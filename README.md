@@ -241,7 +241,7 @@ You: "Use functional components, not class components"
 
 ## Architecture
 
-Olympus operates as a three-tier orchestration system:
+Olympus operates as a three-tier orchestration system with a continuous learning loop:
 
 ```mermaid
 graph TD
@@ -258,15 +258,42 @@ graph TD
     B --> I[Todo Manager]
     I --> J[Background Executor]
     J --> K[Result]
-    G -.->|Context Injection| K
 ```
 
+### How It Works
+
+**Current Session Flow:**
+1. **User Request** → Arrives with learned context already injected at SessionStart
+2. **Orchestrator** → Analyzes task complexity and delegates to appropriate agents
+3. **Model Router** → Selects Haiku (simple), Sonnet (standard), or Opus (complex)
+4. **Agents Execute** → Specialized agents complete their tasks
+5. **Learning System** → Passively captures feedback from corrections, preferences, and patterns
+6. **Feedback Storage** → Stores learned preferences, agent performance, and discoveries
+7. **Result** → User sees the completed work
+
+**Learning & Context Injection (Between Sessions):**
+
+The learning system operates across session boundaries:
+
+- **During Session**: Captures feedback from user corrections ("No, use async/await"), preferences ("Always use TypeScript"), and agent discoveries (gotchas, workarounds)
+- **Storage**: Writes to `~/.claude/olympus/learning/` (global) and `.olympus/learning/` (project-specific)
+- **Next Session Start**: SessionStart hook automatically injects learned context into the initial prompt
+- **Context Types Injected**:
+  - User preferences (verbosity, autonomy, explicit rules)
+  - Recurring corrections (mistakes to avoid)
+  - Project conventions (tech stack, patterns)
+  - Agent performance notes (weak areas to watch)
+  - Recent discoveries (technical insights about your codebase)
+
+**Key Insight:** Context injection happens at the **beginning** of each session (via SessionStart hook), not in the result. This means every new conversation starts with Claude already aware of your preferences and past learnings.
+
 **Key Components:**
-- **Orchestrator** - Delegates tasks to specialized agents
-- **Model Router** - Selects optimal tier (Haiku/Sonnet/Opus)
-- **Learning System** - Captures feedback and injects context
-- **Todo Manager** - Tracks multi-step task progress
-- **Background Executor** - Handles long-running operations
+- **Orchestrator** - Delegates tasks to specialized agents based on complexity
+- **Model Router** - Selects optimal tier (Haiku/Sonnet/Opus) to balance cost and capability
+- **Learning System** - Captures feedback passively and builds preference models
+- **Todo Manager** - Tracks multi-step task progress with real-time status updates
+- **Background Executor** - Runs long-running operations (builds, tests, installs) async with notifications
+- **Feedback Storage** - Persists learned preferences, patterns, and discoveries across sessions
 
 ---
 
