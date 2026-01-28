@@ -55,6 +55,37 @@ After installation, Olympus operates automatically as your default mode in Claud
 
 For complex projects, use `/plan` to create a strategic plan before implementation.
 
+#### Self-Learning System
+
+**New in v3.0.0:** Olympus now learns from your interactions and evolves over time.
+
+**Features:**
+- **Passive Feedback Capture** - Automatically detects corrections, preferences, and patterns from your interactions
+- **Pattern Extraction** - Identifies recurring feedback using Jaccard similarity (minimum 3 occurrences)
+- **Preference Learning** - Infers verbosity level (concise vs. detailed), autonomy preference (ask first vs. just do it), and style preferences
+- **Agent Performance Tracking** - Monitors success/failure rates per agent with 30-day decay for outdated patterns
+- **Discovery Storage** - Agents record technical insights about your codebase (gotchas, workarounds, patterns, dependencies)
+- **Context Injection** - Learned preferences automatically applied in new sessions (~500 token limit to avoid context bloat)
+
+**Storage Locations:**
+- **Global:** `~/.claude/olympus/learning/`
+- **Project:** `.olympus/learning/`
+
+**Files:**
+- `feedback-log.jsonl` - All feedback entries (append-only)
+- `user-preferences.json` - Learned user preferences
+- `agent-performance.json` - Per-agent performance metrics
+- `discoveries.jsonl` - Technical insights (global & project-specific)
+- `session-state.json` - Current session state
+- `patterns.json` - Project-specific patterns
+
+**How It Works:**
+1. Session 1: You correct Claude → Olympus records feedback
+2. Session 2-3: Pattern emerges (3+ similar corrections)
+3. Session 4+: Preference auto-injected → Claude applies it proactively
+
+The learning system operates silently in the background with zero configuration required.
+
 ---
 
 ## [2.7.4] - 2026-01-27
