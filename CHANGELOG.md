@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-01-27
+
+### 🎉 Official Release: Olympus v3.0.0
+
+**"Summon the gods of code"**
+
+Olympus is a powerful multi-agent orchestration system for Claude Code, providing intelligent task delegation, smart model routing, and automated workflow management.
+
+#### Core Features
+
+- **20+ Specialized Agents** - Oracle (architecture), Prometheus (planning), Olympian (execution), Librarian (research), Frontend Engineer (UI/UX), and more
+- **Smart Model Routing** - Automatic tier selection (Haiku/Sonnet/Opus) based on task complexity to optimize cost and performance
+- **Todo List Management** - Automatic task tracking with real-time progress updates
+- **Background Execution** - Long-running operations (builds, tests, installations) run async with notifications
+- **Continuation Enforcement** - Never stops until all tasks are complete
+- **Slash Commands** - `/ultrawork`, `/plan`, `/analyze`, `/deepsearch`, `/ascent`, and more
+- **Planning Workflow** - Prometheus for strategic planning, Momus for critical review, `/complete-plan` for verification
+
+#### Slash Commands
+
+- `/ultrawork` - Maximum performance mode with aggressive parallelization
+- `/plan` - Start planning session with Prometheus
+- `/review` - Critical plan evaluation with Momus
+- `/analyze` - Deep analysis and investigation
+- `/deepsearch` - Thorough codebase search
+- `/ascent` - Self-referential loop until task completion
+- `/complete-plan` - Verify and complete implemented plans
+
+#### Installation
+
+```bash
+npm install -g olympus-ai
+olympus-ai install
+```
+
+Or use the install script:
+```bash
+curl -fsSL https://raw.githubusercontent.com/mikev10/olympus/main/scripts/install.sh | bash
+```
+
+#### Getting Started
+
+After installation, Olympus operates automatically as your default mode in Claude Code:
+- Creates todos before non-trivial tasks
+- Delegates complex work to specialized agents
+- Runs independent tasks in parallel
+- Continues until all tasks are complete
+
+For complex projects, use `/plan` to create a strategic plan before implementation.
+
+---
+
 ## [2.7.4] - 2026-01-27
 
 ### Changed
