@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.npmrc
+.env.local
+
+# Olympus runtime state
+.olympus/ultrawork-state.json
+.olympus/notepads/
+
+# Temporary files
+npm-publish-output.txt
+test-output.json
+test-output.txt
+.olympus/learning/
+
+# Test artifacts and logs (prevent in root)
+/test-*.json
+/test-*.txt
+/test-*.log
+/*.log
+/nul

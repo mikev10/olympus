@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "olympus-ai",
+  "description": "Olympus: Multi-agent orchestration for Claude Code. Summon the gods of code.",
+  "owner": {
+    "name": "mikev10"
+  },
+  "plugins": [
+    {
+      "name": "olympus-ai",
+      "description": "Multi-agent orchestration with intelligent model routing, The Ascent persistence loop, and specialized agents. Summon the gods of code.",
+      "version": "1.0.2",
+      "author": {
+        "name": "mikev10"
+      },
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/mikev10/olympus",
+      "tags": ["multi-agent", "orchestration", "ascent", "ultrawork", "olympus"]
+    }
+  ]
+}
