@@ -1,0 +1,21 @@
+{
+  "name": "olympus-ai",
+  "version": "2.7.3",
+  "description": "Olympus: Multi-agent orchestration for Claude Code. Summon the gods of code.",
+  "author": {
+    "name": "mikev10",
+    "url": "https://github.com/mikev10"
+  },
+  "homepage": "https://github.com/mikev10/olympus#readme",
+  "repository": "https://github.com/mikev10/olympus",
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "olympus",
+    "ultrawork",
+    "ascent",
+    "delegation",
+    "productivity"
+  ]
+}
