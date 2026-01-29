@@ -1,0 +1,43 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem@latest",
+        "${MCP_PROJECTS_DIR}",
+        "${MCP_OBSIDIAN_DIR}"
+      ]
+    },
+    "context7": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@upstash/context7-mcp"],
+      "env": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+      }
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@playwright/mcp"]
+    },
+    "local-rag": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-local-rag"]
+    },
+    "perplexity": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "perplexity-mcp"],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}",
+        "PERPLEXITY_TIMEOUT_MS": "600000"
+      }
+    },
+    "shadcn": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "shadcn@latest", "mcp"]
+    }
+  }
+}
