@@ -44,7 +44,7 @@ import { extractPatterns } from '../learning/pattern-extractor.js';
 import { updatePreferences, createDefaultPreferences } from '../learning/preference-learner.js';
 import { evaluateAgentPerformance } from '../learning/agent-evaluator.js';
 import { generatePromptPatches, previewPatches, applyPromptPatches } from '../learning/prompt-patcher.js';
-import { readDiscoveries, getDiscoveriesForInjection } from '../learning/discovery.js';
+import { readDiscoveries, getDiscoveriesForInjection, recordDiscovery } from '../learning/discovery.js';
 import { migrateNotepads } from '../learning/migrate-notepads.js';
 import { generateLearningStats, formatLearningStats } from '../learning/stats.js';
 import { cleanupLearning, formatCleanupResult } from '../learning/cleanup.js';
@@ -861,6 +861,104 @@ program
     console.log('  -p, --project        Scope to current project (with --forget)');
     console.log('  -e, --export         Export learnings to JSON');
     console.log('  -i, --import <file>  Import learnings from JSON file');
+  });
+
+/**
+ * Discover command - Record agent discoveries
+ */
+program
+  .command('discover <input>')
+  .description('Record a discovery made during work (for agents to use)')
+  .option('-c, --category <category>', 'Discovery category (pattern, gotcha, workaround, etc.)')
+  .option('-s, --scope <scope>', 'Scope: global or project (default: project)', 'project')
+  .option('--confidence <number>', 'Confidence level 0-1 (default: 0.8)', '0.8')
+  .option('--agent <name>', 'Agent name making the discovery (default: olympian)', 'olympian')
+  .action(async (input, options) => {
+    const cwd = process.cwd();
+
+    // Parse input format: "category | summary | details"
+    // OR if category option provided: "summary | details"
+    const parts = input.split('|').map((s: string) => s.trim());
+
+    let category: string;
+    let summary: string;
+    let details: string;
+
+    if (options.category) {
+      // Category provided via option
+      category = options.category;
+      summary = parts[0] || '';
+      details = parts[1] || parts[0] || '';
+    } else if (parts.length >= 3) {
+      // Full format: "category | summary | details"
+      category = parts[0];
+      summary = parts[1];
+      details = parts[2];
+    } else if (parts.length === 2) {
+      // Two parts: "category | summary" (details = summary)
+      category = parts[0];
+      summary = parts[1];
+      details = parts[1];
+    } else {
+      console.error(chalk.red('Error: Invalid format'));
+      console.log('\nUsage:');
+      console.log('  olympus discover "category | summary | details"');
+      console.log('  olympus discover "summary | details" --category <cat>');
+      console.log('\nCategories:');
+      console.log('  pattern, gotcha, workaround, performance, dependency, configuration, technical_insight');
+      console.log('\nExamples:');
+      console.log('  olympus discover "gotcha | Migrations must run first | Database seed fails if..."');
+      console.log('  olympus discover "Use kebab-case for files | This codebase consistently..." -c pattern');
+      process.exit(1);
+    }
+
+    // Validate category
+    const validCategories = [
+      'technical_insight', 'workaround', 'pattern', 'gotcha',
+      'performance', 'dependency', 'configuration'
+    ];
+
+    if (!validCategories.includes(category)) {
+      console.error(chalk.red(`Error: Invalid category "${category}"`));
+      console.log(`Valid categories: ${validCategories.join(', ')}`);
+      process.exit(1);
+    }
+
+    // Validate confidence
+    const confidence = parseFloat(options.confidence);
+    if (isNaN(confidence) || confidence < 0 || confidence > 1) {
+      console.error(chalk.red('Error: Confidence must be between 0 and 1'));
+      process.exit(1);
+    }
+
+    // Validate scope
+    if (options.scope !== 'global' && options.scope !== 'project') {
+      console.error(chalk.red('Error: Scope must be "global" or "project"'));
+      process.exit(1);
+    }
+
+    try {
+      const discovery = recordDiscovery({
+        category: category as any,
+        summary: summary.substring(0, 100), // Limit to 100 chars
+        details: details,
+        agent_name: options.agent,
+        project_path: cwd,
+        confidence: confidence,
+        scope: options.scope as any,
+        session_id: process.env.CLAUDE_SESSION_ID || 'cli',
+      });
+
+      console.log(chalk.green('✓ Discovery recorded successfully'));
+      console.log(chalk.gray(`  ID: ${discovery.id}`));
+      console.log(chalk.white(`  Category: ${discovery.category}`));
+      console.log(chalk.white(`  Summary: ${discovery.summary}`));
+      console.log(chalk.gray(`  Scope: ${discovery.scope}`));
+      console.log(chalk.gray(`  Location: .olympus/learning/discoveries.jsonl`));
+    } catch (error) {
+      console.error(chalk.red('Error recording discovery:'), error);
+      process.exit(1);
+    }
   });
 
 /**
