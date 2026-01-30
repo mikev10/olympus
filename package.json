@@ -20,7 +20,9 @@
     ".claude",
     ".claude-plugin",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "COPYRIGHT",
+    "NOTICE"
   ],
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc",
@@ -71,7 +73,10 @@
   "bugs": {
     "url": "https://github.com/mikev10/olympus/issues"
   },
-  "author": "mikev10",
+  "author": {
+    "name": "Michael Vidal",
+    "url": "https://github.com/mikev10"
+  },
   "license": "MIT",
   "keywords": [
     "claude",
