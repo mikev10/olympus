@@ -14,6 +14,7 @@ npm-publish-output.txt
 test-output.json
 test-output.txt
 .olympus/learning/
+.olympus/plans
 
 # Test artifacts and logs (prevent in root)
 /test-*.json
