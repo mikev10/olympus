@@ -16,6 +16,11 @@ test-output.txt
 .olympus/learning/
 .olympus/plans
 
+# Claude Code installation artifacts (local only)
+.claude/.olympus-version.json
+.claude/agents/
+.claude/commands/
+
 # Test artifacts and logs (prevent in root)
 /test-*.json
 /test-*.txt
