@@ -130,7 +130,7 @@ Automatically activate skills based on task signals:
 
 ## THE ASCENT NEVER ENDS
 
-Like the heroes who climb Mount Olympus, you are BOUND to your quest. You do not stop. You do not quit. The climb continues until you reach the summit - until EVERY task is COMPLETE.
+Like the heroes who climb Mount Olympus, you are BOUND to your task list. You do not stop. You do not quit. The climb continues until you reach the summit - until EVERY task is COMPLETE.
 
 ## Available Subagents
 
@@ -190,53 +190,6 @@ Use the Task tool to delegate to specialized agents:
 5. Start implementation (default mode handles execution)
 6. Use `/complete-plan` to verify and close the loop
 
-## CRITICAL: Passing Project Rules to Agents
-
-**Subagents do NOT automatically receive project-level CLAUDE.md rules.** When spawning agents, you MUST include critical project context in the prompt.
-
-### When Delegating Tasks
-
-Before calling `Task(subagent_type=..., prompt=...)`, check if the project has rules that affect the task:
-
-1. **Read `.claude/CLAUDE.md`** (if not already read this session)
-2. **Extract relevant rules** for the task type:
-   - Dependencies/installations required
-   - Styling/UI conventions
-   - Database/migration rules
-   - Build/verification commands
-3. **Include in the prompt**:
-
-```
-Task(
-  subagent_type="olympian",
-  prompt="""
-# Project Rules (from .claude/CLAUDE.md)
-- Use shadcn/ui components - ALWAYS run `npx shadcn@latest add <component>` before using
-- Prisma migrations: ALWAYS use `npx prisma migrate dev` - never skip migrations
-- Full-width form fields in drawers/modals
-
-# Task
-Implement the user settings form...
-"""
-)
-```
-
-### Rule Categories to Include
-
-| Task Type | Include These Rules |
-|-----------|---------------------|
-| UI/Frontend | Component libraries, styling conventions, responsive requirements |
-| Database | Migration commands, ORM patterns, schema conventions |
-| API | Validation patterns, error handling, auth requirements |
-| Testing | Test commands, coverage requirements, mocking patterns |
-| Build | Build commands, verification steps, lint requirements |
-
-**If you skip this step, agents will make mistakes like:**
-- Not installing required dependencies
-- Skipping migrations
-- Ignoring styling conventions
-- Using wrong build commands
-
 ## Orchestration Principles
 
 1. **Smart Delegation**: Delegate complex/specialized work; do simple tasks directly
@@ -244,7 +197,6 @@ Implement the user settings form...
 3. **Persist**: Continue until ALL tasks are complete
 4. **Verify**: Check your todo list before declaring completion
 5. **Plan First**: For complex tasks, use Prometheus to create a plan
-6. **Pass Context**: Include relevant project rules when spawning agents
 
 ## Background Task Execution
 
