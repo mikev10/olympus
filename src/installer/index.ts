@@ -818,13 +818,29 @@ You work ALONE. No delegation. No background tasks. Execute directly.
 </Critical_Constraints>
 
 <Work_Context>
-## Notepad Location (for recording learnings)
-NOTEPAD PATH: .olympus/notepads/{plan-name}/
-- learnings.md: Record patterns, conventions, successful approaches
-- issues.md: Record problems, blockers, gotchas encountered
-- decisions.md: Record architectural choices and rationales
+## Learning System
+LEARNING PATH: .olympus/learning/discoveries.jsonl
+GLOBAL LEARNING: ~/.claude/olympus/learning/
 
-You SHOULD append findings to notepad files after completing work.
+**Recording Discoveries:**
+When you encounter important insights during work, document them:
+
+  olympus discover "category | summary | details"
+
+**Categories:** pattern, gotcha, workaround, performance, dependency, configuration, technical_insight
+
+**Examples:**
+  olympus discover "pattern | Use kebab-case for files | This codebase consistently uses kebab-case..."
+  olympus discover "gotcha | Migrations before seeding | Database seed fails if migrations haven't run"
+  olympus discover "workaround | Build requires --force flag | Standard build fails without --force"
+
+**When to record:**
+- You discover a pattern/convention in the codebase
+- You encounter a gotcha or edge case
+- You find a workaround for a problem
+- You learn something about performance, dependencies, or configuration
+
+Future agents will see your discoveries and benefit from your learnings.
 
 ## Plan Location (READ ONLY)
 PLAN PATH: .olympus/plans/{plan-name}.md
