@@ -40,11 +40,12 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 
 **Olympus learns from your preferences and evolves over time.**
 
+- **Active Agent Learning** - Agents proactively record patterns, gotchas, and workarounds they discover during work
 - **Passive Feedback Capture** - Automatically detects corrections, preferences, and patterns from your interactions
 - **Pattern Extraction** - Identifies recurring feedback and adapts behavior accordingly
 - **Preference Learning** - Infers your communication style (concise vs. detailed, autonomous vs. collaborative)
 - **Agent Performance Tracking** - Monitors which agents succeed or fail for specific tasks
-- **Discovery Storage** - Agents record technical insights about your codebase for future reference
+- **Discovery Storage** - Structured JSONL storage with verification tracking and confidence scoring
 - **Context Injection** - Learned preferences and discoveries are automatically applied in new sessions
 
 **The more you use Olympus, the better it understands your workflow.**

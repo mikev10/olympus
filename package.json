@@ -1,6 +1,6 @@
 {
   "name": "olympus-ai",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Olympus: Multi-agent orchestration for Claude Code. Summon the gods of code.",
   "type": "module",
   "main": "dist/index.js",
