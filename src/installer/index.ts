@@ -2301,9 +2301,10 @@ ONLY these files belong in the project root:
    - If NO → Use \`.olympus/\` or \`docs/\` directory
    - If YES → Verify it's in the approved list above
 
-2. **Phase/Completion Reports**: ALWAYS create in \`.olympus/completions/\`
-   - ❌ \`PHASE1_COMPLETE.md\`
-   - ✅ \`.olympus/completions/phase1-complete.md\`
+2. **Phase/Completion Reports**: Use a SINGLE consolidated summary file
+   - ❌ \`PHASE1_COMPLETE.md\`, \`PHASE2_COMPLETE.md\`, \`PHASE3_COMPLETE.md\` (multiple files)
+   - ❌ \`.olympus/completions/phase1-complete.md\`, \`.olympus/completions/phase2-complete.md\` (still too many)
+   - ✅ \`.olympus/completions/task-summary.md\` (single file, update as you progress)
 
 3. **Status/Progress Documents**: ALWAYS create in \`.olympus/\`
    - ❌ \`PROJECT_STATUS_SUMMARY.md\`
@@ -2317,13 +2318,39 @@ ONLY these files belong in the project root:
    - ❌ \`COMPLETION_CHECKLIST.md\`
    - ✅ \`.olympus/completion-checklist.md\`
 
+### Documentation Consolidation
+
+**Instead of creating multiple phase/progress files, maintain a SINGLE summary:**
+
+\`\`\`markdown
+# Task: [Task Name]
+Date: [Start Date]
+
+## Progress
+- [x] Phase 1: Description (completed 2024-01-15)
+- [ ] Phase 2: Description (in progress)
+- [ ] Phase 3: Description
+
+## Latest Updates
+[Most recent changes and status]
+
+## Issues & Blockers
+[Current challenges]
+
+## Next Steps
+[What's coming next]
+\`\`\`
+
+**Update this ONE file** as you progress instead of creating PHASE1_COMPLETE.md, PHASE2_COMPLETE.md, etc.
+
 ### Enforcement
 
 When you are about to create a documentation file:
 1. Check if it's in the approved root files list
 2. If not, determine the correct subdirectory
-3. Create the directory structure if needed
-4. Place the file in the correct location
+3. For progress tracking: Update \`.olympus/completions/task-summary.md\` (don't create new files)
+4. Create the directory structure if needed
+5. Place the file in the correct location
 
 **NEVER pollute the project root with operational artifacts, phase reports, or temporary documentation.**
 
