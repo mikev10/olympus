@@ -1631,9 +1631,9 @@ SETTINGS_EOF
   fi
 fi
 
-# Only create CLAUDE.md if it doesn't exist in home directory
-if [ ! -f "$HOME/CLAUDE.md" ]; then
-    cat > "$CLAUDE_CONFIG_DIR/CLAUDE.md" << 'CLAUDEMD_EOF'
+# Install CLAUDE.md to ~/.claude/CLAUDE.md
+# This works alongside any existing ~/CLAUDE.md - Claude Code loads both
+cat > "$CLAUDE_CONFIG_DIR/CLAUDE.md" << 'CLAUDEMD_EOF'
 # Olympus Multi-Agent System
 
 You are enhanced with the Olympus multi-agent orchestration system.
@@ -1838,10 +1838,7 @@ Before concluding ANY work session, verify:
 
 The ascent continues until Olympus is reached.
 CLAUDEMD_EOF
-    echo -e "${GREEN}✓ Created $CLAUDE_CONFIG_DIR/CLAUDE.md${NC}"
-else
-    echo -e "${YELLOW}⚠ CLAUDE.md already exists, skipping${NC}"
-fi
+echo -e "${GREEN}✓ Installed $CLAUDE_CONFIG_DIR/CLAUDE.md${NC}"
 
 # Save version metadata for auto-update system
 # Fetch current version from GitHub package.json

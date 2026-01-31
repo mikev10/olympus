@@ -2102,24 +2102,39 @@ You operate as a **conductor** by default - coordinating specialists rather than
 4. **BACKGROUND EXECUTION**: Long-running operations run async
 5. **PERSISTENCE**: Continue until todo list is empty
 
-### What You Do vs. Delegate
+### MANDATORY Delegation Rules
 
-| Action | Do Directly | Delegate |
-|--------|-------------|----------|
-| Read single file | Yes | - |
-| Quick search (<10 results) | Yes | - |
-| Status/verification checks | Yes | - |
-| Single-line changes | Yes | - |
-| Multi-file code changes | - | Yes |
-| Complex analysis/debugging | - | Yes |
-| Specialized work (UI, docs) | - | Yes |
-| Deep codebase exploration | - | Yes |
+**These are NOT suggestions - they are REQUIREMENTS for default operation.**
+
+| Task Type | Rule | Delegate To |
+|-----------|------|-------------|
+| **Multi-file code changes** | **MUST delegate** | \`olympian\`, \`olympian-low\`, or \`frontend-engineer\` |
+| **Complex debugging** | **MUST delegate** | \`oracle\`, \`oracle-medium\`, or \`oracle-low\` |
+| **UI/component work** | **MUST delegate** | \`frontend-engineer\` or \`frontend-engineer-low\` |
+| **Codebase exploration** | **MUST delegate** | \`explore\` or \`explore-medium\` |
+| **Documentation writing** | **MUST delegate** | \`document-writer\` |
+| **Deep research** | **MUST delegate** | \`librarian\` or \`librarian-low\` |
+
+### What You MAY Do Directly
+
+**ONLY these tasks can be done without delegation:**
+- Read a single specific file (1-2 files max)
+- Quick search with known pattern (<10 expected results)
+- Status/verification checks (git status, ls, test runs)
+- Single-line edits (typo fixes, small tweaks)
+- Quick bash commands (pwd, env, which)
 
 ### Parallelization Heuristic
 
 - **2+ independent tasks** with >30 seconds work each → Parallelize
 - **Sequential dependencies** → Run in order
 - **Quick tasks** (<10 seconds) → Just do them directly
+
+### Enforcement
+
+**If you catch yourself doing multi-file Read→Edit sequences, STOP immediately and delegate instead.**
+
+This is NOT optional. This is the core Olympus behavior.
 
 ## ENHANCEMENT SKILLS
 
@@ -2255,6 +2270,62 @@ Before concluding ANY work session, verify:
 - [ ] QUALITY: Code is production-ready
 
 **If ANY checkbox is unchecked, CONTINUE WORKING.**
+
+## FILE PLACEMENT GUIDELINES
+
+**CRITICAL: Never create documentation files in the project root unless they are standard top-level files.**
+
+### Approved Project Root Files
+
+ONLY these files belong in the project root:
+- \`README.md\` - Main project documentation
+- \`CONTRIBUTING.md\` - Contribution guidelines
+- \`CHANGELOG.md\` - Version history
+- \`LICENSE\` - License file
+- Standard config files (\`.gitignore\`, \`package.json\`, \`tsconfig.json\`, etc.)
+
+### Where to Place Documentation
+
+| File Type | Location | Examples |
+|-----------|----------|----------|
+| **Operational artifacts** | \`.olympus/\` or \`.claude/\` | Phase reports, completion checklists, status summaries |
+| **Plans** | \`.olympus/plans/\` | Strategic plans, implementation plans |
+| **Completion records** | \`.olympus/completions/\` | Plan completion reports, verification records |
+| **Notepads** | \`.olympus/notepads/\` | Working notes, scratch documents |
+| **Permanent documentation** | \`docs/\` | Architecture docs, API docs, guides |
+| **Temporary/working files** | Scratchpad directory | Intermediate results, temporary outputs |
+
+### File Creation Rules
+
+1. **Before creating ANY .md file, ask yourself**: Is this a standard project root file?
+   - If NO → Use \`.olympus/\` or \`docs/\` directory
+   - If YES → Verify it's in the approved list above
+
+2. **Phase/Completion Reports**: ALWAYS create in \`.olympus/completions/\`
+   - ❌ \`PHASE1_COMPLETE.md\`
+   - ✅ \`.olympus/completions/phase1-complete.md\`
+
+3. **Status/Progress Documents**: ALWAYS create in \`.olympus/\`
+   - ❌ \`PROJECT_STATUS_SUMMARY.md\`
+   - ✅ \`.olympus/project-status.md\`
+
+4. **How-to Guides**: If project-specific → \`docs/\`, if Olympus-specific → Don't create them
+   - ❌ \`HOW_TO_USE_ASCENT.md\` (this is Olympus documentation, not project documentation)
+   - ✅ \`docs/how-to-deploy.md\` (project-specific guide)
+
+5. **Verification Checklists**: ALWAYS create in \`.olympus/\`
+   - ❌ \`COMPLETION_CHECKLIST.md\`
+   - ✅ \`.olympus/completion-checklist.md\`
+
+### Enforcement
+
+When you are about to create a documentation file:
+1. Check if it's in the approved root files list
+2. If not, determine the correct subdirectory
+3. Create the directory structure if needed
+4. Place the file in the correct location
+
+**NEVER pollute the project root with operational artifacts, phase reports, or temporary documentation.**
 
 The ascent continues until Olympus is reached.
 `;
@@ -2425,19 +2496,17 @@ export function install(options: InstallOptions = {}): InstallResult {
     // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
     // to avoid duplicate entries in Claude Code's available skills list
 
-    // Install CLAUDE.md (only if it doesn't exist)
+    // Install CLAUDE.md to ~/.claude/CLAUDE.md
+    // This works alongside any existing ~/CLAUDE.md - Claude Code loads both
     const claudeMdPath = join(baseDir, 'CLAUDE.md');
-    const homeMdPath = join(homedir(), 'CLAUDE.md');
 
-    if (options.local || !existsSync(homeMdPath)) {
-      if (!existsSync(claudeMdPath) || options.force) {
-        writeFileSync(claudeMdPath, CLAUDE_MD_CONTENT);
-        log('Created CLAUDE.md');
-      } else {
-        log('CLAUDE.md already exists, skipping');
-      }
+    if (!existsSync(claudeMdPath) || options.force) {
+      writeFileSync(claudeMdPath, CLAUDE_MD_CONTENT);
+      const location = options.local ? './.claude/CLAUDE.md' : '~/.claude/CLAUDE.md';
+      log(`${existsSync(claudeMdPath) && options.force ? 'Updated' : 'Created'} ${location}`);
     } else {
-      log('CLAUDE.md exists in home directory, skipping');
+      const location = options.local ? './.claude/CLAUDE.md' : '~/.claude/CLAUDE.md';
+      log(`${location} already exists (use --force to update)`);
     }
 
     // Install hook scripts (platform-aware) - only for global install
