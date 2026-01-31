@@ -48,6 +48,7 @@ import { readDiscoveries, getDiscoveriesForInjection, recordDiscovery } from '..
 import { migrateNotepads } from '../learning/migrate-notepads.js';
 import { generateLearningStats, formatLearningStats } from '../learning/stats.js';
 import { cleanupLearning, formatCleanupResult } from '../learning/cleanup.js';
+import { getSessionStatePath } from '../learning/session-state.js';
 import type { UserPreferences, AgentPerformance } from '../learning/types.js';
 import { randomUUID } from 'crypto';
 import { rmSync, appendFileSync } from 'fs';
@@ -789,10 +790,18 @@ program
         } else {
           console.log(chalk.yellow('No project learnings found.'));
         }
+
+        // DELETE SESSION STATE (privacy fix)
+        const sessionStatePath = getSessionStatePath(process.cwd());
+        if (existsSync(sessionStatePath)) {
+          rmSync(sessionStatePath);
+          console.log(chalk.green('✓ Session state deleted.'));
+        }
       } else {
         if (existsSync(learningDir)) {
           rmSync(learningDir, { recursive: true });
           console.log(chalk.green('✓ All learnings forgotten.'));
+          console.log(chalk.yellow('⚠  Project-specific learnings remain. Use --forget --project in each project.'));
         } else {
           console.log(chalk.yellow('No learnings found.'));
         }

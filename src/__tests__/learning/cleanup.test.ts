@@ -7,19 +7,41 @@ import type { FeedbackEntry, AgentDiscovery } from '../../learning/types.js';
 const TEST_DIR = join(process.cwd(), '.test-cleanup');
 
 describe('Learning Cleanup', () => {
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
+
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(TEST_DIR, { recursive: true });
+
+    // Save original values
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+
+    // Set both HOME (Unix) and USERPROFILE (Windows)
     process.env.HOME = TEST_DIR;
+    process.env.USERPROFILE = TEST_DIR;
   });
 
   afterEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
-    delete process.env.HOME;
+
+    // Restore original values
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+
+    if (originalUserProfile !== undefined) {
+      process.env.USERPROFILE = originalUserProfile;
+    } else {
+      delete process.env.USERPROFILE;
+    }
   });
 
   it('removes old feedback entries', () => {
@@ -30,6 +52,9 @@ describe('Learning Cleanup', () => {
     const oldDate = new Date();
     oldDate.setDate(oldDate.getDate() - 200); // 200 days ago
 
+    // Create entries with larger messages to ensure measurable space savings
+    const largeMessage = 'This is a large message that should be long enough to ensure measurable space savings when removed. '.repeat(50);
+
     const entries: FeedbackEntry[] = [
       {
         id: 'old-1',
@@ -37,7 +62,7 @@ describe('Learning Cleanup', () => {
         session_id: 'session-1',
         project_path: '/test',
         event_type: 'revision',
-        user_message: 'Old message',
+        user_message: largeMessage,
         feedback_category: 'correction',
         confidence: 0.9,
       },

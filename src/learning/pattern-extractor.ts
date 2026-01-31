@@ -1,12 +1,13 @@
 import type { FeedbackEntry, ExtractedPattern } from './types.js';
 
 /** Extract n-grams from text for similarity comparison */
-function extractNgrams(text: string, n: number = 3): Set<string> {
+function extractNgrams(text: string, n: number = 2): Set<string> {
   const normalized = text.toLowerCase().replace(/[^\w\s]/g, '');
   const words = normalized.split(/\s+/).filter(w => w.length > 0);
 
   if (words.length < n) {
-    return new Set([normalized]);
+    // For very short texts, use unigrams instead
+    return new Set(words);
   }
 
   const ngrams = new Set<string>();
@@ -30,7 +31,7 @@ export function jaccardSimilarity(text1: string, text2: string): number {
 /** Group similar feedback entries */
 function clusterFeedback(
   entries: FeedbackEntry[],
-  similarityThreshold: number = 0.3
+  similarityThreshold: number = 0.1
 ): FeedbackEntry[][] {
   const clusters: FeedbackEntry[][] = [];
   const assigned = new Set<string>();

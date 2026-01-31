@@ -7,20 +7,41 @@ import type { FeedbackEntry } from '../../learning/types.js';
 const TEST_DIR = join(process.cwd(), '.test-learning');
 
 describe('Storage with Rotation', () => {
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
+
   beforeEach(() => {
-    // Override getLearningDir for testing
-    process.env.HOME = TEST_DIR;
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(TEST_DIR, { recursive: true });
+
+    // Save original values
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+
+    // Set both HOME (Unix) and USERPROFILE (Windows)
+    process.env.HOME = TEST_DIR;
+    process.env.USERPROFILE = TEST_DIR;
   });
 
   afterEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
-    delete process.env.HOME;
+
+    // Restore original values
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+
+    if (originalUserProfile !== undefined) {
+      process.env.USERPROFILE = originalUserProfile;
+    } else {
+      delete process.env.USERPROFILE;
+    }
   });
 
   it('rotates JSONL file when exceeding threshold', () => {

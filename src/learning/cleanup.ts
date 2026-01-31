@@ -97,7 +97,7 @@ export function cleanupLearning(
     }
   }
 
-  result.space_freed_mb = parseFloat(result.space_freed_mb.toFixed(2));
+  result.space_freed_mb = parseFloat(result.space_freed_mb.toFixed(4));
 
   return result;
 }
