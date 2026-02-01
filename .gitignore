@@ -6,20 +6,16 @@ dist/
 .env.local
 
 # Olympus runtime state
-.olympus/ultrawork-state.json
-.olympus/notepads/
+.olympus/
+
+# Claude Code - ignore everything except project-specific CLAUDE.md
+.claude/*
+!.claude/CLAUDE.md
 
 # Temporary files
 npm-publish-output.txt
 test-output.json
 test-output.txt
-.olympus/learning/
-.olympus/plans
-
-# Claude Code installation artifacts (local only)
-.claude/.olympus-version.json
-.claude/agents/
-.claude/commands/
 
 # Test artifacts and logs (prevent in root)
 /test-*.json
