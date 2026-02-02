@@ -143,6 +143,12 @@ export interface PluginConfig {
     /** Days before preferences decay (default: 30) */
     preferenceDecayDays?: number;
   };
+
+  // Ascent safety configuration
+  ascent?: {
+    /** Maximum number of iterations before checkpoint (default: 100, min: 10, max: 1000) */
+    maxIterations?: number;
+  };
 }
 
 export interface SessionState {
@@ -192,4 +198,17 @@ export interface HookResult {
   continue: boolean;
   message?: string;
   modifiedInput?: unknown;
+}
+
+export interface AscentCheckpoint {
+  planName: string;
+  timestamp: string;
+  gitSha: string;
+  planHash: string;
+  iterationCount: number;
+  tasks: {
+    id: string;
+    status: 'completed' | 'in_progress' | 'pending';
+    description: string;
+  }[];
 }

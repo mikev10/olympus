@@ -82,6 +82,9 @@ export const DEFAULT_CONFIG: PluginConfig = {
     simplificationKeywords: [
       'find', 'list', 'show', 'where', 'search', 'locate', 'grep'
     ]
+  },
+  ascent: {
+    maxIterations: 100
   }
 };
 
@@ -217,6 +220,21 @@ export function loadEnvConfig(): Partial<PluginConfig> {
       ...config.routing,
       escalationEnabled: process.env.OLYMPUS_ESCALATION_ENABLED === 'true'
     };
+  }
+
+  // Ascent configuration from environment
+  if (process.env.OLYMPUS_MAX_ASCENT_ITERATIONS) {
+    const maxIterations = parseInt(process.env.OLYMPUS_MAX_ASCENT_ITERATIONS, 10);
+    if (!isNaN(maxIterations) && maxIterations >= 10 && maxIterations <= 1000) {
+      config.ascent = {
+        ...config.ascent,
+        maxIterations
+      };
+    } else if (!isNaN(maxIterations)) {
+      console.warn(
+        `Warning: OLYMPUS_MAX_ASCENT_ITERATIONS must be between 10 and 1000. Got: ${maxIterations}`
+      );
+    }
   }
 
   return config;
