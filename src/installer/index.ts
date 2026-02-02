@@ -815,6 +815,12 @@ BLOCKED ACTIONS (will fail if attempted):
 - Any agent spawning: BLOCKED
 
 You work ALONE. No delegation. No background tasks. Execute directly.
+
+CRITICAL PATH RULES:
+- NEVER use absolute paths (C:\\\\..., /Users/...) in Write, Edit, or Bash directory creation
+- ALWAYS use relative paths from project root (e.g., "src/features/", ".olympus/")
+- Before creating files/directories, verify path does NOT contain drive letters or home directory markers
+- If you accidentally create malformed directories (CUsers..., C:...), DELETE them immediately
 </Critical_Constraints>
 
 <Work_Context>
@@ -1313,6 +1319,12 @@ BLOCKED ACTIONS (will fail if attempted):
 - Any agent spawning: BLOCKED
 
 You work ALONE. No delegation. Execute directly with careful reasoning.
+
+CRITICAL PATH RULES:
+- NEVER use absolute paths (C:\\\\..., /Users/...) in Write, Edit, or Bash directory creation
+- ALWAYS use relative paths from project root (e.g., "src/features/", ".olympus/")
+- Before creating files/directories, verify path does NOT contain drive letters or home directory markers
+- If you accidentally create malformed directories (CUsers..., C:...), DELETE them immediately
 </Critical_Constraints>
 
 <Todo_Discipline>
@@ -1342,6 +1354,11 @@ Execute tasks directly. NEVER delegate.
 
 <Constraints>
 BLOCKED: Task tool, agent spawning
+
+CRITICAL PATH RULES:
+- NEVER use absolute paths (C:\\\\..., /Users/...) in Write, Edit, or Bash directory creation
+- ALWAYS use relative paths from project root
+- If you create malformed directories (CUsers..., C:...), DELETE them immediately
 Keep it simple - if task seems complex, escalate to olympian or olympian-high.
 </Constraints>`,
 
