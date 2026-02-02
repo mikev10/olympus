@@ -10,6 +10,11 @@
  * - ANALYZE: Delegate to oracle agent
  * - ASCENT: Relentless persistence mode
  *
+ * Skill Auto-Detection:
+ * - FRONTEND-UI-UX: Detects UI/component/design work with 2+ visual keywords
+ * - GIT-MASTER: Detects refactor/rename/restructure operations
+ * - ASCENT: Detects completion signals like "must complete", "don't stop", "until done"
+ *
  * Behavior: Strips code blocks before detection to avoid false positives
  * Configuration: Customizable keyword patterns via olympus.jsonc
  */
@@ -456,4 +461,195 @@ export function extractPromptText(parts: Array<{ type: string; text?: string; [k
     .filter(p => p.type === 'text')
     .map(p => p.text ?? '')
     .join('\n');
+}
+
+/**
+ * Auto-detect frontend-ui-ux skill from prompt
+ *
+ * Detection logic:
+ * - Primary keywords: component, ui, ux, design, styling, css, html, tailwind, sass, scss
+ * - Element keywords: button, modal, dialog, form, input, navbar, sidebar, menu, dropdown, card, layout
+ * - Action keywords: animate, responsive, theme, style
+ * - Negative signals: api, backend, server, database, endpoint, query, migration
+ *
+ * Rules:
+ * - Check negative signals first (if present, return false)
+ * - Require 2+ keyword matches from primary/elements/actions
+ */
+export function detectFrontendUiUx(prompt: string): boolean {
+  const cleanPrompt = removeCodeBlocks(prompt).toLowerCase();
+
+  // Negative signals - if present, NOT a frontend task
+  const negativeSignals = [
+    /\bapi\b/,
+    /\bbackend\b/,
+    /\bserver\b/,
+    /\bdatabase\b/,
+    /\bendpoint\b/,
+    /\bquery\b/,
+    /\bmigration\b/
+  ];
+
+  for (const signal of negativeSignals) {
+    if (signal.test(cleanPrompt)) {
+      return false;
+    }
+  }
+
+  // Primary keywords
+  const primaryKeywords = [
+    /\bcomponent\b/,
+    /\bui\b/,
+    /\bux\b/,
+    /\bdesign\b/,
+    /\bstyling\b/,
+    /\bcss\b/,
+    /\bhtml\b/,
+    /\btailwind\b/,
+    /\bsass\b/,
+    /\bscss\b/
+  ];
+
+  // Element keywords
+  const elementKeywords = [
+    /\bbutton\b/,
+    /\bmodal\b/,
+    /\bdialog\b/,
+    /\bform\b/,
+    /\binput\b/,
+    /\bnavbar\b/,
+    /\bsidebar\b/,
+    /\bmenu\b/,
+    /\bdropdown\b/,
+    /\bcard\b/,
+    /\blayout\b/
+  ];
+
+  // Action keywords
+  const actionKeywords = [
+    /\banimate\b/,
+    /\bresponsive\b/,
+    /\btheme\b/,
+    /\bstyle\b/
+  ];
+
+  // Count matches
+  let matchCount = 0;
+
+  for (const keyword of [...primaryKeywords, ...elementKeywords, ...actionKeywords]) {
+    if (keyword.test(cleanPrompt)) {
+      matchCount++;
+    }
+  }
+
+  // Require 2+ keyword matches
+  return matchCount >= 2;
+}
+
+/**
+ * Auto-detect git-master skill from prompt
+ *
+ * Detection logic:
+ * - Trigger keywords: refactor, rename, reorganize, migrate, restructure, move files
+ * - Post-Task activation: when 2+ files modified (checked via hook)
+ * - Check git status is clean before activation
+ *
+ * Rules:
+ * - Check prompt for trigger keywords
+ * - Skip if git status dirty (unsafe to start)
+ */
+export function detectGitMaster(prompt: string): boolean {
+  const cleanPrompt = removeCodeBlocks(prompt).toLowerCase();
+
+  // Trigger keywords
+  const triggerKeywords = [
+    /\brefactor\b/,
+    /\brename\b/,
+    /\breorganize\b/,
+    /\bmigrate\b/,
+    /\brestructure\b/,
+    /\bmove\s+files?\b/
+  ];
+
+  for (const keyword of triggerKeywords) {
+    if (keyword.test(cleanPrompt)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Auto-detect ascent skill from prompt
+ *
+ * Detection logic:
+ * - Positive patterns: don't stop, must complete, finish this/it/everything,
+ *   complete all/everything, until done/complete/finished, keep going, don't give up
+ * - Negative patterns: try, attempt, explore, investigate, check if, see if
+ *
+ * Rules:
+ * - Check negative patterns first (if match, return false)
+ * - Use regex for positive patterns (handle contractions)
+ * - Return true if any positive pattern matches
+ */
+export function detectAscent(prompt: string): boolean {
+  const cleanPrompt = removeCodeBlocks(prompt).toLowerCase();
+
+  // Negative patterns - if present, NOT an ascent task
+  const negativePatterns = [
+    /\btry\b/,
+    /\battempt\b/,
+    /\bexplore\b/,
+    /\binvestigate\b/,
+    /\bcheck\s+if\b/,
+    /\bsee\s+if\b/
+  ];
+
+  for (const pattern of negativePatterns) {
+    if (pattern.test(cleanPrompt)) {
+      return false;
+    }
+  }
+
+  // Positive patterns (with contraction support)
+  const positivePatterns = [
+    /don'?t\s+stop/,
+    /must\s+complete/,
+    /finish\s+(this|it|everything)/,
+    /complete\s+(all|everything)/,
+    /until\s+(done|complete|finished)/,
+    /keep\s+going/,
+    /don'?t\s+give\s+up/
+  ];
+
+  for (const pattern of positivePatterns) {
+    if (pattern.test(cleanPrompt)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Detect all skills from a prompt
+ * Returns array of skill names that should be activated
+ */
+export function detectSkills(prompt: string): string[] {
+  const skills: string[] = [];
+
+  if (detectFrontendUiUx(prompt)) {
+    skills.push('frontend-ui-ux');
+  }
+
+  if (detectGitMaster(prompt)) {
+    skills.push('git-master');
+  }
+
+  if (detectAscent(prompt)) {
+    skills.push('ascent');
+  }
+
+  return skills;
 }
