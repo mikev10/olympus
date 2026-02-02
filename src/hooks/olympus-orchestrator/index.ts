@@ -44,7 +44,6 @@ export interface ToolExecuteInput {
   toolInput?: Record<string, unknown>;
   sessionId?: string;
   directory?: string;
-  sessionState?: SessionState;
 }
 
 /**

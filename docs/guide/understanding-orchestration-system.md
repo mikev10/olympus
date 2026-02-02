@@ -716,7 +716,7 @@ flowchart TB
 - ✅ `/cancel-ascent` - User explicitly cancels
 - ❌ ~~User says "stop"~~ - Ignored (continuation enforced)
 
-**Note:** No iteration limit is enforced. The Ascent continues until completion or explicit cancellation.
+**Note:** Maximum iterations are enforced to prevent infinite loops. The Ascent continues until completion, explicit cancellation, or iteration limit is reached.
 
 **System Reminder:**
 ```
