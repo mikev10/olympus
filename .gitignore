@@ -12,6 +12,11 @@ dist/
 .claude/*
 !.claude/CLAUDE.md
 
+# Olympus agent/command/skill templates (generated from src/installer)
+/agents/
+/commands/
+/skills/
+
 # Temporary files
 npm-publish-output.txt
 test-output.json
