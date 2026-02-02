@@ -128,6 +128,20 @@ export {
   type SkillRegistry
 } from './builtin-skills/index.js';
 
+// Ascent Checkpoint - checkpoint system for ascent safety
+export {
+  // Functions
+  saveCheckpoint,
+  loadCheckpoint,
+  listCheckpoints,
+  validateCheckpoint,
+  hashPlanContent,
+  getGitSha,
+  getCheckpointsDir,
+  // Types
+  type AscentCheckpoint
+} from './ascent-checkpoint/index.js';
+
 // Model Routing - intelligent model tier routing
 export {
   // Main functions
@@ -182,3 +196,19 @@ export {
   type RoutingRule,
   type PromptAdaptationStrategy,
 } from './model-routing/index.js';
+
+// Session State - task completion tracking
+export {
+  SessionState,
+  sessionState,
+  type TaskCompletion
+} from './session-state/index.js';
+
+// Hook Logging - violation logging
+export {
+  logViolation,
+  getViolationStats,
+  readViolations,
+  clearViolations,
+  type HookViolation
+} from './hook-logging/index.js';
