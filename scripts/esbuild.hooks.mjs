@@ -28,7 +28,7 @@ await esbuild.build({
   // Prefer ESM modules over UMD/CommonJS to avoid bundling issues
   mainFields: ['module', 'main'],
   // Bundle all dependencies except Node.js built-ins
-  external: ['node:*', 'fs', 'path', 'os', 'crypto', 'child_process', 'util', 'stream', 'events', 'buffer', 'url', 'assert', 'http', 'https', 'net', 'tls', 'dns', 'readline', 'zlib', 'diagnostics_channel'],
+  external: ['node:*', 'fs', 'path', 'os', 'crypto', 'child_process', 'util', 'stream', 'events', 'buffer', 'url', 'assert', 'http', 'https', 'net', 'tls', 'dns', 'readline', 'zlib', 'diagnostics_channel', 'gpt-tokenizer'],
   define: {
     'process.env.NODE_ENV': '"production"'
   },

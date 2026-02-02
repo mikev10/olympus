@@ -52,6 +52,12 @@ import { getSessionStatePath } from '../learning/session-state.js';
 import type { UserPreferences, AgentPerformance } from '../learning/types.js';
 import { randomUUID } from 'crypto';
 import { rmSync, appendFileSync } from 'fs';
+import {
+  showMetrics,
+  exportMetrics,
+  analyzeMetrics,
+  cleanMetrics
+} from './commands/metrics.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1036,6 +1042,49 @@ program
       console.log(chalk.green(`✓ Migrated ${count} discoveries from notepads`));
       console.log(chalk.gray('Run "olympus learn --show" to see the discoveries.'));
     }
+  });
+
+/**
+ * Metrics command - View and analyze token metrics
+ */
+const metricsCommand = program
+  .command('metrics')
+  .description('View and analyze token usage metrics');
+
+metricsCommand
+  .command('show')
+  .description('Display recent token metrics in table format')
+  .option('-l, --limit <number>', 'Limit number of entries to show (default: 50)', '50')
+  .action(async (options) => {
+    await showMetrics({ limit: parseInt(options.limit) });
+  });
+
+metricsCommand
+  .command('export')
+  .description('Export metrics to file')
+  .option('-f, --format <format>', 'Export format: csv or json (default: json)', 'json')
+  .option('-o, --output <file>', 'Output file (default: stdout)')
+  .action(async (options) => {
+    await exportMetrics({
+      format: options.format as 'csv' | 'json',
+      output: options.output
+    });
+  });
+
+metricsCommand
+  .command('analyze')
+  .description('Show summary statistics and trends')
+  .option('-s, --sessions <number>', 'Number of recent sessions to analyze (default: 10)', '10')
+  .action(async (options) => {
+    await analyzeMetrics({ sessions: parseInt(options.sessions) });
+  });
+
+metricsCommand
+  .command('clean')
+  .description('Archive metrics older than N days')
+  .option('-d, --days <number>', 'Age threshold in days (default: 30)', '30')
+  .action(async (options) => {
+    await cleanMetrics({ days: parseInt(options.days) });
   });
 
 // Parse arguments

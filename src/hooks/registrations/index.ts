@@ -12,6 +12,7 @@ import { registerPreToolUseHooks } from './pre-tool-use.js';
 import { registerPostToolUseHooks } from './post-tool-use.js';
 import { registerPostToolUseFailureHooks } from './post-tool-use-failure.js';
 import { registerNotificationHooks } from './notification.js';
+import { registerTokenMetricsHooks } from './token-metrics.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -33,6 +34,7 @@ export function registerAllHooks(): void {
   registerPostToolUseHooks();
   registerPostToolUseFailureHooks();
   registerNotificationHooks();
+  registerTokenMetricsHooks();
 
   registered = true;
 }
@@ -54,4 +56,5 @@ export {
   registerPostToolUseHooks,
   registerPostToolUseFailureHooks,
   registerNotificationHooks,
+  registerTokenMetricsHooks,
 };

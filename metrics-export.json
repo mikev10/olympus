@@ -1,0 +1,1171 @@
+[
+  {
+    "timestamp": "2026-02-01T04:36:08.021Z",
+    "session_id": "test-session",
+    "event_type": "prompt",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "project_path": "C:\\Users\\Mike\\Projects\\olympus"
+  },
+  {
+    "timestamp": "2026-02-01T04:36:23.739Z",
+    "session_id": "session-1",
+    "event_type": "prompt",
+    "input_tokens": 195,
+    "output_tokens": 68,
+    "model": "claude-sonnet-4-5"
+  },
+  {
+    "timestamp": "2026-02-01T04:36:23.740Z",
+    "session_id": "session-2",
+    "event_type": "prompt",
+    "input_tokens": 161,
+    "output_tokens": 53,
+    "model": "claude-sonnet-4-5"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.524Z",
+    "session_id": "test-session",
+    "event_type": "prompt",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "project_path": "C:\\Users\\Mike\\Projects\\olympus"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.950Z",
+    "session_id": "perf-test-session",
+    "event_type": "prompt",
+    "input_tokens": 7,
+    "project_path": "C:\\Users\\Mike\\Projects\\olympus"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.969Z",
+    "session_id": "perf-test-session",
+    "event_type": "tool_use",
+    "output_tokens": 1,
+    "tool_name": "edit",
+    "project_path": "C:\\Users\\Mike\\Projects\\olympus"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.971Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.971Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.972Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.972Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.972Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.973Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.973Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.973Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.974Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.974Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 3
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.975Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.975Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.975Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.976Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.976Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.976Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.977Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.977Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.977Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.978Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.978Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.978Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.979Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.979Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.979Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.980Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.980Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.980Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.981Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.981Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.981Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.982Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.982Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.982Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.982Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.983Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.983Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.983Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.984Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.984Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.984Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.985Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.985Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.985Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.985Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.986Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.986Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.986Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.986Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.987Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.987Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.987Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.987Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.988Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.988Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.988Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.989Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.989Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.989Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.990Z",
+    "session_id": "stress-test-session",
+    "event_type": "prompt",
+    "input_tokens": 5
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.991Z",
+    "session_id": "load-test-session",
+    "event_type": "prompt",
+    "input_tokens": 310
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.995Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.995Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.996Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.996Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.997Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.997Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.997Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.998Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.998Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.998Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.999Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.999Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.999Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:50.999Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.000Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.000Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.000Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.001Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.001Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.001Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.001Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.002Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.002Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.002Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.002Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.003Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.003Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.003Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.003Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.004Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.004Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.004Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.005Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.005Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.005Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.005Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.006Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.006Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.006Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.007Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.007Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.007Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.007Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.008Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.008Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.008Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.009Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.009Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.009Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.010Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.010Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.010Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.011Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.011Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.011Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.012Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.012Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.012Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.013Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.013Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.013Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.013Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.014Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.014Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.014Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.015Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.015Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.015Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.016Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.016Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.016Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.017Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.017Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.017Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.017Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.018Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.018Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.018Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.019Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.019Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.019Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.019Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.020Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.020Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.020Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.021Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.021Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.021Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.022Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.022Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.022Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.023Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.023Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.023Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.024Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.024Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.024Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.025Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.025Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.025Z",
+    "session_id": "baseline-session",
+    "event_type": "prompt",
+    "input_tokens": 4
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.027Z",
+    "session_id": "timeout-test-session",
+    "event_type": "prompt",
+    "input_tokens": 2
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.028Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.028Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.028Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.029Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.029Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.029Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.029Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.030Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.030Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.030Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 1
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.112Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.112Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.113Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.113Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.114Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.114Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.115Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.115Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.116Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:37:51.116Z",
+    "session_id": "unknown",
+    "event_type": "tool_use",
+    "output_tokens": 0,
+    "tool_name": "edit"
+  },
+  {
+    "timestamp": "2026-02-01T04:42:16.989Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 0
+  },
+  {
+    "timestamp": "2026-02-01T04:43:05.260Z",
+    "session_id": "unknown",
+    "event_type": "prompt",
+    "input_tokens": 0
+  },
+  {
+    "timestamp": "2026-02-01T04:45:47.869Z",
+    "session_id": "integration-test",
+    "event_type": "prompt",
+    "input_tokens": 8,
+    "model": "claude-sonnet-4-5",
+    "project_path": "C:\\Users\\Mike\\Projects\\olympus"
+  }
+]
