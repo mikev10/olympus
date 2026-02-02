@@ -7,6 +7,7 @@ dist/
 
 # Olympus runtime state
 .olympus/
+.olympus-test/
 
 # Claude Code - ignore everything except project-specific CLAUDE.md
 .claude/*
