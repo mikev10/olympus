@@ -21,14 +21,20 @@ import {
   QUEST_CONTINUATION_PROMPT,
   VERIFICATION_REMINDER,
   SINGLE_TASK_DIRECTIVE,
+  DELEGATION_REQUIRED_ERROR,
 } from './constants.js';
 import {
   readQuestState,
   getPlanProgress,
 } from '../../features/quest-state/index.js';
+import { SessionState } from '../../features/session-state/index.js';
+import { logViolation } from '../../features/hook-logging/index.js';
 
 // Re-export constants
 export * from './constants.js';
+
+// Module-level session state instance
+const sessionState = new SessionState();
 
 /**
  * Input for tool execution hooks
@@ -38,6 +44,7 @@ export interface ToolExecuteInput {
   toolInput?: Record<string, unknown>;
   sessionId?: string;
   directory?: string;
+  sessionState?: SessionState;
 }
 
 /**
@@ -64,7 +71,52 @@ interface GitFileStat {
  */
 export function isAllowedPath(filePath: string): boolean {
   if (!filePath) return true;
-  return filePath.includes(ALLOWED_PATH_PREFIX);
+  const normalized = filePath.replace(/\\/g, '/');
+  return normalized.includes(ALLOWED_PATH_PREFIX);
+}
+
+/**
+ * Check if a file is a test file
+ */
+export function isTestFile(filePath: string): boolean {
+  if (!filePath) return false;
+  const normalized = filePath.replace(/\\/g, '/');
+  return (
+    normalized.includes('__tests__/') ||
+    normalized.endsWith('.test.ts') ||
+    normalized.endsWith('.test.js') ||
+    normalized.endsWith('.spec.ts') ||
+    normalized.endsWith('.spec.js')
+  );
+}
+
+/**
+ * Calculate lines changed from tool input
+ */
+export function calculateLinesChanged(
+  toolName: string,
+  toolInput?: Record<string, unknown>
+): number {
+  if (!toolInput) return 0;
+
+  // For Edit tool, calculate based on old_string and new_string
+  if (toolName === 'Edit' || toolName === 'edit') {
+    const oldString = (toolInput.old_string ?? '') as string;
+    const newString = (toolInput.new_string ?? '') as string;
+    if (!oldString && !newString) return 0;
+    const oldLines = oldString.split('\n').length;
+    const newLines = newString.split('\n').length;
+    return Math.abs(newLines - oldLines);
+  }
+
+  // For Write tool, calculate based on content
+  if (toolName === 'Write' || toolName === 'write') {
+    const content = (toolInput.content ?? '') as string;
+    if (!content) return 0;
+    return content.split('\n').length;
+  }
+
+  return 0;
 }
 
 /**
@@ -222,10 +274,11 @@ export function buildQuestContinuation(
 
 /**
  * Process pre-tool-use hook for orchestrator
- * Returns warning message if orchestrator tries to modify non-allowed paths
+ * Implements HARD BLOCKING for direct source file modifications
  */
 export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecuteOutput {
-  const { toolName, toolInput } = input;
+  const { toolName, toolInput, directory } = input;
+  const workDir = directory || process.cwd();
 
   // Only check write/edit tools
   if (!isWriteEditTool(toolName)) {
@@ -235,29 +288,88 @@ export function processOrchestratorPreTool(input: ToolExecuteInput): ToolExecute
   // Extract file path from tool input
   const filePath = (toolInput?.filePath ?? toolInput?.path ?? toolInput?.file) as string | undefined;
 
-  // Allow if path is in allowed prefix
-  if (!filePath || isAllowedPath(filePath)) {
+  if (!filePath) {
     return { continue: true };
   }
 
-  // Inject warning for non-allowed path modifications
-  const warning = ORCHESTRATOR_DELEGATION_REQUIRED.replace('$FILE_PATH', filePath);
+  const normalizedPath = filePath.replace(/\\/g, '/');
+
+  // ALWAYS ALLOW: .olympus/ paths
+  if (isAllowedPath(normalizedPath)) {
+    logViolation(
+      {
+        timestamp: new Date().toISOString(),
+        filePath: normalizedPath,
+        toolName,
+        wasBlocked: false,
+        reason: 'Allowed: .olympus/ path',
+      },
+      workDir
+    );
+    return { continue: true };
+  }
+
+  // ALWAYS ALLOW: Test file creation
+  if (isTestFile(normalizedPath)) {
+    logViolation(
+      {
+        timestamp: new Date().toISOString(),
+        filePath: normalizedPath,
+        toolName,
+        wasBlocked: false,
+        reason: 'Allowed: Test file',
+      },
+      workDir
+    );
+    return { continue: true };
+  }
+
+  // Check for verification edit exception
+  const linesChanged = calculateLinesChanged(toolName, toolInput);
+  if (sessionState.isVerificationEdit(normalizedPath, linesChanged)) {
+    logViolation(
+      {
+        timestamp: new Date().toISOString(),
+        filePath: normalizedPath,
+        toolName,
+        linesChanged,
+        wasBlocked: false,
+        reason: `Allowed: Verification edit (${linesChanged} lines on recent task file)`,
+      },
+      workDir
+    );
+    return { continue: true };
+  }
+
+  // HARD BLOCK: Direct source file modification
+  logViolation(
+    {
+      timestamp: new Date().toISOString(),
+      filePath: normalizedPath,
+      toolName,
+      linesChanged,
+      wasBlocked: true,
+      reason: 'Blocked: Direct source file modification (delegation required)',
+    },
+    workDir
+  );
 
   return {
-    continue: true,
-    message: warning,
+    continue: false,
+    message: DELEGATION_REQUIRED_ERROR,
   };
 }
 
 /**
  * Process post-tool-use hook for orchestrator
  * Adds reminders after file modifications and Task delegations
+ * Records Task completions in session state
  */
 export function processOrchestratorPostTool(
   input: ToolExecuteInput,
   output: string
 ): ToolExecuteOutput {
-  const { toolName, toolInput, directory } = input;
+  const { toolName, toolInput, directory, sessionId } = input;
   const workDir = directory || process.cwd();
 
   // Handle write/edit tools
@@ -280,8 +392,17 @@ export function processOrchestratorPostTool(
       return { continue: true };
     }
 
-    // Get git stats and build enhanced output
+    // Get git stats and record task completion
     const gitStats = getGitDiffStats(workDir);
+    const filesModified = gitStats.map((stat) => stat.path);
+
+    // Record task completion in session state
+    sessionState.recordTaskCompletion({
+      timestamp: Date.now(),
+      filesModified,
+      taskId: sessionId || `task-${Date.now()}`,
+    });
+
     const fileChanges = formatFileChanges(gitStats);
 
     // Check for quest state
@@ -295,7 +416,7 @@ export function processOrchestratorPostTool(
 
 ${fileChanges}
 <system-reminder>
-${buildOrchestratorReminder(questState.plan_name, progress)}
+${buildOrchestratorReminder(questState.plan_name, progress, sessionId)}
 </system-reminder>`;
 
       return {
@@ -307,7 +428,7 @@ ${buildOrchestratorReminder(questState.plan_name, progress)}
     // No quest state - add standalone verification reminder
     return {
       continue: true,
-      modifiedOutput: output + `\n<system-reminder>\n${buildVerificationReminder()}\n</system-reminder>`,
+      modifiedOutput: output + `\n<system-reminder>\n${buildVerificationReminder(sessionId)}\n</system-reminder>`,
     };
   }
 

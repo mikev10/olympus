@@ -147,3 +147,45 @@ If you were NOT given **exactly ONE atomic task**, you MUST:
 
 **REFUSE multi-task requests. DEMAND single-task clarity.**
 `;
+
+/** Hard block error for delegation requirement */
+export const DELEGATION_REQUIRED_ERROR = `
+
+================================================================================
+HARD BLOCK: DELEGATION REQUIRED
+================================================================================
+
+You attempted to directly modify a source file. This operation is BLOCKED.
+
+As an ORCHESTRATOR, you MUST delegate implementation work to subagents.
+
+ALLOWED operations:
+  - Modify files in .olympus/ directory (plans, drafts, logs)
+  - Create test files (*.test.ts, *.spec.ts, __tests__/*)
+  - Verification edits (<10 lines on files from last 3 completed tasks)
+
+BLOCKED operations:
+  - Direct source code modifications
+  - Creating new implementation files
+  - Large refactors
+
+TO PROCEED:
+  1. Use the Task tool to delegate to an appropriate subagent:
+     - olympian: General implementation
+     - frontend-engineer: UI/UX work
+     - oracle: Debugging and architecture
+
+  2. Provide clear, atomic task with acceptance criteria
+
+  3. Verify subagent work after completion
+
+Example delegation:
+  Task tool with subagent_type="olympian", prompt="Implement X with Y constraints"
+
+================================================================================
+
+This is a HARD BLOCK. The operation will NOT be executed.
+Delegate to a subagent to proceed.
+
+================================================================================
+`;
