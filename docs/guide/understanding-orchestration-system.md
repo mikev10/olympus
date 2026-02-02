@@ -77,11 +77,11 @@ flowchart TB
 
 ---
 
-## Layer 1: Skills (Independent Commands)
+## Layer 1: Skills (Behavior Injections)
 
 ### What Are Skills?
 
-Skills are **slash commands** that activate specific behavior modes for the master agent. Each skill is an independent markdown file in `.claude/commands/` that modifies Claude's instructions for that session.
+Skills are **behavior injections** that modify Claude's context and instructions. Each skill is a markdown file in `.claude/commands/` that layers onto the master agent, enhancing its capabilities in specific ways.
 
 **How Skills Work:**
 ```
@@ -96,13 +96,13 @@ Claude operates under skill instructions until session ends
 
 ### Skill Categories
 
-| Category | Skills | Purpose | Can Chain? |
+| Category | Skills | Purpose | Composable? |
 |----------|--------|---------|------------|
-| **Orchestration** | `olympus`, `prometheus` | Primary work modes | No - one at a time |
-| **Enhancement** | `ultrawork`, `git-master`, `frontend-ui-ux` | Special behaviors | Manual activation only |
+| **Orchestration** | `olympus`, `prometheus` | Primary work modes | Yes - can layer with enhancements |
+| **Enhancement** | `ultrawork`, `git-master`, `frontend-ui-ux` | Special behaviors | Yes - stack with orchestration |
 | **Persistence** | `ascent` | Enforce completion | Yes - chain with others |
 
-**Important:** Skills do NOT automatically "stack" or "compose". Each is activated manually via slash command.
+**Important:** Skills are **additive behavior modifiers**. Multiple skills can be active simultaneously, with each contributing its specific behaviors to the master agent's context.
 
 ### Skill Usage Examples
 
@@ -115,21 +115,21 @@ Claude operates under skill instructions until session ends
 /plan build authentication system
 # Loads: .claude/commands/plan/skill.md → prometheus agent
 
-# Manual enhancement (must explicitly invoke)
+# Multiple skills active simultaneously
 /git-master
 /olympus refactor API layer
-# Loads git-master skill, then olympus skill
+# Both git-master AND olympus skills are active, layered together
 
-# Persistence guarantee
+# Persistence guarantee (stacks with other skills)
 /ascent fix all failing tests
-# Loads: .claude/commands/ascent/skill.md
+# Loads: .claude/commands/ascent/skill.md (can combine with olympus, ultrawork, etc.)
 ```
 
-### Magic Keywords (Auto-Detection)
+### Skill Activation Methods
 
-Olympus has **magic keyword detection** for a limited set of skills. Most skills require manual activation.
+Skills can be activated in two ways: **manual activation** (slash commands) or **automatic activation** (magic keywords).
 
-**Actually Implemented:**
+**Automatic Activation (Magic Keywords):**
 
 | Keyword | Auto-Activated Behavior | Implementation |
 |---------|------------------------|----------------|
@@ -138,23 +138,24 @@ Olympus has **magic keyword detection** for a limited set of skills. Most skills
 | `analyze` | Deep analysis mode | `src/features/magic-keywords.ts` |
 | `ultrathink` | Extended reasoning | `src/features/magic-keywords.ts` |
 
-**Requires Manual Activation:**
+**Manual Activation (Slash Commands):**
 
-- `/git-master` - NOT auto-detected
-- `/frontend-ui-ux` - NOT auto-detected
-- `/ascent` - NOT auto-detected
-- `/prometheus` - Use `/plan` instead
+- `/git-master` - Git expertise and atomic commits
+- `/frontend-ui-ux` - UI/UX design focus
+- `/ascent` - Persistence guarantee
+- `/olympus` - Orchestration mode
+- `/prometheus` or `/plan` - Strategic planning
 
 **Example:**
 ```bash
-# Magic keyword (auto-detected)
+# Automatic activation via magic keyword
 > ultrawork implement auth system
-# Automatically loads ultrawork behavior
+# Automatically activates ultrawork skill (behavior injection)
 
-# Manual activation required
+# Manual activation via slash command
 > /git-master
 > /olympus refactor API layer
-# Must explicitly invoke /git-master first
+# Both skills active simultaneously, behaviors layered together
 ```
 
 ---
@@ -258,16 +259,16 @@ prompt="[specific single task]"
 ```
 Master Agent: [Tries to use Edit tool on src/auth.ts]
            ↓
-Hook Intercepts: Returns { continue: true, message: "WARNING..." }
+Hook Intercepts: Returns { continue: false }
            ↓
-Tool STILL EXECUTES (not blocked!)
+Tool EXECUTION BLOCKED
            ↓
-Master Agent: [Sees warning message in output]
+Master Agent: [Receives clear delegation error]
            ↓
-Master Agent: [Learns to delegate next time]
+Master Agent: [Must delegate to sub-agent to proceed]
 ```
 
-**Important:** The hook **WARNS but does NOT BLOCK** execution. The tool still runs, but Claude receives guidance to delegate instead in future interactions.
+**Important:** The hook **HARD BLOCKS** execution with `continue: false`. The tool cannot run, and Claude must delegate to a sub-agent to make the required changes. This enforces the orchestration pattern at the tool level.
 
 #### 2. Skill Prompt Instructions (Guidance)
 
