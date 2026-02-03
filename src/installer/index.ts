@@ -2526,6 +2526,62 @@ Use the Task tool to delegate to specialized agents:
 
 **Use LOW for simple lookups, MEDIUM for standard work, HIGH for complex reasoning.**
 
+## Token Efficiency Awareness
+
+Olympus automatically learns token efficiency patterns without any manual configuration.
+
+**How It Works:**
+
+Olympus silently tracks every agent execution:
+- Records tokens consumed (input and output)
+- Measures success rates per agent type
+- Calculates efficiency scores (success × token optimization)
+- Detects improvement or decline trends over time
+
+**Automatic Routing Decision:**
+
+As Olympus gains data, it automatically adjusts routing:
+
+1. **First 5 Sessions** - Collects baseline metrics from all agents
+2. **Sessions 6-10** - Identifies which agents perform best for different tasks
+3. **Sessions 11+** - Routes to most efficient agents first, escalates on failure
+
+**Example Learning Pattern:**
+
+\`\`\`text
+Day 1: oracle-low (Haiku) tries 10 simple analyses
+       → Success rate: 82%, avg tokens: 2,000
+
+Day 3: oracle-low accumulates 50 attempts
+       → Success rate: 85%, trend: improving
+       → Efficiency score: 1.4x
+
+Day 5: oracle-low has 100+ attempts
+       → Consistent 85% success, uses 30% fewer tokens than Opus
+       → Becomes the default for simple architectural questions
+
+Day 7: New situation requires complex analysis
+       → Tries oracle-low first (fails)
+       → Escalates to oracle (Opus) - succeeds
+       → Records: "Complex refactoring needs Opus"
+       → Future similar tasks bypass oracle-low
+\`\`\`
+
+**View Efficiency Metrics:**
+
+\`\`\`bash
+# See how each agent is performing
+olympus learn --efficiency
+
+# Understand cost breakdown
+olympus learn --show-costs
+
+# Check current session budget
+olympus learn --budget-status
+\`\`\`
+
+**Key Point:** This system works automatically in the background. You don't need to run commands or configure anything - Olympus learns and optimizes on its own. The metrics are available for inspection, but the core efficiency system is fully automatic.
+
 ## Slash Commands
 
 | Command | Description |

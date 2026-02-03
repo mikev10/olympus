@@ -1,8 +1,9 @@
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { SessionState, FeedbackCategory } from './types.js';
+import { SessionState, FeedbackCategory, TokenBudget } from './types.js';
 import { readJsonFile, writeJsonFile } from './storage.js';
 import { randomUUID } from 'crypto';
+import { getSessionBaseline } from './baselines.js';
 
 const MAX_RECENT_PROMPTS = 10;
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;  // 30 minutes
@@ -13,7 +14,9 @@ export function getSessionStatePath(directory: string): string {
 }
 
 /** Create fresh session state */
-export function createSessionState(sessionId?: string): SessionState {
+export function createSessionState(sessionId?: string, projectPath?: string): SessionState {
+  const baseline = getSessionBaseline(projectPath);
+
   return {
     session_id: sessionId || randomUUID(),
     started_at: new Date().toISOString(),
@@ -21,6 +24,13 @@ export function createSessionState(sessionId?: string): SessionState {
     recent_prompts: [],
     pending_completion: null,
     todo_snapshot: null,
+    token_budget: {
+      session_baseline: baseline,
+      current_usage: 0,
+      warning_threshold: 1.5,
+      warning_issued: false,
+      started_at: new Date().toISOString()
+    }
   };
 }
 
@@ -30,14 +40,26 @@ export function loadSessionState(directory: string, sessionId?: string): Session
   const state = readJsonFile<SessionState | null>(path, null);
 
   if (!state) {
-    return createSessionState(sessionId);
+    return createSessionState(sessionId, directory);
   }
 
   // Check for session timeout
   const lastUpdate = new Date(state.last_updated).getTime();
   const now = Date.now();
   if (now - lastUpdate > SESSION_TIMEOUT_MS) {
-    return createSessionState(sessionId);
+    return createSessionState(sessionId, directory);
+  }
+
+  // Initialize token_budget if missing (backward compatibility)
+  if (!state.token_budget) {
+    const baseline = getSessionBaseline(directory);
+    state.token_budget = {
+      session_baseline: baseline,
+      current_usage: 0,
+      warning_threshold: 1.5,
+      warning_issued: false,
+      started_at: state.started_at
+    };
   }
 
   return state;
@@ -98,4 +120,67 @@ export function hasPendingCompletion(state: SessionState): boolean {
   const claimedAt = new Date(state.pending_completion.claimed_at).getTime();
   const now = Date.now();
   return now - claimedAt < 5 * 60 * 1000;
+}
+
+/** Initialize token budget for session */
+export function initializeTokenBudget(
+  state: SessionState,
+  projectPath?: string
+): SessionState {
+  const baseline = getSessionBaseline(projectPath);
+
+  state.token_budget = {
+    session_baseline: baseline,
+    current_usage: 0,
+    warning_threshold: 1.5,
+    warning_issued: false,
+    started_at: new Date().toISOString()
+  };
+
+  state.last_updated = new Date().toISOString();
+  return state;
+}
+
+/** Update token budget with new usage */
+export function updateTokenBudget(
+  state: SessionState,
+  tokensUsed: number
+): SessionState {
+  if (!state.token_budget) {
+    state.token_budget = {
+      session_baseline: getSessionBaseline(),
+      current_usage: 0,
+      warning_threshold: 1.5,
+      warning_issued: false,
+      started_at: new Date().toISOString()
+    };
+  }
+
+  state.token_budget.current_usage += tokensUsed;
+  state.last_updated = new Date().toISOString();
+
+  return state;
+}
+
+/** Mark that warning has been issued */
+export function markWarningIssued(state: SessionState): SessionState {
+  if (state.token_budget) {
+    state.token_budget.warning_issued = true;
+    state.last_updated = new Date().toISOString();
+  }
+  return state;
+}
+
+/** Check if budget warning should be issued */
+export function shouldIssueWarning(state: SessionState): boolean {
+  if (!state.token_budget) return false;
+  if (state.token_budget.warning_issued) return false;
+
+  const threshold = state.token_budget.session_baseline * state.token_budget.warning_threshold;
+  return state.token_budget.current_usage >= threshold;
+}
+
+/** Get current token budget info */
+export function getTokenBudgetInfo(state: SessionState): TokenBudget | null {
+  return state.token_budget ?? null;
 }

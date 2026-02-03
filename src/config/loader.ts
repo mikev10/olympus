@@ -12,6 +12,7 @@ import { homedir } from 'os';
 import { join, dirname } from 'path';
 import * as jsonc from 'jsonc-parser';
 import type { PluginConfig } from '../shared/types.js';
+import { DEFAULT_PRICING } from '../learning/pricing.js';
 
 /**
  * Default configuration
@@ -85,6 +86,19 @@ export const DEFAULT_CONFIG: PluginConfig = {
   },
   ascent: {
     maxIterations: 100
+  },
+  learning: {
+    tokenMetrics: {
+      enabled: true,
+      warningThreshold: 1.5,
+      minimumSamples: 5,
+      injectionTokenBudget: 150,
+      sessionBaseline: 10000
+    }
+  },
+  pricing: {
+    models: DEFAULT_PRICING,
+    customPricing: []
   }
 };
 

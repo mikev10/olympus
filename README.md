@@ -45,6 +45,7 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 - **Pattern Extraction** - Identifies recurring feedback and adapts behavior accordingly
 - **Preference Learning** - Infers your communication style (concise vs. detailed, autonomous vs. collaborative)
 - **Agent Performance Tracking** - Monitors which agents succeed or fail for specific tasks
+- **Token Efficiency Tracking** - Automatically tracks token usage per agent to optimize cost without manual intervention
 - **Discovery Storage** - Structured JSONL storage with verification tracking and confidence scoring
 - **Context Injection** - Learned preferences and discoveries are automatically applied in new sessions
 
@@ -79,6 +80,7 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 | **Task Persistence** | Stops when asked | Continues until verified complete |
 | **Background Tasks** | Blocks waiting | Runs async with notifications |
 | **Agent Specialization** | Generic responses | 20+ experts for specific domains |
+| **Token Awareness** | Manual tracking | Automatic efficiency guidance |
 
 ---
 

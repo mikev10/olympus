@@ -12,7 +12,8 @@ import { registerPreToolUseHooks } from './pre-tool-use.js';
 import { registerPostToolUseHooks } from './post-tool-use.js';
 import { registerPostToolUseFailureHooks } from './post-tool-use-failure.js';
 import { registerNotificationHooks } from './notification.js';
-import { registerTokenMetricsHooks } from './token-metrics.js';
+import { registerLearningCaptureHooks } from './learning-capture.js';
+import { registerBudgetWarningHook } from './budget-warning.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -34,7 +35,8 @@ export function registerAllHooks(): void {
   registerPostToolUseHooks();
   registerPostToolUseFailureHooks();
   registerNotificationHooks();
-  registerTokenMetricsHooks();
+  registerLearningCaptureHooks();
+  registerBudgetWarningHook(); // Token budget warning (informational)
 
   registered = true;
 }
@@ -56,5 +58,6 @@ export {
   registerPostToolUseHooks,
   registerPostToolUseFailureHooks,
   registerNotificationHooks,
-  registerTokenMetricsHooks,
+  registerLearningCaptureHooks,
+  registerBudgetWarningHook,
 };

@@ -1,6 +1,8 @@
 import { join } from 'path';
 import type { UserPreferences, AgentPerformance, ProjectPatterns, AgentDiscovery } from '../types.js';
 import { readJsonFile, getLearningDir, getProjectLearningDir } from '../storage.js';
+import { hasMinimumSamples } from '../aggregation.js';
+import { getSessionBaseline } from '../baselines.js';
 
 const MAX_INJECTION_TOKENS = 500;  // Approximate limit
 
@@ -43,6 +45,12 @@ export function generateLearnedContext(projectPath: string): string {
     .filter(a => a.weak_areas.length > 0);
   if (weakAgents.length > 0) {
     sections.push(formatAgentNotes(weakAgents));
+  }
+
+  // Token efficiency section (if we have agent data with token metrics)
+  const tokenGuidance = formatTokenEfficiency(agentPerformance);
+  if (tokenGuidance) {
+    sections.push(tokenGuidance);
   }
 
   // Only inject if we have meaningful content
@@ -123,6 +131,54 @@ function formatAgentNotes(agents: AgentPerformance[]): string {
   for (const agent of agents.slice(0, 3)) {
     lines.push(`- ${agent.agent_name}: struggles with ${agent.weak_areas.join(', ')}`);
   }
+
+  return lines.join('\n');
+}
+
+function formatTokenEfficiency(agentPerformance: Record<string, AgentPerformance>): string {
+  // Filter agents with sufficient token data
+  const agentsWithTokens = Object.values(agentPerformance)
+    .filter(a => a.token_efficiency && hasMinimumSamples(a))
+    .sort((a, b) => {
+      // Sort by efficiency score (higher is better)
+      const scoreA = a.token_efficiency?.efficiency_score ?? 0;
+      const scoreB = b.token_efficiency?.efficiency_score ?? 0;
+      return scoreB - scoreA;
+    });
+
+  if (agentsWithTokens.length === 0) {
+    return ''; // No token data available
+  }
+
+  const lines: string[] = [];
+  lines.push('<olympus-efficiency>');
+  lines.push('AGENT EFFICIENCY (success%/avg tokens):');
+
+  // Show top 3 most efficient agents
+  for (const agent of agentsWithTokens.slice(0, 3)) {
+    const successRate = Math.round(agent.success_rate * 100);
+    const avgTokens = agent.token_efficiency!.avg_tokens_per_success;
+    const avgTokensK = avgTokens >= 1000 ? `${(avgTokens / 1000).toFixed(1)}k` : `${Math.round(avgTokens)}`;
+
+    // Determine if this is the preferred agent
+    const isPreferred = agent.success_rate >= 0.9 && agent.token_efficiency!.efficiency_score > 0.8;
+    const label = isPreferred ? ' [PREFERRED]' : '';
+
+    lines.push(`- ${agent.agent_name}: ${successRate}%/${avgTokensK}${label}`);
+  }
+
+  // Add session budget info
+  const baseline = getSessionBaseline();
+  const baselineK = baseline >= 1000 ? `${(baseline / 1000).toFixed(0)}k` : baseline.toString();
+  const warnThreshold = Math.round(baseline * 1.5);
+  const warnK = warnThreshold >= 1000 ? `${(warnThreshold / 1000).toFixed(0)}k` : warnThreshold.toString();
+
+  lines.push('');
+  lines.push(`SESSION BUDGET: ~${baselineK} baseline | warn at ${warnK}`);
+  lines.push('PATTERNS: Parallel reads save 40%');
+  lines.push('');
+  lines.push('Quality remains priority. Use efficiency as tiebreaker.');
+  lines.push('</olympus-efficiency>');
 
   return lines.join('\n');
 }

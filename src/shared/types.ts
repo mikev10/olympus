@@ -142,6 +142,37 @@ export interface PluginConfig {
     minPatternOccurrences?: number;
     /** Days before preferences decay (default: 30) */
     preferenceDecayDays?: number;
+    /** Token metrics configuration */
+    tokenMetrics?: {
+      /** Enable token usage tracking (default: true) */
+      enabled?: boolean;
+      /** Warning threshold multiplier for session baseline (default: 1.5) */
+      warningThreshold?: number;
+      /** Minimum samples needed for efficiency metrics (default: 5) */
+      minimumSamples?: number;
+      /** Max tokens for injected learning context (default: 150) */
+      injectionTokenBudget?: number;
+      /** Expected baseline tokens per session (default: 10000) */
+      sessionBaseline?: number;
+    };
+  };
+
+  // Pricing configuration
+  pricing?: {
+    /** Default model pricing */
+    models?: Array<{
+      model_pattern: string;
+      input_per_million: number;
+      output_per_million: number;
+      effective_date: string;
+    }>;
+    /** Custom pricing overrides */
+    customPricing?: Array<{
+      model_pattern: string;
+      input_per_million: number;
+      output_per_million: number;
+      effective_date: string;
+    }>;
   };
 
   // Ascent safety configuration

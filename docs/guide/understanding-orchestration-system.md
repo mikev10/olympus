@@ -537,6 +537,76 @@ You: "Always prefer interfaces over types"
 Claude automatically uses interfaces without being told
 ```
 
+### Token Efficiency Learning
+
+Olympus automatically tracks token usage across all agents to optimize cost without manual intervention.
+
+**How It Works:**
+
+Olympus monitors every agent execution and records:
+- **Token Usage** - Input/output tokens consumed per agent
+- **Success Rates** - Which agents succeed vs fail for specific task types
+- **Performance Trends** - Whether agents are improving or declining in efficiency
+- **Cost Breakdown** - Which models (Haiku/Sonnet/Opus) are most expensive for your workflows
+
+**Automatic Optimization:**
+
+```
+Session 1-5: Olympus collects baseline metrics
+→ Records: Oracle uses 5,000 tokens on average, 95% success rate
+
+Session 6+: Smart Model Routing engages
+→ Simple architectural analysis? Use oracle-low (Haiku) first
+→ Complex refactoring? Escalate to oracle (Opus)
+→ Routine lookups? Default to oracle-medium (Sonnet)
+
+Session 10+: Efficiency Trends detected
+→ Sees that oracle-low works 92% of the time
+→ Routes more simple tasks to cheaper oracle-low
+→ Saves 30% on simple analysis without quality loss
+```
+
+**What You See:**
+
+View efficiency metrics anytime using the CLI:
+
+```bash
+# View agent efficiency rankings
+olympus learn --efficiency
+
+# See cost breakdown by model
+olympus learn --show-costs
+
+# Check current session token budget
+olympus learn --budget-status
+```
+
+**Example Output:**
+
+```
+Agent Efficiency Rankings
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. explore (Haiku)       - 2.1x efficient  │ 95% success
+2. olympian-low (Haiku)  - 1.8x efficient  │ 88% success
+3. olympian (Sonnet)     - 1.5x efficient  │ 96% success
+4. oracle-low (Haiku)    - 1.2x efficient  │ 82% success
+5. oracle (Opus)         - 0.8x efficient  │ 100% success
+
+Cost Breakdown (Last 30 Days)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Haiku (explore)           $0.15 (32% of spend)
+Sonnet (olympian)         $0.28 (60% of spend)
+Opus (oracle)             $0.04 (8% of spend)
+
+Session Token Budget
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Used:        45,000 / 100,000 tokens
+Remaining:   55,000 tokens
+Efficiency:  1.5x (better than baseline)
+```
+
+**Key Insight:** You don't need to do anything. Olympus learns token patterns silently in the background and automatically routes future tasks to the most efficient agents. The system emphasizes that token tracking and cost optimization happen automatically - no CLI commands required for the system to work, though you can inspect metrics anytime.
+
 ---
 
 ## The Olympus Workflow

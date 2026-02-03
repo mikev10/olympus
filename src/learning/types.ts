@@ -17,6 +17,14 @@ export interface HookInput {
  * Session state maintained across hook invocations
  * Stored in .olympus/session-state.json
  */
+export interface TokenBudget {
+  session_baseline: number;    // Expected baseline tokens per session (e.g., 10000)
+  current_usage: number;        // Total tokens used so far
+  warning_threshold: number;    // Multiplier for baseline (e.g., 1.5 = 150%)
+  warning_issued: boolean;      // Has warning been issued?
+  started_at: string;           // When budget tracking started
+}
+
 export interface SessionState {
   session_id: string;
   started_at: string;
@@ -42,6 +50,9 @@ export interface SessionState {
     completed: number;
     pending: number;
   } | null;
+
+  // Token budget tracking (optional for backward compatibility)
+  token_budget?: TokenBudget;
 }
 
 export type FeedbackCategory =
@@ -51,6 +62,21 @@ export type FeedbackCategory =
   | 'enhancement'     // "Also add X"
   | 'praise'          // "Perfect", "Thanks"
   | 'explicit_preference';  // "Always do X"
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated: boolean;      // true if estimated from response, false if from API
+  model?: string;          // Model used for this interaction
+}
+
+export interface CostEstimate {
+  input_cost: number;      // Cost in USD for input tokens
+  output_cost: number;     // Cost in USD for output tokens
+  total_cost: number;      // Total cost in USD
+  pricing_version: string; // Pricing version used (e.g., "2024-01-01")
+}
 
 export interface FeedbackEntry {
   id: string;                 // UUID
@@ -71,6 +97,10 @@ export interface FeedbackEntry {
   // Extracted learning (populated by analysis)
   extracted_lesson?: string;
   confidence: number;  // 0-1
+
+  // Token metrics (optional for backward compatibility)
+  token_usage?: TokenUsage;
+  cost_estimate?: CostEstimate;
 }
 
 export interface UserPreferences {
@@ -88,6 +118,15 @@ export interface UserPreferences {
   }>;
 
   last_updated: string;
+}
+
+export interface TokenEfficiency {
+  avg_tokens_per_success: number;   // Average tokens for successful tasks
+  avg_tokens_per_failure: number;   // Average tokens for failed tasks
+  total_tokens: number;              // Total tokens across all invocations
+  invocation_count: number;          // Total invocations tracked
+  efficiency_score: number;          // Lower is better (tokens per success)
+  trend: 'improving' | 'declining' | 'stable' | 'insufficient_data'; // Token efficiency trend
 }
 
 export interface AgentPerformance {
@@ -108,6 +147,9 @@ export interface AgentPerformance {
   weak_areas: string[];
 
   last_updated: string;
+
+  // Token efficiency metrics (optional for backward compatibility)
+  token_efficiency?: TokenEfficiency;
 }
 
 export interface ProjectPatterns {

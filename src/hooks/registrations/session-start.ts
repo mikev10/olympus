@@ -9,6 +9,7 @@ import { readUltraworkState } from '../ultrawork-state/index.js';
 import { checkIncompleteTodos } from '../todo-continuation/index.js';
 import { generateLearnedContext, formatDiscoveries } from '../../learning/hooks/learned-context.js';
 import { getDiscoveriesForInjection } from '../../learning/discovery.js';
+import { loadSessionState, saveSessionState, initializeTokenBudget } from '../../learning/session-state.js';
 import type { HookContext, HookResult } from '../types.js';
 
 export function registerSessionStartHooks(): void {
@@ -55,6 +56,18 @@ export function registerSessionStartHooks(): void {
       const sessionId = ctx.sessionId;
       const directory = ctx.directory || process.cwd();
       const messages: string[] = [];
+
+      // Initialize token budget for this session
+      try {
+        const state = loadSessionState(directory, sessionId);
+        if (!state.token_budget) {
+          initializeTokenBudget(state, directory);
+          saveSessionState(directory, state);
+        }
+      } catch (error) {
+        console.error('[Olympus Learning] Failed to initialize token budget:', error);
+        // Non-fatal - continue session start
+      }
 
       // Check for active ultrawork state
       const ultraworkState = readUltraworkState(directory);

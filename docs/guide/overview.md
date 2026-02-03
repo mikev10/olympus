@@ -70,7 +70,7 @@ Agents are sub-agents that Claude spawns via the `Task` tool. Each has a specifi
 - **Multimodal Looker** (Sonnet) - Screenshot and diagram analysis
 - **QA Tester** (Sonnet) - Interactive CLI testing with tmux
 
-**Model Routing:** Olympus automatically selects agent tiers (Low/Medium/High) based on complexity to optimize cost.
+**Model Routing:** Olympus automatically selects agent tiers (Low/Medium/High) based on complexity and historical efficiency data to optimize cost while maintaining quality.
 
 ### 2. Skills & Commands (Behavior Modifiers)
 

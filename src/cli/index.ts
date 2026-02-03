@@ -39,6 +39,7 @@ import {
   getLearningDir,
   writeJsonFile,
   appendFeedback,
+  updateAgentPerformance,
 } from '../learning/storage.js';
 import { extractPatterns } from '../learning/pattern-extractor.js';
 import { updatePreferences, createDefaultPreferences } from '../learning/preference-learner.js';
@@ -48,6 +49,9 @@ import { readDiscoveries, getDiscoveriesForInjection, recordDiscovery } from '..
 import { migrateNotepads } from '../learning/migrate-notepads.js';
 import { generateLearningStats, formatLearningStats } from '../learning/stats.js';
 import { cleanupLearning, formatCleanupResult } from '../learning/cleanup.js';
+import { getSessionBaseline, getWarningThreshold } from '../learning/baselines.js';
+import { calculateCost, DEFAULT_PRICING } from '../learning/pricing.js';
+import { getTokenUsage, hasEfficiencyMetrics, safeTokenTotal } from '../learning/utils.js';
 import { getSessionStatePath } from '../learning/session-state.js';
 import type { UserPreferences, AgentPerformance } from '../learning/types.js';
 import { randomUUID } from 'crypto';
@@ -613,6 +617,9 @@ program
   .option('-p, --project', 'Scope to current project (with --forget)')
   .option('-e, --export', 'Export learnings to JSON')
   .option('-i, --import <file>', 'Import learnings from JSON')
+  .option('--efficiency', 'Show agent efficiency rankings and token metrics')
+  .option('--show-costs', 'Show cost breakdown by model and agent')
+  .option('--budget-status', 'Show current session token budget status')
   .action(async (options) => {
     const learningDir = getLearningDir();
 
@@ -859,12 +866,245 @@ program
       return;
     }
 
+    if (options.efficiency) {
+      const feedback = readFeedbackLog();
+      const agentPerfRaw = readJsonFile<Record<string, AgentPerformance>>(
+        join(learningDir, 'agent-performance.json'),
+        {}
+      );
+
+      // Compute agent performance from feedback if not already computed
+      const agentPerf: Record<string, AgentPerformance> = {};
+      const agentNames = new Set(feedback.filter(f => f.agent_used).map(f => f.agent_used!));
+
+      for (const agentName of agentNames) {
+        const perf = updateAgentPerformance(agentName, feedback);
+        if (perf) {
+          agentPerf[agentName] = perf;
+        }
+      }
+
+      // Merge with existing performance data
+      Object.assign(agentPerf, agentPerfRaw);
+
+      const agents = Object.values(agentPerf).filter(p => hasEfficiencyMetrics(p));
+
+      if (agents.length === 0) {
+        console.log(chalk.yellow('No efficiency data available yet. Use agents with token metrics to collect data.'));
+        return;
+      }
+
+      // Calculate baseline for efficiency score (average tokens across all agents)
+      const totalTokens = agents.reduce((sum, a) => sum + (a.token_efficiency?.avg_tokens_per_success || 0), 0);
+      const baseline = agents.length > 0 ? totalTokens / agents.length : 4500;
+
+      // Sort by efficiency score (higher is better)
+      const sortedAgents = agents.sort((a, b) => {
+        const effA = (a.success_rate * (baseline / (a.token_efficiency?.avg_tokens_per_success || baseline)));
+        const effB = (b.success_rate * (baseline / (b.token_efficiency?.avg_tokens_per_success || baseline)));
+        return effB - effA;
+      });
+
+      console.log(chalk.blue.bold('\nAGENT EFFICIENCY REPORT'));
+      console.log(chalk.blue.bold('=======================\n'));
+
+      console.log(chalk.white('Agent           Success  Avg Tokens  Efficiency  Trend'));
+      console.log(chalk.gray('------------    -------  ----------  ----------  -----'));
+
+      for (const agent of sortedAgents) {
+        const successRate = (agent.success_rate * 100).toFixed(0) + '%';
+        const avgTokens = Math.round(agent.token_efficiency?.avg_tokens_per_success || 0).toLocaleString();
+        const effScore = (agent.success_rate * (baseline / (agent.token_efficiency?.avg_tokens_per_success || baseline))).toFixed(2);
+        const trend = agent.token_efficiency?.trend || 'insufficient_data';
+        const trendDisplay = trend === 'insufficient_data' ? chalk.gray(trend) :
+                             trend === 'improving' ? chalk.green(trend) :
+                             trend === 'declining' ? chalk.red(trend) :
+                             chalk.yellow(trend);
+
+        const nameCol = agent.agent_name.padEnd(15);
+        const successCol = successRate.padStart(7);
+        const tokensCol = avgTokens.padStart(10);
+        const effCol = effScore.padStart(10);
+
+        console.log(`${nameCol} ${successCol}  ${tokensCol}  ${effCol}  ${trendDisplay}`);
+      }
+
+      console.log('');
+      console.log(chalk.gray(`Efficiency = success_rate * (baseline / avg_tokens)`));
+      console.log(chalk.gray(`Baseline: ${Math.round(baseline).toLocaleString()} tokens\n`));
+
+      // Generate recommendations
+      console.log(chalk.white('Recommendations:'));
+      const topAgent = sortedAgents[0];
+      if (topAgent) {
+        const effScore = (topAgent.success_rate * (baseline / (topAgent.token_efficiency?.avg_tokens_per_success || baseline)));
+        if (effScore > 1.2) {
+          console.log(chalk.green(`- Prefer ${topAgent.agent_name} for similar tasks (high efficiency, good success)`));
+        }
+      }
+
+      const insufficientData = sortedAgents.filter(a => a.token_efficiency?.trend === 'insufficient_data');
+      if (insufficientData.length > 0) {
+        console.log(chalk.yellow(`- ${insufficientData.map(a => a.agent_name).join(', ')} ha${insufficientData.length === 1 ? 's' : 've'} insufficient data - consider using more`));
+      }
+
+      console.log('');
+      return;
+    }
+
+    if (options.showCosts) {
+      const feedback = readFeedbackLog();
+      const feedbackWithTokens = feedback.filter(f => getTokenUsage(f) !== null);
+
+      if (feedbackWithTokens.length === 0) {
+        console.log(chalk.yellow('No cost data available yet. Token metrics are not recorded yet.'));
+        return;
+      }
+
+      // Filter to last 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recent = feedbackWithTokens.filter(f => new Date(f.timestamp) >= thirtyDaysAgo);
+
+      if (recent.length === 0) {
+        console.log(chalk.yellow('No cost data from the last 30 days.'));
+        return;
+      }
+
+      // Calculate totals
+      let totalTokens = 0;
+      let totalCost = 0;
+      const byModel: Record<string, { tokens: number; cost: number; input: number; output: number }> = {};
+      const byAgent: Record<string, { tokens: number; cost: number }> = {};
+
+      for (const entry of recent) {
+        const tokenUsage = getTokenUsage(entry);
+        if (!tokenUsage) continue;
+
+        const tokens = tokenUsage.total_tokens;
+        totalTokens += tokens;
+
+        const modelId = tokenUsage.model || 'unknown';
+        const cost = calculateCost(tokenUsage.input_tokens, tokenUsage.output_tokens, modelId);
+        totalCost += cost.totalCost;
+
+        // By model
+        if (!byModel[modelId]) {
+          byModel[modelId] = { tokens: 0, cost: 0, input: 0, output: 0 };
+        }
+        byModel[modelId].tokens += tokens;
+        byModel[modelId].cost += cost.totalCost;
+        byModel[modelId].input += tokenUsage.input_tokens;
+        byModel[modelId].output += tokenUsage.output_tokens;
+
+        // By agent
+        const agentName = entry.agent_used || 'unknown';
+        if (!byAgent[agentName]) {
+          byAgent[agentName] = { tokens: 0, cost: 0 };
+        }
+        byAgent[agentName].tokens += tokens;
+        byAgent[agentName].cost += cost.totalCost;
+      }
+
+      console.log(chalk.blue.bold('\nCOST ANALYSIS (Last 30 days)'));
+      console.log(chalk.blue.bold('============================\n'));
+
+      console.log(chalk.white(`Total tokens:    ${totalTokens.toLocaleString()}`));
+      console.log(chalk.white(`Estimated cost:  $${totalCost.toFixed(2)}\n`));
+
+      if (Object.keys(byModel).length > 0) {
+        console.log(chalk.white('By Model:'));
+        for (const [model, data] of Object.entries(byModel)) {
+          const tokensK = Math.round(data.tokens / 1000) + 'k';
+          console.log(`- ${model.padEnd(25)}  ${tokensK.padStart(8)} tokens ($${data.cost.toFixed(2)})`);
+        }
+        console.log('');
+      }
+
+      if (Object.keys(byAgent).length > 0) {
+        console.log(chalk.white('By Agent:'));
+        const sortedAgents = Object.entries(byAgent).sort((a, b) => b[1].tokens - a[1].tokens);
+        for (const [agent, data] of sortedAgents) {
+          const tokensK = Math.round(data.tokens / 1000) + 'k';
+          console.log(`- ${agent.padEnd(25)}  ${tokensK.padStart(8)} tokens ($${data.cost.toFixed(2)})`);
+        }
+        console.log('');
+      }
+
+      // Get pricing version
+      const pricingVersion = DEFAULT_PRICING[0]?.effective_date || '2025-01-01';
+      console.log(chalk.gray('Note: Costs are estimates based on list pricing.'));
+      console.log(chalk.gray(`Pricing version: ${pricingVersion}\n`));
+      return;
+    }
+
+    if (options.budgetStatus) {
+      const sessionStatePath = getSessionStatePath(process.cwd());
+
+      if (!existsSync(sessionStatePath)) {
+        console.log(chalk.yellow('No active session found. Start a session to track budget.'));
+        return;
+      }
+
+      const sessionState = readJsonFile<any>(sessionStatePath, null);
+
+      if (!sessionState || !sessionState.token_budget) {
+        console.log(chalk.yellow('No token budget data available for current session.'));
+        return;
+      }
+
+      const budget = sessionState.token_budget;
+      const baseline = budget.session_baseline || 10000;
+      const current = budget.current_usage || 0;
+      const threshold = getWarningThreshold(baseline, budget.warning_threshold || 1.5);
+      const percentage = baseline > 0 ? ((current / baseline) * 100).toFixed(0) : 0;
+
+      console.log(chalk.blue.bold('\nSESSION BUDGET STATUS'));
+      console.log(chalk.blue.bold('=====================\n'));
+
+      console.log(chalk.white(`Current session:  ${current.toLocaleString()} tokens`));
+      console.log(chalk.white(`Session baseline: ${baseline.toLocaleString()} tokens`));
+      console.log(chalk.white(`Warning threshold: ${Math.round(threshold).toLocaleString()} tokens (${((budget.warning_threshold || 1.5) * 100)}% of baseline)\n`));
+
+      // Determine status
+      const status = current > threshold ? chalk.red('WARNING') :
+                     current > baseline ? chalk.yellow('ELEVATED') :
+                     chalk.green('NORMAL');
+
+      console.log(chalk.white(`Status: ${status} (${percentage}% of baseline)\n`));
+
+      // Historical comparison
+      const feedback = readFeedbackLog();
+      const recentSessions = feedback
+        .filter(f => getTokenUsage(f) !== null)
+        .slice(-5);
+
+      if (recentSessions.length > 0) {
+        const avgRecent = recentSessions.reduce((sum, f) => sum + safeTokenTotal(f), 0) / recentSessions.length;
+        console.log(chalk.white('Historical comparison:'));
+        if (current < baseline) {
+          console.log(chalk.gray('- This session is below typical usage'));
+        } else if (current > threshold) {
+          console.log(chalk.red('- This session significantly exceeds typical usage'));
+        } else {
+          console.log(chalk.gray('- This session is within normal range'));
+        }
+        console.log(chalk.gray(`- Last ${recentSessions.length} sessions averaged: ${Math.round(avgRecent).toLocaleString()} tokens`));
+      }
+
+      console.log('');
+      return;
+    }
+
     // Default: show help
     console.log('Usage: olympus learn [options]');
     console.log('');
     console.log('Options:');
     console.log('  -s, --show           Show current learnings');
     console.log('  --stats              Show learning system statistics');
+    console.log('  --efficiency         Show agent efficiency rankings and token metrics');
+    console.log('  --show-costs         Show cost breakdown by model and agent');
+    console.log('  --budget-status      Show current session token budget status');
     console.log('  --cleanup            Clean up old learning data');
     console.log('  --dry-run            Preview cleanup without executing');
     console.log('  --age <days>         Age threshold for cleanup (default: 180)');
