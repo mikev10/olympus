@@ -309,6 +309,22 @@ You are a designer who learned to code. You see what pure developers miss—spac
 
 ---
 
+# File Placement
+
+**CRITICAL: Never create files in the project root directory** except when required by framework conventions.
+
+| File Type | Destination |
+|-----------|-------------|
+| Components | Follow project's component structure |
+| Styles | Follow project's style structure |
+| Tests | Follow project's test structure |
+| Documentation | \`docs/\` (create if needed) |
+| Work discoveries | Use \`olympus discover\` command |
+
+Follow the project's existing structure. Never create arbitrary folders at project root.
+
+---
+
 # Design Process
 
 Before coding, commit to a **BOLD aesthetic direction**:
@@ -432,6 +448,44 @@ Create documentation that is accurate, comprehensive, and genuinely useful. Exec
 - **Report honestly**: Communicate both successes and gaps explicitly
 - **No surprises**: Make your work visible and understandable to others
 </role>
+
+<file_placement>
+## CRITICAL: Where to Save Documentation
+
+**NEVER create files in the project root directory.**
+
+### Documentation Routing
+
+| Documentation Type | Destination | Example |
+|-------------------|-------------|---------|
+| Architecture docs | \`docs/\` | \`docs/ARCHITECTURE.md\` |
+| API documentation | \`docs/\` | \`docs/api-reference.md\` |
+| User guides | \`docs/\` | \`docs/getting-started.md\` |
+| Troubleshooting | \`docs/\` | \`docs/troubleshooting.md\` |
+| Work discoveries | Discovery system | Use \`olympus discover\` command |
+
+### Decision Tree
+
+Is this permanent project knowledge (for team/users)?
+- YES -> Write to \`docs/\` (create folder if needed)
+- NO -> Did you discover a pattern, gotcha, or insight?
+  - YES -> Use \`olympus discover "category | summary | details"\`
+  - NO -> Ask for clarification on destination
+
+### Recording Work Discoveries
+
+**DO NOT create markdown files for work learnings.** Use:
+
+\`\`\`bash
+olympus discover "category | summary | details"
+\`\`\`
+
+Categories: pattern, gotcha, workaround, performance, dependency, configuration, technical_insight
+
+### User Override
+
+If the user explicitly specifies a path, follow their instruction.
+</file_placement>
 
 <workflow>
 **YOU MUST FOLLOW THESE RULES EXACTLY, EVERY SINGLE TIME:**
@@ -917,6 +971,21 @@ When you encounter important insights during work, document them:
 
 Future agents will see your discoveries and benefit from your learnings.
 
+## File Placement Policy
+
+**CRITICAL: Never create files in the project root directory** except:
+- Standard config files required by tools
+- Files explicitly requested by user to be in root
+
+| File Type | Destination |
+|-----------|-------------|
+| Work discoveries | Use \`olympus discover\` (see above) |
+| Project documentation | \`docs/\` (create if needed) |
+| Source code | Follow project's existing structure |
+| Tests | Follow project's existing test structure |
+
+**DO NOT create markdown files for learnings** - use the discovery system above.
+
 ## Plan Location (READ ONLY)
 PLAN PATH: .olympus/plans/{plan-name}.md
 
@@ -1049,7 +1118,14 @@ TODO OBSESSION (NON-NEGOTIABLE):
 - 2+ steps → TodoWrite FIRST, atomic breakdown
 - Mark in_progress before starting (ONE at a time)
 - Mark completed IMMEDIATELY after each step
-</Todo_Discipline>`,
+</Todo_Discipline>
+
+<File_Placement>
+**NEVER create files in project root** except config files or user-requested files.
+- Work discoveries -> \`olympus discover\` command
+- Documentation -> \`docs/\`
+- Code/Tests -> Follow existing structure
+</File_Placement>`,
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite'],
   model: 'opus'
 };
@@ -1074,6 +1150,8 @@ Execute tasks directly. NEVER delegate.
 <Constraints>
 BLOCKED: Task tool, agent spawning
 Keep it simple - if task seems complex, escalate to olympian or olympian-high.
+
+**File Placement**: Never create files in project root. Use \`docs/\` for documentation, \`olympus discover\` for learnings.
 </Constraints>`,
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'TodoWrite'],
   model: 'haiku'
@@ -1147,6 +1225,8 @@ Use for trivial frontend work:
 - Adding basic elements
 
 For creative design work, use frontend-engineer (sonnet).
+
+**File Placement**: Never create files in project root. Follow project's component/style structure.
 </Role>`,
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   model: 'haiku'
@@ -1167,6 +1247,8 @@ Use for:
 - Accessibility overhauls
 
 You are a designer who learned to code. Create stunning, cohesive interfaces.
+
+**File Placement**: Never create files in project root. Follow project's component/style structure. Documentation goes in \`docs/\`.
 </Role>`,
   tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   model: 'opus'

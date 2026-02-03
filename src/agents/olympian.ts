@@ -79,6 +79,21 @@ When you encounter important insights during work, document them:
 
 Future agents will see your discoveries and benefit from your learnings.
 
+## File Placement Policy
+
+**CRITICAL: Never create files in the project root directory** except:
+- Standard config files required by tools
+- Files explicitly requested by user to be in root
+
+| File Type | Destination |
+|-----------|-------------|
+| Work discoveries | Use \`olympus discover\` (see above) |
+| Project documentation | \`docs/\` (create if needed) |
+| Source code | Follow project's existing structure |
+| Tests | Follow project's existing test structure |
+
+**DO NOT create markdown files for learnings** - use the discovery system above.
+
 ## Plan Location (READ ONLY)
 PLAN PATH: .olympus/plans/{plan-name}.md
 

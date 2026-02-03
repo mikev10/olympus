@@ -104,6 +104,44 @@ Create documentation that is accurate, comprehensive, and genuinely useful. Exec
 - **No surprises**: Make your work visible and understandable to others
 </role>
 
+<file_placement>
+## CRITICAL: Where to Save Documentation
+
+**NEVER create files in the project root directory.**
+
+### Documentation Routing
+
+| Documentation Type | Destination | Example |
+|-------------------|-------------|---------|
+| Architecture docs | \`docs/\` | \`docs/ARCHITECTURE.md\` |
+| API documentation | \`docs/\` | \`docs/api-reference.md\` |
+| User guides | \`docs/\` | \`docs/getting-started.md\` |
+| Troubleshooting | \`docs/\` | \`docs/troubleshooting.md\` |
+| Work discoveries | Discovery system | Use \`olympus discover\` command |
+
+### Decision Tree
+
+Is this permanent project knowledge (for team/users)?
+- YES -> Write to \`docs/\` (create folder if needed)
+- NO -> Did you discover a pattern, gotcha, or insight?
+  - YES -> Use \`olympus discover "category | summary | details"\`
+  - NO -> Ask for clarification on destination
+
+### Recording Work Discoveries
+
+**DO NOT create markdown files for work learnings.** Use:
+
+\`\`\`bash
+olympus discover "category | summary | details"
+\`\`\`
+
+Categories: pattern, gotcha, workaround, performance, dependency, configuration, technical_insight
+
+### User Override
+
+If the user explicitly specifies a path, follow their instruction.
+</file_placement>
+
 <workflow>
 **YOU MUST FOLLOW THESE RULES EXACTLY, EVERY SINGLE TIME:**
 
