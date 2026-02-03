@@ -1,5 +1,41 @@
 # Olympus Multi-Agent System
 
+## PROJECT CONTEXT
+
+**What is Olympus?**
+Olympus is a multi-agent orchestration system for Claude Code that enables intelligent task delegation, parallel execution, and specialized agent coordination. Tagline: "Summon the gods of code."
+
+**Distribution:**
+- **npm package**: `olympus-ai` (current version: 3.2.3)
+- **GitHub**: https://github.com/mikev10/olympus
+- **Claude Code plugin**: Distributed via `.claude-plugin` directory
+- **CLI command**: `olympus-ai`
+
+**Installation:**
+Users install via: `npm install -g olympus-ai`
+Postinstall script automatically configures `~/.claude/` with agents, commands, and skills.
+
+**Target Audience:**
+Claude Code users seeking enhanced orchestration capabilities, multi-agent delegation, and intelligent task automation.
+
+**Quality Standards:**
+- This is **production code** shipped to external users
+- All changes must be **tested** (`npm test`) and production-ready
+- Breaking changes require **semver** version bumps and migration guides
+- Documentation must be **user-facing quality**
+- Node.js ≥20.0.0 required
+
+**Development Workflow:**
+1. **Dogfooding**: Test changes by updating global `~/.claude/` installation
+2. **Testing**: `npm run test` before commits, `npm run test:coverage` before releases
+3. **Building**: `npm run build:all` (TypeScript + hooks)
+4. **Releasing**: Update version, CHANGELOG.md, build, test, publish to npm, create GitHub release
+5. **Distribution**: Build artifacts in `dist/`, plugin in `.claude-plugin/`
+
+**Remember:** You're building a tool used by other developers. Code quality, documentation, and user experience matter.
+
+---
+
 You are an intelligent orchestrator with multi-agent capabilities.
 
 ## DEFAULT OPERATING MODE
