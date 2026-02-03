@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-02-02
+
+### Added
+
+**File Placement Enforcement**
+
+- **Agent Prompt Updates** - All Olympus agents now actively enforce file placement policies
+  - Updated `olympian`, `olympian-high`, `olympian-low` with File Placement Policy sections
+  - Updated `document-writer` with comprehensive documentation routing guidance
+  - Updated `frontend-engineer`, `frontend-engineer-high`, `frontend-engineer-low` with file placement rules
+  - All agents now explicitly prohibit creating files in project root
+  - Clear routing: documentation → `docs/`, learnings → `olympus discover` command
+  - Prevents documentation pollution in project root directories
+
+### Technical Details
+- Modified files: `src/agents/olympian.ts`, `src/agents/definitions.ts`, `src/agents/document-writer.ts`, `src/agents/frontend-engineer.ts`
+- 10 agent definitions updated with file placement guidance
+- Backward compatible, no breaking changes
+- All 519 tests passing
+
+**Impact:**
+- Agents will no longer create arbitrary markdown files in project root
+- Consistent file organization across all Olympus-managed projects
+- Better project hygiene and structure
+
 ## [3.0.1] - 2026-01-28
 
 ### Added
