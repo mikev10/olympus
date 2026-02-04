@@ -6,33 +6,33 @@ The `olympus-ai` command-line tool is your interface to manage the Olympus multi
 
 | Command | Purpose | Example |
 |---------|---------|---------|
-| `olympus install` | Install Olympus to Claude Code config | `olympus install --force` |
-| `olympus init` | Create local configuration file | `olympus init --global` |
-| `olympus config` | Show or validate configuration | `olympus config --validate` |
-| `olympus info` | Display available agents and features | `olympus info` |
-| `olympus learn --show` | View learnings and feedback data | `olympus learn --show` |
-| `olympus learn --efficiency` | See agent performance rankings | `olympus learn --efficiency` |
-| `olympus learn --show-costs` | Check token costs (last 30 days) | `olympus learn --show-costs` |
-| `olympus learn --budget-status` | View current session token usage | `olympus learn --budget-status` |
-| `olympus learn --stats` | Learning system statistics | `olympus learn --stats` |
-| `olympus discover` | Record a discovery or pattern | `olympus discover "pattern \| summary \| details"` |
-| `olympus feedback` | Log preferences or view history | `olympus feedback "always use strict mode"` |
-| `olympus update --check` | Check for available updates | `olympus update --check` |
-| `olympus update` | Install latest version | `olympus update` |
-| `olympus version` | Show version information | `olympus version` |
-| `olympus test-prompt` | Preview prompt enhancement | `olympus test-prompt "my prompt"` |
-| `olympus idea <feature>` | Generate IDEA artifact for a feature | `olympus idea "user-auth"` |
-| `olympus prd <feature>` | Generate PRD artifact for a feature | `olympus prd "user-auth"` |
-| `olympus spec <feature>` | Generate SPEC artifact for a feature | `olympus spec "user-auth"` |
-| `olympus intents <feature>` | Generate INTENTS artifact for a feature | `olympus intents "user-auth"` |
-| `olympus workflow-status` | View all active workflows and status | `olympus workflow-status` |
+| `olympus-ai install` | Install Olympus to Claude Code config | `olympus-ai install --force` |
+| `olympus-ai init` | Create local configuration file | `olympus-ai init --global` |
+| `olympus-ai config` | Show or validate configuration | `olympus-ai config --validate` |
+| `olympus-ai info` | Display available agents and features | `olympus-ai info` |
+| `olympus-ai learn --show` | View learnings and feedback data | `olympus-ai learn --show` |
+| `olympus-ai learn --efficiency` | See agent performance rankings | `olympus-ai learn --efficiency` |
+| `olympus-ai learn --show-costs` | Check token costs (last 30 days) | `olympus-ai learn --show-costs` |
+| `olympus-ai learn --budget-status` | View current session token usage | `olympus-ai learn --budget-status` |
+| `olympus-ai learn --stats` | Learning system statistics | `olympus-ai learn --stats` |
+| `olympus-ai discover` | Record a discovery or pattern | `olympus-ai discover "pattern \| summary \| details"` |
+| `olympus-ai feedback` | Log preferences or view history | `olympus-ai feedback "always use strict mode"` |
+| `olympus-ai update --check` | Check for available updates | `olympus-ai update --check` |
+| `olympus-ai update` | Install latest version | `olympus-ai update` |
+| `olympus-ai version` | Show version information | `olympus-ai version` |
+| `olympus-ai test-prompt` | Preview prompt enhancement | `olympus-ai test-prompt "my prompt"` |
+| `olympus-ai idea <feature>` | Generate IDEA artifact for a feature | `olympus-ai idea "user-auth"` |
+| `olympus-ai prd <feature>` | Generate PRD artifact for a feature | `olympus-ai prd "user-auth"` |
+| `olympus-ai spec <feature>` | Generate SPEC artifact for a feature | `olympus-ai spec "user-auth"` |
+| `olympus-ai intents <feature>` | Generate INTENTS artifact for a feature | `olympus-ai intents "user-auth"` |
+| `olympus-ai workflow-status` | View all active workflows and status | `olympus-ai workflow-status` |
 
 ## Installation & Setup
 
 ### Install Olympus to Claude Code
 
 ```bash
-olympus install
+olympus-ai install
 ```
 
 Installs Olympus agents, commands, and hooks to your Claude Code configuration (`~/.claude/`).
@@ -46,13 +46,13 @@ Installs Olympus agents, commands, and hooks to your Claude Code configuration (
 **Example:**
 ```bash
 # Force reinstall everything
-olympus install --force
+olympus-ai install --force
 
 # Silent installation
-olympus install --quiet
+olympus-ai install --quiet
 
 # Install just to this project
-olympus install --local
+olympus-ai install --local
 ```
 
 After installation, agents and slash commands are available in Claude Code:
@@ -63,7 +63,7 @@ After installation, agents and slash commands are available in Claude Code:
 ### Initialize Configuration
 
 ```bash
-olympus init
+olympus-ai init
 ```
 
 Creates a configuration file with agent models, feature toggles, and MCP servers.
@@ -80,16 +80,16 @@ Creates a configuration file with agent models, feature toggles, and MCP servers
 **Example:**
 ```bash
 # Initialize global config
-olympus init --global
+olympus-ai init --global
 
 # Create local project config (overwrite if exists)
-olympus init --force
+olympus-ai init --force
 ```
 
 ### Show Configuration
 
 ```bash
-olympus config
+olympus-ai config
 ```
 
 Displays your current configuration. Useful for verifying agent models, features, and MCP servers.
@@ -101,13 +101,13 @@ Displays your current configuration. Useful for verifying agent models, features
 **Example:**
 ```bash
 # View full configuration
-olympus config
+olympus-ai config
 
 # Check for problems
-olympus config --validate
+olympus-ai config --validate
 
 # Just show file locations
-olympus config --paths
+olympus-ai config --paths
 ```
 
 ## System Information
@@ -115,7 +115,7 @@ olympus config --paths
 ### View System & Agent Info
 
 ```bash
-olympus info
+olympus-ai info
 ```
 
 Shows available agents, enabled features, MCP servers, and magic keywords in a formatted display.
@@ -138,7 +138,7 @@ Enabled Features:
 ### Check Version Information
 
 ```bash
-olympus version
+olympus-ai version
 ```
 
 Displays detailed version information including package version, installation method, and commit hash.
@@ -159,7 +159,7 @@ The learning system helps Olympus understand your preferences, track agent perfo
 ### View Current Learnings
 
 ```bash
-olympus learn --show
+olympus-ai learn --show
 ```
 
 Displays feedback collected, learned preferences, agent performance metrics, and discoveries.
@@ -172,13 +172,13 @@ Displays feedback collected, learned preferences, agent performance metrics, and
 
 **Example:**
 ```bash
-olympus learn --show
+olympus-ai learn --show
 ```
 
 ### Learning System Statistics
 
 ```bash
-olympus learn --stats
+olympus-ai learn --stats
 ```
 
 Shows comprehensive statistics about your learning data:
@@ -189,13 +189,13 @@ Shows comprehensive statistics about your learning data:
 
 **Example:**
 ```bash
-olympus learn --stats
+olympus-ai learn --stats
 ```
 
 ### Analyze Patterns & Update Preferences
 
 ```bash
-olympus learn --analyze
+olympus-ai learn --analyze
 ```
 
 Analyzes your feedback log to extract patterns and update user preferences automatically.
@@ -207,13 +207,13 @@ Analyzes your feedback log to extract patterns and update user preferences autom
 
 **Example:**
 ```bash
-olympus learn --analyze
+olympus-ai learn --analyze
 ```
 
 ### Suggest Prompt Improvements
 
 ```bash
-olympus learn --suggest
+olympus-ai learn --suggest
 ```
 
 Based on agent performance and your preferences, suggests improvements to agent prompts.
@@ -225,7 +225,7 @@ Based on agent performance and your preferences, suggests improvements to agent 
 
 **Example:**
 ```bash
-olympus learn --suggest
+olympus-ai learn --suggest
 
 # Output shows suggestions like:
 # [78%] Preferred agents: oracle, librarian
@@ -235,7 +235,7 @@ olympus learn --suggest
 ### Apply Prompt Improvements
 
 ```bash
-olympus learn --apply
+olympus-ai learn --apply
 ```
 
 Automatically applies suggested prompt improvements to agent prompts. Creates backups before making changes.
@@ -247,13 +247,13 @@ Automatically applies suggested prompt improvements to agent prompts. Creates ba
 
 **Example:**
 ```bash
-olympus learn --apply
+olympus-ai learn --apply
 ```
 
 ### Forget All Learnings
 
 ```bash
-olympus learn --forget
+olympus-ai learn --forget
 ```
 
 Permanently deletes all learning data. This is irreversible.
@@ -264,20 +264,20 @@ Permanently deletes all learning data. This is irreversible.
 **Example:**
 ```bash
 # Forget everything
-olympus learn --forget
+olympus-ai learn --forget
 
 # Forget only project learnings
-olympus learn --forget --project
+olympus-ai learn --forget --project
 ```
 
 ### Export & Import Learnings
 
 ```bash
 # Export all learnings to JSON
-olympus learn --export > learnings.json
+olympus-ai learn --export > learnings.json
 
 # Import learnings from file
-olympus learn --import learnings.json
+olympus-ai learn --import learnings.json
 ```
 
 **Useful for:**
@@ -288,16 +288,16 @@ olympus learn --import learnings.json
 **Example:**
 ```bash
 # Save before wiping system
-olympus learn --export > backup-learnings.json
+olympus-ai learn --export > backup-learnings.json
 
 # Restore from backup
-olympus learn --import backup-learnings.json
+olympus-ai learn --import backup-learnings.json
 ```
 
 ### Clean Up Old Learning Data
 
 ```bash
-olympus learn --cleanup
+olympus-ai learn --cleanup
 ```
 
 Removes old feedback entries and archived files to keep learning data manageable.
@@ -310,13 +310,13 @@ Removes old feedback entries and archived files to keep learning data manageable
 **Example:**
 ```bash
 # Preview cleanup first
-olympus learn --cleanup --dry-run
+olympus-ai learn --cleanup --dry-run
 
 # Actually clean up entries older than 90 days
-olympus learn --cleanup --age 90
+olympus-ai learn --cleanup --age 90
 
 # Also remove archived files
-olympus learn --cleanup --remove-archived
+olympus-ai learn --cleanup --remove-archived
 ```
 
 ## Token Efficiency & Cost Tracking
@@ -326,7 +326,7 @@ NEW: Advanced token metrics to optimize your agent usage and understand costs.
 ### View Agent Efficiency Rankings
 
 ```bash
-olympus learn --efficiency
+olympus-ai learn --efficiency
 ```
 
 Shows agent performance ranked by efficiency (success rate vs. token usage).
@@ -362,7 +362,7 @@ explore         92%      2,100       1.05        improving
 ### Show Cost Breakdown
 
 ```bash
-olympus learn --show-costs
+olympus-ai learn --show-costs
 ```
 
 Displays token costs by model and agent for the last 30 days. Helps you understand spending patterns.
@@ -395,7 +395,7 @@ By Agent:
 ### Check Session Token Budget
 
 ```bash
-olympus learn --budget-status
+olympus-ai learn --budget-status
 ```
 
 Shows current session token usage compared to your baseline. Helps catch runaway sessions.
@@ -553,7 +553,7 @@ Discoveries help you capture project insights so agents can learn about your cod
 ### Record a Discovery
 
 ```bash
-olympus discover "category | summary | details"
+olympus-ai discover "category | summary | details"
 ```
 
 Records a discovery for agents to use in future sessions.
@@ -562,13 +562,13 @@ Records a discovery for agents to use in future sessions.
 
 ```bash
 # Full format: category | summary | details
-olympus discover "pattern | Use kebab-case for file names | This codebase consistently uses kebab-case for all non-component files"
+olympus-ai discover "pattern | Use kebab-case for file names | This codebase consistently uses kebab-case for all non-component files"
 
 # With --category option
-olympus discover "Use TypeScript strict mode | Enforced in tsconfig.json" --category pattern
+olympus-ai discover "Use TypeScript strict mode | Enforced in tsconfig.json" --category pattern
 
 # Shorthand format
-olympus discover "gotcha | Database migrations must run in order | Sequential execution required"
+olympus-ai discover "gotcha | Database migrations must run in order | Sequential execution required"
 ```
 
 **Discovery categories:**
@@ -589,21 +589,21 @@ olympus discover "gotcha | Database migrations must run in order | Sequential ex
 **Example:**
 ```bash
 # Record a pattern discovery
-olympus discover "pattern | Always use const by default | var is never used in this project" --scope project
+olympus-ai discover "pattern | Always use const by default | var is never used in this project" --scope project
 
 # Record a gotcha with high confidence
-olympus discover "gotcha | Import order matters | Component imports must come before utility imports" --confidence 0.95
+olympus-ai discover "gotcha | Import order matters | Component imports must come before utility imports" --confidence 0.95
 
 # Record a global discovery (shared across projects)
-olympus discover "configuration | Node version | Project requires Node 20+" --scope global
+olympus-ai discover "configuration | Node version | Project requires Node 20+" --scope global
 ```
 
-After recording, discoveries appear in `olympus learn --show` and are automatically injected into agent prompts.
+After recording, discoveries appear in `olympus-ai learn --show` and are automatically injected into agent prompts.
 
 ### View Discoveries
 
 ```bash
-olympus learn --show
+olympus-ai learn --show
 ```
 
 View section includes all discovered patterns, gotchas, workarounds, and insights. Agents use these to make smarter decisions.
@@ -613,7 +613,7 @@ View section includes all discovered patterns, gotchas, workarounds, and insight
 ### Log a Preference
 
 ```bash
-olympus feedback "your preference here"
+olympus-ai feedback "your preference here"
 ```
 
 Manually record a preference or instruction for Olympus to learn.
@@ -621,19 +621,19 @@ Manually record a preference or instruction for Olympus to learn.
 **Examples:**
 ```bash
 # Instruction
-olympus feedback "Always ask before making breaking changes"
+olympus-ai feedback "Always ask before making breaking changes"
 
 # Preference
-olympus feedback "Prefer Sonnet over Opus for simple analysis to save costs"
+olympus-ai feedback "Prefer Sonnet over Opus for simple analysis to save costs"
 
 # Convention
-olympus feedback "Component files should go in src/components/, not src/"
+olympus-ai feedback "Component files should go in src/components/, not src/"
 ```
 
 ### View Feedback History
 
 ```bash
-olympus feedback --history
+olympus-ai feedback --history
 ```
 
 Shows the last 20 feedback entries (most recent first).
@@ -652,7 +652,7 @@ Feedback History (last 20):
 ### Check for Updates
 
 ```bash
-olympus update --check
+olympus-ai update --check
 ```
 
 Checks if a newer version is available without installing.
@@ -671,7 +671,7 @@ Checking for updates...
 ### Install Updates
 
 ```bash
-olympus update
+olympus-ai update
 ```
 
 Installs the latest version of olympus-ai. Automatically installed from npm.
@@ -684,13 +684,13 @@ Installs the latest version of olympus-ai. Automatically installed from npm.
 **Example:**
 ```bash
 # Update with full output
-olympus update
+olympus-ai update
 
 # Force reinstall
-olympus update --force
+olympus-ai update --force
 
 # Silent mode
-olympus update --quiet
+olympus-ai update --quiet
 ```
 
 **After updating:**
@@ -700,7 +700,7 @@ olympus update --quiet
 ### Postinstall Hook (Automatic)
 
 ```bash
-olympus postinstall
+olympus-ai postinstall
 ```
 
 Automatically runs after `npm install -g olympus-ai`. Creates initial configuration and validates setup.
@@ -712,14 +712,14 @@ This is called automatically and doesn't need manual execution.
 ### Test Prompt Enhancement
 
 ```bash
-olympus test-prompt "<your prompt here>"
+olympus-ai test-prompt "<your prompt here>"
 ```
 
 Preview how Olympus will enhance your prompt with magic keywords and learnings.
 
 **Example:**
 ```bash
-$ olympus test-prompt "Please implement an /ultrawork to fix the API"
+$ olympus-ai test-prompt "Please implement an /ultrawork to fix the API"
 
 Original prompt:
 Please implement an /ultrawork to fix the API
@@ -741,16 +741,16 @@ Enhanced prompt:
 ### Migrate Notepads to Learning System
 
 ```bash
-olympus migrate-notepads
+olympus-ai migrate-notepads
 ```
 
 One-time utility to migrate content from `.olympus/notepads/` to the modern discovery system.
 
 **Example:**
 ```bash
-olympus migrate-notepads
+olympus-ai migrate-notepads
 ✓ Migrated 12 discoveries from notepads
-Run "olympus learn --show" to see the discoveries.
+Run "olympus-ai learn --show" to see the discoveries.
 ```
 
 After migration, old notepads can be safely deleted.
@@ -773,13 +773,13 @@ After migration, old notepads can be safely deleted.
 **Solutions:**
 ```bash
 # Initialize config
-olympus init
+olympus-ai init
 
 # Validate config
-olympus config --validate
+olympus-ai config --validate
 
 # Check paths
-olympus config --paths
+olympus-ai config --paths
 ```
 
 ### Agents Not Available
@@ -787,8 +787,8 @@ olympus config --paths
 **Problem:** Agents not showing in Claude Code
 
 **Solutions:**
-1. Reinstall: `olympus install --force`
-2. Verify installation: `olympus info`
+1. Reinstall: `olympus-ai install --force`
+2. Verify installation: `olympus-ai info`
 3. Check `.claude/` directory exists
 4. Restart Claude Code
 
@@ -799,10 +799,10 @@ olympus config --paths
 **Solutions:**
 ```bash
 # Check what data exists
-olympus learn --show
+olympus-ai learn --show
 
 # View statistics
-olympus learn --stats
+olympus-ai learn --stats
 
 # Check file sizes
 ls -lah ~/.olympus/learning/
@@ -847,16 +847,16 @@ You can use Olympus CLI in shell scripts:
 #!/bin/bash
 
 # Check for updates and install silently
-olympus update --quiet
+olympus-ai update --quiet
 
 # Log a discovery
-olympus discover "pattern | Build process updated | Use npm run build instead of make"
+olympus-ai discover "pattern | Build process updated | Use npm run build instead of make"
 
 # Export learnings for backup
-olympus learn --export > backup-$(date +%Y%m%d).json
+olympus-ai learn --export > backup-$(date +%Y%m%d).json
 
 # Check efficiency before delegating tasks
-olympus learn --efficiency | grep -i "improving"
+olympus-ai learn --efficiency | grep -i "improving"
 ```
 
 ### Integration Examples
@@ -867,10 +867,10 @@ olympus learn --efficiency | grep -i "improving"
   run: npm install -g olympus-ai
 
 - name: Validate Setup
-  run: olympus config --validate
+  run: olympus-ai config --validate
 
 - name: Check Agent Efficiency
-  run: olympus learn --efficiency
+  run: olympus-ai learn --efficiency
 ```
 
 **NPM Postinstall:**
@@ -939,46 +939,46 @@ Olympus respects these environment variables:
 
 ```bash
 # Show help for any command
-olympus --help
-olympus learn --help
-olympus discover --help
+olympus-ai --help
+olympus-ai learn --help
+olympus-ai discover --help
 ```
 
 ### Command Examples
 
 ```bash
 # List all commands
-olympus --help
+olympus-ai --help
 
 # Get command specific options
-olympus learn --help
+olympus-ai learn --help
 
 # Quick reference
-olympus info
+olympus-ai info
 ```
 
 ### Common Commands Reference
 
 ```bash
 # Daily operations
-olympus learn --show              # Check what you've learned
-olympus learn --efficiency        # See agent performance
-olympus discover "..."            # Record a discovery
+olympus-ai learn --show              # Check what you've learned
+olympus-ai learn --efficiency        # See agent performance
+olympus-ai discover "..."            # Record a discovery
 
 # Maintenance
-olympus learn --cleanup           # Clean up old data
-olympus update --check            # Check for updates
-olympus config --validate         # Validate setup
+olympus-ai learn --cleanup           # Clean up old data
+olympus-ai update --check            # Check for updates
+olympus-ai config --validate         # Validate setup
 
 # Advanced
-olympus learn --suggest           # Get recommendations
-olympus learn --apply             # Apply improvements
-olympus learn --export            # Backup your learnings
+olympus-ai learn --suggest           # Get recommendations
+olympus-ai learn --apply             # Apply improvements
+olympus-ai learn --export            # Backup your learnings
 ```
 
 ## What's Next?
 
-- **Get started:** Run `olympus install` to add agents to Claude Code
+- **Get started:** Run `olympus-ai install` to add agents to Claude Code
 - **Learn more:** Read the [Understanding Orchestration System](understanding-orchestration-system.md) guide
 - **Configure agents:** See [Configuration Guide](../configuration.md)
 - **Workflow examples:** Check out [Workflow Guide](workflow-guide.md)

@@ -105,9 +105,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SessionStart injection with efficiency guidance (<500 token cap)
 
 - **CLI Inspection Tools** (Optional) - Power user visibility
-  - `olympus learn --efficiency` - Agent efficiency rankings
-  - `olympus learn --show-costs` - Cost breakdown by model and agent
-  - `olympus learn --budget-status` - Current session budget status
+  - `olympus-ai learn --efficiency` - Agent efficiency rankings
+  - `olympus-ai learn --show-costs` - Cost breakdown by model and agent
+  - `olympus-ai learn --budget-status` - Current session budget status
 
 - **Configuration Support** - Fully customizable behavior
   - `learning.tokenMetrics.enabled` (default: true)

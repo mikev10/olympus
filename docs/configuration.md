@@ -179,13 +179,13 @@ While the system works completely automatically, power users can inspect token d
 
 ```bash
 # Show agent efficiency rankings
-olympus learn --efficiency
+olympus-ai learn --efficiency
 
 # Show cost breakdown by model and agent
-olympus learn --show-costs
+olympus-ai learn --show-costs
 
 # Show current session budget status
-olympus learn --budget-status
+olympus-ai learn --budget-status
 ```
 
 **These commands are completely optional.** The system works without running any CLI commands.

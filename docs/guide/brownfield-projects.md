@@ -304,13 +304,13 @@ Check what Olympus has learned about your codebase:
 
 ```bash
 # See efficiency metrics
-olympus learn --efficiency
+olympus-ai learn --efficiency
 
 # View discovered patterns
 cat .olympus/learning/patterns.json
 
 # Check agent performance
-olympus learn --show-costs
+olympus-ai learn --show-costs
 
 # Inspect discoveries
 cat .olympus/learning/discoveries.jsonl

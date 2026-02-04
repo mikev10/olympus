@@ -572,13 +572,13 @@ View efficiency metrics anytime using the CLI:
 
 ```bash
 # View agent efficiency rankings
-olympus learn --efficiency
+olympus-ai learn --efficiency
 
 # See cost breakdown by model
-olympus learn --show-costs
+olympus-ai learn --show-costs
 
 # Check current session token budget
-olympus learn --budget-status
+olympus-ai learn --budget-status
 ```
 
 **Example Output:**
