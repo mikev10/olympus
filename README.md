@@ -605,6 +605,7 @@ olympus/
 ## Documentation
 
 - 📖 [Getting Started Guide](docs/Olympus.md)
+- 💻 [CLI Reference Guide](docs/guide/cli-reference.md) - Complete command-line tool reference
 - 🤖 [Agent Reference](docs/AGENTS.md)
 - 🏗️ [Architecture Overview](docs/ARCHITECTURE.md)
 - 🗺️ [Roadmap](docs/ROADMAP.md)
