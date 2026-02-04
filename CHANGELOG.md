@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-02-04
+
+### Added - Phase 4: Execution Integration
+- Task status tracking with execution.ts module
+- Progress updates to master plan showing completion percentage
+- `/ascent` workflow integration for executing structured workflows
+- `/olympus next {feature}` command to get next ready task
+- Execution order calculation with topological sort
+- Blocked task detection and dependency management
+
+### Added - Phase 5: Manual Commands & Polish
+- `/idea {feature}` - Manual IDEA generation using idea-intake agent
+- `/prd {feature}` - Manual PRD generation using prd-writer agent
+- `/spec {feature}` - Manual SPEC generation using spec-writer agent
+- `/intents {feature}` - Manual INTENTS generation using intent-generator agent
+- `/workflow-status` - View all active structured workflows
+- Prometheus structured workflow opt-in after plan generation
+- Comprehensive error handling (disk full, corrupt checkpoint, permissions)
+- Performance optimization with caching (10-100x faster checkpoints)
+- User documentation: comprehensive workflow-guide.md (1,466 lines)
+- 31 end-to-end tests for workflow system
+- 16 performance benchmark tests
+
+### Fixed
+- Test directory cleanup (no more leftover .test-* directories)
+- Learning-capture integration test (pre-initialize tokenizer)
+- Hook timeout issues in test suite
+
+### Performance
+- Checkpoint save: 0.5-3ms (was targeting <50ms)
+- Checkpoint load: 0.7ms cold, 0.01ms warm
+- Memory usage: <10MB for 100 workflows
+
+## [3.4.1] - 2026-02-03
+
 ### Fixed
 
 **Token Metrics: Accurate Input/Output Split and Model Tracking**
