@@ -26,10 +26,10 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
   // Initialize checkpoint.json if it doesn't exist
   if (!await fs.pathExists(checkpointPath)) {
     await fs.writeJson(checkpointPath, {
-      workflowId,
-      currentStage: 'idea',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      workflow_id: workflowId,
+      current_stage: 'idea',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }, { spaces: 2 });
   }
 }

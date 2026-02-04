@@ -43,11 +43,11 @@ describe('artifacts', () => {
       // Verify checkpoint.json structure
       const checkpoint = await fs.readJson(checkpointPath);
       expect(checkpoint).toMatchObject({
-        workflowId,
-        currentStage: 'idea',
+        workflow_id: workflowId,
+        current_stage: 'idea',
       });
-      expect(checkpoint.createdAt).toBeDefined();
-      expect(checkpoint.updatedAt).toBeDefined();
+      expect(checkpoint.created_at).toBeDefined();
+      expect(checkpoint.updated_at).toBeDefined();
     });
 
     it('should be idempotent (safe to call multiple times)', async () => {
