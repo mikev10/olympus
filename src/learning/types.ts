@@ -19,10 +19,13 @@ export interface HookInput {
  */
 export interface TokenBudget {
   session_baseline: number;    // Expected baseline tokens per session (e.g., 10000)
-  current_usage: number;        // Total tokens used so far
+  current_usage: number;        // Total tokens used so far (for backward compatibility)
+  input_tokens: number;         // Input tokens used in session
+  output_tokens: number;        // Output tokens used in session
   warning_threshold: number;    // Multiplier for baseline (e.g., 1.5 = 150%)
   warning_issued: boolean;      // Has warning been issued?
   started_at: string;           // When budget tracking started
+  current_model?: string;       // Current model being used in session
 }
 
 export interface SessionState {

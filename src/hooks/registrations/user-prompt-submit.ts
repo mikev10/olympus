@@ -17,6 +17,12 @@ import {
 } from '../../installer/hooks.js';
 import { handleRevisionDetection } from '../../learning/hooks/revision-detector.js';
 import { handleSuccessDetection } from '../../learning/hooks/success-detector.js';
+import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
+import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
+import {
+  buildStructuredWorkflowPrompt,
+  buildWorkflowResumptionPrompt
+} from '../../features/workflow-engine/hooks.js';
 import type { HookContext, HookResult } from '../types.js';
 
 /**
@@ -39,6 +45,102 @@ function getPromptText(ctx: HookContext): string {
 }
 
 export function registerUserPromptSubmitHooks(): void {
+  // Structured Workflow Detector (priority 8 - before keyword detector)
+  registerHook({
+    name: 'structuredWorkflowDetector',
+    event: 'UserPromptSubmit',
+    priority: 8,
+    handler: async (ctx: HookContext): Promise<HookResult> => {
+      const promptText = getPromptText(ctx);
+      if (!promptText || !ctx.directory) {
+        return { continue: true };
+      }
+
+      // Match patterns
+      const structuredMatch = promptText.match(/^\/plan\s+(.+?)\s+--structured$/i);
+      const continueMatch = promptText.match(/^\/plan\s+continue$/i);
+
+      // Handle /plan {feature} --structured
+      if (structuredMatch) {
+        const featureName = structuredMatch[1].trim();
+
+        try {
+          // Create new workflow engine instance
+          const engine = new WorkflowEngine(ctx.directory, featureName);
+
+          // Start the workflow (creates checkpoint and initializes)
+          await engine.start(featureName);
+
+          // Load the checkpoint to get the initial state
+          const workflowId = featureName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+          const checkpoint = await loadCheckpoint(ctx.directory, workflowId);
+
+          if (!checkpoint) {
+            return { continue: true };
+          }
+
+          // Build the structured workflow prompt
+          const workflowPrompt = buildStructuredWorkflowPrompt(featureName, checkpoint);
+
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'UserPromptSubmit',
+              additionalContext: workflowPrompt
+            }
+          };
+        } catch (error) {
+          console.error('[Structured Workflow]', error);
+          return { continue: true };
+        }
+      }
+
+      // Handle /plan continue
+      if (continueMatch) {
+        try {
+          // Find active workflows
+          const workflows = await listWorkflows(ctx.directory);
+
+          if (workflows.length === 0) {
+            return {
+              continue: true,
+              hookSpecificOutput: {
+                hookEventName: 'UserPromptSubmit',
+                additionalContext: 'No active workflows found. Use `/plan {feature} --structured` to start a new workflow.'
+              }
+            };
+          }
+
+          // Load the most recent workflow (for now, just use the first one)
+          // TODO: In the future, handle multiple workflows more intelligently
+          const workflowId = workflows[0];
+          const checkpoint = await loadCheckpoint(ctx.directory, workflowId);
+
+          if (!checkpoint) {
+            return { continue: true };
+          }
+
+          // Build the resumption prompt
+          const resumptionPrompt = buildWorkflowResumptionPrompt(checkpoint.feature_name, checkpoint);
+
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'UserPromptSubmit',
+              additionalContext: resumptionPrompt
+            }
+          };
+        } catch (error) {
+          console.error('[Workflow Resume]', error);
+          return { continue: true };
+        }
+      }
+
+      // No pattern matched, continue normally
+      return { continue: true };
+    }
+  });
+
   // Keyword Detector (highest priority - activates modes)
   registerHook({
     name: 'keywordDetector',

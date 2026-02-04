@@ -25,9 +25,11 @@ describe('Hook Integration', () => {
 
       const expectedHooks = [
         // UserPromptSubmit
+        'structuredWorkflowDetector',
         'keywordDetector',
         'autoSlashCommand',
         'thinkMode',
+        'learningFeedbackCapture',
         // SessionStart
         'sessionStart',
         // Stop
@@ -66,12 +68,14 @@ describe('Hook Integration', () => {
   describe('Event Assignment', () => {
     it('has UserPromptSubmit hooks', () => {
       const hooks = getHooksForEvent('UserPromptSubmit');
-      expect(hooks.length).toBeGreaterThanOrEqual(3);
+      expect(hooks.length).toBeGreaterThanOrEqual(5);
 
       const names = hooks.map(h => h.name);
+      expect(names).toContain('structuredWorkflowDetector');
       expect(names).toContain('keywordDetector');
       expect(names).toContain('autoSlashCommand');
       expect(names).toContain('thinkMode');
+      expect(names).toContain('learningFeedbackCapture');
     });
 
     it('has SessionStart hooks', () => {

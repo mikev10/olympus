@@ -65,10 +65,20 @@ function ensureTokenBudget(state: SessionState, sessionBaseline: number = 10000)
     state.token_budget = {
       session_baseline: sessionBaseline,
       current_usage: 0,
+      input_tokens: 0,
+      output_tokens: 0,
       warning_threshold: 1.5,
       warning_issued: false,
       started_at: new Date().toISOString(),
     };
+  } else {
+    // Ensure new fields exist (backward compatibility)
+    if (state.token_budget.input_tokens === undefined) {
+      state.token_budget.input_tokens = 0;
+    }
+    if (state.token_budget.output_tokens === undefined) {
+      state.token_budget.output_tokens = 0;
+    }
   }
   return state;
 }
@@ -100,8 +110,15 @@ export function registerLearningCaptureHooks(): void {
         const state = loadSessionState(ctx.directory, ctx.sessionId);
         ensureTokenBudget(state);
 
-        // Accumulate input tokens
+        // Capture model identifier (Task #7)
+        const modelId = getModelIdentifier(ctx);
+        if (modelId && state.token_budget) {
+          state.token_budget.current_model = modelId;
+        }
+
+        // Accumulate input tokens (Task #8)
         if (state.token_budget) {
+          state.token_budget.input_tokens += inputTokens;
           state.token_budget.current_usage += inputTokens;
           saveSessionState(ctx.directory, state);
         }
@@ -134,8 +151,9 @@ export function registerLearningCaptureHooks(): void {
         const state = loadSessionState(ctx.directory, ctx.sessionId);
         ensureTokenBudget(state);
 
-        // Accumulate output tokens
+        // Accumulate output tokens (Task #8)
         if (state.token_budget) {
+          state.token_budget.output_tokens += outputTokens;
           state.token_budget.current_usage += outputTokens;
           saveSessionState(ctx.directory, state);
         }
@@ -168,19 +186,21 @@ export function registerLearningCaptureHooks(): void {
         }
 
         const totalTokens = state.token_budget.current_usage;
+        const inputTokens = state.token_budget.input_tokens || 0;
+        const outputTokens = state.token_budget.output_tokens || 0;
 
         // Only create entry if there's actual usage
         if (totalTokens === 0) {
           return { continue: true };
         }
 
-        // Get model identifier (may not be available on Stop)
-        const modelId = 'unknown'; // Stop event doesn't have model info
+        // Get model identifier from session state (Task #9)
+        const modelId = state.token_budget.current_model || 'unknown';
 
-        // Create token usage object
+        // Create token usage object (Task #9)
         const tokenUsage: TokenUsage = {
-          input_tokens: 0, // We tracked combined totals, not split
-          output_tokens: 0,
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
           total_tokens: totalTokens,
           estimated: true,
           model: modelId,
@@ -196,12 +216,12 @@ export function registerLearningCaptureHooks(): void {
 
         // Try to calculate cost if we have a valid model
         try {
-          const cost = calculateCost(0, totalTokens, modelId);
+          const cost = calculateCost(inputTokens, outputTokens, modelId);
           costEstimate.input_cost = cost.inputCost;
           costEstimate.output_cost = cost.outputCost;
           costEstimate.total_cost = cost.totalCost;
           costEstimate.pricing_version = cost.pricingVersion;
-        } catch (error) {
+        } catch (_error) {
           // Cost calculation failed - not critical
         }
 
@@ -232,8 +252,11 @@ export function registerLearningCaptureHooks(): void {
 
         // Reset token budget for next session
         state.token_budget.current_usage = 0;
+        state.token_budget.input_tokens = 0;
+        state.token_budget.output_tokens = 0;
         state.token_budget.warning_issued = false;
         state.token_budget.started_at = new Date().toISOString();
+        delete state.token_budget.current_model;
         saveSessionState(ctx.directory, state);
       } catch (error) {
         // Silent failure - learning should never block

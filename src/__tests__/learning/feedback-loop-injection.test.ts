@@ -24,6 +24,19 @@ const GLOBAL_LEARNING_DIR = getLearningDir();
 let agentPerfBackup: string | null = null;
 
 beforeEach(() => {
+  // Clean up any leftover test directories from previous failed runs
+  const cwdEntries = require('fs').readdirSync(process.cwd());
+  cwdEntries.forEach((entry: string) => {
+    if (entry.startsWith('.test-injection-')) {
+      const leftoverDir = join(process.cwd(), entry);
+      try {
+        rmSync(leftoverDir, { recursive: true, force: true });
+      } catch (err) {
+        // Ignore errors - directory might be in use
+      }
+    }
+  });
+
   mkdirSync(TEST_DIR, { recursive: true });
   mkdirSync(join(TEST_DIR, '.olympus'), { recursive: true });
 
