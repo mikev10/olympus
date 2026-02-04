@@ -11,10 +11,23 @@
  * 3. Oracle agent is invoked to verify the work
  * 4. If oracle approves -> truly complete
  * 5. If oracle finds flaws -> continue ascent with oracle feedback
+ *
+ * Extended to support workflow execution:
+ * - Detects if argument is a workflow ID
+ * - Executes tasks in dependency order
+ * - Updates task status in checkpoint
+ * - Shows progress after each task completion
  */
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import {
+  updateTaskStatus,
+  getNextReadyTask,
+  updateMasterPlanProgress
+} from '../../features/workflow-engine/execution.js';
+import { loadCheckpoint } from '../../features/workflow-engine/checkpoint.js';
+import { getExecutionOrder } from '../../features/workflow-engine/artifacts.js';
 
 export interface VerificationState {
   /** Whether verification is pending */
@@ -263,4 +276,169 @@ export function detectOracleRejection(text: string): { rejected: boolean; feedba
   }
 
   return { rejected: false, feedback: '' };
+}
+
+/**
+ * Check if the argument is a workflow ID by checking for checkpoint file.
+ *
+ * @param baseDir - Base directory of the project (typically process.cwd())
+ * @param arg - Argument to check (potential workflow ID)
+ * @returns True if a workflow checkpoint exists for this ID
+ */
+export function isWorkflowExecution(baseDir: string, arg: string): boolean {
+  if (!arg || arg.trim().length === 0) {
+    return false;
+  }
+
+  const checkpointPath = join(baseDir, '.olympus', 'workflow', arg, 'checkpoint.json');
+  return existsSync(checkpointPath);
+}
+
+/**
+ * Read intent file content for a task.
+ *
+ * @param baseDir - Base directory of the project
+ * @param workflowId - ID of the workflow
+ * @param taskId - ID of the task
+ * @returns Intent file content or null if not found
+ */
+export async function readIntentFile(
+  baseDir: string,
+  workflowId: string,
+  taskId: string
+): Promise<string | null> {
+  const intentPath = join(baseDir, '.olympus', 'workflow', workflowId, 'intents', `${taskId}.md`);
+
+  if (!existsSync(intentPath)) {
+    return null;
+  }
+
+  try {
+    return readFileSync(intentPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate workflow execution prompt for the next task.
+ *
+ * @param baseDir - Base directory of the project
+ * @param workflowId - ID of the workflow
+ * @param taskId - ID of the task to execute
+ * @param taskNumber - Current task number (1-indexed)
+ * @param totalTasks - Total number of tasks in workflow
+ * @returns Formatted prompt for task execution
+ */
+export async function getWorkflowTaskPrompt(
+  baseDir: string,
+  workflowId: string,
+  taskId: string,
+  taskNumber: number,
+  totalTasks: number
+): Promise<string> {
+  const intentContent = await readIntentFile(baseDir, workflowId, taskId);
+
+  if (!intentContent) {
+    return `<workflow-task-error>
+
+[WORKFLOW ERROR]
+
+Intent file not found for task: ${taskId}
+
+This workflow may be corrupted. Check the workflow directory:
+.olympus/workflow/${workflowId}/intents/
+
+</workflow-task-error>
+
+---
+
+`;
+  }
+
+  return `<workflow-task-execution>
+
+[WORKFLOW TASK ${taskNumber}/${totalTasks}]
+
+**Workflow ID**: ${workflowId}
+**Task ID**: ${taskId}
+
+## Task Instructions
+
+${intentContent}
+
+## Execution Guidelines
+
+1. **Read the task instructions carefully** above
+2. **Implement the requirements** as specified in the intent file
+3. **Verify your work** before marking complete
+4. **When done**, output: \`<promise>TASK_COMPLETE</promise>\`
+
+IMPORTANT: Do NOT proceed to the next task automatically. Output the completion promise and wait for verification.
+
+</workflow-task-execution>
+
+---
+
+`;
+}
+
+/**
+ * Generate workflow progress summary.
+ *
+ * @param workflowId - ID of the workflow
+ * @param completedTasks - Number of completed tasks
+ * @param totalTasks - Total number of tasks
+ * @param currentTaskId - ID of the task that was just completed
+ * @returns Formatted progress summary
+ */
+export function getWorkflowProgressSummary(
+  workflowId: string,
+  completedTasks: number,
+  totalTasks: number,
+  currentTaskId: string
+): string {
+  const percentage = Math.round((completedTasks / totalTasks) * 100);
+  const remaining = totalTasks - completedTasks;
+
+  return `<workflow-progress>
+
+[WORKFLOW PROGRESS UPDATE]
+
+**Workflow**: ${workflowId}
+**Completed**: ${completedTasks}/${totalTasks} tasks (${percentage}%)
+**Remaining**: ${remaining} ${remaining === 1 ? 'task' : 'tasks'}
+**Just Completed**: ${currentTaskId}
+
+${remaining === 0 ? '✓ All tasks complete! Workflow finished.' : '→ Proceeding to next task...'}
+
+</workflow-progress>
+
+---
+
+`;
+}
+
+/**
+ * Generate workflow completion message.
+ *
+ * @param workflowId - ID of the workflow
+ * @param totalTasks - Total number of tasks completed
+ * @returns Formatted completion message
+ */
+export function getWorkflowCompletionMessage(workflowId: string, totalTasks: number): string {
+  return `<workflow-complete>
+
+[WORKFLOW COMPLETE]
+
+Successfully executed all ${totalTasks} tasks in workflow: ${workflowId}
+
+The workflow has finished. Check the master plan for verification:
+.olympus/plans/${workflowId}-plan.md
+
+</workflow-complete>
+
+---
+
+`;
 }

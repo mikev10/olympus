@@ -2596,7 +2596,165 @@ Use the checkpoint storage functions from \`src/features/workflow-engine/checkpo
 - \`listWorkflows(projectPath)\` to get all workflow IDs
 - \`loadCheckpoint(projectPath, workflowId)\` to get details for each
 
-Present the information in a clear, scannable format with status indicators (✓, ⧗, ✗).`
+Present the information in a clear, scannable format with status indicators (✓, ⧗, ✗).`,
+
+  'olympus-next.md': `---
+description: Get the next ready task from a structured workflow
+---
+
+You are retrieving the next ready task from a structured workflow.
+
+## TASK
+
+Find and display the next task that is ready to be implemented for the specified workflow.
+
+**Arguments**: \`{feature}\` - The workflow ID (e.g., "user-auth", "oauth-flow")
+
+## IMPLEMENTATION STEPS
+
+### Step 1: Validate Workflow Exists
+
+Check if the workflow exists at:
+\`.olympus/workflow/{feature}/checkpoint.json\`
+
+If not found, display:
+\`\`\`
+Workflow "{feature}" not found.
+
+To list all workflows, use: /workflow-status
+To start a new workflow, use: /plan {feature-name} --structured
+\`\`\`
+
+### Step 2: Get Next Ready Task
+
+Use the workflow engine function:
+\`\`\`typescript
+import { getNextReadyTask } from 'src/features/workflow-engine/execution.js';
+
+const taskId = await getNextReadyTask(process.cwd(), feature);
+\`\`\`
+
+### Step 3: Display Task Details
+
+**If taskId is null:**
+
+Check if workflow is complete by examining checkpoint.json status.
+
+If all tasks complete:
+\`\`\`
+All tasks complete for workflow: {feature}
+
+The workflow is ready for final validation and completion.
+\`\`\`
+
+If tasks are blocked:
+\`\`\`
+No tasks ready for workflow: {feature}
+
+All remaining tasks are blocked by incomplete dependencies.
+
+Use /workflow-status to see the full workflow status and dependency graph.
+\`\`\`
+
+**If taskId is found:**
+
+Read the task details from:
+1. **Dependency Graph**: \`.olympus/workflow/{feature}/intents/dependency-graph.json\`
+   - Extract task title, component, and estimated_effort
+2. **Intent File**: \`.olympus/workflow/{feature}/intents/{taskId}.md\`
+   - Contains the full task prompt and implementation details
+3. **Checkpoint**: \`.olympus/workflow/{feature}/checkpoint.json\`
+   - Check task_statuses in resume_context for current status
+
+Display:
+\`\`\`
+Next Ready Task: {feature}
+
+Task ID: {taskId}
+Title: {task.title}
+Component: {task.component}
+Estimated Effort: {task.estimated_effort} points
+
+Dependencies: [list of dependency task IDs, or "None"]
+Status: pending
+
+## Task Details
+
+{contents of intent file}
+
+---
+
+To start this task, use:
+olympus implement {feature} {taskId}
+
+Or manually:
+1. Read the full task details above
+2. Implement the changes
+3. Mark task complete: olympus task-complete {feature} {taskId}
+\`\`\`
+
+### Step 4: Error Handling
+
+Handle these edge cases:
+- Workflow not found → Show helpful message
+- Dependency graph missing → Indicate intents not generated yet
+- Intent file missing → Show task ID but note details unavailable
+- All tasks complete → Congratulate and suggest next steps
+- All tasks blocked → Show blocking dependencies
+
+## EXAMPLE OUTPUT
+
+\`\`\`
+Next Ready Task: user-auth
+
+Task ID: TASK-002
+Title: Implement JWT token generation service
+Component: auth-service
+Estimated Effort: 5 points
+
+Dependencies: TASK-001 (complete)
+Status: pending
+
+## Task Details
+
+# Intent: Implement JWT token generation service
+
+Create a service module for generating and validating JWT tokens.
+
+## Requirements
+- Use jsonwebtoken library
+- Support access token (15min) and refresh token (7d) expiry
+- Sign tokens with RS256 algorithm
+- Store public/private keys in secure configuration
+
+## Files to Create/Modify
+- src/auth/token-service.ts (new)
+- src/auth/types.ts (update)
+- src/config/jwt-config.ts (new)
+
+## Acceptance Criteria
+- [ ] Token service can generate signed JWT tokens
+- [ ] Token service can validate and decode tokens
+- [ ] Unit tests cover happy path and error cases
+- [ ] Keys are loaded from environment variables
+
+---
+
+To start this task, use:
+olympus implement user-auth TASK-002
+
+Or manually:
+1. Read the full task details above
+2. Implement the changes
+3. Mark task complete: olympus task-complete user-auth TASK-002
+\`\`\`
+
+## NOTES
+
+- This command helps agents know what to work on next
+- It respects the dependency graph and only shows tasks with all dependencies met
+- The intent file contains the full implementation prompt
+- Task statuses are tracked in checkpoint.json resume_context`
 };
 
 // SKILL_DEFINITIONS removed - skills are now only in COMMAND_DEFINITIONS to avoid duplicates

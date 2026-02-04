@@ -41,6 +41,16 @@ export {
   linkMasterPlan,
 } from './artifacts.js';
 
+// Execution and task tracking
+export type { TaskStatus, TaskStatusRecord } from './execution.js';
+export {
+  updateTaskStatus,
+  getTaskStatus,
+  getBlockedTasks,
+  getNextReadyTask,
+  updateMasterPlanProgress,
+} from './execution.js';
+
 // Validation
 export { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
 
