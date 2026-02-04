@@ -212,3 +212,24 @@ export {
   clearViolations,
   type HookViolation
 } from './hook-logging/index.js';
+
+// Workflow Engine - structured workflow system
+export {
+  // Types
+  type WorkflowStage,
+  type WorkflowStatus,
+  type ArtifactReference,
+  type ValidationResult,
+  type RequirementMapping,
+  type WorkflowCheckpoint,
+  // Checkpoint persistence
+  saveCheckpoint as saveWorkflowCheckpoint,
+  loadCheckpoint as loadWorkflowCheckpoint,
+  listWorkflows,
+  deleteWorkflow,
+  // Artifact management
+  ensureWorkflowDir,
+  getArtifactPath,
+  writeArtifact,
+  readArtifact,
+} from './workflow-engine/index.js';
