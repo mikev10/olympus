@@ -180,6 +180,25 @@ export interface PluginConfig {
     /** Maximum number of iterations before checkpoint (default: 100, min: 10, max: 1000) */
     maxIterations?: number;
   };
+
+  // Workflow engine configuration
+  workflow?: {
+    /** Enable structured workflow system (default: true) */
+    enabled?: boolean;
+    /** Default mode: 'manual' or 'continuous' (default: 'continuous') */
+    defaultMode?: 'manual' | 'continuous';
+    /** Automatically checkpoint at each stage (default: true) */
+    autoCheckpoint?: boolean;
+    /** Timeout settings for workflow operations */
+    timeouts?: {
+      /** Timeout for agent execution in ms (default: 300000 = 5 min) */
+      agentExecution?: number;
+      /** Timeout for validation in ms (default: 60000 = 1 min) */
+      validation?: number;
+      /** Timeout for resume operation in ms (default: 30000 = 30 sec) */
+      resume?: number;
+    };
+  };
 }
 
 export interface SessionState {
