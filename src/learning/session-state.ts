@@ -1,5 +1,4 @@
 import { join } from 'path';
-import { existsSync } from 'fs';
 import { SessionState, FeedbackCategory, TokenBudget } from './types.js';
 import { readJsonFile, writeJsonFile } from './storage.js';
 import { randomUUID } from 'crypto';
@@ -27,6 +26,8 @@ export function createSessionState(sessionId?: string, projectPath?: string): Se
     token_budget: {
       session_baseline: baseline,
       current_usage: 0,
+      input_tokens: 0,
+      output_tokens: 0,
       warning_threshold: 1.5,
       warning_issued: false,
       started_at: new Date().toISOString()
@@ -56,10 +57,20 @@ export function loadSessionState(directory: string, sessionId?: string): Session
     state.token_budget = {
       session_baseline: baseline,
       current_usage: 0,
+      input_tokens: 0,
+      output_tokens: 0,
       warning_threshold: 1.5,
       warning_issued: false,
       started_at: state.started_at
     };
+  } else {
+    // Ensure new fields exist (backward compatibility)
+    if (state.token_budget.input_tokens === undefined) {
+      state.token_budget.input_tokens = 0;
+    }
+    if (state.token_budget.output_tokens === undefined) {
+      state.token_budget.output_tokens = 0;
+    }
   }
 
   return state;
@@ -132,6 +143,8 @@ export function initializeTokenBudget(
   state.token_budget = {
     session_baseline: baseline,
     current_usage: 0,
+    input_tokens: 0,
+    output_tokens: 0,
     warning_threshold: 1.5,
     warning_issued: false,
     started_at: new Date().toISOString()
@@ -150,6 +163,8 @@ export function updateTokenBudget(
     state.token_budget = {
       session_baseline: getSessionBaseline(),
       current_usage: 0,
+      input_tokens: 0,
+      output_tokens: 0,
       warning_threshold: 1.5,
       warning_issued: false,
       started_at: new Date().toISOString()

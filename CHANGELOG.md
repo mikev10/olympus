@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+**Token Metrics: Accurate Input/Output Split and Model Tracking**
+
+- **Fixed token split tracking** - Input and output tokens now tracked separately instead of being set to 0
+  - Added `input_tokens` and `output_tokens` fields to `TokenBudget` interface
+  - UserPromptSubmit hook now accumulates to `input_tokens` field
+  - PostToolUse hook now accumulates to `output_tokens` field
+  - Stop hook uses actual split values in FeedbackEntry
+  - Maintains backward compatibility with existing session states
+
+- **Fixed model identifier tracking** - Real model ID captured instead of "unknown"
+  - Added `current_model` field to session state
+  - UserPromptSubmit hook captures model from `ctx.message.model`
+  - Stop hook uses captured model ID in FeedbackEntry
+  - Enables accurate per-model cost estimation
+
+**Impact**: Cost estimates are now accurate and reflect actual input/output token usage per model. The learning system can now properly calculate model-specific pricing and track efficiency metrics.
+
 ## [3.4.1] - 2026-02-03
 
 ### Fixed

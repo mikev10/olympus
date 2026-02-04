@@ -30,7 +30,11 @@ test-output.txt
 /*.log
 /nul
 
+# Test temporary directories
+/.test-*/
+
 # ADD methodology documentation (not ready for public release)
+docs/add/
 docs/ADD-White-Paper.md
 docs/ADD-Comparative-Analysis.md
 docs/ADD-LinkedIn-Announcement.md
