@@ -5,7 +5,7 @@ Olympus configuration is flexible and works out-of-the-box with sensible default
 ## Configuration Paths
 
 Configuration can be set in two locations:
-- **User-level:** `~/.config/claude-olympus/config.jsonc` (applies to all projects)
+- **User-level:** `~/.claude/olympus/config.jsonc` (applies to all projects)
 - **Project-level:** `.claude/olympus.jsonc` (overrides user-level for this project)
 
 Project-level configuration takes precedence over user-level configuration.
@@ -28,7 +28,7 @@ Configuration files use JSONC format (JSON with comments):
 Token efficiency tracking is enabled by default and works automatically. No configuration is required for the system to function.
 
 Configuration can be set in:
-- `~/.config/claude-olympus/config.jsonc` (user-level)
+- `~/.claude/olympus/config.jsonc` (user-level)
 - `.claude/olympus.jsonc` (project-level, overrides user config)
 
 ### Configuration Options
@@ -71,7 +71,7 @@ Session baselines are calculated automatically from historical data. When no his
 To warn at 2.0x baseline instead of 1.5x:
 
 ```jsonc
-// ~/.config/claude-olympus/config.jsonc
+// ~/.claude/olympus/config.jsonc
 {
   "learning": {
     "tokenMetrics": {
@@ -165,7 +165,7 @@ If you need to reset to default configuration, simply delete your custom config 
 
 ```bash
 # Remove user-level config (resets to hardcoded defaults)
-rm ~/.config/claude-olympus/config.jsonc
+rm ~/.claude/olympus/config.jsonc
 
 # Remove project-level config (resets to user-level)
 rm .claude/olympus.jsonc

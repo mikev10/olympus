@@ -2,7 +2,7 @@
  * Configuration Loader
  *
  * Handles loading and merging configuration from multiple sources:
- * - User config: ~/.config/claude-olympus/config.jsonc
+ * - User config: ~/.claude/olympus/config.jsonc
  * - Project config: .claude/olympus.jsonc
  * - Environment variables
  */
@@ -106,10 +106,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
  * Configuration file locations
  */
 export function getConfigPaths(): { user: string; project: string } {
-  const userConfigDir = process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config');
-
   return {
-    user: join(userConfigDir, 'claude-olympus', 'config.jsonc'),
+    user: join(homedir(), '.claude', 'olympus', 'config.jsonc'),
     project: join(process.cwd(), '.claude', 'olympus.jsonc')
   };
 }
