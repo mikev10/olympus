@@ -278,90 +278,52 @@ describe('End-to-End Workflow Tests', () => {
   // Scenario 3: Validation Failure and Retry
   // ============================================================================
 
-  describe('Scenario 3: Validation Failure and Retry', () => {
-    it('handles validation failure gracefully', async () => {
-      const engine = new WorkflowEngine(tmpDir, 'Validation Fail Test');
-      await engine.start('Test validation failure');
+  describe('Scenario 3: Validation Success and Quality', () => {
+    it('validates successfully with properly formatted artifacts', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Validation Success Test');
+      await engine.start('Test validation success');
 
-      // The stub implementation creates artifacts with missing sections
-      // which will fail validation
-      const checkpoint = await loadCheckpoint(tmpDir, 'validation-fail-test');
+      // The engine now generates properly formatted artifacts that pass validation
+      const checkpoint = await loadCheckpoint(tmpDir, 'validation-success-test');
 
       // Verify validation was performed
       expect(checkpoint?.validation_results.idea).not.toBeNull();
 
-      // The mock artifact intentionally lacks required sections
-      // so validation should fail
-      expect(checkpoint?.validation_results.idea?.passed).toBe(false);
-      expect(checkpoint?.validation_results.idea?.blocking_issues.length).toBeGreaterThan(0);
+      // The properly formatted artifact should pass validation
+      expect(checkpoint?.validation_results.idea?.passed).toBe(true);
+      expect(checkpoint?.validation_results.idea?.coverage_percentage).toBe(100);
+      expect(checkpoint?.validation_results.idea?.blocking_issues.length).toBe(0);
     });
 
-    it('allows retry after fixing validation issues', async () => {
-      const workflowId = 'retry-test';
-      const engine = new WorkflowEngine(tmpDir, 'Retry Test');
-      await engine.start('Test retry after validation failure');
-
-      // Get initial checkpoint with failed validation
-      let checkpoint = await loadCheckpoint(tmpDir, workflowId);
-      expect(checkpoint?.validation_results.idea?.passed).toBe(false);
-
-      // Clear file cache to ensure fresh reads
-      const { clearFileCache } = await import('../../features/workflow-engine/validation.js');
-      clearFileCache();
-
-      // Manually fix the IDEA artifact to pass validation
-      const validIdeaContent = `---
-risk_tier: 2
----
-
-# Feature Idea: Retry Test
-
-## Initial Prompt
-Test retry after validation failure
-
-## Problem Statement
-This is a complete problem statement with sufficient detail to understand the challenge we're solving.
-
-## Business Context
-Complete business context explaining the value and rationale behind this feature request.
-
-## Success Metrics
-- Metric 1: 50% adoption rate
-- Metric 2: 90% satisfaction score
-
-## Constraints
-- Technical constraint: Must use existing auth system
-- Timeline constraint: 2 weeks
-
-## Solution Approach
-Detailed solution approach explaining how we'll solve this problem with specific technical details.
-`;
-
-      await writeArtifact(tmpDir, workflowId, 'idea', validIdeaContent);
-
-      // Import validation function to re-validate the fixed artifact
-      const { validateIdea } = await import('../../features/workflow-engine/validation.js');
-      const { getArtifactPath } = await import('../../features/workflow-engine/artifacts.js');
-
-      const ideaPath = getArtifactPath(tmpDir, workflowId, 'idea');
-      const validationResult = await validateIdea(ideaPath);
-
-      // Verify validation now passes
-      expect(validationResult.passed).toBe(true);
-      expect(validationResult.blocking_issues.length).toBe(0);
-      expect(validationResult.coverage_percentage).toBe(100);
-    });
-
-    it('tracks validation coverage percentage', async () => {
+    it('validates PRD with full coverage of IDEA constraints', async () => {
+      const workflowId = 'coverage-test';
       const engine = new WorkflowEngine(tmpDir, 'Coverage Test');
+      await engine.start('Test coverage validation');
+
+      // Execute PRD stage
+      await engine.executeStage('prd');
+
+      // Get checkpoint after PRD generation
+      let checkpoint = await loadCheckpoint(tmpDir, workflowId);
+      expect(checkpoint?.validation_results.prd?.passed).toBe(true);
+
+      // Verify PRD has 100% coverage of IDEA constraints
+      expect(checkpoint?.validation_results.prd?.coverage_percentage).toBe(100);
+      expect(checkpoint?.validation_results.prd?.blocking_issues.length).toBe(0);
+
+      // Verify PRD was reviewed by Momus (placeholder in Phase 2)
+      expect(checkpoint?.validation_results.prd?.reviewer).toBe('momus');
+    });
+
+    it('tracks validation coverage percentage correctly', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Coverage Test 2');
       await engine.start('Test coverage tracking');
 
-      const checkpoint = await loadCheckpoint(tmpDir, 'coverage-test');
+      const checkpoint = await loadCheckpoint(tmpDir, 'coverage-test-2');
 
-      // Verify coverage percentage is calculated
-      expect(checkpoint?.validation_results.idea?.coverage_percentage).toBeDefined();
-      expect(checkpoint?.validation_results.idea?.coverage_percentage).toBeGreaterThanOrEqual(0);
-      expect(checkpoint?.validation_results.idea?.coverage_percentage).toBeLessThanOrEqual(100);
+      // Verify coverage percentage is calculated and is 100% for properly formatted artifacts
+      expect(checkpoint?.validation_results.idea?.coverage_percentage).toBe(100);
+      expect(checkpoint?.validation_results.idea?.passed).toBe(true);
     });
 
     it('PRD validation checks IDEA constraint coverage', async () => {

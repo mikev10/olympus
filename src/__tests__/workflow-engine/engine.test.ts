@@ -223,7 +223,8 @@ describe('WorkflowEngine', () => {
       expect(exists).toBe(true);
 
       const content = await fs.readFile(ideaPath, 'utf-8');
-      expect(content).toContain('# Feature Idea: Test Feature');
+      expect(content).toContain('## Problem Statement');
+      expect(content).toContain('Build a test feature');
     });
 
     it("creates prd artifact for 'prd' stage", async () => {
@@ -238,7 +239,8 @@ describe('WorkflowEngine', () => {
       expect(exists).toBe(true);
 
       const content = await fs.readFile(prdPath, 'utf-8');
-      expect(content).toContain('# Product Requirements Document: Test Feature');
+      expect(content).toContain('## User Stories');
+      expect(content).toContain('US-001');
     });
 
     it("creates spec artifact for 'spec' stage", async () => {
@@ -290,8 +292,8 @@ describe('WorkflowEngine', () => {
       expect(checkpoint?.artifacts.idea).not.toBeNull();
       expect(checkpoint?.artifacts.idea?.id).toBe('IDEA-001');
       // validation_passed should reflect the actual validation result
-      // The mock artifact fails validation because it lacks required sections
-      expect(checkpoint?.artifacts.idea?.validation_passed).toBe(false);
+      // The properly formatted artifact should pass validation
+      expect(checkpoint?.artifacts.idea?.validation_passed).toBe(true);
     });
 
     it('advances current_stage after execution', async () => {
