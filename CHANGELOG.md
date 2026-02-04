@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.1] - 2026-02-03
+
+### Fixed
+
+**Critical UX: /plan questions now visible immediately**
+
+- **Fixed hidden questions in `/plan` command** - Questions from Prometheus are now displayed immediately instead of being trapped in agent subprocess
+  - Updated `/plan` command to execute planning workflow directly in main conversation
+  - Added explicit instruction: "Ask questions DIRECTLY to the user via normal message output"
+  - Updated Prometheus agent to never use AskUserQuestion tool when delegated
+  - Questions now appear as regular text output, ensuring immediate visibility
+
+- **Added interactive workflow documentation** - Created `docs/interactive-workflows.md` explaining when to execute directly vs delegate to agents
+  - Documents the pattern for interactive commands that require real-time user interaction
+  - Provides implementation checklist for future command development
+  - Prevents similar UX issues in other interactive workflows
+
+**Impact**: Users no longer need to ask "are you done?" to see questions. Planning sessions now feel natural and responsive.
+
 ## [3.4.0] - 2026-02-03
 
 ### Added

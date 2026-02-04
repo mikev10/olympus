@@ -29,3 +29,14 @@ test-output.txt
 /test-*.log
 /*.log
 /nul
+
+# ADD methodology documentation (not ready for public release)
+docs/ADD-White-Paper.md
+docs/ADD-Comparative-Analysis.md
+docs/ADD-LinkedIn-Announcement.md
+docs/ADD-White-Paper.md.backup
+docs/ADD-Comparative-Analysis.md.backup
+docs/ADD-LinkedIn-Announcement.md.backup
+docs/ADD-White-Paper.tex
+docs/ADD-Whitepaper-Issues-Report.md
+docs/claude-code-docs.txt
