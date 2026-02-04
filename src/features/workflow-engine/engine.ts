@@ -18,6 +18,7 @@ import {
 } from './types.js';
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
+import { validateIdea, validatePrd } from './validation.js';
 
 /**
  * Ordered list of workflow stages for progression validation
@@ -62,6 +63,7 @@ export class WorkflowEngine {
   private projectPath: string;
   private featureName: string;
   private workflowId: string;
+  private interruptHandler: (() => void) | null = null;
 
   /**
    * Create a new WorkflowEngine instance
@@ -116,8 +118,16 @@ export class WorkflowEngine {
     // Save initial checkpoint
     await saveCheckpoint(this.projectPath, checkpoint);
 
-    // Execute the IDEA stage
-    await this.executeStage('idea');
+    // Setup interrupt handler before executing stages
+    this.setupInterruptHandler();
+
+    try {
+      // Execute the IDEA stage
+      await this.executeStage('idea');
+    } finally {
+      // Clean up interrupt handler after workflow completes or errors
+      this.cleanupInterruptHandler();
+    }
   }
 
   /**
@@ -143,8 +153,16 @@ export class WorkflowEngine {
       await saveCheckpoint(this.projectPath, checkpoint);
     }
 
-    // Execute the current stage
-    await this.executeStage(checkpoint.current_stage);
+    // Setup interrupt handler before executing stages
+    this.setupInterruptHandler();
+
+    try {
+      // Execute the current stage
+      await this.executeStage(checkpoint.current_stage);
+    } finally {
+      // Clean up interrupt handler after workflow completes or errors
+      this.cleanupInterruptHandler();
+    }
 
     return `Resumed workflow from stage: ${checkpoint.current_stage}`;
   }
@@ -211,7 +229,7 @@ export class WorkflowEngine {
       id: artifactId,
       path: artifactPath,
       created_at: new Date().toISOString(),
-      validation_passed: true,
+      validation_passed: checkpoint.validation_results[stage]?.passed ?? false,
     };
 
     // Move to next stage
@@ -256,21 +274,97 @@ export class WorkflowEngine {
   }
 
   // ============================================================================
+  // Interrupt Handling
+  // ============================================================================
+
+  /**
+   * Setup SIGINT handler to save checkpoint when workflow is interrupted.
+   * This allows users to resume their workflow later with `/plan continue`.
+   *
+   * @private
+   */
+  private setupInterruptHandler(): void {
+    this.interruptHandler = async () => {
+      console.log('\n[WorkflowEngine] Workflow interrupted - saving checkpoint...');
+
+      try {
+        const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        if (checkpoint) {
+          checkpoint.status = 'paused';
+          checkpoint.updated_at = new Date().toISOString();
+          checkpoint.resume_context = {
+            ...checkpoint.resume_context,
+            interrupted_at: new Date().toISOString(),
+            current_stage: checkpoint.current_stage,
+            message: `Workflow interrupted during ${checkpoint.current_stage} stage`,
+          };
+
+          await saveCheckpoint(this.projectPath, checkpoint);
+          console.log('[WorkflowEngine] Checkpoint saved. Resume with `/plan continue`');
+        }
+      } catch (error) {
+        console.error('[WorkflowEngine] Failed to save checkpoint on interrupt:', error);
+      }
+
+      process.exit(0);
+    };
+
+    process.on('SIGINT', this.interruptHandler);
+  }
+
+  /**
+   * Clean up the interrupt handler when workflow completes or errors.
+   *
+   * @private
+   */
+  private cleanupInterruptHandler(): void {
+    if (this.interruptHandler) {
+      process.off('SIGINT', this.interruptHandler);
+      this.interruptHandler = null;
+    }
+  }
+
+  // ============================================================================
   // Stage Execution Methods (Stubs - to be replaced with real agent calls)
   // ============================================================================
 
   /**
    * Execute the IDEA stage
-   * TODO: Replace with actual idea-intake agent call in Phase 2.2
+   *
+   * Invokes the idea-intake agent to generate the IDEA artifact.
+   * The artifact is validated before the stage is considered complete.
+   *
+   * TODO: Replace with actual Task tool invocation when integration is complete.
+   * Current implementation creates mock artifacts with validation.
    */
   private async executeIdeaStage(checkpoint: WorkflowCheckpoint): Promise<void> {
-    console.log('Executing idea stage');
+    const initialPrompt = checkpoint.resume_context?.initial_prompt || 'No initial prompt provided';
 
-    // Create mock artifact
+    console.log(`[WorkflowEngine] Executing IDEA stage for feature: ${this.featureName}`);
+    console.log(`[WorkflowEngine] Initial prompt: ${initialPrompt}`);
+
+    // TODO: Implement actual agent invocation when Task tool integration is available
+    // This would invoke the idea-intake agent with the feature request:
+    //
+    // const agentPrompt = `Generate IDEA artifact for: ${this.featureName}\n\nInitial request: ${initialPrompt}`;
+    // await invokeAgent('idea-intake', agentPrompt, {
+    //   workflowId: this.workflowId,
+    //   outputPath: `.olympus/workflow/${this.workflowId}/idea.md`
+    // });
+    //
+    // The idea-intake agent would:
+    // 1. Interview the user about the feature
+    // 2. Analyze requirements and constraints
+    // 3. Generate a complete IDEA artifact with all required sections
+    // 4. Save to the designated path
+
+    console.log('[WorkflowEngine] Agent invocation: idea-intake (stub - would be invoked here)');
+
+    // For now, create mock artifact (will be replaced when agent integration is complete)
     const ideaContent = `# Feature Idea: ${this.featureName}
 
 ## Initial Prompt
-${checkpoint.resume_context?.initial_prompt || 'No initial prompt provided'}
+${initialPrompt}
 
 ## Summary
 This is a placeholder idea document. The real idea-intake agent will generate
@@ -290,16 +384,59 @@ a proper analysis of the feature requirements.
 `;
 
     await writeArtifact(this.projectPath, this.workflowId, 'idea', ideaContent);
+
+    // Validate the generated artifact
+    const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
+    console.log(`[WorkflowEngine] Validating IDEA artifact at: ${ideaPath}`);
+
+    const validationResult = await validateIdea(ideaPath);
+
+    // Store validation result in checkpoint
+    checkpoint.validation_results.idea = validationResult;
+
+    if (!validationResult.passed) {
+      console.log('[WorkflowEngine] IDEA validation failed:', validationResult.blocking_issues);
+      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
+    } else {
+      console.log('[WorkflowEngine] IDEA validation passed');
+    }
   }
 
   /**
    * Execute the PRD stage
-   * TODO: Replace with actual prd-writer agent call in Phase 2.3
+   *
+   * Invokes the prd-writer agent to generate the PRD artifact.
+   * The PRD is validated against the IDEA artifact to ensure coverage.
+   *
+   * TODO: Replace with actual Task tool invocation when integration is complete.
+   * Current implementation creates mock artifacts with validation.
    */
   private async executePrdStage(checkpoint: WorkflowCheckpoint): Promise<void> {
-    console.log('Executing prd stage');
+    console.log(`[WorkflowEngine] Executing PRD stage for feature: ${this.featureName}`);
 
-    // Create mock artifact
+    // Get the IDEA artifact path for context
+    const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
+
+    // TODO: Implement actual agent invocation when Task tool integration is available
+    // This would invoke the prd-writer agent with the IDEA artifact:
+    //
+    // const agentPrompt = `Generate PRD artifact for: ${this.featureName}\n\nIDEA artifact: ${ideaPath}`;
+    // await invokeAgent('prd-writer', agentPrompt, {
+    //   workflowId: this.workflowId,
+    //   inputArtifacts: { idea: ideaPath },
+    //   outputPath: `.olympus/workflow/${this.workflowId}/prd.md`
+    // });
+    //
+    // The prd-writer agent would:
+    // 1. Read and analyze the IDEA artifact
+    // 2. Generate user stories covering all constraints
+    // 3. Create a comprehensive PRD with requirement coverage
+    // 4. Save to the designated path
+
+    console.log('[WorkflowEngine] Agent invocation: prd-writer (stub - would be invoked here)');
+    console.log(`[WorkflowEngine] Input IDEA artifact: ${ideaPath}`);
+
+    // For now, create mock artifact (will be replaced when agent integration is complete)
     const prdContent = `# Product Requirements Document: ${this.featureName}
 
 ## Overview
@@ -323,14 +460,44 @@ a comprehensive product requirements document.
 `;
 
     await writeArtifact(this.projectPath, this.workflowId, 'prd', prdContent);
+
+    // Validate the generated artifact against IDEA
+    const prdPath = getArtifactPath(this.projectPath, this.workflowId, 'prd');
+    console.log(`[WorkflowEngine] Validating PRD artifact at: ${prdPath}`);
+
+    const validationResult = await validatePrd(prdPath, ideaPath);
+
+    // Store validation result in checkpoint
+    checkpoint.validation_results.prd = validationResult;
+
+    if (!validationResult.passed) {
+      console.log('[WorkflowEngine] PRD validation failed:', validationResult.blocking_issues);
+      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
+    } else {
+      console.log('[WorkflowEngine] PRD validation passed');
+      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
+    }
   }
 
   /**
    * Execute the SPEC stage
-   * TODO: Replace with actual spec-writer agent call in Phase 3.1
+   *
+   * TODO (Phase 3): Implement spec-writer agent invocation.
+   * The spec-writer agent would generate a technical specification from the PRD.
    */
   private async executeSpecStage(checkpoint: WorkflowCheckpoint): Promise<void> {
-    console.log('Executing spec stage');
+    console.log('[WorkflowEngine] Executing SPEC stage (stub implementation)');
+
+    // TODO (Phase 3): Implement spec-writer agent invocation
+    // This would invoke the spec-writer agent with the PRD artifact:
+    //
+    // const prdPath = getArtifactPath(this.projectPath, this.workflowId, 'prd');
+    // const agentPrompt = `Generate technical specification for: ${this.featureName}\n\nPRD artifact: ${prdPath}`;
+    // await invokeAgent('spec-writer', agentPrompt, {
+    //   workflowId: this.workflowId,
+    //   inputArtifacts: { prd: prdPath },
+    //   outputPath: `.olympus/workflow/${this.workflowId}/spec.md`
+    // });
 
     // Create mock artifact
     const specContent = `# Technical Specification: ${this.featureName}
@@ -360,10 +527,23 @@ generate a detailed technical specification.
 
   /**
    * Execute the INTENTS stage
-   * TODO: Replace with actual intent-generator agent call in Phase 3.2
+   *
+   * TODO (Phase 3): Implement intent-generator agent invocation.
+   * The intent-generator agent would create implementation intent files from the SPEC.
    */
   private async executeIntentsStage(checkpoint: WorkflowCheckpoint): Promise<void> {
-    console.log('Executing intents stage');
+    console.log('[WorkflowEngine] Executing INTENTS stage (stub implementation)');
+
+    // TODO (Phase 3): Implement intent-generator agent invocation
+    // This would invoke the intent-generator agent with the SPEC artifact:
+    //
+    // const specPath = getArtifactPath(this.projectPath, this.workflowId, 'spec');
+    // const agentPrompt = `Generate implementation intents for: ${this.featureName}\n\nSPEC artifact: ${specPath}`;
+    // await invokeAgent('intent-generator', agentPrompt, {
+    //   workflowId: this.workflowId,
+    //   inputArtifacts: { spec: specPath },
+    //   outputPath: `.olympus/workflow/${this.workflowId}/intents/`
+    // });
 
     // For intents stage, we create files in the intents directory
     // Since writeArtifact doesn't support intents, we'll write directly

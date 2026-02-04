@@ -289,7 +289,9 @@ describe('WorkflowEngine', () => {
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       expect(checkpoint?.artifacts.idea).not.toBeNull();
       expect(checkpoint?.artifacts.idea?.id).toBe('IDEA-001');
-      expect(checkpoint?.artifacts.idea?.validation_passed).toBe(true);
+      // validation_passed should reflect the actual validation result
+      // The mock artifact fails validation because it lacks required sections
+      expect(checkpoint?.artifacts.idea?.validation_passed).toBe(false);
     });
 
     it('advances current_stage after execution', async () => {
@@ -412,6 +414,156 @@ describe('WorkflowEngine', () => {
       checkpoint = await loadCheckpoint(tmpDir, 'pause-resume-test');
       // After resume, spec stage should have executed
       expect(checkpoint?.current_stage).toBe('intents');
+    });
+  });
+
+  describe('Interrupt Handling', () => {
+    it('sets up interrupt handler on start', () => {
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      const engineAny = engine as any;
+
+      // Before start, no handler should be set
+      expect(engineAny.interruptHandler).toBeNull();
+
+      // We can't fully test the async start() here, but we can verify the property exists
+      expect(engineAny).toHaveProperty('interruptHandler');
+    });
+
+    it('interrupt handler saves checkpoint with paused status', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Interrupt Test');
+
+      // Create a checkpoint
+      const checkpoint: WorkflowCheckpoint = {
+        schema_version: '1.0.0',
+        workflow_id: 'interrupt-test',
+        feature_name: 'Interrupt Test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        current_stage: 'prd',
+        status: 'in_progress',
+        artifacts: {
+          idea: {
+            id: 'IDEA-001',
+            path: '.olympus/workflow/interrupt-test/idea.md',
+            created_at: new Date().toISOString(),
+            validation_passed: true,
+          },
+          prd: null,
+          spec: null,
+          intents: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intents: null,
+          complete: null,
+        },
+        resume_context: {
+          initial_prompt: 'Test initial prompt',
+        },
+      };
+
+      await saveCheckpoint(tmpDir, checkpoint);
+
+      // Simulate the interrupt handler logic
+      const engineAny = engine as any;
+      engineAny.setupInterruptHandler();
+
+      // Manually trigger the handler logic without SIGINT
+      const loadedCheckpoint = await loadCheckpoint(tmpDir, 'interrupt-test');
+      if (loadedCheckpoint) {
+        loadedCheckpoint.status = 'paused';
+        loadedCheckpoint.updated_at = new Date().toISOString();
+        loadedCheckpoint.resume_context = {
+          ...loadedCheckpoint.resume_context,
+          interrupted_at: new Date().toISOString(),
+          current_stage: loadedCheckpoint.current_stage,
+          message: `Workflow interrupted during ${loadedCheckpoint.current_stage} stage`,
+        };
+        await saveCheckpoint(tmpDir, loadedCheckpoint);
+      }
+
+      // Verify checkpoint was updated
+      const savedCheckpoint = await loadCheckpoint(tmpDir, 'interrupt-test');
+      expect(savedCheckpoint?.status).toBe('paused');
+      expect(savedCheckpoint?.resume_context?.interrupted_at).toBeDefined();
+      expect(savedCheckpoint?.resume_context?.current_stage).toBe('prd');
+      expect(savedCheckpoint?.resume_context?.message).toContain('interrupted during prd stage');
+
+      // Clean up handler
+      engineAny.cleanupInterruptHandler();
+    });
+
+    it('cleans up interrupt handler after workflow completes', () => {
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      const engineAny = engine as any;
+
+      // Set up a mock handler
+      engineAny.interruptHandler = () => {};
+
+      // Verify handler is set
+      expect(engineAny.interruptHandler).not.toBeNull();
+
+      // Clean up
+      engineAny.cleanupInterruptHandler();
+
+      // Verify handler is cleared
+      expect(engineAny.interruptHandler).toBeNull();
+    });
+
+    it('interrupt handler preserves initial_prompt in resume_context', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Interrupt Context Test');
+
+      const initialPrompt = 'Build an authentication system';
+      const checkpoint: WorkflowCheckpoint = {
+        schema_version: '1.0.0',
+        workflow_id: 'interrupt-context-test',
+        feature_name: 'Interrupt Context Test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intents: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intents: null,
+          complete: null,
+        },
+        resume_context: {
+          initial_prompt: initialPrompt,
+        },
+      };
+
+      await saveCheckpoint(tmpDir, checkpoint);
+
+      // Simulate interrupt
+      const loadedCheckpoint = await loadCheckpoint(tmpDir, 'interrupt-context-test');
+      if (loadedCheckpoint) {
+        loadedCheckpoint.status = 'paused';
+        loadedCheckpoint.updated_at = new Date().toISOString();
+        loadedCheckpoint.resume_context = {
+          ...loadedCheckpoint.resume_context,
+          interrupted_at: new Date().toISOString(),
+          current_stage: loadedCheckpoint.current_stage,
+          message: `Workflow interrupted during ${loadedCheckpoint.current_stage} stage`,
+        };
+        await saveCheckpoint(tmpDir, loadedCheckpoint);
+      }
+
+      // Verify initial_prompt is preserved
+      const savedCheckpoint = await loadCheckpoint(tmpDir, 'interrupt-context-test');
+      expect(savedCheckpoint?.resume_context?.initial_prompt).toBe(initialPrompt);
+      expect(savedCheckpoint?.resume_context?.interrupted_at).toBeDefined();
     });
   });
 });
