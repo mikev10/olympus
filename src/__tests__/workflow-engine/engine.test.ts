@@ -256,7 +256,13 @@ describe('WorkflowEngine', () => {
       expect(exists).toBe(true);
 
       const content = await fs.readFile(specPath, 'utf-8');
-      expect(content).toContain('# Technical Specification: Test Feature');
+      expect(content).toContain('## Components');
+      expect(content).toContain('## Database Schema');
+      expect(content).toContain('## API Endpoints');
+      expect(content).toContain('## Authentication/Authorization');
+      expect(content).toContain('## Error Handling');
+      expect(content).toContain('## Performance Considerations');
+      expect(content).toContain('## PRD Coverage');
     });
 
     it("creates intent files for 'intents' stage", async () => {
@@ -269,12 +275,33 @@ describe('WorkflowEngine', () => {
       await engine.executeStage('intents');
 
       const intentsDir = join(tmpDir, '.olympus', 'workflow', 'test-feature', 'intents');
-      const intentFile = join(intentsDir, 'intent-001.md');
-      const exists = await fs.pathExists(intentFile);
-      expect(exists).toBe(true);
 
-      const content = await fs.readFile(intentFile, 'utf-8');
-      expect(content).toContain('# Intent: Implement Test Feature');
+      // Check that multiple INTENT files exist
+      const intent1 = join(intentsDir, 'INTENT-001.md');
+      const intent2 = join(intentsDir, 'INTENT-002.md');
+      expect(await fs.pathExists(intent1)).toBe(true);
+      expect(await fs.pathExists(intent2)).toBe(true);
+
+      // Check content of first INTENT
+      const content = await fs.readFile(intent1, 'utf-8');
+      expect(content).toContain('# Task:');
+      expect(content).toContain('## Goal');
+      expect(content).toContain('## Acceptance Criteria');
+      expect(content).toContain('## Implementation Steps');
+      expect(content).toContain('## Dependencies');
+      expect(content).toContain('## Estimated Effort');
+
+      // Check that dependency graph exists
+      const graphPath = join(intentsDir, 'dependency-graph.json');
+      expect(await fs.pathExists(graphPath)).toBe(true);
+
+      const graphContent = await fs.readFile(graphPath, 'utf-8');
+      const graph = JSON.parse(graphContent);
+      // Graph should be a simple adjacency list (Record<string, string[]>)
+      expect(graph['INTENT-001']).toBeDefined();
+      expect(Array.isArray(graph['INTENT-001'])).toBe(true);
+      expect(graph['INTENT-002']).toBeDefined();
+      expect(Array.isArray(graph['INTENT-002'])).toBe(true);
     });
 
     it("throws error for 'complete' stage", async () => {
