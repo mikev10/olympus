@@ -17,6 +17,8 @@
 
 import type { AgentConfig, ModelType } from '../shared/types.js';
 import { qaTesterAgent } from './qa-tester.js';
+import { ideaIntakeAgent } from './idea-intake.js';
+import { prdWriterAgent } from './prd-writer.js';
 
 /**
  * Oracle Agent - Architecture and Debugging Expert
@@ -1405,6 +1407,8 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     'olympian': olympusJuniorAgent,
     prometheus: prometheusAgent,
     'qa-tester': qaTesterAgent,
+    'idea-intake': ideaIntakeAgent,
+    'prd-writer': prdWriterAgent,
     // Tiered variants for smart model routing
     'oracle-medium': oracleMediumAgent,
     'oracle-low': oracleLowAgent,
