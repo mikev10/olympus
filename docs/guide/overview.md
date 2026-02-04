@@ -9,7 +9,8 @@ A multi-agent orchestration plugin that transforms Claude Code from a single ass
 Olympus is a **plugin system** for [Claude Code](https://docs.anthropic.com/claude-code) - Anthropic's official CLI tool. It enhances Claude with:
 
 - **20+ Specialized Agents** that Claude can spawn for specific tasks
-- **13+ Slash Commands** for activating skills and workflows
+- **18+ Slash Commands** for activating skills and workflows
+- **Structured Workflows** for complex features (IDEA → PRD → SPEC → INTENTS pipeline)
 - **Learning System** that improves from your corrections over time
 - **Smart Hooks** that add persistence, keyword detection, and context injection
 
@@ -87,6 +88,14 @@ Skills are activated via slash commands and modify how Claude behaves:
 
 **Guarantee Skills**
 - `/ascent <task>` - Cannot stop until verified complete (The Ascent Never Ends)
+
+**Workflow Commands** (v3.5.0)
+- `/idea <feature>` - Generate IDEA artifact (business context, success metrics)
+- `/prd <feature>` - Generate PRD artifact (user stories, requirements)
+- `/spec <feature>` - Generate SPEC artifact (technical design)
+- `/intents <feature>` - Generate INTENTS artifact (actionable tasks)
+- `/workflow-status` - View all active structured workflows
+- `/olympus next` - Get the next ready task from current workflow
 
 **Utility Commands**
 - `/deepsearch <query>` - Thorough multi-strategy codebase search
@@ -333,7 +342,7 @@ See [Installation Guide](./installation.md#customize-configuration-advanced) for
 | Feature | Plain Claude Code | Olympus |
 |---------|-------------------|---------|
 | **Agents** | 1 (you) | 20+ specialized experts |
-| **Commands** | Built-in only | 13+ skills & workflows |
+| **Commands** | Built-in only | 18+ skills & workflows |
 | **Learning** | Per-session only | Persistent, cross-session |
 | **Delegation** | Manual (you spawn agents) | Automatic + intelligent |
 | **Persistence** | Stops when asked | Continues until verified |

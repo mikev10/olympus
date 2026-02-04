@@ -27,7 +27,8 @@ Olympus is a multi-agent orchestration system for [Claude Code](https://docs.ant
 - 📋 **Todo Management** - Tracks progress with real-time updates
 - 🔄 **Background Execution** - Long-running tasks run async with notifications
 - 🎯 **Continuation Enforcement** - Never stops until all tasks are complete
-- 💬 **13+ Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, and more
+- 💬 **18+ Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/idea`, `/prd`, `/spec`, `/intents`, and more
+- 🔮 **Structured Workflows** - IDEA → PRD → SPEC → INTENTS pipeline for complex features
 - 🔮 **Magic Keywords** - Natural language triggers for enhanced modes
 
 ---
@@ -155,6 +156,12 @@ claude
 | `/deepsearch <query>`   | Thorough multi-strategy codebase search                                |
 | `/analyze <target>`     | Deep analysis and investigation                                        |
 | `/complete-plan [path]` | Verify and complete a plan after implementation                        |
+| `/idea <feature>`       | Manually generate IDEA artifact for a feature                          |
+| `/prd <feature>`        | Manually generate PRD artifact for a feature                           |
+| `/spec <feature>`       | Manually generate SPEC artifact for a feature                          |
+| `/intents <feature>`    | Manually generate INTENTS artifact for a feature                       |
+| `/workflow-status`      | View all active structured workflows and their status                  |
+| `/olympus next`         | Get the next ready task from current workflow                          |
 | `/doctor`               | Diagnose and fix olympus installation issues                           |
 | `/deepinit`             | Deep codebase initialization with hierarchical AGENTS.md documentation |
 | `/update`               | Check for and install updates                                          |
@@ -604,8 +611,10 @@ olympus/
 
 ## Documentation
 
-- 📖 [Getting Started Guide](docs/Olympus.md)
+- 📖 [Getting Started Guide](docs/guide/overview.md)
 - 💻 [CLI Reference Guide](docs/guide/cli-reference.md) - Complete command-line tool reference
+- 🔄 [Workflow Selection Guide](docs/guide/workflow-guide.md) - Choose the right workflow for your task
+- 📋 [Structured Workflows Guide](docs/workflow-guide.md) - IDEA → PRD → SPEC → INTENTS pipeline for complex features
 - 🤖 [Agent Reference](docs/AGENTS.md)
 - 🏗️ [Architecture Overview](docs/ARCHITECTURE.md)
 - 🗺️ [Roadmap](docs/ROADMAP.md)

@@ -21,6 +21,11 @@ The `olympus-ai` command-line tool is your interface to manage the Olympus multi
 | `olympus update` | Install latest version | `olympus update` |
 | `olympus version` | Show version information | `olympus version` |
 | `olympus test-prompt` | Preview prompt enhancement | `olympus test-prompt "my prompt"` |
+| `olympus idea <feature>` | Generate IDEA artifact for a feature | `olympus idea "user-auth"` |
+| `olympus prd <feature>` | Generate PRD artifact for a feature | `olympus prd "user-auth"` |
+| `olympus spec <feature>` | Generate SPEC artifact for a feature | `olympus spec "user-auth"` |
+| `olympus intents <feature>` | Generate INTENTS artifact for a feature | `olympus intents "user-auth"` |
+| `olympus workflow-status` | View all active workflows and status | `olympus workflow-status` |
 
 ## Installation & Setup
 
@@ -422,6 +427,124 @@ Historical comparison:
 - **NORMAL**: Below baseline usage
 - **ELEVATED**: Above baseline but below threshold
 - **WARNING**: Exceeds warning threshold (typically 150% of baseline)
+
+## Structured Workflow Commands
+
+NEW (v3.5.0): Generate structured artifacts for complex features using the IDEA → PRD → SPEC → INTENTS pipeline.
+
+### Manual IDEA Generation
+
+```bash
+olympus-ai idea <feature-name>
+```
+
+Manually generate an IDEA artifact for a feature without running the full workflow.
+
+**Example:**
+```bash
+olympus-ai idea "user-authentication"
+
+# Creates: .olympus/workflows/user-authentication/IDEA.md
+```
+
+**Artifact includes:**
+- Problem statement and business context
+- Success metrics and constraints
+- Risk tier assessment
+- Assumptions and dependencies
+
+### Manual PRD Generation
+
+```bash
+olympus-ai prd <feature-name>
+```
+
+Manually generate a PRD (Product Requirements Document) artifact for a feature.
+
+**Example:**
+```bash
+olympus-ai prd "user-authentication"
+
+# Creates: .olympus/workflows/user-authentication/PRD.md
+```
+
+**Artifact includes:**
+- User stories with acceptance criteria
+- Requirement coverage (mapped to IDEA constraints)
+- Functional and non-functional requirements
+- API/interface specifications
+
+### Manual SPEC Generation
+
+```bash
+olympus-ai spec <feature-name>
+```
+
+Manually generate a SPEC (technical specification) artifact for a feature.
+
+**Example:**
+```bash
+olympus-ai spec "user-authentication"
+
+# Creates: .olympus/workflows/user-authentication/SPEC.md
+```
+
+**Artifact includes:**
+- Technical architecture and design
+- Data models and schemas
+- Algorithm specifications
+- Integration points and dependencies
+
+### Manual INTENTS Generation
+
+```bash
+olympus-ai intents <feature-name>
+```
+
+Manually generate INTENTS artifact breaking down the feature into actionable tasks.
+
+**Example:**
+```bash
+olympus-ai intents "user-authentication"
+
+# Creates: .olympus/workflows/user-authentication/INTENTS.md
+```
+
+**Artifact includes:**
+- Execution order based on dependencies
+- Concrete implementation tasks
+- Blocking relationships
+- Effort and complexity estimates
+
+### View Workflow Status
+
+```bash
+olympus-ai workflow-status
+```
+
+View all active structured workflows and their current status.
+
+**Output includes:**
+- Workflow name and feature
+- Current stage (IDEA, PRD, SPEC, INTENTS, IN_PROGRESS, COMPLETED)
+- Progress percentage
+- Last updated timestamp
+
+**Example output:**
+```
+Active Workflows
+================
+
+1. user-authentication
+   Stage: SPEC (67% complete)
+   Last updated: 2026-02-04T10:30:00Z
+   Artifacts: IDEA.md, PRD.md, SPEC.md
+
+2. real-time-chat
+   Stage: PRD (33% complete)
+   Last updated: 2026-02-04T09:15:00Z
+   Artifacts: IDEA.md, PRD.md
+```
 
 ## Managing Discoveries
 
@@ -862,4 +985,4 @@ olympus learn --export            # Backup your learnings
 
 ---
 
-**Version:** 3.2.3 | **Last Updated:** February 2025
+**Version:** 3.5.0 | **Last Updated:** February 2026
