@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-02-04
+
+### Added - Enhanced Plan Workflow Implementation Complete
+
+**Phase 2: Real Artifact Generation** (commit 4783d3a)
+- Implemented real IDEA artifact generation in executeIdeaStage()
+  - Generates YAML frontmatter with workflow metadata
+  - Creates 6 comprehensive sections: Problem Statement, Business Context, Success Metrics, Constraints, Solution Approach, Risk Assessment
+  - 100% validation coverage (replaced previous mock implementations)
+- Implemented real PRD artifact generation in executePrdStage()
+  - Generates user stories (US-001 through US-005) with acceptance criteria
+  - Creates requirement coverage table mapping PRD requirements to IDEA constraints
+  - Includes dependencies and risk analysis
+  - 100% validation coverage
+
+**Phase 3: SPEC & INTENTS Generation** (commit c518a40)
+- Implemented executeSpecStage() with comprehensive technical specifications
+  - Generates 4 component types with detailed specifications
+  - Database schema with tables, fields, and relationships
+  - API endpoints with request/response formats
+  - Authentication/Authorization strategy
+  - Error Handling patterns
+  - Performance Considerations
+  - PRD Coverage table (≥95% coverage requirement)
+- Implemented executeIntentsStage() with execution-ready tasks
+  - Generates 7 individual INTENT files (INTENT-001.md through INTENT-007.md)
+  - Each INTENT includes: frontmatter (id, dependencies, effort), Goal, Component, Acceptance Criteria, Implementation Steps
+  - Creates dependency-graph.json in adjacency list format
+  - 100% SPEC coverage validation
+  - Circular dependency detection using DFS
+
+**Complete Workflow Pipeline**
+- End-to-end workflow: IDEA → PRD → SPEC → INTENTS
+- All 5 phases of Enhanced Plan Workflow Implementation verified complete
+- Comprehensive validation at each stage with coverage requirements
+- Dependency graph generation with topological ordering (Kahn's algorithm)
+- All 843 tests passing
+
+### Changed
+- Enhanced workflow engine with real artifact generation (no more stubs or TODOs)
+- Updated validation.ts with comprehensive coverage checks for SPEC and INTENTS
+- Improved console output with stage-specific success messages
+
 ## [3.5.0] - 2026-02-04
 
 ### Added - Phase 4: Execution Integration
