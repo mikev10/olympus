@@ -4,22 +4,27 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { registerLearningCaptureHooks } from '../../hooks/registrations/learning-capture.js';
 import { routeHook } from '../../hooks/router.js';
+import { clearHooks } from '../../hooks/registry.js';
 import { loadSessionState } from '../../learning/session-state.js';
 import { loadFeedback } from '../../learning/storage.js';
+import { estimateTokens } from '../../learning/token-estimator.js';
 import type { HookContext } from '../../hooks/types.js';
 
 const TEST_DIR = join(process.cwd(), '.test-learning-capture');
 
 describe('Learning Capture Integration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     // Create test directory
     if (!existsSync(TEST_DIR)) {
       mkdirSync(TEST_DIR, { recursive: true });
     }
+
+    // Pre-initialize tokenizer to avoid async import delays during hook execution
+    await estimateTokens('warm up tokenizer');
   });
 
   afterEach(() => {
@@ -27,6 +32,8 @@ describe('Learning Capture Integration', () => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
+    // Clear hooks registry to prevent interference between tests
+    clearHooks();
   });
 
   it('should accumulate tokens across UserPromptSubmit and PostToolUse', async () => {
