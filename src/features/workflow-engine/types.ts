@@ -180,3 +180,74 @@ export interface WorkflowCheckpoint {
   /** Context data needed to resume interrupted workflows */
   resume_context?: any;
 }
+
+/**
+ * Task definition for intent files.
+ * Represents a single task with dependencies and effort estimates.
+ *
+ * @example
+ * {
+ *   id: "TASK-001",
+ *   title: "Implement user authentication",
+ *   component: "AuthService",
+ *   estimated_effort: 5,
+ *   dependencies: ["TASK-002", "TASK-003"]
+ * }
+ */
+export interface IntentTask {
+  /** Unique task identifier */
+  id: string;
+
+  /** Human-readable task title */
+  title: string;
+
+  /** Component or module this task belongs to */
+  component: string;
+
+  /** Estimated effort in story points or hours */
+  estimated_effort: number;
+
+  /** Array of task IDs this task depends on */
+  dependencies: string[];
+}
+
+/**
+ * Node in a dependency graph.
+ * Represents a task without its dependency relationships.
+ */
+export interface IntentNode {
+  /** Unique task identifier */
+  id: string;
+
+  /** Human-readable task title */
+  title: string;
+
+  /** Component or module this task belongs to */
+  component: string;
+
+  /** Estimated effort in story points or hours */
+  estimated_effort: number;
+}
+
+/**
+ * Dependency graph representing task relationships.
+ * Used for topological sorting and cycle detection.
+ *
+ * @example
+ * {
+ *   nodes: [
+ *     { id: "TASK-001", title: "Setup database", component: "DB", estimated_effort: 3 },
+ *     { id: "TASK-002", title: "Create schema", component: "DB", estimated_effort: 2 }
+ *   ],
+ *   edges: [
+ *     { from: "TASK-001", to: "TASK-002" }  // TASK-002 depends on TASK-001
+ *   ]
+ * }
+ */
+export interface DependencyGraph {
+  /** Array of task nodes */
+  nodes: IntentNode[];
+
+  /** Array of directed edges (from -> to means 'to' depends on 'from') */
+  edges: { from: string; to: string }[];
+}
