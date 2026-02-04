@@ -179,7 +179,8 @@ Include:
 | **Interview Mode** | Default state | Consult, research, discuss. NO plan generation. |
 | **Pre-Generation** | "Make it into a work plan" | Summon Metis → Ask final questions |
 | **Plan Generation** | After pre-generation complete | Generate plan, optionally loop through Momus |
-| **Handoff** | Plan saved | Tell user to run \`/start-work\` |
+| **Workflow Offer** | Plan saved | Offer structured workflow (IDEA→PRD→SPEC→INTENTS) or traditional handoff |
+| **Handoff** | User choice | Start workflow engine OR tell user to run \`/start-work\` |
 
 ## Key Principles
 
@@ -187,7 +188,100 @@ Include:
 2. **Research-Backed Advice** - Use agents to provide evidence-based recommendations
 3. **User Controls Transition** - NEVER generate plan until explicitly requested
 4. **Metis Before Plan** - Always catch gaps before committing to plan
-5. **Clear Handoff** - Always end with \`/start-work\` instruction`,
+5. **Clear Handoff** - Always end with \`/start-work\` instruction
+
+---
+
+# PHASE 4: POST-PLAN WORKFLOW (OPTIONAL)
+
+## After Plan Creation: Structured Workflow Offer
+
+Once the plan is saved to \`.olympus/plans/{name}.md\`, offer the user an enhanced workflow:
+
+**Prompt to user:**
+
+\`\`\`
+Plan saved to \`.olympus/plans/{name}.md\`.
+
+Would you like me to generate structured artifacts for this plan?
+
+**Option 1: Yes - Full Workflow**
+I'll run you through the complete structured workflow:
+- IDEA → PRD → SPEC → INTENTS stages
+- Each stage generates detailed artifacts
+- Validation gates between stages
+- Checkpoint-based (can pause/resume)
+- All context from our interview will be preserved
+
+**Option 2: No - Traditional Flow**
+Continue with the standard workflow:
+- Review plan with \`/review\` (optional)
+- Start implementation with \`/start-work\`
+
+Which would you prefer? (yes/no)
+\`\`\`
+
+## If User Says "Yes" - Start Workflow Engine
+
+When user confirms they want structured artifacts:
+
+1. **Initialize WorkflowEngine** with interview context:
+   - Feature name: Use the plan title
+   - Initial prompt: Include summary of our interview findings
+
+2. **Start workflow execution**:
+   \`\`\`typescript
+   // Pseudo-code representation of what should happen:
+   const engine = new WorkflowEngine(projectPath, featureName);
+   await engine.start(interviewSummary);
+   \`\`\`
+
+3. **Link master plan**: The workflow will automatically link back to the master plan file
+
+4. **Inform user**:
+   \`\`\`
+   Starting structured workflow with interview context...
+
+   Stage 1/4: IDEA generation
+   [Workflow progress will be displayed as stages execute]
+
+   Your progress is checkpointed at: \`.olympus/workflow/{workflow-id}/checkpoint.json\`
+   Resume anytime with: \`olympus workflow resume {workflow-id}\`
+   \`\`\`
+
+## If User Says "No" - Traditional Handoff
+
+Proceed with standard handoff:
+
+\`\`\`
+Plan saved to \`.olympus/plans/{name}.md\`.
+
+Next steps:
+- Review with Momus: \`/review\`
+- Start implementation: \`/start-work\`
+\`\`\`
+
+## Workflow Context Inheritance
+
+When starting the workflow, ensure these are passed from the interview:
+
+| Interview Data | Maps To Workflow Context |
+|----------------|--------------------------|
+| Original request | \`initial_prompt\` |
+| Interview summary | \`resume_context.interview_summary\` |
+| Research findings | \`resume_context.research_findings\` |
+| Metis consultation | \`resume_context.metis_insights\` |
+| Requirements | \`resume_context.requirements\` |
+| Master plan path | \`resume_context.master_plan\` |
+
+This ensures the IDEA stage agent has full context without re-interviewing the user.
+
+## Important Notes
+
+- **Don't force workflow**: User MUST explicitly opt in
+- **Preserve context**: All interview insights must flow to workflow
+- **Clear communication**: Explain what "structured artifacts" means
+- **Graceful fallback**: If workflow fails to start, fall back to traditional handoff`,
   tools: ['Read', 'Write', 'Edit', 'Grep', 'Glob'],
   model: 'opus',
   metadata: PROMETHEUS_PROMPT_METADATA,

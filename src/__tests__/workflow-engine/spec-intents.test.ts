@@ -575,7 +575,7 @@ estimated_effort: ${effort}
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues).toContain(
-        'Tasks directory not found or inaccessible'
+        'Tasks directory not found'
       );
     });
 

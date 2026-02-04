@@ -11,6 +11,7 @@ import { WorkflowStage, IntentTask, IntentNode, DependencyGraph } from './types.
  * - .olympus/workflow/{workflowId}/checkpoint.json (if not exists)
  *
  * Idempotent - safe to call multiple times.
+ * @throws Error if disk is full or permissions are denied
  */
 export async function ensureWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
   const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
@@ -18,19 +19,59 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
   const validationDir = path.join(workflowDir, 'validation');
   const checkpointPath = path.join(workflowDir, 'checkpoint.json');
 
-  // Create directories
-  await fs.ensureDir(workflowDir);
-  await fs.ensureDir(intentsDir);
-  await fs.ensureDir(validationDir);
+  try {
+    // Create directories
+    await fs.ensureDir(workflowDir);
+    await fs.ensureDir(intentsDir);
+    await fs.ensureDir(validationDir);
 
-  // Initialize checkpoint.json if it doesn't exist
-  if (!await fs.pathExists(checkpointPath)) {
-    await fs.writeJson(checkpointPath, {
-      workflow_id: workflowId,
-      current_stage: 'idea',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, { spaces: 2 });
+    // Initialize checkpoint.json if it doesn't exist
+    if (!await fs.pathExists(checkpointPath)) {
+      await fs.writeJson(checkpointPath, {
+        workflow_id: workflowId,
+        current_stage: 'idea',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { spaces: 2 });
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Artifacts] Failed to create workflow directory: Disk full`);
+      console.error(`[Artifacts] Please free up disk space and try again.`);
+      console.error(`[Artifacts] Attempted path: ${workflowDir}`);
+      throw new Error(
+        'Failed to create workflow directory: Disk is full. Please free up space and retry.'
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to create workflow directory: Permission denied`);
+      console.error(`[Artifacts] Path: ${workflowDir}`);
+      throw new Error(
+        `Failed to create workflow directory: Permission denied for ${workflowDir}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Artifacts] Failed to create workflow directory: Read-only filesystem`);
+      console.error(`[Artifacts] Path: ${workflowDir}`);
+      throw new Error(
+        'Failed to create workflow directory: Filesystem is read-only'
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to create workflow directory: ${err.message}`);
+    console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+    console.error(`[Artifacts] Path: ${workflowDir}`);
+    throw new Error(
+      `Failed to create workflow directory for ${workflowId}: ${err.message}`
+    );
   }
 }
 
@@ -67,6 +108,7 @@ export function getArtifactPath(projectPath: string, workflowId: string, stage: 
  *
  * @throws Error if stage is 'intents' (use different function for multiple intent files)
  * @throws Error if stage is 'complete' (no artifact for complete stage)
+ * @throws Error if disk is full or permissions are denied
  */
 export async function writeArtifact(
   projectPath: string,
@@ -79,8 +121,48 @@ export async function writeArtifact(
   }
 
   const artifactPath = getArtifactPath(projectPath, workflowId, stage);
-  await fs.ensureDir(path.dirname(artifactPath));
-  await fs.writeFile(artifactPath, content, 'utf-8');
+
+  try {
+    await fs.ensureDir(path.dirname(artifactPath));
+    await fs.writeFile(artifactPath, content, 'utf-8');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Artifacts] Failed to write ${stage} artifact: Disk full`);
+      console.error(`[Artifacts] Please free up disk space and try again.`);
+      console.error(`[Artifacts] Path: ${artifactPath}`);
+      throw new Error(
+        `Failed to write ${stage} artifact: Disk is full. Please free up space and retry.`
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to write ${stage} artifact: Permission denied`);
+      console.error(`[Artifacts] Path: ${artifactPath}`);
+      throw new Error(
+        `Failed to write ${stage} artifact: Permission denied for ${artifactPath}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Artifacts] Failed to write ${stage} artifact: Read-only filesystem`);
+      console.error(`[Artifacts] Path: ${artifactPath}`);
+      throw new Error(
+        `Failed to write ${stage} artifact: Filesystem is read-only`
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to write ${stage} artifact: ${err.message}`);
+    console.error(`[Artifacts] Path: ${artifactPath}`);
+    throw new Error(
+      `Failed to write ${stage} artifact: ${err.message}`
+    );
+  }
 }
 
 /**
@@ -89,6 +171,7 @@ export async function writeArtifact(
  * @returns Content of the artifact, or null if the file doesn't exist
  * @throws Error if stage is 'intents' (use different function to read multiple files)
  * @throws Error if stage is 'complete' (no artifact for complete stage)
+ * @throws Error if permissions are denied or file is corrupt
  */
 export async function readArtifact(
   projectPath: string,
@@ -101,11 +184,36 @@ export async function readArtifact(
 
   const artifactPath = getArtifactPath(projectPath, workflowId, stage);
 
-  if (!await fs.pathExists(artifactPath)) {
-    return null;
-  }
+  try {
+    if (!await fs.pathExists(artifactPath)) {
+      return null;
+    }
 
-  return await fs.readFile(artifactPath, 'utf-8');
+    return await fs.readFile(artifactPath, 'utf-8');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // File not found is expected (return null)
+    if (err.code === 'ENOENT') {
+      return null;
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to read ${stage} artifact: Permission denied`);
+      console.error(`[Artifacts] Path: ${artifactPath}`);
+      throw new Error(
+        `Failed to read ${stage} artifact: Permission denied for ${artifactPath}`
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to read ${stage} artifact: ${err.message}`);
+    console.error(`[Artifacts] Path: ${artifactPath}`);
+    throw new Error(
+      `Failed to read ${stage} artifact: ${err.message}`
+    );
+  }
 }
 
 /**
@@ -289,6 +397,7 @@ export function getExecutionOrder(graph: DependencyGraph): string[] {
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
+ * @throws Error if disk is full or permissions are denied
  *
  * @example
  * await linkMasterPlan('/path/to/project', 'wf-2024-01-15-user-auth');
@@ -299,9 +408,10 @@ export async function linkMasterPlan(
   workflowId: string
 ): Promise<void> {
   const plansDir = path.join(projectPath, '.olympus', 'plans');
-  await fs.ensureDir(plansDir);
-
   const planPath = path.join(plansDir, `${workflowId}-plan.md`);
+
+  try {
+    await fs.ensureDir(plansDir);
 
   const artifactsSection = `## Structured Artifacts
 
@@ -315,27 +425,66 @@ This feature was developed using the structured workflow system:
 - [Workflow Checkpoint](.olympus/workflow/${workflowId}/checkpoint.json)
 `;
 
-  let content = '';
+    let content = '';
 
-  if (await fs.pathExists(planPath)) {
-    // Read existing file
-    content = await fs.readFile(planPath, 'utf-8');
+    if (await fs.pathExists(planPath)) {
+      // Read existing file
+      content = await fs.readFile(planPath, 'utf-8');
 
-    // Check if Structured Artifacts section exists
-    const sectionRegex = /## Structured Artifacts[\s\S]*?(?=\n## |$)/;
-    if (sectionRegex.test(content)) {
-      // Replace existing section
-      content = content.replace(sectionRegex, artifactsSection.trim());
+      // Check if Structured Artifacts section exists
+      const sectionRegex = /## Structured Artifacts[\s\S]*?(?=\n## |$)/;
+      if (sectionRegex.test(content)) {
+        // Replace existing section
+        content = content.replace(sectionRegex, artifactsSection.trim());
+      } else {
+        // Append section at the end
+        content = content.trim() + '\n\n' + artifactsSection;
+      }
     } else {
-      // Append section at the end
-      content = content.trim() + '\n\n' + artifactsSection;
-    }
-  } else {
-    // Create new file with header
-    content = `# Plan: ${workflowId}
+      // Create new file with header
+      content = `# Plan: ${workflowId}
 
 ${artifactsSection}`;
-  }
+    }
 
-  await fs.writeFile(planPath, content, 'utf-8');
+    await fs.writeFile(planPath, content, 'utf-8');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Artifacts] Failed to link master plan: Disk full`);
+      console.error(`[Artifacts] Please free up disk space and try again.`);
+      console.error(`[Artifacts] Path: ${planPath}`);
+      throw new Error(
+        'Failed to link master plan: Disk is full. Please free up space and retry.'
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to link master plan: Permission denied`);
+      console.error(`[Artifacts] Path: ${planPath}`);
+      throw new Error(
+        `Failed to link master plan: Permission denied for ${planPath}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Artifacts] Failed to link master plan: Read-only filesystem`);
+      console.error(`[Artifacts] Path: ${planPath}`);
+      throw new Error(
+        'Failed to link master plan: Filesystem is read-only'
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to link master plan: ${err.message}`);
+    console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+    console.error(`[Artifacts] Path: ${planPath}`);
+    throw new Error(
+      `Failed to link master plan for ${workflowId}: ${err.message}`
+    );
+  }
 }

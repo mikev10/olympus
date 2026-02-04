@@ -52,6 +52,7 @@ export interface TaskStatusRecord {
  * @param status - New status for the task
  * @param error - Optional error message if status is 'failed'
  * @throws Error if checkpoint doesn't exist
+ * @throws Error if disk is full or permissions are denied
  */
 export async function updateTaskStatus(
   projectPath: string,
@@ -60,9 +61,22 @@ export async function updateTaskStatus(
   status: TaskStatus,
   error?: string
 ): Promise<void> {
-  const checkpoint = await loadCheckpoint(projectPath, workflowId);
+  let checkpoint;
+
+  try {
+    checkpoint = await loadCheckpoint(projectPath, workflowId);
+  } catch (error) {
+    const err = error as Error;
+    console.error(`[Execution] Failed to load checkpoint for task status update: ${err.message}`);
+    console.error(`[Execution] Workflow ID: ${workflowId}, Task ID: ${taskId}`);
+    throw new Error(
+      `Failed to update task status: Could not load checkpoint for workflow ${workflowId}`
+    );
+  }
 
   if (!checkpoint) {
+    console.error(`[Execution] Workflow ${workflowId} not found for task status update`);
+    console.error(`[Execution] Task ID: ${taskId}`);
     throw new Error(`Workflow ${workflowId} not found`);
   }
 
@@ -95,14 +109,24 @@ export async function updateTaskStatus(
   }
 
   // Save updated checkpoint
-  await saveCheckpoint(projectPath, checkpoint);
+  try {
+    await saveCheckpoint(projectPath, checkpoint);
+  } catch (error) {
+    const err = error as Error;
+    console.error(`[Execution] Failed to save checkpoint after task status update: ${err.message}`);
+    console.error(`[Execution] Workflow ID: ${workflowId}, Task ID: ${taskId}, Status: ${status}`);
+    throw new Error(
+      `Failed to update task status: Could not save checkpoint - ${err.message}`
+    );
+  }
 
   // Update master plan progress section
   try {
     await updateMasterPlanProgress(projectPath, workflowId);
   } catch (error) {
     // Log warning but don't fail the status update if plan update fails
-    console.warn(`Failed to update master plan progress: ${(error as Error).message}`);
+    console.warn(`[Execution] Failed to update master plan progress: ${(error as Error).message}`);
+    console.warn(`[Execution] Task status was saved, but plan file was not updated`);
   }
 }
 
@@ -142,7 +166,7 @@ export async function getTaskStatus(
  *
  * @param projectPath - Root path of the project
  * @param workflowId - ID of the workflow
- * @returns Dependency graph or null if not found
+ * @returns Dependency graph or null if not found or corrupt
  */
 async function loadDependencyGraph(
   projectPath: string,
@@ -163,7 +187,28 @@ async function loadDependencyGraph(
 
     return await fs.readJson(graphPath);
   } catch (error) {
-    console.warn(`Failed to load dependency graph for ${workflowId}:`, (error as Error).message);
+    const err = error as Error;
+
+    // Handle JSON parse errors (corrupt graph)
+    if (err.name === 'SyntaxError' || err.message.includes('JSON')) {
+      console.warn(`[Execution] Corrupt dependency graph detected for workflow ${workflowId}`);
+      console.warn(`[Execution] Path: ${graphPath}`);
+      console.warn(`[Execution] Error: ${err.message}`);
+      console.warn(`[Execution] To reset, regenerate the dependency graph from SPEC`);
+      return null;
+    }
+
+    // Handle permission errors
+    const nodeErr = err as NodeJS.ErrnoException;
+    if (nodeErr.code === 'EACCES' || nodeErr.code === 'EPERM') {
+      console.warn(`[Execution] Permission denied reading dependency graph for ${workflowId}`);
+      console.warn(`[Execution] Path: ${graphPath}`);
+      return null;
+    }
+
+    // Generic error
+    console.warn(`[Execution] Failed to load dependency graph for ${workflowId}: ${err.message}`);
+    console.warn(`[Execution] Path: ${graphPath}`);
     return null;
   }
 }
@@ -429,34 +474,75 @@ export async function getExecutionOrder(
  * @param baseDir - Base directory of the project (typically process.cwd())
  * @param workflowId - ID of the workflow
  * @throws Error if checkpoint or dependency graph doesn't exist
+ * @throws Error if disk is full or permissions are denied
  */
 export async function updateMasterPlanProgress(
   baseDir: string,
   workflowId: string
 ): Promise<void> {
-  const checkpoint = await loadCheckpoint(baseDir, workflowId);
+  let checkpoint;
+
+  try {
+    checkpoint = await loadCheckpoint(baseDir, workflowId);
+  } catch (error) {
+    const err = error as Error;
+    console.error(`[Execution] Failed to load checkpoint for plan update: ${err.message}`);
+    console.error(`[Execution] Workflow ID: ${workflowId}`);
+    throw new Error(
+      `Failed to update master plan progress: Could not load checkpoint for ${workflowId}`
+    );
+  }
 
   if (!checkpoint) {
+    console.error(`[Execution] Workflow ${workflowId} not found for plan update`);
     throw new Error(`Workflow ${workflowId} not found`);
   }
 
   const graph = await loadDependencyGraph(baseDir, workflowId);
 
   if (!graph) {
+    console.error(`[Execution] Dependency graph not found for workflow ${workflowId}`);
+    console.error(`[Execution] Cannot update master plan progress without dependency graph`);
     throw new Error(`Dependency graph not found for workflow ${workflowId}`);
   }
 
   const planPath = join(baseDir, '.olympus', 'plans', `${workflowId}-plan.md`);
 
   // Check if plan file exists
-  const planExists = await fs.pathExists(planPath);
-  if (!planExists) {
-    console.warn(`Plan file not found: ${planPath}`);
+  try {
+    const planExists = await fs.pathExists(planPath);
+    if (!planExists) {
+      console.warn(`[Execution] Plan file not found: ${planPath}`);
+      console.warn(`[Execution] Skipping master plan progress update`);
+      return;
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    console.warn(`[Execution] Failed to check plan file existence: ${err.message}`);
+    console.warn(`[Execution] Path: ${planPath}`);
     return;
   }
 
   // Read existing plan content
-  let planContent = await fs.readFile(planPath, 'utf-8');
+  let planContent: string;
+  try {
+    planContent = await fs.readFile(planPath, 'utf-8');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Execution] Permission denied reading plan file: ${planPath}`);
+      throw new Error(
+        `Failed to update master plan progress: Permission denied for ${planPath}`
+      );
+    }
+
+    console.error(`[Execution] Failed to read plan file: ${err.message}`);
+    console.error(`[Execution] Path: ${planPath}`);
+    throw new Error(
+      `Failed to update master plan progress: Could not read plan file - ${err.message}`
+    );
+  }
 
   // Get task statuses
   const taskStatuses = checkpoint.resume_context?.task_statuses as TaskStatusRecord[] | undefined;
@@ -520,5 +606,44 @@ export async function updateMasterPlanProgress(
   }
 
   // Write updated plan back to disk
-  await fs.writeFile(planPath, planContent, 'utf-8');
+  try {
+    await fs.writeFile(planPath, planContent, 'utf-8');
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Execution] Failed to write plan file: Disk full`);
+      console.error(`[Execution] Please free up disk space and try again.`);
+      console.error(`[Execution] Path: ${planPath}`);
+      throw new Error(
+        'Failed to update master plan progress: Disk is full. Please free up space and retry.'
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Execution] Failed to write plan file: Permission denied`);
+      console.error(`[Execution] Path: ${planPath}`);
+      throw new Error(
+        `Failed to update master plan progress: Permission denied for ${planPath}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Execution] Failed to write plan file: Read-only filesystem`);
+      console.error(`[Execution] Path: ${planPath}`);
+      throw new Error(
+        'Failed to update master plan progress: Filesystem is read-only'
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Execution] Failed to write plan file: ${err.message}`);
+    console.error(`[Execution] Path: ${planPath}`);
+    throw new Error(
+      `Failed to update master plan progress: ${err.message}`
+    );
+  }
 }

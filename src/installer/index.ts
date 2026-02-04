@@ -2754,7 +2754,104 @@ Or manually:
 - This command helps agents know what to work on next
 - It respects the dependency graph and only shows tasks with all dependencies met
 - The intent file contains the full implementation prompt
-- Task statuses are tracked in checkpoint.json resume_context`
+- Task statuses are tracked in checkpoint.json resume_context`,
+
+  'idea.md': `---
+description: Generate IDEA artifact for structured workflow
+---
+
+You are executing the IDEA stage of a structured workflow.
+
+Feature: $ARGUMENTS
+
+INSTRUCTIONS:
+1. Check if workflow exists: \`.olympus/workflow/{feature}/checkpoint.json\`
+2. If exists, load context and continue
+3. If not, create new workflow and start IDEA interview
+
+Invoke the idea-intake agent to gather:
+- Problem statement
+- Business context
+- Success metrics
+- Constraints
+- Risk tier
+
+Save artifact to: \`.olympus/workflow/{feature}/idea.md\`
+Update checkpoint after completion.`,
+
+  'prd.md': `---
+description: Generate PRD artifact for structured workflow
+---
+
+You are executing the PRD stage of a structured workflow.
+
+Feature: $ARGUMENTS
+
+INSTRUCTIONS:
+1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
+2. Read IDEA artifact: \`.olympus/workflow/{feature}/idea.md\`
+3. Invoke prd-writer agent to generate user stories with acceptance criteria
+
+Ensure all IDEA constraints are addressed in the PRD.
+Run Momus validation after generation.
+Update checkpoint with PRD artifact reference.`,
+
+  'spec.md': `---
+description: Generate SPEC artifact for structured workflow
+---
+
+You are executing the SPEC stage of a structured workflow.
+
+Feature: $ARGUMENTS
+
+INSTRUCTIONS:
+1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
+2. Read IDEA and PRD artifacts
+3. Invoke spec-writer agent to design technical architecture
+
+Use explore/librarian agents to analyze existing codebase.
+Ensure all PRD user stories are addressed in the design.
+Run Metis validation after generation.
+Update checkpoint with SPEC artifact reference.`,
+
+  'intents.md': `---
+description: Generate INTENTS (executable tasks) for structured workflow
+---
+
+You are executing the INTENTS stage of a structured workflow.
+
+Feature: $ARGUMENTS
+
+INSTRUCTIONS:
+1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
+2. Read SPEC artifact: \`.olympus/workflow/{feature}/spec.md\`
+3. Invoke intent-generator agent to decompose SPEC into atomic tasks
+
+Generate:
+- INTENT-{NNN}.md files with prompts and acceptance criteria
+- dependency-graph.json defining execution order
+
+Run coverage validation (100% of SPEC components must have tasks).
+Update checkpoint with task references.`,
+
+  'workflow-status.md': `---
+description: Show status of active workflows
+---
+
+Display all active structured workflows.
+
+INSTRUCTIONS:
+1. Scan \`.olympus/workflow/\` directory for checkpoint files
+2. For each checkpoint, show:
+   - Feature name
+   - Current stage
+   - Status
+   - Last updated timestamp
+   - Path to checkpoint
+
+If no active workflows, display: "No active workflows found."
+
+Use \`/plan continue\` to resume a paused workflow.`
 };
 
 // SKILL_DEFINITIONS removed - skills are now only in COMMAND_DEFINITIONS to avoid duplicates

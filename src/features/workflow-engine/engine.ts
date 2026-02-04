@@ -82,6 +82,7 @@ export class WorkflowEngine {
    * Start a new workflow from the IDEA stage
    *
    * @param initialPrompt - The user's initial description of the feature
+   * @throws Error if disk is full, permissions are denied, or workflow initialization fails
    */
   async start(initialPrompt: string): Promise<void> {
     // Create initial checkpoint
@@ -112,11 +113,27 @@ export class WorkflowEngine {
       },
     };
 
-    // Create directory structure
-    await ensureWorkflowDir(this.projectPath, this.workflowId);
+    try {
+      // Create directory structure
+      await ensureWorkflowDir(this.projectPath, this.workflowId);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to initialize workflow directory: ${err.message}`);
+      throw new Error(
+        `Failed to start workflow: Could not create directory structure - ${err.message}`
+      );
+    }
 
-    // Save initial checkpoint
-    await saveCheckpoint(this.projectPath, checkpoint);
+    try {
+      // Save initial checkpoint
+      await saveCheckpoint(this.projectPath, checkpoint);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to save initial checkpoint: ${err.message}`);
+      throw new Error(
+        `Failed to start workflow: Could not save checkpoint - ${err.message}`
+      );
+    }
 
     // Setup interrupt handler before executing stages
     this.setupInterruptHandler();
@@ -124,6 +141,30 @@ export class WorkflowEngine {
     try {
       // Execute the IDEA stage
       await this.executeStage('idea');
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to execute IDEA stage: ${err.message}`);
+
+      // Try to save checkpoint as paused so workflow can be resumed
+      try {
+        const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        if (updatedCheckpoint) {
+          updatedCheckpoint.status = 'paused';
+          updatedCheckpoint.resume_context = {
+            ...updatedCheckpoint.resume_context,
+            error_message: err.message,
+            failed_stage: 'idea',
+          };
+          await saveCheckpoint(this.projectPath, updatedCheckpoint);
+          console.log('[WorkflowEngine] Workflow saved as paused. Resume with `/plan continue`');
+        }
+      } catch (saveError) {
+        console.warn('[WorkflowEngine] Failed to save error checkpoint:', (saveError as Error).message);
+      }
+
+      throw new Error(
+        `Failed to execute IDEA stage: ${err.message}`
+      );
     } finally {
       // Clean up interrupt handler after workflow completes or errors
       this.cleanupInterruptHandler();
@@ -134,11 +175,24 @@ export class WorkflowEngine {
    * Resume an existing workflow from its current stage
    *
    * @returns Status message indicating what happened
+   * @throws Error if checkpoint doesn't exist or workflow execution fails
    */
   async resume(): Promise<string> {
-    const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    let checkpoint;
+
+    try {
+      checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to load checkpoint for resume: ${err.message}`);
+      throw new Error(
+        `Failed to resume workflow: Could not load checkpoint - ${err.message}`
+      );
+    }
 
     if (!checkpoint) {
+      console.error(`[WorkflowEngine] No checkpoint found for workflow: ${this.workflowId}`);
+      console.error(`[WorkflowEngine] Available workflows: Run 'olympus workflow list' to see workflows`);
       throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
     }
 
@@ -150,38 +204,94 @@ export class WorkflowEngine {
     // Update status to in_progress if it was paused
     if (checkpoint.status === 'paused') {
       checkpoint.status = 'in_progress';
-      await saveCheckpoint(this.projectPath, checkpoint);
+
+      try {
+        await saveCheckpoint(this.projectPath, checkpoint);
+      } catch (error) {
+        const err = error as Error;
+        console.error(`[WorkflowEngine] Failed to update checkpoint status: ${err.message}`);
+        throw new Error(
+          `Failed to resume workflow: Could not save checkpoint - ${err.message}`
+        );
+      }
     }
 
     // Setup interrupt handler before executing stages
     this.setupInterruptHandler();
 
+    const currentStage = checkpoint.current_stage;
+
     try {
       // Execute the current stage
-      await this.executeStage(checkpoint.current_stage);
+      await this.executeStage(currentStage);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to execute ${currentStage} stage: ${err.message}`);
+
+      // Try to save checkpoint as paused so workflow can be resumed again
+      try {
+        const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        if (updatedCheckpoint) {
+          updatedCheckpoint.status = 'paused';
+          updatedCheckpoint.resume_context = {
+            ...updatedCheckpoint.resume_context,
+            error_message: err.message,
+            failed_stage: currentStage,
+          };
+          await saveCheckpoint(this.projectPath, updatedCheckpoint);
+          console.log('[WorkflowEngine] Workflow saved as paused. Fix the issue and resume with `/plan continue`');
+        }
+      } catch (saveError) {
+        console.warn('[WorkflowEngine] Failed to save error checkpoint:', (saveError as Error).message);
+      }
+
+      throw new Error(
+        `Failed to execute ${currentStage} stage: ${err.message}`
+      );
     } finally {
       // Clean up interrupt handler after workflow completes or errors
       this.cleanupInterruptHandler();
     }
 
-    return `Resumed workflow from stage: ${checkpoint.current_stage}`;
+    return `Resumed workflow from stage: ${currentStage}`;
   }
 
   /**
    * Pause the workflow at its current state
    *
    * @returns Path to the checkpoint file
+   * @throws Error if checkpoint doesn't exist or save fails
    */
   async pause(): Promise<string> {
-    const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    let checkpoint;
+
+    try {
+      checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to load checkpoint for pause: ${err.message}`);
+      throw new Error(
+        `Failed to pause workflow: Could not load checkpoint - ${err.message}`
+      );
+    }
 
     if (!checkpoint) {
+      console.error(`[WorkflowEngine] No checkpoint found for workflow: ${this.workflowId}`);
       throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
     }
 
     // Update status to paused
     checkpoint.status = 'paused';
-    await saveCheckpoint(this.projectPath, checkpoint);
+
+    try {
+      await saveCheckpoint(this.projectPath, checkpoint);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to save paused checkpoint: ${err.message}`);
+      throw new Error(
+        `Failed to pause workflow: Could not save checkpoint - ${err.message}`
+      );
+    }
 
     // Return the checkpoint file path
     return `.olympus/workflow/${this.workflowId}/checkpoint.json`;
@@ -246,11 +356,24 @@ export class WorkflowEngine {
 
   /**
    * Get the current status of the workflow
+   *
+   * @throws Error if checkpoint doesn't exist or load fails
    */
   async getStatus(): Promise<WorkflowStatusResponse> {
-    const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    let checkpoint;
+
+    try {
+      checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    } catch (error) {
+      const err = error as Error;
+      console.error(`[WorkflowEngine] Failed to load checkpoint for status: ${err.message}`);
+      throw new Error(
+        `Failed to get workflow status: Could not load checkpoint - ${err.message}`
+      );
+    }
 
     if (!checkpoint) {
+      console.error(`[WorkflowEngine] No checkpoint found for workflow: ${this.workflowId}`);
       throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
     }
 
