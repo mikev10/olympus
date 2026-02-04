@@ -37,6 +37,8 @@ export { prometheusAgent, PROMETHEUS_PROMPT_METADATA } from './prometheus.js';
 export { qaTesterAgent, QA_TESTER_PROMPT_METADATA } from './qa-tester.js';
 export { ideaIntakeAgent, IDEA_INTAKE_PROMPT_METADATA } from './idea-intake.js';
 export { prdWriterAgent, PRD_WRITER_PROMPT_METADATA } from './prd-writer.js';
+export { specWriterAgent, SPEC_WRITER_PROMPT_METADATA } from './spec-writer.js';
+export { intentGeneratorAgent, INTENT_GENERATOR_PROMPT_METADATA } from './intent-generator.js';
 
 // Legacy exports (backward compatibility - getAgentDefinitions and olympusSystemPrompt)
 export {

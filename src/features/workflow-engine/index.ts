@@ -16,6 +16,9 @@ export type {
   ValidationResult,
   RequirementMapping,
   WorkflowCheckpoint,
+  IntentTask,
+  IntentNode,
+  DependencyGraph,
 } from './types.js';
 
 // Checkpoint persistence
@@ -32,10 +35,14 @@ export {
   getArtifactPath,
   writeArtifact,
   readArtifact,
+  generateDependencyGraph,
+  validateDependencyGraph,
+  getExecutionOrder,
+  linkMasterPlan,
 } from './artifacts.js';
 
 // Validation
-export { validateIdea, validatePrd } from './validation.js';
+export { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
 
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
