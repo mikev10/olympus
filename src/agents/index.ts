@@ -35,6 +35,8 @@ export { metisAgent, METIS_PROMPT_METADATA } from './metis.js';
 // export { orchestratorOlympusAgent, ORCHESTRATOR_OLYMPUS_PROMPT_METADATA } from './orchestrator-olympus.js';
 export { prometheusAgent, PROMETHEUS_PROMPT_METADATA } from './prometheus.js';
 export { qaTesterAgent, QA_TESTER_PROMPT_METADATA } from './qa-tester.js';
+export { ideaIntakeAgent, IDEA_INTAKE_PROMPT_METADATA } from './idea-intake.js';
+export { prdWriterAgent, PRD_WRITER_PROMPT_METADATA } from './prd-writer.js';
 
 // Legacy exports (backward compatibility - getAgentDefinitions and olympusSystemPrompt)
 export {
