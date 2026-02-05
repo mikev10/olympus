@@ -9,7 +9,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const outdir = join(__dirname, 'dist', 'hooks');
+const projectRoot = join(__dirname, '..');
+const outdir = join(projectRoot, 'dist', 'hooks');
 
 // Ensure output directory exists
 if (!existsSync(outdir)) {

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-02-04
+
+### Fixed
+- **Learning System Deployment**: Fixed hooks build output path to enable learning capture system
+  - Changed build script to output bundled hooks to `dist/hooks/` instead of `scripts/dist/hooks/`
+  - Resolved path mismatch where installer couldn't find bundled hooks file
+  - Learning capture hooks (feedback log, token tracking) now properly deployed to all users
+  - Affects all npm installations - users will receive learning capture on next update
+
 ## [3.6.1] - 2026-02-04
 
 ### Fixed
