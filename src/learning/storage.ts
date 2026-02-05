@@ -10,6 +10,10 @@ const MAX_JSONL_LINES = 10000;
 
 /** Get learning storage directory (cross-platform) */
 export function getLearningDir(): string {
+  // Allow tests to override the learning directory via environment variable
+  if (process.env.OLYMPUS_TEST_LEARNING_DIR) {
+    return process.env.OLYMPUS_TEST_LEARNING_DIR;
+  }
   return join(homedir(), '.claude', 'olympus', 'learning');
 }
 

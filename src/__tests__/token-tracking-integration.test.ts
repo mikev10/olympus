@@ -45,11 +45,14 @@ beforeEach(() => {
   mkdirSync(join(TEST_DIR, '.olympus'), { recursive: true });
   mkdirSync(TEST_LEARNING_DIR, { recursive: true });
 
-  // Mock getLearningDir to use test directory
-  vi.spyOn(storage, 'getLearningDir').mockReturnValue(TEST_LEARNING_DIR);
+  // Override learning directory via environment variable (more reliable than mocking)
+  process.env.OLYMPUS_TEST_LEARNING_DIR = TEST_LEARNING_DIR;
 });
 
 afterEach(() => {
+  // Clean up environment variable
+  delete process.env.OLYMPUS_TEST_LEARNING_DIR;
+
   // Restore mocks
   vi.restoreAllMocks();
 

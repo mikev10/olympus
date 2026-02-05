@@ -15,6 +15,7 @@ import { estimateTokens } from '../../learning/token-estimator.js';
 import type { HookContext } from '../../hooks/types.js';
 
 const TEST_DIR = join(process.cwd(), '.test-learning-capture');
+const TEST_LEARNING_DIR = join(TEST_DIR, '.claude', 'olympus', 'learning');
 
 describe('Learning Capture Integration', () => {
   beforeEach(async () => {
@@ -22,12 +23,19 @@ describe('Learning Capture Integration', () => {
     if (!existsSync(TEST_DIR)) {
       mkdirSync(TEST_DIR, { recursive: true });
     }
+    mkdirSync(TEST_LEARNING_DIR, { recursive: true });
+
+    // Override learning directory to use test directory
+    process.env.OLYMPUS_TEST_LEARNING_DIR = TEST_LEARNING_DIR;
 
     // Pre-initialize tokenizer to avoid async import delays during hook execution
     await estimateTokens('warm up tokenizer');
   });
 
   afterEach(() => {
+    // Clean up environment variable
+    delete process.env.OLYMPUS_TEST_LEARNING_DIR;
+
     // Clean up test directory
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true, force: true });

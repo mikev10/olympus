@@ -6,6 +6,10 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     exclude: ['node_modules', 'dist', '.olympus'],
+    // Isolate tests from production learning directory
+    env: {
+      OLYMPUS_TEST_MODE: '1',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

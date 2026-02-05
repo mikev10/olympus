@@ -7,6 +7,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { registerAllHooks, resetRegistration } from '../../hooks/registrations/index.js';
 import { routeHook } from '../../hooks/router.js';
 import { clearHooks } from '../../hooks/registry.js';
+import { join } from 'path';
+import { mkdirSync, rmSync, existsSync } from 'fs';
 
 // Mock config to avoid file system IO
 vi.mock('../../config/loader.js', () => ({
@@ -24,8 +26,18 @@ vi.mock('../../config/loader.js', () => ({
   }
 }));
 
+const TEST_DIR = join(process.cwd(), '.test-hook-performance');
+const TEST_LEARNING_DIR = join(TEST_DIR, '.claude', 'olympus', 'learning');
+
 describe('Hook Performance', () => {
   beforeAll(() => {
+    // Create isolated test directory
+    mkdirSync(TEST_DIR, { recursive: true });
+    mkdirSync(TEST_LEARNING_DIR, { recursive: true });
+
+    // Override learning directory
+    process.env.OLYMPUS_TEST_LEARNING_DIR = TEST_LEARNING_DIR;
+
     clearHooks();
     registerAllHooks();
   });
@@ -33,6 +45,14 @@ describe('Hook Performance', () => {
   afterAll(() => {
     clearHooks();
     resetRegistration();
+
+    // Clean up environment variable
+    delete process.env.OLYMPUS_TEST_LEARNING_DIR;
+
+    // Clean up test directory
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
   });
 
   describe('Latency Budget (200ms per event)', () => {
@@ -42,7 +62,7 @@ describe('Hook Performance', () => {
       await routeHook('UserPromptSubmit', {
         prompt: 'test prompt with ultrawork keyword',
         sessionId: 'perf-test-session',
-        directory: process.cwd()
+        directory: TEST_DIR
       });
 
       const elapsed = performance.now() - start;
@@ -54,7 +74,7 @@ describe('Hook Performance', () => {
 
       await routeHook('SessionStart', {
         sessionId: 'perf-test-session',
-        directory: process.cwd()
+        directory: TEST_DIR
       });
 
       const elapsed = performance.now() - start;
@@ -66,7 +86,7 @@ describe('Hook Performance', () => {
 
       await routeHook('Stop', {
         sessionId: 'perf-test-session',
-        directory: process.cwd()
+        directory: TEST_DIR
       });
 
       const elapsed = performance.now() - start;
@@ -80,7 +100,7 @@ describe('Hook Performance', () => {
         toolName: 'read',
         toolInput: { file_path: '/test/file.ts' },
         sessionId: 'perf-test-session',
-        directory: process.cwd()
+        directory: TEST_DIR
       });
 
       const elapsed = performance.now() - start;
@@ -95,7 +115,7 @@ describe('Hook Performance', () => {
         toolInput: { file_path: '/test/file.ts' },
         toolOutput: { output: 'Success' },
         sessionId: 'perf-test-session',
-        directory: process.cwd()
+        directory: TEST_DIR
       });
 
       const elapsed = performance.now() - start;
