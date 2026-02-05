@@ -76,7 +76,16 @@ async function main(): Promise<void> {
 
   let context: HookContext;
   try {
-    context = JSON.parse(inputStr);
+    const rawContext = JSON.parse(inputStr) as Record<string, unknown>;
+
+    // Map Claude Code field names to our HookContext interface
+    // Claude Code sends: cwd, session_id, transcript_path, hook_event_name
+    // We expect: directory, sessionId, (other fields stay the same)
+    context = {
+      ...rawContext,
+      directory: (rawContext.cwd as string) || (rawContext.directory as string),
+      sessionId: (rawContext.session_id as string) || (rawContext.sessionId as string),
+    } as HookContext;
   } catch {
     context = {};
   }

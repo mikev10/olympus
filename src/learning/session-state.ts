@@ -51,6 +51,11 @@ export function loadSessionState(directory: string, sessionId?: string): Session
     return createSessionState(sessionId, directory);
   }
 
+  // Update session ID if it changed (new Claude Code session)
+  if (sessionId && state.session_id !== sessionId) {
+    state.session_id = sessionId;
+  }
+
   // Initialize token_budget if missing (backward compatibility)
   if (!state.token_budget) {
     const baseline = getSessionBaseline(directory);
