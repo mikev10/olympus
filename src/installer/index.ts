@@ -1713,18 +1713,40 @@ Guide the user through planning by:
 
 **CRITICAL**: Ask questions DIRECTLY to the user via your normal message output. Questions MUST be visible immediately.
 
-Ask about:
-- **Goals**: What problem are we solving? What does success look like?
-- **Constraints**: Technical limitations, timeline, resources, compatibility requirements
-- **Context**: Existing code patterns, user preferences, architectural decisions
-- **Risks**: What could go wrong? What are the edge cases?
-- **Preferences**: Implementation approach, libraries, patterns to follow/avoid
+**Workflow Structure** (follow these steps in order):
 
-**DO NOT** assume anything. Ask until requirements are crystal clear.
+#### Step 1: Scoping Questions (Ask 2-3 Critical Questions)
+- [ ] What is the core objective?
+- [ ] What are the hard constraints (technical, timeline, compatibility)?
+- [ ] Is this modifying existing code or creating new code?
+- [ ] Record what you asked (maintain mental checklist)
 
-Use research agents for context:
-- \`Task(subagent_type="explore", ...)\` - Find existing implementations in codebase
-- \`Task(subagent_type="librarian", ...)\` - Research external docs and best practices
+**DO NOT** ask more than 3 questions in this step. Keep them high-level and scoping-focused.
+
+#### Step 2: Research (Launch After Receiving Scoping Answers)
+- [ ] Based on user's answers, determine if research is needed
+- [ ] IF modifying existing code → \`Task(subagent_type="explore", ...)\`
+- [ ] IF needs best practices/external docs → \`Task(subagent_type="librarian", ...)\`
+- [ ] Wait for research results before proceeding to Step 3
+
+#### Step 3: Detailed Questions (Ask 3-5 Questions Informed by Research)
+- [ ] **FIRST**: Review what you already asked in Step 1
+- [ ] **SECOND**: Review what research revealed
+- [ ] **THIRD**: Ask ONLY NEW questions that address gaps
+
+Ask about (only if not covered by Step 1 or research):
+- **Implementation preferences** revealed by research findings
+- **Edge cases** discovered during codebase exploration
+- **Architectural decisions** needed for the specific context
+- **Risk mitigation** approaches for identified concerns
+
+**Quality Gate (MANDATORY)**:
+- [ ] Maximum 7 total questions across Steps 1 and 3 combined
+- [ ] Each question must be unique (no duplicates from Step 1)
+- [ ] If research answered a question → skip it, don't ask
+- [ ] No redundant questions (e.g., asking "slash command or CLI?" twice)
+
+**CRITICAL RULE**: If you catch yourself about to ask something you already asked or that research answered, STOP and skip that question.
 
 ### Phase 2: Pre-Plan Consultation
 
