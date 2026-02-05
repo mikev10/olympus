@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-02-04
+
+### Fixed
+- **Plan Command Workflow**: Restructured `/plan` command to prevent redundant questions
+  - Added explicit 3-step workflow: Scoping (2-3 questions) → Research → Detailed questions (3-5 max)
+  - Implemented anti-redundancy mechanisms with mandatory review checkpoints
+  - Added quality gate: 7 question maximum across all steps, no duplicates allowed
+  - Fixed issue where research agents were launched mid-interview, causing duplicate questions
+
 ## [3.6.0] - 2026-02-04
 
 ### Added - Enhanced Plan Workflow Implementation Complete
