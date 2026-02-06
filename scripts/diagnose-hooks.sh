@@ -44,7 +44,7 @@ echo ""
 
 # Test 3: Test UserPromptSubmit hook with REAL context structure
 echo "Test 3: Testing UserPromptSubmit hook execution..."
-TEST_INPUT=$(cat <<'EOF'
+TEST_INPUT=$(cat <<EOF
 {
   "session_id": "diagnostic-test-001",
   "transcript_path": "/tmp/transcript.jsonl",
@@ -68,7 +68,7 @@ echo ""
 
 # Test 4: Test PostToolUse hook
 echo "Test 4: Testing PostToolUse hook execution..."
-TEST_INPUT=$(cat <<'EOF'
+TEST_INPUT=$(cat <<EOF
 {
   "session_id": "diagnostic-test-001",
   "transcript_path": "/tmp/transcript.jsonl",
@@ -90,7 +90,7 @@ echo ""
 
 # Test 5: Test Stop hook
 echo "Test 5: Testing Stop hook execution..."
-TEST_INPUT=$(cat <<'EOF'
+TEST_INPUT=$(cat <<EOF
 {
   "session_id": "diagnostic-test-001",
   "transcript_path": "/tmp/transcript.jsonl",
