@@ -14,6 +14,7 @@ import { registerPostToolUseFailureHooks } from './post-tool-use-failure.js';
 import { registerNotificationHooks } from './notification.js';
 import { registerLearningCaptureHooks } from './learning-capture.js';
 import { registerBudgetWarningHook } from './budget-warning.js';
+import { registerAgentTrackingHook } from './agent-tracking.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -37,6 +38,7 @@ export function registerAllHooks(): void {
   registerNotificationHooks();
   registerLearningCaptureHooks();
   registerBudgetWarningHook(); // Token budget warning (informational)
+  registerAgentTrackingHook(); // Agent usage tracking for learning system
 
   registered = true;
 }
@@ -60,4 +62,5 @@ export {
   registerNotificationHooks,
   registerLearningCaptureHooks,
   registerBudgetWarningHook,
+  registerAgentTrackingHook,
 };

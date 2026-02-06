@@ -22,9 +22,9 @@ import { registerHook } from '../registry.js';
 import { estimateTokens, estimateTokensFromToolOutput } from '../../learning/token-estimator.js';
 import { calculateCost } from '../../learning/pricing.js';
 import { loadSessionState, saveSessionState } from '../../learning/session-state.js';
-import { appendFeedback, updateAgentPerformance, loadFeedback } from '../../learning/storage.js';
+import { appendFeedback, appendSessionSummary } from '../../learning/storage.js';
 import type { HookContext, HookResult } from '../types.js';
-import type { SessionState, FeedbackEntry, TokenUsage, CostEstimate } from '../../learning/types.js';
+import type { SessionState, FeedbackEntry, TokenUsage, CostEstimate, SessionSummary } from '../../learning/types.js';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -443,14 +443,48 @@ export function registerLearningCaptureHooks(): void {
         appendFeedback(feedbackEntry);
         debugLog('learningCaptureStop', 'Feedback entry saved successfully');
 
-        // Update agent performance if agent was used
-        if (state.pending_completion?.agent_used) {
-          debugLog('learningCaptureStop', `Updating agent performance for: ${state.pending_completion.agent_used}`);
-          const allFeedback = loadFeedback();
-          updateAgentPerformance(state.pending_completion.agent_used, allFeedback);
-          debugLog('learningCaptureStop', 'Agent performance updated successfully');
-        } else {
-          debugLog('learningCaptureStop', 'No agent used - skipping performance update');
+        // Create and save session summary for observability
+        const sessionSummary: SessionSummary = {
+          session_id: state.session_id,
+          project_path: ctx.directory,
+          started_at: state.token_budget.started_at,
+          ended_at: new Date().toISOString(),
+          duration_seconds: Math.round(
+            (Date.now() - new Date(state.token_budget.started_at).getTime()) / 1000
+          ),
+          agents_used: state.token_budget.agents_used || [],
+          total_input_tokens: inputTokens,
+          total_output_tokens: outputTokens,
+          total_tokens: totalTokens,
+          estimated_cost: costEstimate.total_cost,
+          model: modelId,
+          outcome: 'success',
+        };
+        debugLog('learningCaptureStop', 'Session summary created', {
+          sessionId: sessionSummary.session_id,
+          duration: sessionSummary.duration_seconds,
+          agentsUsed: sessionSummary.agents_used,
+          totalTokens: sessionSummary.total_tokens,
+          cost: sessionSummary.estimated_cost,
+        });
+
+        try {
+          appendSessionSummary(sessionSummary);
+          debugLog('learningCaptureStop', 'Session summary saved successfully');
+        } catch (summaryError) {
+          // Don't let summary failure block the rest of the stop handler
+          debugLog('learningCaptureStop', 'Failed to save session summary (non-critical)', {
+            error: summaryError instanceof Error ? summaryError.message : String(summaryError),
+          });
+        }
+
+        // Output session summary to terminal (stderr, not captured by Claude Code JSON protocol)
+        try {
+          const { formatSessionSummaryLine } = await import('../../learning/summary-formatter.js');
+          const summaryLine = formatSessionSummaryLine(sessionSummary);
+          console.error(summaryLine);
+        } catch {
+          // Silent failure - terminal output should never break hooks
         }
 
         // Reset token budget for next session
@@ -461,6 +495,7 @@ export function registerLearningCaptureHooks(): void {
         state.token_budget.warning_issued = false;
         state.token_budget.started_at = new Date().toISOString();
         delete state.token_budget.current_model;
+        delete state.token_budget.agents_used;
 
         debugLog('learningCaptureStop', 'Saving reset session state');
         saveSessionState(ctx.directory, state);

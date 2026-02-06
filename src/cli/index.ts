@@ -40,8 +40,11 @@ import {
   writeJsonFile,
   appendFeedback,
   updateAgentPerformance,
+  loadSessionSummaries,
+  getLastSessionSummary,
 } from '../learning/storage.js';
 import { extractPatterns } from '../learning/pattern-extractor.js';
+import { extractPatterns as extractTaskPatterns, computePatternConfidence } from '../learning/pattern-matcher.js';
 import { updatePreferences, createDefaultPreferences } from '../learning/preference-learner.js';
 import { evaluateAgentPerformance } from '../learning/agent-evaluator.js';
 import { generatePromptPatches, previewPatches, applyPromptPatches } from '../learning/prompt-patcher.js';
@@ -53,7 +56,7 @@ import { getSessionBaseline, getWarningThreshold } from '../learning/baselines.j
 import { calculateCost, DEFAULT_PRICING } from '../learning/pricing.js';
 import { getTokenUsage, hasEfficiencyMetrics, safeTokenTotal } from '../learning/utils.js';
 import { getSessionStatePath } from '../learning/session-state.js';
-import type { UserPreferences, AgentPerformance } from '../learning/types.js';
+import type { UserPreferences, AgentPerformance, SessionSummary, TaskPattern } from '../learning/types.js';
 import { randomUUID } from 'crypto';
 import { rmSync, appendFileSync } from 'fs';
 import {
@@ -606,7 +609,7 @@ program
   .description('View and manage learned preferences and patterns')
   .option('-s, --show', 'Show current learnings')
   .option('--stats', 'Show learning system statistics')
-  .option('--cleanup', 'Clean up old learning data')
+  .option('--cleanup', 'Clean up old learning data (archives auto-prune at 30 days / 5 max)')
   .option('--dry-run', 'Preview cleanup without executing (use with --cleanup)')
   .option('--age <days>', 'Age threshold in days for cleanup (default: 180)', '180')
   .option('--remove-archived', 'Remove archived .old.jsonl files (use with --cleanup)')
@@ -620,8 +623,114 @@ program
   .option('--efficiency', 'Show agent efficiency rankings and token metrics')
   .option('--show-costs', 'Show cost breakdown by model and agent')
   .option('--budget-status', 'Show current session token budget status')
+  .option('--last-session', 'Show last session summary')
+  .option('--sessions [n]', 'Show last N sessions (default: 10)')
   .action(async (options) => {
     const learningDir = getLearningDir();
+
+    if (options.lastSession) {
+      const summary = getLastSessionSummary();
+      if (!summary) {
+        console.log(chalk.yellow('No session summaries recorded yet. Complete a session first.'));
+        return;
+      }
+
+      console.log(chalk.blue.bold('\nLast Session Summary'));
+      console.log(chalk.gray('─────────────────────────────────'));
+      console.log(`  Session ID:  ${chalk.white(summary.session_id)}`);
+      console.log(`  Project:     ${chalk.white(summary.project_path)}`);
+      console.log(`  Started:     ${chalk.white(new Date(summary.started_at).toLocaleString())}`);
+
+      const mins = Math.floor(summary.duration_seconds / 60);
+      const secs = summary.duration_seconds % 60;
+      const durStr = mins > 0 ? `${mins} minutes ${secs} seconds` : `${secs} seconds`;
+      console.log(`  Duration:    ${chalk.white(durStr)}`);
+
+      const agentsStr = summary.agents_used.length > 0
+        ? summary.agents_used.join(', ')
+        : chalk.gray('(none)');
+      console.log(`  Agents Used: ${chalk.white(agentsStr)}`);
+
+      const inTokens = summary.total_input_tokens.toLocaleString();
+      const outTokens = summary.total_output_tokens.toLocaleString();
+      const totalTokens = summary.total_tokens.toLocaleString();
+      console.log(`  Tokens:      ${chalk.white(totalTokens)} (in: ${inTokens} / out: ${outTokens})`);
+
+      const costStr = `$${summary.estimated_cost.toFixed(summary.estimated_cost >= 0.01 ? 2 : 3)}`;
+      console.log(`  Est. Cost:   ${chalk.white(costStr)}`);
+      console.log(`  Model:       ${chalk.white(summary.model)}`);
+      console.log(`  Outcome:     ${chalk.white(summary.outcome)}`);
+      console.log('');
+      return;
+    }
+
+    if (options.sessions !== undefined) {
+      const n = typeof options.sessions === 'string' ? parseInt(options.sessions) : 10;
+      const count = isNaN(n) ? 10 : n;
+      const allSummaries = loadSessionSummaries();
+
+      if (allSummaries.length === 0) {
+        console.log(chalk.yellow('No session summaries recorded yet. Complete a session first.'));
+        return;
+      }
+
+      const summaries = allSummaries.slice(-count);
+
+      console.log(chalk.blue.bold(`\nRecent Sessions (last ${summaries.length})`));
+      console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────'));
+      console.log(chalk.gray('Date          Duration  Agents                    Tokens      Cost     Outcome'));
+      console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────'));
+
+      let totalDuration = 0;
+      let totalTokens = 0;
+      let totalCost = 0;
+      const allAgents = new Set<string>();
+
+      for (const s of summaries) {
+        const date = new Date(s.started_at);
+        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
+          + ' ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+        const mins = Math.floor(s.duration_seconds / 60);
+        const secs = s.duration_seconds % 60;
+        const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+        let agentsStr: string;
+        if (s.agents_used.length === 0) {
+          agentsStr = '(none)';
+        } else if (s.agents_used.length <= 3) {
+          agentsStr = s.agents_used.join(', ');
+        } else {
+          agentsStr = s.agents_used.slice(0, 2).join(', ') + ` +${s.agents_used.length - 2}`;
+        }
+
+        const tokensStr = s.total_tokens.toLocaleString();
+        const costStr = `$${s.estimated_cost.toFixed(s.estimated_cost >= 0.01 ? 2 : 3)}`;
+
+        console.log(
+          `${dateStr.padEnd(14)}${durStr.padEnd(10)}${agentsStr.padEnd(26)}${tokensStr.padStart(8)}  ${costStr.padStart(8)}  ${s.outcome}`
+        );
+
+        totalDuration += s.duration_seconds;
+        totalTokens += s.total_tokens;
+        totalCost += s.estimated_cost;
+        s.agents_used.forEach(a => allAgents.add(a));
+      }
+
+      console.log(chalk.gray('─────────────────────────────────────────────────────────────────────────'));
+
+      const totalMins = Math.floor(totalDuration / 60);
+      const totalSecs = totalDuration % 60;
+      const totalDurStr = totalMins > 0 ? `${totalMins}m ${totalSecs}s` : `${totalSecs}s`;
+      const totalTokensStr = totalTokens.toLocaleString();
+      const totalCostStr = `$${totalCost.toFixed(totalCost >= 0.01 ? 2 : 3)}`;
+
+      console.log(
+        `${'Totals:'.padEnd(14)}${totalDurStr.padEnd(10)}${(allAgents.size + ' unique agents').padEnd(26)}${totalTokensStr.padStart(8)}  ${totalCostStr.padStart(8)}`
+      );
+      console.log('');
+      return;
+    }
 
     if (options.stats) {
       const stats = generateLearningStats(process.cwd());
@@ -732,7 +841,66 @@ program
 
       // Update agent performance
       const agentPerf = evaluateAgentPerformance(feedback);
-      writeJsonFile(join(learningDir, 'agent-performance.json'), Object.fromEntries(agentPerf));
+
+      // Extract task patterns for routing recommendations
+      const agentPerfObj = Object.fromEntries(agentPerf);
+
+      // Load existing performance to preserve existing task_patterns
+      const existingPerf = readJsonFile<Record<string, AgentPerformance>>(
+        join(learningDir, 'agent-performance.json'),
+        {}
+      );
+
+      // Analyze task patterns per agent
+      for (const [agentName, perf] of Object.entries(agentPerfObj)) {
+        const agentFeedback = feedback.filter(f => f.agent_used === agentName);
+        const patternStats: Record<string, { success: number; total: number }> = {};
+
+        for (const entry of agentFeedback) {
+          if (!entry.original_task) continue;
+          const taskPatterns = extractTaskPatterns(entry.original_task);
+
+          for (const pattern of taskPatterns) {
+            if (!patternStats[pattern]) {
+              patternStats[pattern] = { success: 0, total: 0 };
+            }
+            patternStats[pattern].total++;
+            if (entry.event_type === 'success') {
+              patternStats[pattern].success++;
+            }
+          }
+        }
+
+        // Convert to TaskPattern array
+        const taskPatterns: TaskPattern[] = [];
+        for (const [pattern, stats] of Object.entries(patternStats)) {
+          if (stats.total < 3) continue; // Skip patterns with too few samples
+          const successRate = stats.success / stats.total;
+          taskPatterns.push({
+            pattern,
+            successfulAgents: successRate >= 0.7 ? [agentName] : [],
+            unsuccessfulAgents: successRate < 0.5 ? [agentName] : [],
+            confidence: computePatternConfidence(stats.total),
+          });
+        }
+
+        if (taskPatterns.length > 0) {
+          perf.task_patterns = taskPatterns.slice(0, 10); // Limit to top 10 patterns
+        } else if (existingPerf[agentName]?.task_patterns) {
+          // Preserve existing patterns if no new ones found
+          perf.task_patterns = existingPerf[agentName].task_patterns;
+        }
+      }
+
+      // Write with patterns included
+      writeJsonFile(join(learningDir, 'agent-performance.json'), agentPerfObj);
+
+      const totalPatterns = Object.values(agentPerfObj).reduce(
+        (sum, p) => sum + (p.task_patterns?.length || 0), 0
+      );
+      if (totalPatterns > 0) {
+        console.log(chalk.green(`✓ ${totalPatterns} task patterns extracted for routing optimization.`));
+      }
 
       console.log(chalk.green('\n✓ Preferences and performance metrics updated.'));
       return;
@@ -1102,6 +1270,8 @@ program
     console.log('Options:');
     console.log('  -s, --show           Show current learnings');
     console.log('  --stats              Show learning system statistics');
+    console.log('  --last-session       Show last session summary');
+    console.log('  --sessions [n]       Show last N sessions (default: 10)');
     console.log('  --efficiency         Show agent efficiency rankings and token metrics');
     console.log('  --show-costs         Show cost breakdown by model and agent');
     console.log('  --budget-status      Show current session token budget status');

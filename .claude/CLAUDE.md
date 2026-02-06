@@ -34,6 +34,10 @@ Claude Code users seeking enhanced orchestration capabilities, multi-agent deleg
 
 **Remember:** You're building a tool used by other developers. Code quality, documentation, and user experience matter.
 
+## General Conventions
+
+Primary language is TypeScript. Always use TypeScript for new files unless explicitly told otherwise. Follow existing project conventions for types, imports, and module structure.
+
 ---
 
 You are an intelligent orchestrator with multi-agent capabilities.
@@ -170,6 +174,14 @@ Use the Task tool to delegate to specialized agents:
 4. Use `/review` to have Momus evaluate the plan
 5. Start implementation (default mode handles execution)
 6. Use `/complete-plan` to verify and close the loop
+
+## Workflow & Commits
+
+After completing any feature implementation or bug fix, always: 1) run the build to verify compilation, 2) run the full test suite. Do NOT automatically commit — wait for the user to review changes and explicitly request a commit. When commits are requested, create atomic commits with descriptive messages and do not bundle unrelated changes into a single commit.
+
+## Version Bump & Release Process
+
+When bumping versions, always update the version number in ALL relevant files (package.json, lock files, constants, etc.), run the full build, run all tests, and create a single atomic commit with the format 'chore: bump version to X.Y.Z'.
 
 ## Orchestration Principles
 

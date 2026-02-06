@@ -1,8 +1,9 @@
 import { homedir } from 'os';
-import { join, resolve, dirname } from 'path';
-import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { join, resolve, dirname, basename } from 'path';
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync } from 'fs';
 import { createHash } from 'crypto';
-import type { FeedbackEntry, AgentPerformance, TokenEfficiency } from './types.js';
+import type { FeedbackEntry, AgentPerformance, TokenEfficiency, SessionSummary, ArchiveRetentionConfig } from './types.js';
+import { DEFAULT_ARCHIVE_RETENTION } from './types.js';
 import { getTokenUsage, safeTokenTotal } from './utils.js';
 
 /** Maximum lines before rotating JSONL files */
@@ -43,8 +44,69 @@ export function ensureLearningDirs(projectPath?: string): void {
   }
 }
 
+/**
+ * Prune old archives based on retention policy.
+ * Deletes archives older than maxAgeInDays and caps at maxArchiveCount.
+ */
+function pruneArchives(
+  originalFilePath: string,
+  retention: ArchiveRetentionConfig = DEFAULT_ARCHIVE_RETENTION
+): void {
+  try {
+    const dir = dirname(originalFilePath);
+    const baseFileName = basename(originalFilePath, '.jsonl');
+    const files = readdirSync(dir);
+
+    // Find all archive files matching this base name
+    const archivePattern = new RegExp(
+      `^${baseFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\..*\\.old\\.jsonl$`
+    );
+    const archives = files
+      .filter(f => archivePattern.test(f))
+      .map(f => {
+        // Extract date portion: "2026-02-05T14-30-00-000Z" → "2026-02-05"
+        const dateMatch = f.match(/\.(\d{4}-\d{2}-\d{2})T/);
+        const timestamp = dateMatch ? new Date(dateMatch[1]) : null;
+        return { filename: f, filepath: join(dir, f), timestamp };
+      })
+      .filter(a => a.timestamp !== null && !isNaN(a.timestamp!.getTime()))
+      .sort((a, b) => b.timestamp!.getTime() - a.timestamp!.getTime()); // Newest first
+
+    const maxAge = retention.maxAgeInDays ?? 30;
+    const maxCount = retention.maxArchiveCount ?? 5;
+    const cutoffDate = new Date(Date.now() - maxAge * 24 * 60 * 60 * 1000);
+    let pruneCount = 0;
+
+    for (let i = 0; i < archives.length; i++) {
+      const archive = archives[i];
+      const shouldPruneByAge = archive.timestamp! < cutoffDate;
+      const shouldPruneByCount = i >= maxCount;
+
+      if (shouldPruneByAge || shouldPruneByCount) {
+        try {
+          unlinkSync(archive.filepath);
+          pruneCount++;
+        } catch {
+          // Silent failure on individual file deletion
+        }
+      }
+    }
+
+    if (pruneCount > 0) {
+      console.log(`[Olympus Learning] Pruned ${pruneCount} old archives`);
+    }
+  } catch (error) {
+    // Archive pruning is non-critical
+    console.error('[Olympus Learning] Failed to prune archives:', error);
+  }
+}
+
 /** Rotate JSONL file if it exceeds size threshold */
-function rotateIfNeeded(filePath: string, maxLines: number = MAX_JSONL_LINES): void {
+function rotateIfNeeded(
+  filePath: string,
+  maxLines: number = MAX_JSONL_LINES,
+  retention: ArchiveRetentionConfig = DEFAULT_ARCHIVE_RETENTION
+): void {
   if (!existsSync(filePath)) return;
 
   try {
@@ -56,6 +118,9 @@ function rotateIfNeeded(filePath: string, maxLines: number = MAX_JSONL_LINES): v
       const archivePath = filePath.replace('.jsonl', `.${timestamp}.old.jsonl`);
       renameSync(filePath, archivePath);
       console.log(`[Olympus Learning] Archived ${lineCount} entries to ${archivePath}`);
+
+      // Prune old archives
+      pruneArchives(filePath, retention);
     }
   } catch (error) {
     console.error(`[Olympus Learning] Failed to rotate ${filePath}:`, error);
@@ -214,5 +279,41 @@ export function writeJsonFile<T>(filePath: string, data: T): void {
   }
 }
 
-/** Export rotation function for use in discovery.ts and cleanup */
-export { rotateIfNeeded };
+/** Append session summary to JSONL log */
+export function appendSessionSummary(summary: SessionSummary): void {
+  ensureLearningDirs();
+  const logPath = join(getLearningDir(), 'session-summaries.jsonl');
+  rotateIfNeeded(logPath);
+  appendFileSync(logPath, JSON.stringify(summary) + '\n', 'utf-8');
+}
+
+/** Load all session summaries */
+export function loadSessionSummaries(): SessionSummary[] {
+  const logPath = join(getLearningDir(), 'session-summaries.jsonl');
+  if (!existsSync(logPath)) return [];
+  try {
+    const content = readFileSync(logPath, 'utf-8');
+    return content
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        try {
+          return JSON.parse(line) as SessionSummary;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is SessionSummary => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** Get the most recent session summary */
+export function getLastSessionSummary(): SessionSummary | null {
+  const summaries = loadSessionSummaries();
+  return summaries.length > 0 ? summaries[summaries.length - 1] : null;
+}
+
+/** Export rotation and pruning functions for use in discovery.ts and cleanup */
+export { rotateIfNeeded, pruneArchives };

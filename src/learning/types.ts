@@ -26,6 +26,7 @@ export interface TokenBudget {
   warning_issued: boolean;      // Has warning been issued?
   started_at: string;           // When budget tracking started
   current_model?: string;       // Current model being used in session
+  agents_used?: string[];       // All unique agents used during this session
 }
 
 export interface SessionState {
@@ -106,6 +107,25 @@ export interface FeedbackEntry {
   cost_estimate?: CostEstimate;
 }
 
+/**
+ * Summary of a single session for observability
+ * Written to session-summaries.jsonl at session end
+ */
+export interface SessionSummary {
+  session_id: string;
+  project_path: string;
+  started_at: string;
+  ended_at: string;
+  duration_seconds: number;
+  agents_used: string[];
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  model: string;
+  outcome: 'success' | 'revision' | 'cancellation' | 'unknown';
+}
+
 export interface UserPreferences {
   verbosity: 'concise' | 'detailed' | 'unknown';
   autonomy: 'ask_first' | 'just_do_it' | 'balanced' | 'unknown';
@@ -153,6 +173,35 @@ export interface AgentPerformance {
 
   // Token efficiency metrics (optional for backward compatibility)
   token_efficiency?: TokenEfficiency;
+
+  // Task patterns for routing recommendations
+  task_patterns?: TaskPattern[];
+}
+
+/**
+ * Configuration for smart agent routing recommendations
+ */
+export interface RoutingThresholds {
+  /** Minimum data points before making recommendations. Default: 10 */
+  minDataPoints: number;
+  /** Minimum success rate to recommend a lower-tier agent. Default: 0.80 */
+  minSuccessRate: number;
+  /** Whether to prefer lower-tier agents when they meet thresholds. Default: true */
+  preferLowerTier: boolean;
+}
+
+/**
+ * Task pattern for agent performance correlation
+ */
+export interface TaskPattern {
+  /** Pattern category (e.g., 'simple_search', 'debugging') */
+  pattern: string;
+  /** Agents that handle this pattern well */
+  successfulAgents: string[];
+  /** Agents that struggle with this pattern */
+  unsuccessfulAgents: string[];
+  /** Confidence score 0-1 based on sample size */
+  confidence: number;
 }
 
 export interface ProjectPatterns {
@@ -166,6 +215,22 @@ export interface ProjectPatterns {
 
   last_updated: string;
 }
+
+/**
+ * Configuration for automatic archive pruning
+ */
+export interface ArchiveRetentionConfig {
+  /** Maximum age in days before archives are pruned. Default: 30 */
+  maxAgeInDays?: number;
+  /** Maximum number of archives to keep per file type. Default: 5 */
+  maxArchiveCount?: number;
+}
+
+/** Default archive retention settings */
+export const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionConfig = {
+  maxAgeInDays: 30,
+  maxArchiveCount: 5,
+};
 
 // AGENT DISCOVERY TYPES (Phase 6)
 
