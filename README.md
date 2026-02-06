@@ -29,6 +29,7 @@ Olympus is a multi-agent orchestration system for [Claude Code](https://docs.ant
 - 🎯 **Continuation Enforcement** - Never stops until all tasks are complete
 - 💬 **18+ Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/idea`, `/prd`, `/spec`, `/intents`, and more
 - 🔮 **Structured Workflows** - IDEA → PRD → SPEC → INTENTS pipeline for complex features
+- 🌐 **Language Agnostic** - Works with any tech stack: Python, .NET, Go, Rust, Java, and more
 - 🔮 **Magic Keywords** - Natural language triggers for enhanced modes
 
 ---
@@ -67,6 +68,7 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 ### 🔧 Developer Experience
 
 - **Zero Configuration** - Works out-of-the-box with sensible defaults
+- **Works Everywhere** - Not tied to any language or framework — orchestrates across .NET, Python, Go, Rust, Java, and any codebase
 - **Slash Commands** - 13+ productivity commands (`/ultrawork`, `/plan`, `/ascent`)
 - **Magic Keywords** - Natural language triggers for enhanced modes
 
