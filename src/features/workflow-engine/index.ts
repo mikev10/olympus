@@ -82,5 +82,48 @@ export {
 // Validation
 export { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
 
+// Depth Assessment
+export type { DepthFactors, RiskFactors } from './depth-assessment.js';
+export {
+  assessDepth,
+  classifyRiskTier,
+  assessDepthFromIdea,
+  getDepthLabel,
+  getRiskTierLabel,
+} from './depth-assessment.js';
+
+// Requirements
+export type {
+  Stakeholder,
+  StakeholderMap,
+  ConstraintCategory,
+  ClassifiedConstraint,
+  ConstraintClassification,
+  TraceabilityLink,
+  RequirementsTrace,
+} from './requirements.js';
+export {
+  buildStakeholderMap,
+  classifyConstraints,
+  buildRequirementsTrace,
+  getTraceabilitySummary,
+} from './requirements.js';
+
+// Risk Management
+export type { RiskRegister, RiskSummary } from './risk-management.js';
+export {
+  extractRisks,
+  createRiskRegister,
+  loadRiskRegister,
+  saveRiskRegister,
+  addRisk,
+  updateRisk,
+  removeRisk,
+  getRiskSummary,
+  getRiskPriorityScore,
+  getNextRiskId,
+  formatRiskReport,
+} from './risk-management.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
