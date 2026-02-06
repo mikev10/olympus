@@ -815,6 +815,37 @@ program
         console.log('');
       }
 
+      // Show auto-discovery configuration status
+      try {
+        const { loadDiscoveryConfig } = await import('../learning/config.js');
+        const discoveryConfig = loadDiscoveryConfig(process.cwd());
+
+        console.log(chalk.white('🔍 Auto-Discovery:'));
+        console.log(`   • Status: ${discoveryConfig.enabled ? chalk.green('enabled') : chalk.red('disabled')}`);
+        console.log(`   • Min Confidence: ${discoveryConfig.minConfidence}`);
+        console.log(`   • Limits: ${discoveryConfig.maxPerSession}/session, ${discoveryConfig.maxPerDay}/day`);
+        console.log(`   • Dedup Window: ${discoveryConfig.deduplicationWindowDays} days`);
+
+        // Show recent auto-discoveries with confidence scores
+        if (discoveries.total_discoveries > 0) {
+          const recentAuto = [...discoveries.project_discoveries]
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .slice(0, 5);
+
+          if (recentAuto.length > 0) {
+            console.log(chalk.gray('   Recent auto-discoveries:'));
+            for (const d of recentAuto) {
+              const age = Math.floor((Date.now() - new Date(d.timestamp).getTime()) / (1000 * 60 * 60 * 24));
+              const ageStr = age === 0 ? 'today' : `${age}d ago`;
+              console.log(`     - [${d.category}] ${d.summary.substring(0, 50)}${d.summary.length > 50 ? '...' : ''} (${(d.confidence * 100).toFixed(0)}%, ${ageStr})`);
+            }
+          }
+        }
+        console.log('');
+      } catch {
+        // Silent failure - auto-discovery status is non-critical
+      }
+
       return;
     }
 

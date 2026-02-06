@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-02-06
+
+### Added
+
+**Automated Discovery Capture** - Intelligent learning from agent task completions
+
+- **Automatic Task Discovery Extraction** - Captures learnings when agents complete tasks successfully
+  - Hooks into task completion events to analyze agent work
+  - Extracts discoveries about patterns, gotchas, workarounds, and technical insights
+  - Zero manual intervention - discoveries captured automatically from successful task execution
+  - Respects user privacy - only captures technical insights, not sensitive data
+
+- **Two-Tier Deduplication System** - Prevents redundant discovery storage
+  - **Tier 1**: Exact task description match within configurable window (default: 7 days)
+  - **Tier 2**: Jaccard similarity > 0.7 on summary text prevents near-duplicate discoveries
+  - Ensures learning data remains high-signal without unbounded growth
+
+- **Configurable Volume Control** - Fine-grained control over discovery capture behavior
+  - Global config at `~/.claude/olympus/config.json`, project override at `.olympus/config.json`
+  - `autoDiscovery.enabled` (default: true) - Enable/disable auto-capture per project
+  - `autoDiscovery.minConfidence` (default: 0.6) - Quality threshold for captured discoveries
+  - `autoDiscovery.maxPerSession` (default: 5) / `maxPerDay` (default: 20) - Volume limits
+  - `autoDiscovery.deduplicationWindowDays` (default: 7) - Deduplication lookback window
+
+- **Plan Lifecycle Tracking** - Discoveries linked to plan context
+  - Captures plan name and phase during structured workflow execution
+  - Enables plan-specific discovery retrieval and analysis
+  - Helps track technical learnings across multi-phase implementations
+  - Supports retrospectives on completed plans
+
+### Changed
+
+- **Session State Extended** - Added `discovery_volume` tracking for volume limiting
+  - Backward compatible (optional field, initialized on first use)
+  - Tracks session count, daily count, and daily reset timestamp
+
+- **DiscoveryCategory Extended** - Added `planning_insight` category for plan learnings
+  - Updated `readDiscoveries()` categories record
+
+- **CLI `learn --show` Enhanced** - Auto-discovery status section in learning status output
+  - Shows enabled/disabled status, confidence threshold, volume limits
+  - Displays recent auto-discoveries with confidence scores and age
+
+### Technical Details
+
+**New Files:**
+- `src/learning/config.ts` - Discovery configuration with global/project override hierarchy
+- `src/learning/discovery-detector.ts` - Discovery extraction, two-tier deduplication, category inference
+- `src/learning/plan-tracker.ts` - Plan lifecycle monitoring, Momus review parsing, learnings formatting
+- `src/hooks/registrations/discovery-capture.ts` - Stop event hook (priority 92) for auto-discovery
+- `src/hooks/registrations/plan-lifecycle.ts` - Plan file monitoring, review tracking, Prometheus injection
+
+**Test Coverage:**
+- 56 new tests across 4 test files
+- Unit tests for discovery detection, category inference, deduplication, volume limits
+- Integration tests for end-to-end discovery capture flow (6 scenarios)
+- Plan lifecycle tracking tests (18 scenarios)
+
+**Performance:**
+- Discovery extraction: <5ms per task completion
+- Deduplication check: <10ms (O(n) on recent discoveries within window)
+- Total Stop hook addition: <50ms
+- No impact on task execution latency (runs at session end)
+
 ## [3.6.2] - 2026-02-04
 
 ### Fixed

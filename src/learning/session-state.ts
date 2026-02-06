@@ -31,7 +31,12 @@ export function createSessionState(sessionId?: string, projectPath?: string): Se
       warning_threshold: 1.5,
       warning_issued: false,
       started_at: new Date().toISOString()
-    }
+    },
+    discovery_volume: {
+      session_count: 0,
+      daily_count: 0,
+      daily_reset_at: new Date().toISOString(),
+    },
   };
 }
 
@@ -76,6 +81,15 @@ export function loadSessionState(directory: string, sessionId?: string): Session
     if (state.token_budget.output_tokens === undefined) {
       state.token_budget.output_tokens = 0;
     }
+  }
+
+  // Initialize discovery_volume if missing (backward compatibility)
+  if (!state.discovery_volume) {
+    state.discovery_volume = {
+      session_count: 0,
+      daily_count: 0,
+      daily_reset_at: new Date().toISOString(),
+    };
   }
 
   return state;
@@ -203,4 +217,49 @@ export function shouldIssueWarning(state: SessionState): boolean {
 /** Get current token budget info */
 export function getTokenBudgetInfo(state: SessionState): TokenBudget | null {
   return state.token_budget ?? null;
+}
+
+/** Increment discovery count for volume tracking */
+export function incrementDiscoveryCount(state: SessionState): SessionState {
+  if (!state.discovery_volume) {
+    state.discovery_volume = {
+      session_count: 0,
+      daily_count: 0,
+      daily_reset_at: new Date().toISOString(),
+    };
+  }
+
+  // Reset daily count if past midnight
+  const resetAt = new Date(state.discovery_volume.daily_reset_at);
+  const now = new Date();
+  if (now.toDateString() !== resetAt.toDateString()) {
+    state.discovery_volume.daily_count = 0;
+    state.discovery_volume.daily_reset_at = now.toISOString();
+  }
+
+  state.discovery_volume.session_count++;
+  state.discovery_volume.daily_count++;
+  state.last_updated = now.toISOString();
+
+  return state;
+}
+
+/** Check if discovery volume limits are exceeded */
+export function checkDiscoveryLimit(
+  state: SessionState,
+  config: { maxPerSession: number; maxPerDay: number }
+): boolean {
+  if (!state.discovery_volume) return false; // No tracking = not exceeded
+
+  // Reset daily count if past midnight
+  const resetAt = new Date(state.discovery_volume.daily_reset_at);
+  const now = new Date();
+  if (now.toDateString() !== resetAt.toDateString()) {
+    return false; // New day, limits reset
+  }
+
+  return (
+    state.discovery_volume.session_count >= config.maxPerSession ||
+    state.discovery_volume.daily_count >= config.maxPerDay
+  );
 }

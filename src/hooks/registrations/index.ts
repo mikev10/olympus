@@ -15,6 +15,8 @@ import { registerNotificationHooks } from './notification.js';
 import { registerLearningCaptureHooks } from './learning-capture.js';
 import { registerBudgetWarningHook } from './budget-warning.js';
 import { registerAgentTrackingHook } from './agent-tracking.js';
+import { registerDiscoveryCaptureHooks } from './discovery-capture.js';
+import { registerPlanLifecycleHooks } from './plan-lifecycle.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -39,6 +41,8 @@ export function registerAllHooks(): void {
   registerLearningCaptureHooks();
   registerBudgetWarningHook(); // Token budget warning (informational)
   registerAgentTrackingHook(); // Agent usage tracking for learning system
+  registerDiscoveryCaptureHooks(); // Auto-discovery capture for learning system
+  registerPlanLifecycleHooks(); // Plan lifecycle tracking for learning system
 
   registered = true;
 }
@@ -63,4 +67,6 @@ export {
   registerLearningCaptureHooks,
   registerBudgetWarningHook,
   registerAgentTrackingHook,
+  registerDiscoveryCaptureHooks,
+  registerPlanLifecycleHooks,
 };

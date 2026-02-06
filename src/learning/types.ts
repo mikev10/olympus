@@ -57,6 +57,13 @@ export interface SessionState {
 
   // Token budget tracking (optional for backward compatibility)
   token_budget?: TokenBudget;
+
+  // Discovery volume tracking (optional for backward compatibility)
+  discovery_volume?: {
+    session_count: number;      // Discoveries this session (max 5)
+    daily_count: number;        // Discoveries today (max 20)
+    daily_reset_at: string;     // ISO timestamp for daily reset
+  };
 }
 
 export type FeedbackCategory =
@@ -244,7 +251,8 @@ export type DiscoveryCategory =
   | 'gotcha'              // "Migration must run before seeding"
   | 'performance'         // "Query N+1 issue in X, use eager loading"
   | 'dependency'          // "Package X requires peer dependency Y"
-  | 'configuration';      // "Environment variable X must be set"
+  | 'configuration'       // "Environment variable X must be set"
+  | 'planning_insight';   // "Plans need X consideration"
 
 /**
  * An agent-discovered learning entry
@@ -299,4 +307,21 @@ export interface ExtractedPattern {
   evidence_examples: string[]; // ["add types", "use strict", ...]
   scope: 'global' | 'project';
   category: 'style' | 'behavior' | 'tooling' | 'communication';
+}
+
+// PLAN LIFECYCLE TRACKING TYPES (Phase 6 Extension)
+
+/**
+ * Plan lifecycle event tracking
+ */
+export interface PlanLifecycleEvent {
+  event_type: 'plan_created' | 'plan_revised' | 'plan_review_failed' |
+              'plan_review_passed' | 'plan_completed' | 'plan_failed';
+  plan_path: string;              // Relative path from project root
+  plan_summary: string;           // First 200 chars of plan
+  revision_count?: number;        // How many times revised
+  failure_reasons?: string[];     // Why plan failed/was revised
+  reviewer?: 'momus' | 'user';    // Who reviewed/rejected
+  session_id: string;
+  timestamp: string;
 }
