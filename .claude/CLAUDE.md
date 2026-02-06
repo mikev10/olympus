@@ -6,7 +6,7 @@
 Olympus is a multi-agent orchestration system for Claude Code that enables intelligent task delegation, parallel execution, and specialized agent coordination. Tagline: "Summon the gods of code."
 
 **Distribution:**
-- **npm package**: `olympus-ai` (current version: 3.2.3)
+- **npm package**: `olympus-ai` (current version: 3.7.0)
 - **GitHub**: https://github.com/mikev10/olympus
 - **Claude Code plugin**: Distributed via `.claude-plugin` directory
 - **CLI command**: `olympus-ai`
@@ -181,7 +181,14 @@ After completing any feature implementation or bug fix, always: 1) run the build
 
 ## Version Bump & Release Process
 
-When bumping versions, always update the version number in ALL relevant files (package.json, lock files, constants, etc.), run the full build, run all tests, and create a single atomic commit with the format 'chore: bump version to X.Y.Z'.
+When bumping versions, always update the version number in ALL of these files:
+- `package.json` (and run `npm install --package-lock-only` to sync lock file)
+- `src/installer/index.ts` (VERSION constant)
+- `src/__tests__/installer.test.ts` (expected version assertion)
+- `.claude-plugin/plugin.json` (plugin version)
+- `.claude/CLAUDE.md` (current version in PROJECT CONTEXT)
+
+Then run the full build, run all tests, and create a single atomic commit with the format 'chore: bump version to X.Y.Z'.
 
 ## Orchestration Principles
 
