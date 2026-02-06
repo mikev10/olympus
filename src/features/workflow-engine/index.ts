@@ -21,6 +21,34 @@ export type {
   DependencyGraph,
 } from './types.js';
 
+// ODLC Phase Types
+export type {
+  WorkflowPhase,
+  ForgeStage,
+  SummitStage,
+  AnyStage,
+  TrustLevel,
+  TrustState,
+  TrustLevelChange,
+  RiskTier,
+  RiskTierClassification,
+  PhaseState,
+  AlignmentVerificationResult,
+  AlignmentValidationResult,
+  AlignmentQuestion,
+  AlignmentCheck,
+  GateResult,
+  DepthAssessment,
+  RiskEntry,
+  HierarchicalNode,
+  ManifestSchema,
+  ManifestArtifact,
+  ArtifactLink,
+  GateAuditEntry,
+  MethodologyMetrics,
+  WorkflowCheckpointV2,
+} from './phase-types.js';
+
 // Checkpoint persistence
 export {
   saveCheckpoint,

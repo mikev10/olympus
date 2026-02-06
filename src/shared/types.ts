@@ -128,6 +128,13 @@ export interface PluginConfig {
     sessionRecovery?: { enabled?: boolean };
     emptyMessageSanitizer?: { enabled?: boolean };
     thinkingBlockValidator?: { enabled?: boolean };
+
+    // Quality gate hooks (Phase 4)
+    qualityGate?: { enabled?: boolean };
+    agentRoleGuard?: { enabled?: boolean };
+    buildCheck?: { enabled?: boolean; mode?: 'soft' | 'strict'; debounceMs?: number };
+    workflowArtifactGate?: { enabled?: boolean };
+    depthAssessment?: { enabled?: boolean };
   };
 
   // Learning system configuration
@@ -198,6 +205,12 @@ export interface PluginConfig {
       /** Timeout for resume operation in ms (default: 30000 = 30 sec) */
       resume?: number;
     };
+
+    // ODLC extensions
+    qualityGates?: { enabled?: boolean; autoAdvanceEnabled?: boolean };
+    forgeExecution?: { enabled?: boolean; maxConcurrentBolts?: number };
+    trust?: { enabled?: boolean; persistPath?: string };
+    riskTier?: { enabled?: boolean; defaultTier?: 1 | 2 | 3 };
   };
 }
 
