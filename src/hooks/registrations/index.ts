@@ -18,6 +18,9 @@ import { registerAgentTrackingHook } from './agent-tracking.js';
 import { registerDiscoveryCaptureHooks } from './discovery-capture.js';
 import { registerPlanLifecycleHooks } from './plan-lifecycle.js';
 import { registerQualityGateHooks } from './quality-gate.js';
+import { registerAgentRoleGuardHook } from './agent-role-guard.js';
+import { registerBuildCheckHooks } from './build-check.js';
+import { registerWorkflowArtifactGateHook } from './workflow-artifact-gate.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -32,6 +35,7 @@ export function registerAllHooks(): void {
   }
 
   // Register hooks by event type
+  registerAgentRoleGuardHook(); // Agent role enforcement (priority 5) - BEFORE pre-tool-use
   registerUserPromptSubmitHooks();
   registerSessionStartHooks();
   registerStopHooks();
@@ -44,6 +48,8 @@ export function registerAllHooks(): void {
   registerAgentTrackingHook(); // Agent usage tracking for learning system
   registerDiscoveryCaptureHooks(); // Auto-discovery capture for learning system
   registerPlanLifecycleHooks(); // Plan lifecycle tracking for learning system
+  registerBuildCheckHooks(); // Async build check (priorities 65/66) - AFTER post-tool-use
+  registerWorkflowArtifactGateHook(); // Workflow artifact validation (priority 78) - AFTER build-check
   registerQualityGateHooks(); // Quality gate hooks for phase transitions
 
   registered = true;
@@ -72,4 +78,7 @@ export {
   registerDiscoveryCaptureHooks,
   registerPlanLifecycleHooks,
   registerQualityGateHooks,
+  registerAgentRoleGuardHook,
+  registerBuildCheckHooks,
+  registerWorkflowArtifactGateHook,
 };
