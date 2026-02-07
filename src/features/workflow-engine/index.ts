@@ -150,5 +150,27 @@ export {
   formatRiskReport,
 } from './risk-management.js';
 
+// Trust
+export {
+  createDefaultTrustState,
+  loadTrustState,
+  saveTrustState,
+  evaluateTrustLevel,
+  recordTransition,
+  resetTrust,
+  shouldAutoAdvance,
+  checkTrustReset,
+} from './trust.js';
+
+// Alignment
+export type { TransitionType } from './alignment.js';
+export {
+  computeVerification,
+  generateValidationQuestions,
+  runAlignmentCheck as runFullAlignmentCheck,
+  recordAlignmentResult,
+  getConformanceThreshold,
+} from './alignment.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
