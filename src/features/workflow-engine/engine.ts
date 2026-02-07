@@ -453,9 +453,43 @@ export class WorkflowEngine {
       }
 
       case 'summit': {
-        // Summit v1: minimal template-based artifacts only
-        // Full implementation in Phase 7 (Task 24)
-        console.log('[WorkflowEngine] Summit phase: Template-based artifacts (v1 minimal)');
+        // Summit v1: template-based artifact generation
+        const { generateDeployGuide, generateRunbook, generateMonitoringConfig, generateReleaseNotes } = await import('./summit/templates.js');
+        const { loadManifest } = await import('./manifest.js');
+
+        const workflowDir = `.olympus/workflow/${this.workflowId}`;
+        const manifestPath = `${this.projectPath}/${workflowDir}/manifest.json`;
+        const manifest = await loadManifest(manifestPath);
+
+        // Read spec if available
+        let specContent: string | null = null;
+        try {
+          const fsModule = await import('fs');
+          specContent = fsModule.readFileSync(getArtifactPath(this.projectPath, this.workflowId, 'spec'), 'utf-8');
+        } catch {
+          // Spec may not exist
+        }
+
+        const summitContext = {
+          workflowId: this.workflowId,
+          featureName: this.featureName,
+          manifest,
+          specContent,
+          buildLogContent: null,
+        };
+
+        // Ensure summit directory
+        const fsExtra = await import('fs-extra');
+        const summitDir = `${this.projectPath}/.olympus/workflow/${this.workflowId}/summit`;
+        await fsExtra.ensureDir(summitDir);
+
+        // Generate all summit artifacts
+        await fsExtra.writeFile(`${summitDir}/deploy-guide.md`, generateDeployGuide(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${summitDir}/runbook.md`, generateRunbook(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${summitDir}/monitoring.json`, generateMonitoringConfig(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${summitDir}/release-notes.md`, generateReleaseNotes(summitContext), 'utf-8');
+
+        console.log('[WorkflowEngine] Summit phase: Generated deploy-guide, runbook, monitoring config, and release notes');
         break;
       }
     }

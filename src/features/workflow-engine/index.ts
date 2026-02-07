@@ -212,5 +212,54 @@ export {
   validateForgePhase,
 } from './forge/validation.js';
 
+// Summit Phase
+export type { SummitContext } from './summit/templates.js';
+export {
+  generateDeployGuide,
+  generateRunbook,
+  generateMonitoringConfig,
+  generateReleaseNotes,
+} from './summit/templates.js';
+
+// Status Reporter
+export type { WorkflowReport, PhaseProgressEntry } from './status-reporter.js';
+export {
+  generateWorkflowReport,
+  computePhaseProgress,
+  formatPhaseProgressBar,
+  buildArtifactTree,
+  buildRiskSummary,
+  buildGateSummary,
+  buildTrustDisplay,
+  buildAlignmentSummary,
+  buildDepthDisplay,
+  buildRiskTierDisplay,
+} from './status-reporter.js';
+
+// Learning Bridge
+export type {
+  WorkflowEventType,
+  WorkflowEvent,
+  WorkflowContext,
+  MethodologyPreference,
+} from './learning-bridge.js';
+export {
+  captureWorkflowDiscovery,
+  queryRelevantDiscoveries,
+  reportAgentPerformance,
+  trackMethodologyPreferences,
+  recordTrustLevelChange,
+} from './learning-bridge.js';
+
+// Metrics
+export {
+  recordPhaseStart,
+  recordPhaseComplete,
+  computeMetrics,
+  exportToLearningSystem,
+  computePhaseDuration,
+  formatDuration,
+} from './metrics.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

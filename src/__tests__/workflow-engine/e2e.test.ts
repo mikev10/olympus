@@ -16,6 +16,38 @@ import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
 import { loadCheckpoint, saveCheckpoint, clearCache } from '../../features/workflow-engine/checkpoint.js';
 import { WorkflowCheckpoint, WorkflowStage } from '../../features/workflow-engine/types.js';
 import { ensureWorkflowDir, writeArtifact } from '../../features/workflow-engine/artifacts.js';
+import { createManifest, loadManifest, registerArtifact, addGateAuditEntry, updateContractStatus } from '../../features/workflow-engine/manifest.js';
+import { generateDeployGuide, generateRunbook, generateMonitoringConfig, generateReleaseNotes } from '../../features/workflow-engine/summit/templates.js';
+import type { SummitContext } from '../../features/workflow-engine/summit/templates.js';
+import { generateWorkflowReport, computePhaseProgress } from '../../features/workflow-engine/status-reporter.js';
+import { captureWorkflowDiscovery, reportAgentPerformance, recordTrustLevelChange } from '../../features/workflow-engine/learning-bridge.js';
+import type { WorkflowEvent, WorkflowContext } from '../../features/workflow-engine/learning-bridge.js';
+import { computeMetrics, recordPhaseStart, recordPhaseComplete, formatDuration } from '../../features/workflow-engine/metrics.js';
+import { createDefaultTrustState, recordTransition } from '../../features/workflow-engine/trust.js';
+import type { ManifestSchema, ManifestArtifact, PhaseState, TrustState } from '../../features/workflow-engine/phase-types.js';
+
+function createMinimalManifest(workflowId: string, featureName: string): ManifestSchema {
+  return {
+    schema_version: '2.0.0',
+    workflow_id: workflowId,
+    feature_name: featureName,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    phases: {
+      vision: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      forge: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      summit: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+    },
+    depth_assessment: null,
+    artifacts: [],
+    links: [],
+    risks: [],
+    gate_audit: [],
+    metrics: null,
+    alignment_checks: [],
+    risk_tier: null,
+  };
+}
 
 describe('End-to-End Workflow Tests', () => {
   let tmpDir: string;
@@ -734,6 +766,313 @@ describe('End-to-End Workflow Tests', () => {
       expect(checkpoint?.resume_context?.initial_prompt).toBe(initialPrompt);
       expect(checkpoint?.resume_context?.custom_field).toBe('test value');
       expect(checkpoint?.resume_context?.nested?.data).toBe('nested value');
+    });
+  });
+
+  // ============================================================================
+  // Scenario 6: ODLC Full Lifecycle Integration
+  // ============================================================================
+
+  describe('Scenario 6: ODLC Full Lifecycle Integration', () => {
+    it('completes full ODLC lifecycle: Vision → Forge → Summit with manifest tracking', async () => {
+      const workflowId = 'odlc-lifecycle-test';
+      const featureName = 'ODLC Lifecycle Test';
+
+      // 1. Start workflow (Vision phase)
+      const engine = new WorkflowEngine(tmpDir, featureName);
+      await engine.start('Test full ODLC lifecycle');
+
+      // Verify Vision IDEA stage completed
+      let checkpoint = await loadCheckpoint(tmpDir, workflowId);
+      expect(checkpoint).not.toBeNull();
+      expect(checkpoint?.current_stage).toBe('prd');
+
+      // 2. Create manifest to track ODLC artifacts
+      const manifestPath = createManifest(workflowId, featureName, tmpDir);
+      expect(manifestPath).toBeTruthy();
+
+      const manifest = await loadManifest(manifestPath);
+      expect(manifest).not.toBeNull();
+      expect(manifest!.schema_version).toBe('2.0.0');
+
+      // 3. Register Vision artifacts in manifest
+      registerArtifact(manifestPath, {
+        id: 'IDEA-001',
+        type: 'idea',
+        phase: 'vision',
+        stage: 'idea',
+        path: `vision/idea.md`,
+        validation_passed: true,
+        write_complete: true,
+        checksum: null,
+      });
+
+      // Set contract status to active
+      updateContractStatus(manifestPath, 'IDEA-001', 'active');
+
+      // 4. Add gate audit entry
+      addGateAuditEntry(manifestPath, {
+        phase: 'vision',
+        timestamp: new Date().toISOString(),
+        action: 'approved',
+        actor: 'human',
+        reason: 'IDEA approved for development',
+      });
+
+      // 5. Generate Summit artifacts
+      const loadedManifest = await loadManifest(manifestPath);
+      expect(loadedManifest).not.toBeNull();
+
+      const summitContext: SummitContext = {
+        workflowId,
+        featureName,
+        manifest: loadedManifest,
+        specContent: null,
+        buildLogContent: null,
+      };
+
+      const deployGuide = generateDeployGuide(summitContext);
+      expect(deployGuide).toContain(featureName);
+      expect(deployGuide).toContain('Deployment Guide');
+      expect(deployGuide).toContain('DEPLOY-GUIDE-001');
+
+      const runbook = generateRunbook(summitContext);
+      expect(runbook).toContain(featureName);
+      expect(runbook).toContain('Runbook');
+
+      const monitoringConfig = generateMonitoringConfig(summitContext);
+      const config = JSON.parse(monitoringConfig);
+      expect(config.feature).toBe(workflowId);
+      expect(config.alerts).toHaveLength(3);
+
+      const releaseNotes = generateReleaseNotes(summitContext);
+      expect(releaseNotes).toContain(featureName);
+      expect(releaseNotes).toContain('Gates Passed');
+    });
+
+    it('generates comprehensive workflow status report', async () => {
+      // Create a manifest with multiple artifacts across phases
+      const workflowId = 'status-report-e2e';
+      const featureName = 'Status Report E2E';
+
+      const engine = new WorkflowEngine(tmpDir, featureName);
+      await engine.start('Test status reporting');
+
+      const manifestPath = createManifest(workflowId, featureName, tmpDir);
+
+      // Register artifacts in different phases
+      const artifacts: Partial<ManifestArtifact>[] = [
+        { id: 'IDEA-001', type: 'idea', phase: 'vision', stage: 'idea', contract_status: 'active', validation_passed: true },
+        { id: 'PRD-001', type: 'prd', phase: 'vision', stage: 'prd', contract_status: 'active', validation_passed: true },
+        { id: 'UNIT-001', type: 'unit', phase: 'forge', stage: 'units', contract_status: 'draft', validation_passed: null },
+      ];
+
+      for (const artifact of artifacts) {
+        registerArtifact(manifestPath, {
+          id: artifact.id!,
+          type: artifact.type!,
+          phase: artifact.phase! as any,
+          stage: artifact.stage! as any,
+          path: `${artifact.phase}/${artifact.id}.md`,
+          validation_passed: artifact.validation_passed ?? null,
+          write_complete: true,
+          checksum: null,
+        });
+
+        // Update contract status if not draft
+        if (artifact.contract_status && artifact.contract_status !== 'draft') {
+          updateContractStatus(manifestPath, artifact.id!, artifact.contract_status as any);
+        }
+      }
+
+      // Add gate entries
+      addGateAuditEntry(manifestPath, {
+        phase: 'vision',
+        timestamp: new Date().toISOString(),
+        action: 'approved',
+        actor: 'human',
+        reason: null,
+      });
+
+      // Load manifest AFTER registering all artifacts
+      const loadedManifest = await loadManifest(manifestPath);
+      expect(loadedManifest).not.toBeNull();
+      expect(loadedManifest!.artifacts).toHaveLength(3);
+
+      // Generate trust state
+      const trustState = createDefaultTrustState();
+
+      // Generate report
+      const report = generateWorkflowReport(loadedManifest!, trustState);
+
+      // Verify report structure
+      expect(report.summary).toContain('artifacts total');
+      expect(report.phaseProgress).toHaveLength(3);
+      expect(report.artifactTree).toContain('IDEA-001');
+      expect(report.artifactTree).toContain('UNIT-001');
+      expect(report.trustDisplay).toContain('Baseline');
+      expect(report.fullReport).toContain('Workflow Status');
+      expect(report.fullReport).toContain('Phase Progress');
+
+      // Verify phase progress
+      const progress = computePhaseProgress(loadedManifest!);
+      const visionProgress = progress.find(p => p.phase === 'vision');
+      expect(visionProgress?.artifactCount).toBe(2);
+      expect(visionProgress?.percentage).toBe(100); // both active
+    });
+
+    it('captures workflow discoveries via learning bridge', () => {
+      const context: WorkflowContext = {
+        workflowId: 'learning-e2e',
+        featureName: 'Learning E2E Test',
+        projectPath: tmpDir,
+        sessionId: 'test-session-123',
+        phase: 'vision',
+      };
+
+      // Capture gate rejection
+      const rejectionEvent: WorkflowEvent = {
+        type: 'gate_rejection',
+        phase: 'vision',
+        stage: 'prd',
+        details: 'PRD coverage below threshold',
+      };
+
+      const discovery = captureWorkflowDiscovery(rejectionEvent, context);
+      expect(discovery.category).toBe('gotcha');
+      expect(discovery.summary).toContain('Gate rejected');
+      expect(discovery.scope).toBe('project');
+      expect(discovery.id).toBeTruthy();
+
+      // Capture gate approval
+      const approvalEvent: WorkflowEvent = {
+        type: 'gate_approval',
+        phase: 'vision',
+        details: 'Vision phase approved',
+      };
+
+      const approvalDiscovery = captureWorkflowDiscovery(approvalEvent, context);
+      expect(approvalDiscovery.category).toBe('pattern');
+      expect(approvalDiscovery.verified).toBe(true);
+
+      // Report agent performance
+      const feedbackEntry = reportAgentPerformance(
+        'units',
+        'olympian',
+        { passed: true },
+        'test-session',
+      );
+      expect(feedbackEntry.event_type).toBe('success');
+      expect(feedbackEntry.agent_used).toBe('olympian');
+
+      // Record trust level change
+      const trustDiscovery = recordTrustLevelChange(
+        { from: 0, to: 1, reason: 'Earned through successful transitions', timestamp: new Date().toISOString() },
+        context,
+      );
+      expect(trustDiscovery.category).toBe('planning_insight');
+      expect(trustDiscovery.summary).toContain('Trust level change');
+    });
+
+    it('computes methodology metrics from manifest', async () => {
+      const workflowId = 'metrics-e2e';
+      const featureName = 'Metrics E2E Test';
+
+      const engine = new WorkflowEngine(tmpDir, featureName);
+      await engine.start('Test metrics computation');
+
+      const manifestPath = createManifest(workflowId, featureName, tmpDir);
+
+      // Register artifacts with validation results
+      registerArtifact(manifestPath, {
+        id: 'IDEA-001', type: 'idea', phase: 'vision', stage: 'idea',
+        path: 'vision/idea.md', validation_passed: true,
+        write_complete: true, checksum: null,
+      });
+      updateContractStatus(manifestPath, 'IDEA-001', 'active');
+
+      registerArtifact(manifestPath, {
+        id: 'PRD-001', type: 'prd', phase: 'vision', stage: 'prd',
+        path: 'vision/prd.md', validation_passed: false,
+        write_complete: true, checksum: null,
+      });
+      // PRD-001 stays as 'draft' since validation failed
+
+      // Add gate entries
+      addGateAuditEntry(manifestPath, {
+        phase: 'vision', timestamp: new Date().toISOString(),
+        action: 'rejected', actor: 'human', reason: 'Needs more detail',
+      });
+      addGateAuditEntry(manifestPath, {
+        phase: 'vision', timestamp: new Date().toISOString(),
+        action: 'approved', actor: 'human', reason: null,
+      });
+
+      const loadedManifest = await loadManifest(manifestPath);
+      expect(loadedManifest).not.toBeNull();
+
+      const metrics = computeMetrics(loadedManifest!);
+      expect(metrics.total_artifacts).toBe(2);
+      expect(metrics.validation_pass_rate).toBe(0.5); // 1 passed out of 2
+      expect(metrics.rework_count).toBe(1); // 1 rejection
+      expect(metrics.gate_bypass_count).toBe(0);
+
+      // Verify formatDuration
+      expect(formatDuration(500)).toBe('500ms');
+      expect(formatDuration(5000)).toBe('5.0s');
+      expect(formatDuration(120000)).toBe('2.0m');
+      expect(formatDuration(7200000)).toBe('2.0h');
+    });
+
+    it('tracks trust progression through workflow lifecycle', () => {
+      // Start at level 0
+      let trustState = createDefaultTrustState();
+      expect(trustState.current_level).toBe(0);
+
+      // Record 10 successful transitions to earn Level 1
+      for (let i = 0; i < 10; i++) {
+        trustState = recordTransition(trustState, true, false);
+      }
+      expect(trustState.current_level).toBe(1);
+      expect(trustState.total_transitions).toBe(10);
+
+      // Verify trust display in report
+      const trustDisplay = generateWorkflowReport(
+        createMinimalManifest('trust-test', 'Trust Test'),
+        trustState,
+      ).trustDisplay;
+
+      expect(trustDisplay).toContain('Level 1');
+      expect(trustDisplay).toContain('Earned');
+      expect(trustDisplay).toContain('Transitions: 10');
+    });
+
+    it('integrates executePhase summit with template generation', async () => {
+      const featureName = 'Summit Execute Test';
+      const workflowId = 'summit-execute-test';
+
+      const engine = new WorkflowEngine(tmpDir, featureName);
+      await engine.start('Test summit phase execution');
+
+      // Execute summit phase
+      await engine.executePhase('summit');
+
+      // Verify summit artifacts were created
+      const summitDir = join(tmpDir, '.olympus', 'workflow', workflowId, 'summit');
+      const { pathExists, readFile } = await import('fs-extra');
+
+      expect(await pathExists(join(summitDir, 'deploy-guide.md'))).toBe(true);
+      expect(await pathExists(join(summitDir, 'runbook.md'))).toBe(true);
+      expect(await pathExists(join(summitDir, 'monitoring.json'))).toBe(true);
+      expect(await pathExists(join(summitDir, 'release-notes.md'))).toBe(true);
+
+      // Verify content
+      const deployGuide = await readFile(join(summitDir, 'deploy-guide.md'), 'utf-8');
+      expect(deployGuide).toContain(featureName);
+
+      const monitoringRaw = await readFile(join(summitDir, 'monitoring.json'), 'utf-8');
+      const monitoring = JSON.parse(monitoringRaw);
+      expect(monitoring.feature).toBe(workflowId);
     });
   });
 });
