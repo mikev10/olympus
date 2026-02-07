@@ -17,6 +17,7 @@ import { registerBudgetWarningHook } from './budget-warning.js';
 import { registerAgentTrackingHook } from './agent-tracking.js';
 import { registerDiscoveryCaptureHooks } from './discovery-capture.js';
 import { registerPlanLifecycleHooks } from './plan-lifecycle.js';
+import { registerQualityGateHooks } from './quality-gate.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -43,6 +44,7 @@ export function registerAllHooks(): void {
   registerAgentTrackingHook(); // Agent usage tracking for learning system
   registerDiscoveryCaptureHooks(); // Auto-discovery capture for learning system
   registerPlanLifecycleHooks(); // Plan lifecycle tracking for learning system
+  registerQualityGateHooks(); // Quality gate hooks for phase transitions
 
   registered = true;
 }
@@ -69,4 +71,5 @@ export {
   registerAgentTrackingHook,
   registerDiscoveryCaptureHooks,
   registerPlanLifecycleHooks,
+  registerQualityGateHooks,
 };
