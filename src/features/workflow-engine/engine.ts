@@ -19,6 +19,8 @@ import {
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
 import { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
+import { ForgeExecutor } from './forge/executor.js';
+import type { WorkflowPhase } from './phase-types.js';
 
 /**
  * Ordered list of workflow stages for progression validation
@@ -394,6 +396,69 @@ export class WorkflowEngine {
       artifacts,
       updated_at: checkpoint.updated_at,
     };
+  }
+
+  /**
+   * Execute a phase of the ODLC methodology.
+   *
+   * This is a NEW method that coexists with executeStage().
+   * - executePhase('vision') delegates to existing executeStage() pipeline
+   * - executePhase('forge') instantiates ForgeExecutor
+   * - executePhase('summit') generates template-based artifacts (v1 minimal)
+   *
+   * @param phase - The phase to execute ('vision' | 'forge' | 'summit')
+   */
+  async executePhase(phase: WorkflowPhase): Promise<void> {
+    switch (phase) {
+      case 'vision': {
+        // Delegate to existing stage-based pipeline
+        const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        if (!checkpoint) {
+          throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
+        }
+
+        const stageOrder: WorkflowStage[] = ['idea', 'prd', 'spec', 'intents'];
+        for (const stage of stageOrder) {
+          if (checkpoint.current_stage === stage || checkpoint.current_stage === 'idea') {
+            await this.executeStage(stage);
+            // Reload checkpoint after each stage
+            const updated = await loadCheckpoint(this.projectPath, this.workflowId);
+            if (updated && updated.current_stage === 'complete') {
+              break;
+            }
+          }
+        }
+        break;
+      }
+
+      case 'forge': {
+        // Read spec content for design validation
+        const specPath = getArtifactPath(this.projectPath, this.workflowId, 'spec');
+        let specContent: string | undefined;
+        try {
+          const fs = await import('fs');
+          specContent = fs.readFileSync(specPath, 'utf-8');
+        } catch {
+          // Spec may not exist, continue without it
+        }
+
+        const executor = new ForgeExecutor(this.projectPath, this.workflowId);
+        const result = await executor.execute(specContent);
+
+        if (!result.passed) {
+          console.error(`[WorkflowEngine] Forge phase validation failed:`, result.blocking_issues);
+          throw new Error(`Forge phase validation failed: ${result.blocking_issues.join(', ')}`);
+        }
+        break;
+      }
+
+      case 'summit': {
+        // Summit v1: minimal template-based artifacts only
+        // Full implementation in Phase 7 (Task 24)
+        console.log('[WorkflowEngine] Summit phase: Template-based artifacts (v1 minimal)');
+        break;
+      }
+    }
   }
 
   // ============================================================================

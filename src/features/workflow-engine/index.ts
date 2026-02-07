@@ -172,5 +172,45 @@ export {
   getConformanceThreshold,
 } from './alignment.js';
 
+// Forge Phase
+export type {
+  UnitSpec,
+  BoltSpec,
+  DecompositionTree,
+} from './forge/decomposition.js';
+export {
+  parseIntentsFromDisk,
+  decomposeIntentToUnits,
+  decomposeUnitToBolts,
+  buildDecompositionTree,
+  getLeafBolts,
+  getExecutableOrder,
+} from './forge/decomposition.js';
+export type {
+  InterfaceContract,
+  InterfaceField,
+  DataFlowDiagram,
+  DataFlowComponent,
+  DataFlow,
+  ComponentDesign,
+  DesignArtifacts,
+} from './forge/design.js';
+export {
+  generateInterfaceContracts,
+  generateDataFlowDiagram,
+  generateComponentDesign,
+  validateDesign,
+  writeDesignArtifacts,
+  loadDesignArtifacts,
+} from './forge/design.js';
+export { ForgeExecutor, FORGE_STAGE_AGENT_MAP } from './forge/executor.js';
+export type { ForgeProgress } from './forge/executor.js';
+export {
+  validateUnits,
+  validateDesignArtifacts,
+  validateBolt,
+  validateForgePhase,
+} from './forge/validation.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
