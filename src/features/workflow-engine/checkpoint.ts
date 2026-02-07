@@ -13,6 +13,7 @@
 import * as fs from 'fs-extra';
 import { join } from 'path';
 import { WorkflowCheckpoint } from './types.js';
+import type { WorkflowCheckpointV2, WorkflowPhase, PhaseState, RiskTierClassification } from './phase-types.js';
 
 const WORKFLOW_DIR = '.olympus/workflow';
 const CHECKPOINT_FILENAME = 'checkpoint.json';
@@ -62,6 +63,87 @@ export function invalidateCache(projectPath: string, workflowId: string): void {
 }
 
 /**
+ * Helper to determine Vision phase status during v1->v2 migration
+ */
+function determineVisionStatus(currentStage: string, workflowStatus: string): string {
+  if (currentStage === 'complete') {
+    return 'complete';
+  }
+  return workflowStatus;
+}
+
+/**
+ * Migrate a v1 checkpoint to v2 format.
+ * Detects v1 by schema_version !== '2.0.0' and adds ODLC phase tracking.
+ *
+ * @param checkpoint - v1 checkpoint to migrate
+ * @returns Migrated v2 checkpoint
+ */
+export function migrateCheckpointV1toV2(checkpoint: WorkflowCheckpoint): WorkflowCheckpointV2 {
+  // If already v2, return as-is
+  if (checkpoint.schema_version === '2.0.0') {
+    return checkpoint as unknown as WorkflowCheckpointV2;
+  }
+
+  // Initialize v2 phase states
+  const phases: Record<WorkflowPhase, PhaseState> = {
+    vision: {
+      status: determineVisionStatus(checkpoint.current_stage, checkpoint.status) as any,
+      started_at: checkpoint.created_at,
+      completed_at: checkpoint.current_stage === 'complete' ? checkpoint.updated_at : null,
+      gate_result: null,
+      gate_bypassed: false,
+      bypass_reason: null,
+    },
+    forge: {
+      status: 'not_started',
+      started_at: null,
+      completed_at: null,
+      gate_result: null,
+      gate_bypassed: false,
+      bypass_reason: null,
+    },
+    summit: {
+      status: 'not_started',
+      started_at: null,
+      completed_at: null,
+      gate_result: null,
+      gate_bypassed: false,
+      bypass_reason: null,
+    },
+  };
+
+  // Create v2 checkpoint
+  const v2Checkpoint: WorkflowCheckpointV2 = {
+    schema_version: '2.0.0',
+    workflow_id: checkpoint.workflow_id,
+    feature_name: checkpoint.feature_name,
+    created_at: checkpoint.created_at,
+    updated_at: checkpoint.updated_at,
+
+    // Phase-based tracking (new in v2)
+    current_phase: 'vision', // v1 workflows were always in Vision phase
+    phases,
+
+    // Stage-based tracking (preserved from v1)
+    current_stage: checkpoint.current_stage,
+    status: checkpoint.status,
+    artifacts: checkpoint.artifacts,
+    validation_results: checkpoint.validation_results,
+
+    // Preserved context
+    resume_context: checkpoint.resume_context,
+
+    // ODLC extensions (new in v2)
+    manifest_path: null,
+    trust_state_path: null,
+    risk_tier: null,
+  };
+
+  return v2Checkpoint;
+}
+
+/**
  * Save a workflow checkpoint to disk.
  * Creates directory structure if it doesn't exist.
  * Updates the checkpoint's updated_at timestamp before saving.
@@ -106,7 +188,7 @@ export async function saveCheckpoint(
     // Update cache
     const cacheKey = getCacheKey(projectPath, checkpoint.workflow_id);
     checkpointCache.set(cacheKey, {
-      checkpoint: { ...checkpoint }, // Store a copy to prevent mutation
+      checkpoint: structuredClone(checkpoint), // Store a deep copy to prevent mutation
       timestamp: Date.now(),
       dirty: false,
     });
@@ -173,8 +255,8 @@ export async function loadCheckpoint(
   // Check cache first
   const cachedEntry = checkpointCache.get(cacheKey);
   if (cachedEntry && isCacheValid(cachedEntry)) {
-    // Return a copy to prevent external mutations from affecting the cache
-    return { ...cachedEntry.checkpoint };
+    // Return a deep copy to prevent external mutations from affecting the cache
+    return structuredClone(cachedEntry.checkpoint);
   }
 
   const checkpointPath = join(
@@ -188,7 +270,7 @@ export async function loadCheckpoint(
     // Fast path: use readFile + JSON.parse instead of fs.readJson
     // This is faster for typical checkpoint sizes
     const fileContent = await fs.readFile(checkpointPath, 'utf-8');
-    const checkpoint = JSON.parse(fileContent) as WorkflowCheckpoint;
+    let checkpoint = JSON.parse(fileContent) as WorkflowCheckpoint;
 
     // Validate schema_version exists
     if (!checkpoint.schema_version) {
@@ -198,9 +280,35 @@ export async function loadCheckpoint(
       return null;
     }
 
+    // Auto-migrate v1 -> v2 if needed
+    if (checkpoint.schema_version !== '2.0.0') {
+      try {
+        console.log(`[Checkpoint] Migrating checkpoint ${workflowId} from v${checkpoint.schema_version} to v2.0.0`);
+        checkpoint = migrateCheckpointV1toV2(checkpoint) as any;
+
+        // Save migrated checkpoint back to disk (one-way migration)
+        const estimatedSize = JSON.stringify(checkpoint).length;
+        const useCompact = estimatedSize > 10000;
+
+        if (useCompact) {
+          const jsonContent = JSON.stringify(checkpoint);
+          await fs.writeFile(checkpointPath, jsonContent, 'utf-8');
+        } else {
+          await fs.writeJson(checkpointPath, checkpoint, { spaces: 2 });
+        }
+
+        console.log(`[Checkpoint] Successfully migrated and saved checkpoint ${workflowId} to v2.0.0`);
+      } catch (migrationError) {
+        const err = migrationError as Error;
+        console.warn(`[Checkpoint] Failed to migrate checkpoint ${workflowId}: ${err.message}`);
+        console.warn(`[Checkpoint] Returning null - checkpoint may need manual migration`);
+        return null;
+      }
+    }
+
     // Update cache with fresh data
     checkpointCache.set(cacheKey, {
-      checkpoint: { ...checkpoint },
+      checkpoint: structuredClone(checkpoint),
       timestamp: Date.now(),
       dirty: false,
     });

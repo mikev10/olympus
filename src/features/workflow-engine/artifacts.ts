@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { WorkflowStage, IntentTask, IntentNode, DependencyGraph } from './types.js';
+import { WorkflowPhase } from './phase-types.js';
 
 /**
  * Ensures the workflow directory structure exists.
@@ -486,5 +487,264 @@ ${artifactsSection}`;
     throw new Error(
       `Failed to link master plan for ${workflowId}: ${err.message}`
     );
+  }
+}
+
+/**
+ * Ensures the phase-based workflow directory structure exists.
+ * Creates:
+ * - .olympus/workflow/{workflowId}/
+ * - .olympus/workflow/{workflowId}/vision/
+ * - .olympus/workflow/{workflowId}/vision/intents/
+ * - .olympus/workflow/{workflowId}/vision/validation/
+ * - .olympus/workflow/{workflowId}/forge/
+ * - .olympus/workflow/{workflowId}/forge/units/
+ * - .olympus/workflow/{workflowId}/forge/design/
+ * - .olympus/workflow/{workflowId}/forge/bolts/
+ * - .olympus/workflow/{workflowId}/forge/bolts/results/
+ * - .olympus/workflow/{workflowId}/forge/validation/
+ * - .olympus/workflow/{workflowId}/summit/
+ * - .olympus/workflow/{workflowId}/summit/validation/
+ *
+ * Idempotent - safe to call multiple times.
+ * Does NOT create manifest.json (that's manifest.ts's job).
+ * @throws Error if disk is full or permissions are denied
+ */
+export async function ensurePhaseWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
+  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+
+  try {
+    // Create base workflow directory
+    await fs.ensureDir(workflowDir);
+
+    // Create Vision phase directories
+    await fs.ensureDir(path.join(workflowDir, 'vision'));
+    await fs.ensureDir(path.join(workflowDir, 'vision', 'intents'));
+    await fs.ensureDir(path.join(workflowDir, 'vision', 'validation'));
+
+    // Create Forge phase directories
+    await fs.ensureDir(path.join(workflowDir, 'forge'));
+    await fs.ensureDir(path.join(workflowDir, 'forge', 'units'));
+    await fs.ensureDir(path.join(workflowDir, 'forge', 'design'));
+    await fs.ensureDir(path.join(workflowDir, 'forge', 'bolts'));
+    await fs.ensureDir(path.join(workflowDir, 'forge', 'bolts', 'results'));
+    await fs.ensureDir(path.join(workflowDir, 'forge', 'validation'));
+
+    // Create Summit phase directories
+    await fs.ensureDir(path.join(workflowDir, 'summit'));
+    await fs.ensureDir(path.join(workflowDir, 'summit', 'validation'));
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Artifacts] Failed to create phase workflow directory: Disk full`);
+      console.error(`[Artifacts] Please free up disk space and try again.`);
+      console.error(`[Artifacts] Attempted path: ${workflowDir}`);
+      throw new Error(
+        'Failed to create phase workflow directory: Disk is full. Please free up space and retry.'
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to create phase workflow directory: Permission denied`);
+      console.error(`[Artifacts] Path: ${workflowDir}`);
+      throw new Error(
+        `Failed to create phase workflow directory: Permission denied for ${workflowDir}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Artifacts] Failed to create phase workflow directory: Read-only filesystem`);
+      console.error(`[Artifacts] Path: ${workflowDir}`);
+      throw new Error(
+        'Failed to create phase workflow directory: Filesystem is read-only'
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to create phase workflow directory: ${err.message}`);
+    console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+    console.error(`[Artifacts] Path: ${workflowDir}`);
+    throw new Error(
+      `Failed to create phase workflow directory for ${workflowId}: ${err.message}`
+    );
+  }
+}
+
+/**
+ * Checks if a workflow directory uses the legacy flat layout or the new phase-based layout.
+ *
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @returns true if the workflow uses the legacy flat layout (no vision/ subdirectory),
+ *          false if it uses the new phase-based layout (has vision/ subdirectory)
+ */
+export async function isLegacyLayout(projectPath: string, workflowId: string): Promise<boolean> {
+  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+  const visionDir = path.join(workflowDir, 'vision');
+
+  try {
+    return !await fs.pathExists(visionDir);
+  } catch (error) {
+    // If we can't read the directory, assume it's legacy
+    return true;
+  }
+}
+
+/**
+ * Migrates a workflow from the legacy flat layout to the new phase-based layout.
+ * Moves:
+ * - idea.md -> vision/idea.md
+ * - prd.md -> vision/prd.md
+ * - spec.md -> vision/spec.md
+ * - intents/ -> vision/intents/
+ * - validation/ -> vision/validation/
+ *
+ * Preserves:
+ * - checkpoint.json (remains in root)
+ * - manifest.json (remains in root)
+ *
+ * Creates:
+ * - forge/ and summit/ directories
+ *
+ * Idempotent - if already migrated (vision/ exists), returns early without error.
+ *
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @throws Error if disk is full, permissions are denied, or filesystem errors occur
+ */
+export async function migrateLayout(projectPath: string, workflowId: string): Promise<void> {
+  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+  const visionDir = path.join(workflowDir, 'vision');
+
+  try {
+    // If already migrated, return early
+    if (await fs.pathExists(visionDir)) {
+      return;
+    }
+
+    // Create the phase-based directory structure
+    await ensurePhaseWorkflowDir(projectPath, workflowId);
+
+    // Move artifacts if they exist
+    const filesToMove = [
+      { from: 'idea.md', to: path.join('vision', 'idea.md') },
+      { from: 'prd.md', to: path.join('vision', 'prd.md') },
+      { from: 'spec.md', to: path.join('vision', 'spec.md') },
+    ];
+
+    for (const file of filesToMove) {
+      const sourcePath = path.join(workflowDir, file.from);
+      const targetPath = path.join(workflowDir, file.to);
+
+      if (await fs.pathExists(sourcePath)) {
+        await fs.move(sourcePath, targetPath, { overwrite: false });
+      }
+    }
+
+    // Move directories if they exist
+    const dirsToMove = [
+      { from: 'intents', to: path.join('vision', 'intents') },
+      { from: 'validation', to: path.join('vision', 'validation') },
+    ];
+
+    for (const dir of dirsToMove) {
+      const sourcePath = path.join(workflowDir, dir.from);
+      const targetPath = path.join(workflowDir, dir.to);
+
+      if (await fs.pathExists(sourcePath)) {
+        // Ensure target parent exists
+        await fs.ensureDir(path.dirname(targetPath));
+
+        // Move the directory
+        await fs.move(sourcePath, targetPath, { overwrite: false });
+      }
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+
+    // Handle disk full error
+    if (err.code === 'ENOSPC') {
+      console.error(`[Artifacts] Failed to migrate layout: Disk full`);
+      console.error(`[Artifacts] Please free up disk space and try again.`);
+      console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+      throw new Error(
+        'Failed to migrate workflow layout: Disk is full. Please free up space and retry.'
+      );
+    }
+
+    // Handle permission denied error
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Artifacts] Failed to migrate layout: Permission denied`);
+      console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+      throw new Error(
+        `Failed to migrate workflow layout: Permission denied for ${workflowId}`
+      );
+    }
+
+    // Handle read-only filesystem
+    if (err.code === 'EROFS') {
+      console.error(`[Artifacts] Failed to migrate layout: Read-only filesystem`);
+      console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+      throw new Error(
+        'Failed to migrate workflow layout: Filesystem is read-only'
+      );
+    }
+
+    // Generic error with context
+    console.error(`[Artifacts] Failed to migrate layout: ${err.message}`);
+    console.error(`[Artifacts] Workflow ID: ${workflowId}`);
+    throw new Error(
+      `Failed to migrate workflow layout for ${workflowId}: ${err.message}`
+    );
+  }
+}
+
+/**
+ * Returns the file path for an artifact in the phase-based layout.
+ *
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @param phase - Workflow phase ('vision', 'forge', or 'summit')
+ * @param stage - Stage within the phase (e.g., 'idea', 'units', 'deploy')
+ * @param filename - Name of the file
+ * @returns Absolute path to the artifact file
+ *
+ * @example
+ * getPhaseArtifactPath(p, id, 'vision', 'idea', 'idea.md')
+ * // Returns: .olympus/workflow/{id}/vision/idea.md
+ *
+ * getPhaseArtifactPath(p, id, 'forge', 'units', 'UNIT-001.md')
+ * // Returns: .olympus/workflow/{id}/forge/units/UNIT-001.md
+ *
+ * getPhaseArtifactPath(p, id, 'summit', 'deploy', 'deploy-guide.md')
+ * // Returns: .olympus/workflow/{id}/summit/deploy-guide.md
+ */
+export function getPhaseArtifactPath(
+  projectPath: string,
+  workflowId: string,
+  phase: WorkflowPhase,
+  stage: string,
+  filename: string
+): string {
+  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+
+  // Determine subdirectory structure based on stage
+  // Stages that map to subdirectories
+  const subdirStages = ['intents', 'validation', 'units', 'design', 'bolts', 'results'];
+
+  if (subdirStages.includes(stage)) {
+    // Special case: results is a subdirectory within bolts
+    if (stage === 'results') {
+      return path.join(workflowDir, phase, 'bolts', 'results', filename);
+    }
+    // Other stages map directly to subdirectories
+    return path.join(workflowDir, phase, stage, filename);
+  } else {
+    // Other stages are files directly in the phase directory
+    return path.join(workflowDir, phase, filename);
   }
 }

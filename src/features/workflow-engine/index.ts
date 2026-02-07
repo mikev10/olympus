@@ -55,6 +55,7 @@ export {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
+  migrateCheckpointV1toV2,
 } from './checkpoint.js';
 
 // Artifact management
@@ -67,7 +68,31 @@ export {
   validateDependencyGraph,
   getExecutionOrder,
   linkMasterPlan,
+  ensurePhaseWorkflowDir,
+  isLegacyLayout,
+  migrateLayout,
+  getPhaseArtifactPath,
 } from './artifacts.js';
+
+// Manifest management
+export {
+  createManifest,
+  loadManifest,
+  saveManifest,
+  registerArtifact,
+  linkArtifacts,
+  computeChecksum,
+  detectStaleArtifacts,
+  cascadeInvalidation,
+  runAlignmentCheck,
+  recoverManifest,
+  normalizePath,
+  updatePhaseStatus,
+  addGateAuditEntry,
+  getArtifactById,
+  getArtifactsByPhase,
+  updateContractStatus,
+} from './manifest.js';
 
 // Execution and task tracking
 export type { TaskStatus, TaskStatusRecord } from './execution.js';
