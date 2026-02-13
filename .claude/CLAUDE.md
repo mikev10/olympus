@@ -6,7 +6,7 @@
 Olympus is a multi-agent orchestration system for Claude Code that enables intelligent task delegation, parallel execution, and specialized agent coordination. Tagline: "Summon the gods of code."
 
 **Distribution:**
-- **npm package**: `olympus-ai` (current version: 3.7.0)
+- **npm package**: `olympus-ai` (current version: 3.7.1)
 - **GitHub**: https://github.com/mikev10/olympus
 - **Claude Code plugin**: Distributed via `.claude-plugin` directory
 - **CLI command**: `olympus-ai`
