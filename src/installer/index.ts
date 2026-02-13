@@ -16,7 +16,7 @@
  * - OLYMPUS_USE_BASH_HOOKS=1: Force Bash hooks (Unix only)
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -2940,26 +2940,7 @@ Generate:
 - dependency-graph.json defining execution order
 
 Run coverage validation (100% of SPEC components must have tasks).
-Update checkpoint with task references.`,
-
-  'workflow-status.md': `---
-description: Show status of active workflows
----
-
-Display all active structured workflows.
-
-INSTRUCTIONS:
-1. Scan \`.olympus/workflow/\` directory for checkpoint files
-2. For each checkpoint, show:
-   - Feature name
-   - Current stage
-   - Status
-   - Last updated timestamp
-   - Path to checkpoint
-
-If no active workflows, display: "No active workflows found."
-
-Use \`/plan continue\` to resume a paused workflow.`
+Update checkpoint with task references.`
 };
 
 // SKILL_DEFINITIONS removed - skills are now only in COMMAND_DEFINITIONS to avoid duplicates
@@ -3426,13 +3407,29 @@ export function install(options: InstallOptions = {}): InstallResult {
       'olympus.md',
       'prometheus.md',
       'review.md',
-      'ultrawork.md'
+      'ultrawork.md',
+      'workflow-status.md'
     ];
     for (const legacyFile of legacyFiles) {
       const legacyPath = join(commandsDir, legacyFile);
       if (existsSync(legacyPath)) {
         unlinkSync(legacyPath);
         log(`  Removed legacy ${legacyFile}`);
+      }
+    }
+
+    // Clean up legacy skill directories (replaced by commands)
+    const legacySkillDirs = [
+      'deepinit',
+      'ultrawork',
+      'frontend-ui-ux',
+      'git-master'
+    ];
+    for (const legacySkill of legacySkillDirs) {
+      const legacySkillPath = join(skillsDir, legacySkill);
+      if (existsSync(legacySkillPath)) {
+        rmSync(legacySkillPath, { recursive: true, force: true });
+        log(`  Removed legacy skill ${legacySkill}/`);
       }
     }
 
