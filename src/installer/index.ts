@@ -2479,6 +2479,57 @@ You are running the Olympus pre-release smoke test. This verifies all hooks are 
 For full test protocol details, see \`.claude/skills/smoke-test/skill.md\`
 `,
 
+  'workflow-test.md': `---
+description: End-to-end structured workflow test - exercises every stage from IDEA through BUILD, then cleans up
+---
+
+$ARGUMENTS
+
+## Task: Run Workflow End-to-End Test
+
+You are running an end-to-end test of the Olympus structured workflow engine.
+
+### Complete Pipeline
+
+\`\`\`
+IDEA → PRD → SPEC → INTENTS → UNITS → DESIGN → BUILD
+\`\`\`
+
+### What This Does
+
+1. Creates a test workflow \`smoke-test-hello-world\` in \`.olympus/workflow/\`
+2. Walks through all 7 stages: IDEA, PRD, SPEC, INTENTS, UNITS, DESIGN, BUILD
+3. Creates minimal test artifacts at each stage in the correct directory structure
+4. Updates checkpoint.json after each stage to verify state transitions
+5. Verifies all 13 artifacts are created in the correct locations
+6. **Deletes the entire test workflow** when done — mandatory cleanup
+
+### Quick Protocol
+
+1. **Setup**: Delete leftover \`.olympus/workflow/smoke-test-hello-world/\`, create fresh directory structure
+2. **Create checkpoint.json** with schema v2.0.0, initial state: vision/idea
+3. **Vision phase**: Write idea.md → prd.md → spec.md → INTENT-*.md (update checkpoint after each)
+4. **Forge phase**: Write UNIT-*.md → design docs (interfaces.md, data-flow.md, components.md) → BUILD stage creates BOLT-*.md (update checkpoint after each)
+5. **BUILD verification**: Read final checkpoint, verify all stages complete, count all 13 artifacts
+6. **Cleanup**: Delete \`.olympus/workflow/smoke-test-hello-world/\` entirely, verify deletion
+7. **Report**: Print PASS/FAIL table for each of the 7 stages
+
+### Arguments
+- No args: Full test (all 7 stages)
+- \`vision\`: Vision phase only (IDEA/PRD/SPEC/INTENTS)
+- \`forge\`: Forge phase only (UNITS/DESIGN/BUILD)
+- \`cleanup\`: Delete leftover test artifacts
+
+### Rules
+- ALL files go in \`.olympus/workflow/smoke-test-hello-world/\` only
+- NEVER modify source code (\`src/\`, \`dist/\`, etc.)
+- ALWAYS clean up — if cleanup fails, report as FAILURE
+- Report results to stdout, do not create report files
+- Use workflow ID \`smoke-test-hello-world\` exactly
+
+For full test protocol details, see \`.claude/skills/workflow-test/skill.md\`
+`,
+
   'deepinit.md': `---
 description: Index full codebase recursively with hierarchical AGENTS.md files
 ---
