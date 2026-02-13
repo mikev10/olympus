@@ -65,13 +65,11 @@ export function extractDiscovery(
   const taskDescription = state.pending_completion.task_description;
   const agentUsed = state.pending_completion.agent_used || 'unknown';
 
-  // Extract summary (first 100 chars, truncated at word boundary)
-  const summary = truncateAtWordBoundary(taskDescription, 100);
+  // Extract meaningful summary from task description
+  const summary = extractActionSummary(taskDescription);
 
-  // Extract details (full task description, capped at 2000 chars)
-  const details = taskDescription.length > 2000
-    ? taskDescription.substring(0, 2000) + '...'
-    : taskDescription;
+  // Extract key details (first meaningful section, code blocks stripped, capped at 500 chars)
+  const details = extractKeyDetails(taskDescription);
 
   // Infer category from task description
   const category = inferCategory(taskDescription, agentUsed);
@@ -197,6 +195,177 @@ function truncateAtWordBoundary(text: string, maxLength: number): string {
   }
 
   return truncated + '...';
+}
+
+/**
+ * Extract the first meaningful sentence from text.
+ * Stops at first period, newline, or maxLength (whichever comes first).
+ */
+export function extractFirstSentence(text: string, maxLength: number = 100): string {
+  if (!text || text.length === 0) return '';
+
+  // Find first period followed by space, or newline, or max length
+  const periodMatch = text.match(/^[^.]+\./);
+  const newlineIndex = text.indexOf('\n');
+
+  let endIndex = text.length;
+
+  if (periodMatch && periodMatch[0].length <= maxLength) {
+    endIndex = Math.min(endIndex, periodMatch[0].length);
+  }
+
+  if (newlineIndex > 0 && newlineIndex <= maxLength) {
+    endIndex = Math.min(endIndex, newlineIndex);
+  }
+
+  endIndex = Math.min(endIndex, maxLength);
+
+  const result = text.substring(0, endIndex).trim();
+
+  if (result.length < text.length && !result.endsWith('.')) {
+    return truncateAtWordBoundary(result, maxLength);
+  }
+
+  return result;
+}
+
+/**
+ * Strip file paths from text (Windows and Unix paths).
+ * Removes patterns like C:\Users\..., /home/user/..., or backtick-wrapped paths.
+ */
+export function stripFilePaths(text: string): string {
+  // Remove backtick-wrapped paths first (more specific)
+  let result = text.replace(/`[^`]*[\\\/][^`]*`/g, '');
+
+  // Remove Windows paths (C:\..., D:\...)
+  result = result.replace(/[A-Z]:[\\\/][\w\\\/.@-]+/gi, '');
+
+  // Remove Unix paths (/home/..., /Users/..., /var/...) - but be careful with markdown links
+  // Only remove if it looks like a file system path (contains multiple segments)
+  result = result.replace(/\/[\w-]+(?:\/[\w\/.@-]+)+/g, '');
+
+  // Clean up extra spaces left by path removal
+  result = result.replace(/\s+/g, ' ').trim();
+
+  return result;
+}
+
+/**
+ * Extract an action-oriented summary from a task description.
+ * Converts action verbs to past tense and focuses on what was done.
+ */
+export function extractActionSummary(taskDescription: string): string {
+  if (!taskDescription || taskDescription.length === 0) {
+    return 'Completed task';
+  }
+
+  // Common action verbs and their past tense forms
+  const actionVerbs: Record<string, string> = {
+    'Create': 'Created',
+    'Fix': 'Fixed',
+    'Update': 'Updated',
+    'Add': 'Added',
+    'Implement': 'Implemented',
+    'Build': 'Built',
+    'Write': 'Wrote',
+    'Configure': 'Configured',
+    'Set up': 'Set up',
+    'Setup': 'Set up',
+    'Install': 'Installed',
+    'Remove': 'Removed',
+    'Delete': 'Deleted',
+    'Refactor': 'Refactored',
+    'Test': 'Tested',
+    'Debug': 'Debugged',
+    'Deploy': 'Deployed',
+    'Migrate': 'Migrated',
+    'VERIFY': 'Verified',
+    'Verify': 'Verified',
+    'Analyze': 'Analyzed',
+    'Review': 'Reviewed',
+    'Explore': 'Explored',
+    'Investigate': 'Investigated',
+  };
+
+  // Strip file paths first
+  let cleaned = stripFilePaths(taskDescription);
+
+  // Get first sentence or line
+  const firstSentence = extractFirstSentence(cleaned, 150);
+
+  // Check if it starts with an action verb
+  for (const [present, past] of Object.entries(actionVerbs)) {
+    const pattern = new RegExp(`^${present}\\b`, 'i');
+    if (pattern.test(firstSentence)) {
+      // Replace with past tense
+      const transformed = firstSentence.replace(pattern, past);
+
+      // Clean up and truncate
+      return truncateAtWordBoundary(transformed.trim(), 100);
+    }
+  }
+
+  // If no action verb found, extract first meaningful phrase
+  // Look for patterns like "In the X project, Y" -> "Y"
+  const inPatternMatch = cleaned.match(/^In the .+? project,\s*(.+)/i);
+  if (inPatternMatch) {
+    const extracted = inPatternMatch[1].trim();
+    // Try to make it action-oriented
+    if (extracted.toLowerCase().startsWith('i need to')) {
+      const action = extracted.replace(/^i need to\s+/i, '');
+      return truncateAtWordBoundary(action.charAt(0).toUpperCase() + action.slice(1), 100);
+    }
+    return truncateAtWordBoundary(extracted, 100);
+  }
+
+  // Fallback: just use the first sentence, stripped of paths
+  return truncateAtWordBoundary(firstSentence, 100);
+}
+
+/**
+ * Extract key details from task description.
+ * Strips code blocks, extracts first section/paragraph, caps at 500 chars.
+ */
+export function extractKeyDetails(taskDescription: string): string {
+  if (!taskDescription || taskDescription.length === 0) {
+    return '';
+  }
+
+  let text = taskDescription;
+
+  // Strip code blocks (```...``` or `...`)
+  text = text.replace(/```[\s\S]*?```/g, '[code block]');
+  text = text.replace(/`[^`]+`/g, '');
+
+  // Look for first markdown section (## heading)
+  const sectionMatch = text.match(/^(.*?)(?=\n##|\n\n##|$)/s);
+  if (sectionMatch) {
+    text = sectionMatch[1].trim();
+  }
+
+  // If we have numbered steps, extract just the step descriptions
+  const stepsMatch = text.match(/^\d+\.\s+(.+)/gm);
+  if (stepsMatch && stepsMatch.length > 0) {
+    // Take first 3 steps
+    const steps = stepsMatch.slice(0, 3).map(step => {
+      return step.replace(/^\d+\.\s+/, '').trim();
+    });
+    text = steps.join('; ');
+  }
+
+  // Take first paragraph if we have multiple paragraphs
+  const firstParagraph = text.split(/\n\n/)[0];
+  text = firstParagraph || text;
+
+  // Clean up whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+
+  // Cap at 500 chars
+  if (text.length > 500) {
+    return truncateAtWordBoundary(text, 500);
+  }
+
+  return text;
 }
 
 /**

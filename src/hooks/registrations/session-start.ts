@@ -8,7 +8,7 @@ import { registerHook } from '../registry.js';
 import { readUltraworkState } from '../ultrawork-state/index.js';
 import { checkIncompleteTodos } from '../todo-continuation/index.js';
 import { generateLearnedContext, formatDiscoveries } from '../../learning/hooks/learned-context.js';
-import { getDiscoveriesForInjection } from '../../learning/discovery.js';
+import { getDiscoveriesForInjection, markDiscoveryUseful } from '../../learning/discovery.js';
 import { loadSessionState, saveSessionState, initializeTokenBudget } from '../../learning/session-state.js';
 import type { HookContext, HookResult } from '../types.js';
 
@@ -27,6 +27,23 @@ export function registerSessionStartHooks(): void {
         const learnedContext = generateLearnedContext(ctx.directory);
         const discoveries = getDiscoveriesForInjection(ctx.directory, 5);
         const discoveriesContext = formatDiscoveries(discoveries);
+
+        // Mark injected discoveries as useful (verification loop)
+        // Only mark discoveries that haven't been marked useful in the last 24 hours
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        for (const discovery of discoveries) {
+          try {
+            const lastUseful = new Date(discovery.last_useful);
+            if (lastUseful < oneDayAgo) {
+              markDiscoveryUseful(discovery.id, ctx.directory);
+            }
+          } catch (error) {
+            // Silently ignore verification failures - never block session start
+            console.error('[Olympus Learning] Failed to mark discovery as useful:', error);
+          }
+        }
 
         const contextToInject = learnedContext + (discoveriesContext ? '\n\n' + discoveriesContext : '');
 

@@ -31,6 +31,7 @@ describe('Hook Integration', () => {
         'thinkMode',
         'learningFeedbackCapture',
         // SessionStart
+        'learnedContextInjection',
         'sessionStart',
         // Stop
         'persistentMode',
@@ -80,18 +81,20 @@ describe('Hook Integration', () => {
 
     it('has SessionStart hooks', () => {
       const hooks = getHooksForEvent('SessionStart');
-      expect(hooks.length).toBeGreaterThanOrEqual(1);
+      expect(hooks.length).toBeGreaterThanOrEqual(2);
 
       const names = hooks.map(h => h.name);
+      expect(names).toContain('learnedContextInjection');
       expect(names).toContain('sessionStart');
     });
 
     it('has Stop hooks', () => {
       const hooks = getHooksForEvent('Stop');
-      expect(hooks.length).toBeGreaterThanOrEqual(1);
+      expect(hooks.length).toBeGreaterThanOrEqual(2);
 
       const names = hooks.map(h => h.name);
       expect(names).toContain('persistentMode');
+      expect(names).toContain('learningAggregation');
     });
 
     it('has PreToolUse hooks', () => {

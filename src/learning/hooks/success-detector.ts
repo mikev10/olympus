@@ -12,9 +12,6 @@ export async function handleSuccessDetection(input: HookInput): Promise<void> {
 
   const state = loadSessionState(directory, sessionId);
 
-  // Only check for success if there's a pending completion
-  if (!hasPendingCompletion(state)) return;
-
   const detected = detectFeedbackCategory(prompt);
 
   // Success indicators:
@@ -41,9 +38,11 @@ export async function handleSuccessDetection(input: HookInput): Promise<void> {
 
     appendFeedback(feedbackEntry);
 
-    // Clear the completion claim
-    const updatedState = clearCompletionClaim(state);
-    saveSessionState(directory, updatedState);
+    // Clear the completion claim if there was a pending completion
+    if (hasPendingCompletion(state)) {
+      const updatedState = clearCompletionClaim(state);
+      saveSessionState(directory, updatedState);
+    }
   }
 }
 

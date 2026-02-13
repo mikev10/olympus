@@ -131,15 +131,26 @@ export function registerPlanLifecycleHooks(): void {
 
         const reviewResult = parseMomusReviewOutput(outputStr);
 
-        // Only create discoveries for failures (don't pollute with noise from passing reviews)
+        // Only create discoveries for failures with specific, actionable issues
         if (!reviewResult.passed && reviewResult.issues.length > 0) {
-          // Find the most recent plan file
-          const state = loadSessionState(ctx.directory, ctx.sessionId);
-          const planPath = state.pending_completion?.task_description || 'unknown-plan';
+          // Skip generic "Plan requires revision" - not actionable
+          const hasSpecificIssues = reviewResult.issues.some(
+            issue => issue !== 'Plan requires revision' && issue.length > 10
+          );
+
+          if (!hasSpecificIssues) {
+            return { continue: true };
+          }
+
+          // Extract plan file path from the Momus task prompt
+          const taskPrompt = (toolInput?.prompt as string) || '';
+          const planPathMatch = taskPrompt.match(/\.olympus\/plans\/([\w-]+\.md)/);
+          const planPath = planPathMatch ? planPathMatch[0] : 'unknown-plan';
+          const planFilename = planPathMatch ? planPathMatch[1] : 'unknown-plan';
 
           const event = {
             event_type: 'plan_review_failed' as const,
-            plan_path: planPath.substring(0, 200),
+            plan_path: planPath,
             plan_summary: `Momus review failed with ${reviewResult.issues.length} issues`,
             failure_reasons: reviewResult.issues,
             reviewer: 'momus' as const,

@@ -145,8 +145,8 @@ describe('Stop Hook Performance', () => {
     console.log(`Stop hook completed in ${executionTime.toFixed(2)}ms with 5000 feedback entries`);
   });
 
-  it('should still append feedback entry correctly (core functionality)', async () => {
-    // Spy on appendFeedback to verify it IS called (this is the core functionality we keep)
+  it('should NOT append feedback entry anymore (removed generic entry)', async () => {
+    // Spy on appendFeedback to verify it is NOT called (generic entry removed)
     const appendFeedbackSpy = vi.spyOn(storage, 'appendFeedback');
 
     registerLearningCaptureHooks();
@@ -185,17 +185,8 @@ describe('Stop Hook Performance', () => {
 
     await routeHook('Stop', ctx);
 
-    // Verify appendFeedback WAS called with correct data
-    expect(appendFeedbackSpy).toHaveBeenCalledTimes(1);
-    const feedbackEntry = appendFeedbackSpy.mock.calls[0][0];
-
-    expect(feedbackEntry.session_id).toBe(sessionId);
-    expect(feedbackEntry.agent_used).toBe('olympian');
-    expect(feedbackEntry.original_task).toBe('Test append functionality');
-    expect(feedbackEntry.token_usage).toBeDefined();
-    expect(feedbackEntry.token_usage!.total_tokens).toBe(1000);
-    expect(feedbackEntry.token_usage!.input_tokens).toBe(400);
-    expect(feedbackEntry.token_usage!.output_tokens).toBe(600);
+    // Verify appendFeedback was NOT called (generic feedback entry removed)
+    expect(appendFeedbackSpy).not.toHaveBeenCalled();
   });
 
   it('should complete quickly with no token usage (edge case)', async () => {

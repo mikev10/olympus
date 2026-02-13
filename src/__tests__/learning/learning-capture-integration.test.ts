@@ -80,23 +80,13 @@ describe('Learning Capture Integration', () => {
     expect(state.token_budget!.current_usage).toBeGreaterThan(afterPrompt);
     const totalTokens = state.token_budget!.current_usage;
 
-    // 3. Stop - should create FeedbackEntry and reset budget
+    // 3. Stop - should reset budget (but NO longer creates generic feedback entry)
     const stopCtx: HookContext = {
       sessionId,
       directory: TEST_DIR,
     };
 
     await routeHook('Stop', stopCtx);
-
-    // Verify feedback was created
-    const feedback = loadFeedback();
-    const sessionFeedback = feedback.filter(f => f.session_id === sessionId);
-    expect(sessionFeedback.length).toBeGreaterThan(0);
-
-    const entry = sessionFeedback[0];
-    expect(entry.token_usage).toBeDefined();
-    expect(entry.token_usage!.total_tokens).toBe(totalTokens);
-    expect(entry.token_usage!.estimated).toBe(true);
 
     // Verify budget was reset
     state = loadSessionState(TEST_DIR, sessionId);
@@ -187,18 +177,23 @@ describe('Learning Capture Integration', () => {
     }
 
     // Verify cumulative token count
-    const state = loadSessionState(TEST_DIR, sessionId);
-    expect(state.token_budget!.current_usage).toBeGreaterThan(0);
+    const stateBefore = loadSessionState(TEST_DIR, sessionId);
+    expect(stateBefore.token_budget!.current_usage).toBeGreaterThan(0);
+    const totalTokensBefore = stateBefore.token_budget!.current_usage;
 
-    // Stop and verify
+    // Stop and verify budget reset (no feedback entry created)
     await routeHook('Stop', {
       sessionId,
       directory: TEST_DIR,
     });
 
+    // Verify budget was reset
+    const stateAfter = loadSessionState(TEST_DIR, sessionId);
+    expect(stateAfter.token_budget!.current_usage).toBe(0);
+
+    // Verify NO feedback entry was created (generic entry removed)
     const feedback = loadFeedback();
     const entry = feedback.find(f => f.session_id === sessionId);
-    expect(entry).toBeDefined();
-    expect(entry!.token_usage!.total_tokens).toBeGreaterThan(0);
+    expect(entry).toBeUndefined();
   });
 });

@@ -83,8 +83,8 @@ export async function handleRevisionDetection(input: HookInput): Promise<void> {
   // Update session state with this prompt
   const updatedState = addPromptToSession(state, prompt, detected?.category);
 
-  // If feedback detected and there was a pending completion, log it
-  if (detected && hasPendingCompletion(state)) {
+  // If feedback detected, log it (regardless of pending completion)
+  if (detected) {
     const feedbackEntry: FeedbackEntry = {
       id: randomUUID(),
       timestamp: new Date().toISOString(),

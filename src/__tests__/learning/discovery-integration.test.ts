@@ -4,6 +4,7 @@ import { join } from 'path';
 import { registerDiscoveryCaptureHooks } from '../../hooks/registrations/discovery-capture.js';
 import { registerAgentTrackingHook } from '../../hooks/registrations/agent-tracking.js';
 import { registerLearningCaptureHooks } from '../../hooks/registrations/learning-capture.js';
+import { registerUserPromptSubmitHooks } from '../../hooks/registrations/user-prompt-submit.js';
 import { routeHook } from '../../hooks/router.js';
 import { clearHooks } from '../../hooks/registry.js';
 import { loadSessionState, saveSessionState, markCompletionClaim, addPromptToSession } from '../../learning/session-state.js';
@@ -189,19 +190,19 @@ describe('Discovery Integration', () => {
     expect(existsSync(discoveryPath)).toBe(false);
   });
 
-  it('should verify feedback-log.jsonl is also populated (v3.6.2 validation)', async () => {
+  it('should verify feedback-log.jsonl is populated by success detector', async () => {
     registerLearningCaptureHooks();
     registerDiscoveryCaptureHooks();
+    registerUserPromptSubmitHooks(); // Needed for success/revision detection
 
     const sessionId = 'test-feedback-validation';
 
     // Set up state with task completion and praise
     const state = loadSessionState(TEST_DIR, sessionId);
     markCompletionClaim(state, 'Fix the login bug', 'olympian');
-    addPromptToSession(state, 'perfect!', 'praise');
     saveSessionState(TEST_DIR, state);
 
-    // Accumulate some tokens so learning-capture creates feedback entry
+    // UserPromptSubmit with praise - triggers success detector which creates feedback entry
     await routeHook('UserPromptSubmit', {
       sessionId,
       directory: TEST_DIR,
@@ -217,7 +218,7 @@ describe('Discovery Integration', () => {
 
     await routeHook('Stop', { sessionId, directory: TEST_DIR });
 
-    // Verify feedback-log.jsonl exists and has content
+    // Verify feedback-log.jsonl exists and has content (from success detector, not Stop hook)
     const feedbackPath = join(TEST_LEARNING_DIR, 'feedback-log.jsonl');
     expect(existsSync(feedbackPath)).toBe(true);
 
@@ -227,6 +228,6 @@ describe('Discovery Integration', () => {
 
     const feedbackEntry = JSON.parse(feedbackLines[0]);
     expect(feedbackEntry.session_id).toBe(sessionId);
-    expect(feedbackEntry.token_usage).toBeDefined();
+    expect(feedbackEntry.feedback_category).toBe('praise'); // From success detector
   });
 });

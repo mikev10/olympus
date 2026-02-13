@@ -290,6 +290,14 @@ export function registerLearningCaptureHooks(): void {
         ensureTokenBudget(state);
         debugLog('learningCaptureTool', 'Token budget ensured');
 
+        // Capture model identifier if available
+        const modelId = getModelIdentifier(ctx);
+        debugLog('learningCaptureTool', `Model identifier: ${modelId || 'none'}`);
+        if (modelId && state.token_budget) {
+          state.token_budget.current_model = modelId;
+          debugLog('learningCaptureTool', `Model set in token budget: ${modelId}`);
+        }
+
         // Accumulate output tokens (Task #8)
         if (state.token_budget) {
           const beforeOutput = state.token_budget.output_tokens;
@@ -415,33 +423,6 @@ export function registerLearningCaptureHooks(): void {
             error: error instanceof Error ? error.message : String(error),
           });
         }
-
-        // Create a single FeedbackEntry with aggregated session totals
-        const feedbackEntry: FeedbackEntry = {
-          id: randomUUID(),
-          timestamp: new Date().toISOString(),
-          session_id: state.session_id,
-          project_path: ctx.directory,
-          event_type: 'success', // Default to success for normal session end
-          user_message: 'Session completed',
-          feedback_category: 'praise',
-          confidence: 0.5, // Low confidence - automated entry
-          token_usage: tokenUsage,
-          cost_estimate: costEstimate,
-          agent_used: state.pending_completion?.agent_used,
-          original_task: state.pending_completion?.task_description,
-        };
-        debugLog('learningCaptureStop', 'Feedback entry created', {
-          id: feedbackEntry.id,
-          sessionId: feedbackEntry.session_id,
-          agentUsed: feedbackEntry.agent_used,
-          totalCost: costEstimate.total_cost,
-        });
-
-        // Save feedback entry
-        debugLog('learningCaptureStop', 'Appending feedback entry to storage');
-        appendFeedback(feedbackEntry);
-        debugLog('learningCaptureStop', 'Feedback entry saved successfully');
 
         // Create and save session summary for observability
         const sessionSummary: SessionSummary = {

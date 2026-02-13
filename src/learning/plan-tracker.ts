@@ -135,18 +135,25 @@ export function createPlanningDiscovery(
   issues: string[],
   projectPath: string
 ): Partial<AgentDiscovery> {
-  const issuesSummary = issues.slice(0, 3).join('; ');
-  const summary = `Plan "${event.plan_path}" ${event.event_type === 'plan_review_failed' ? 'failed review' : 'failed'}: ${issuesSummary}`.substring(0, 100);
+  // Extract just the filename from plan_path
+  const planFilename = event.plan_path.split('/').pop() || event.plan_path;
+
+  // Create concise summary with filename and issue count
+  const issueCount = issues.length;
+  const summary = event.event_type === 'plan_review_failed'
+    ? `Plan '${planFilename}' failed review: ${issueCount} issue${issueCount !== 1 ? 's' : ''}`
+    : `Plan '${planFilename}' failed: ${issueCount} issue${issueCount !== 1 ? 's' : ''}`;
+
+  // Format issues as concise bullet list (cap at 500 chars)
+  const issuesBullets = issues
+    .map(i => `- ${i}`)
+    .join('\n')
+    .substring(0, 500);
 
   const details = [
-    `Plan: ${event.plan_path}`,
-    `Event: ${event.event_type}`,
-    event.revision_count ? `Revision count: ${event.revision_count}` : '',
-    event.reviewer ? `Reviewer: ${event.reviewer}` : '',
-    '',
-    'Issues:',
-    ...issues.map(i => `- ${i}`),
-  ].filter(Boolean).join('\n').substring(0, 2000);
+    event.reviewer ? `Issues found by ${event.reviewer}:` : 'Issues:',
+    issuesBullets,
+  ].join('\n');
 
   return {
     session_id: event.session_id,

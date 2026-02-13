@@ -145,27 +145,68 @@ The plan must be REVISED before implementation.`;
 
       expect(discovery.category).toBe('planning_insight');
       expect(discovery.confidence).toBe(0.9);
-      expect(discovery.summary).toContain('failed review');
-      expect(discovery.details).toContain('Missing rate limit analysis');
+      expect(discovery.summary).toBe("Plan 'api-feature.md' failed review: 2 issues");
+      expect(discovery.details).toContain('Issues found by momus:');
+      expect(discovery.details).toContain('- Missing rate limit analysis');
+      expect(discovery.details).toContain('- No rollback strategy');
       expect(discovery.agent_name).toBe('prometheus');
     });
 
-    it('should truncate long summaries to 100 chars', () => {
+    it('should use filename only in summary, not full path', () => {
       const event: PlanLifecycleEvent = {
-        event_type: 'plan_failed',
-        plan_path: '.olympus/plans/very-long-plan-name-that-exceeds-normal-boundaries.md',
-        plan_summary: 'A very detailed plan summary',
+        event_type: 'plan_review_failed',
+        plan_path: '.olympus/plans/enforcement-hooks.md',
+        plan_summary: 'Enforcement hooks plan',
+        failure_reasons: ['Hook priority conflicts'],
+        reviewer: 'momus',
+        session_id: 'test-session',
+        timestamp: new Date().toISOString(),
+      };
+
+      const discovery = createPlanningDiscovery(event, ['Hook priority conflicts'], tempDir);
+
+      expect(discovery.summary).toBe("Plan 'enforcement-hooks.md' failed review: 1 issue");
+      expect(discovery.summary).not.toContain('.olympus/plans/');
+    });
+
+    it('should format details as bullet list with reviewer', () => {
+      const event: PlanLifecycleEvent = {
+        event_type: 'plan_review_failed',
+        plan_path: '.olympus/plans/test.md',
+        plan_summary: 'Test plan',
+        failure_reasons: ['Issue A', 'Issue B', 'Issue C'],
+        reviewer: 'momus',
         session_id: 'test-session',
         timestamp: new Date().toISOString(),
       };
 
       const discovery = createPlanningDiscovery(
         event,
-        ['Issue 1', 'Issue 2', 'Issue 3', 'Issue 4'],
+        ['Issue A', 'Issue B', 'Issue C'],
         tempDir
       );
 
-      expect(discovery.summary!.length).toBeLessThanOrEqual(100);
+      expect(discovery.details).toContain('Issues found by momus:');
+      expect(discovery.details).toContain('- Issue A');
+      expect(discovery.details).toContain('- Issue B');
+      expect(discovery.details).toContain('- Issue C');
+    });
+
+    it('should cap details at 500 chars', () => {
+      const longIssues = Array.from({ length: 20 }, (_, i) => `Very detailed issue number ${i} with lots of context that makes it super long`);
+      const event: PlanLifecycleEvent = {
+        event_type: 'plan_failed',
+        plan_path: '.olympus/plans/test.md',
+        plan_summary: 'Test',
+        session_id: 'test-session',
+        timestamp: new Date().toISOString(),
+      };
+
+      const discovery = createPlanningDiscovery(event, longIssues, tempDir);
+
+      // Details = "Issues:" + newline + bullets (capped at 500)
+      // So total will be slightly more than 500 due to the prefix
+      expect(discovery.details!.length).toBeLessThan(550);
     });
   });
 
@@ -370,6 +411,103 @@ Implement feature X with testing.
       // No plan tracking should have occurred
       const discoveryPath = join(tempDir, '.olympus', 'learning', 'discoveries.jsonl');
       expect(existsSync(discoveryPath)).toBe(false);
+    });
+
+    it('should extract plan path from Momus task prompt', async () => {
+      registerPlanLifecycleHooks();
+      registerLearningCaptureHooks();
+
+      const momusPrompt = 'Please critically review the plan at .olympus/plans/enforcement-hooks.md.\n\nThis plan adds 3 enforcement hooks...';
+      const momusOutput = `Review Result:
+- CRITICAL: Missing error handling for hook failures
+- MAJOR ISSUE: No test coverage for concurrent hook execution
+The plan must be REVISED.`;
+
+      await routeHook('PostToolUse', {
+        sessionId: 'test-session',
+        directory: tempDir,
+        toolName: 'Task',
+        toolInput: {
+          subagent_type: 'momus',
+          prompt: momusPrompt,
+        },
+        toolOutput: momusOutput,
+      });
+
+      // Should have created a discovery with correct filename
+      const discoveryPath = join(tempDir, '.olympus', 'learning', 'discoveries.jsonl');
+      expect(existsSync(discoveryPath)).toBe(true);
+
+      const discoveries = readFileSync(discoveryPath, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line));
+
+      expect(discoveries.length).toBeGreaterThan(0);
+      const planDiscovery = discoveries.find(d => d.category === 'planning_insight');
+      expect(planDiscovery).toBeDefined();
+      expect(planDiscovery.summary).toContain('enforcement-hooks.md');
+      expect(planDiscovery.summary).not.toContain('Please critically review');
+    });
+
+    it('should skip generic "Plan requires revision" failures', async () => {
+      registerPlanLifecycleHooks();
+      registerLearningCaptureHooks();
+
+      const momusPrompt = 'Please review .olympus/plans/test-plan.md';
+      const momusOutput = 'The plan requires revision.';
+
+      await routeHook('PostToolUse', {
+        sessionId: 'test-session',
+        directory: tempDir,
+        toolName: 'Task',
+        toolInput: {
+          subagent_type: 'momus',
+          prompt: momusPrompt,
+        },
+        toolOutput: momusOutput,
+      });
+
+      // Should NOT have created a discovery (generic failure)
+      const discoveryPath = join(tempDir, '.olympus', 'learning', 'discoveries.jsonl');
+      expect(existsSync(discoveryPath)).toBe(false);
+    });
+
+    it('should record specific actionable issues from Momus', async () => {
+      registerPlanLifecycleHooks();
+      registerLearningCaptureHooks();
+
+      const momusPrompt = 'Review the plan at .olympus/plans/api-design.md';
+      const momusOutput = `Review failed:
+- CRITICAL: No authentication strategy defined
+- MAJOR ISSUE: Missing pagination for list endpoints
+- CONCERN: Rate limiting not addressed`;
+
+      await routeHook('PostToolUse', {
+        sessionId: 'test-session',
+        directory: tempDir,
+        toolName: 'Task',
+        toolInput: {
+          subagent_type: 'momus',
+          prompt: momusPrompt,
+        },
+        toolOutput: momusOutput,
+      });
+
+      const discoveryPath = join(tempDir, '.olympus', 'learning', 'discoveries.jsonl');
+      expect(existsSync(discoveryPath)).toBe(true);
+
+      const discoveries = readFileSync(discoveryPath, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line));
+
+      const planDiscovery = discoveries.find(d => d.category === 'planning_insight');
+      expect(planDiscovery).toBeDefined();
+      expect(planDiscovery.summary).toBe("Plan 'api-design.md' failed review: 3 issues");
+      expect(planDiscovery.details).toContain('Issues found by momus:');
+      expect(planDiscovery.details).toContain('No authentication strategy');
+      expect(planDiscovery.details).toContain('Missing pagination');
     });
   });
 });
