@@ -2,14 +2,16 @@
  * WorkflowEngine - Core orchestrator for the multi-stage workflow system
  *
  * Manages the progression of features through stages:
- * IDEA → PRD → SPEC → INTENTS → COMPLETE
+ * IDEA → INTENT → UNIT → BOLT → COMPLETE
  *
  * Features:
  * - Checkpoint-based persistence for resumable workflows
  * - Artifact generation and tracking
  * - Status management (in_progress, paused, complete)
+ * - Dual validation (parent + root IDEA alignment) at stage transitions
  */
 
+import * as fs from 'fs';
 import {
   WorkflowCheckpoint,
   WorkflowStage,
@@ -19,7 +21,9 @@ import {
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
 import { validateIdea, validateIntent, clearFileCache } from './validation.js';
+import { runDualValidation } from './alignment.js';
 import { ForgeExecutor } from './forge/executor.js';
+import { executeDiscoveryPhase } from './discovery.js';
 import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
 
 /**
@@ -418,6 +422,21 @@ export class WorkflowEngine {
    */
   async executePhase(phase: WorkflowPhase): Promise<void> {
     switch (phase) {
+      case 'discovery': {
+        const manifestPath = `${this.projectPath}/aidlc-docs/manifest.json`;
+        const result = await executeDiscoveryPhase({
+          projectPath: this.projectPath,
+          workflowId: this.workflowId,
+          featureName: this.featureName,
+          manifestPath,
+        });
+        if (result.gateRequired) {
+          console.log(`[WorkflowEngine] Discovery phase: ${result.artifactsGenerated.length} artifacts generated (${result.sourceFileCount} source files detected)`);
+          console.log(`[WorkflowEngine] Discovery Gate: Review findings in aidlc-docs/discovery/ before proceeding to Inception`);
+        }
+        break;
+      }
+
       case 'inception': {
         // Delegate to existing stage-based pipeline
         const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
@@ -436,15 +455,22 @@ export class WorkflowEngine {
             }
           }
         }
+        console.log('[WorkflowEngine] Decomposition pending — will run when Construction pipeline is implemented in Phase 3');
         break;
       }
 
       case 'construction': {
+        // Check if waiting for developer review before proceeding
+        const constructionCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        if (constructionCheckpoint && constructionCheckpoint.status === 'awaiting_dev_review') {
+          console.log('[WorkflowEngine] Waiting for developer review of technical specification (Risk Tier 3).');
+          return;
+        }
+
         // Read intent content for design validation
         const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
         let intentContent: string | undefined;
         try {
-          const fs = await import('fs');
           intentContent = fs.readFileSync(intentPath, 'utf-8');
         } catch {
           // Intent may not exist, continue without it
@@ -562,8 +588,8 @@ export class WorkflowEngine {
    * Execute the IDEA stage
    *
    * Generates the IDEA artifact following the structured format expected by validation.
-   * The artifact includes problem statement, business context, success metrics, constraints,
-   * solution approach, and risk assessment.
+   * The artifact includes problem statement, user personas, success metrics,
+   * business constraints, and out of scope sections.
    */
   private async executeIdeaStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     const initialPrompt = checkpoint.resume_context?.initial_prompt || 'No initial prompt provided';
@@ -573,14 +599,15 @@ export class WorkflowEngine {
     console.log('[WorkflowEngine] Generating IDEA artifact with structured format');
 
     // Generate a properly formatted IDEA artifact that passes validation
-    const ideaId = 'IDEA-001'; // In production, this would be auto-incremented
+    const ideaId = `idea-${this.workflowId}`;
     const timestamp = new Date().toISOString();
 
     const ideaContent = `---
 id: ${ideaId}
-feature: ${this.workflowId}
-feature_name: ${this.featureName}
+title: ${this.featureName}
+status: draft
 created: ${timestamp}
+author: "workflow-engine"
 risk_tier: 2
 ---
 
@@ -592,13 +619,11 @@ ${initialPrompt}
 
 This feature addresses a specific need identified by stakeholders. The goal is to implement a solution that meets user requirements while maintaining system quality and performance standards.
 
-## Business Context
+## User Personas
 
-This feature will benefit end users by providing new functionality that enhances their workflow. The implementation aligns with our strategic goals of improving user experience and system capabilities.
-
-**Target Users**: Primary users who will directly interact with this feature
-**Expected Impact**: Improved user satisfaction and operational efficiency
-**Strategic Alignment**: Supports product roadmap and business objectives
+- **Primary User**: End users who will directly interact with this feature in their daily workflow
+- **Developer**: Engineers who will integrate with, maintain, and extend this feature
+- **Administrator**: System administrators who will configure, monitor, and manage this feature
 
 ## Success Metrics
 
@@ -606,7 +631,7 @@ This feature will benefit end users by providing new functionality that enhances
 - **Metric 2**: Zero critical bugs in production within first 30 days (target: 0 P0/P1 issues)
 - **Metric 3**: Positive user feedback and adoption rate (target: >80% user satisfaction)
 
-## Constraints
+## Business Constraints
 
 - **Technical**: Must integrate with existing system architecture and maintain compatibility
 - **Timeline**: Development should follow standard sprint cycles and delivery timelines
@@ -614,38 +639,12 @@ This feature will benefit end users by providing new functionality that enhances
 - **Resources**: Available team capacity and technical expertise
 - **Policy**: Compliance with security standards, data privacy regulations, and coding best practices
 
-## Solution Approach
+## Out of Scope
 
-The proposed solution will follow a phased implementation approach:
-
-1. **Phase 1 - Planning**: Define detailed requirements, technical design, and implementation plan
-2. **Phase 2 - Development**: Implement core functionality with iterative testing
-3. **Phase 3 - Validation**: Comprehensive testing, security review, and performance validation
-4. **Phase 4 - Deployment**: Staged rollout with monitoring and support
-
-**Key Considerations**:
-- Maintain backward compatibility where applicable
-- Ensure scalability and performance
-- Implement proper error handling and logging
-- Follow established coding standards and patterns
-
-## Risk Assessment
-
-**Risk Tier**: 2 (Medium)
-
-**Justification**: This is a standard feature implementation with moderate complexity. While there are some unknowns in requirements and integration points, the domain is well-understood and the impact is manageable with proper testing and validation.
-
-**Key Risks**:
-- **Integration Complexity**: May encounter challenges integrating with existing systems
-- **Scope Creep**: Requirements may evolve during implementation
-- **Resource Availability**: Team capacity constraints could impact timeline
-- **Technical Debt**: Need to balance new features with code quality and maintainability
-
-**Mitigation Strategies**:
-- Early prototyping to validate integration approach
-- Regular stakeholder communication to manage scope
-- Incremental delivery to reduce risk
-- Comprehensive testing and code review processes
+- Future enhancements not included in initial requirements
+- Integration with systems outside the current scope
+- Features that require additional budget allocation
+- Changes to unrelated system components
 
 ---
 *Generated by WorkflowEngine*
@@ -667,42 +666,65 @@ The proposed solution will follow a phased implementation approach:
     } else {
       console.log('[WorkflowEngine] IDEA validation passed');
     }
+
+    // CCR-1: Save checkpoint after artifact generation
+    const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    if (updatedCheckpoint) {
+      const v3Checkpoint = updatedCheckpoint as WorkflowCheckpointV3;
+      if (v3Checkpoint.interview_progress) {
+        v3Checkpoint.interview_progress.stage = 'idea';
+      }
+      updatedCheckpoint.updated_at = new Date().toISOString();
+      await saveCheckpoint(this.projectPath, updatedCheckpoint);
+    }
   }
 
   /**
-   * Execute the INTENT stage (formerly PRD)
+   * Execute the INTENT stage
    *
-   * Generates the INTENT artifact with user stories and requirement coverage.
-   * The INTENT is validated against the IDEA artifact to ensure >= 90% coverage.
+   * Reads the approved IDEA artifact and generates:
+   * 1. inception/intent.md - Business requirements, technical specification, implementation plan
+   * 2. inception/nfr.md - Non-functional requirements (security, performance, etc.)
+   *
+   * Runs dual validation (parent + root IDEA alignment) for the idea-to-intent transition.
    */
   private async executeIntentStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     console.log(`[WorkflowEngine] Executing INTENT stage for feature: ${this.featureName}`);
 
-    // Get the IDEA artifact path for context
+    // Read the approved IDEA artifact
     const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
     console.log(`[WorkflowEngine] Reading IDEA artifact from: ${ideaPath}`);
-    console.log('[WorkflowEngine] Generating INTENT artifact with user stories');
 
-    // Generate a properly formatted INTENT artifact that passes validation
-    const intentId = 'INTENT-001';
+    let ideaContent: string;
+    try {
+      ideaContent = fs.readFileSync(ideaPath, 'utf-8');
+    } catch {
+      ideaContent = '';
+      console.warn('[WorkflowEngine] Could not read IDEA artifact, proceeding with empty context');
+    }
+
+    console.log('[WorkflowEngine] Generating INTENT artifact with business requirements and technical specification');
+
+    const ideaId = `idea-${this.workflowId}`;
+    const intentId = `intent-${this.workflowId}`;
     const timestamp = new Date().toISOString();
 
-    // Create user stories that map to the constraints from IDEA
-    // Each constraint type gets at least one user story
+    // Generate INTENT artifact with new template format
     const intentContent = `---
 id: ${intentId}
-feature: ${this.workflowId}
+title: ${this.featureName}
+parent: "${ideaId}"
+status: draft
 created: ${timestamp}
-based_on: IDEA-001
+depth_score: 3
+risk_tier: 2
 ---
 
-## Overview
+## Business Requirements
 
-This PRD defines the product requirements for ${this.featureName}. It translates the strategic vision from the IDEA artifact into actionable user stories with clear acceptance criteria.
+### User Stories
 
-## User Stories
-
-### US-001: Core Feature Implementation
+#### US-001: Core Feature Implementation
 **As a** user
 **I want** to use ${this.featureName}
 **So that** I can benefit from the new functionality
@@ -713,11 +735,7 @@ This PRD defines the product requirements for ${this.featureName}. It translates
 - [ ] Feature integrates with existing system components
 - [ ] Feature handles error cases gracefully
 
-**Technical Notes:**
-- Must maintain compatibility with existing architecture
-- Follow established coding patterns and standards
-
-### US-002: Technical Integration
+#### US-002: Technical Integration
 **As a** developer
 **I want** the feature to integrate seamlessly with existing systems
 **So that** we maintain system stability and consistency
@@ -728,138 +746,184 @@ This PRD defines the product requirements for ${this.featureName}. It translates
 - [ ] No breaking changes to existing functionality
 - [ ] Performance metrics remain within acceptable bounds
 
-**Technical Notes:**
-- Requires review of existing integration points
-- May need adapter patterns for legacy components
-
-### US-003: Resource Management
+#### US-003: Operational Readiness
 **As a** system administrator
-**I want** the feature to operate within resource constraints
-**So that** system performance and costs remain optimal
+**I want** the feature to be properly documented and monitored
+**So that** I can maintain and troubleshoot it effectively
 
 **Acceptance Criteria:**
-- [ ] Resource usage stays within budget constraints
-- [ ] Scaling strategy is defined and documented
 - [ ] Monitoring and alerting are configured
-- [ ] Capacity planning is completed
+- [ ] Runbook documentation is complete
+- [ ] Resource usage stays within budget constraints
+- [ ] Scaling strategy is defined
 
-**Technical Notes:**
-- Consider horizontal scaling for high-load scenarios
-- Implement resource pooling where appropriate
+### Business Rules
 
-### US-004: Timeline Delivery
-**As a** project stakeholder
-**I want** the feature delivered according to schedule
-**So that** we meet business commitments and milestones
+- All user-facing changes must maintain backward compatibility
+- Security review is required before deployment
+- Performance must not degrade beyond established baselines
+- All changes must comply with data privacy regulations
 
-**Acceptance Criteria:**
-- [ ] Implementation follows defined sprint cycles
-- [ ] Key milestones are tracked and met
-- [ ] Blockers are identified and resolved promptly
-- [ ] Regular status updates are provided
+## Technical Specification
 
-**Technical Notes:**
-- Use iterative development approach
-- Prioritize MVP features first
+### Architecture Overview
 
-### US-005: Compliance and Security
-**As a** compliance officer
-**I want** the feature to meet security and policy requirements
-**So that** we maintain regulatory compliance and protect user data
+The implementation follows the existing system architecture patterns. Core functionality will be implemented as modular components that integrate with the current service layer.
 
-**Acceptance Criteria:**
-- [ ] Security review completed and approved
-- [ ] Data privacy requirements satisfied
-- [ ] Access controls properly implemented
-- [ ] Audit logging in place
+### API Design
 
-**Technical Notes:**
-- Follow OWASP security guidelines
-- Implement principle of least privilege
+- RESTful endpoints following existing API conventions
+- Request/response validation using established middleware
+- Proper error handling with standard error response format
 
-## Requirement Coverage
+### Data Model
 
-| IDEA Constraint | PRD User Story | Coverage |
-|-----------------|----------------|----------|
-| Technical constraints | US-001, US-002 | ✓ |
-| Timeline constraints | US-004 | ✓ |
-| Budget constraints | US-003 | ✓ |
-| Resource constraints | US-003 | ✓ |
-| Policy constraints | US-005 | ✓ |
+- Data structures aligned with existing schema patterns
+- Migration scripts for any database changes
+- Backward-compatible schema modifications
 
-**Coverage Summary:**
-- Total constraints: 5
-- Covered: 5 (100%)
-- Uncovered: None
+### Integration Points
 
-## Out of Scope
+- Integration with existing authentication and authorization systems
+- Event-driven communication where applicable
+- API versioning to maintain backward compatibility
 
-The following items are explicitly excluded from this PRD:
-- Future enhancements not included in initial requirements
-- Integration with systems outside the current scope
-- Features that require additional budget allocation
-- Changes to unrelated system components
+### Security Considerations
 
-## Dependencies
+- Input validation on all user-facing endpoints
+- Authentication required for all protected resources
+- Authorization checks at the service layer
+- Audit logging for sensitive operations
 
-**External Dependencies:**
-- Existing system infrastructure and services
-- Third-party libraries and frameworks (as needed)
-- Development and testing environments
+## Implementation Plan
 
-**Internal Dependencies:**
-- Team availability and resource allocation
-- Completion of prerequisite tasks or features
-- Access to necessary systems and data
+### Proposed UNITs
 
-## Risks
+- **UNIT-001**: Core feature implementation and business logic
+- **UNIT-002**: Integration layer and API endpoints
+- **UNIT-003**: Testing, documentation, and deployment configuration
+
+### Cross-UNIT Dependencies
+
+- UNIT-002 depends on UNIT-001 (core logic must exist before integration)
+- UNIT-003 depends on UNIT-001 and UNIT-002 (testing requires both layers)
+
+### Risk Assessment
 
 **Technical Risks:**
 - Integration complexity may require additional investigation
 - Performance requirements may need optimization iterations
-- Technical debt may need to be addressed during implementation
 
 **Mitigation:**
-- Early prototyping and proof-of-concept work
-- Regular technical reviews and architecture discussions
+- Early prototyping to validate integration approach
 - Incremental delivery with continuous testing
-
-**Schedule Risks:**
-- Resource constraints could impact delivery timeline
-- Unexpected technical challenges may arise
-- Scope creep from evolving requirements
-
-**Mitigation:**
-- Maintain clear scope boundaries
-- Regular stakeholder communication
-- Buffer time for contingencies
-
-## Success Metrics
-
-Success will be measured using the following criteria from the IDEA artifact:
-- **Implementation Completeness**: All acceptance criteria met (target: 100%)
-- **Quality**: Zero critical defects in production (target: 0 P0/P1 issues)
-- **User Satisfaction**: Positive feedback and adoption (target: >80% satisfaction)
+- Regular technical reviews and architecture discussions
 
 ---
-*Generated by WorkflowEngine based on IDEA-001*
+*Generated by WorkflowEngine based on ${ideaId}*
 `;
 
     await writeArtifact(this.projectPath, this.workflowId, 'intent', intentContent);
 
-    // Validate the generated artifact against IDEA
+    // Generate NFR artifact
+    const nfrId = `nfr-${this.workflowId}`;
+    const nfrContent = `---
+id: ${nfrId}
+parent: "${intentId}"
+status: draft
+created: ${timestamp}
+---
+
+## Security
+
+| Requirement | Type | Gate-blocking |
+|-------------|------|---------------|
+| Input validation on all endpoints | design-time | yes |
+| Authentication for protected resources | design-time | yes |
+| Authorization checks at service layer | runtime | yes |
+| Audit logging for sensitive operations | runtime | no |
+
+## Performance
+
+| Requirement | Type | Gate-blocking |
+|-------------|------|---------------|
+| API response time < 500ms (p95) | runtime | yes |
+| No memory leaks under sustained load | runtime | yes |
+| Database queries optimized with indexes | design-time | no |
+
+## Availability
+
+| Requirement | Type | Gate-blocking |
+|-------------|------|---------------|
+| Graceful degradation on dependency failure | runtime | yes |
+| Health check endpoint available | design-time | no |
+| Error recovery without data loss | runtime | yes |
+
+## Compliance
+
+| Requirement | Type | Gate-blocking |
+|-------------|------|---------------|
+| Data privacy regulations satisfied | design-time | yes |
+| Coding standards and best practices followed | design-time | no |
+| License compliance for dependencies | design-time | no |
+
+## Accessibility
+
+| Requirement | Type | Gate-blocking |
+|-------------|------|---------------|
+| WCAG 2.1 AA compliance for UI components | design-time | no |
+| Keyboard navigation support | design-time | no |
+| Screen reader compatible output | runtime | no |
+
+---
+*Generated by WorkflowEngine based on ${intentId}*
+`;
+
+    await writeArtifact(this.projectPath, this.workflowId, 'nfr', nfrContent);
+    console.log('[WorkflowEngine] Generated NFR artifact at inception/nfr.md');
+
+    // Run dual validation (parent + root IDEA alignment)
+    try {
+      const dualResult = runDualValidation(
+        intentContent,
+        ideaContent,
+        ideaContent,
+        'idea-to-intent',
+        'unit-to-idea',
+        ideaId,
+        intentId,
+        ideaId
+      );
+      console.log(`[WorkflowEngine] Dual validation: parent=${dualResult.parentCheck.alignment_passed}, root=${dualResult.rootCheck.alignment_passed}, overall=${dualResult.passed}`);
+    } catch (error) {
+      console.error('[WorkflowEngine] Dual validation error (non-blocking):', (error as Error).message);
+    }
+
+    // Validate the generated artifact
     const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
     console.log(`[WorkflowEngine] Validating INTENT artifact at: ${intentPath}`);
 
     const validationResult = await validateIntent(intentPath);
 
-    // Note: V3 checkpoints don't store validation_results inline - they use manifest
     if (!validationResult.passed) {
       console.log('[WorkflowEngine] INTENT validation failed:', validationResult.blocking_issues);
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
     } else {
       console.log('[WorkflowEngine] INTENT validation passed');
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
+    }
+
+    // CCR-1: Save checkpoint after artifact generation
+    const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    if (updatedCheckpoint) {
+      const v3Checkpoint = updatedCheckpoint as WorkflowCheckpointV3;
+      v3Checkpoint.interview_progress = {
+        stage: 'intent',
+        questions_asked: 0,
+        draft_artifact_path: intentPath,
+      };
+      updatedCheckpoint.updated_at = new Date().toISOString();
+      await saveCheckpoint(this.projectPath, updatedCheckpoint);
     }
   }
 
@@ -885,712 +949,4 @@ Success will be measured using the following criteria from the IDEA artifact:
     throw new Error('BOLT stage execution not yet implemented');
   }
 
-  /**
-   * DEPRECATED: Execute the SPEC stage (old workflow)
-   *
-   * Generates the SPEC artifact with technical design from the PRD.
-   * Includes components, database schema, API endpoints, authentication,
-   * error handling, and performance considerations.
-   */
-  private async executeSpecStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing SPEC stage for feature: ${this.featureName}`);
-
-    // Get the INTENT artifact path for context
-    const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
-    console.log(`[WorkflowEngine] Reading INTENT artifact from: ${intentPath}`);
-    console.log('[WorkflowEngine] Generating SPEC artifact with technical design');
-
-    // Read INTENT to extract user stories for coverage tracking
-    const fs = await import('fs');
-    const intentContent = fs.readFileSync(intentPath, 'utf-8');
-    const intentUserStories: string[] = [];
-    const intentLines = intentContent.split('\n');
-    for (const line of intentLines) {
-      const match = line.match(/^###?\s+(US-\d+)/);
-      if (match) {
-        intentUserStories.push(match[1]);
-      }
-    }
-
-    // Generate a properly formatted SPEC artifact that passes validation
-    const specId = 'SPEC-001';
-    const timestamp = new Date().toISOString();
-
-    const specContent = `---
-id: ${specId}
-feature: ${this.workflowId}
-created: ${timestamp}
-based_on: IDEA-001
-prd_id: PRD-001
----
-
-## Overview
-
-This technical specification defines the architecture, data models, and implementation approach for ${this.featureName}. It translates the product requirements from the PRD into concrete technical designs.
-
-## Components
-
-### Frontend Components
-
-**User Interface Layer**
-- Main feature UI component with state management
-- Form validation and input handling
-- Error boundary and fallback UI
-- Responsive layout adapters
-
-**Technical Requirements:**
-- Component library: React/Vue/Angular (as per stack)
-- State management: Redux/Context API/Vuex
-- Styling: CSS modules or styled-components
-- Accessibility: WCAG 2.1 AA compliance
-
-### Backend Services
-
-**API Service**
-- RESTful API endpoints for feature operations
-- Request validation middleware
-- Business logic layer
-- Data access layer
-
-**Technical Requirements:**
-- Framework: Express/FastAPI/Spring Boot (as per stack)
-- Validation: Joi/Pydantic/Bean Validation
-- ORM: TypeORM/SQLAlchemy/JPA
-- Logging: Winston/Python logging/SLF4J
-
-### Database Components
-
-**Data Storage**
-- Primary database tables/collections
-- Indexing strategy for performance
-- Migration scripts
-- Backup procedures
-
-**Technical Requirements:**
-- Database: PostgreSQL/MySQL/MongoDB (as per stack)
-- Connection pooling: pgbouncer/connection pool
-- Replication: Primary-replica setup
-- Backup: Daily automated backups
-
-### Infrastructure Components
-
-**Deployment Architecture**
-- Application server configuration
-- Load balancer setup
-- CDN integration for static assets
-- Monitoring and alerting
-
-**Technical Requirements:**
-- Container: Docker
-- Orchestration: Kubernetes/Docker Compose
-- CI/CD: GitHub Actions/Jenkins/GitLab CI
-- Monitoring: Prometheus/Grafana/Datadog
-
-## Database Schema
-
-### Tables/Collections
-
-**feature_data**
-- id: UUID PRIMARY KEY
-- user_id: UUID NOT NULL FOREIGN KEY → users.id
-- feature_name: VARCHAR(255) NOT NULL
-- data_payload: JSONB
-- status: VARCHAR(50) NOT NULL
-- created_at: TIMESTAMP NOT NULL DEFAULT NOW()
-- updated_at: TIMESTAMP NOT NULL DEFAULT NOW()
-
-**Indexes:**
-- idx_feature_data_user_id ON feature_data(user_id)
-- idx_feature_data_status ON feature_data(status)
-- idx_feature_data_created_at ON feature_data(created_at)
-
-**feature_audit_log**
-- id: UUID PRIMARY KEY
-- feature_data_id: UUID NOT NULL FOREIGN KEY → feature_data.id
-- action: VARCHAR(50) NOT NULL
-- actor_id: UUID NOT NULL FOREIGN KEY → users.id
-- changes: JSONB
-- timestamp: TIMESTAMP NOT NULL DEFAULT NOW()
-
-**Indexes:**
-- idx_feature_audit_feature_id ON feature_audit_log(feature_data_id)
-- idx_feature_audit_timestamp ON feature_audit_log(timestamp)
-
-## API Endpoints
-
-### POST /api/v1/feature
-Create new feature instance
-
-**Request:**
-\`\`\`json
-{
-  "feature_name": "string",
-  "data_payload": {},
-  "user_id": "uuid"
-}
-\`\`\`
-
-**Response (201 Created):**
-\`\`\`json
-{
-  "id": "uuid",
-  "feature_name": "string",
-  "status": "active",
-  "created_at": "timestamp"
-}
-\`\`\`
-
-**Authentication:** Bearer token required
-**Rate Limit:** 100 requests/minute per user
-
-### GET /api/v1/feature/:id
-Retrieve feature instance by ID
-
-**Response (200 OK):**
-\`\`\`json
-{
-  "id": "uuid",
-  "feature_name": "string",
-  "data_payload": {},
-  "status": "active",
-  "created_at": "timestamp",
-  "updated_at": "timestamp"
-}
-\`\`\`
-
-**Authentication:** Bearer token required
-**Rate Limit:** 1000 requests/minute per user
-
-### PUT /api/v1/feature/:id
-Update feature instance
-
-**Request:**
-\`\`\`json
-{
-  "data_payload": {},
-  "status": "active" | "inactive"
-}
-\`\`\`
-
-**Response (200 OK):**
-\`\`\`json
-{
-  "id": "uuid",
-  "feature_name": "string",
-  "data_payload": {},
-  "status": "active",
-  "updated_at": "timestamp"
-}
-\`\`\`
-
-**Authentication:** Bearer token required
-**Rate Limit:** 100 requests/minute per user
-
-### DELETE /api/v1/feature/:id
-Delete feature instance (soft delete)
-
-**Response (204 No Content)**
-
-**Authentication:** Bearer token required
-**Rate Limit:** 50 requests/minute per user
-
-## Authentication/Authorization
-
-### Authentication Mechanism
-
-**JWT Token-Based Authentication**
-- Tokens issued on successful login
-- Token expiry: 24 hours
-- Refresh token rotation enabled
-- Token blacklist for logout
-
-**Implementation:**
-\`\`\`typescript
-middleware.authenticate = (req, res, next) => {
-  const token = extractToken(req);
-  const payload = verifyJWT(token);
-  req.user = payload;
-  next();
-};
-\`\`\`
-
-### Authorization Model
-
-**Role-Based Access Control (RBAC)**
-- Roles: admin, user, guest
-- Permissions: create, read, update, delete
-- Resource-level permissions
-
-**Permission Matrix:**
-| Role | Create | Read | Update | Delete |
-|------|--------|------|--------|--------|
-| Admin | ✓ | ✓ | ✓ | ✓ |
-| User | ✓ | ✓ (own) | ✓ (own) | ✓ (own) |
-| Guest | ✗ | ✓ (public) | ✗ | ✗ |
-
-### Token Management
-
-**Token Storage:**
-- Access token: HTTP-only cookie or localStorage
-- Refresh token: HTTP-only cookie (secure flag)
-
-**Token Refresh Flow:**
-1. Client detects expired access token
-2. Send refresh token to /api/v1/auth/refresh
-3. Server validates refresh token
-4. Issue new access token and refresh token pair
-5. Client updates stored tokens
-
-## Error Handling
-
-### Error Types
-
-**Client Errors (4xx)**
-- 400 Bad Request: Invalid input data
-- 401 Unauthorized: Missing or invalid authentication
-- 403 Forbidden: Insufficient permissions
-- 404 Not Found: Resource does not exist
-- 409 Conflict: Resource conflict (duplicate entry)
-- 422 Unprocessable Entity: Validation errors
-- 429 Too Many Requests: Rate limit exceeded
-
-**Server Errors (5xx)**
-- 500 Internal Server Error: Unexpected error
-- 502 Bad Gateway: Upstream service failure
-- 503 Service Unavailable: Temporary unavailability
-- 504 Gateway Timeout: Upstream timeout
-
-### Error Response Format
-
-\`\`\`json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid input data",
-    "details": [
-      {
-        "field": "feature_name",
-        "message": "Feature name is required"
-      }
-    ],
-    "request_id": "uuid"
-  }
-}
-\`\`\`
-
-### Logging Strategy
-
-**Log Levels:**
-- ERROR: Critical failures requiring immediate attention
-- WARN: Non-critical issues that should be investigated
-- INFO: General operational events
-- DEBUG: Detailed diagnostic information
-
-**Log Format (JSON):**
-\`\`\`json
-{
-  "timestamp": "ISO8601",
-  "level": "ERROR",
-  "service": "feature-api",
-  "message": "Database connection failed",
-  "context": {
-    "request_id": "uuid",
-    "user_id": "uuid",
-    "error": "Connection timeout"
-  }
-}
-\`\`\`
-
-**Log Aggregation:**
-- Centralized logging: ELK Stack/Splunk/CloudWatch
-- Log retention: 30 days for INFO, 90 days for ERROR
-- Alert triggers: Error rate > 1% over 5 minutes
-
-## Performance Considerations
-
-### Caching Strategy
-
-**Application-Level Caching**
-- Cache frequently accessed data (user profiles, feature metadata)
-- Cache TTL: 5 minutes for dynamic data, 1 hour for static data
-- Cache invalidation on data mutation
-
-**Implementation:**
-\`\`\`typescript
-cache.get('feature:' + id, async () => {
-  return await database.getFeature(id);
-}, { ttl: 300 });
-\`\`\`
-
-**CDN Caching**
-- Static assets: max-age=31536000 (1 year)
-- API responses: Cache-Control: no-cache for authenticated endpoints
-- Public data: Cache-Control: public, max-age=300
-
-### Database Optimization
-
-**Query Optimization**
-- Use prepared statements to prevent SQL injection
-- Index foreign keys and frequently queried columns
-- Use connection pooling (min: 10, max: 50 connections)
-- Implement query timeouts (5 seconds)
-
-**Database Scaling:**
-- Read replicas for heavy read workloads
-- Partitioning for large tables (by date/user_id)
-- Query result pagination (max 100 records per page)
-
-### Rate Limiting
-
-**Implementation:**
-- Token bucket algorithm
-- Per-user limits stored in Redis
-- Rate limit headers in response:
-  - X-RateLimit-Limit: Maximum requests
-  - X-RateLimit-Remaining: Remaining requests
-  - X-RateLimit-Reset: Reset timestamp
-
-**Limits by Endpoint:**
-- POST /api/v1/feature: 100/min
-- GET /api/v1/feature: 1000/min
-- PUT /api/v1/feature: 100/min
-- DELETE /api/v1/feature: 50/min
-
-## INTENT Coverage
-
-This specification addresses all user stories from INTENT-001:
-
-| INTENT User Story | SPEC Coverage |
-|-------------------|---------------|${intentUserStories.map(story => `
-| ${story} | Components, API Endpoints, Database Schema |`).join('')}
-
-**Coverage Summary:**
-- Total user stories: ${intentUserStories.length}
-- Covered: ${intentUserStories.length} (100%)
-- Uncovered: None
-
----
-*Generated by WorkflowEngine based on INTENT-001*
-`;
-
-    // Note: 'spec' is deprecated as an artifact type - using 'intent' instead
-    await writeArtifact(this.projectPath, this.workflowId, 'intent', specContent);
-
-    // Validate the generated artifact
-    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
-    console.log(`[WorkflowEngine] Validating SPEC artifact at: ${specPath}`);
-
-    // Note: validateSpec was removed in the new workflow - using validateIntent instead
-    const validationResult = await validateIntent(specPath);
-
-    // Note: V3 checkpoints don't store validation_results inline - they use manifest
-    if (!validationResult.passed) {
-      console.log('[WorkflowEngine] SPEC validation failed:', validationResult.blocking_issues);
-      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
-    } else {
-      console.log('[WorkflowEngine] SPEC validation passed');
-      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
-    }
-  }
-
-  /**
-   * DEPRECATED: Execute the INTENTS stage (old workflow)
-   *
-   * Generates INTENT artifacts with implementation tasks from the SPEC.
-   * Creates multiple INTENT-*.md files and a dependency-graph.json file
-   * with task breakdown, dependencies, and effort estimates.
-   */
-  private async executeIntentsStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing INTENTS stage for feature: ${this.featureName}`);
-
-    // Get the INTENT artifact path for context (was 'spec' in old workflow)
-    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
-    console.log(`[WorkflowEngine] Reading INTENT artifact from: ${specPath}`);
-    console.log('[WorkflowEngine] Generating INTENT task artifacts with implementation tasks');
-
-    // Read SPEC to extract components for task generation
-    const fs = await import('fs-extra');
-    const path = await import('path');
-    const specContent = await fs.readFile(specPath, 'utf-8');
-
-    // Extract components from SPEC (look for sections under ## Components)
-    const specComponents: string[] = [];
-    const lines = specContent.split('\n');
-    let inComponentsSection = false;
-    for (const line of lines) {
-      if (line.match(/^##\s+Components/i)) {
-        inComponentsSection = true;
-        continue;
-      }
-      if (inComponentsSection && line.match(/^##\s+/)) {
-        inComponentsSection = false;
-      }
-      if (inComponentsSection && line.match(/^###\s+(.+)$/)) {
-        const match = line.match(/^###\s+(.+)$/);
-        if (match) {
-          specComponents.push(match[1].trim());
-        }
-      }
-    }
-
-    const intentsDir = path.join(
-      this.projectPath,
-      '.olympus',
-      'workflow',
-      this.workflowId,
-      'intents'
-    );
-
-    await fs.ensureDir(intentsDir);
-
-    const timestamp = new Date().toISOString();
-
-    // Generate INTENT files - one per major task group
-    const intents = [
-      {
-        id: 'INTENT-001',
-        title: 'Setup Database Schema',
-        component: 'Database Components',
-        goal: 'Create database tables, indexes, and migration scripts',
-        acceptanceCriteria: [
-          'Database tables created with proper schema',
-          'Indexes created for performance optimization',
-          'Migration scripts tested and validated',
-          'Rollback scripts prepared',
-        ],
-        steps: [
-          'Create migration script for feature_data table',
-          'Create migration script for feature_audit_log table',
-          'Add indexes on foreign keys and frequently queried columns',
-          'Test migration in development environment',
-          'Create rollback migration script',
-          'Document schema changes',
-        ],
-        technicalNotes: 'Use migration framework (Flyway/Alembic/TypeORM migrations). Ensure backward compatibility.',
-        dependencies: [],
-        effort: 4,
-      },
-      {
-        id: 'INTENT-002',
-        title: 'Implement Backend API Endpoints',
-        component: 'Backend Services',
-        goal: 'Create RESTful API endpoints for feature operations',
-        acceptanceCriteria: [
-          'All CRUD endpoints implemented',
-          'Request validation middleware in place',
-          'Error handling properly configured',
-          'Unit tests passing with >80% coverage',
-        ],
-        steps: [
-          'Create API route definitions',
-          'Implement POST /api/v1/feature endpoint',
-          'Implement GET /api/v1/feature/:id endpoint',
-          'Implement PUT /api/v1/feature/:id endpoint',
-          'Implement DELETE /api/v1/feature/:id endpoint',
-          'Add request validation middleware',
-          'Add error handling middleware',
-          'Write unit tests for all endpoints',
-        ],
-        technicalNotes: 'Follow REST conventions. Use async/await for database operations. Implement proper error responses.',
-        dependencies: ['INTENT-001'],
-        effort: 8,
-      },
-      {
-        id: 'INTENT-003',
-        title: 'Build Frontend Components',
-        component: 'Frontend Components',
-        goal: 'Create user interface components for feature interaction',
-        acceptanceCriteria: [
-          'Main feature UI component implemented',
-          'Form validation working correctly',
-          'Error states handled gracefully',
-          'Responsive design across devices',
-          'Accessibility standards met (WCAG 2.1 AA)',
-        ],
-        steps: [
-          'Create main feature component',
-          'Implement form inputs with validation',
-          'Add error boundary component',
-          'Implement loading states',
-          'Add success/error notifications',
-          'Make responsive for mobile/tablet/desktop',
-          'Test with screen readers',
-          'Write component tests',
-        ],
-        technicalNotes: 'Use component library patterns. Implement proper state management. Follow accessibility guidelines.',
-        dependencies: ['INTENT-002'],
-        effort: 8,
-      },
-      {
-        id: 'INTENT-004',
-        title: 'Implement Authentication and Authorization',
-        component: 'Backend Services',
-        goal: 'Add authentication and authorization for feature endpoints',
-        acceptanceCriteria: [
-          'JWT authentication middleware implemented',
-          'Role-based access control enforced',
-          'Token refresh mechanism working',
-          'Unauthorized access properly blocked',
-        ],
-        steps: [
-          'Implement JWT verification middleware',
-          'Create role-based permission checks',
-          'Add token refresh endpoint',
-          'Implement token blacklist for logout',
-          'Add authentication to all protected routes',
-          'Write authentication tests',
-        ],
-        technicalNotes: 'Use secure token storage. Implement token rotation. Follow OWASP authentication guidelines.',
-        dependencies: ['INTENT-002'],
-        effort: 4,
-      },
-      {
-        id: 'INTENT-005',
-        title: 'Add Rate Limiting and Caching',
-        component: 'Backend Services',
-        goal: 'Implement rate limiting and caching for performance and security',
-        acceptanceCriteria: [
-          'Rate limiting active on all endpoints',
-          'Rate limit headers in responses',
-          'Application-level caching implemented',
-          'Cache invalidation working correctly',
-        ],
-        steps: [
-          'Set up Redis for rate limiting and caching',
-          'Implement rate limiting middleware',
-          'Add rate limit headers to responses',
-          'Implement application-level cache',
-          'Add cache invalidation on mutations',
-          'Configure CDN caching rules',
-          'Write performance tests',
-        ],
-        technicalNotes: 'Use Redis for distributed rate limiting. Implement cache warming strategy. Monitor cache hit rates.',
-        dependencies: ['INTENT-002'],
-        effort: 4,
-      },
-      {
-        id: 'INTENT-006',
-        title: 'Setup Infrastructure and Deployment',
-        component: 'Infrastructure Components',
-        goal: 'Configure deployment pipeline and infrastructure',
-        acceptanceCriteria: [
-          'Docker container configured and building',
-          'CI/CD pipeline running successfully',
-          'Monitoring and alerting configured',
-          'Staging environment deployed',
-        ],
-        steps: [
-          'Create Dockerfile for application',
-          'Configure Docker Compose for local development',
-          'Set up CI/CD pipeline (GitHub Actions/Jenkins)',
-          'Configure staging environment',
-          'Set up monitoring (Prometheus/Grafana)',
-          'Configure alerting rules',
-          'Document deployment process',
-        ],
-        technicalNotes: 'Use multi-stage Docker builds. Implement health checks. Set up automated rollbacks.',
-        dependencies: ['INTENT-002', 'INTENT-003'],
-        effort: 8,
-      },
-      {
-        id: 'INTENT-007',
-        title: 'Write Integration Tests and Documentation',
-        component: 'Backend Services',
-        goal: 'Create comprehensive tests and documentation',
-        acceptanceCriteria: [
-          'Integration tests covering all workflows',
-          'API documentation complete',
-          'Test coverage >80%',
-          'Documentation reviewed and approved',
-        ],
-        steps: [
-          'Write end-to-end integration tests',
-          'Test authentication flows',
-          'Test error scenarios',
-          'Generate API documentation (OpenAPI/Swagger)',
-          'Write user-facing documentation',
-          'Create troubleshooting guide',
-          'Run full test suite',
-        ],
-        technicalNotes: 'Use test fixtures for data setup. Mock external services. Document edge cases.',
-        dependencies: ['INTENT-003', 'INTENT-004', 'INTENT-005'],
-        effort: 4,
-      },
-    ];
-
-    // Write individual INTENT markdown files
-    for (const intent of intents) {
-      const intentContent = `---
-id: ${intent.id}
-feature: ${this.workflowId}
-created: ${timestamp}
-based_on: SPEC-001
-status: pending
-estimated_effort: ${intent.effort}
-dependencies: ${JSON.stringify(intent.dependencies)}
----
-
-# Task: ${intent.title}
-
-## Goal
-
-${intent.goal}
-
-## Component
-
-${intent.component}
-
-## Acceptance Criteria
-
-${intent.acceptanceCriteria.map(c => `- [ ] ${c}`).join('\n')}
-
-## Implementation Steps
-
-${intent.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}
-
-## Technical Notes
-
-${intent.technicalNotes}
-
-## Dependencies
-
-${intent.dependencies.length > 0 ? intent.dependencies.join(', ') : 'None'}
-
-## Estimated Effort
-
-${intent.effort}h
-
----
-*Generated by WorkflowEngine based on SPEC-001*
-`;
-
-      await fs.writeFile(
-        path.join(intentsDir, `${intent.id}.md`),
-        intentContent,
-        'utf-8'
-      );
-    }
-
-    // Generate dependency graph JSON
-    // Format: Record<string, string[]> (adjacency list)
-    const totalEffort = intents.reduce((sum, intent) => sum + intent.effort, 0);
-
-    const dependencyGraph: Record<string, string[]> = {};
-    for (const intent of intents) {
-      dependencyGraph[intent.id] = intent.dependencies;
-    }
-
-    await fs.writeFile(
-      path.join(intentsDir, 'dependency-graph.json'),
-      JSON.stringify(dependencyGraph, null, 2),
-      'utf-8'
-    );
-
-    console.log(`[WorkflowEngine] Generated ${intents.length} INTENT files`);
-    console.log(`[WorkflowEngine] Total estimated effort: ${totalEffort}h`);
-
-    // Note: validateTasks was removed in the new workflow
-    console.log(`[WorkflowEngine] INTENTS stage complete - validation skipped (deprecated)`);
-    console.log(`[WorkflowEngine] Generated ${intents.length} INTENT files with ${totalEffort}h estimated effort`);
-  }
 }

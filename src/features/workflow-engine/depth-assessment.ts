@@ -468,6 +468,89 @@ function deriveRiskFactorsFromIdea(content: string, sections: IdeaSections): Ris
 }
 
 /**
+ * Depth override mapping:
+ * --depth shallow → score 5 (skip_units: true)
+ * --depth medium  → score 15
+ * --depth deep    → score 25
+ */
+export type DepthOverride = 'shallow' | 'medium' | 'deep';
+
+export function assessDepthWithOverride(
+  ideaContent: string,
+  depthOverride?: DepthOverride
+): DepthAssessment {
+  if (depthOverride) {
+    return createOverriddenAssessment(depthOverride, ideaContent);
+  }
+  return assessDepthFromIdea(ideaContent);
+}
+
+function createOverriddenAssessment(override: DepthOverride, ideaContent: string): DepthAssessment {
+  // Get the natural assessment for risk tier calculation
+  const natural = assessDepthFromIdea(ideaContent);
+
+  const overrideScores: Record<DepthOverride, number> = {
+    shallow: 5,
+    medium: 15,
+    deep: 25,
+  };
+
+  const score = overrideScores[override];
+  const recommended_depth = score <= 10 ? 'minimal' as const : score <= 20 ? 'standard' as const : 'comprehensive' as const;
+
+  return {
+    ...natural,
+    total_score: score,
+    recommended_depth,
+    skip_units: score <= 10,
+    // Keep natural risk tier - override only affects depth, not risk
+    risk_tier: {
+      ...natural.risk_tier,
+      override_reason: `Manual depth override: --depth ${override}`,
+    },
+  };
+}
+
+/**
+ * Get recommended question counts based on depth level.
+ * Returns { business: number, technical: number } ranges.
+ *
+ * SHALLOW: 1-2 business, 0 technical (minimal ceremony)
+ * MEDIUM: 3-5 business, AI-driven technical
+ * DEEP: 5+ business, Metis + Momus mandatory
+ */
+export function getDepthQuestionLimits(depthScore: number): {
+  maxBusinessQuestions: number;
+  maxTechnicalQuestions: number;
+  requiresMetis: boolean;
+  requiresMomus: boolean;
+} {
+  if (depthScore <= 10) {
+    // SHALLOW
+    return { maxBusinessQuestions: 2, maxTechnicalQuestions: 0, requiresMetis: false, requiresMomus: false };
+  } else if (depthScore <= 20) {
+    // MEDIUM
+    return { maxBusinessQuestions: 5, maxTechnicalQuestions: 3, requiresMetis: false, requiresMomus: false };
+  } else {
+    // DEEP
+    return { maxBusinessQuestions: 8, maxTechnicalQuestions: 5, requiresMetis: true, requiresMomus: true };
+  }
+}
+
+/**
+ * Get effective question count as the MINIMUM of trust-based and depth-based limits.
+ * SHALLOW depth caps at 1-2 questions regardless of trust level.
+ *
+ * @param depthScore - The depth assessment total score (6-30)
+ * @param trustBasedCount - The question count recommended by trust level
+ * @returns The effective (minimum) question count
+ */
+export function getEffectiveQuestionCount(depthScore: number, trustBasedCount: number): number {
+  const depthLimits = getDepthQuestionLimits(depthScore);
+  return Math.min(trustBasedCount, depthLimits.maxBusinessQuestions);
+}
+
+/**
  * Get human-readable label for depth level
  *
  * @param depth - The workflow depth level

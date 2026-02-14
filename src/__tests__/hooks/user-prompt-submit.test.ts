@@ -226,18 +226,46 @@ describe('Structured Workflow Hook', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('my awesome feature');
     });
 
-    it('does not match /plan without --structured flag', async () => {
+    it('matches /plan {feature} without --structured flag', async () => {
       const ctx: HookContext = {
         prompt: '/plan myfeature',
         directory: '/test/project',
         sessionId: 'test-session',
       };
 
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'myfeature',
+        feature_name: 'myfeature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {
+          initial_prompt: '/plan myfeature',
+        },
+      });
+
       const result = await workflowHook.handler(ctx);
 
       expect(result.continue).toBe(true);
-      expect(result.hookSpecificOutput).toBeUndefined();
-      expect(WorkflowEngine).not.toHaveBeenCalled();
+      expect(result.hookSpecificOutput).toBeDefined();
+      expect(result.hookSpecificOutput?.additionalContext).toContain('myfeature');
+      expect(WorkflowEngine).toHaveBeenCalled();
     });
 
     it('does not match regular /plan command', async () => {
@@ -380,6 +408,231 @@ describe('Structured Workflow Hook', () => {
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeDefined();
+    });
+
+    it('extracts --depth flag from feature name', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan my feature --depth shallow',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'my-feature',
+        feature_name: 'my feature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('my feature');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Depth override: shallow');
+    });
+
+    it('extracts --brownfield flag from feature name', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan my feature --brownfield',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'my-feature',
+        feature_name: 'my feature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('my feature');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Project type: brownfield');
+    });
+
+    it('does not match /plan --abort', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan --abort',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(WorkflowEngine).not.toHaveBeenCalled();
+    });
+
+    it('does not match /plan --help', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan --help',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(WorkflowEngine).not.toHaveBeenCalled();
+    });
+
+    it('supports backward compatibility with --structured flag', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan my feature --structured',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'my-feature',
+        feature_name: 'my feature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeDefined();
+      expect(result.hookSpecificOutput?.additionalContext).toContain('my feature');
+      expect(WorkflowEngine).toHaveBeenCalled();
+    });
+
+    it('injects workflow context hint for workflow start', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan test-workflow',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'test-workflow',
+        feature_name: 'test-workflow',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        current_phase: 'inception',
+        status: 'in_progress',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[Workflow: test-workflow | Phase: inception | Stage: idea]');
+    });
+
+    it('injects workflow context hint for workflow resume', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan continue',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['my-workflow']);
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'my-workflow',
+        feature_name: 'My Workflow',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'intent',
+        current_phase: 'forge',
+        status: 'paused',
+        artifacts: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        validation_results: {
+          idea: null,
+          prd: null,
+          spec: null,
+          intent: null,
+          complete: null,
+        },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[Workflow: my-workflow | Phase: forge | Stage: intent]');
     });
   });
 
@@ -804,7 +1057,7 @@ describe('Structured Workflow Hook', () => {
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeDefined();
       expect(result.hookSpecificOutput?.additionalContext).toContain('No active workflows found');
-      expect(result.hookSpecificOutput?.additionalContext).toContain('/plan {feature} --structured');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('/plan {feature}');
     });
 
     it('handles workflow directory not existing', async () => {

@@ -1,7 +1,7 @@
 /**
  * Quality Gate Hooks Registration
  *
- * Implements Phase 4 (Quality Gates and Governance) of the ODLC workflow engine.
+ * Implements quality gates and governance for the ODLC workflow engine.
  * Provides two critical hooks:
  * 1. qualityGateBlocker (PostToolUse): Detects phase transitions and blocks for approval
  * 2. qualityGateApprover (UserPromptSubmit): Processes approve/reject commands
@@ -12,15 +12,18 @@
  *
  * Key behaviors:
  * - Detects Inception→Construction and Construction→Operations transitions
- * - Runs V&V placeholder checks (alignment engine coming in Phase 4.5)
+ * - Runs V&V alignment checks via the alignment engine
  * - Auto-advances based on trust level and risk tier
  * - Records all gate decisions in manifest audit trail
  * - Supports bypass via --no-gates flag or config setting
+ * - Enforces Momus review for Risk Tier 3 Inception gates
+ * - Persists checkpoint after gate decisions
  * - Fail-open on errors to prevent blocking legitimate work
  */
 
 import { registerHook } from '../registry.js';
-import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
+import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
+import { assessDepthFromIdea, getDepthQuestionLimits } from '../../features/workflow-engine/depth-assessment.js';
 import {
   loadManifest,
   saveManifest,
@@ -28,6 +31,8 @@ import {
   updateContractStatus,
   updatePhaseStatus,
 } from '../../features/workflow-engine/manifest.js';
+import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../features/workflow-engine/trust.js';
+import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
 import type {
   WorkflowPhase,
   TrustState,
@@ -42,6 +47,7 @@ import type {
 import type { HookContext, HookResult } from '../types.js';
 import * as fs from 'fs-extra';
 import { join } from 'path';
+import { readFileSync } from 'fs';
 
 /**
  * V&V validation questions templates by transition type.
@@ -50,25 +56,19 @@ import { join } from 'path';
 const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
   inception: [
     {
-      question: 'Does the PRD address all IDEA constraints?',
+      question: 'Does the INTENT address all IDEA constraints?',
       answer: null,
       answered_by: null,
       passed: null,
     },
     {
-      question: 'Does the PRD solve the actual business problem?',
+      question: 'Does the INTENT solve the actual business problem defined in the IDEA?',
       answer: null,
       answered_by: null,
       passed: null,
     },
     {
-      question: 'Does the SPEC implement all PRD user stories?',
-      answer: null,
-      answered_by: null,
-      passed: null,
-    },
-    {
-      question: 'Do INTENTS cover all SPEC components?',
+      question: 'Are NFRs properly derived from IDEA constraints?',
       answer: null,
       answered_by: null,
       passed: null,
@@ -109,72 +109,6 @@ const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
     },
   ],
 };
-
-/**
- * Loads trust state from .olympus/trust-state.json.
- * Returns default state if file doesn't exist.
- *
- * @param projectPath - Absolute path to project root
- * @returns Trust state object
- */
-function loadTrustState(projectPath: string): TrustState {
-  try {
-    const trustPath = join(projectPath, '.olympus', 'trust-state.json');
-    if (fs.existsSync(trustPath)) {
-      return fs.readJsonSync(trustPath) as TrustState;
-    }
-  } catch (error) {
-    console.error('[Olympus Quality Gate] Failed to load trust state:', error);
-  }
-
-  // Default trust state
-  return {
-    current_level: 0 as TrustLevel,
-    total_transitions: 0,
-    rejection_count: 0,
-    rejection_rate: 0,
-    incident_count: 0,
-    last_level_change: null,
-    level_history: [],
-  };
-}
-
-/**
- * Saves trust state to .olympus/trust-state.json.
- *
- * @param projectPath - Absolute path to project root
- * @param state - Trust state to save
- */
-function saveTrustState(projectPath: string, state: TrustState): void {
-  try {
-    const trustPath = join(projectPath, '.olympus', 'trust-state.json');
-    fs.ensureDirSync(join(projectPath, '.olympus'));
-    fs.writeJsonSync(trustPath, state, { spaces: 2 });
-  } catch (error) {
-    console.error('[Olympus Quality Gate] Failed to save trust state:', error);
-  }
-}
-
-/**
- * Determines if a phase transition should auto-advance based on trust level and risk tier.
- *
- * Trust progression:
- * - Level 0: Never auto-advance (manual approval required)
- * - Level 1: Auto-advance Tier 1 only
- * - Level 2: Auto-advance Tier 1 and Tier 2
- * - Level 3: Auto-advance Tier 1 and Tier 2 (Tier 3 still requires approval)
- *
- * @param riskTier - Risk tier of the workflow (1=low, 2=medium, 3=high)
- * @param trustLevel - Current trust level (0-3)
- * @returns True if should auto-advance, false if manual approval needed
- */
-function shouldAutoAdvance(riskTier: RiskTier, trustLevel: TrustLevel): boolean {
-  if (trustLevel === 0) return false;
-  if (trustLevel === 1) return riskTier === 1;
-  if (trustLevel === 2) return riskTier <= 2;
-  if (trustLevel === 3) return riskTier <= 2; // Tier 3 still needs approval even at Trust 3
-  return false;
-}
 
 /**
  * Finds the active workflow with a running checkpoint.
@@ -243,8 +177,8 @@ function detectPhaseTransition(
   const currentPhase = (checkpoint as any).current_phase as WorkflowPhase | undefined;
 
   if (!currentPhase) {
-    // Legacy checkpoint - check if Inception is completing (intent stage complete)
-    if (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
+    // Legacy checkpoint - check if Inception stage gates are needed
+    if (checkpoint.current_stage === 'idea' || checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
       return 'inception';
     }
     return null;
@@ -268,10 +202,10 @@ function detectPhaseTransition(
     }
   }
 
-  // Simple heuristic: Inception completes when intent stage is done
+  // Inception has stage-level gates: Gate 1 after IDEA, Gate 2 after INTENT
   if (
     currentPhase === 'inception' &&
-    (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
+    (checkpoint.current_stage === 'idea' || checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
   ) {
     return 'inception';
   }
@@ -343,8 +277,10 @@ function getPromptText(ctx: HookContext): string {
  * 1. Auto-advances if trust level permits (based on risk tier)
  * 2. Blocks and requests human approval via context injection
  *
- * Runs V&V placeholder verification (alignment engine coming in Phase 4.5).
+ * Runs V&V alignment checks for verification and validation.
  * Records all gate decisions in manifest audit trail.
+ * Persists checkpoint after gate decisions.
+ * Enforces Momus review for Risk Tier 3 Inception gates.
  *
  * Always fails open on errors to prevent blocking legitimate work.
  *
@@ -387,7 +323,45 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
     // Check trust-based auto-advance
     const trustState = loadTrustState(ctx.directory);
     const riskTier: RiskTier =
-      checkpoint.risk_tier?.tier || manifest.risk_tier?.tier || 2; // Default tier 2
+      (typeof checkpoint.risk_tier === 'number' ? checkpoint.risk_tier : checkpoint.risk_tier?.tier) ||
+      manifest.risk_tier?.tier || 2; // Default tier 2
+
+    // Risk Tier 3 Momus review enforcement for inception phase
+    if (riskTier === 3 && transitioningPhase === 'inception') {
+      const hasMomusReview = manifest.artifacts.some(
+        (a) => a.type?.toLowerCase().includes('momus') || a.type?.toLowerCase() === 'momus-review'
+      );
+      if (!hasMomusReview) {
+        // Block gate transition - Momus review required
+        manifest.phases[transitioningPhase].gate_result = {
+          passed: false,
+          approved_by: null,
+          approved_at: null,
+          feedback: 'Momus review required for Risk Tier 3',
+          verification: {
+            conformance_score: 0,
+            coverage_percentage: 0,
+            missing_items: ['Momus review artifact missing'],
+            passed: false,
+          },
+          validation: {
+            alignment_score: 0,
+            alignment_questions: [],
+            passed: false,
+          },
+        };
+        saveManifest(manifestPath, manifest);
+        await saveCheckpoint(ctx.directory, checkpoint);
+
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext: `[BLOCKING - Acknowledgment Required] BLOCKED: Risk Tier 3 requires Momus review before INTENT approval. Run /review to invoke Momus.\n\n[GATE_PENDING]`,
+          },
+        };
+      }
+    }
 
     if (shouldAutoAdvance(riskTier, trustState.current_level)) {
       // Auto-advance: record gate approval and continue
@@ -418,25 +392,85 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
       };
 
       saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, checkpoint);
       return { continue: true };
     }
 
     // NOT auto-advancing - block for human review
-    // Run V&V stub verification
-    const verification: AlignmentVerificationResult = {
-      conformance_score: 0,
-      coverage_percentage: 0,
-      missing_items: ['Alignment engine not yet available (Phase 4.5)'],
-      passed: false,
-    };
+    // Run V&V alignment checks
+    let verification: AlignmentVerificationResult;
+    let questions: AlignmentQuestion[];
 
-    // Create validation questions based on transition type
-    const questions = VV_QUESTIONS[transitioningPhase] || [];
+    if (transitioningPhase === 'inception') {
+      try {
+        const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
+        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+
+        if (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
+          // Gate 2: INTENT exists, run dual validation against IDEA
+          const intentContent = readFileSync(join(inceptionDir, 'intent.md'), 'utf-8');
+          const dualResult = runDualValidation(
+            intentContent,    // artifact
+            ideaContent,      // parent
+            ideaContent,      // root (same as parent for inception)
+            'idea-to-intent', // transition
+            'unit-to-idea',   // root transition (closest available)
+            'idea',           // sourceId
+            'intent',         // targetId
+            'idea'            // rootId
+          );
+          verification = {
+            conformance_score: dualResult.parentCheck.verification.conformance_score,
+            coverage_percentage: dualResult.parentCheck.verification.coverage_percentage,
+            missing_items: dualResult.parentCheck.verification.missing_items,
+            passed: dualResult.passed,
+          };
+          questions = generateValidationQuestions('idea-to-intent');
+        } else {
+          // Gate 1: Only IDEA exists, do structural verification
+          verification = computeVerification(ideaContent, ideaContent, 'idea-to-intent');
+          questions = VV_QUESTIONS[transitioningPhase] || [];
+        }
+      } catch {
+        // Fail-open fallback
+        verification = {
+          conformance_score: 0,
+          coverage_percentage: 0,
+          missing_items: ['Could not read inception artifacts for alignment check'],
+          passed: false,
+        };
+        questions = VV_QUESTIONS[transitioningPhase] || [];
+      }
+    } else {
+      // For other phases, use VV_QUESTIONS fallback
+      verification = {
+        conformance_score: 0,
+        coverage_percentage: 0,
+        missing_items: ['Alignment check not yet implemented for this phase'],
+        passed: false,
+      };
+      questions = VV_QUESTIONS[transitioningPhase] || [];
+    }
+
     const validation: AlignmentValidationResult = {
       alignment_score: 0,
       alignment_questions: questions,
       passed: false,
     };
+
+    // Check for DEEP depth without Metis consultation
+    let depthWarning = '';
+    if (transitioningPhase === 'inception') {
+      const depthScore = checkpoint.depth_score || manifest.depth_assessment?.total_score;
+      if (depthScore && depthScore >= 21) {
+        const hasMetisArtifact = manifest.artifacts.some(
+          (a) => a.type?.toLowerCase().includes('metis')
+        );
+        if (!hasMetisArtifact) {
+          depthWarning = '\n\nWARNING: DEEP workflow without Metis consultation detected. Metis blind-spot analysis is strongly recommended for complex workflows.';
+        }
+      }
+    }
 
     // Store gate request in manifest
     manifest.phases[transitioningPhase].gate_result = {
@@ -449,9 +483,14 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
     };
 
     saveManifest(manifestPath, manifest);
+    await saveCheckpoint(ctx.directory, checkpoint);
 
     // Return with context injection to block and request approval
-    const message = `STOP: Phase transition from ${transitioningPhase} requires approval.
+    const devPrefix = riskTier === 3 ? '[BLOCKING - Acknowledgment Required] ' : '';
+    const gateLabel = checkpoint.current_stage === 'idea' ? 'Gate 1 (IDEA review)' :
+                      checkpoint.current_stage === 'intent' ? 'Gate 2 (INTENT review)' :
+                      `${transitioningPhase} transition`;
+    const message = `${devPrefix}STOP: ${gateLabel} requires approval.
 
 VERIFICATION: ${verification.conformance_score}% conformance, ${verification.coverage_percentage}% coverage.
 Missing: ${verification.missing_items.join(', ')}
@@ -459,7 +498,7 @@ Missing: ${verification.missing_items.join(', ')}
 VALIDATION: Review alignment questions:
 ${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
 
-Type "approve" to proceed or "reject <reason>" to block.
+Type "approve" to proceed or "reject <reason>" to block.${depthWarning}
 
 [GATE_PENDING]`;
 
@@ -534,6 +573,7 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
               actor === 'flag' ? '--no-gates flag' : 'Config disabled';
 
             saveManifest(manifestPath, manifest);
+            await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
           }
         }
       }
@@ -586,15 +626,32 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
       if (trustState.total_transitions > 0) {
         trustState.rejection_rate = trustState.rejection_count / trustState.total_transitions;
       }
-      saveTrustState(ctx.directory, trustState);
+      saveTrustState(trustState, ctx.directory);
 
       saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
+
+      // Reset gate_result so next stage gate can fire (Gate 1 → Gate 2 within inception)
+      // The audit trail preserves the approval record
+      if (manifest.phases[pendingPhase].gate_result?.passed) {
+        manifest.phases[pendingPhase].gate_result = null;
+        saveManifest(manifestPath, manifest);
+      }
+
+      // Add depth-aware guidance
+      let depthGuidance = '';
+      const depthScore = activeWorkflow.checkpoint.depth_score;
+      if (depthScore && depthScore <= 10) {
+        depthGuidance = ' SHALLOW depth: Skip UNIT decomposition, proceed directly to single BOLT generation.';
+      } else if (depthScore && depthScore >= 21) {
+        depthGuidance = ' DEEP depth: Full UNIT + BOLT decomposition with design artifacts required.';
+      }
 
       return {
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: `Gate approved. Phase ${pendingPhase} transition approved. Proceeding to next phase.`,
+          additionalContext: `Gate approved. Phase ${pendingPhase} transition approved. Proceeding to next phase.${depthGuidance}`,
         },
       };
     }
@@ -647,9 +704,10 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
       if (trustState.total_transitions > 0) {
         trustState.rejection_rate = trustState.rejection_count / trustState.total_transitions;
       }
-      saveTrustState(ctx.directory, trustState);
+      saveTrustState(trustState, ctx.directory);
 
       saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
 
       return {
         continue: true,

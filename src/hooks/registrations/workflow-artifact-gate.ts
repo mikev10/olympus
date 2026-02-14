@@ -2,40 +2,43 @@
  * Workflow Artifact Gate Hook Registration
  *
  * Validates workflow artifacts after Inception stage agents complete their work.
- * Runs validation functions when idea-intake, prd-writer, spec-writer, or
- * intent-generator agents finish tasks. Injects warnings for failed validations
- * but always fails open (never blocks workflow progression).
+ * Runs validation functions when prometheus agent finishes tasks, using the
+ * checkpoint's current_stage to determine which artifact to validate.
+ * Injects warnings for failed validations but always fails open (never blocks
+ * workflow progression).
  *
  * Priority: 78 (runs after agent-tracking at 50, before quality-gate at 80)
  *
  * Key behaviors:
- * - Detects Task completions from Inception stage agents
- * - Loads active workflow checkpoint
- * - Runs appropriate validation function (validateIdea, validatePrd, etc.)
+ * - Detects Task completions from Inception stage agents (prometheus)
+ * - Loads active workflow checkpoint to determine artifact type from current_stage
+ * - Runs appropriate validation function (validateIdea, validateIntent)
+ * - Looks in aidlc-docs/ directory structure for artifacts
  * - Injects success/warning context based on validation results
  * - Always returns continue: true (fail-open approach)
  */
 
 import { registerHook } from '../registry.js';
 import { loadSessionState } from '../../learning/session-state.js';
-import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
+import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import {
   validateIdea,
   validateIntent,
 } from '../../features/workflow-engine/validation.js';
+import { assessDepthFromIdea } from '../../features/workflow-engine/depth-assessment.js';
+import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import type { HookContext, HookResult } from '../types.js';
 import type { ValidationResult } from '../../features/workflow-engine/types.js';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 
 /**
- * Maps Inception stage agent names to their artifact types.
- * This determines which validation function to run for each agent.
+ * Maps Inception stage agent names to their phase.
+ * Prometheus handles both idea and intent stages; the actual artifact type
+ * is determined by checkpoint.current_stage at runtime.
  */
-const VISION_STAGE_AGENT_MAP: Record<string, string> = {
-  'idea-intake': 'idea',
-  'intent-writer': 'intent',
-  'intent-generator': 'intent',
+const INCEPTION_STAGE_AGENT_MAP: Record<string, string> = {
+  'prometheus': 'inception', // Prometheus handles both idea and intent stages
 };
 
 /**
@@ -84,9 +87,10 @@ async function findActiveWorkflow(
 
 /**
  * Determines artifact paths based on workflow directory structure.
- * Supports both new nested layout (vision/) and legacy flat layout.
+ * Supports nested layout (inception/ subdirectory) and legacy flat layout.
+ * The workflowDir is already under aidlc-docs/<workflowId>/.
  *
- * @param workflowDir - Absolute path to workflow directory
+ * @param workflowDir - Absolute path to workflow directory (e.g., <project>/aidlc-docs/<workflowId>)
  * @param artifactType - Type of artifact (idea, intent)
  * @returns Object containing all necessary artifact paths for validation
  */
@@ -94,7 +98,7 @@ function getArtifactPaths(
   workflowDir: string,
   artifactType: string
 ): { artifactPath: string; referencePaths: string[] } | null {
-  // Try nested layout first (inception/ subdirectory)
+  // Try nested layout first (inception/ subdirectory), then flat layout
   const nestedBasePath = join(workflowDir, 'inception');
   const flatBasePath = workflowDir;
 
@@ -183,8 +187,8 @@ ${result.reviewer ? `Reviewer: ${result.reviewer}\n` : ''}Please review and addr
  * Workflow Artifact Gate Hook (PostToolUse, priority 78)
  *
  * Validates workflow artifacts when Inception stage agents complete their tasks.
- * Detects Task tool completions from idea-intake, prd-writer, spec-writer, or
- * intent-generator agents and runs the appropriate validation function.
+ * Detects Task tool completions from prometheus agent and uses the checkpoint's
+ * current_stage to determine which artifact to validate.
  *
  * Always fails open - returns continue: true even if validation fails.
  * Validation failures are injected as warnings via additionalContext.
@@ -213,8 +217,8 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
     }
 
     // Check if this agent is an Inception stage agent
-    const artifactType = VISION_STAGE_AGENT_MAP[agentUsed];
-    if (!artifactType) {
+    const agentPhase = INCEPTION_STAGE_AGENT_MAP[agentUsed];
+    if (!agentPhase) {
       // Not an Inception stage agent - pass through
       return { continue: true };
     }
@@ -227,6 +231,15 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
     }
 
     const { workflowId, checkpoint } = activeWorkflow;
+
+    // Determine artifact type from checkpoint's current_stage
+    let artifactType: string;
+    if (agentUsed === 'prometheus') {
+      // Prometheus handles both idea and intent stages
+      artifactType = checkpoint.current_stage === 'intent' ? 'intent' : 'idea';
+    } else {
+      artifactType = 'idea'; // Default fallback
+    }
 
     // Determine workflow directory
     const workflowDir = join(ctx.directory, 'aidlc-docs', workflowId);
@@ -258,7 +271,37 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
     }
 
     // Format and inject validation message
-    const message = formatValidationMessage(artifactType, validationResult);
+    let message = formatValidationMessage(artifactType, validationResult);
+
+    // After IDEA validation, trigger depth assessment and store results
+    if (artifactType === 'idea' && validationResult.passed) {
+      try {
+        const ideaContent = readFileSync(paths.artifactPath, 'utf-8');
+        const depthAssessment = assessDepthFromIdea(ideaContent);
+
+        // Store in manifest
+        const manifestPath = checkpoint.manifest_path ||
+          join(ctx.directory, 'aidlc-docs', workflowId, 'manifest.json');
+        const manifest = loadManifest(manifestPath);
+        if (manifest) {
+          manifest.depth_assessment = depthAssessment;
+          manifest.risk_tier = depthAssessment.risk_tier;
+          saveManifest(manifestPath, manifest);
+        }
+
+        // Store in checkpoint (CCR-1)
+        checkpoint.depth_score = depthAssessment.total_score;
+        checkpoint.risk_tier = depthAssessment.risk_tier.tier;
+        await saveCheckpoint(ctx.directory, checkpoint);
+
+        // Append depth info to validation message
+        const depthLabel = depthAssessment.recommended_depth === 'minimal' ? 'SHALLOW' :
+                          depthAssessment.recommended_depth === 'standard' ? 'MEDIUM' : 'DEEP';
+        message += `\n\n[Depth Assessment] Score: ${depthAssessment.total_score}/30 → ${depthLabel} | Risk Tier: ${depthAssessment.risk_tier.tier}`;
+      } catch (error) {
+        console.error('[Olympus Artifact Gate] Failed to assess depth after IDEA validation:', error);
+      }
+    }
 
     return {
       continue: true, // Always fail open

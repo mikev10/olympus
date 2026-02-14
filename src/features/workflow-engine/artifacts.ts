@@ -18,7 +18,13 @@ export type ArtifactType =
   | 'monitoring'
   | 'release-notes'
   | 'state'
-  | 'audit';
+  | 'audit'
+  | 'analysis-plan'
+  | 'current-state-analysis'
+  | 'regression-baseline'
+  | 'change-impact'
+  | 'static-model'
+  | 'dynamic-model';
 
 /**
  * Ensures the workflow directory structure exists.
@@ -161,6 +167,18 @@ export function getArtifactPath(
       return path.join(workflowDir, 'state.md');
     case 'audit':
       return path.join(workflowDir, 'audit.md');
+    case 'analysis-plan':
+      return path.join(workflowDir, 'discovery', 'analysis-plan.md');
+    case 'current-state-analysis':
+      return path.join(workflowDir, 'discovery', 'current-state-analysis.md');
+    case 'regression-baseline':
+      return path.join(workflowDir, 'discovery', 'regression-baseline.md');
+    case 'change-impact':
+      return path.join(workflowDir, 'discovery', 'change-impact.md');
+    case 'static-model':
+      return path.join(workflowDir, 'discovery', 'static-model.md');
+    case 'dynamic-model':
+      return path.join(workflowDir, 'discovery', 'dynamic-model.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }

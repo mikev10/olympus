@@ -57,12 +57,32 @@ export function registerUserPromptSubmitHooks(): void {
       }
 
       // Match patterns
-      const structuredMatch = promptText.match(/^\/plan\s+(.+?)\s+--structured$/i);
+      // /plan {feature} - excludes subcommands like "continue", "--abort", "--help"
+      const planMatch = promptText.match(/^\/plan\s+(?!continue\b|--)([\s\S]+?)$/i);
       const continueMatch = promptText.match(/^\/plan\s+continue$/i);
 
-      // Handle /plan {feature} --structured
-      if (structuredMatch) {
-        const featureName = structuredMatch[1].trim();
+      // Handle /plan {feature}
+      if (planMatch) {
+        let featureName = planMatch[1].trim();
+
+        // Strip --structured flag if present (backward compatibility)
+        featureName = featureName.replace(/\s+--structured\s*/i, '').trim();
+
+        // Extract --depth flag
+        let depthOverride: string | undefined;
+        const depthFlagMatch = featureName.match(/\s+--depth\s+(shallow|medium|deep)\s*$/i);
+        if (depthFlagMatch) {
+          depthOverride = depthFlagMatch[1].toLowerCase();
+          featureName = featureName.replace(depthFlagMatch[0], '').trim();
+        }
+
+        // Extract --brownfield or --greenfield flag
+        let projectType: string | undefined;
+        const projectTypeMatch = featureName.match(/\s+--(brownfield|greenfield)\s*$/i);
+        if (projectTypeMatch) {
+          projectType = projectTypeMatch[1].toLowerCase();
+          featureName = featureName.replace(projectTypeMatch[0], '').trim();
+        }
 
         try {
           // Create new workflow engine instance
@@ -82,11 +102,25 @@ export function registerUserPromptSubmitHooks(): void {
           // Build the structured workflow prompt
           const workflowPrompt = buildStructuredWorkflowPrompt(featureName, checkpoint);
 
+          // Inject workflow context hint
+          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'idea'}]`;
+          let additionalContext = `${contextHint}\n\n${workflowPrompt}`;
+
+          // Add depth override if specified
+          if (depthOverride) {
+            additionalContext += `\n\nDepth override: ${depthOverride}`;
+          }
+
+          // Add project type if specified
+          if (projectType) {
+            additionalContext += `\n\nProject type: ${projectType}`;
+          }
+
           return {
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'UserPromptSubmit',
-              additionalContext: workflowPrompt
+              additionalContext
             }
           };
         } catch (error) {
@@ -106,7 +140,7 @@ export function registerUserPromptSubmitHooks(): void {
               continue: true,
               hookSpecificOutput: {
                 hookEventName: 'UserPromptSubmit',
-                additionalContext: 'No active workflows found. Use `/plan {feature} --structured` to start a new workflow.'
+                additionalContext: 'No active workflows found. Use `/plan {feature}` to start a new workflow.'
               }
             };
           }
@@ -123,11 +157,15 @@ export function registerUserPromptSubmitHooks(): void {
           // Build the resumption prompt
           const resumptionPrompt = buildWorkflowResumptionPrompt(checkpoint.feature_name, checkpoint);
 
+          // Inject workflow context hint
+          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'idea'}]`;
+          const additionalContext = `${contextHint}\n\n${resumptionPrompt}`;
+
           return {
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'UserPromptSubmit',
-              additionalContext: resumptionPrompt
+              additionalContext
             }
           };
         } catch (error) {

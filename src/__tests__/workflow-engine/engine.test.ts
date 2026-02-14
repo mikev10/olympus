@@ -216,6 +216,13 @@ describe('WorkflowEngine', () => {
       const content = await fs.readFile(ideaPath, 'utf-8');
       expect(content).toContain('## Problem Statement');
       expect(content).toContain('Build a test feature');
+      expect(content).toContain('## User Personas');
+      expect(content).toContain('## Success Metrics');
+      expect(content).toContain('## Business Constraints');
+      expect(content).toContain('## Out of Scope');
+      expect(content).toContain('id: idea-test-feature');
+      expect(content).toContain('status: draft');
+      expect(content).toContain('author: "workflow-engine"');
     });
 
     it("creates intent artifact for 'intent' stage", async () => {
@@ -230,8 +237,32 @@ describe('WorkflowEngine', () => {
       expect(exists).toBe(true);
 
       const content = await fs.readFile(intentPath, 'utf-8');
-      expect(content).toContain('## User Stories');
+      expect(content).toContain('## Business Requirements');
+      expect(content).toContain('### User Stories');
       expect(content).toContain('US-001');
+      expect(content).toContain('## Technical Specification');
+      expect(content).toContain('## Implementation Plan');
+      expect(content).toContain('UNIT-001');
+    });
+
+    it("generates nfr.md after executing 'intent' stage", async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      await engine.start('Build a test feature');
+
+      // Execute intent stage
+      await engine.executeStage('intent');
+
+      const nfrPath = join(tmpDir, 'aidlc-docs', 'inception', 'nfr.md');
+      const exists = await fs.pathExists(nfrPath);
+      expect(exists).toBe(true);
+
+      const content = await fs.readFile(nfrPath, 'utf-8');
+      expect(content).toContain('## Security');
+      expect(content).toContain('## Performance');
+      expect(content).toContain('## Availability');
+      expect(content).toContain('## Compliance');
+      expect(content).toContain('## Accessibility');
+      expect(content).toContain('Gate-blocking');
     });
 
     it.skip("creates unit artifact for 'unit' stage", async () => {
