@@ -2,7 +2,7 @@
  * Construction Phase: Hierarchical Decomposition
  *
  * Decomposes high-level INTENTs from the Inception phase into hierarchical execution units:
- * - INTENT (from Inception phase) → UNIT (architectural components) → BOLT (atomic tasks)
+ * - INTENT (from Inception phase) -> UNIT (architectural components) -> BOLT (atomic tasks)
  *
  * This module provides the core decomposition logic for the Construction phase of ODLC,
  * transforming strategic intents into executable work items.
@@ -29,6 +29,12 @@ export interface DecompositionTree {
   roots: HierarchicalNode[];  // intent-level nodes
   nodes: Map<string, HierarchicalNode>;  // all nodes by ID
 }
+
+/** Default limit for units per intent */
+const DEFAULT_MAX_UNITS = 10;
+
+/** Default limit for bolts per unit */
+const DEFAULT_MAX_BOLTS = 8;
 
 /**
  * Parses INTENT-*.md files from disk and returns HierarchicalNode array.
@@ -113,23 +119,92 @@ export async function parseIntentsFromDisk(intentsDir: string): Promise<Hierarch
 }
 
 /**
+ * Parses a single intent.md file from disk and returns its content plus proposed UNITs.
+ *
+ * This is the new-style parser for the unified intent.md file format used by the
+ * Construction pipeline (one INTENT per workflow, not INTENT-*.md files).
+ *
+ * @param intentPath - Absolute path to the intent.md file
+ * @returns Parsed content and proposed units, or null if file not found / unparseable
+ */
+export async function parseIntentFromFile(intentPath: string): Promise<{
+  content: string;
+  proposedUnits: Array<{ id: string; title: string; description: string }>;
+} | null> {
+  try {
+    const exists = await fs.pathExists(intentPath);
+    if (!exists) {
+      return null;
+    }
+
+    const content = await fs.readFile(intentPath, 'utf-8');
+
+    // Parse "### Proposed UNITs" section
+    const proposedUnits: Array<{ id: string; title: string; description: string }> = [];
+
+    const unitsMatch = content.match(/### Proposed UNITs\s*\n([\s\S]*?)(?=\n##[^#]|\n---|\Z|$)/);
+    if (unitsMatch) {
+      const unitsSection = unitsMatch[1];
+      // Parse bullet points: - **BOLT-NNN**: description  OR  - **UNIT-NNN**: description
+      // Also handles: - **title**: description
+      const bulletRegex = /^-\s+\*\*([^*]+)\*\*:\s*(.+)$/gm;
+      let bulletMatch;
+      let index = 1;
+      while ((bulletMatch = bulletRegex.exec(unitsSection)) !== null) {
+        const rawTitle = bulletMatch[1].trim();
+        const description = bulletMatch[2].trim();
+        // If the title already looks like UNIT-NNN, use it; otherwise generate an ID
+        const id = rawTitle.match(/^UNIT-\d+$/i) ? rawTitle.toUpperCase() : `UNIT-${String(index).padStart(3, '0')}`;
+        proposedUnits.push({
+          id,
+          title: rawTitle,
+          description,
+        });
+        index++;
+      }
+    }
+
+    return {
+      content,
+      proposedUnits,
+    };
+  } catch (error) {
+    console.error(`Failed to parse intent from ${intentPath}:`, error);
+    return null;
+  }
+}
+
+/**
  * Decomposes an INTENT node into UNIT nodes.
  *
  * Creates child UNIT nodes under the given intent, auto-generating IDs
  * in the format UNIT-001, UNIT-002, etc.
  *
+ * If more unit specs are provided than maxUnits allows, the list is truncated
+ * and a warning is logged.
+ *
  * @param intent - The parent intent node
  * @param unitSpecs - Specifications for the units to create
+ * @param maxUnits - Maximum number of units to create (default 10)
  * @returns Array of created unit nodes
  */
 export function decomposeIntentToUnits(
   intent: HierarchicalNode,
-  unitSpecs: UnitSpec[]
+  unitSpecs: UnitSpec[],
+  maxUnits: number = DEFAULT_MAX_UNITS
 ): HierarchicalNode[] {
+  let specs = unitSpecs;
+  if (specs.length > maxUnits) {
+    console.warn(
+      `[decomposition] Unit specs (${specs.length}) exceed maxUnits limit (${maxUnits}). Truncating to ${maxUnits}.`
+    );
+    specs = specs.slice(0, maxUnits);
+  }
+
   const units: HierarchicalNode[] = [];
 
-  for (let i = 0; i < unitSpecs.length; i++) {
-    const spec = unitSpecs[i];
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i];
     const unitId = `UNIT-${String(i + 1).padStart(3, '0')}`;
 
     const unit: HierarchicalNode = {
@@ -156,18 +231,31 @@ export function decomposeIntentToUnits(
  * Creates child BOLT nodes under the given unit, auto-generating IDs
  * in the format BOLT-001, BOLT-002, etc.
  *
+ * If more bolt specs are provided than maxBolts allows, the list is truncated
+ * and a warning is logged.
+ *
  * @param unit - The parent unit node
  * @param boltSpecs - Specifications for the bolts to create
+ * @param maxBolts - Maximum number of bolts to create (default 8)
  * @returns Array of created bolt nodes
  */
 export function decomposeUnitToBolts(
   unit: HierarchicalNode,
-  boltSpecs: BoltSpec[]
+  boltSpecs: BoltSpec[],
+  maxBolts: number = DEFAULT_MAX_BOLTS
 ): HierarchicalNode[] {
+  let specs = boltSpecs;
+  if (specs.length > maxBolts) {
+    console.warn(
+      `[decomposition] Bolt specs (${specs.length}) exceed maxBolts limit (${maxBolts}) for ${unit.id}. Truncating to ${maxBolts}.`
+    );
+    specs = specs.slice(0, maxBolts);
+  }
+
   const bolts: HierarchicalNode[] = [];
 
-  for (let i = 0; i < boltSpecs.length; i++) {
-    const spec = boltSpecs[i];
+  for (let i = 0; i < specs.length; i++) {
+    const spec = specs[i];
     const boltId = `BOLT-${String(i + 1).padStart(3, '0')}`;
 
     const bolt: HierarchicalNode = {
@@ -186,6 +274,29 @@ export function decomposeUnitToBolts(
   }
 
   return bolts;
+}
+
+/**
+ * Enforces a global bolt limit across all units.
+ *
+ * If the total number of bolts exceeds maxTotal, truncates the list and logs a warning.
+ *
+ * @param allBolts - All bolts from all units
+ * @param maxTotal - Maximum total bolts allowed (default 50)
+ * @returns Truncated bolt list if over limit, otherwise original list
+ */
+export function enforceGlobalBoltLimit(
+  allBolts: HierarchicalNode[],
+  maxTotal: number
+): HierarchicalNode[] {
+  if (allBolts.length <= maxTotal) {
+    return allBolts;
+  }
+
+  console.warn(
+    `[decomposition] Total bolts (${allBolts.length}) exceed global limit (${maxTotal}). Truncating to ${maxTotal}.`
+  );
+  return allBolts.slice(0, maxTotal);
 }
 
 /**

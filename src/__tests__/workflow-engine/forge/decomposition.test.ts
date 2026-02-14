@@ -1,17 +1,29 @@
 /**
- * Tests for Forge Phase: Hierarchical Decomposition
+ * Tests for Construction Phase: Hierarchical Decomposition
  *
  * Tests the core decomposition logic that transforms INTENTs into
- * hierarchical execution units (INTENT → UNIT → BOLT).
+ * hierarchical execution units (INTENT -> UNIT -> BOLT).
+ *
+ * Includes tests for:
+ * - Legacy parseIntentsFromDisk
+ * - New parseIntentFromFile
+ * - decomposeIntentToUnits with limits
+ * - decomposeUnitToBolts with limits
+ * - enforceGlobalBoltLimit
+ * - buildDecompositionTree
+ * - getLeafBolts
+ * - getExecutableOrder
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs-extra';
 import path from 'path';
 import {
   parseIntentsFromDisk,
+  parseIntentFromFile,
   decomposeIntentToUnits,
   decomposeUnitToBolts,
+  enforceGlobalBoltLimit,
   buildDecompositionTree,
   getLeafBolts,
   getExecutableOrder,
@@ -195,6 +207,157 @@ Content
   });
 });
 
+describe('parseIntentFromFile', () => {
+  const testDir = path.join(process.cwd(), '.test-decomposition-intent');
+
+  beforeEach(async () => {
+    await fs.ensureDir(testDir);
+  });
+
+  afterEach(async () => {
+    await fs.remove(testDir);
+  });
+
+  it('should return null if file does not exist', async () => {
+    const result = await parseIntentFromFile(path.join(testDir, 'nonexistent.md'));
+    expect(result).toBeNull();
+  });
+
+  it('should parse intent.md content', async () => {
+    const content = `---
+id: intent-test
+title: "Test Feature"
+status: pending
+estimated_effort: 8
+---
+
+# Intent: Test Feature
+
+## Business Requirements
+Build the feature
+
+## Implementation Plan
+Follow standards
+`;
+
+    await fs.writeFile(path.join(testDir, 'intent.md'), content);
+
+    const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
+
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe(content);
+    expect(result!.proposedUnits).toHaveLength(0);
+  });
+
+  it('should parse proposed UNITs section with bullet points', async () => {
+    const content = `---
+id: intent-multi
+title: "Multi-Unit Feature"
+status: pending
+estimated_effort: 16
+---
+
+# Intent: Multi-Unit Feature
+
+## Business Requirements
+Build multiple components
+
+### Proposed UNITs
+- **Database Layer**: Handle data persistence and migrations
+- **API Layer**: REST endpoint implementation
+- **UI Layer**: Frontend components and pages
+
+## Acceptance Criteria
+- [ ] All units complete
+`;
+
+    await fs.writeFile(path.join(testDir, 'intent.md'), content);
+
+    const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
+
+    expect(result).not.toBeNull();
+    expect(result!.proposedUnits).toHaveLength(3);
+    expect(result!.proposedUnits[0]).toEqual({
+      id: 'UNIT-001',
+      title: 'Database Layer',
+      description: 'Handle data persistence and migrations',
+    });
+    expect(result!.proposedUnits[1]).toEqual({
+      id: 'UNIT-002',
+      title: 'API Layer',
+      description: 'REST endpoint implementation',
+    });
+    expect(result!.proposedUnits[2]).toEqual({
+      id: 'UNIT-003',
+      title: 'UI Layer',
+      description: 'Frontend components and pages',
+    });
+  });
+
+  it('should handle UNIT-NNN format in proposed units', async () => {
+    const content = `---
+id: intent-explicit
+title: "Explicit IDs"
+---
+
+# Intent
+
+### Proposed UNITs
+- **UNIT-001**: First unit
+- **UNIT-002**: Second unit
+`;
+
+    await fs.writeFile(path.join(testDir, 'intent.md'), content);
+
+    const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
+
+    expect(result!.proposedUnits).toHaveLength(2);
+    expect(result!.proposedUnits[0].id).toBe('UNIT-001');
+    expect(result!.proposedUnits[1].id).toBe('UNIT-002');
+  });
+
+  it('should handle empty proposed UNITs section', async () => {
+    const content = `---
+id: intent-empty
+title: "No Units"
+---
+
+# Intent
+
+### Proposed UNITs
+
+## Acceptance Criteria
+- [ ] Done
+`;
+
+    await fs.writeFile(path.join(testDir, 'intent.md'), content);
+
+    const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
+
+    expect(result!.proposedUnits).toHaveLength(0);
+  });
+
+  it('should handle file without proposed UNITs section', async () => {
+    const content = `---
+id: intent-no-units
+title: "Simple Intent"
+---
+
+# Intent
+
+## Description
+A simple intent without units
+`;
+
+    await fs.writeFile(path.join(testDir, 'intent.md'), content);
+
+    const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
+
+    expect(result).not.toBeNull();
+    expect(result!.proposedUnits).toHaveLength(0);
+  });
+});
+
 describe('decomposeIntentToUnits', () => {
   it('should create UNIT nodes with correct IDs', () => {
     const intent: HierarchicalNode = {
@@ -332,6 +495,92 @@ describe('decomposeIntentToUnits', () => {
     decomposeIntentToUnits(intent, unitSpecs);
 
     expect(intent.children_ids).toEqual(['EXISTING-UNIT', 'UNIT-001']);
+  });
+
+  describe('limit enforcement', () => {
+    it('should truncate units when exceeding maxUnits default (10)', () => {
+      const intent: HierarchicalNode = {
+        id: 'INTENT-001',
+        type: 'intent',
+        title: 'Big Intent',
+        parent_id: null,
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 50,
+      };
+
+      // 12 specs exceeds default limit of 10
+      const unitSpecs: UnitSpec[] = Array.from({ length: 12 }, (_, i) => ({
+        title: `Unit ${i + 1}`,
+        estimated_effort: 4,
+      }));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const units = decomposeIntentToUnits(intent, unitSpecs);
+
+      expect(units).toHaveLength(10);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Unit specs (12) exceed maxUnits limit (10)')
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it('should respect custom maxUnits', () => {
+      const intent: HierarchicalNode = {
+        id: 'INTENT-001',
+        type: 'intent',
+        title: 'Custom Limit',
+        parent_id: null,
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 20,
+      };
+
+      const unitSpecs: UnitSpec[] = Array.from({ length: 5 }, (_, i) => ({
+        title: `Unit ${i + 1}`,
+        estimated_effort: 4,
+      }));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const units = decomposeIntentToUnits(intent, unitSpecs, 3);
+
+      expect(units).toHaveLength(3);
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+
+    it('should not truncate when under limit', () => {
+      const intent: HierarchicalNode = {
+        id: 'INTENT-001',
+        type: 'intent',
+        title: 'Small Intent',
+        parent_id: null,
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 10,
+      };
+
+      const unitSpecs: UnitSpec[] = [
+        { title: 'Unit One', estimated_effort: 5 },
+        { title: 'Unit Two', estimated_effort: 5 },
+      ];
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const units = decomposeIntentToUnits(intent, unitSpecs);
+
+      expect(units).toHaveLength(2);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
   });
 });
 
@@ -476,6 +725,159 @@ describe('decomposeUnitToBolts', () => {
 
     expect(bolts[0].children_ids).toEqual([]);
     expect(bolts[1].children_ids).toEqual([]);
+  });
+
+  describe('limit enforcement', () => {
+    it('should truncate bolts when exceeding maxBolts default (8)', () => {
+      const unit: HierarchicalNode = {
+        id: 'UNIT-001',
+        type: 'unit',
+        title: 'Big Unit',
+        parent_id: 'INTENT-001',
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 40,
+      };
+
+      // 10 specs exceeds default limit of 8
+      const boltSpecs: BoltSpec[] = Array.from({ length: 10 }, (_, i) => ({
+        title: `Bolt ${i + 1}`,
+        estimated_effort: 4,
+      }));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const bolts = decomposeUnitToBolts(unit, boltSpecs);
+
+      expect(bolts).toHaveLength(8);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Bolt specs (10) exceed maxBolts limit (8)')
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it('should respect custom maxBolts', () => {
+      const unit: HierarchicalNode = {
+        id: 'UNIT-001',
+        type: 'unit',
+        title: 'Custom Limit Unit',
+        parent_id: 'INTENT-001',
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 20,
+      };
+
+      const boltSpecs: BoltSpec[] = Array.from({ length: 6 }, (_, i) => ({
+        title: `Bolt ${i + 1}`,
+        estimated_effort: 3,
+      }));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const bolts = decomposeUnitToBolts(unit, boltSpecs, 4);
+
+      expect(bolts).toHaveLength(4);
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+
+    it('should not truncate when under limit', () => {
+      const unit: HierarchicalNode = {
+        id: 'UNIT-001',
+        type: 'unit',
+        title: 'Small Unit',
+        parent_id: 'INTENT-001',
+        children_ids: [],
+        status: 'pending',
+        assigned_agent: null,
+        estimated_effort: 6,
+      };
+
+      const boltSpecs: BoltSpec[] = [
+        { title: 'Bolt One', estimated_effort: 3 },
+        { title: 'Bolt Two', estimated_effort: 3 },
+      ];
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const bolts = decomposeUnitToBolts(unit, boltSpecs);
+
+      expect(bolts).toHaveLength(2);
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+  });
+});
+
+describe('enforceGlobalBoltLimit', () => {
+  function makeBolt(id: string): HierarchicalNode {
+    return {
+      id,
+      type: 'bolt',
+      title: `Bolt ${id}`,
+      parent_id: 'UNIT-001',
+      children_ids: [],
+      status: 'pending',
+      assigned_agent: null,
+      estimated_effort: 2,
+    };
+  }
+
+  it('should return same array when under limit', () => {
+    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002')];
+    const result = enforceGlobalBoltLimit(bolts, 50);
+
+    expect(result).toBe(bolts); // same reference
+    expect(result).toHaveLength(2);
+  });
+
+  it('should return same array when exactly at limit', () => {
+    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002'), makeBolt('BOLT-003')];
+    const result = enforceGlobalBoltLimit(bolts, 3);
+
+    expect(result).toBe(bolts);
+    expect(result).toHaveLength(3);
+  });
+
+  it('should truncate when over limit', () => {
+    const bolts = Array.from({ length: 10 }, (_, i) =>
+      makeBolt(`BOLT-${String(i + 1).padStart(3, '0')}`)
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = enforceGlobalBoltLimit(bolts, 5);
+
+    expect(result).toHaveLength(5);
+    expect(result[0].id).toBe('BOLT-001');
+    expect(result[4].id).toBe('BOLT-005');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Total bolts (10) exceed global limit (5)')
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('should handle empty array', () => {
+    const result = enforceGlobalBoltLimit([], 50);
+    expect(result).toHaveLength(0);
+  });
+
+  it('should truncate to 1 when maxTotal is 1', () => {
+    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002')];
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = enforceGlobalBoltLimit(bolts, 1);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('BOLT-001');
+
+    warnSpy.mockRestore();
   });
 });
 

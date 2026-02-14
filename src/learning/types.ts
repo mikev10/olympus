@@ -46,6 +46,8 @@ export interface SessionState {
     claimed_at?: string;
     task_description?: string;
     agent_used?: string;
+    bolt_id?: string;       // BOLT ID if this is a BOLT execution
+    workflow_id?: string;   // Workflow ID if this is a BOLT execution
   } | null;
 
   // Track todo state for cancellation detection

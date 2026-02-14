@@ -487,43 +487,72 @@ export class WorkflowEngine {
       }
 
       case 'operations': {
-        // Operations v1: template-based artifact generation
-        const { generateDeployGuide, generateRunbook, generateMonitoringConfig, generateReleaseNotes } = await import('./summit/templates.js');
-        const { loadManifest } = await import('./manifest.js');
+        // Operations v2: depth-aware artifact generation with checkpoint persistence
+        const { generateOperationsArtifacts } = await import('./summit/templates.js');
+        const { loadManifest, registerArtifact, updatePhaseStatus } = await import('./manifest.js');
 
-        const workflowDir = `aidlc-docs`;
-        const manifestPath = `${this.projectPath}/${workflowDir}/manifest.json`;
-        const manifest = await loadManifest(manifestPath);
+        const manifestPath = `${this.projectPath}/aidlc-docs/manifest.json`;
+        const manifest = loadManifest(manifestPath);
 
         // Read intent if available
         let intentContent: string | null = null;
         try {
-          const fsModule = await import('fs');
-          intentContent = fsModule.readFileSync(getArtifactPath(this.projectPath, this.workflowId, 'intent'), 'utf-8');
+          intentContent = fs.readFileSync(getArtifactPath(this.projectPath, this.workflowId, 'intent'), 'utf-8');
         } catch {
           // Intent may not exist
         }
 
-        const summitContext = {
+        // Determine depth level from manifest or checkpoint
+        const opsCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+        let depthLevel: 'SHALLOW' | 'MEDIUM' | 'DEEP' = 'MEDIUM';
+        if (manifest?.depth_assessment) {
+          const score = manifest.depth_assessment.total_score;
+          if (score <= 10) depthLevel = 'SHALLOW';
+          else if (score >= 21) depthLevel = 'DEEP';
+        }
+
+        const opsContext = {
           workflowId: this.workflowId,
           featureName: this.featureName,
           manifest,
           specContent: intentContent,
           buildLogContent: null,
+          depthLevel,
         };
 
-        // Ensure operations directory
-        const fsExtra = await import('fs-extra');
-        const operationsDir = `${this.projectPath}/aidlc-docs/operations`;
-        await fsExtra.ensureDir(operationsDir);
+        // Generate operations artifacts
+        const result = await generateOperationsArtifacts(opsContext, this.projectPath);
 
-        // Generate all operations artifacts
-        await fsExtra.writeFile(`${operationsDir}/deploy-guide.md`, generateDeployGuide(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${operationsDir}/runbook.md`, generateRunbook(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${operationsDir}/monitoring.json`, generateMonitoringConfig(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${operationsDir}/release-notes.md`, generateReleaseNotes(summitContext), 'utf-8');
+        // Update phase status in manifest
+        if (manifest) {
+          updatePhaseStatus(manifestPath, 'operations', 'complete');
 
-        console.log('[WorkflowEngine] Operations phase: Generated deploy-guide, runbook, monitoring config, and release notes');
+          // Register each generated artifact in manifest
+          for (const artifactName of result.artifactsGenerated) {
+            const artifactPath = `aidlc-docs/operations/${artifactName}`;
+            const artifactType = artifactName.replace(/\.(md|json)$/, '').toUpperCase().replace(/-/g, '_');
+            registerArtifact(manifestPath, {
+              id: `OPS-${artifactType}`,
+              type: artifactType,
+              phase: 'operations',
+              stage: 'bolt',
+              path: artifactPath,
+              validation_passed: true,
+              write_complete: true,
+              checksum: null,
+            });
+          }
+        }
+
+        // CCR-1: Save checkpoint after Operations artifact generation
+        if (opsCheckpoint) {
+          opsCheckpoint.current_phase = 'operations' as WorkflowPhase;
+          opsCheckpoint.updated_at = new Date().toISOString();
+          await saveCheckpoint(this.projectPath, opsCheckpoint);
+        }
+
+        console.log(`[WorkflowEngine] Operations phase: Generated ${result.artifactsGenerated.length} artifacts (depth: ${depthLevel})`);
+        console.log(`[WorkflowEngine] Operations artifacts: ${result.artifactsGenerated.join(', ')}`);
         break;
       }
     }

@@ -74,6 +74,7 @@ export {
 } from './artifacts.js';
 
 // Manifest management
+export type { RevalidationResult } from './manifest.js';
 export {
   createManifest,
   loadManifest,
@@ -100,6 +101,7 @@ export {
   transitionToFulfilled,
   transitionToViolated,
   transitionToStale,
+  revalidateStaleArtifacts,
 } from './manifest.js';
 
 // Execution and task tracking
@@ -190,8 +192,10 @@ export type {
 } from './forge/decomposition.js';
 export {
   parseIntentsFromDisk,
+  parseIntentFromFile,
   decomposeIntentToUnits,
   decomposeUnitToBolts,
+  enforceGlobalBoltLimit,
   buildDecompositionTree,
   getLeafBolts,
   getExecutableOrder,
@@ -213,22 +217,30 @@ export {
   writeDesignArtifacts,
   loadDesignArtifacts,
 } from './forge/design.js';
-export { ForgeExecutor, FORGE_STAGE_AGENT_MAP } from './forge/executor.js';
-export type { ForgeProgress } from './forge/executor.js';
+export {
+  ConstructionExecutor,
+  ForgeExecutor,
+  CONSTRUCTION_STAGE_AGENT_MAP,
+  FORGE_STAGE_AGENT_MAP,
+} from './forge/executor.js';
+export type { ConstructionProgress, ConstructionOptions, ForgeProgress } from './forge/executor.js';
 export {
   validateUnits,
   validateDesignArtifacts,
   validateBolt,
   validateForgePhase,
+  validateConstructionPhase,
 } from './forge/validation.js';
 
 // Operations Phase
-export type { SummitContext } from './summit/templates.js';
+export type { OperationsContext, SummitContext, OperationsResult } from './summit/templates.js';
 export {
   generateDeployGuide,
   generateRunbook,
   generateMonitoringConfig,
   generateReleaseNotes,
+  generateCostAnalysis,
+  generateOperationsArtifacts,
 } from './summit/templates.js';
 
 // Status Reporter
@@ -270,6 +282,33 @@ export {
   computePhaseDuration,
   formatDuration,
 } from './metrics.js';
+
+// Validation Report
+export type { BoltValidationData } from './validation-report.js';
+export {
+  generateValidationReport,
+  readValidationReport,
+  getValidationReportPath,
+} from './validation-report.js';
+
+// CI Checks
+export type { CICheckConfig, CICheckResult, CICheckSummary } from './ci-checks.js';
+export {
+  loadCICheckConfig,
+  getDefaultConfig as getDefaultCIConfig,
+  detectProjectCommands,
+  runCICheck,
+  runAllCIChecks,
+  formatCIResults,
+  scanForSecrets,
+  scanForRiskyPatterns,
+} from './ci-checks.js';
+
+// Manifest Updater (atomic writes)
+export {
+  atomicManifestUpdate,
+  batchManifestUpdate,
+} from './manifest-updater.js';
 
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

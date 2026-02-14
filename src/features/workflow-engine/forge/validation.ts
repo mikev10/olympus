@@ -5,9 +5,9 @@
  * These are structural checks only - NOT V&V alignment checks.
  *
  * Validates:
- * - Unit files (UNIT-*.md) in construction/units/ directory
+ * - Unit files in construction/UNIT-NNN/spec.md (new) or construction/UNIT-NNN.md (legacy)
  * - Design artifacts (interfaces, components, data flows) in construction/design/
- * - Bolt files (BOLT-*.md) representing implementation tasks
+ * - Bolt files (BOLT-*.md) in construction/UNIT-NNN/ directories or construction/bolts/ (legacy)
  * - Overall Construction phase structural integrity
  */
 
@@ -118,45 +118,142 @@ function countBulletPoints(content: string): number {
 }
 
 /**
- * Validates UNIT-*.md files in the construction/units/ directory.
+ * Validates a single unit's content.
+ *
+ * @param content - The markdown content of the unit file
+ * @param unitId - The unit identifier (e.g., UNIT-001)
+ * @param intentIds - Set of valid intent IDs
+ * @returns Object with isValid flag, blocking issues, and tracked parent intent
+ */
+function validateUnitContent(
+  content: string,
+  unitId: string,
+  intentIds: Set<string>
+): { isValid: boolean; blockingIssues: string[]; parentIntent: string | null } {
+  const blockingIssues: string[] = [];
+  let parentIntent: string | null = null;
+
+  // Parse frontmatter
+  const frontmatter = parseFrontmatter(content);
+  if (!frontmatter) {
+    blockingIssues.push(`${unitId}: Missing frontmatter`);
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  // Check required frontmatter fields
+  const requiredFields = ['id', 'title', 'parent_intent', 'status', 'estimated_effort'];
+  const missingFields: string[] = [];
+  for (const field of requiredFields) {
+    if (!frontmatter[field]) {
+      missingFields.push(field);
+    }
+  }
+
+  if (missingFields.length > 0) {
+    blockingIssues.push(`${unitId}: Missing frontmatter fields: ${missingFields.join(', ')}`);
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  // Validate parent_intent references a valid intent
+  parentIntent = frontmatter.parent_intent;
+  // Accept INTENT-NNN format (validated against known intents) or intent-{id} format (loose)
+  if (!intentIds.has(parentIntent!) && !parentIntent!.startsWith('intent-')) {
+    blockingIssues.push(`${unitId}: References non-existent parent intent: ${parentIntent}`);
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  // Track intent has children (only for known intents)
+  // parentIntent is set above
+
+  // Validate effort estimate
+  const effortEstimate = parseInt(frontmatter.estimated_effort, 10);
+  if (isNaN(effortEstimate) || !VALID_EFFORT_ESTIMATES.includes(effortEstimate)) {
+    blockingIssues.push(
+      `${unitId}: Invalid effort estimate ${frontmatter.estimated_effort} (must be 1, 2, 4, 8, or 16)`
+    );
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  // Parse sections
+  const markdownContent = removeFrontmatter(content);
+  const sections = parseSections(markdownContent);
+
+  // Check required sections - support both new and old template formats
+  // NEW template sections
+  const newRequiredSections = ['Scope & Responsibility', 'Interface Contracts', 'Dependencies', 'Acceptance Criteria', 'Proposed BOLTs'];
+  // OLD template sections (backward compat)
+  const oldRequiredSections = ['Goal', 'Acceptance Criteria', 'Implementation Notes'];
+
+  const hasNewSections = newRequiredSections.every(s => sections.has(s));
+  const hasOldSections = oldRequiredSections.every(s => sections.has(s));
+
+  if (!hasNewSections && !hasOldSections) {
+    // Report which sections are missing from the NEW template (since that's the target)
+    const missingSections = newRequiredSections.filter(s => !sections.has(s));
+    blockingIssues.push(`${unitId}: Missing sections: ${missingSections.join(', ')}`);
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  // Check at least one acceptance criterion
+  const acceptanceCriteria = sections.get('Acceptance Criteria');
+  if (acceptanceCriteria) {
+    const criteriaCount = countBulletPoints(acceptanceCriteria);
+    if (criteriaCount === 0) {
+      blockingIssues.push(`${unitId}: No acceptance criteria found`);
+      return { isValid: false, blockingIssues, parentIntent };
+    }
+  } else {
+    blockingIssues.push(`${unitId}: Acceptance Criteria section is empty`);
+    return { isValid: false, blockingIssues, parentIntent };
+  }
+
+  return { isValid: true, blockingIssues, parentIntent };
+}
+
+/**
+ * Validates UNIT artifacts in the construction directory.
+ *
+ * Supports two directory layouts:
+ * - NEW: construction/UNIT-NNN/spec.md (subdirectory per unit)
+ * - OLD: construction/UNIT-NNN.md (flat files, backward compatible)
  *
  * Checks structural completeness:
  * - Each unit file has frontmatter (id, title, parent_intent, status, estimated_effort)
- * - Each unit references a valid parent intent (INTENT-NNN)
- * - Unit has required sections: Goal, Acceptance Criteria, Implementation Notes
+ * - Each unit references a valid parent intent (INTENT-NNN or intent-{id})
+ * - Unit has required sections (new or old template format)
  * - At least one acceptance criterion exists
  * - Effort estimate is valid (1, 2, 4, 8, or 16 hours)
  *
  * Also checks that all intents have at least one unit child.
  *
- * @param unitsDir - Absolute path to the construction/units/ directory
- * @param intentsDir - Absolute path to the intents/ directory
+ * @param constructionDir - Absolute path to the construction/ directory
+ * @param intentsDir - Absolute path to the intents/ directory (inception/)
  * @returns ValidationResult with coverage percentage and blocking issues
  *
  * @example
  * const result = await validateUnits(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\units',
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\intents'
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction',
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\inception'
  * );
  * if (result.passed) {
  *   console.log('All units are structurally complete');
  * }
  */
 export async function validateUnits(
-  unitsDir: string,
+  constructionDir: string,
   intentsDir: string
 ): Promise<ValidationResult> {
   const timestamp = new Date().toISOString();
   const blockingIssues: string[] = [];
 
-  // Read unit files
-  let unitFiles: string[] = [];
+  // Read construction directory entries
+  let entries: import('fs').Dirent[];
   try {
-    unitFiles = readdirSync(unitsDir).filter(f => f.startsWith('UNIT-') && f.endsWith('.md'));
+    entries = readdirSync(constructionDir, { withFileTypes: true });
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read units directory: ${err.message}`);
-    console.error(`[Validation] Path: ${unitsDir}`);
+    console.error(`[Validation] Failed to read construction directory: ${err.message}`);
+    console.error(`[Validation] Path: ${constructionDir}`);
 
     const errorMsg = err.code === 'ENOENT'
       ? 'Units directory not found'
@@ -172,7 +269,38 @@ export async function validateUnits(
     };
   }
 
-  if (unitFiles.length === 0) {
+  // Step 1: Look for UNIT-NNN subdirectories with spec.md (new style)
+  const unitDirs = entries.filter(e => e.isDirectory() && /^UNIT-\d{3}$/.test(e.name));
+
+  // Step 2: Look for top-level UNIT-NNN.md files (old style / backward compat)
+  const topLevelUnits = entries.filter(e => e.isFile() && /^UNIT-\d{3}\.md$/.test(e.name));
+
+  // Track which unit IDs we've discovered
+  const discoveredUnitIds = new Set<string>();
+
+  // Collect unit entries to validate: { unitId, filePath }
+  const unitEntries: { unitId: string; filePath: string }[] = [];
+
+  // New-style: UNIT-NNN/spec.md
+  for (const dir of unitDirs) {
+    const unitId = dir.name;
+    const specPath = join(constructionDir, dir.name, 'spec.md');
+    if (existsSync(specPath)) {
+      discoveredUnitIds.add(unitId);
+      unitEntries.push({ unitId, filePath: specPath });
+    }
+  }
+
+  // Old-style: top-level UNIT-NNN.md (only if not already found via subdirectory)
+  for (const file of topLevelUnits) {
+    const unitId = file.name.replace('.md', '');
+    if (!discoveredUnitIds.has(unitId)) {
+      discoveredUnitIds.add(unitId);
+      unitEntries.push({ unitId, filePath: join(constructionDir, file.name) });
+    }
+  }
+
+  if (unitEntries.length === 0) {
     return {
       passed: false,
       coverage_percentage: 0,
@@ -208,106 +336,40 @@ export async function validateUnits(
   // Track which intents have unit children
   const intentsWithChildren = new Set<string>();
 
-  // Validate each unit file
+  // Validate each unit
   let validUnits = 0;
-  const totalUnits = unitFiles.length;
+  const totalUnits = unitEntries.length;
 
-  for (const unitFile of unitFiles) {
-    const unitPath = join(unitsDir, unitFile);
-    const unitId = unitFile.replace('.md', '');
-
+  for (const { unitId, filePath } of unitEntries) {
     // Read unit file
     let content: string;
     try {
-      content = readFileSync(unitPath, 'utf-8');
+      content = readFileSync(filePath, 'utf-8');
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       console.error(`[Validation] Failed to read unit file: ${err.message}`);
-      console.error(`[Validation] Path: ${unitPath}`);
+      console.error(`[Validation] Path: ${filePath}`);
 
       const errorMsg = err.code === 'ENOENT'
-        ? `Unit file not found: ${unitFile}`
+        ? `Unit file not found: ${unitId}`
         : err.code === 'EACCES' || err.code === 'EPERM'
-        ? `Permission denied reading unit file: ${unitFile}`
-        : `Failed to read unit file ${unitFile}: ${err.message}`;
+        ? `Permission denied reading unit file: ${unitId}`
+        : `Failed to read unit file ${unitId}: ${err.message}`;
 
       blockingIssues.push(errorMsg);
       continue;
     }
 
-    // Parse frontmatter
-    const frontmatter = parseFrontmatter(content);
-    if (!frontmatter) {
-      blockingIssues.push(`${unitId}: Missing frontmatter`);
-      continue;
+    const result = validateUnitContent(content, unitId, intentIds);
+    blockingIssues.push(...result.blockingIssues);
+
+    if (result.parentIntent && intentIds.has(result.parentIntent)) {
+      intentsWithChildren.add(result.parentIntent);
     }
 
-    // Check required frontmatter fields
-    const requiredFields = ['id', 'title', 'parent_intent', 'status', 'estimated_effort'];
-    const missingFields: string[] = [];
-    for (const field of requiredFields) {
-      if (!frontmatter[field]) {
-        missingFields.push(field);
-      }
+    if (result.isValid) {
+      validUnits++;
     }
-
-    if (missingFields.length > 0) {
-      blockingIssues.push(`${unitId}: Missing frontmatter fields: ${missingFields.join(', ')}`);
-      continue;
-    }
-
-    // Validate parent_intent references a valid intent
-    const parentIntent = frontmatter.parent_intent;
-    if (!intentIds.has(parentIntent)) {
-      blockingIssues.push(`${unitId}: References non-existent parent intent: ${parentIntent}`);
-      continue;
-    }
-
-    // Track intent has children
-    intentsWithChildren.add(parentIntent);
-
-    // Validate effort estimate
-    const effortEstimate = parseInt(frontmatter.estimated_effort, 10);
-    if (isNaN(effortEstimate) || !VALID_EFFORT_ESTIMATES.includes(effortEstimate)) {
-      blockingIssues.push(
-        `${unitId}: Invalid effort estimate ${frontmatter.estimated_effort} (must be 1, 2, 4, 8, or 16)`
-      );
-      continue;
-    }
-
-    // Parse sections
-    const markdownContent = removeFrontmatter(content);
-    const sections = parseSections(markdownContent);
-
-    // Check required sections
-    const requiredSections = ['Goal', 'Acceptance Criteria', 'Implementation Notes'];
-    const missingSections: string[] = [];
-    for (const section of requiredSections) {
-      if (!sections.has(section)) {
-        missingSections.push(section);
-      }
-    }
-
-    if (missingSections.length > 0) {
-      blockingIssues.push(`${unitId}: Missing sections: ${missingSections.join(', ')}`);
-      continue;
-    }
-
-    // Check at least one acceptance criterion
-    const acceptanceCriteria = sections.get('Acceptance Criteria');
-    if (acceptanceCriteria) {
-      const criteriaCount = countBulletPoints(acceptanceCriteria);
-      if (criteriaCount === 0) {
-        blockingIssues.push(`${unitId}: No acceptance criteria found`);
-        continue;
-      }
-    } else {
-      blockingIssues.push(`${unitId}: Acceptance Criteria section is empty`);
-      continue;
-    }
-
-    // All checks passed for this unit
-    validUnits++;
   }
 
   // Check all intents have at least one unit child
@@ -494,10 +556,12 @@ export async function validateDesignArtifacts(designDir: string): Promise<Valida
  *
  * Checks structural completeness:
  * - Frontmatter has id, title, parent_unit, status, estimated_effort
- * - Has required sections: Goal, Implementation Steps, Acceptance Criteria
+ * - Has required sections (new or old template format):
+ *   NEW: Domain Design, Logical Design, Target Files, Implementation Steps, Acceptance Criteria
+ *   OLD: Goal, Implementation Steps, Acceptance Criteria
  * - At least one implementation step
  * - At least one acceptance criterion
- * - References a valid parent unit (UNIT-NNN)
+ * - References a valid parent unit (UNIT-NNN) or "none" for SHALLOW mode
  * - Effort estimate is valid (1, 2, 4, 8, or 16 hours)
  *
  * @param boltPath - Absolute path to the BOLT-*.md file
@@ -505,7 +569,7 @@ export async function validateDesignArtifacts(designDir: string): Promise<Valida
  *
  * @example
  * const result = await validateBolt(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\bolts\\BOLT-001.md'
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\UNIT-001\\BOLT-001.md'
  * );
  * if (result.passed) {
  *   console.log('Bolt is structurally complete');
@@ -571,9 +635,9 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
     passedChecks++; // Check 1: All frontmatter fields present
   }
 
-  // Validate parent_unit format (UNIT-NNN)
+  // Validate parent_unit format (UNIT-NNN or "none" for SHALLOW mode)
   const parentUnit = frontmatter.parent_unit;
-  if (parentUnit && /^UNIT-\d{3}$/.test(parentUnit)) {
+  if (parentUnit && (/^UNIT-\d{3}$/.test(parentUnit) || parentUnit === 'none')) {
     passedChecks++; // Check 2: Valid parent unit reference
   } else {
     blockingIssues.push(`Invalid parent_unit format: ${parentUnit} (expected UNIT-NNN)`);
@@ -593,18 +657,20 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
   const markdownContent = removeFrontmatter(content);
   const sections = parseSections(markdownContent);
 
-  // Check required sections
-  const requiredSections = ['Goal', 'Implementation Steps', 'Acceptance Criteria'];
-  const missingSections: string[] = [];
-  for (const section of requiredSections) {
-    if (!sections.has(section)) {
-      missingSections.push(section);
-    }
-  }
+  // Check required sections - support both new and old template formats
+  // NEW template sections
+  const newRequiredSections = ['Domain Design', 'Logical Design', 'Target Files', 'Implementation Steps', 'Acceptance Criteria'];
+  // OLD template sections (backward compat)
+  const oldRequiredSections = ['Goal', 'Implementation Steps', 'Acceptance Criteria'];
 
-  if (missingSections.length === 0) {
+  const hasNewSections = newRequiredSections.every(s => sections.has(s));
+  const hasOldSections = oldRequiredSections.every(s => sections.has(s));
+
+  if (hasNewSections || hasOldSections) {
     passedChecks++; // Check 4: All required sections present
   } else {
+    // Report which sections are missing from the NEW template (since that's the target)
+    const missingSections = newRequiredSections.filter(s => !sections.has(s));
     blockingIssues.push(`Missing sections: ${missingSections.join(', ')}`);
   }
 
@@ -656,12 +722,16 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
  * Runs validateUnits, validateDesignArtifacts, and checks bolts.
  * Returns aggregate ValidationResult.
  *
+ * Supports both new and legacy directory layouts:
+ * - NEW: construction/UNIT-NNN/spec.md, construction/UNIT-NNN/BOLT-NNN.md
+ * - OLD: construction/units/UNIT-NNN.md, construction/bolts/BOLT-NNN.md
+ *
  * @param projectPath - Absolute path to the project root
  * @param workflowId - Workflow ID for the feature
  * @returns ValidationResult with aggregated coverage and blocking issues
  *
  * @example
- * const result = await validateForgePhase(
+ * const result = await validateConstructionPhase(
  *   'C:\\path\\to\\project',
  *   'feature-x-20240115'
  * );
@@ -669,7 +739,7 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
  *   console.log('Construction phase is structurally complete');
  * }
  */
-export async function validateForgePhase(
+export async function validateConstructionPhase(
   projectPath: string,
   workflowId: string
 ): Promise<ValidationResult> {
@@ -677,14 +747,12 @@ export async function validateForgePhase(
   const blockingIssues: string[] = [];
 
   const workflowDir = join(projectPath, 'aidlc-docs');
-  const forgeDir = join(workflowDir, 'construction');
-  const unitsDir = join(forgeDir, 'units');
-  const designDir = join(forgeDir, 'design');
-  const boltsDir = join(forgeDir, 'bolts');
+  const constructionDir = join(workflowDir, 'construction');
   const intentsDir = join(workflowDir, 'inception');
+  const designDir = join(constructionDir, 'design');
 
   // Check if construction directory exists
-  if (!existsSync(forgeDir)) {
+  if (!existsSync(constructionDir)) {
     return {
       passed: false,
       coverage_percentage: 0,
@@ -693,15 +761,24 @@ export async function validateForgePhase(
     };
   }
 
-  // Validate units
+  // Validate units (reads from constructionDir now, not units/ subdir)
   let unitsResult: ValidationResult | null = null;
-  if (existsSync(unitsDir) && existsSync(intentsDir)) {
-    unitsResult = await validateUnits(unitsDir, intentsDir);
+  if (existsSync(intentsDir)) {
+    unitsResult = await validateUnits(constructionDir, intentsDir);
     if (!unitsResult.passed) {
       blockingIssues.push(...unitsResult.blocking_issues.map(i => `[Units] ${i}`));
     }
   } else {
-    blockingIssues.push('Units or intents directory not found');
+    // Also check for legacy units/ directory
+    const legacyUnitsDir = join(constructionDir, 'units');
+    if (existsSync(legacyUnitsDir)) {
+      unitsResult = await validateUnits(legacyUnitsDir, intentsDir);
+      if (!unitsResult.passed) {
+        blockingIssues.push(...unitsResult.blocking_issues.map(i => `[Units] ${i}`));
+      }
+    } else {
+      blockingIssues.push('Units or intents directory not found');
+    }
   }
 
   // Validate design artifacts
@@ -715,19 +792,25 @@ export async function validateForgePhase(
     blockingIssues.push('Design directory not found');
   }
 
-  // Validate bolts
+  // Validate bolts - scan UNIT-NNN directories for BOLT-*.md files
   let boltsResult: ValidationResult | null = null;
-  let boltFiles: string[] = [];
-  if (existsSync(boltsDir)) {
-    try {
-      boltFiles = readdirSync(boltsDir).filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
+  let totalBolts = 0;
+  let validBolts = 0;
 
-      if (boltFiles.length > 0) {
-        let validBolts = 0;
-        const totalBolts = boltFiles.length;
+  try {
+    const entries = readdirSync(constructionDir, { withFileTypes: true });
+    const unitDirs = entries.filter(e => e.isDirectory() && /^UNIT-\d{3}$/.test(e.name));
+
+    // Check bolts in UNIT-NNN directories (new style)
+    for (const dir of unitDirs) {
+      const unitDirPath = join(constructionDir, dir.name);
+      try {
+        const boltFiles = readdirSync(unitDirPath)
+          .filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
 
         for (const boltFile of boltFiles) {
-          const boltPath = join(boltsDir, boltFile);
+          totalBolts++;
+          const boltPath = join(unitDirPath, boltFile);
           const boltResult = await validateBolt(boltPath);
 
           if (boltResult.passed) {
@@ -736,16 +819,44 @@ export async function validateForgePhase(
             blockingIssues.push(...boltResult.blocking_issues.map(i => `[${boltFile}] ${i}`));
           }
         }
+      } catch {
+        // Skip directories we can't read
+      }
+    }
 
-        const boltsCoveragePercentage = Math.round((validBolts / totalBolts) * 100);
-        boltsResult = {
-          passed: validBolts === totalBolts,
-          coverage_percentage: boltsCoveragePercentage,
-          blocking_issues: [],
-          timestamp,
-        };
+    // Also check for top-level BOLT-*.md files in construction/ (SHALLOW mode)
+    const topLevelBolts = entries.filter(e => e.isFile() && e.name.startsWith('BOLT-') && e.name.endsWith('.md'));
+    for (const boltEntry of topLevelBolts) {
+      totalBolts++;
+      const boltPath = join(constructionDir, boltEntry.name);
+      const boltResult = await validateBolt(boltPath);
+
+      if (boltResult.passed) {
+        validBolts++;
       } else {
-        blockingIssues.push('No bolt files found in bolts directory');
+        blockingIssues.push(...boltResult.blocking_issues.map(i => `[${boltEntry.name}] ${i}`));
+      }
+    }
+  } catch {
+    // constructionDir already checked for existence above
+  }
+
+  // Also check legacy bolts/ directory for backward compat
+  const legacyBoltsDir = join(constructionDir, 'bolts');
+  if (existsSync(legacyBoltsDir)) {
+    try {
+      const boltFiles = readdirSync(legacyBoltsDir).filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
+
+      for (const boltFile of boltFiles) {
+        totalBolts++;
+        const boltPath = join(legacyBoltsDir, boltFile);
+        const boltResult = await validateBolt(boltPath);
+
+        if (boltResult.passed) {
+          validBolts++;
+        } else {
+          blockingIssues.push(...boltResult.blocking_issues.map(i => `[${boltFile}] ${i}`));
+        }
       }
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
@@ -757,8 +868,19 @@ export async function validateForgePhase(
 
       blockingIssues.push(errorMsg);
     }
+  }
+
+  // If no bolts found anywhere, that's a blocking issue
+  if (totalBolts === 0) {
+    blockingIssues.push('No bolt files found');
   } else {
-    blockingIssues.push('Bolts directory not found');
+    const boltsCoveragePercentage = Math.round((validBolts / totalBolts) * 100);
+    boltsResult = {
+      passed: validBolts === totalBolts,
+      coverage_percentage: boltsCoveragePercentage,
+      blocking_issues: [],
+      timestamp,
+    };
   }
 
   // Calculate aggregate coverage
@@ -778,3 +900,6 @@ export async function validateForgePhase(
     timestamp,
   };
 }
+
+/** @deprecated Use validateConstructionPhase instead */
+export const validateForgePhase = validateConstructionPhase;

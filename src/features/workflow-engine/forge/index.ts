@@ -11,9 +11,14 @@ export * from './decomposition.js';
 // Design system (interface contracts, data flows, components)
 export * from './design.js';
 
-// Forge executor (orchestrates units → design → build)
-export { ForgeExecutor, FORGE_STAGE_AGENT_MAP } from './executor.js';
-export type { ForgeProgress } from './executor.js';
+// Construction executor (orchestrates decomposition + design)
+export {
+  ConstructionExecutor,
+  ForgeExecutor,
+  CONSTRUCTION_STAGE_AGENT_MAP,
+  FORGE_STAGE_AGENT_MAP,
+} from './executor.js';
+export type { ConstructionProgress, ConstructionOptions, ForgeProgress } from './executor.js';
 
 // Validation for forge artifacts
-export { validateUnits, validateDesignArtifacts, validateBolt, validateForgePhase } from './validation.js';
+export { validateUnits, validateDesignArtifacts, validateBolt, validateForgePhase, validateConstructionPhase } from './validation.js';

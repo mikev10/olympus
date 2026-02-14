@@ -33,6 +33,8 @@ import {
 } from '../../features/workflow-engine/manifest.js';
 import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../features/workflow-engine/trust.js';
 import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
+import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
+import { generateValidationReport, getValidationReportPath } from '../../features/workflow-engine/validation-report.js';
 import type {
   WorkflowPhase,
   TrustState,
@@ -103,6 +105,34 @@ const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
     },
     {
       question: 'Does the monitoring config capture key metrics?',
+      answer: null,
+      answered_by: null,
+      passed: null,
+    },
+  ],
+  gate3: [
+    {
+      question: 'Do UNITs cover all INTENT acceptance criteria?',
+      answer: null,
+      answered_by: null,
+      passed: null,
+    },
+    {
+      question: 'Is the decomposition granularity appropriate?',
+      answer: null,
+      answered_by: null,
+      passed: null,
+    },
+  ],
+  gate4: [
+    {
+      question: 'Does the BOLT implementation satisfy its acceptance criteria?',
+      answer: null,
+      answered_by: null,
+      passed: null,
+    },
+    {
+      question: 'Are all tests passing?',
       answer: null,
       answered_by: null,
       passed: null,
@@ -208,6 +238,21 @@ function detectPhaseTransition(
     (checkpoint.current_stage === 'idea' || checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
   ) {
     return 'inception';
+  }
+
+  // Gate 3: Construction phase, unit stage - fires after UNIT decomposition completes
+  if (currentPhase === 'construction' && checkpoint.current_stage === 'unit') {
+    return 'construction';
+  }
+
+  // Gate 4: Construction phase, bolt stage with active bolt - fires after BOLT execution
+  if (currentPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+    return 'construction';
+  }
+
+  // Gate 5: Operations phase - placeholder for release review (wired in Task 3.7)
+  if (currentPhase === 'operations') {
+    return 'operations';
   }
 
   return null;
@@ -363,6 +408,378 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
       }
     }
 
+    // --- Gate 3: Construction phase, unit stage ---
+    if (transitioningPhase === 'construction' && checkpoint.current_stage === 'unit') {
+      const gate3Behavior = getGate3TrustBehavior(trustState.current_level, riskTier);
+
+      if (gate3Behavior === 'auto-advance' && riskTier !== 3) {
+        // Auto-advance: record audit, save, return silently
+        addGateAuditEntry(manifestPath, {
+          phase: 'construction',
+          action: 'approved',
+          actor: 'trust',
+          reason: `Gate 3 auto-advanced by Trust Level ${trustState.current_level} for Tier ${riskTier}`,
+        });
+
+        const now = new Date().toISOString();
+        manifest.phases.construction.gate_result = {
+          passed: true,
+          approved_by: 'trust',
+          approved_at: now,
+          feedback: null,
+          verification: {
+            conformance_score: 100,
+            coverage_percentage: 100,
+            missing_items: [],
+            passed: true,
+          },
+          validation: {
+            alignment_score: 100,
+            alignment_questions: [],
+            passed: true,
+          },
+        };
+
+        // Set reviewedBy on UNIT artifacts
+        for (const artifact of manifest.artifacts) {
+          if (artifact.stage === 'unit') {
+            artifact.reviewedBy = 'auto-approved';
+          }
+        }
+
+        saveManifest(manifestPath, manifest);
+        await saveCheckpoint(ctx.directory, checkpoint);
+        return { continue: true };
+      }
+
+      // Blocking: present Gate 3
+      let verification: AlignmentVerificationResult;
+      try {
+        const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
+        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+        // Find a UNIT spec to validate against
+        const unitArtifacts = manifest.artifacts.filter(a => a.stage === 'unit');
+        const unitContent = unitArtifacts.length > 0
+          ? readFileSync(join(ctx.directory, unitArtifacts[0].path), 'utf-8')
+          : '';
+
+        const dualResult = runDualValidation(
+          unitContent,      // artifact
+          ideaContent,      // parent (IDEA for unit check)
+          ideaContent,      // root
+          'intent-to-unit', // transition (parent transition type)
+          'unit-to-idea',   // root check
+          'idea',           // sourceId
+          unitArtifacts[0]?.id || 'unit',  // targetId
+          'idea'            // rootId
+        );
+        verification = {
+          conformance_score: dualResult.parentCheck.verification.conformance_score,
+          coverage_percentage: dualResult.parentCheck.verification.coverage_percentage,
+          missing_items: dualResult.parentCheck.verification.missing_items,
+          passed: dualResult.passed,
+        };
+      } catch {
+        verification = {
+          conformance_score: 0,
+          coverage_percentage: 0,
+          missing_items: ['Could not read construction artifacts for alignment check'],
+          passed: false,
+        };
+      }
+
+      const questions = VV_QUESTIONS['gate3'] || [];
+      const validation: AlignmentValidationResult = {
+        alignment_score: 0,
+        alignment_questions: questions,
+        passed: false,
+      };
+
+      const presentations = presentGate3(manifest, trustState.current_level);
+      const reviewContent = presentations.map(p => p.reviewContent).join('\n\n');
+
+      manifest.phases.construction.gate_result = {
+        passed: false,
+        approved_by: null,
+        approved_at: null,
+        feedback: null,
+        verification,
+        validation,
+      };
+
+      addGateAuditEntry(manifestPath, {
+        phase: 'construction',
+        action: 'approved',
+        actor: 'trust',
+        reason: `Gate 3 pending review`,
+      });
+
+      saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, checkpoint);
+
+      const devPrefix = riskTier === 3 ? '[BLOCKING - Acknowledgment Required] ' : '';
+      const message = `${devPrefix}STOP: Gate 3 (UNIT decomposition review) requires approval.
+
+${reviewContent}
+
+VERIFICATION: ${verification.conformance_score}% conformance, ${verification.coverage_percentage}% coverage.
+Missing: ${verification.missing_items.join(', ')}
+
+VALIDATION: Review alignment questions:
+${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
+
+Type "approve" to proceed or "reject <reason>" to block.
+
+[GATE_PENDING]`;
+
+      return {
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: message,
+        },
+      };
+    }
+
+    // --- Gate 4: Construction phase, bolt stage ---
+    if (transitioningPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+      const boltId = checkpoint.active_bolt_id;
+      const gate4Behavior = getGate4TrustBehavior(trustState.current_level, riskTier);
+
+      // Run V&V dual validation for bolt-to-idea
+      let verification: AlignmentVerificationResult;
+      try {
+        const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
+        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+        const boltArtifact = manifest.artifacts.find(a => a.id === boltId);
+        const boltContent = boltArtifact
+          ? readFileSync(join(ctx.directory, boltArtifact.path), 'utf-8')
+          : '';
+
+        const dualResult = runDualValidation(
+          boltContent,      // artifact
+          ideaContent,      // parent
+          ideaContent,      // root
+          'unit-to-bolt',   // transition (parent transition type)
+          'bolt-to-idea',   // root check
+          'idea',           // sourceId
+          boltId,           // targetId
+          'idea'            // rootId
+        );
+        verification = {
+          conformance_score: dualResult.parentCheck.verification.conformance_score,
+          coverage_percentage: dualResult.parentCheck.verification.coverage_percentage,
+          missing_items: dualResult.parentCheck.verification.missing_items,
+          passed: dualResult.passed,
+        };
+      } catch {
+        verification = {
+          conformance_score: 0,
+          coverage_percentage: 0,
+          missing_items: ['Could not read BOLT artifacts for alignment check'],
+          passed: false,
+        };
+      }
+
+      const questions = VV_QUESTIONS['gate4'] || [];
+      const validation: AlignmentValidationResult = {
+        alignment_score: 0,
+        alignment_questions: questions,
+        passed: false,
+      };
+
+      // Gate 4 trust-adaptive behavior (Tier 3 always blocking)
+      if (gate4Behavior === 'notification-only' && riskTier !== 3) {
+        // Notification-only: auto-advance but record audit
+        addGateAuditEntry(manifestPath, {
+          phase: 'construction',
+          action: 'approved',
+          actor: 'trust',
+          reason: `Gate 4 notification-only for BOLT ${boltId} at Trust Level ${trustState.current_level}`,
+        });
+
+        const now = new Date().toISOString();
+        manifest.phases.construction.gate_result = {
+          passed: true,
+          approved_by: 'trust',
+          approved_at: now,
+          feedback: null,
+          verification,
+          validation,
+        };
+
+        // Set reviewedBy on the BOLT artifact
+        const boltArtifact = manifest.artifacts.find(a => a.id === boltId);
+        if (boltArtifact) {
+          boltArtifact.reviewedBy = 'auto-approved';
+        }
+
+        // Mark BOLT contract as fulfilled
+        updateContractStatus(manifestPath, boltId, 'fulfilled');
+
+        // Generate validation report after Gate 4 auto-advance
+        try {
+          const parentUnitId = findParentUnit(manifest, boltId);
+          if (parentUnitId && ctx.directory) {
+            const reportPath = getValidationReportPath(ctx.directory, parentUnitId);
+            generateValidationReport(reportPath, parentUnitId, {
+              boltId,
+              boltTitle: boltArtifact?.type || 'auto-approved',
+              commandsExecuted: [],
+              testResults: [],
+              filesChanged: [],
+              gateApprovedBy: 'auto-approved',
+              dualValidation: {
+                parentConformance: verification.conformance_score,
+                rootConformance: 0,
+              },
+              riskTier,
+            });
+          }
+        } catch (error) {
+          console.error('[Olympus Quality Gate] Failed to generate validation report:', error);
+          // Fail-open: don't block approval if report generation fails
+        }
+
+        saveManifest(manifestPath, manifest);
+        await saveCheckpoint(ctx.directory, checkpoint);
+
+        // Check if all BOLTs are now fulfilled → auto-transition to Operations
+        let autoTransitionMessage = '';
+        try {
+          const { isWorkflowComplete } = await import('../../features/workflow-engine/manifest.js');
+          const refreshedManifest = loadManifest(manifestPath);
+          if (refreshedManifest && isWorkflowComplete(refreshedManifest)) {
+            checkpoint.current_phase = 'operations' as WorkflowPhase;
+            checkpoint.current_stage = 'bolt'; // Per Decision 12: stage stays 'bolt' during Operations
+            updatePhaseStatus(manifestPath, 'construction', 'complete');
+            updatePhaseStatus(manifestPath, 'operations', 'in_progress');
+            await saveCheckpoint(ctx.directory, checkpoint);
+            autoTransitionMessage = ' All BOLTs fulfilled — auto-transitioning to Operations phase.';
+            console.log('[Olympus Quality Gate] All BOLTs fulfilled — auto-transitioning to Operations phase');
+          }
+        } catch (error) {
+          console.error('[Olympus Quality Gate] Failed to check workflow completion:', error);
+        }
+
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext: `Gate 4 (BOLT ${boltId} review): Auto-approved at Trust Level ${trustState.current_level}. Notification only.${autoTransitionMessage}`,
+          },
+        };
+      }
+
+      // Present Gate 4 (blocking or summary-review)
+      let presentation;
+      try {
+        presentation = presentGate4(manifest, boltId, trustState.current_level, riskTier);
+      } catch {
+        // Fail open if BOLT artifact not found
+        return { continue: true };
+      }
+
+      manifest.phases.construction.gate_result = {
+        passed: false,
+        approved_by: null,
+        approved_at: null,
+        feedback: null,
+        verification,
+        validation,
+      };
+
+      addGateAuditEntry(manifestPath, {
+        phase: 'construction',
+        action: 'approved',
+        actor: 'trust',
+        reason: `Gate 4 pending review for BOLT ${boltId}`,
+      });
+
+      saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, checkpoint);
+
+      const devPrefix = riskTier === 3 ? '[BLOCKING - Acknowledgment Required] ' : '';
+      const reviewType = gate4Behavior === 'summary-review' ? ' (Summary Review)' : '';
+      const message = `${devPrefix}STOP: Gate 4 (BOLT ${boltId} review)${reviewType} requires approval.
+
+${presentation.reviewContent}
+
+VERIFICATION: ${verification.conformance_score}% conformance, ${verification.coverage_percentage}% coverage.
+Missing: ${verification.missing_items.join(', ')}
+
+VALIDATION: Review alignment questions:
+${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
+
+Type "approve" to proceed or "reject <reason>" to block.
+
+[GATE_PENDING]`;
+
+      return {
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: message,
+        },
+      };
+    }
+
+    // --- Gate 5: Operations phase (placeholder) ---
+    if (transitioningPhase === 'operations') {
+      let presentation;
+      try {
+        presentation = presentGate5(manifest, trustState.current_level);
+      } catch {
+        // Fail open
+        return { continue: true };
+      }
+
+      const questions = VV_QUESTIONS['operations'] || [];
+      const verification: AlignmentVerificationResult = {
+        conformance_score: 0,
+        coverage_percentage: 0,
+        missing_items: ['Release review pending'],
+        passed: false,
+      };
+      const validation: AlignmentValidationResult = {
+        alignment_score: 0,
+        alignment_questions: questions,
+        passed: false,
+      };
+
+      manifest.phases.operations.gate_result = {
+        passed: false,
+        approved_by: null,
+        approved_at: null,
+        feedback: null,
+        verification,
+        validation,
+      };
+
+      saveManifest(manifestPath, manifest);
+      await saveCheckpoint(ctx.directory, checkpoint);
+
+      const message = `[BLOCKING - Acknowledgment Required] STOP: Gate 5 (Release review) requires approval.
+
+${presentation.reviewContent}
+
+VALIDATION: Review alignment questions:
+${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
+
+Type "approve" to proceed or "reject <reason>" to block.
+
+[GATE_PENDING]`;
+
+      return {
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: message,
+        },
+      };
+    }
+
+    // --- Inception gates (Gate 1 / Gate 2) and generic phase gates ---
     if (shouldAutoAdvance(riskTier, trustState.current_level)) {
       // Auto-advance: record gate approval and continue
       addGateAuditEntry(manifestPath, {
@@ -606,10 +1023,79 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         manifest.phases[pendingPhase].gate_result!.approved_at = now;
       }
 
-      // Update artifact contract status to 'active'
-      const phaseArtifacts = manifest.artifacts.filter((a) => a.phase === pendingPhase);
-      for (const artifact of phaseArtifacts) {
-        updateContractStatus(manifestPath, artifact.id, 'active');
+      const { checkpoint } = activeWorkflow;
+
+      // Construction gate-specific approval handling
+      if (pendingPhase === 'construction') {
+        if (checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+          // Gate 4 approval: mark BOLT as fulfilled, set reviewedBy
+          const boltId = checkpoint.active_bolt_id;
+          updateContractStatus(manifestPath, boltId, 'fulfilled');
+
+          // Set reviewedBy on the BOLT artifact
+          const boltArtifact = manifest.artifacts.find(a => a.id === boltId);
+          if (boltArtifact) {
+            boltArtifact.reviewedBy = 'human';
+          }
+
+          // Generate validation report after Gate 4 approval
+          try {
+            const parentUnitId = findParentUnit(manifest, boltId);
+            if (parentUnitId) {
+              const reportPath = getValidationReportPath(ctx.directory, parentUnitId);
+              const riskTier: RiskTier =
+                (typeof checkpoint.risk_tier === 'number' ? checkpoint.risk_tier : checkpoint.risk_tier?.tier) ||
+                manifest.risk_tier?.tier || 2;
+              generateValidationReport(reportPath, parentUnitId, {
+                boltId,
+                boltTitle: boltArtifact?.type || boltId,
+                commandsExecuted: [],  // Will be populated by CI pipeline (Task 3.5b)
+                testResults: [],        // Will be populated by CI pipeline (Task 3.5b)
+                filesChanged: [],       // Will be populated by CI pipeline (Task 3.5b)
+                gateApprovedBy: 'human',
+                dualValidation: {
+                  parentConformance: manifest.phases.construction.gate_result?.verification?.conformance_score ?? 0,
+                  rootConformance: 0,  // Root conformance from dual validation
+                },
+                riskTier,
+              });
+            }
+          } catch (error) {
+            console.error('[Olympus Quality Gate] Failed to generate validation report:', error);
+            // Fail-open: don't block approval if report generation fails
+          }
+
+          // Check if all BOLTs are now fulfilled → auto-transition to Operations
+          try {
+            const { isWorkflowComplete } = await import('../../features/workflow-engine/manifest.js');
+            const refreshedManifest = loadManifest(manifestPath);
+            if (refreshedManifest && isWorkflowComplete(refreshedManifest)) {
+              // All BOLTs fulfilled — transition to Operations phase
+              checkpoint.current_phase = 'operations' as WorkflowPhase;
+              checkpoint.current_stage = 'bolt'; // Per Decision 12: stage stays 'bolt' during Operations
+              updatePhaseStatus(manifestPath, 'construction', 'complete');
+              updatePhaseStatus(manifestPath, 'operations', 'in_progress');
+              await saveCheckpoint(ctx.directory, checkpoint);
+              console.log('[Olympus Quality Gate] All BOLTs fulfilled — auto-transitioning to Operations phase');
+            }
+          } catch (error) {
+            console.error('[Olympus Quality Gate] Failed to check workflow completion:', error);
+            // Fail-open: don't block if completion check fails
+          }
+        } else if (checkpoint.current_stage === 'unit') {
+          // Gate 3 approval: mark UNIT contracts as active, set reviewedBy
+          const unitArtifacts = manifest.artifacts.filter(a => a.stage === 'unit');
+          for (const artifact of unitArtifacts) {
+            updateContractStatus(manifestPath, artifact.id, 'active');
+            artifact.reviewedBy = 'human';
+          }
+        }
+      } else {
+        // Non-construction: update artifact contract status to 'active'
+        const phaseArtifacts = manifest.artifacts.filter((a) => a.phase === pendingPhase);
+        for (const artifact of phaseArtifacts) {
+          updateContractStatus(manifestPath, artifact.id, 'active');
+        }
       }
 
       // Add gate audit entry
@@ -683,10 +1169,36 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         manifest.phases[pendingPhase].gate_result!.feedback = reason;
       }
 
-      // Update artifact contract status to 'violated'
-      const phaseArtifacts = manifest.artifacts.filter((a) => a.phase === pendingPhase);
-      for (const artifact of phaseArtifacts) {
-        updateContractStatus(manifestPath, artifact.id, 'violated', reason);
+      const { checkpoint } = activeWorkflow;
+
+      // Construction gate-specific rejection handling
+      let rejectionFeedback = '';
+      if (pendingPhase === 'construction') {
+        if (checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+          // Gate 4 rejection: mark BOLT as violated
+          const boltId = checkpoint.active_bolt_id;
+          updateContractStatus(manifestPath, boltId, 'violated', reason);
+          rejectionFeedback = `The reviewer rejected ${boltId}: ${reason}. Revise and re-submit.`;
+        } else if (checkpoint.current_stage === 'unit') {
+          // Gate 3 rejection: mark UNIT artifacts as violated
+          const unitArtifacts = manifest.artifacts.filter(a => a.stage === 'unit');
+          for (const artifact of unitArtifacts) {
+            updateContractStatus(manifestPath, artifact.id, 'violated', reason);
+          }
+          rejectionFeedback = `The reviewer rejected UNIT decomposition: ${reason}. Revise and re-submit.`;
+        } else {
+          // Generic construction rejection
+          const phaseArtifacts = manifest.artifacts.filter((a) => a.phase === pendingPhase);
+          for (const artifact of phaseArtifacts) {
+            updateContractStatus(manifestPath, artifact.id, 'violated', reason);
+          }
+        }
+      } else {
+        // Non-construction: update artifact contract status to 'violated'
+        const phaseArtifacts = manifest.artifacts.filter((a) => a.phase === pendingPhase);
+        for (const artifact of phaseArtifacts) {
+          updateContractStatus(manifestPath, artifact.id, 'violated', reason);
+        }
       }
 
       // Add gate audit entry
@@ -709,11 +1221,15 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
 
+      const feedbackMessage = rejectionFeedback
+        ? rejectionFeedback
+        : `Gate rejected. Reason: ${reason}. Revise artifacts before retrying.`;
+
       return {
         continue: true,
         hookSpecificOutput: {
           hookEventName: 'UserPromptSubmit',
-          additionalContext: `Gate rejected. Reason: ${reason}. Revise artifacts before retrying.`,
+          additionalContext: feedbackMessage,
         },
       };
     }

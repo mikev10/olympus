@@ -21,6 +21,7 @@ import { registerQualityGateHooks } from './quality-gate.js';
 import { registerAgentRoleGuardHook } from './agent-role-guard.js';
 import { registerBuildCheckHooks } from './build-check.js';
 import { registerWorkflowArtifactGateHook } from './workflow-artifact-gate.js';
+import { registerCIReviewPipelineHook } from './ci-review-pipeline.js';
 import { registerLearningAggregationHook } from './learning-aggregation.js';
 
 /** Flag to prevent double registration */
@@ -51,6 +52,7 @@ export function registerAllHooks(): void {
   registerPlanLifecycleHooks(); // Plan lifecycle tracking for learning system
   registerBuildCheckHooks(); // Async build check (priorities 65/66) - AFTER post-tool-use
   registerWorkflowArtifactGateHook(); // Workflow artifact validation (priority 78) - AFTER build-check
+  registerCIReviewPipelineHook(); // CI review pipeline (priority 79) - AFTER artifact-gate, BEFORE quality-gate
   registerQualityGateHooks(); // Quality gate hooks for phase transitions
   registerLearningAggregationHook(); // Learning aggregation (priority 95) - AFTER learning-capture
 
@@ -83,5 +85,6 @@ export {
   registerAgentRoleGuardHook,
   registerBuildCheckHooks,
   registerWorkflowArtifactGateHook,
+  registerCIReviewPipelineHook,
   registerLearningAggregationHook,
 };

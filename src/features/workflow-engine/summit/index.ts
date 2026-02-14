@@ -9,5 +9,7 @@ export {
   generateRunbook,
   generateMonitoringConfig,
   generateReleaseNotes,
+  generateCostAnalysis,
+  generateOperationsArtifacts,
 } from './templates.js';
-export type { SummitContext } from './templates.js';
+export type { OperationsContext, SummitContext, OperationsResult } from './templates.js';

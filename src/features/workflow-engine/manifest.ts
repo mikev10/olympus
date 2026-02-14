@@ -675,6 +675,9 @@ export function isWorkflowComplete(manifest: ManifestSchema): boolean {
  * During cascade, we mark artifacts as stale regardless of current state,
  * except if they're already stale or violated (already invalidated).
  *
+ * NOTE: This allows fulfilled -> stale transitions ONLY during cascade invalidation.
+ * This is a special exception to the normal state machine rules.
+ *
  * @param artifact - Artifact to transition
  * @param reason - Reason for staleness
  * @returns true if transition applied, false if skipped
@@ -684,6 +687,7 @@ function applyStaleTransitionInMemory(artifact: ManifestArtifact, reason: string
   if (artifact.contract_status === 'stale' || artifact.contract_status === 'violated') {
     return false;
   }
+  // NOTE: Allows fulfilled -> stale transition during cascade (special exception)
   artifact.contract_status = 'stale';
   artifact.stale_reason = reason;
   if (!artifact.statusHistory) artifact.statusHistory = [];
@@ -845,4 +849,130 @@ export function transitionToStale(manifestPath: string, artifactId: string, reas
   artifact.statusHistory.push({ status: 'stale', timestamp: new Date().toISOString() });
 
   saveManifest(manifestPath, manifest);
+}
+
+/**
+ * Result of revalidating stale artifacts.
+ */
+export interface RevalidationResult {
+  restored: string[];   // artifact IDs restored to 'active'
+  stillStale: string[]; // artifact IDs remaining stale
+  errors: string[];     // any errors during revalidation
+}
+
+/**
+ * Revalidates all stale artifacts against their parent and root IDEA artifacts.
+ * Runs dual validation (parent + root checks) for each stale artifact.
+ * If both checks pass, the artifact is restored to 'active' status.
+ * If either check fails, the artifact remains 'stale'.
+ *
+ * @param projectPath - Absolute path to project root
+ * @param workflowId - Workflow ID (unused but kept for API consistency)
+ * @returns RevalidationResult with restored, stillStale, and errors arrays
+ */
+export async function revalidateStaleArtifacts(
+  projectPath: string,
+  workflowId: string
+): Promise<RevalidationResult> {
+  const result: RevalidationResult = { restored: [], stillStale: [], errors: [] };
+
+  const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    result.errors.push('Manifest not found');
+    return result;
+  }
+
+  // Find all stale artifacts
+  const staleArtifacts = manifest.artifacts.filter((a) => a.contract_status === 'stale');
+
+  for (const artifact of staleArtifacts) {
+    try {
+      // Find the parent artifact via links
+      const parentLink = manifest.links.find((l) => l.target_id === artifact.id);
+      if (!parentLink) {
+        result.stillStale.push(artifact.id);
+        continue;
+      }
+
+      const parentArtifact = manifest.artifacts.find((a) => a.id === parentLink.source_id);
+      if (!parentArtifact) {
+        result.stillStale.push(artifact.id);
+        continue;
+      }
+
+      // Find root IDEA artifact
+      const ideaArtifact = manifest.artifacts.find((a) => a.stage === 'idea');
+      if (!ideaArtifact) {
+        result.stillStale.push(artifact.id);
+        continue;
+      }
+
+      // Read artifact contents
+      const artifactContent = fs.existsSync(artifact.path)
+        ? fs.readFileSync(artifact.path, 'utf-8')
+        : null;
+      const parentContent = fs.existsSync(parentArtifact.path)
+        ? fs.readFileSync(parentArtifact.path, 'utf-8')
+        : null;
+      const ideaContent = fs.existsSync(ideaArtifact.path)
+        ? fs.readFileSync(ideaArtifact.path, 'utf-8')
+        : null;
+
+      if (!artifactContent || !parentContent || !ideaContent) {
+        result.stillStale.push(artifact.id);
+        continue;
+      }
+
+      // Determine transition types based on artifact stage
+      const { runDualValidation } = await import('./alignment.js');
+      let transition: 'idea-to-intent' | 'intent-to-unit' | 'unit-to-bolt';
+      let rootTransition: 'unit-to-idea' | 'bolt-to-idea';
+
+      if (artifact.stage === 'intent') {
+        transition = 'idea-to-intent';
+        rootTransition = 'unit-to-idea'; // closest available for intent
+      } else if (artifact.stage === 'unit') {
+        transition = 'intent-to-unit';
+        rootTransition = 'unit-to-idea';
+      } else if (artifact.stage === 'bolt') {
+        transition = 'unit-to-bolt';
+        rootTransition = 'bolt-to-idea';
+      } else {
+        result.stillStale.push(artifact.id);
+        continue;
+      }
+
+      // Run dual validation
+      const dualResult = runDualValidation(
+        artifactContent,
+        parentContent,
+        ideaContent,
+        transition,
+        rootTransition,
+        parentArtifact.id,
+        artifact.id,
+        ideaArtifact.id
+      );
+
+      if (dualResult.passed) {
+        // Restore to active status
+        artifact.contract_status = 'active';
+        artifact.stale_reason = null;
+        if (!artifact.statusHistory) artifact.statusHistory = [];
+        artifact.statusHistory.push({ status: 'active', timestamp: new Date().toISOString() });
+        result.restored.push(artifact.id);
+      } else {
+        result.stillStale.push(artifact.id);
+      }
+    } catch (error) {
+      result.errors.push(`Error revalidating ${artifact.id}: ${error}`);
+      result.stillStale.push(artifact.id);
+    }
+  }
+
+  // Save updated manifest
+  saveManifest(manifestPath, manifest);
+
+  return result;
 }

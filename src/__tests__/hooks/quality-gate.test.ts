@@ -64,11 +64,46 @@ vi.mock('../../features/workflow-engine/alignment.js', () => ({
   runDualValidation: vi.fn(),
 }));
 
+// Mock gate-presenter module
+vi.mock('../../features/workflow-engine/gate-presenter.js', () => ({
+  presentGate3: vi.fn().mockReturnValue([{
+    gateNumber: 3,
+    gateType: 'architecture-review',
+    artifactId: 'UNIT-001',
+    summary: 'Architecture review for UNIT-001',
+    reviewContent: 'UNIT Artifact: construction/UNIT-001/spec.md\nContract Status: active',
+    trustLevel: 0,
+    trustBehavior: 'blocking',
+  }]),
+  presentGate4: vi.fn().mockReturnValue({
+    gateNumber: 4,
+    gateType: 'code-review',
+    artifactId: 'BOLT-001',
+    summary: 'Code review for BOLT-001',
+    reviewContent: 'BOLT Spec: construction/UNIT-001/BOLT-001.md\nContract Status: active',
+    trustLevel: 0,
+    trustBehavior: 'blocking',
+  }),
+  presentGate5: vi.fn().mockReturnValue({
+    gateNumber: 5,
+    gateType: 'release-review',
+    artifactId: 'test-feature',
+    summary: 'Release approval for Test Feature',
+    reviewContent: 'Release Approval Review\n\nFeature: Test Feature',
+    trustLevel: 0,
+    trustBehavior: 'blocking',
+  }),
+  getGate3TrustBehavior: vi.fn().mockReturnValue('blocking'),
+  getGate4TrustBehavior: vi.fn().mockReturnValue('blocking'),
+  findParentUnit: vi.fn().mockReturnValue(null),
+}));
+
 import { registerQualityGateHooks } from '../../hooks/registrations/quality-gate.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import { loadManifest, saveManifest, addGateAuditEntry, updateContractStatus } from '../../features/workflow-engine/manifest.js';
 import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../features/workflow-engine/trust.js';
 import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
+import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
 import { readFileSync } from 'fs';
 import * as fsExtra from 'fs-extra';
 
@@ -1897,6 +1932,980 @@ describe('Quality Gate Hooks', () => {
 
       // Second call: gate_result reset to null (so next stage gate can fire)
       expect(savedStates[1].phases.inception.gate_result).toBeNull();
+    });
+  });
+
+  describe('Gate 3 - UNIT decomposition review', () => {
+    function setupGate3Mocks(overrides: { trustLevel?: number; riskTier?: number; trustBehavior?: string } = {}) {
+      const trustLevel = overrides.trustLevel ?? 0;
+      const riskTier = overrides.riskTier ?? 2;
+      const trustBehavior = overrides.trustBehavior ?? 'blocking';
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'unit',
+          risk_tier: { tier: riskTier, score: 45, rationale: 'Test' },
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'in_progress', gate_result: null },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', path: 'construction/UNIT-001/spec.md', contract_status: 'draft' },
+          ],
+          links: [],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: trustLevel as any,
+        total_transitions: 5,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+      vi.mocked(shouldAutoAdvance).mockReturnValue(false);
+      vi.mocked(getGate3TrustBehavior).mockReturnValue(trustBehavior);
+      vi.mocked(readFileSync).mockReturnValue('# IDEA content');
+      vi.mocked(runDualValidation).mockReturnValue({
+        parentCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'UNIT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        rootCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'UNIT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        passed: true,
+      });
+    }
+
+    it('fires when construction phase + unit stage', async () => {
+      setupGate3Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 3');
+    });
+
+    it('is blocking at Trust 0-1', async () => {
+      setupGate3Mocks({ trustLevel: 1, trustBehavior: 'blocking' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 3');
+    });
+
+    it('auto-advances at Trust 2+ for Tier 1-2', async () => {
+      setupGate3Mocks({ trustLevel: 2, riskTier: 2, trustBehavior: 'auto-advance' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toBeUndefined();
+      expect(addGateAuditEntry).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ phase: 'construction', actor: 'trust', action: 'approved' })
+      );
+    });
+
+    it('always blocking at Risk Tier 3', async () => {
+      setupGate3Mocks({ trustLevel: 3, riskTier: 3, trustBehavior: 'blocking' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[BLOCKING - Acknowledgment Required]');
+    });
+
+    it('runs dual validation with unit-to-idea root check', async () => {
+      setupGate3Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(runDualValidation).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        'intent-to-unit',
+        'unit-to-idea',
+        expect.any(String),
+        expect.any(String),
+        expect.any(String)
+      );
+    });
+
+    it('records result in manifest', async () => {
+      setupGate3Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveManifest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          phases: expect.objectContaining({
+            construction: expect.objectContaining({
+              gate_result: expect.objectContaining({
+                passed: false,
+                approved_by: null,
+              })
+            })
+          })
+        })
+      );
+    });
+
+    it('saves checkpoint (CCR-1)', async () => {
+      setupGate3Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveCheckpoint).toHaveBeenCalledWith('/test/project', expect.anything());
+    });
+
+    it('auto-advance sets reviewedBy to auto-approved on UNIT artifacts', async () => {
+      setupGate3Mocks({ trustLevel: 2, riskTier: 1, trustBehavior: 'auto-advance' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveManifest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          artifacts: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'UNIT-001',
+              reviewedBy: 'auto-approved',
+            })
+          ])
+        })
+      );
+    });
+  });
+
+  describe('Gate 4 - BOLT execution review', () => {
+    function setupGate4Mocks(overrides: { trustLevel?: number; riskTier?: number; trustBehavior?: string } = {}) {
+      const trustLevel = overrides.trustLevel ?? 0;
+      const riskTier = overrides.riskTier ?? 2;
+      const trustBehavior = overrides.trustBehavior ?? 'blocking';
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+          risk_tier: { tier: riskTier, score: 45, rationale: 'Test' },
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'in_progress', gate_result: null },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', path: 'construction/UNIT-001/spec.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+          links: [
+            { source_id: 'UNIT-001', target_id: 'BOLT-001', link_type: 'derives' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: trustLevel as any,
+        total_transitions: 5,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+      vi.mocked(shouldAutoAdvance).mockReturnValue(false);
+      vi.mocked(getGate4TrustBehavior).mockReturnValue(trustBehavior);
+      vi.mocked(readFileSync).mockReturnValue('# Content');
+      vi.mocked(runDualValidation).mockReturnValue({
+        parentCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'BOLT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        rootCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'BOLT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        passed: true,
+      });
+    }
+
+    it('fires when construction phase + bolt stage + active_bolt_id', async () => {
+      setupGate4Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 4');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('BOLT-001');
+    });
+
+    it('blocking at Trust 0-1', async () => {
+      setupGate4Mocks({ trustLevel: 1, trustBehavior: 'blocking' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 4');
+    });
+
+    it('summary-review at Trust 2', async () => {
+      setupGate4Mocks({ trustLevel: 2, trustBehavior: 'summary-review' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Summary Review');
+    });
+
+    it('notification-only at Trust 3', async () => {
+      setupGate4Mocks({ trustLevel: 3, trustBehavior: 'notification-only' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      // Notification-only auto-advances
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Auto-approved');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Notification only');
+    });
+
+    it('always blocking at Risk Tier 3', async () => {
+      setupGate4Mocks({ trustLevel: 3, riskTier: 3, trustBehavior: 'blocking' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[BLOCKING - Acknowledgment Required]');
+    });
+
+    it('runs dual validation with bolt-to-idea root check', async () => {
+      setupGate4Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(runDualValidation).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        'unit-to-bolt',
+        'bolt-to-idea',
+        expect.any(String),
+        'BOLT-001',
+        expect.any(String)
+      );
+    });
+
+    it('records result in manifest', async () => {
+      setupGate4Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveManifest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          phases: expect.objectContaining({
+            construction: expect.objectContaining({
+              gate_result: expect.objectContaining({
+                passed: false,
+                approved_by: null,
+              })
+            })
+          })
+        })
+      );
+    });
+
+    it('saves checkpoint (CCR-1)', async () => {
+      setupGate4Mocks();
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveCheckpoint).toHaveBeenCalledWith('/test/project', expect.anything());
+    });
+
+    it('approval sets BOLT contract to fulfilled', async () => {
+      // Setup Gate 4 pending state for approver
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      expect(updateContractStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        'BOLT-001',
+        'fulfilled'
+      );
+    });
+
+    it('approval populates reviewedBy on BOLT artifact', async () => {
+      const savedStates: any[] = [];
+      vi.mocked(saveManifest).mockImplementation((_path: any, manifest: any) => {
+        savedStates.push(JSON.parse(JSON.stringify(manifest)));
+      });
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      // Check first saved manifest state has reviewedBy set
+      expect(savedStates[0].artifacts[0].reviewedBy).toBe('human');
+    });
+
+    it('rejection sets BOLT contract to violated', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject code quality too low');
+      await approver!.handler(ctx);
+
+      expect(updateContractStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        'BOLT-001',
+        'violated',
+        'code quality too low'
+      );
+    });
+
+    it('notification-only auto-advance sets reviewedBy to auto-approved', async () => {
+      setupGate4Mocks({ trustLevel: 3, trustBehavior: 'notification-only' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveManifest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          artifacts: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'BOLT-001',
+              reviewedBy: 'auto-approved',
+            })
+          ])
+        })
+      );
+    });
+
+    it('notification-only auto-advance marks BOLT as fulfilled', async () => {
+      setupGate4Mocks({ trustLevel: 3, trustBehavior: 'notification-only' });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(updateContractStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        'BOLT-001',
+        'fulfilled'
+      );
+    });
+
+    it('does not fire Gate 4 without active_bolt_id (falls through to generic construction gate)', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          // No active_bolt_id
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'in_progress', gate_result: null },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [],
+        })
+      );
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      // Without active_bolt_id, Gate 4 doesn't fire specifically,
+      // but the generic construction transition detection may still trigger.
+      // The key assertion is that it doesn't mention "Gate 4" or BOLT-specific content.
+      if (result.hookSpecificOutput?.additionalContext) {
+        expect(result.hookSpecificOutput.additionalContext).not.toContain('Gate 4');
+        expect(result.hookSpecificOutput.additionalContext).not.toContain('BOLT-001');
+      }
+    });
+  });
+
+  describe('Gate 5 - Release review (placeholder)', () => {
+    it('fires when operations phase detected', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'operations',
+          current_stage: 'complete',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'complete', gate_result: null },
+            operations: { status: 'in_progress', gate_result: null },
+          },
+          artifacts: [],
+          gate_audit: [],
+        })
+      );
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 5');
+    });
+
+    it('is always blocking', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'operations',
+          current_stage: 'complete',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'complete', gate_result: null },
+            operations: { status: 'in_progress', gate_result: null },
+          },
+          artifacts: [],
+          gate_audit: [],
+        })
+      );
+      vi.mocked(shouldAutoAdvance).mockReturnValue(true); // Even with auto-advance, should still block
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      const result = await blocker!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[BLOCKING - Acknowledgment Required]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
+    });
+
+    it('saves checkpoint (CCR-1)', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'operations',
+          current_stage: 'complete',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'complete', gate_result: null },
+            operations: { status: 'in_progress', gate_result: null },
+          },
+          artifacts: [],
+          gate_audit: [],
+        })
+      );
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveCheckpoint).toHaveBeenCalledWith('/test/project', expect.anything());
+    });
+  });
+
+  describe('Rejection feedback injection', () => {
+    it('injects revision instruction with reason for BOLT rejection', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject missing error handling');
+      const result = await approver!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('The reviewer rejected BOLT-001: missing error handling. Revise and re-submit.');
+    });
+
+    it('injects revision instruction with reason for UNIT rejection', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'unit',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', path: 'construction/UNIT-001/spec.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject decomposition too coarse');
+      const result = await approver!.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).toContain('The reviewer rejected UNIT decomposition: decomposition too coarse. Revise and re-submit.');
+    });
+  });
+
+  describe('reviewedBy population', () => {
+    it('human approval sets reviewedBy to human', async () => {
+      const savedStates: any[] = [];
+      vi.mocked(saveManifest).mockImplementation((_path: any, manifest: any) => {
+        savedStates.push(JSON.parse(JSON.stringify(manifest)));
+      });
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      const boltArtifact = savedStates[0]?.artifacts.find((a: any) => a.id === 'BOLT-001');
+      expect(boltArtifact?.reviewedBy).toBe('human');
+    });
+
+    it('auto-advance sets reviewedBy to auto-approved', async () => {
+      // Use Gate 4 notification-only as an auto-advance scenario
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'bolt',
+          active_bolt_id: 'BOLT-001',
+          risk_tier: { tier: 1, score: 10, rationale: 'Low' },
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: { status: 'in_progress', gate_result: null },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+          ],
+          links: [],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 3 as any,
+        total_transitions: 50,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+      vi.mocked(shouldAutoAdvance).mockReturnValue(false);
+      vi.mocked(getGate4TrustBehavior).mockReturnValue('notification-only');
+      vi.mocked(readFileSync).mockReturnValue('# Content');
+      vi.mocked(runDualValidation).mockReturnValue({
+        parentCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'BOLT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        rootCheck: {
+          source_artifact_id: 'idea',
+          target_artifact_id: 'BOLT-001',
+          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
+          validation: { alignment_score: 75, alignment_questions: [], passed: true },
+          alignment_passed: true,
+          checked_at: '2025-01-01T00:00:00.000Z',
+        },
+        passed: true,
+      });
+
+      const hooks = getHooksForEvent('PostToolUse');
+      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
+
+      const ctx = createPostToolUseCtx();
+      await blocker!.handler(ctx);
+
+      expect(saveManifest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          artifacts: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'BOLT-001',
+              reviewedBy: 'auto-approved',
+            })
+          ])
+        })
+      );
+    });
+
+    it('Gate 3 human approval sets reviewedBy to human on UNIT artifacts', async () => {
+      const savedStates: any[] = [];
+      vi.mocked(saveManifest).mockImplementation((_path: any, manifest: any) => {
+        savedStates.push(JSON.parse(JSON.stringify(manifest)));
+      });
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_phase: 'construction',
+          current_stage: 'unit',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: null },
+            inception: { status: 'complete', gate_result: null },
+            construction: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, approved_at: null, feedback: null, verification: { conformance_score: 0, coverage_percentage: 0, missing_items: [], passed: false }, validation: { alignment_score: 0, alignment_questions: [], passed: false } }
+            },
+            operations: { status: 'not_started', gate_result: null },
+          },
+          artifacts: [
+            { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', path: 'construction/UNIT-001/spec.md', contract_status: 'draft' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 0,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      const unitArtifact = savedStates[0]?.artifacts.find((a: any) => a.id === 'UNIT-001');
+      expect(unitArtifact?.reviewedBy).toBe('human');
     });
   });
 });

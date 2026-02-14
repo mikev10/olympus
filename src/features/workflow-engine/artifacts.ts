@@ -187,6 +187,7 @@ export function getArtifactPath(
 /**
  * Writes artifact content to the correct path for the given artifact type.
  * Creates parent directories if needed.
+ * If the artifact already exists, triggers cascade invalidation after write.
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
@@ -205,6 +206,9 @@ export async function writeArtifact(
   unitId?: string
 ): Promise<void> {
   const artifactPath = getArtifactPath(projectPath, workflowId, artifactType, artifactId, unitId);
+
+  // Check if artifact already exists (write to existing = potential cascade)
+  const isExistingArtifact = await fs.pathExists(artifactPath);
 
   try {
     await fs.ensureDir(path.dirname(artifactPath));
@@ -247,10 +251,44 @@ export async function writeArtifact(
       `Failed to write ${artifactType} artifact: ${err.message}`
     );
   }
+
+  // After successful write, trigger cascade if this was an existing artifact
+  if (isExistingArtifact) {
+    try {
+      const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+      // Use dynamic import to avoid circular dependency
+      const { cascadeInvalidation, loadManifest, saveManifest, computeChecksum } = await import('./manifest.js');
+      const manifest = loadManifest(manifestPath);
+      if (manifest) {
+        // Find the artifact in manifest by matching the path
+        const normalizedPath = artifactPath.replace(/\\/g, '/');
+        const artifact = manifest.artifacts.find((a) =>
+          a.path === normalizedPath ||
+          a.path.endsWith(path.basename(artifactPath))
+        );
+        if (artifact) {
+          // Update the checksum in manifest
+          const newChecksum = computeChecksum(artifactPath);
+          if (newChecksum) {
+            artifact.checksum = newChecksum;
+            artifact.updated_at = new Date().toISOString();
+            saveManifest(manifestPath, manifest);
+          }
+          // Trigger cascade for downstream artifacts
+          cascadeInvalidation(manifestPath, artifact.id);
+        }
+      }
+    } catch (error) {
+      // Silent failure - cascade is best-effort, should never block writes
+      console.error('[Artifacts] Cascade invalidation after write failed:', error);
+    }
+  }
 }
 
 /**
  * Reads artifact content from the correct path for the given artifact type.
+ * After successful read, verifies checksum against manifest.
+ * If checksum differs (manual edit detected), triggers cascade invalidation.
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
@@ -269,12 +307,14 @@ export async function readArtifact(
 ): Promise<string | null> {
   const artifactPath = getArtifactPath(projectPath, workflowId, artifactType, artifactId, unitId);
 
+  let content: string | null = null;
+
   try {
     if (!await fs.pathExists(artifactPath)) {
       return null;
     }
 
-    return await fs.readFile(artifactPath, 'utf-8');
+    content = await fs.readFile(artifactPath, 'utf-8');
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
 
@@ -299,6 +339,38 @@ export async function readArtifact(
       `Failed to read ${artifactType} artifact: ${err.message}`
     );
   }
+
+  // After successful read, verify checksum against manifest
+  if (content !== null) {
+    try {
+      const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+      // Use dynamic import to avoid circular dependency
+      const { loadManifest, saveManifest, computeChecksum, cascadeInvalidation } = await import('./manifest.js');
+      const manifest = loadManifest(manifestPath);
+      if (manifest) {
+        const normalizedPath = artifactPath.replace(/\\/g, '/');
+        const artifact = manifest.artifacts.find((a) =>
+          a.path === normalizedPath ||
+          a.path.endsWith(path.basename(artifactPath))
+        );
+        if (artifact && artifact.checksum && artifact.write_complete) {
+          const currentChecksum = computeChecksum(artifactPath);
+          if (currentChecksum && currentChecksum !== artifact.checksum) {
+            // Manual edit detected - update checksum and cascade
+            artifact.checksum = currentChecksum;
+            artifact.updated_at = new Date().toISOString();
+            saveManifest(manifestPath, manifest);
+            cascadeInvalidation(manifestPath, artifact.id);
+          }
+        }
+      }
+    } catch (error) {
+      // Silent failure - checksum verification is best-effort
+      console.error('[Artifacts] Checksum verification on read failed:', error);
+    }
+  }
+
+  return content;
 }
 
 
