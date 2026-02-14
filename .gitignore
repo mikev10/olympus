@@ -47,3 +47,9 @@ docs/ADD-Whitepaper-Issues-Report.md
 docs/claude-code-docs.txt
 docs/hackathon.md
 docs/olympus-vs-aidlc-analysis.md
+docs/Vesta AI-SDLC Playbook v1.0.pdf
+docs/chat-history.md
+
+# Local RAG / embedding data
+lancedb/
+models/
