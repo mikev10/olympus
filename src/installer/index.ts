@@ -2507,17 +2507,17 @@ IDEA → PRD → SPEC → INTENTS → UNITS → DESIGN → BUILD
 ### Quick Protocol
 
 1. **Setup**: Delete leftover \`.olympus/workflow/smoke-test-hello-world/\`, create fresh directory structure
-2. **Create checkpoint.json** with schema v2.0.0, initial state: vision/idea
-3. **Vision phase**: Write idea.md → prd.md → spec.md → INTENT-*.md (update checkpoint after each)
-4. **Forge phase**: Write UNIT-*.md → design docs (interfaces.md, data-flow.md, components.md) → BUILD stage creates BOLT-*.md (update checkpoint after each)
+2. **Create checkpoint.json** with schema v2.0.0, initial state: inception/idea
+3. **Inception phase**: Write idea.md → prd.md → spec.md → INTENT-*.md (update checkpoint after each)
+4. **Construction phase**: Write UNIT-*.md → design docs (interfaces.md, data-flow.md, components.md) → BUILD stage creates BOLT-*.md (update checkpoint after each)
 5. **BUILD verification**: Read final checkpoint, verify all stages complete, count all 13 artifacts
 6. **Cleanup**: Delete \`.olympus/workflow/smoke-test-hello-world/\` entirely, verify deletion
 7. **Report**: Print PASS/FAIL table for each of the 7 stages
 
 ### Arguments
 - No args: Full test (all 7 stages)
-- \`vision\`: Vision phase only (IDEA/PRD/SPEC/INTENTS)
-- \`forge\`: Forge phase only (UNITS/DESIGN/BUILD)
+- \`inception\`: Inception phase only (IDEA/PRD/SPEC/INTENTS)
+- \`construction\`: Construction phase only (UNITS/DESIGN/BUILD)
 - \`cleanup\`: Delete leftover test artifacts
 
 ### Rules
@@ -2706,241 +2706,6 @@ Use the checkpoint storage functions from \`src/features/workflow-engine/checkpo
 
 Present the information in a clear, scannable format with status indicators (✓, ⧗, ✗).`,
 
-  'olympus-next.md': `---
-description: Get the next ready task from a structured workflow
----
-
-You are retrieving the next ready task from a structured workflow.
-
-## TASK
-
-Find and display the next task that is ready to be implemented for the specified workflow.
-
-**Arguments**: \`{feature}\` - The workflow ID (e.g., "user-auth", "oauth-flow")
-
-## IMPLEMENTATION STEPS
-
-### Step 1: Validate Workflow Exists
-
-Check if the workflow exists at:
-\`.olympus/workflow/{feature}/checkpoint.json\`
-
-If not found, display:
-\`\`\`
-Workflow "{feature}" not found.
-
-To list all workflows, use: /workflow-status
-To start a new workflow, use: /plan {feature-name} --structured
-\`\`\`
-
-### Step 2: Get Next Ready Task
-
-Use the workflow engine function:
-\`\`\`typescript
-import { getNextReadyTask } from 'src/features/workflow-engine/execution.js';
-
-const taskId = await getNextReadyTask(process.cwd(), feature);
-\`\`\`
-
-### Step 3: Display Task Details
-
-**If taskId is null:**
-
-Check if workflow is complete by examining checkpoint.json status.
-
-If all tasks complete:
-\`\`\`
-All tasks complete for workflow: {feature}
-
-The workflow is ready for final validation and completion.
-\`\`\`
-
-If tasks are blocked:
-\`\`\`
-No tasks ready for workflow: {feature}
-
-All remaining tasks are blocked by incomplete dependencies.
-
-Use /workflow-status to see the full workflow status and dependency graph.
-\`\`\`
-
-**If taskId is found:**
-
-Read the task details from:
-1. **Dependency Graph**: \`.olympus/workflow/{feature}/intents/dependency-graph.json\`
-   - Extract task title, component, and estimated_effort
-2. **Intent File**: \`.olympus/workflow/{feature}/intents/{taskId}.md\`
-   - Contains the full task prompt and implementation details
-3. **Checkpoint**: \`.olympus/workflow/{feature}/checkpoint.json\`
-   - Check task_statuses in resume_context for current status
-
-Display:
-\`\`\`
-Next Ready Task: {feature}
-
-Task ID: {taskId}
-Title: {task.title}
-Component: {task.component}
-Estimated Effort: {task.estimated_effort} points
-
-Dependencies: [list of dependency task IDs, or "None"]
-Status: pending
-
-## Task Details
-
-{contents of intent file}
-
----
-
-To start this task, use:
-olympus implement {feature} {taskId}
-
-Or manually:
-1. Read the full task details above
-2. Implement the changes
-3. Mark task complete: olympus task-complete {feature} {taskId}
-\`\`\`
-
-### Step 4: Error Handling
-
-Handle these edge cases:
-- Workflow not found → Show helpful message
-- Dependency graph missing → Indicate intents not generated yet
-- Intent file missing → Show task ID but note details unavailable
-- All tasks complete → Congratulate and suggest next steps
-- All tasks blocked → Show blocking dependencies
-
-## EXAMPLE OUTPUT
-
-\`\`\`
-Next Ready Task: user-auth
-
-Task ID: TASK-002
-Title: Implement JWT token generation service
-Component: auth-service
-Estimated Effort: 5 points
-
-Dependencies: TASK-001 (complete)
-Status: pending
-
-## Task Details
-
-# Intent: Implement JWT token generation service
-
-Create a service module for generating and validating JWT tokens.
-
-## Requirements
-- Use jsonwebtoken library
-- Support access token (15min) and refresh token (7d) expiry
-- Sign tokens with RS256 algorithm
-- Store public/private keys in secure configuration
-
-## Files to Create/Modify
-- src/auth/token-service.ts (new)
-- src/auth/types.ts (update)
-- src/config/jwt-config.ts (new)
-
-## Acceptance Criteria
-- [ ] Token service can generate signed JWT tokens
-- [ ] Token service can validate and decode tokens
-- [ ] Unit tests cover happy path and error cases
-- [ ] Keys are loaded from environment variables
-
----
-
-To start this task, use:
-olympus implement user-auth TASK-002
-
-Or manually:
-1. Read the full task details above
-2. Implement the changes
-3. Mark task complete: olympus task-complete user-auth TASK-002
-\`\`\`
-
-## NOTES
-
-- This command helps agents know what to work on next
-- It respects the dependency graph and only shows tasks with all dependencies met
-- The intent file contains the full implementation prompt
-- Task statuses are tracked in checkpoint.json resume_context`,
-
-  'idea.md': `---
-description: Generate IDEA artifact for structured workflow
----
-
-You are executing the IDEA stage of a structured workflow.
-
-Feature: $ARGUMENTS
-
-INSTRUCTIONS:
-1. Check if workflow exists: \`.olympus/workflow/{feature}/checkpoint.json\`
-2. If exists, load context and continue
-3. If not, create new workflow and start IDEA interview
-
-Invoke the idea-intake agent to gather:
-- Problem statement
-- Business context
-- Success metrics
-- Constraints
-- Risk tier
-
-Save artifact to: \`.olympus/workflow/{feature}/idea.md\`
-Update checkpoint after completion.`,
-
-  'prd.md': `---
-description: Generate PRD artifact for structured workflow
----
-
-You are executing the PRD stage of a structured workflow.
-
-Feature: $ARGUMENTS
-
-INSTRUCTIONS:
-1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
-2. Read IDEA artifact: \`.olympus/workflow/{feature}/idea.md\`
-3. Invoke prd-writer agent to generate user stories with acceptance criteria
-
-Ensure all IDEA constraints are addressed in the PRD.
-Run Momus validation after generation.
-Update checkpoint with PRD artifact reference.`,
-
-  'spec.md': `---
-description: Generate SPEC artifact for structured workflow
----
-
-You are executing the SPEC stage of a structured workflow.
-
-Feature: $ARGUMENTS
-
-INSTRUCTIONS:
-1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
-2. Read IDEA and PRD artifacts
-3. Invoke spec-writer agent to design technical architecture
-
-Use explore/librarian agents to analyze existing codebase.
-Ensure all PRD user stories are addressed in the design.
-Run Metis validation after generation.
-Update checkpoint with SPEC artifact reference.`,
-
-  'intents.md': `---
-description: Generate INTENTS (executable tasks) for structured workflow
----
-
-You are executing the INTENTS stage of a structured workflow.
-
-Feature: $ARGUMENTS
-
-INSTRUCTIONS:
-1. Load workflow checkpoint: \`.olympus/workflow/{feature}/checkpoint.json\`
-2. Read SPEC artifact: \`.olympus/workflow/{feature}/spec.md\`
-3. Invoke intent-generator agent to decompose SPEC into atomic tasks
-
-Generate:
-- INTENT-{NNN}.md files with prompts and acceptance criteria
-- dependency-graph.json defining execution order
-
-Run coverage validation (100% of SPEC components must have tasks).
-Update checkpoint with task references.`
 };
 
 // SKILL_DEFINITIONS removed - skills are now only in COMMAND_DEFINITIONS to avoid duplicates
@@ -3408,7 +3173,12 @@ export function install(options: InstallOptions = {}): InstallResult {
       'prometheus.md',
       'review.md',
       'ultrawork.md',
-      'workflow-status.md'
+      'workflow-status.md',
+      'idea.md',
+      'prd.md',
+      'spec.md',
+      'intents.md',
+      'olympus-next.md'
     ];
     for (const legacyFile of legacyFiles) {
       const legacyPath = join(commandsDir, legacyFile);

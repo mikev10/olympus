@@ -8,9 +8,10 @@
 import * as fs from 'fs-extra';
 import { join } from 'path';
 import { loadCheckpoint, saveCheckpoint } from './checkpoint.js';
-import { WorkflowCheckpoint, DependencyGraph } from './types.js';
+import type { WorkflowCheckpointV3 } from './phase-types.js';
+import type { DependencyGraph } from './types.js';
 
-const WORKFLOW_DIR = '.olympus/workflow';
+const WORKFLOW_DIR = 'aidlc-docs';
 const DEPENDENCY_GRAPH_PATH = 'intents/dependency-graph.json';
 
 /**

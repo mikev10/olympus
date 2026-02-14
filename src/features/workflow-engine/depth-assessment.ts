@@ -2,9 +2,9 @@
  * Depth Assessment and Risk Tier Classification
  *
  * Scores 6 factors (1-5 each) to determine workflow depth:
- * - minimal (<=8): IDEA only, skip Forge
- * - standard (9-18): full Vision + Forge
- * - comprehensive (19-30): deep analysis + rigorous Forge
+ * - SHALLOW (1-10): skip UNIT decomposition, INTENT → single BOLT
+ * - MEDIUM (11-20): full Inception + Construction pipeline
+ * - DEEP (21-30): deep analysis + rigorous Construction + Metis consultation
  *
  * Also classifies risk tier (1-3) based on reversibility, blast radius,
  * data sensitivity, and compliance impact.
@@ -55,16 +55,16 @@ export function assessDepth(factors: DepthFactors): DepthAssessment {
 
   // Determine recommended depth
   let recommended_depth: 'minimal' | 'standard' | 'comprehensive';
-  if (total_score <= 8) {
+  if (total_score <= 10) {
     recommended_depth = 'minimal';
-  } else if (total_score <= 18) {
+  } else if (total_score <= 20) {
     recommended_depth = 'standard';
   } else {
     recommended_depth = 'comprehensive';
   }
 
-  // Skip Forge if minimal depth
-  const skip_forge = total_score <= 8;
+  // Skip UNIT decomposition if SHALLOW depth
+  const skip_units = total_score <= 10;
 
   // Derive risk factors from the assessment
   const riskFactors = deriveRiskFactors(risk, complexity, scope);
@@ -79,7 +79,7 @@ export function assessDepth(factors: DepthFactors): DepthAssessment {
     preferences,
     total_score,
     recommended_depth,
-    skip_forge,
+    skip_units,
     risk_tier,
   };
 }
@@ -253,19 +253,19 @@ export function assessDepthFromIdea(ideaContent: string): DepthAssessment {
  */
 interface IdeaSections {
   problemStatement: string;
-  solutionApproach: string;
-  businessContext: string;
-  constraints: string;
+  userPersonas: string;
   successMetrics: string;
+  businessConstraints: string;
+  outOfScope: string;
 }
 
 function parseIdeaSections(content: string): IdeaSections {
   const sections: IdeaSections = {
     problemStatement: '',
-    solutionApproach: '',
-    businessContext: '',
-    constraints: '',
+    userPersonas: '',
+    businessConstraints: '',
     successMetrics: '',
+    outOfScope: '',
   };
 
   // Split by h2 headers (## Heading)
@@ -292,14 +292,14 @@ function parseIdeaSections(content: string): IdeaSections {
     const title = part.title.toLowerCase();
     if (title.includes('problem') || title.includes('statement')) {
       sections.problemStatement = part.content;
-    } else if (title.includes('solution') || title.includes('approach')) {
-      sections.solutionApproach = part.content;
-    } else if (title.includes('business') || title.includes('context')) {
-      sections.businessContext = part.content;
-    } else if (title.includes('constraint')) {
-      sections.constraints = part.content;
+    } else if (title.includes('persona') || title.includes('user persona')) {
+      sections.userPersonas = part.content;
+    } else if (title.includes('business constraint') || title.includes('constraint')) {
+      sections.businessConstraints = part.content;
     } else if (title.includes('success') || title.includes('metric')) {
       sections.successMetrics = part.content;
+    } else if (title.includes('out of scope') || title.includes('scope')) {
+      sections.outOfScope = part.content;
     }
   }
 
@@ -308,10 +308,10 @@ function parseIdeaSections(content: string): IdeaSections {
 
 /**
  * Score clarity (1-5, lower = clearer)
- * More detail in problem/solution = higher clarity = LOWER score
+ * More detail in problem/personas = higher clarity = LOWER score
  */
 function scoreClarity(sections: IdeaSections): number {
-  const totalLength = sections.problemStatement.length + sections.solutionApproach.length;
+  const totalLength = sections.problemStatement.length + sections.userPersonas.length;
 
   // More detail = clearer = lower score
   if (totalLength > 1000) return 1; // Very clear
@@ -326,9 +326,9 @@ function scoreClarity(sections: IdeaSections): number {
  * More bullet points and components = higher complexity
  */
 function scoreComplexity(sections: IdeaSections): number {
-  const bulletPoints = (sections.solutionApproach.match(/^[-*+]\s/gm) || []).length;
+  const bulletPoints = (sections.userPersonas.match(/^[-*+]\s/gm) || []).length;
   const componentKeywords = ['component', 'service', 'module', 'layer', 'system', 'integration', 'api'];
-  const componentCount = componentKeywords.filter(kw => sections.solutionApproach.toLowerCase().includes(kw)).length;
+  const componentCount = componentKeywords.filter(kw => sections.userPersonas.toLowerCase().includes(kw)).length;
 
   const complexityScore = bulletPoints + componentCount;
 
@@ -344,7 +344,7 @@ function scoreComplexity(sections: IdeaSections): number {
  * More constraints and metrics = larger scope
  */
 function scoreScope(sections: IdeaSections): number {
-  const constraintBullets = (sections.constraints.match(/^[-*+]\s/gm) || []).length;
+  const constraintBullets = (sections.businessConstraints.match(/^[-*+]\s/gm) || []).length;
   const metricBullets = (sections.successMetrics.match(/^[-*+]\s/gm) || []).length;
 
   const scopeScore = constraintBullets + metricBullets;
@@ -367,7 +367,7 @@ function scoreRisk(sections: IdeaSections): number {
     'infrastructure', 'system-wide', 'critical'
   ];
 
-  const allText = sections.constraints + sections.solutionApproach;
+  const allText = sections.businessConstraints + sections.userPersonas;
   const lowerText = allText.toLowerCase();
 
   const riskCount = riskKeywords.filter(kw => lowerText.includes(kw)).length;
@@ -381,17 +381,17 @@ function scoreRisk(sections: IdeaSections): number {
 
 /**
  * Score context (1-5)
- * Less context provided = higher score (more context needed)
+ * More "out of scope" items = LESS context needed = LOWER score
  */
 function scoreContext(sections: IdeaSections): number {
-  const contextLength = sections.businessContext.length;
+  const contextLength = sections.outOfScope.length;
 
-  // Less context = higher score (more needed)
-  if (contextLength < 50) return 5;
-  if (contextLength < 150) return 4;
-  if (contextLength < 300) return 3;
-  if (contextLength < 500) return 2;
-  return 1;
+  // More out-of-scope content = LOWER context score (less context needed)
+  if (contextLength > 500) return 1; // Lots of scope exclusions = low context needed
+  if (contextLength > 300) return 2;
+  if (contextLength > 150) return 3;
+  if (contextLength > 50) return 4;
+  return 5; // No scope exclusions = high context needed
 }
 
 /**
@@ -400,7 +400,7 @@ function scoreContext(sections: IdeaSections): number {
  */
 function scorePreferences(sections: IdeaSections): number {
   const preferenceKeywords = ['must', 'should', 'could', 'prefer', 'optional', 'required', 'nice to have'];
-  const allText = sections.constraints + sections.solutionApproach;
+  const allText = sections.businessConstraints + sections.userPersonas;
   const lowerText = allText.toLowerCase();
 
   const preferenceCount = preferenceKeywords.filter(kw => lowerText.includes(kw)).length;
@@ -476,11 +476,11 @@ function deriveRiskFactorsFromIdea(content: string, sections: IdeaSections): Ris
 export function getDepthLabel(depth: 'minimal' | 'standard' | 'comprehensive'): string {
   switch (depth) {
     case 'minimal':
-      return 'Minimal (IDEA only, skip Forge)';
+      return 'SHALLOW (skip UNIT decomposition, INTENT → single BOLT)';
     case 'standard':
-      return 'Standard (full Vision + Forge)';
+      return 'MEDIUM (full Inception + Construction pipeline)';
     case 'comprehensive':
-      return 'Comprehensive (deep analysis + rigorous Forge)';
+      return 'DEEP (deep analysis + rigorous Construction + Metis consultation)';
   }
 }
 

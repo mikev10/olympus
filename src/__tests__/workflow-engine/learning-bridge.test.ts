@@ -20,13 +20,13 @@ describe('captureWorkflowDiscovery', () => {
     featureName: 'test-feature',
     projectPath: '/test/project',
     sessionId: 'test-session',
-    phase: 'outline',
+    phase: 'inception',
   };
 
   it('maps gate_rejection to gotcha category', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Missing required documentation',
     };
 
@@ -38,7 +38,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps gate_approval to pattern category', () => {
     const event: WorkflowEvent = {
       type: 'gate_approval',
-      phase: 'outline',
+      phase: 'inception',
       details: 'All requirements met',
     };
 
@@ -50,7 +50,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps build_failure to technical_insight category', () => {
     const event: WorkflowEvent = {
       type: 'build_failure',
-      phase: 'forge',
+      phase: 'construction',
       details: 'TypeScript compilation error',
     };
 
@@ -62,7 +62,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps rework_required to gotcha category', () => {
     const event: WorkflowEvent = {
       type: 'rework_required',
-      phase: 'forge',
+      phase: 'construction',
       details: 'Quality checks failed',
     };
 
@@ -86,7 +86,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps trust_level_change to planning_insight category', () => {
     const event: WorkflowEvent = {
       type: 'trust_level_change',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Trust increased to high',
     };
 
@@ -98,7 +98,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps phase_complete to pattern category', () => {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Phase completed successfully',
     };
 
@@ -110,7 +110,7 @@ describe('captureWorkflowDiscovery', () => {
   it('maps depth_override to planning_insight category', () => {
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Depth set to comprehensive',
     };
 
@@ -122,7 +122,7 @@ describe('captureWorkflowDiscovery', () => {
   it('truncates summary to max 100 chars', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'A'.repeat(200), // Long details
     };
 
@@ -134,7 +134,7 @@ describe('captureWorkflowDiscovery', () => {
   it('includes workflow context in details', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -142,13 +142,13 @@ describe('captureWorkflowDiscovery', () => {
 
     expect(discovery.details).toContain('test-workflow');
     expect(discovery.details).toContain('test-feature');
-    expect(discovery.details).toContain('outline');
+    expect(discovery.details).toContain('inception');
   });
 
   it('generates valid UUID id', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -161,7 +161,7 @@ describe('captureWorkflowDiscovery', () => {
     const timestamp = '2024-01-01T12:00:00Z';
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
       timestamp,
     };
@@ -174,7 +174,7 @@ describe('captureWorkflowDiscovery', () => {
   it('falls back to current time if no timestamp', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -189,7 +189,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets high confidence for gate_approval', () => {
     const event: WorkflowEvent = {
       type: 'gate_approval',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -201,7 +201,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets high confidence for phase_complete', () => {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -213,7 +213,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets verified=true for gate_approval', () => {
     const event: WorkflowEvent = {
       type: 'gate_approval',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -225,7 +225,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets verified=true for phase_complete', () => {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -237,7 +237,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets verified=false for gate_rejection', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -262,7 +262,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets empty files_involved when no artifactId', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -274,7 +274,7 @@ describe('captureWorkflowDiscovery', () => {
   it('defaults agentName to workflow-engine', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -286,7 +286,7 @@ describe('captureWorkflowDiscovery', () => {
   it('uses provided agentName if specified', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
       agentName: 'oracle',
     };
@@ -299,7 +299,7 @@ describe('captureWorkflowDiscovery', () => {
   it('sets scope to project', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -311,14 +311,14 @@ describe('captureWorkflowDiscovery', () => {
   it('includes stage in task_context when provided', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'forge',
-      stage: 'build',
+      phase: 'construction',
+      stage: 'bolt',
       details: 'Test details',
     };
 
     const discovery = captureWorkflowDiscovery(event, baseContext);
 
-    expect(discovery.task_context).toContain('forge/build');
+    expect(discovery.task_context).toContain('construction/bolt');
   });
 
   it('includes risk tier in details when provided', () => {
@@ -329,7 +329,7 @@ describe('captureWorkflowDiscovery', () => {
 
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -346,7 +346,7 @@ describe('captureWorkflowDiscovery', () => {
 
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Test details',
     };
 
@@ -362,7 +362,7 @@ describe('queryRelevantDiscoveries', () => {
     featureName: 'test-feature',
     projectPath: '/test/project',
     sessionId: 'test-session',
-    phase: 'outline',
+    phase: 'inception',
   };
 
   it('returns empty array for no discoveries', () => {
@@ -423,7 +423,7 @@ describe('queryRelevantDiscoveries', () => {
         summary: 'Outline phase',
         details: 'Test',
         agent_name: 'workflow-engine',
-        task_context: 'test-feature (outline)', // Same phase
+        task_context: 'test-feature (inception)', // Same phase
         confidence: 0.8,
         verified: false,
         verification_count: 0,
@@ -439,7 +439,7 @@ describe('queryRelevantDiscoveries', () => {
         summary: 'Forge phase',
         details: 'Test',
         agent_name: 'workflow-engine',
-        task_context: 'test-feature (forge)', // Different phase
+        task_context: 'test-feature (construction)', // Different phase
         confidence: 0.8,
         verified: false,
         verification_count: 0,
@@ -643,7 +643,7 @@ describe('queryRelevantDiscoveries', () => {
         summary: 'Test',
         details: 'Test',
         agent_name: 'workflow-engine',
-        task_context: 'test (outline)', // +2
+        task_context: 'test (inception)', // +2
         confidence: 0.8,
         verified: false,
         verification_count: 0,
@@ -735,7 +735,7 @@ describe('trackMethodologyPreferences', () => {
   it('creates depth_preference for depth_override event', () => {
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'comprehensive',
     };
 
@@ -750,14 +750,14 @@ describe('trackMethodologyPreferences', () => {
   it('creates gate_pattern for gate_approval event', () => {
     const event: WorkflowEvent = {
       type: 'gate_approval',
-      phase: 'outline',
+      phase: 'inception',
       details: 'Gate passed',
     };
 
     const result = trackMethodologyPreferences(event, []);
 
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('gate_pattern:outline');
+    expect(result[0].key).toBe('gate_pattern:inception');
     expect(result[0].value).toBe('approved');
     expect(result[0].count).toBe(1);
   });
@@ -765,14 +765,14 @@ describe('trackMethodologyPreferences', () => {
   it('creates gate_pattern for gate_rejection event', () => {
     const event: WorkflowEvent = {
       type: 'gate_rejection',
-      phase: 'forge',
+      phase: 'construction',
       details: 'Gate failed',
     };
 
     const result = trackMethodologyPreferences(event, []);
 
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe('gate_pattern:forge');
+    expect(result[0].key).toBe('gate_pattern:construction');
     expect(result[0].value).toBe('rejected');
     expect(result[0].count).toBe(1);
   });
@@ -804,7 +804,7 @@ describe('trackMethodologyPreferences', () => {
 
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'comprehensive',
     };
 
@@ -826,7 +826,7 @@ describe('trackMethodologyPreferences', () => {
 
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'comprehensive',
     };
 
@@ -850,7 +850,7 @@ describe('trackMethodologyPreferences', () => {
 
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'basic',
     };
 
@@ -875,7 +875,7 @@ describe('trackMethodologyPreferences', () => {
 
     const event: WorkflowEvent = {
       type: 'depth_override',
-      phase: 'outline',
+      phase: 'inception',
       details: 'comprehensive',
     };
 
@@ -890,7 +890,7 @@ describe('trackMethodologyPreferences', () => {
   it('handles build_failure event with generic event key', () => {
     const event: WorkflowEvent = {
       type: 'build_failure',
-      phase: 'forge',
+      phase: 'construction',
       details: 'Compilation error',
     };
 
@@ -908,7 +908,7 @@ describe('recordTrustLevelChange', () => {
     featureName: 'test-feature',
     projectPath: '/test/project',
     sessionId: 'test-session',
-    phase: 'outline',
+    phase: 'inception',
   };
 
   it('creates discovery with planning_insight category', () => {

@@ -9,7 +9,7 @@ import {
 import type { DepthFactors, RiskFactors } from '../../features/workflow-engine/depth-assessment.js';
 
 describe('assessDepth', () => {
-  it('should return minimal depth for total <= 8', () => {
+  it('should return minimal depth for total <= 10', () => {
     const factors: DepthFactors = {
       clarity: 1,
       complexity: 1,
@@ -23,10 +23,10 @@ describe('assessDepth', () => {
 
     expect(result.total_score).toBe(6);
     expect(result.recommended_depth).toBe('minimal');
-    expect(result.skip_forge).toBe(true);
+    expect(result.skip_units).toBe(true);
   });
 
-  it('should return standard depth for total between 9-18', () => {
+  it('should return standard depth for total between 11-20', () => {
     const factors: DepthFactors = {
       clarity: 2,
       complexity: 2,
@@ -40,10 +40,10 @@ describe('assessDepth', () => {
 
     expect(result.total_score).toBe(13);
     expect(result.recommended_depth).toBe('standard');
-    expect(result.skip_forge).toBe(false);
+    expect(result.skip_units).toBe(false);
   });
 
-  it('should return comprehensive depth for total >= 19', () => {
+  it('should return comprehensive depth for total >= 21', () => {
     const factors: DepthFactors = {
       clarity: 5,
       complexity: 5,
@@ -57,7 +57,7 @@ describe('assessDepth', () => {
 
     expect(result.total_score).toBe(30);
     expect(result.recommended_depth).toBe('comprehensive');
-    expect(result.skip_forge).toBe(false);
+    expect(result.skip_units).toBe(false);
   });
 
   it('should handle boundary at total=8 (minimal)', () => {
@@ -74,9 +74,10 @@ describe('assessDepth', () => {
 
     expect(result.total_score).toBe(8);
     expect(result.recommended_depth).toBe('minimal');
+    expect(result.skip_units).toBe(true);
   });
 
-  it('should handle boundary at total=9 (standard)', () => {
+  it('should handle boundary at total=9 (minimal)', () => {
     const factors: DepthFactors = {
       clarity: 1,
       complexity: 1,
@@ -89,30 +90,66 @@ describe('assessDepth', () => {
     const result = assessDepth(factors);
 
     expect(result.total_score).toBe(9);
-    expect(result.recommended_depth).toBe('standard');
+    expect(result.recommended_depth).toBe('minimal');
+    expect(result.skip_units).toBe(true);
   });
 
-  it('should handle boundary at total=18 (standard)', () => {
+  it('should handle boundary at total=10 (minimal)', () => {
     const factors: DepthFactors = {
-      clarity: 3,
-      complexity: 3,
-      scope: 3,
-      risk: 3,
-      context: 3,
-      preferences: 3,
+      clarity: 1,
+      complexity: 2,
+      scope: 2,
+      risk: 2,
+      context: 1,
+      preferences: 2,
     };
 
     const result = assessDepth(factors);
 
-    expect(result.total_score).toBe(18);
-    expect(result.recommended_depth).toBe('standard');
+    expect(result.total_score).toBe(10);
+    expect(result.recommended_depth).toBe('minimal');
+    expect(result.skip_units).toBe(true);
   });
 
-  it('should handle boundary at total=19 (comprehensive)', () => {
+  it('should handle boundary at total=11 (standard)', () => {
+    const factors: DepthFactors = {
+      clarity: 1,
+      complexity: 2,
+      scope: 2,
+      risk: 2,
+      context: 2,
+      preferences: 2,
+    };
+
+    const result = assessDepth(factors);
+
+    expect(result.total_score).toBe(11);
+    expect(result.recommended_depth).toBe('standard');
+    expect(result.skip_units).toBe(false);
+  });
+
+  it('should handle boundary at total=20 (standard)', () => {
     const factors: DepthFactors = {
       clarity: 3,
       complexity: 3,
       scope: 3,
+      risk: 4,
+      context: 3,
+      preferences: 4,
+    };
+
+    const result = assessDepth(factors);
+
+    expect(result.total_score).toBe(20);
+    expect(result.recommended_depth).toBe('standard');
+    expect(result.skip_units).toBe(false);
+  });
+
+  it('should handle boundary at total=21 (comprehensive)', () => {
+    const factors: DepthFactors = {
+      clarity: 3,
+      complexity: 4,
+      scope: 4,
       risk: 3,
       context: 3,
       preferences: 4,
@@ -120,8 +157,9 @@ describe('assessDepth', () => {
 
     const result = assessDepth(factors);
 
-    expect(result.total_score).toBe(19);
+    expect(result.total_score).toBe(21);
     expect(result.recommended_depth).toBe('comprehensive');
+    expect(result.skip_units).toBe(false);
   });
 
   it('should clamp factors < 1 to 1', () => {
@@ -381,21 +419,21 @@ describe('assessDepthFromIdea', () => {
 
 Need basic logging.
 
-## Business Context
+## User Personas
 
-Internal tool.
+Internal developers.
 
 ## Success Metrics
 
 - Logs work
 
-## Constraints
+## Business Constraints
 
 - Use existing library
 
-## Solution Approach
+## Out of Scope
 
-Add console logging.
+External logging services.
 `;
 
   const COMPLEX_IDEA = `---
@@ -408,9 +446,15 @@ risk_tier: high
 
 Users currently cannot securely access their accounts. We need a robust authentication system that supports multiple login methods and provides secure session management. The system must handle OAuth 2.0, SAML, and traditional credentials.
 
-## Business Context
+## User Personas
 
-Our platform is expanding to handle sensitive user data across all users of the system. Regulatory requirements (GDPR, SOC2) mandate strong authentication controls. This is a system-wide infrastructure change affecting multiple services.
+- End users: Need seamless, secure access to accounts with multiple login options
+- Security admins: Require compliance monitoring and authentication audit trails
+- Mobile app users: Need OAuth support for social login integration
+- Enterprise customers: Require SAML SSO for their internal systems
+- API consumers: Need service-to-service authentication via API tokens
+- Developers: Need authentication service component and SDK integration layer
+- Compliance officers: Need GDPR-compliant PII handling module
 
 ## Success Metrics
 
@@ -420,7 +464,7 @@ Our platform is expanding to handle sensitive user data across all users of the 
 - Meet SOC2 compliance requirements
 - Zero PII data leaks
 
-## Constraints
+## Business Constraints
 
 - Must integrate with existing user database schema
 - Cannot break current session management (breaking change risk)
@@ -430,16 +474,9 @@ Our platform is expanding to handle sensitive user data across all users of the 
 - Authentication tokens must be encrypted
 - Migration of existing users required (irreversible data migration)
 
-## Solution Approach
+## Out of Scope
 
-Implement OAuth 2.0 based authentication with support for:
-- Traditional email/password with bcrypt hashing
-- Social login (Google, GitHub) via OAuth providers
-- Optional 2FA using TOTP
-- JWT-based session tokens with refresh mechanism
-- API integration layer for service-to-service auth
-- Centralized authentication service component
-- User data module for PII handling
+This is a system-wide infrastructure change affecting multiple services across all users of the platform.
 `;
 
   it('should return low depth for simple IDEA', () => {
@@ -447,14 +484,14 @@ Implement OAuth 2.0 based authentication with support for:
 
     // Simple IDEA: short content scores high on context/clarity (less info = needs more)
     // So total_score lands in standard range, not minimal
-    expect(result.total_score).toBeLessThanOrEqual(18);
+    expect(result.total_score).toBeLessThanOrEqual(20);
     expect(['minimal', 'standard']).toContain(result.recommended_depth);
   });
 
   it('should return comprehensive depth for complex IDEA', () => {
     const result = assessDepthFromIdea(COMPLEX_IDEA);
 
-    expect(result.total_score).toBeGreaterThanOrEqual(19);
+    expect(result.total_score).toBeGreaterThanOrEqual(21);
     expect(result.recommended_depth).toBe('comprehensive');
   });
 
@@ -466,9 +503,9 @@ Implement OAuth 2.0 based authentication with support for:
 
 Users need a way to view and edit their profile information.
 
-## Business Context
+## User Personas
 
-Requested by 50% of users in feedback surveys. Core feature for user engagement.
+Registered users who want to manage their account settings, update personal details, and customize their profile presentation.
 
 ## Success Metrics
 
@@ -476,25 +513,21 @@ Requested by 50% of users in feedback surveys. Core feature for user engagement.
 - Page load time under 2 seconds
 - Zero data loss during updates
 
-## Constraints
+## Business Constraints
 
 - Must integrate with existing API
 - Mobile responsive required
 - Use existing design system components
 
-## Solution Approach
+## Out of Scope
 
-Build a profile page with:
-- Form for editing name, email, bio
-- Avatar upload
-- Password change option
-- Save/cancel buttons
+Requested by 50% of users in feedback surveys. Core feature for user engagement.
 `;
 
     const result = assessDepthFromIdea(moderateIdea);
 
-    expect(result.total_score).toBeGreaterThan(8);
-    expect(result.total_score).toBeLessThan(19);
+    expect(result.total_score).toBeGreaterThan(10);
+    expect(result.total_score).toBeLessThan(21);
     expect(result.recommended_depth).toBe('standard');
   });
 
@@ -506,7 +539,7 @@ Build a profile page with:
 
 Need to migrate user data to new schema.
 
-## Constraints
+## Business Constraints
 
 - Irreversible data migration required
 - Must run during maintenance window
@@ -521,11 +554,11 @@ Need to migrate user data to new schema.
     const systemWideIdea = `
 # Feature: Global Rate Limiting
 
-## Business Context
+## Out of Scope
 
 This change affects all users of the system.
 
-## Solution Approach
+## User Personas
 
 Apply rate limits across all API endpoints.
 `;
@@ -543,7 +576,7 @@ Apply rate limits across all API endpoints.
 
 Users need to export their PII data for compliance.
 
-## Constraints
+## Business Constraints
 
 - Must handle sensitive personal information
 `;
@@ -557,7 +590,7 @@ Users need to export their PII data for compliance.
     const authIdea = `
 # Feature: Two-Factor Authentication
 
-## Solution Approach
+## User Personas
 
 Add authentication token management.
 `;
@@ -571,7 +604,7 @@ Add authentication token management.
     const gdprIdea = `
 # Feature: Data Retention Policy
 
-## Constraints
+## Business Constraints
 
 - Must comply with GDPR requirements
 `;
@@ -585,7 +618,7 @@ Add authentication token management.
     const complianceIdea = `
 # Feature: Audit Logging
 
-## Business Context
+## Out of Scope
 
 Required for compliance with regulatory standards.
 `;
@@ -619,24 +652,24 @@ This is just a title and some text.
 });
 
 describe('getDepthLabel', () => {
-  it('should return label containing "Minimal" and "skip Forge" for minimal', () => {
+  it('should return label containing "SHALLOW" and "skip UNIT" for minimal', () => {
     const label = getDepthLabel('minimal');
 
-    expect(label).toContain('Minimal');
-    expect(label).toMatch(/skip.*Forge/i);
+    expect(label).toContain('SHALLOW');
+    expect(label).toMatch(/skip.*UNIT/i);
   });
 
-  it('should return label containing "Standard" and "Vision + Forge" for standard', () => {
+  it('should return label containing "MEDIUM" and "Vision + Forge" for standard', () => {
     const label = getDepthLabel('standard');
 
-    expect(label).toContain('Standard');
-    expect(label).toMatch(/Vision.*Forge/i);
+    expect(label).toContain('MEDIUM');
+    expect(label).toMatch(/Inception.*Construction/i);
   });
 
-  it('should return label containing "Comprehensive" and "rigorous" for comprehensive', () => {
+  it('should return label containing "DEEP" and "rigorous" for comprehensive', () => {
     const label = getDepthLabel('comprehensive');
 
-    expect(label).toContain('Comprehensive');
+    expect(label).toContain('DEEP');
     expect(label).toMatch(/rigorous/i);
   });
 });

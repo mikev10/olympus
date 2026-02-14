@@ -16,7 +16,31 @@ import {
   updateMasterPlanProgress,
 } from '../../features/workflow-engine/execution.js';
 import { saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
-import { WorkflowCheckpoint, DependencyGraph } from '../../features/workflow-engine/types.js';
+import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
+import type { DependencyGraph } from '../../features/workflow-engine/types.js';
+
+// Helper to create a V3 checkpoint for testing
+function createCheckpointV3(overrides: Partial<WorkflowCheckpointV3> = {}): WorkflowCheckpointV3 {
+  return {
+    schema_version: '3.0.0',
+    workflow_id: 'test-workflow',
+    feature_name: 'test-feature',
+    current_phase: 'inception',
+    current_stage: 'intent',
+    status: 'in_progress',
+    phases: {
+      discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'in_progress', started_at: '2024-01-15T10:00:00Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+    },
+    manifest_path: 'aidlc-docs/test-workflow/manifest.json',
+    trust_state_path: 'aidlc-docs/test-workflow/trust-state.json',
+    created_at: '2024-01-15T10:00:00Z',
+    updated_at: '2024-01-15T10:00:00Z',
+    ...overrides,
+  };
+}
 
 describe('Execution Module', () => {
   let tmpDir: string;
@@ -31,29 +55,7 @@ describe('Execution Module', () => {
 
   describe('updateTaskStatus', () => {
     it('creates new task status record', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       await saveCheckpoint(tmpDir, checkpoint);
 
@@ -64,28 +66,7 @@ describe('Execution Module', () => {
     });
 
     it('updates existing task status record', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
+      const checkpoint = createCheckpointV3({
         resume_context: {
           task_statuses: [
             {
@@ -95,7 +76,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       await saveCheckpoint(tmpDir, checkpoint);
 
@@ -106,29 +87,7 @@ describe('Execution Module', () => {
     });
 
     it('stores error message for failed tasks', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       await saveCheckpoint(tmpDir, checkpoint);
 
@@ -141,29 +100,7 @@ describe('Execution Module', () => {
 
   describe('getTaskStatus', () => {
     it('returns pending for non-existent task', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       await saveCheckpoint(tmpDir, checkpoint);
 
@@ -174,28 +111,7 @@ describe('Execution Module', () => {
 
   describe('getBlockedTasks', () => {
     it('identifies tasks blocked by incomplete dependencies', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
+      const checkpoint = createCheckpointV3({
         resume_context: {
           task_statuses: [
             {
@@ -205,7 +121,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -217,7 +133,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -226,28 +142,7 @@ describe('Execution Module', () => {
     });
 
     it('returns empty array when no tasks are blocked', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
+      const checkpoint = createCheckpointV3({
         resume_context: {
           task_statuses: [
             {
@@ -257,7 +152,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -269,7 +164,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -280,29 +175,7 @@ describe('Execution Module', () => {
 
   describe('getNextReadyTask', () => {
     it('returns first pending task with all dependencies met', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       const graph: DependencyGraph = {
         nodes: [
@@ -314,7 +187,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -323,28 +196,7 @@ describe('Execution Module', () => {
     });
 
     it('returns null when no tasks are ready', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
+      const checkpoint = createCheckpointV3({
         resume_context: {
           task_statuses: [
             {
@@ -359,7 +211,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -371,7 +223,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -382,29 +234,7 @@ describe('Execution Module', () => {
 
   describe('getExecutionOrder', () => {
     it('returns topologically sorted task order', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       const graph: DependencyGraph = {
         nodes: [
@@ -420,7 +250,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -429,29 +259,7 @@ describe('Execution Module', () => {
     });
 
     it('throws error for circular dependencies', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test-workflow',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      const checkpoint = createCheckpointV3();
 
       const graph: DependencyGraph = {
         nodes: [
@@ -466,7 +274,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-workflow/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-workflow/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -478,28 +286,8 @@ describe('Execution Module', () => {
 
   describe('updateMasterPlanProgress', () => {
     it('creates progress section in plan file', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
+      const checkpoint = createCheckpointV3({
         workflow_id: 'test-plan',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
         resume_context: {
           task_statuses: [
             {
@@ -514,7 +302,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -530,7 +318,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-plan/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-plan/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -552,28 +340,8 @@ describe('Execution Module', () => {
     });
 
     it('updates existing progress section', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
+      const checkpoint = createCheckpointV3({
         workflow_id: 'test-plan',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
         resume_context: {
           task_statuses: [
             {
@@ -588,7 +356,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -600,7 +368,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-plan/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-plan/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -621,28 +389,8 @@ describe('Execution Module', () => {
     });
 
     it('shows blocked tasks in progress section', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
+      const checkpoint = createCheckpointV3({
         workflow_id: 'test-plan',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
         resume_context: {
           task_statuses: [
             {
@@ -652,7 +400,7 @@ describe('Execution Module', () => {
             },
           ],
         },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -664,7 +412,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-plan/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-plan/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 
@@ -682,29 +430,9 @@ describe('Execution Module', () => {
     });
 
     it('handles non-existent plan file gracefully', async () => {
-      const checkpoint: WorkflowCheckpoint = {
-        schema_version: '1.0.0',
+      const checkpoint = createCheckpointV3({
         workflow_id: 'test-plan',
-        feature_name: 'test-feature',
-        created_at: '2024-01-15T10:00:00Z',
-        updated_at: '2024-01-15T10:00:00Z',
-        current_stage: 'intents',
-        status: 'in_progress',
-        artifacts: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-        validation_results: {
-          idea: null,
-          prd: null,
-          spec: null,
-          intents: null,
-          complete: null,
-        },
-      };
+      });
 
       const graph: DependencyGraph = {
         nodes: [
@@ -715,7 +443,7 @@ describe('Execution Module', () => {
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const graphDir = join(tmpDir, '.olympus/workflow/test-plan/intents');
+      const graphDir = join(tmpDir, 'aidlc-docs/test-plan/intents');
       await fs.ensureDir(graphDir);
       await fs.writeJson(join(graphDir, 'dependency-graph.json'), graph);
 

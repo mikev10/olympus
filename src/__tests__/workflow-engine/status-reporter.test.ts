@@ -41,7 +41,7 @@ function createTestArtifact(overrides: Partial<ManifestArtifact> = {}): Manifest
   return {
     id: 'test-artifact',
     type: 'requirements',
-    phase: 'vision',
+    phase: 'inception',
     stage: 'discover',
     path: '/test/path',
     created_at: '2024-01-01T00:00:00Z',
@@ -64,9 +64,10 @@ function createTestManifest(overrides: Partial<ManifestSchema> = {}): ManifestSc
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     phases: {
-      vision: createTestPhaseState(),
-      forge: createTestPhaseState(),
-      summit: createTestPhaseState(),
+      discovery: createTestPhaseState(),
+      inception: createTestPhaseState(),
+      construction: createTestPhaseState(),
+      operations: createTestPhaseState(),
     },
     depth_assessment: null,
     artifacts: [],
@@ -108,7 +109,7 @@ function createTestRisk(overrides: Partial<RiskEntry> = {}): RiskEntry {
 
 function createTestGateEntry(overrides: Partial<GateAuditEntry> = {}): GateAuditEntry {
   return {
-    phase: 'vision',
+    phase: 'inception',
     timestamp: '2024-01-01T00:00:00Z',
     action: 'approved',
     actor: 'human',
@@ -148,7 +149,7 @@ function createTestDepthAssessment(overrides: Partial<DepthAssessment> = {}): De
     preferences: 2,
     total_score: 17,
     recommended_depth: 'standard',
-    skip_forge: false,
+    skip_units: false,
     risk_tier: {
       tier: 2,
       rationale: 'Moderate risk',
@@ -184,17 +185,18 @@ describe('computePhaseProgress', () => {
     const manifest = createTestManifest({
       artifacts: [],
       phases: {
-        vision: createTestPhaseState({ status: 'not_started' }),
-        forge: createTestPhaseState({ status: 'not_started' }),
-        summit: createTestPhaseState({ status: 'not_started' }),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'not_started' }),
+        construction: createTestPhaseState({ status: 'not_started' }),
+        operations: createTestPhaseState({ status: 'not_started' }),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress).toHaveLength(3);
+    expect(progress).toHaveLength(4);
     expect(progress[0]).toEqual({
-      phase: 'vision',
+      phase: 'discovery',
       percentage: 0,
       status: 'not_started',
       artifactCount: 0,
@@ -205,16 +207,17 @@ describe('computePhaseProgress', () => {
     const manifest = createTestManifest({
       artifacts: [],
       phases: {
-        vision: createTestPhaseState({ status: 'complete' }),
-        forge: createTestPhaseState({ status: 'not_started' }),
-        summit: createTestPhaseState({ status: 'not_started' }),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'complete' }),
+        construction: createTestPhaseState({ status: 'not_started' }),
+        operations: createTestPhaseState({ status: 'not_started' }),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress[0]).toEqual({
-      phase: 'vision',
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 100,
       status: 'complete',
       artifactCount: 0,
@@ -224,20 +227,21 @@ describe('computePhaseProgress', () => {
   it('returns 100% for phase with all active artifacts', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'a2', phase: 'vision', contract_status: 'active' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'a2', phase: 'inception', contract_status: 'active' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'in_progress' }),
-        forge: createTestPhaseState(),
-        summit: createTestPhaseState(),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'in_progress' }),
+        construction: createTestPhaseState(),
+        operations: createTestPhaseState(),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress[0]).toEqual({
-      phase: 'vision',
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 100,
       status: 'in_progress',
       artifactCount: 2,
@@ -247,20 +251,21 @@ describe('computePhaseProgress', () => {
   it('returns 100% for phase with all fulfilled artifacts', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'fulfilled' }),
-        createTestArtifact({ id: 'a2', phase: 'vision', contract_status: 'fulfilled' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'fulfilled' }),
+        createTestArtifact({ id: 'a2', phase: 'inception', contract_status: 'fulfilled' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'complete' }),
-        forge: createTestPhaseState(),
-        summit: createTestPhaseState(),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'complete' }),
+        construction: createTestPhaseState(),
+        operations: createTestPhaseState(),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress[0]).toEqual({
-      phase: 'vision',
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 100,
       status: 'complete',
       artifactCount: 2,
@@ -270,22 +275,23 @@ describe('computePhaseProgress', () => {
   it('returns partial percentage for phase with mix of draft/active artifacts', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'a2', phase: 'vision', contract_status: 'draft' }),
-        createTestArtifact({ id: 'a3', phase: 'vision', contract_status: 'draft' }),
-        createTestArtifact({ id: 'a4', phase: 'vision', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'a2', phase: 'inception', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a3', phase: 'inception', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a4', phase: 'inception', contract_status: 'draft' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'in_progress' }),
-        forge: createTestPhaseState(),
-        summit: createTestPhaseState(),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'in_progress' }),
+        construction: createTestPhaseState(),
+        operations: createTestPhaseState(),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress[0]).toEqual({
-      phase: 'vision',
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 25, // 1/4 = 25%
       status: 'in_progress',
       artifactCount: 4,
@@ -295,61 +301,70 @@ describe('computePhaseProgress', () => {
   it('counts stale and violated artifacts correctly (not as completed)', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'a2', phase: 'vision', contract_status: 'violated' }),
-        createTestArtifact({ id: 'a3', phase: 'vision', contract_status: 'stale' }),
-        createTestArtifact({ id: 'a4', phase: 'vision', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'a2', phase: 'inception', contract_status: 'violated' }),
+        createTestArtifact({ id: 'a3', phase: 'inception', contract_status: 'stale' }),
+        createTestArtifact({ id: 'a4', phase: 'inception', contract_status: 'draft' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'in_progress' }),
-        forge: createTestPhaseState(),
-        summit: createTestPhaseState(),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'in_progress' }),
+        construction: createTestPhaseState(),
+        operations: createTestPhaseState(),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress[0]).toEqual({
-      phase: 'vision',
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 25, // Only 'a1' is active, 1/4 = 25%
       status: 'in_progress',
       artifactCount: 4,
     });
   });
 
-  it('computes progress for all three phases independently', () => {
+  it('computes progress for all phases independently', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'v1', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'v2', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'f1', phase: 'forge', contract_status: 'active' }),
-        createTestArtifact({ id: 'f2', phase: 'forge', contract_status: 'draft' }),
-        createTestArtifact({ id: 's1', phase: 'summit', contract_status: 'draft' }),
+        createTestArtifact({ id: 'd1', phase: 'discovery', contract_status: 'active' }),
+        createTestArtifact({ id: 'i1', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'i2', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'c1', phase: 'construction', contract_status: 'active' }),
+        createTestArtifact({ id: 'c2', phase: 'construction', contract_status: 'draft' }),
+        createTestArtifact({ id: 'o1', phase: 'operations', contract_status: 'draft' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'complete' }),
-        forge: createTestPhaseState({ status: 'in_progress' }),
-        summit: createTestPhaseState({ status: 'not_started' }),
+        discovery: createTestPhaseState({ status: 'complete' }),
+        inception: createTestPhaseState({ status: 'complete' }),
+        construction: createTestPhaseState({ status: 'in_progress' }),
+        operations: createTestPhaseState({ status: 'not_started' }),
       },
     });
 
     const progress = computePhaseProgress(manifest);
 
-    expect(progress).toHaveLength(3);
+    expect(progress).toHaveLength(4);
     expect(progress[0]).toEqual({
-      phase: 'vision',
+      phase: 'discovery',
+      percentage: 100,
+      status: 'complete',
+      artifactCount: 1,
+    });
+    expect(progress[1]).toEqual({
+      phase: 'inception',
       percentage: 100,
       status: 'complete',
       artifactCount: 2,
     });
-    expect(progress[1]).toEqual({
-      phase: 'forge',
+    expect(progress[2]).toEqual({
+      phase: 'construction',
       percentage: 50,
       status: 'in_progress',
       artifactCount: 2,
     });
-    expect(progress[2]).toEqual({
-      phase: 'summit',
+    expect(progress[3]).toEqual({
+      phase: 'operations',
       percentage: 0,
       status: 'not_started',
       artifactCount: 1,
@@ -360,7 +375,7 @@ describe('computePhaseProgress', () => {
 describe('formatPhaseProgressBar', () => {
   it('formats 0% with empty bar', () => {
     const entry = {
-      phase: 'vision' as WorkflowPhase,
+      phase: 'inception' as WorkflowPhase,
       percentage: 0,
       status: 'not_started',
       artifactCount: 0,
@@ -376,7 +391,7 @@ describe('formatPhaseProgressBar', () => {
 
   it('formats 100% with full bar', () => {
     const entry = {
-      phase: 'vision' as WorkflowPhase,
+      phase: 'inception' as WorkflowPhase,
       percentage: 100,
       status: 'complete',
       artifactCount: 5,
@@ -392,7 +407,7 @@ describe('formatPhaseProgressBar', () => {
 
   it('formats 50% with half bar', () => {
     const entry = {
-      phase: 'forge' as WorkflowPhase,
+      phase: 'construction' as WorkflowPhase,
       percentage: 50,
       status: 'in_progress',
       artifactCount: 10,
@@ -408,7 +423,7 @@ describe('formatPhaseProgressBar', () => {
 
   it('capitalizes phase name', () => {
     const entry = {
-      phase: 'vision' as WorkflowPhase,
+      phase: 'inception' as WorkflowPhase,
       percentage: 0,
       status: 'not_started',
       artifactCount: 0,
@@ -416,34 +431,34 @@ describe('formatPhaseProgressBar', () => {
 
     const result = formatPhaseProgressBar(entry);
 
-    expect(result).toContain('Vision  ');
+    expect(result).toMatch(/^Inception\s/);
   });
 
-  it('pads phase name to 8 characters', () => {
-    const visionEntry = {
-      phase: 'vision' as WorkflowPhase,
+  it('pads phase name to consistent width', () => {
+    const inceptionEntry = {
+      phase: 'inception' as WorkflowPhase,
       percentage: 0,
       status: 'not_started',
       artifactCount: 0,
     };
-    const summitEntry = {
-      phase: 'summit' as WorkflowPhase,
+    const operationsEntry = {
+      phase: 'operations' as WorkflowPhase,
       percentage: 0,
       status: 'not_started',
       artifactCount: 0,
     };
 
-    const visionResult = formatPhaseProgressBar(visionEntry);
-    const summitResult = formatPhaseProgressBar(summitEntry);
+    const inceptionResult = formatPhaseProgressBar(inceptionEntry);
+    const operationsResult = formatPhaseProgressBar(operationsEntry);
 
-    // Both should start with phase name padded to 8 chars
-    expect(visionResult.substring(0, 8)).toBe('Vision  ');
-    expect(summitResult.substring(0, 8)).toBe('Summit  ');
+    // Both should start with capitalized phase name followed by spaces
+    expect(inceptionResult).toMatch(/^Inception\s+\[/);
+    expect(operationsResult).toMatch(/^Operations\s+\[/);
   });
 
   it('formats 25% correctly', () => {
     const entry = {
-      phase: 'forge' as WorkflowPhase,
+      phase: 'construction' as WorkflowPhase,
       percentage: 25,
       status: 'in_progress',
       artifactCount: 4,
@@ -457,7 +472,7 @@ describe('formatPhaseProgressBar', () => {
 
   it('formats 75% correctly', () => {
     const entry = {
-      phase: 'summit' as WorkflowPhase,
+      phase: 'operations' as WorkflowPhase,
       percentage: 75,
       status: 'in_progress',
       artifactCount: 8,
@@ -482,23 +497,23 @@ describe('buildArtifactTree', () => {
   it('groups artifacts by phase', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'v1', phase: 'vision', stage: 'discover' }),
-        createTestArtifact({ id: 'f1', phase: 'forge', stage: 'units' }),
+        createTestArtifact({ id: 'v1', phase: 'inception', stage: 'discover' }),
+        createTestArtifact({ id: 'f1', phase: 'construction', stage: 'unit' }),
       ],
     });
 
     const result = buildArtifactTree(manifest);
 
-    expect(result).toContain('[Vision]');
-    expect(result).toContain('[Forge]');
+    expect(result).toContain('[Inception]');
+    expect(result).toContain('[Construction]');
   });
 
   it('groups artifacts by stage within phase', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'v1', phase: 'vision', stage: 'discover' }),
-        createTestArtifact({ id: 'v2', phase: 'vision', stage: 'assess' }),
-        createTestArtifact({ id: 'v3', phase: 'vision', stage: 'discover' }),
+        createTestArtifact({ id: 'v1', phase: 'inception', stage: 'discover' }),
+        createTestArtifact({ id: 'v2', phase: 'inception', stage: 'assess' }),
+        createTestArtifact({ id: 'v3', phase: 'inception', stage: 'discover' }),
       ],
     });
 
@@ -511,7 +526,7 @@ describe('buildArtifactTree', () => {
   it('shows correct contract status icon for draft', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', contract_status: 'draft' }),
       ],
     });
 
@@ -523,7 +538,7 @@ describe('buildArtifactTree', () => {
   it('shows correct contract status icon for active', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', contract_status: 'active' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', contract_status: 'active' }),
       ],
     });
 
@@ -535,7 +550,7 @@ describe('buildArtifactTree', () => {
   it('shows correct contract status icon for fulfilled', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', contract_status: 'fulfilled' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', contract_status: 'fulfilled' }),
       ],
     });
 
@@ -547,7 +562,7 @@ describe('buildArtifactTree', () => {
   it('shows correct contract status icon for violated', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', contract_status: 'violated' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', contract_status: 'violated' }),
       ],
     });
 
@@ -559,7 +574,7 @@ describe('buildArtifactTree', () => {
   it('shows correct contract status icon for stale', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', contract_status: 'stale' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', contract_status: 'stale' }),
       ],
     });
 
@@ -571,7 +586,7 @@ describe('buildArtifactTree', () => {
   it('shows validation mark v for passed', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', validation_passed: true }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', validation_passed: true }),
       ],
     });
 
@@ -583,7 +598,7 @@ describe('buildArtifactTree', () => {
   it('shows validation mark x for failed', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', validation_passed: false }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', validation_passed: false }),
       ],
     });
 
@@ -595,7 +610,7 @@ describe('buildArtifactTree', () => {
   it('shows validation mark - for null', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', validation_passed: null }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', validation_passed: null }),
       ],
     });
 
@@ -607,7 +622,7 @@ describe('buildArtifactTree', () => {
   it('shows artifact type in parentheses', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', stage: 'discover', type: 'requirements' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', stage: 'discover', type: 'requirements' }),
       ],
     });
 
@@ -619,21 +634,21 @@ describe('buildArtifactTree', () => {
   it('builds complete tree structure with hierarchy', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'v1', phase: 'vision', stage: 'discover', type: 'requirements', contract_status: 'active', validation_passed: true }),
-        createTestArtifact({ id: 'v2', phase: 'vision', stage: 'assess', type: 'depth', contract_status: 'fulfilled', validation_passed: true }),
-        createTestArtifact({ id: 'f1', phase: 'forge', stage: 'units', type: 'unit', contract_status: 'draft', validation_passed: null }),
+        createTestArtifact({ id: 'v1', phase: 'inception', stage: 'discover', type: 'requirements', contract_status: 'active', validation_passed: true }),
+        createTestArtifact({ id: 'v2', phase: 'inception', stage: 'assess', type: 'depth', contract_status: 'fulfilled', validation_passed: true }),
+        createTestArtifact({ id: 'f1', phase: 'construction', stage: 'unit', type: 'unit', contract_status: 'draft', validation_passed: null }),
       ],
     });
 
     const result = buildArtifactTree(manifest);
 
-    expect(result).toContain('[Vision]');
+    expect(result).toContain('[Inception]');
     expect(result).toContain('  discover/');
     expect(result).toContain('    [+] v1 (requirements) [v]');
     expect(result).toContain('  assess/');
     expect(result).toContain('    [++] v2 (depth) [v]');
-    expect(result).toContain('[Forge]');
-    expect(result).toContain('  units/');
+    expect(result).toContain('[Construction]');
+    expect(result).toContain('  unit/');
     expect(result).toContain('    [o] f1 (unit) [-]');
   });
 });
@@ -723,47 +738,47 @@ describe('buildGateSummary', () => {
 
   it('shows individual entries with phase and actor', () => {
     const entries = [
-      createTestGateEntry({ phase: 'vision', action: 'approved', actor: 'human' }),
+      createTestGateEntry({ phase: 'inception', action: 'approved', actor: 'human' }),
     ];
 
     const result = buildGateSummary(entries);
 
-    expect(result).toContain('[APPROVED] Vision by human');
+    expect(result).toContain('[APPROVED] Inception by human');
   });
 
   it('shows reason if provided', () => {
     const entries = [
-      createTestGateEntry({ phase: 'forge', action: 'bypassed', actor: 'config', reason: 'Auto-approve enabled' }),
+      createTestGateEntry({ phase: 'construction', action: 'bypassed', actor: 'config', reason: 'Auto-approve enabled' }),
     ];
 
     const result = buildGateSummary(entries);
 
-    expect(result).toContain('[BYPASSED] Forge by config: Auto-approve enabled');
+    expect(result).toContain('[BYPASSED] Construction by config: Auto-approve enabled');
   });
 
   it('does not show colon if no reason', () => {
     const entries = [
-      createTestGateEntry({ phase: 'summit', action: 'approved', actor: 'trust', reason: null }),
+      createTestGateEntry({ phase: 'operations', action: 'approved', actor: 'trust', reason: null }),
     ];
 
     const result = buildGateSummary(entries);
 
-    expect(result).toContain('[APPROVED] Summit by trust');
+    expect(result).toContain('[APPROVED] Operations by trust');
     expect(result).not.toContain('trust:');
   });
 
   it('capitalizes phase names', () => {
     const entries = [
-      createTestGateEntry({ phase: 'vision', action: 'approved', actor: 'human' }),
-      createTestGateEntry({ phase: 'forge', action: 'approved', actor: 'human' }),
-      createTestGateEntry({ phase: 'summit', action: 'approved', actor: 'human' }),
+      createTestGateEntry({ phase: 'inception', action: 'approved', actor: 'human' }),
+      createTestGateEntry({ phase: 'construction', action: 'approved', actor: 'human' }),
+      createTestGateEntry({ phase: 'operations', action: 'approved', actor: 'human' }),
     ];
 
     const result = buildGateSummary(entries);
 
-    expect(result).toContain('Vision');
-    expect(result).toContain('Forge');
-    expect(result).toContain('Summit');
+    expect(result).toContain('Inception');
+    expect(result).toContain('Construction');
+    expect(result).toContain('Operations');
   });
 });
 
@@ -970,35 +985,35 @@ describe('buildDepthDisplay', () => {
     expect(result).toContain('(score: 17/30)');
   });
 
-  it('shows skip-forge flag when true', () => {
+  it('shows skip-units flag when true', () => {
     const depth = createTestDepthAssessment({
       recommended_depth: 'minimal',
       total_score: 8,
-      skip_forge: true,
+      skip_units: true,
     });
 
     const result = buildDepthDisplay(depth);
 
-    expect(result).toContain('[skip-forge]');
+    expect(result).toContain('[skip-units]');
   });
 
-  it('does not show skip-forge flag when false', () => {
+  it('does not show skip-units flag when false', () => {
     const depth = createTestDepthAssessment({
       recommended_depth: 'standard',
       total_score: 17,
-      skip_forge: false,
+      skip_units: false,
     });
 
     const result = buildDepthDisplay(depth);
 
-    expect(result).not.toContain('[skip-forge]');
+    expect(result).not.toContain('[skip-units]');
   });
 
   it('formats minimal depth correctly', () => {
     const depth = createTestDepthAssessment({
       recommended_depth: 'minimal',
       total_score: 9,
-      skip_forge: false,
+      skip_units: false,
     });
 
     const result = buildDepthDisplay(depth);
@@ -1010,7 +1025,7 @@ describe('buildDepthDisplay', () => {
     const depth = createTestDepthAssessment({
       recommended_depth: 'comprehensive',
       total_score: 25,
-      skip_forge: false,
+      skip_units: false,
     });
 
     const result = buildDepthDisplay(depth);
@@ -1065,7 +1080,7 @@ describe('generateWorkflowReport', () => {
   it('returns all report sections', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'active' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'active' }),
       ],
     });
 
@@ -1115,7 +1130,7 @@ describe('generateWorkflowReport', () => {
 
     const report = generateWorkflowReport(manifest);
 
-    expect(report.phaseProgress).toHaveLength(3);
+    expect(report.phaseProgress).toHaveLength(4);
     expect(report.artifactTree).toBe('');
     expect(report.riskSummary).toBe('No risks registered');
     expect(report.gateSummary).toBe('No gate transitions recorded');
@@ -1169,20 +1184,21 @@ describe('generateWorkflowReport', () => {
   it('formats summary line correctly', () => {
     const manifest = createTestManifest({
       artifacts: [
-        createTestArtifact({ id: 'a1', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'a2', phase: 'vision', contract_status: 'active' }),
-        createTestArtifact({ id: 'a3', phase: 'forge', contract_status: 'draft' }),
+        createTestArtifact({ id: 'a1', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'a2', phase: 'inception', contract_status: 'active' }),
+        createTestArtifact({ id: 'a3', phase: 'construction', contract_status: 'draft' }),
       ],
       phases: {
-        vision: createTestPhaseState({ status: 'complete' }),
-        forge: createTestPhaseState({ status: 'in_progress' }),
-        summit: createTestPhaseState({ status: 'not_started' }),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'complete' }),
+        construction: createTestPhaseState({ status: 'in_progress' }),
+        operations: createTestPhaseState({ status: 'not_started' }),
       },
     });
 
     const report = generateWorkflowReport(manifest);
 
-    expect(report.summary).toContain('1/3 phases complete');
+    expect(report.summary).toContain('1/4 phases complete');
     expect(report.summary).toContain('3 artifacts total');
   });
 
@@ -1191,14 +1207,14 @@ describe('generateWorkflowReport', () => {
       workflow_id: 'wf-complete',
       feature_name: 'Complete Feature',
       artifacts: [
-        createTestArtifact({ id: 'v1', phase: 'vision', stage: 'discover', contract_status: 'active', validation_passed: true }),
-        createTestArtifact({ id: 'f1', phase: 'forge', stage: 'units', contract_status: 'draft', validation_passed: null }),
+        createTestArtifact({ id: 'v1', phase: 'inception', stage: 'discover', contract_status: 'active', validation_passed: true }),
+        createTestArtifact({ id: 'f1', phase: 'construction', stage: 'unit', contract_status: 'draft', validation_passed: null }),
       ],
       risks: [
         createTestRisk({ id: 'r1', status: 'open', description: 'Test risk' }),
       ],
       gate_audit: [
-        createTestGateEntry({ phase: 'vision', action: 'approved', actor: 'human' }),
+        createTestGateEntry({ phase: 'inception', action: 'approved', actor: 'human' }),
       ],
       alignment_checks: [
         createTestAlignmentCheck({ source_artifact_id: 'v1', target_artifact_id: 'f1', alignment_passed: true }),
@@ -1206,9 +1222,10 @@ describe('generateWorkflowReport', () => {
       depth_assessment: createTestDepthAssessment({ recommended_depth: 'standard', total_score: 17 }),
       risk_tier: createTestRiskTier({ tier: 2, rationale: 'Moderate risk' }),
       phases: {
-        vision: createTestPhaseState({ status: 'complete' }),
-        forge: createTestPhaseState({ status: 'in_progress' }),
-        summit: createTestPhaseState({ status: 'not_started' }),
+        discovery: createTestPhaseState(),
+      inception: createTestPhaseState({ status: 'complete' }),
+        construction: createTestPhaseState({ status: 'in_progress' }),
+        operations: createTestPhaseState({ status: 'not_started' }),
       },
     });
     const trustState = createTestTrustState({ current_level: 1, total_transitions: 5 });
@@ -1217,15 +1234,15 @@ describe('generateWorkflowReport', () => {
 
     expect(report.fullReport).toContain('# Workflow Status: Complete Feature');
     expect(report.fullReport).toContain('ID: wf-complete');
-    expect(report.fullReport).toContain('Vision');
-    expect(report.fullReport).toContain('Forge');
-    expect(report.fullReport).toContain('Summit');
+    expect(report.fullReport).toContain('Inception');
+    expect(report.fullReport).toContain('Construction');
+    expect(report.fullReport).toContain('Operations');
     expect(report.fullReport).toContain('Depth: standard');
     expect(report.fullReport).toContain('Risk Tier: 2');
     expect(report.fullReport).toContain('Trust Level 1: Earned');
-    expect(report.fullReport).toContain('[Vision]');
+    expect(report.fullReport).toContain('[Inception]');
     expect(report.fullReport).toContain('[PASS] v1 -> f1');
     expect(report.fullReport).toContain('[OPEN] r1: Test risk');
-    expect(report.fullReport).toContain('[APPROVED] Vision by human');
+    expect(report.fullReport).toContain('[APPROVED] Inception by human');
   });
 });

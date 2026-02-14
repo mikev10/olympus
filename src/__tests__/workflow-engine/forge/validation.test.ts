@@ -11,7 +11,7 @@ import {
 describe('Forge Validation', () => {
   const testDir = join(process.cwd(), '.test-validation');
   const unitsDir = join(testDir, 'units');
-  const intentsDir = join(testDir, 'intents');
+  const intentDir = join(testDir, 'inception');
   const designDir = join(testDir, 'design');
   const boltsDir = join(testDir, 'bolts');
 
@@ -64,10 +64,10 @@ Use migration framework for database schema creation.
 `;
 
     it('should return passed=false if units directory does not exist', async () => {
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(0);
@@ -77,10 +77,10 @@ Use migration framework for database schema creation.
 
     it('should return passed=false if no unit files found', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(0);
@@ -91,7 +91,7 @@ Use migration framework for database schema creation.
       mkdirSync(unitsDir, { recursive: true });
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(0);
@@ -100,11 +100,11 @@ Use migration framework for database schema creation.
 
     it('should return passed=true for valid unit files', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(true);
       expect(result.coverage_percentage).toBe(100);
@@ -113,8 +113,8 @@ Use migration framework for database schema creation.
 
     it('should return passed=false if unit missing frontmatter', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const noFrontmatterContent = `
 ## Goal
@@ -123,7 +123,7 @@ Create database tables
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), noFrontmatterContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(0);
@@ -132,8 +132,8 @@ Create database tables
 
     it('should return passed=false if unit missing required frontmatter field', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const missingFieldContent = `---
 id: UNIT-001
@@ -156,7 +156,7 @@ Use migrations
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), missingFieldContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues[0]).toContain('UNIT-001: Missing frontmatter fields: estimated_effort');
@@ -164,8 +164,8 @@ Use migrations
 
     it('should return passed=false if parent_intent references nonexistent intent', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const invalidParentContent = `---
 id: UNIT-001
@@ -189,7 +189,7 @@ Use migrations
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), invalidParentContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues[0]).toContain('UNIT-001: References non-existent parent intent: INTENT-999');
@@ -197,8 +197,8 @@ Use migrations
 
     it('should return passed=false if effort estimate invalid', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const invalidEffortContent = `---
 id: UNIT-001
@@ -222,7 +222,7 @@ Use migrations
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), invalidEffortContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues[0]).toContain('UNIT-001: Invalid effort estimate 3 (must be 1, 2, 4, 8, or 16)');
@@ -230,8 +230,8 @@ Use migrations
 
     it('should return passed=false if unit missing required section', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const missingSectionContent = `---
 id: UNIT-001
@@ -251,7 +251,7 @@ Create database tables
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), missingSectionContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues[0]).toContain('UNIT-001: Missing sections: Implementation Notes');
@@ -259,8 +259,8 @@ Create database tables
 
     it('should return passed=false if acceptance criteria has no bullet points', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       const noCriteriaContent = `---
 id: UNIT-001
@@ -284,7 +284,7 @@ Use migrations
 `;
       writeFileSync(join(unitsDir, 'UNIT-001.md'), noCriteriaContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues[0]).toContain('UNIT-001: No acceptance criteria found');
@@ -292,12 +292,12 @@ Use migrations
 
     it('should return passed=false if intent has no unit children', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
-      writeFileSync(join(intentsDir, 'INTENT-002.md'), validIntentContent.replace('INTENT-001', 'INTENT-002'));
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
+      writeFileSync(join(intentDir, 'INTENT-002.md'), validIntentContent.replace('INTENT-001', 'INTENT-002'));
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues).toContain('Intent INTENT-002 has no unit children');
@@ -305,8 +305,8 @@ Use migrations
 
     it('should calculate coverage percentage correctly', async () => {
       mkdirSync(unitsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      mkdirSync(intentDir, { recursive: true });
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
 
       // One valid unit
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
@@ -314,7 +314,7 @@ Use migrations
       // One invalid unit (missing frontmatter)
       writeFileSync(join(unitsDir, 'UNIT-002.md'), '## Goal\nSome content');
 
-      const result = await validateUnits(unitsDir, intentsDir);
+      const result = await validateUnits(unitsDir, intentDir);
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(50); // 1 out of 2 units valid
@@ -794,7 +794,7 @@ Create migration script
       },
     ];
 
-    it('should return passed=false if forge directory does not exist', async () => {
+    it('should return passed=false if construction directory does not exist', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
 
@@ -802,25 +802,25 @@ Create migration script
 
       expect(result.passed).toBe(false);
       expect(result.coverage_percentage).toBe(0);
-      expect(result.blocking_issues).toContain('Forge directory not found');
+      expect(result.blocking_issues).toContain('Construction directory not found');
     });
 
-    it('should return passed=true for complete valid forge structure', async () => {
+    it('should return passed=true for complete valid construction structure', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, '.olympus', 'workflows', workflowId);
-      const forgeDir = join(workflowDir, 'forge');
-      const unitsDir = join(forgeDir, 'units');
-      const designDir = join(forgeDir, 'design');
-      const boltsDir = join(forgeDir, 'bolts');
-      const intentsDir = join(workflowDir, 'intents');
+      const workflowDir = join(projectPath, 'aidlc-docs');
+      const constructionDir = join(workflowDir, 'construction');
+      const unitsDir = join(constructionDir, 'units');
+      const designDir = join(constructionDir, 'design');
+      const boltsDir = join(constructionDir, 'bolts');
+      const intentDir = join(workflowDir, 'inception');
 
       mkdirSync(unitsDir, { recursive: true });
       mkdirSync(designDir, { recursive: true });
       mkdirSync(boltsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
+      mkdirSync(intentDir, { recursive: true });
 
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
       writeFileSync(join(boltsDir, 'BOLT-001.md'), validBoltContent);
       writeFileSync(join(designDir, 'interfaces.json'), JSON.stringify(validInterfaces, null, 2));
@@ -837,20 +837,20 @@ Create migration script
     it('should aggregate blocking issues from sub-validations', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, '.olympus', 'workflows', workflowId);
-      const forgeDir = join(workflowDir, 'forge');
-      const unitsDir = join(forgeDir, 'units');
-      const designDir = join(forgeDir, 'design');
-      const boltsDir = join(forgeDir, 'bolts');
-      const intentsDir = join(workflowDir, 'intents');
+      const workflowDir = join(projectPath, 'aidlc-docs');
+      const constructionDir = join(workflowDir, 'construction');
+      const unitsDir = join(constructionDir, 'units');
+      const designDir = join(constructionDir, 'design');
+      const boltsDir = join(constructionDir, 'bolts');
+      const intentDir = join(workflowDir, 'inception');
 
       mkdirSync(unitsDir, { recursive: true });
       mkdirSync(designDir, { recursive: true });
       mkdirSync(boltsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
+      mkdirSync(intentDir, { recursive: true });
 
       // Create invalid unit (missing frontmatter)
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
       writeFileSync(join(unitsDir, 'UNIT-001.md'), '## Goal\nInvalid unit');
 
       // Create invalid design artifact (missing interfaces.json)
@@ -872,20 +872,20 @@ Create migration script
     it('should calculate aggregate coverage correctly', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, '.olympus', 'workflows', workflowId);
-      const forgeDir = join(workflowDir, 'forge');
-      const unitsDir = join(forgeDir, 'units');
-      const designDir = join(forgeDir, 'design');
-      const boltsDir = join(forgeDir, 'bolts');
-      const intentsDir = join(workflowDir, 'intents');
+      const workflowDir = join(projectPath, 'aidlc-docs');
+      const constructionDir = join(workflowDir, 'construction');
+      const unitsDir = join(constructionDir, 'units');
+      const designDir = join(constructionDir, 'design');
+      const boltsDir = join(constructionDir, 'bolts');
+      const intentDir = join(workflowDir, 'inception');
 
       mkdirSync(unitsDir, { recursive: true });
       mkdirSync(designDir, { recursive: true });
       mkdirSync(boltsDir, { recursive: true });
-      mkdirSync(intentsDir, { recursive: true });
+      mkdirSync(intentDir, { recursive: true });
 
       // Valid units (100% coverage)
-      writeFileSync(join(intentsDir, 'INTENT-001.md'), validIntentContent);
+      writeFileSync(join(intentDir, 'INTENT-001.md'), validIntentContent);
       writeFileSync(join(unitsDir, 'UNIT-001.md'), validUnitContent);
 
       // Partial design artifacts (67% coverage - 2 out of 3)

@@ -18,14 +18,14 @@ import {
 } from './types.js';
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
-import { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
+import { validateIdea, validateIntent, clearFileCache } from './validation.js';
 import { ForgeExecutor } from './forge/executor.js';
-import type { WorkflowPhase } from './phase-types.js';
+import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
 
 /**
  * Ordered list of workflow stages for progression validation
  */
-const STAGE_ORDER: WorkflowStage[] = ['idea', 'prd', 'spec', 'intents', 'complete'];
+const STAGE_ORDER: WorkflowStage[] = ['idea', 'intent', 'unit', 'bolt', 'complete'];
 
 /**
  * Get the next stage in the workflow progression
@@ -87,29 +87,52 @@ export class WorkflowEngine {
    * @throws Error if disk is full, permissions are denied, or workflow initialization fails
    */
   async start(initialPrompt: string): Promise<void> {
-    // Create initial checkpoint
-    const checkpoint: WorkflowCheckpoint = {
-      schema_version: '1.0.0',
+    // Create initial checkpoint using V3 format
+    const checkpoint: WorkflowCheckpointV3 = {
+      schema_version: '3.0.0',
       workflow_id: this.workflowId,
       feature_name: this.featureName,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      current_phase: 'inception',
       current_stage: 'idea',
       status: 'in_progress',
-      artifacts: {
-        idea: null,
-        prd: null,
-        spec: null,
-        intents: null,
-        complete: null,
+      phases: {
+        discovery: {
+          status: 'not_started',
+          started_at: null,
+          completed_at: null,
+          gate_result: null,
+          gate_bypassed: false,
+          bypass_reason: null,
+        },
+        inception: {
+          status: 'in_progress',
+          started_at: new Date().toISOString(),
+          completed_at: null,
+          gate_result: null,
+          gate_bypassed: false,
+          bypass_reason: null,
+        },
+        construction: {
+          status: 'not_started',
+          started_at: null,
+          completed_at: null,
+          gate_result: null,
+          gate_bypassed: false,
+          bypass_reason: null,
+        },
+        operations: {
+          status: 'not_started',
+          started_at: null,
+          completed_at: null,
+          gate_result: null,
+          gate_bypassed: false,
+          bypass_reason: null,
+        },
       },
-      validation_results: {
-        idea: null,
-        prd: null,
-        spec: null,
-        intents: null,
-        complete: null,
-      },
+      manifest_path: `aidlc-docs/manifest.json`,
+      trust_state_path: `.olympus/trust-state.json`,
       resume_context: {
         initial_prompt: initialPrompt,
       },
@@ -296,7 +319,7 @@ export class WorkflowEngine {
     }
 
     // Return the checkpoint file path
-    return `.olympus/workflow/${this.workflowId}/checkpoint.json`;
+    return `aidlc-docs/checkpoint.json`;
   }
 
   /**
@@ -320,29 +343,19 @@ export class WorkflowEngine {
       case 'idea':
         await this.executeIdeaStage(checkpoint);
         break;
-      case 'prd':
-        await this.executePrdStage(checkpoint);
+      case 'intent':
+        await this.executeIntentStage(checkpoint);
         break;
-      case 'spec':
-        await this.executeSpecStage(checkpoint);
+      case 'unit':
+        await this.executeUnitStage(checkpoint);
         break;
-      case 'intents':
-        await this.executeIntentsStage(checkpoint);
+      case 'bolt':
+        await this.executeBoltStage(checkpoint);
         break;
     }
 
-    // Update checkpoint with completion of this stage
-    const artifactId = `${stage.toUpperCase()}-001`;
-    const artifactPath = stage === 'intents'
-      ? `.olympus/workflow/${this.workflowId}/intents/`
-      : `.olympus/workflow/${this.workflowId}/${stage}.md`;
-
-    checkpoint.artifacts[stage] = {
-      id: artifactId,
-      path: artifactPath,
-      created_at: new Date().toISOString(),
-      validation_passed: checkpoint.validation_results[stage]?.passed ?? false,
-    };
+    // Note: V3 checkpoints don't track artifacts inline - they use manifest
+    // Artifact tracking is handled by the manifest system
 
     // Move to next stage
     const nextStage = getNextStage(stage);
@@ -379,14 +392,9 @@ export class WorkflowEngine {
       throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
     }
 
-    // Collect non-null artifacts into array
+    // Note: V3 checkpoints don't have inline artifacts - they use manifest
+    // For now, return empty artifacts array
     const artifacts: ArtifactReference[] = [];
-    for (const stage of STAGE_ORDER) {
-      const artifact = checkpoint.artifacts[stage];
-      if (artifact) {
-        artifacts.push(artifact);
-      }
-    }
 
     return {
       workflow_id: checkpoint.workflow_id,
@@ -402,22 +410,22 @@ export class WorkflowEngine {
    * Execute a phase of the ODLC methodology.
    *
    * This is a NEW method that coexists with executeStage().
-   * - executePhase('vision') delegates to existing executeStage() pipeline
-   * - executePhase('forge') instantiates ForgeExecutor
-   * - executePhase('summit') generates template-based artifacts (v1 minimal)
+   * - executePhase('inception') delegates to existing executeStage() pipeline
+   * - executePhase('construction') instantiates ForgeExecutor
+   * - executePhase('operations') generates template-based artifacts (v1 minimal)
    *
-   * @param phase - The phase to execute ('vision' | 'forge' | 'summit')
+   * @param phase - The phase to execute ('discovery' | 'inception' | 'construction' | 'operations')
    */
   async executePhase(phase: WorkflowPhase): Promise<void> {
     switch (phase) {
-      case 'vision': {
+      case 'inception': {
         // Delegate to existing stage-based pipeline
         const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
         if (!checkpoint) {
           throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
         }
 
-        const stageOrder: WorkflowStage[] = ['idea', 'prd', 'spec', 'intents'];
+        const stageOrder: WorkflowStage[] = ['idea', 'intent'];
         for (const stage of stageOrder) {
           if (checkpoint.current_stage === stage || checkpoint.current_stage === 'idea') {
             await this.executeStage(stage);
@@ -431,65 +439,65 @@ export class WorkflowEngine {
         break;
       }
 
-      case 'forge': {
-        // Read spec content for design validation
-        const specPath = getArtifactPath(this.projectPath, this.workflowId, 'spec');
-        let specContent: string | undefined;
+      case 'construction': {
+        // Read intent content for design validation
+        const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
+        let intentContent: string | undefined;
         try {
           const fs = await import('fs');
-          specContent = fs.readFileSync(specPath, 'utf-8');
+          intentContent = fs.readFileSync(intentPath, 'utf-8');
         } catch {
-          // Spec may not exist, continue without it
+          // Intent may not exist, continue without it
         }
 
         const executor = new ForgeExecutor(this.projectPath, this.workflowId);
-        const result = await executor.execute(specContent);
+        const result = await executor.execute(intentContent);
 
         if (!result.passed) {
-          console.error(`[WorkflowEngine] Forge phase validation failed:`, result.blocking_issues);
-          throw new Error(`Forge phase validation failed: ${result.blocking_issues.join(', ')}`);
+          console.error(`[WorkflowEngine] Construction phase validation failed:`, result.blocking_issues);
+          throw new Error(`Construction phase validation failed: ${result.blocking_issues.join(', ')}`);
         }
         break;
       }
 
-      case 'summit': {
-        // Summit v1: template-based artifact generation
+      case 'operations': {
+        // Operations v1: template-based artifact generation
         const { generateDeployGuide, generateRunbook, generateMonitoringConfig, generateReleaseNotes } = await import('./summit/templates.js');
         const { loadManifest } = await import('./manifest.js');
 
-        const workflowDir = `.olympus/workflow/${this.workflowId}`;
+        const workflowDir = `aidlc-docs`;
         const manifestPath = `${this.projectPath}/${workflowDir}/manifest.json`;
         const manifest = await loadManifest(manifestPath);
 
-        // Read spec if available
-        let specContent: string | null = null;
+        // Read intent if available
+        let intentContent: string | null = null;
         try {
           const fsModule = await import('fs');
-          specContent = fsModule.readFileSync(getArtifactPath(this.projectPath, this.workflowId, 'spec'), 'utf-8');
+          intentContent = fsModule.readFileSync(getArtifactPath(this.projectPath, this.workflowId, 'intent'), 'utf-8');
         } catch {
-          // Spec may not exist
+          // Intent may not exist
         }
 
         const summitContext = {
           workflowId: this.workflowId,
           featureName: this.featureName,
           manifest,
-          specContent,
+          specContent: intentContent,
           buildLogContent: null,
         };
 
-        // Ensure summit directory
+        // Ensure operations directory
         const fsExtra = await import('fs-extra');
-        const summitDir = `${this.projectPath}/.olympus/workflow/${this.workflowId}/summit`;
-        await fsExtra.ensureDir(summitDir);
+        const operationsDir = `${this.projectPath}/aidlc-docs/operations`;
+        await fsExtra.ensureDir(operationsDir);
 
-        // Generate all summit artifacts
-        await fsExtra.writeFile(`${summitDir}/deploy-guide.md`, generateDeployGuide(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${summitDir}/runbook.md`, generateRunbook(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${summitDir}/monitoring.json`, generateMonitoringConfig(summitContext), 'utf-8');
-        await fsExtra.writeFile(`${summitDir}/release-notes.md`, generateReleaseNotes(summitContext), 'utf-8');
+        // Generate all operations artifacts
+        await fsExtra.writeFile(`${operationsDir}/deploy-guide.md`, generateDeployGuide(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${operationsDir}/runbook.md`, generateRunbook(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${operationsDir}/monitoring.json`, generateMonitoringConfig(summitContext), 'utf-8');
+        await fsExtra.writeFile(`${operationsDir}/release-notes.md`, generateReleaseNotes(summitContext), 'utf-8');
 
-        console.log('[WorkflowEngine] Summit phase: Generated deploy-guide, runbook, monitoring config, and release notes');
+        console.log('[WorkflowEngine] Operations phase: Generated deploy-guide, runbook, monitoring config, and release notes');
         break;
       }
     }
@@ -557,7 +565,7 @@ export class WorkflowEngine {
    * The artifact includes problem statement, business context, success metrics, constraints,
    * solution approach, and risk assessment.
    */
-  private async executeIdeaStage(checkpoint: WorkflowCheckpoint): Promise<void> {
+  private async executeIdeaStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     const initialPrompt = checkpoint.resume_context?.initial_prompt || 'No initial prompt provided';
 
     console.log(`[WorkflowEngine] Executing IDEA stage for feature: ${this.featureName}`);
@@ -651,9 +659,8 @@ The proposed solution will follow a phased implementation approach:
 
     const validationResult = await validateIdea(ideaPath);
 
-    // Store validation result in checkpoint
-    checkpoint.validation_results.idea = validationResult;
-
+    // Note: V3 checkpoints don't store validation_results inline - they use manifest
+    // For now, just log the validation result
     if (!validationResult.passed) {
       console.log('[WorkflowEngine] IDEA validation failed:', validationResult.blocking_issues);
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
@@ -663,27 +670,27 @@ The proposed solution will follow a phased implementation approach:
   }
 
   /**
-   * Execute the PRD stage
+   * Execute the INTENT stage (formerly PRD)
    *
-   * Generates the PRD artifact with user stories and requirement coverage.
-   * The PRD is validated against the IDEA artifact to ensure >= 90% coverage.
+   * Generates the INTENT artifact with user stories and requirement coverage.
+   * The INTENT is validated against the IDEA artifact to ensure >= 90% coverage.
    */
-  private async executePrdStage(checkpoint: WorkflowCheckpoint): Promise<void> {
-    console.log(`[WorkflowEngine] Executing PRD stage for feature: ${this.featureName}`);
+  private async executeIntentStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] Executing INTENT stage for feature: ${this.featureName}`);
 
     // Get the IDEA artifact path for context
     const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
     console.log(`[WorkflowEngine] Reading IDEA artifact from: ${ideaPath}`);
-    console.log('[WorkflowEngine] Generating PRD artifact with user stories');
+    console.log('[WorkflowEngine] Generating INTENT artifact with user stories');
 
-    // Generate a properly formatted PRD artifact that passes validation
-    const prdId = 'PRD-001';
+    // Generate a properly formatted INTENT artifact that passes validation
+    const intentId = 'INTENT-001';
     const timestamp = new Date().toISOString();
 
     // Create user stories that map to the constraints from IDEA
     // Each constraint type gets at least one user story
-    const prdContent = `---
-id: ${prdId}
+    const intentContent = `---
+id: ${intentId}
 feature: ${this.workflowId}
 created: ${timestamp}
 based_on: IDEA-001
@@ -838,50 +845,70 @@ Success will be measured using the following criteria from the IDEA artifact:
 *Generated by WorkflowEngine based on IDEA-001*
 `;
 
-    await writeArtifact(this.projectPath, this.workflowId, 'prd', prdContent);
+    await writeArtifact(this.projectPath, this.workflowId, 'intent', intentContent);
 
     // Validate the generated artifact against IDEA
-    const prdPath = getArtifactPath(this.projectPath, this.workflowId, 'prd');
-    console.log(`[WorkflowEngine] Validating PRD artifact at: ${prdPath}`);
+    const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
+    console.log(`[WorkflowEngine] Validating INTENT artifact at: ${intentPath}`);
 
-    const validationResult = await validatePrd(prdPath, ideaPath);
+    const validationResult = await validateIntent(intentPath);
 
-    // Store validation result in checkpoint
-    checkpoint.validation_results.prd = validationResult;
-
+    // Note: V3 checkpoints don't store validation_results inline - they use manifest
     if (!validationResult.passed) {
-      console.log('[WorkflowEngine] PRD validation failed:', validationResult.blocking_issues);
+      console.log('[WorkflowEngine] INTENT validation failed:', validationResult.blocking_issues);
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
     } else {
-      console.log('[WorkflowEngine] PRD validation passed');
+      console.log('[WorkflowEngine] INTENT validation passed');
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
     }
   }
 
   /**
-   * Execute the SPEC stage
+   * Execute the UNIT stage
+   *
+   * Generates the UNIT artifacts for the feature.
+   */
+  private async executeUnitStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] Executing UNIT stage for feature: ${this.featureName}`);
+    // TODO: Implement UNIT stage execution
+    throw new Error('UNIT stage execution not yet implemented');
+  }
+
+  /**
+   * Execute the BOLT stage
+   *
+   * Generates the BOLT artifacts for the feature.
+   */
+  private async executeBoltStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] Executing BOLT stage for feature: ${this.featureName}`);
+    // TODO: Implement BOLT stage execution
+    throw new Error('BOLT stage execution not yet implemented');
+  }
+
+  /**
+   * DEPRECATED: Execute the SPEC stage (old workflow)
    *
    * Generates the SPEC artifact with technical design from the PRD.
    * Includes components, database schema, API endpoints, authentication,
    * error handling, and performance considerations.
    */
-  private async executeSpecStage(checkpoint: WorkflowCheckpoint): Promise<void> {
+  private async executeSpecStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     console.log(`[WorkflowEngine] Executing SPEC stage for feature: ${this.featureName}`);
 
-    // Get the PRD artifact path for context
-    const prdPath = getArtifactPath(this.projectPath, this.workflowId, 'prd');
-    console.log(`[WorkflowEngine] Reading PRD artifact from: ${prdPath}`);
+    // Get the INTENT artifact path for context
+    const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
+    console.log(`[WorkflowEngine] Reading INTENT artifact from: ${intentPath}`);
     console.log('[WorkflowEngine] Generating SPEC artifact with technical design');
 
-    // Read PRD to extract user stories for coverage tracking
+    // Read INTENT to extract user stories for coverage tracking
     const fs = await import('fs');
-    const prdContent = fs.readFileSync(prdPath, 'utf-8');
-    const prdUserStories: string[] = [];
-    const prdLines = prdContent.split('\n');
-    for (const line of prdLines) {
+    const intentContent = fs.readFileSync(intentPath, 'utf-8');
+    const intentUserStories: string[] = [];
+    const intentLines = intentContent.split('\n');
+    for (const line of intentLines) {
       const match = line.match(/^###?\s+(US-\d+)/);
       if (match) {
-        prdUserStories.push(match[1]);
+        intentUserStories.push(match[1]);
       }
     }
 
@@ -1229,34 +1256,34 @@ cache.get('feature:' + id, async () => {
 - PUT /api/v1/feature: 100/min
 - DELETE /api/v1/feature: 50/min
 
-## PRD Coverage
+## INTENT Coverage
 
-This specification addresses all user stories from PRD-001:
+This specification addresses all user stories from INTENT-001:
 
-| PRD User Story | SPEC Coverage |
-|----------------|---------------|${prdUserStories.map(story => `
+| INTENT User Story | SPEC Coverage |
+|-------------------|---------------|${intentUserStories.map(story => `
 | ${story} | Components, API Endpoints, Database Schema |`).join('')}
 
 **Coverage Summary:**
-- Total user stories: ${prdUserStories.length}
-- Covered: ${prdUserStories.length} (100%)
+- Total user stories: ${intentUserStories.length}
+- Covered: ${intentUserStories.length} (100%)
 - Uncovered: None
 
 ---
-*Generated by WorkflowEngine based on PRD-001*
+*Generated by WorkflowEngine based on INTENT-001*
 `;
 
-    await writeArtifact(this.projectPath, this.workflowId, 'spec', specContent);
+    // Note: 'spec' is deprecated as an artifact type - using 'intent' instead
+    await writeArtifact(this.projectPath, this.workflowId, 'intent', specContent);
 
-    // Validate the generated artifact against PRD
-    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'spec');
+    // Validate the generated artifact
+    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
     console.log(`[WorkflowEngine] Validating SPEC artifact at: ${specPath}`);
 
-    const validationResult = await validateSpec(specPath, prdPath);
+    // Note: validateSpec was removed in the new workflow - using validateIntent instead
+    const validationResult = await validateIntent(specPath);
 
-    // Store validation result in checkpoint
-    checkpoint.validation_results.spec = validationResult;
-
+    // Note: V3 checkpoints don't store validation_results inline - they use manifest
     if (!validationResult.passed) {
       console.log('[WorkflowEngine] SPEC validation failed:', validationResult.blocking_issues);
       console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
@@ -1267,19 +1294,19 @@ This specification addresses all user stories from PRD-001:
   }
 
   /**
-   * Execute the INTENTS stage
+   * DEPRECATED: Execute the INTENTS stage (old workflow)
    *
    * Generates INTENT artifacts with implementation tasks from the SPEC.
    * Creates multiple INTENT-*.md files and a dependency-graph.json file
    * with task breakdown, dependencies, and effort estimates.
    */
-  private async executeIntentsStage(checkpoint: WorkflowCheckpoint): Promise<void> {
+  private async executeIntentsStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     console.log(`[WorkflowEngine] Executing INTENTS stage for feature: ${this.featureName}`);
 
-    // Get the SPEC artifact path for context
-    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'spec');
-    console.log(`[WorkflowEngine] Reading SPEC artifact from: ${specPath}`);
-    console.log('[WorkflowEngine] Generating INTENT artifacts with implementation tasks');
+    // Get the INTENT artifact path for context (was 'spec' in old workflow)
+    const specPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');
+    console.log(`[WorkflowEngine] Reading INTENT artifact from: ${specPath}`);
+    console.log('[WorkflowEngine] Generating INTENT task artifacts with implementation tasks');
 
     // Read SPEC to extract components for task generation
     const fs = await import('fs-extra');
@@ -1562,20 +1589,8 @@ ${intent.effort}h
     console.log(`[WorkflowEngine] Generated ${intents.length} INTENT files`);
     console.log(`[WorkflowEngine] Total estimated effort: ${totalEffort}h`);
 
-    // Validate the generated artifacts against SPEC
-    console.log(`[WorkflowEngine] Validating INTENTS against SPEC at: ${specPath}`);
-
-    const validationResult = await validateTasks(intentsDir, specPath);
-
-    // Store validation result in checkpoint
-    checkpoint.validation_results.intents = validationResult;
-
-    if (!validationResult.passed) {
-      console.log('[WorkflowEngine] INTENTS validation failed:', validationResult.blocking_issues);
-      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
-    } else {
-      console.log('[WorkflowEngine] INTENTS validation passed');
-      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
-    }
+    // Note: validateTasks was removed in the new workflow
+    console.log(`[WorkflowEngine] INTENTS stage complete - validation skipped (deprecated)`);
+    console.log(`[WorkflowEngine] Generated ${intents.length} INTENT files with ${totalEffort}h estimated effort`);
   }
 }

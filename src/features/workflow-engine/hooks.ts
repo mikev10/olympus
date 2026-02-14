@@ -11,11 +11,11 @@ import type { WorkflowCheckpoint, WorkflowStage } from './types.js';
  * Map workflow stages to their corresponding agent types.
  */
 const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
-  idea: 'idea-intake',
-  prd: 'prd-writer',
-  spec: 'spec-writer',
-  intents: 'intent-generator',
-  complete: null, // No agent needed for complete stage
+  idea: null,      // IDEA stage handled by /plan entry point
+  intent: null,    // INTENT stage handled by /plan entry point
+  unit: null,      // UNIT decomposition handled by ForgeExecutor
+  bolt: null,      // BOLT execution handled by ForgeExecutor
+  complete: null,  // No agent needed for complete stage
 };
 
 /**
@@ -24,13 +24,13 @@ const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
 function getStageTaskDescription(stage: WorkflowStage): string {
   switch (stage) {
     case 'idea':
-      return 'capture and validate the initial feature concept';
-    case 'prd':
-      return 'create a comprehensive Product Requirements Document';
-    case 'spec':
-      return 'write a detailed technical specification';
-    case 'intents':
-      return 'generate implementation intent files';
+      return 'capture the problem statement, personas, success metrics, and constraints';
+    case 'intent':
+      return 'define business requirements, technical approach, and proposed UNITs';
+    case 'unit':
+      return 'decompose into module-scoped UNITs with interface contracts';
+    case 'bolt':
+      return 'execute the smallest implementation unit with domain and logical design';
     case 'complete':
       return 'finalize and validate all workflow artifacts';
     default:
@@ -56,19 +56,18 @@ function getStageTaskDescription(stage: WorkflowStage): string {
  * // Current stage: idea
  * // Status: in_progress
  * //
- * // Next step: Invoke the idea-intake agent to capture and validate the initial feature concept
- * //
- * // Use: Task(subagent_type="idea-intake", prompt="...")
+ * // Next step: capture the problem statement, personas, success metrics, and constraints
  */
 export function buildStructuredWorkflowPrompt(
   featureName: string,
-  checkpoint: WorkflowCheckpoint
+  checkpoint: any
 ): string {
-  const agent = STAGE_AGENT_MAP[checkpoint.current_stage];
-  const taskDescription = getStageTaskDescription(checkpoint.current_stage);
+  const currentStage = checkpoint.current_stage as WorkflowStage;
+  const agent = STAGE_AGENT_MAP[currentStage];
+  const taskDescription = getStageTaskDescription(currentStage);
 
   let prompt = `You are beginning a structured workflow for feature: ${featureName}\n\n`;
-  prompt += `Current stage: ${checkpoint.current_stage}\n`;
+  prompt += `Current stage: ${currentStage}\n`;
   prompt += `Status: ${checkpoint.status}\n\n`;
 
   if (agent) {
@@ -96,22 +95,23 @@ export function buildStructuredWorkflowPrompt(
  * // Returns:
  * // Resuming workflow for feature: user-auth
  * //
- * // You were interrupted during: prd
+ * // You were interrupted during: intent
  * // Last update: 2024-01-15T12:00:00Z
  * //
  * // Resume context: [checkpoint data if available]
  * //
- * // Continue from where you left off: create a comprehensive Product Requirements Document
+ * // Continue from where you left off: define business requirements, technical approach, and proposed UNITs
  */
 export function buildWorkflowResumptionPrompt(
   featureName: string,
-  checkpoint: WorkflowCheckpoint
+  checkpoint: any
 ): string {
-  const agent = STAGE_AGENT_MAP[checkpoint.current_stage];
-  const taskDescription = getStageTaskDescription(checkpoint.current_stage);
+  const currentStage = checkpoint.current_stage as WorkflowStage;
+  const agent = STAGE_AGENT_MAP[currentStage];
+  const taskDescription = getStageTaskDescription(currentStage);
 
   let prompt = `Resuming workflow for feature: ${featureName}\n\n`;
-  prompt += `You were interrupted during: ${checkpoint.current_stage}\n`;
+  prompt += `You were interrupted during: ${currentStage}\n`;
   prompt += `Last update: ${checkpoint.updated_at}\n\n`;
 
   if (checkpoint.resume_context) {
@@ -141,17 +141,17 @@ export function buildWorkflowResumptionPrompt(
  * @returns Formatted prompt string for stage transition
  *
  * @example
- * const prompt = buildWorkflowTransitionPrompt(checkpoint, 'spec');
+ * const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
  * // Returns:
- * // Stage prd complete! ✓
+ * // Stage intent complete! ✓
  * //
  * // Completed artifacts:
- * // - PRD-001: .olympus/workflows/user-auth/prd.md (validated: true)
+ * // - INTENT-001: .olympus/workflows/user-auth/intent.md (validated: true)
  * //
- * // Next stage: spec
- * // Validation required: Technical specification review
+ * // Next stage: unit
+ * // Validation required: UNIT decomposition coverage and interface contracts
  * //
- * // Proceed with: Invoke the spec-writer agent to write a detailed technical specification
+ * // Proceed with: decompose into module-scoped UNITs with interface contracts
  */
 export function buildWorkflowTransitionPrompt(
   checkpoint: WorkflowCheckpoint,
@@ -199,12 +199,12 @@ export function buildWorkflowTransitionPrompt(
  */
 function getValidationType(stage: WorkflowStage): string | null {
   switch (stage) {
-    case 'prd':
-      return 'Product requirements completeness review';
-    case 'spec':
-      return 'Technical specification review';
-    case 'intents':
-      return 'Intent file validation';
+    case 'intent':
+      return 'INTENT completeness and alignment with IDEA';
+    case 'unit':
+      return 'UNIT decomposition coverage and interface contracts';
+    case 'bolt':
+      return 'BOLT implementation alignment with parent UNIT';
     case 'complete':
       return 'Final workflow validation';
     default:

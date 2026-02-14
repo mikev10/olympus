@@ -7,8 +7,11 @@ import {
   getArtifactPath,
   writeArtifact,
   readArtifact,
+  ensureDiscoveryDir,
+  writeStateFile,
+  appendAuditEntry,
+  ArtifactType,
 } from '../../features/workflow-engine/artifacts.js';
-import { WorkflowStage } from '../../features/workflow-engine/types.js';
 
 describe('artifacts', () => {
   let tmpDir: string;
@@ -30,14 +33,18 @@ describe('artifacts', () => {
     it('should create full workflow directory structure', async () => {
       await ensureWorkflowDir(projectPath, workflowId);
 
-      const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
-      const intentsDir = path.join(workflowDir, 'intents');
-      const validationDir = path.join(workflowDir, 'validation');
+      const workflowDir = path.join(projectPath, 'aidlc-docs');
+      const inceptionDir = path.join(workflowDir, 'inception');
+      const constructionDir = path.join(workflowDir, 'construction');
+      const constructionDesignDir = path.join(workflowDir, 'construction', 'design');
+      const operationsDir = path.join(workflowDir, 'operations');
       const checkpointPath = path.join(workflowDir, 'checkpoint.json');
 
       expect(await fs.pathExists(workflowDir)).toBe(true);
-      expect(await fs.pathExists(intentsDir)).toBe(true);
-      expect(await fs.pathExists(validationDir)).toBe(true);
+      expect(await fs.pathExists(inceptionDir)).toBe(true);
+      expect(await fs.pathExists(constructionDir)).toBe(true);
+      expect(await fs.pathExists(constructionDesignDir)).toBe(true);
+      expect(await fs.pathExists(operationsDir)).toBe(true);
       expect(await fs.pathExists(checkpointPath)).toBe(true);
 
       // Verify checkpoint.json structure
@@ -54,7 +61,7 @@ describe('artifacts', () => {
       // Call ensureWorkflowDir twice
       await ensureWorkflowDir(projectPath, workflowId);
 
-      const checkpointPath = path.join(projectPath, '.olympus', 'workflow', workflowId, 'checkpoint.json');
+      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'checkpoint.json');
       const firstCheckpoint = await fs.readJson(checkpointPath);
 
       // Wait a bit to ensure timestamp would differ if file was rewritten
@@ -66,34 +73,112 @@ describe('artifacts', () => {
       // Checkpoint should not have been overwritten
       expect(secondCheckpoint).toEqual(firstCheckpoint);
     });
+
+    it('should not create old directory structure', async () => {
+      await ensureWorkflowDir(projectPath, workflowId);
+
+      const workflowDir = path.join(projectPath, 'aidlc-docs');
+      const intentsDir = path.join(workflowDir, 'intents');
+      const validationDir = path.join(workflowDir, 'validation');
+
+      // Old directories should NOT exist
+      expect(await fs.pathExists(intentsDir)).toBe(false);
+      expect(await fs.pathExists(validationDir)).toBe(false);
+    });
   });
 
   describe('getArtifactPath', () => {
-    it('should return correct path for idea stage', () => {
-      const expected = path.join(projectPath, '.olympus', 'workflow', workflowId, 'idea.md');
+    it('should return correct path for idea artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'idea.md');
       expect(getArtifactPath(projectPath, workflowId, 'idea')).toBe(expected);
     });
 
-    it('should return correct path for prd stage', () => {
-      const expected = path.join(projectPath, '.olympus', 'workflow', workflowId, 'prd.md');
-      expect(getArtifactPath(projectPath, workflowId, 'prd')).toBe(expected);
+    it('should return correct path for intent artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'intent.md');
+      expect(getArtifactPath(projectPath, workflowId, 'intent')).toBe(expected);
     });
 
-    it('should return correct path for spec stage', () => {
-      const expected = path.join(projectPath, '.olympus', 'workflow', workflowId, 'spec.md');
-      expect(getArtifactPath(projectPath, workflowId, 'spec')).toBe(expected);
+    it('should return correct path for unit artifact with ID', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'spec.md');
+      expect(getArtifactPath(projectPath, workflowId, 'unit', 'UNIT-001')).toBe(expected);
     });
 
-    it('should throw error for complete stage', () => {
-      expect(() => getArtifactPath(projectPath, workflowId, 'complete')).toThrow(
-        'No artifact file for complete stage'
+    it('should throw error for unit artifact without ID', () => {
+      expect(() => getArtifactPath(projectPath, workflowId, 'unit')).toThrow(
+        'artifactId is required for unit artifacts'
       );
     });
 
-    it('should throw error for intents stage', () => {
-      expect(() => getArtifactPath(projectPath, workflowId, 'intents')).toThrow(
-        'Intents is a directory'
+    it('should return correct path for bolt artifact with ID and unitId', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'BOLT-001.md');
+      expect(getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001')).toBe(expected);
+    });
+
+    it('should throw error for bolt artifact without ID', () => {
+      expect(() => getArtifactPath(projectPath, workflowId, 'bolt')).toThrow(
+        'artifactId is required for bolt artifacts'
       );
+    });
+
+    it('should throw error for bolt artifact without unitId', () => {
+      expect(() => getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001')).toThrow(
+        'unitId is required for bolt artifacts'
+      );
+    });
+
+    it('should return correct path for nfr artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'nfr.md');
+      expect(getArtifactPath(projectPath, workflowId, 'nfr')).toBe(expected);
+    });
+
+    it('should return correct path for validation-report artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'validation-report.md');
+      expect(getArtifactPath(projectPath, workflowId, 'validation-report', 'UNIT-001')).toBe(expected);
+    });
+
+    it('should return correct path for state artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'state.md');
+      expect(getArtifactPath(projectPath, workflowId, 'state')).toBe(expected);
+    });
+
+    it('should return correct path for audit artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      expect(getArtifactPath(projectPath, workflowId, 'audit')).toBe(expected);
+    });
+
+    it('should return correct path for interfaces artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'interfaces.json');
+      expect(getArtifactPath(projectPath, workflowId, 'interfaces')).toBe(expected);
+    });
+
+    it('should return correct path for data-flow artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'data-flow.json');
+      expect(getArtifactPath(projectPath, workflowId, 'data-flow')).toBe(expected);
+    });
+
+    it('should return correct path for components artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'components.json');
+      expect(getArtifactPath(projectPath, workflowId, 'components')).toBe(expected);
+    });
+
+    it('should return correct path for deploy-guide artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'deploy-guide.md');
+      expect(getArtifactPath(projectPath, workflowId, 'deploy-guide')).toBe(expected);
+    });
+
+    it('should return correct path for runbook artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'runbook.md');
+      expect(getArtifactPath(projectPath, workflowId, 'runbook')).toBe(expected);
+    });
+
+    it('should return correct path for monitoring artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'monitoring.json');
+      expect(getArtifactPath(projectPath, workflowId, 'monitoring')).toBe(expected);
+    });
+
+    it('should return correct path for release-notes artifact', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'release-notes.md');
+      expect(getArtifactPath(projectPath, workflowId, 'release-notes')).toBe(expected);
     });
 
     it('should handle cross-platform paths correctly', () => {
@@ -101,9 +186,8 @@ describe('artifacts', () => {
       const artifactPath = getArtifactPath(projectPath, workflowId, 'idea');
 
       // Path should contain platform-specific separators
-      expect(artifactPath).toContain('.olympus');
-      expect(artifactPath).toContain('workflow');
-      expect(artifactPath).toContain(workflowId);
+      expect(artifactPath).toContain('aidlc-docs');
+      expect(artifactPath).toContain('inception');
       expect(artifactPath).toContain('idea.md');
 
       // Verify it's a valid path (no mixing of separators)
@@ -113,7 +197,7 @@ describe('artifacts', () => {
   });
 
   describe('writeArtifact', () => {
-    it('should write artifact content correctly', async () => {
+    it('should write idea artifact content correctly', async () => {
       const content = '# Test Idea\n\nThis is a test idea document.';
 
       await writeArtifact(projectPath, workflowId, 'idea', content);
@@ -124,46 +208,113 @@ describe('artifacts', () => {
       expect(savedContent).toBe(content);
     });
 
+    it('should write intent artifact content correctly', async () => {
+      const content = '# Intent\n\nThis is the intent document.';
+
+      await writeArtifact(projectPath, workflowId, 'intent', content);
+
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'intent');
+      const savedContent = await fs.readFile(artifactPath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
+    it('should write unit artifact with ID', async () => {
+      const content = '# Unit UNIT-001\n\nUnit implementation details.';
+
+      await writeArtifact(projectPath, workflowId, 'unit', content, 'UNIT-001');
+
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'unit', 'UNIT-001');
+      const savedContent = await fs.readFile(artifactPath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
+    it('should write bolt artifact with ID and unitId', async () => {
+      const content = '# Bolt BOLT-001\n\nBolt execution plan.';
+
+      await writeArtifact(projectPath, workflowId, 'bolt', content, 'BOLT-001', 'UNIT-001');
+
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001');
+      const savedContent = await fs.readFile(artifactPath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
+    it('should write design artifacts', async () => {
+      const content = JSON.stringify({ interfaces: [] }, null, 2);
+
+      await writeArtifact(projectPath, workflowId, 'interfaces', content);
+
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'interfaces');
+      const savedContent = await fs.readFile(artifactPath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
+    it('should write operations artifacts', async () => {
+      const content = '# Deploy Guide\n\nDeployment instructions.';
+
+      await writeArtifact(projectPath, workflowId, 'deploy-guide', content);
+
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'deploy-guide');
+      const savedContent = await fs.readFile(artifactPath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
     it('should create parent directories if needed', async () => {
       // Don't call ensureWorkflowDir first
-      const content = '# PRD Document';
+      const content = '# Intent Document';
 
-      await writeArtifact(projectPath, workflowId, 'prd', content);
+      await writeArtifact(projectPath, workflowId, 'intent', content);
 
-      const artifactPath = getArtifactPath(projectPath, workflowId, 'prd');
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'intent');
       expect(await fs.pathExists(artifactPath)).toBe(true);
 
       const savedContent = await fs.readFile(artifactPath, 'utf-8');
       expect(savedContent).toBe(content);
     });
 
-    it('should throw error for intents stage', async () => {
-      await expect(
-        writeArtifact(projectPath, workflowId, 'intents', 'content')
-      ).rejects.toThrow('Cannot write single artifact for intents stage');
-    });
-
-    it('should throw error for complete stage', async () => {
-      await expect(
-        writeArtifact(projectPath, workflowId, 'complete', 'content')
-      ).rejects.toThrow('No artifact file for complete stage');
-    });
-
     it('should overwrite existing artifact', async () => {
-      await writeArtifact(projectPath, workflowId, 'spec', 'First version');
-      await writeArtifact(projectPath, workflowId, 'spec', 'Second version');
+      await writeArtifact(projectPath, workflowId, 'idea', 'First version');
+      await writeArtifact(projectPath, workflowId, 'idea', 'Second version');
 
-      const content = await readArtifact(projectPath, workflowId, 'spec');
+      const content = await readArtifact(projectPath, workflowId, 'idea');
       expect(content).toBe('Second version');
     });
   });
 
   describe('readArtifact', () => {
-    it('should read artifact content correctly', async () => {
-      const content = '# Specification\n\nDetailed spec here.';
-      await writeArtifact(projectPath, workflowId, 'spec', content);
+    it('should read idea artifact content correctly', async () => {
+      const content = '# Idea\n\nDetailed idea here.';
+      await writeArtifact(projectPath, workflowId, 'idea', content);
 
-      const readContent = await readArtifact(projectPath, workflowId, 'spec');
+      const readContent = await readArtifact(projectPath, workflowId, 'idea');
+      expect(readContent).toBe(content);
+    });
+
+    it('should read intent artifact content correctly', async () => {
+      const content = '# Intent\n\nDetailed intent here.';
+      await writeArtifact(projectPath, workflowId, 'intent', content);
+
+      const readContent = await readArtifact(projectPath, workflowId, 'intent');
+      expect(readContent).toBe(content);
+    });
+
+    it('should read unit artifact with ID', async () => {
+      const content = '# Unit UNIT-001\n\nUnit details.';
+      await writeArtifact(projectPath, workflowId, 'unit', content, 'UNIT-001');
+
+      const readContent = await readArtifact(projectPath, workflowId, 'unit', 'UNIT-001');
+      expect(readContent).toBe(content);
+    });
+
+    it('should read bolt artifact with ID and unitId', async () => {
+      const content = '# Bolt BOLT-001\n\nBolt details.';
+      await writeArtifact(projectPath, workflowId, 'bolt', content, 'BOLT-001', 'UNIT-001');
+
+      const readContent = await readArtifact(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001');
       expect(readContent).toBe(content);
     });
 
@@ -172,23 +323,16 @@ describe('artifacts', () => {
       expect(content).toBeNull();
     });
 
-    it('should throw error for intents stage', async () => {
-      await expect(
-        readArtifact(projectPath, workflowId, 'intents')
-      ).rejects.toThrow('Cannot read single artifact for intents stage');
-    });
-
-    it('should throw error for complete stage', async () => {
-      await expect(
-        readArtifact(projectPath, workflowId, 'complete')
-      ).rejects.toThrow('No artifact file for complete stage');
+    it('should return null for missing unit with ID', async () => {
+      const content = await readArtifact(projectPath, workflowId, 'unit', 'UNIT-999');
+      expect(content).toBeNull();
     });
 
     it('should handle UTF-8 content correctly', async () => {
       const content = '# Unicode Test\n\n✅ Checkmark\n🚀 Rocket\n日本語 Japanese';
-      await writeArtifact(projectPath, workflowId, 'prd', content);
+      await writeArtifact(projectPath, workflowId, 'intent', content);
 
-      const readContent = await readArtifact(projectPath, workflowId, 'prd');
+      const readContent = await readArtifact(projectPath, workflowId, 'intent');
       expect(readContent).toBe(content);
     });
   });
@@ -201,7 +345,7 @@ describe('artifacts', () => {
 
       // Verify path components are present
       expect(artifactPath).toContain('idea.md');
-      expect(artifactPath).toContain(workflowId);
+      expect(artifactPath).toContain('inception');
 
       // Path should be normalized for the platform
       const normalized = path.normalize(artifactPath);
@@ -210,10 +354,10 @@ describe('artifacts', () => {
 
     it('should handle Unix-style paths correctly', async () => {
       const unixStylePath = '/home/user/project';
-      const artifactPath = getArtifactPath(unixStylePath, workflowId, 'prd');
+      const artifactPath = getArtifactPath(unixStylePath, workflowId, 'intent');
 
-      expect(artifactPath).toContain('prd.md');
-      expect(artifactPath).toContain(workflowId);
+      expect(artifactPath).toContain('intent.md');
+      expect(artifactPath).toContain('inception');
 
       const normalized = path.normalize(artifactPath);
       expect(artifactPath).toBe(normalized);
@@ -223,10 +367,88 @@ describe('artifacts', () => {
       // Use current tmpDir which works on any platform
       const content = 'Cross-platform test content';
 
-      await writeArtifact(projectPath, workflowId, 'spec', content);
-      const readContent = await readArtifact(projectPath, workflowId, 'spec');
+      await writeArtifact(projectPath, workflowId, 'idea', content);
+      const readContent = await readArtifact(projectPath, workflowId, 'idea');
 
       expect(readContent).toBe(content);
+    });
+  });
+
+  describe('ensureDiscoveryDir', () => {
+    it('should create discovery directory', async () => {
+      await ensureDiscoveryDir(projectPath);
+
+      const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+      expect(await fs.pathExists(discoveryDir)).toBe(true);
+    });
+
+    it('should be idempotent', async () => {
+      await ensureDiscoveryDir(projectPath);
+      await ensureDiscoveryDir(projectPath);
+
+      const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+      expect(await fs.pathExists(discoveryDir)).toBe(true);
+    });
+  });
+
+  describe('writeStateFile', () => {
+    it('should write state file to aidlc-docs/state.md', async () => {
+      const content = '# State\n\nCurrent workflow state.';
+
+      await writeStateFile(projectPath, content);
+
+      const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+      const savedContent = await fs.readFile(statePath, 'utf-8');
+
+      expect(savedContent).toBe(content);
+    });
+
+    it('should overwrite existing state file', async () => {
+      await writeStateFile(projectPath, 'First state');
+      await writeStateFile(projectPath, 'Second state');
+
+      const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+      const savedContent = await fs.readFile(statePath, 'utf-8');
+
+      expect(savedContent).toBe('Second state');
+    });
+  });
+
+  describe('appendAuditEntry', () => {
+    it('should create audit.md with header on first call', async () => {
+      await appendAuditEntry(projectPath, 'First entry');
+
+      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const content = await fs.readFile(auditPath, 'utf-8');
+
+      expect(content).toContain('# Audit Log');
+      expect(content).toContain('First entry');
+    });
+
+    it('should append entries without duplicating header', async () => {
+      await appendAuditEntry(projectPath, 'First entry');
+      await appendAuditEntry(projectPath, 'Second entry');
+
+      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const content = await fs.readFile(auditPath, 'utf-8');
+
+      expect(content).toContain('First entry');
+      expect(content).toContain('Second entry');
+      // Header should appear only once
+      expect((content.match(/# Audit Log/g) || []).length).toBe(1);
+    });
+
+    it('should preserve existing entries when appending', async () => {
+      await appendAuditEntry(projectPath, 'Entry 1');
+      await appendAuditEntry(projectPath, 'Entry 2');
+      await appendAuditEntry(projectPath, 'Entry 3');
+
+      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const content = await fs.readFile(auditPath, 'utf-8');
+
+      expect(content).toContain('Entry 1');
+      expect(content).toContain('Entry 2');
+      expect(content).toContain('Entry 3');
     });
   });
 });

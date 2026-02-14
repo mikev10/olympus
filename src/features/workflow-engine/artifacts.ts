@@ -1,30 +1,51 @@
 import * as path from 'path';
 import * as fs from 'fs-extra';
-import { WorkflowStage, IntentTask, IntentNode, DependencyGraph } from './types.js';
+import { WorkflowStage } from './types.js';
 import { WorkflowPhase } from './phase-types.js';
+
+export type ArtifactType =
+  | 'idea'
+  | 'intent'
+  | 'nfr'
+  | 'unit'
+  | 'bolt'
+  | 'validation-report'
+  | 'interfaces'
+  | 'data-flow'
+  | 'components'
+  | 'deploy-guide'
+  | 'runbook'
+  | 'monitoring'
+  | 'release-notes'
+  | 'state'
+  | 'audit';
 
 /**
  * Ensures the workflow directory structure exists.
  * Creates:
- * - .olympus/workflow/{workflowId}/
- * - .olympus/workflow/{workflowId}/intents/
- * - .olympus/workflow/{workflowId}/validation/
- * - .olympus/workflow/{workflowId}/checkpoint.json (if not exists)
+ * - aidlc-docs/
+ * - aidlc-docs/inception/
+ * - aidlc-docs/construction/
+ * - aidlc-docs/construction/design/
+ * - aidlc-docs/operations/
+ * - aidlc-docs/checkpoint.json (if not exists)
+ *
+ * Note: Per-unit directories (UNIT-001/, etc.) are created on-demand, not upfront.
  *
  * Idempotent - safe to call multiple times.
  * @throws Error if disk is full or permissions are denied
  */
 export async function ensureWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
-  const intentsDir = path.join(workflowDir, 'intents');
-  const validationDir = path.join(workflowDir, 'validation');
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
   const checkpointPath = path.join(workflowDir, 'checkpoint.json');
 
   try {
     // Create directories
     await fs.ensureDir(workflowDir);
-    await fs.ensureDir(intentsDir);
-    await fs.ensureDir(validationDir);
+    await fs.ensureDir(path.join(workflowDir, 'inception'));
+    await fs.ensureDir(path.join(workflowDir, 'construction'));
+    await fs.ensureDir(path.join(workflowDir, 'construction', 'design'));
+    await fs.ensureDir(path.join(workflowDir, 'operations'));
 
     // Initialize checkpoint.json if it doesn't exist
     if (!await fs.pathExists(checkpointPath)) {
@@ -77,51 +98,95 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
 }
 
 /**
- * Returns the file path for a given workflow stage artifact.
+ * Returns the file path for a given artifact type.
  *
- * @throws Error if stage is 'complete' (no artifact for complete stage)
- * @throws Error if stage is 'intents' (intents is a directory, not a file)
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @param artifactType - Type of artifact (idea, intent, unit, bolt, etc.)
+ * @param artifactId - Optional ID for unit/bolt/validation-report artifacts (required for certain types)
+ * @param unitId - Optional unit ID (required for 'bolt' artifacts to determine parent unit directory)
+ * @throws Error if artifactType is 'complete' (no artifact for complete stage)
+ * @throws Error if required parameters are missing for specific artifact types
  */
-export function getArtifactPath(projectPath: string, workflowId: string, stage: WorkflowStage): string {
-  if (stage === 'complete') {
-    throw new Error('No artifact file for complete stage');
+export function getArtifactPath(
+  projectPath: string,
+  workflowId: string,
+  artifactType: ArtifactType,
+  artifactId?: string,
+  unitId?: string
+): string {
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
+
+  // Mapping for artifact types to paths
+  switch (artifactType) {
+    case 'idea':
+      return path.join(workflowDir, 'inception', 'idea.md');
+    case 'intent':
+      return path.join(workflowDir, 'inception', 'intent.md');
+    case 'nfr':
+      return path.join(workflowDir, 'inception', 'nfr.md');
+    case 'unit':
+      if (!artifactId) {
+        throw new Error('artifactId is required for unit artifacts');
+      }
+      return path.join(workflowDir, 'construction', artifactId, 'spec.md');
+    case 'bolt':
+      if (!artifactId) {
+        throw new Error('artifactId is required for bolt artifacts');
+      }
+      if (!unitId) {
+        throw new Error('unitId is required for bolt artifacts');
+      }
+      return path.join(workflowDir, 'construction', unitId, `${artifactId}.md`);
+    case 'validation-report':
+      if (!artifactId) {
+        throw new Error('artifactId is required for validation-report artifacts');
+      }
+      return path.join(workflowDir, 'construction', artifactId, 'validation-report.md');
+    case 'interfaces':
+      return path.join(workflowDir, 'construction', 'design', 'interfaces.json');
+    case 'data-flow':
+      return path.join(workflowDir, 'construction', 'design', 'data-flow.json');
+    case 'components':
+      return path.join(workflowDir, 'construction', 'design', 'components.json');
+    case 'deploy-guide':
+      return path.join(workflowDir, 'operations', 'deploy-guide.md');
+    case 'runbook':
+      return path.join(workflowDir, 'operations', 'runbook.md');
+    case 'monitoring':
+      return path.join(workflowDir, 'operations', 'monitoring.json');
+    case 'release-notes':
+      return path.join(workflowDir, 'operations', 'release-notes.md');
+    case 'state':
+      return path.join(workflowDir, 'state.md');
+    case 'audit':
+      return path.join(workflowDir, 'audit.md');
+    default:
+      throw new Error(`Unknown artifact type: ${artifactType}`);
   }
-
-  if (stage === 'intents') {
-    throw new Error('Intents is a directory, not a single file. Use getIntentsDir() instead.');
-  }
-
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
-
-  const artifactMap: Record<Exclude<WorkflowStage, 'complete' | 'intents'>, string> = {
-    'idea': 'idea.md',
-    'prd': 'prd.md',
-    'spec': 'spec.md',
-  };
-
-  const filename = artifactMap[stage as Exclude<WorkflowStage, 'complete' | 'intents'>];
-  return path.join(workflowDir, filename);
 }
 
 /**
- * Writes artifact content to the correct path for the given stage.
+ * Writes artifact content to the correct path for the given artifact type.
  * Creates parent directories if needed.
  *
- * @throws Error if stage is 'intents' (use different function for multiple intent files)
- * @throws Error if stage is 'complete' (no artifact for complete stage)
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @param artifactType - Type of artifact to write
+ * @param content - Content to write
+ * @param artifactId - Optional ID for unit/bolt/validation-report artifacts
+ * @param unitId - Optional unit ID (required for 'bolt' artifacts)
  * @throws Error if disk is full or permissions are denied
  */
 export async function writeArtifact(
   projectPath: string,
   workflowId: string,
-  stage: WorkflowStage,
-  content: string
+  artifactType: ArtifactType,
+  content: string,
+  artifactId?: string,
+  unitId?: string
 ): Promise<void> {
-  if (stage === 'intents') {
-    throw new Error('Cannot write single artifact for intents stage. Use writeIntentFile() instead.');
-  }
-
-  const artifactPath = getArtifactPath(projectPath, workflowId, stage);
+  const artifactPath = getArtifactPath(projectPath, workflowId, artifactType, artifactId, unitId);
 
   try {
     await fs.ensureDir(path.dirname(artifactPath));
@@ -131,59 +196,60 @@ export async function writeArtifact(
 
     // Handle disk full error
     if (err.code === 'ENOSPC') {
-      console.error(`[Artifacts] Failed to write ${stage} artifact: Disk full`);
+      console.error(`[Artifacts] Failed to write ${artifactType} artifact: Disk full`);
       console.error(`[Artifacts] Please free up disk space and try again.`);
       console.error(`[Artifacts] Path: ${artifactPath}`);
       throw new Error(
-        `Failed to write ${stage} artifact: Disk is full. Please free up space and retry.`
+        `Failed to write ${artifactType} artifact: Disk is full. Please free up space and retry.`
       );
     }
 
     // Handle permission denied error
     if (err.code === 'EACCES' || err.code === 'EPERM') {
-      console.error(`[Artifacts] Failed to write ${stage} artifact: Permission denied`);
+      console.error(`[Artifacts] Failed to write ${artifactType} artifact: Permission denied`);
       console.error(`[Artifacts] Path: ${artifactPath}`);
       throw new Error(
-        `Failed to write ${stage} artifact: Permission denied for ${artifactPath}`
+        `Failed to write ${artifactType} artifact: Permission denied for ${artifactPath}`
       );
     }
 
     // Handle read-only filesystem
     if (err.code === 'EROFS') {
-      console.error(`[Artifacts] Failed to write ${stage} artifact: Read-only filesystem`);
+      console.error(`[Artifacts] Failed to write ${artifactType} artifact: Read-only filesystem`);
       console.error(`[Artifacts] Path: ${artifactPath}`);
       throw new Error(
-        `Failed to write ${stage} artifact: Filesystem is read-only`
+        `Failed to write ${artifactType} artifact: Filesystem is read-only`
       );
     }
 
     // Generic error with context
-    console.error(`[Artifacts] Failed to write ${stage} artifact: ${err.message}`);
+    console.error(`[Artifacts] Failed to write ${artifactType} artifact: ${err.message}`);
     console.error(`[Artifacts] Path: ${artifactPath}`);
     throw new Error(
-      `Failed to write ${stage} artifact: ${err.message}`
+      `Failed to write ${artifactType} artifact: ${err.message}`
     );
   }
 }
 
 /**
- * Reads artifact content from the correct path for the given stage.
+ * Reads artifact content from the correct path for the given artifact type.
  *
+ * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
+ * @param artifactType - Type of artifact to read
+ * @param artifactId - Optional ID for unit/bolt/validation-report artifacts
+ * @param unitId - Optional unit ID (required for 'bolt' artifacts)
  * @returns Content of the artifact, or null if the file doesn't exist
- * @throws Error if stage is 'intents' (use different function to read multiple files)
- * @throws Error if stage is 'complete' (no artifact for complete stage)
  * @throws Error if permissions are denied or file is corrupt
  */
 export async function readArtifact(
   projectPath: string,
   workflowId: string,
-  stage: WorkflowStage
+  artifactType: ArtifactType,
+  artifactId?: string,
+  unitId?: string
 ): Promise<string | null> {
-  if (stage === 'intents') {
-    throw new Error('Cannot read single artifact for intents stage. Use readIntentFiles() instead.');
-  }
-
-  const artifactPath = getArtifactPath(projectPath, workflowId, stage);
+  const artifactPath = getArtifactPath(projectPath, workflowId, artifactType, artifactId, unitId);
 
   try {
     if (!await fs.pathExists(artifactPath)) {
@@ -201,195 +267,22 @@ export async function readArtifact(
 
     // Handle permission denied error
     if (err.code === 'EACCES' || err.code === 'EPERM') {
-      console.error(`[Artifacts] Failed to read ${stage} artifact: Permission denied`);
+      console.error(`[Artifacts] Failed to read ${artifactType} artifact: Permission denied`);
       console.error(`[Artifacts] Path: ${artifactPath}`);
       throw new Error(
-        `Failed to read ${stage} artifact: Permission denied for ${artifactPath}`
+        `Failed to read ${artifactType} artifact: Permission denied for ${artifactPath}`
       );
     }
 
     // Generic error with context
-    console.error(`[Artifacts] Failed to read ${stage} artifact: ${err.message}`);
+    console.error(`[Artifacts] Failed to read ${artifactType} artifact: ${err.message}`);
     console.error(`[Artifacts] Path: ${artifactPath}`);
     throw new Error(
-      `Failed to read ${stage} artifact: ${err.message}`
+      `Failed to read ${artifactType} artifact: ${err.message}`
     );
   }
 }
 
-/**
- * Generates a dependency graph from an array of intent tasks.
- * Creates nodes and edges representing task dependencies.
- *
- * @param tasks - Array of IntentTask objects with dependencies
- * @returns DependencyGraph with nodes and edges
- *
- * @example
- * const tasks = [
- *   { id: "A", title: "Task A", component: "Auth", estimated_effort: 3, dependencies: [] },
- *   { id: "B", title: "Task B", component: "Auth", estimated_effort: 2, dependencies: ["A"] }
- * ];
- * const graph = generateDependencyGraph(tasks);
- * // Returns: { nodes: [...], edges: [{ from: "A", to: "B" }] }
- */
-export function generateDependencyGraph(tasks: IntentTask[]): DependencyGraph {
-  const nodes: IntentNode[] = tasks.map(task => ({
-    id: task.id,
-    title: task.title,
-    component: task.component,
-    estimated_effort: task.estimated_effort,
-  }));
-
-  const edges: { from: string; to: string }[] = [];
-  for (const task of tasks) {
-    for (const dep of task.dependencies) {
-      edges.push({ from: dep, to: task.id });
-    }
-  }
-
-  return { nodes, edges };
-}
-
-/**
- * Validates a dependency graph for cycles and structural integrity.
- * Throws errors if:
- * - Circular dependencies are detected
- * - Node IDs are not unique
- * - Edge references point to non-existent nodes
- *
- * @param graph - The dependency graph to validate
- * @throws Error if validation fails with detailed message
- *
- * @example
- * validateDependencyGraph(graph); // Throws if graph has cycles
- */
-export function validateDependencyGraph(graph: DependencyGraph): void {
-  // Validate unique node IDs
-  const nodeIds = new Set<string>();
-  for (const node of graph.nodes) {
-    if (nodeIds.has(node.id)) {
-      throw new Error(`Duplicate node ID detected: ${node.id}`);
-    }
-    nodeIds.add(node.id);
-  }
-
-  // Validate all edges reference existing nodes
-  for (const edge of graph.edges) {
-    if (!nodeIds.has(edge.from)) {
-      throw new Error(`Edge references non-existent node: ${edge.from}`);
-    }
-    if (!nodeIds.has(edge.to)) {
-      throw new Error(`Edge references non-existent node: ${edge.to}`);
-    }
-  }
-
-  // Detect circular dependencies using DFS
-  const adjacencyList = new Map<string, string[]>();
-  for (const node of graph.nodes) {
-    adjacencyList.set(node.id, []);
-  }
-  for (const edge of graph.edges) {
-    adjacencyList.get(edge.from)!.push(edge.to);
-  }
-
-  const visited = new Set<string>();
-  const recStack = new Set<string>();
-  const path: string[] = [];
-
-  function dfs(nodeId: string): boolean {
-    visited.add(nodeId);
-    recStack.add(nodeId);
-    path.push(nodeId);
-
-    const neighbors = adjacencyList.get(nodeId) || [];
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        if (dfs(neighbor)) {
-          return true;
-        }
-      } else if (recStack.has(neighbor)) {
-        // Found a cycle
-        const cycleStart = path.indexOf(neighbor);
-        const cycle = path.slice(cycleStart).concat(neighbor);
-        throw new Error(`Circular dependency detected: ${cycle.join(' -> ')}`);
-      }
-    }
-
-    recStack.delete(nodeId);
-    path.pop();
-    return false;
-  }
-
-  for (const node of graph.nodes) {
-    if (!visited.has(node.id)) {
-      dfs(node.id);
-    }
-  }
-}
-
-/**
- * Returns the execution order of tasks based on dependency graph.
- * Uses topological sort (Kahn's algorithm) to determine order.
- *
- * @param graph - The dependency graph to sort
- * @returns Array of task IDs in execution order
- * @throws Error if graph contains cycles (should validate first)
- *
- * @example
- * const order = getExecutionOrder(graph);
- * // Returns: ["TASK-001", "TASK-002", "TASK-003"]
- */
-export function getExecutionOrder(graph: DependencyGraph): string[] {
-  // Build adjacency list and in-degree map
-  const adjacencyList = new Map<string, string[]>();
-  const inDegree = new Map<string, number>();
-
-  // Initialize
-  for (const node of graph.nodes) {
-    adjacencyList.set(node.id, []);
-    inDegree.set(node.id, 0);
-  }
-
-  // Build graph
-  for (const edge of graph.edges) {
-    adjacencyList.get(edge.from)!.push(edge.to);
-    inDegree.set(edge.to, (inDegree.get(edge.to) || 0) + 1);
-  }
-
-  // Kahn's algorithm
-  const queue: string[] = [];
-  const result: string[] = [];
-
-  // Start with nodes that have no dependencies
-  for (const [nodeId, degree] of inDegree.entries()) {
-    if (degree === 0) {
-      queue.push(nodeId);
-    }
-  }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    result.push(current);
-
-    // Reduce in-degree for neighbors
-    const neighbors = adjacencyList.get(current) || [];
-    for (const neighbor of neighbors) {
-      const newDegree = inDegree.get(neighbor)! - 1;
-      inDegree.set(neighbor, newDegree);
-
-      if (newDegree === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  // If result doesn't contain all nodes, there's a cycle
-  if (result.length !== graph.nodes.length) {
-    throw new Error('Cannot determine execution order: graph contains cycles');
-  }
-
-  return result;
-}
 
 /**
  * Links workflow artifacts to the master plan file.
@@ -418,12 +311,26 @@ export async function linkMasterPlan(
 
 This feature was developed using the structured workflow system:
 
-- [IDEA Artifact](.olympus/workflow/${workflowId}/idea.md)
-- [PRD Artifact](.olympus/workflow/${workflowId}/prd.md)
-- [SPEC Artifact](.olympus/workflow/${workflowId}/spec.md)
-- [Intent Files](.olympus/workflow/${workflowId}/intents/)
-- [Dependency Graph](.olympus/workflow/${workflowId}/intents/dependency-graph.json)
-- [Workflow Checkpoint](.olympus/workflow/${workflowId}/checkpoint.json)
+### Inception Phase
+- [Idea Document](aidlc-docs/inception/idea.md)
+- [Intent Document](aidlc-docs/inception/intent.md)
+- [Non-Functional Requirements](aidlc-docs/inception/nfr.md)
+
+### Construction Phase
+- [Units](aidlc-docs/construction/) - Per-unit directories (UNIT-001/, UNIT-002/, etc.)
+- [Design Artifacts](aidlc-docs/construction/design/)
+
+### Operations Phase
+- [Deployment Guide](aidlc-docs/operations/deploy-guide.md)
+- [Runbook](aidlc-docs/operations/runbook.md)
+- [Monitoring Configuration](aidlc-docs/operations/monitoring.json)
+- [Release Notes](aidlc-docs/operations/release-notes.md)
+
+### Metadata
+- [Workflow State](aidlc-docs/state.md)
+- [Audit Log](aidlc-docs/audit.md)
+- [Workflow Checkpoint](aidlc-docs/checkpoint.json)
+- [Manifest](aidlc-docs/manifest.json)
 `;
 
     let content = '';
@@ -493,46 +400,34 @@ ${artifactsSection}`;
 /**
  * Ensures the phase-based workflow directory structure exists.
  * Creates:
- * - .olympus/workflow/{workflowId}/
- * - .olympus/workflow/{workflowId}/vision/
- * - .olympus/workflow/{workflowId}/vision/intents/
- * - .olympus/workflow/{workflowId}/vision/validation/
- * - .olympus/workflow/{workflowId}/forge/
- * - .olympus/workflow/{workflowId}/forge/units/
- * - .olympus/workflow/{workflowId}/forge/design/
- * - .olympus/workflow/{workflowId}/forge/bolts/
- * - .olympus/workflow/{workflowId}/forge/bolts/results/
- * - .olympus/workflow/{workflowId}/forge/validation/
- * - .olympus/workflow/{workflowId}/summit/
- * - .olympus/workflow/{workflowId}/summit/validation/
+ * - aidlc-docs/
+ * - aidlc-docs/inception/
+ * - aidlc-docs/construction/
+ * - aidlc-docs/construction/design/
+ * - aidlc-docs/operations/
+ *
+ * Note: Per-unit directories (UNIT-001/, etc.) are created on-demand, not upfront.
  *
  * Idempotent - safe to call multiple times.
  * Does NOT create manifest.json (that's manifest.ts's job).
  * @throws Error if disk is full or permissions are denied
  */
 export async function ensurePhaseWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
 
   try {
     // Create base workflow directory
     await fs.ensureDir(workflowDir);
 
-    // Create Vision phase directories
-    await fs.ensureDir(path.join(workflowDir, 'vision'));
-    await fs.ensureDir(path.join(workflowDir, 'vision', 'intents'));
-    await fs.ensureDir(path.join(workflowDir, 'vision', 'validation'));
+    // Create Inception phase directory (idea.md and intent.md go directly in inception/)
+    await fs.ensureDir(path.join(workflowDir, 'inception'));
 
-    // Create Forge phase directories
-    await fs.ensureDir(path.join(workflowDir, 'forge'));
-    await fs.ensureDir(path.join(workflowDir, 'forge', 'units'));
-    await fs.ensureDir(path.join(workflowDir, 'forge', 'design'));
-    await fs.ensureDir(path.join(workflowDir, 'forge', 'bolts'));
-    await fs.ensureDir(path.join(workflowDir, 'forge', 'bolts', 'results'));
-    await fs.ensureDir(path.join(workflowDir, 'forge', 'validation'));
+    // Create Construction phase directories
+    await fs.ensureDir(path.join(workflowDir, 'construction'));
+    await fs.ensureDir(path.join(workflowDir, 'construction', 'design'));
 
-    // Create Summit phase directories
-    await fs.ensureDir(path.join(workflowDir, 'summit'));
-    await fs.ensureDir(path.join(workflowDir, 'summit', 'validation'));
+    // Create Operations phase directory (all artifacts go directly in operations/)
+    await fs.ensureDir(path.join(workflowDir, 'operations'));
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
 
@@ -579,15 +474,26 @@ export async function ensurePhaseWorkflowDir(projectPath: string, workflowId: st
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
- * @returns true if the workflow uses the legacy flat layout (no vision/ subdirectory),
- *          false if it uses the new phase-based layout (has vision/ subdirectory)
+ * @returns true if the workflow uses the legacy flat layout (in .olympus/workflow/{id}/),
+ *          false if it uses the new phase-based layout (in aidlc-docs/)
  */
 export async function isLegacyLayout(projectPath: string, workflowId: string): Promise<boolean> {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
-  const visionDir = path.join(workflowDir, 'vision');
+  const newWorkflowDir = path.join(projectPath, 'aidlc-docs');
+  const oldWorkflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
 
   try {
-    return !await fs.pathExists(visionDir);
+    // If aidlc-docs/ exists, it's the new layout
+    if (await fs.pathExists(newWorkflowDir)) {
+      return false;
+    }
+
+    // If only .olympus/workflow/{id}/ exists, it's legacy
+    if (await fs.pathExists(oldWorkflowDir)) {
+      return true;
+    }
+
+    // Neither exists, treat as legacy
+    return true;
   } catch (error) {
     // If we can't read the directory, assume it's legacy
     return true;
@@ -595,30 +501,26 @@ export async function isLegacyLayout(projectPath: string, workflowId: string): P
 }
 
 /**
- * Migrates a workflow from the legacy flat layout to the new phase-based layout.
+ * Migrates a workflow from the legacy layout to the new phase-based layout.
  * Moves:
- * - idea.md -> vision/idea.md
- * - prd.md -> vision/prd.md
- * - spec.md -> vision/spec.md
- * - intents/ -> vision/intents/
- * - validation/ -> vision/validation/
+ * - idea.md -> inception/idea.md
  *
  * Preserves:
- * - checkpoint.json (remains in root)
- * - manifest.json (remains in root)
+ * - checkpoint.json (moves to aidlc-docs/)
+ * - manifest.json (moves to aidlc-docs/)
  *
  * Creates:
- * - forge/ and summit/ directories
+ * - aidlc-docs/inception/, aidlc-docs/construction/, and aidlc-docs/operations/ directories
  *
- * Idempotent - if already migrated (vision/ exists), returns early without error.
+ * Idempotent - if already migrated (aidlc-docs/ exists), returns early without error.
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
  * @throws Error if disk is full, permissions are denied, or filesystem errors occur
  */
 export async function migrateLayout(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
-  const visionDir = path.join(workflowDir, 'vision');
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const visionDir = path.join(workflowDir, 'inception');
 
   try {
     // If already migrated, return early
@@ -629,39 +531,12 @@ export async function migrateLayout(projectPath: string, workflowId: string): Pr
     // Create the phase-based directory structure
     await ensurePhaseWorkflowDir(projectPath, workflowId);
 
-    // Move artifacts if they exist
-    const filesToMove = [
-      { from: 'idea.md', to: path.join('vision', 'idea.md') },
-      { from: 'prd.md', to: path.join('vision', 'prd.md') },
-      { from: 'spec.md', to: path.join('vision', 'spec.md') },
-    ];
+    // Move idea.md if it exists
+    const ideaSource = path.join(workflowDir, 'idea.md');
+    const ideaTarget = path.join(workflowDir, 'inception', 'idea.md');
 
-    for (const file of filesToMove) {
-      const sourcePath = path.join(workflowDir, file.from);
-      const targetPath = path.join(workflowDir, file.to);
-
-      if (await fs.pathExists(sourcePath)) {
-        await fs.move(sourcePath, targetPath, { overwrite: false });
-      }
-    }
-
-    // Move directories if they exist
-    const dirsToMove = [
-      { from: 'intents', to: path.join('vision', 'intents') },
-      { from: 'validation', to: path.join('vision', 'validation') },
-    ];
-
-    for (const dir of dirsToMove) {
-      const sourcePath = path.join(workflowDir, dir.from);
-      const targetPath = path.join(workflowDir, dir.to);
-
-      if (await fs.pathExists(sourcePath)) {
-        // Ensure target parent exists
-        await fs.ensureDir(path.dirname(targetPath));
-
-        // Move the directory
-        await fs.move(sourcePath, targetPath, { overwrite: false });
-      }
+    if (await fs.pathExists(ideaSource)) {
+      await fs.move(ideaSource, ideaTarget, { overwrite: false });
     }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
@@ -708,20 +583,20 @@ export async function migrateLayout(projectPath: string, workflowId: string): Pr
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
- * @param phase - Workflow phase ('vision', 'forge', or 'summit')
- * @param stage - Stage within the phase (e.g., 'idea', 'units', 'deploy')
+ * @param phase - Workflow phase ('discovery', 'inception', 'construction', or 'operations')
+ * @param stage - Stage within the phase (e.g., 'idea', 'design', 'deploy')
  * @param filename - Name of the file
  * @returns Absolute path to the artifact file
  *
  * @example
- * getPhaseArtifactPath(p, id, 'vision', 'idea', 'idea.md')
- * // Returns: .olympus/workflow/{id}/vision/idea.md
+ * getPhaseArtifactPath(p, id, 'inception', 'idea', 'idea.md')
+ * // Returns: aidlc-docs/inception/idea.md
  *
- * getPhaseArtifactPath(p, id, 'forge', 'units', 'UNIT-001.md')
- * // Returns: .olympus/workflow/{id}/forge/units/UNIT-001.md
+ * getPhaseArtifactPath(p, id, 'construction', 'design', 'interfaces.json')
+ * // Returns: aidlc-docs/construction/design/interfaces.json
  *
- * getPhaseArtifactPath(p, id, 'summit', 'deploy', 'deploy-guide.md')
- * // Returns: .olympus/workflow/{id}/summit/deploy-guide.md
+ * getPhaseArtifactPath(p, id, 'operations', 'deploy', 'deploy-guide.md')
+ * // Returns: aidlc-docs/operations/deploy-guide.md
  */
 export function getPhaseArtifactPath(
   projectPath: string,
@@ -730,21 +605,58 @@ export function getPhaseArtifactPath(
   stage: string,
   filename: string
 ): string {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
 
   // Determine subdirectory structure based on stage
-  // Stages that map to subdirectories
-  const subdirStages = ['intents', 'validation', 'units', 'design', 'bolts', 'results'];
+  // Only 'design' maps to subdirectory in construction phase (per-unit dirs are handled separately)
+  const subdirStages = ['design'];
 
   if (subdirStages.includes(stage)) {
-    // Special case: results is a subdirectory within bolts
-    if (stage === 'results') {
-      return path.join(workflowDir, phase, 'bolts', 'results', filename);
-    }
-    // Other stages map directly to subdirectories
+    // These stages map to subdirectories within construction/
     return path.join(workflowDir, phase, stage, filename);
   } else {
-    // Other stages are files directly in the phase directory
+    // All other stages: files go directly in the phase directory
     return path.join(workflowDir, phase, filename);
+  }
+}
+
+/**
+ * Ensures the discovery directory exists for brownfield workflows.
+ * Creates aidlc-docs/discovery/
+ *
+ * @param projectPath - Root path of the project
+ */
+export async function ensureDiscoveryDir(projectPath: string): Promise<void> {
+  const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+  await fs.ensureDir(discoveryDir);
+}
+
+/**
+ * Writes content to the state.md file at the root of aidlc-docs/.
+ *
+ * @param projectPath - Root path of the project
+ * @param content - Content to write to state.md
+ */
+export async function writeStateFile(projectPath: string, content: string): Promise<void> {
+  const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+  await fs.ensureDir(path.dirname(statePath));
+  await fs.writeFile(statePath, content, 'utf-8');
+}
+
+/**
+ * Appends an entry to the audit.md file at the root of aidlc-docs/.
+ * Creates the file with a header if it doesn't exist.
+ *
+ * @param projectPath - Root path of the project
+ * @param entry - Entry to append to audit.md
+ */
+export async function appendAuditEntry(projectPath: string, entry: string): Promise<void> {
+  const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+  await fs.ensureDir(path.dirname(auditPath));
+  const exists = await fs.pathExists(auditPath);
+  if (exists) {
+    await fs.appendFile(auditPath, '\n' + entry, 'utf-8');
+  } else {
+    await fs.writeFile(auditPath, `# Audit Log\n\n${entry}`, 'utf-8');
   }
 }

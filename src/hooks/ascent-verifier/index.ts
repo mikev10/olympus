@@ -27,7 +27,6 @@ import {
   updateMasterPlanProgress
 } from '../../features/workflow-engine/execution.js';
 import { loadCheckpoint } from '../../features/workflow-engine/checkpoint.js';
-import { getExecutionOrder } from '../../features/workflow-engine/artifacts.js';
 
 export interface VerificationState {
   /** Whether verification is pending */

@@ -1,14 +1,14 @@
 /**
- * Forge Phase Validation
+ * Construction Phase Validation
  *
- * Validates structural completeness of Forge stage artifacts (units, design, bolts).
+ * Validates structural completeness of Construction stage artifacts (units, design, bolts).
  * These are structural checks only - NOT V&V alignment checks.
  *
  * Validates:
- * - Unit files (UNIT-*.md) in forge/units/ directory
- * - Design artifacts (interfaces, components, data flows) in forge/design/
+ * - Unit files (UNIT-*.md) in construction/units/ directory
+ * - Design artifacts (interfaces, components, data flows) in construction/design/
  * - Bolt files (BOLT-*.md) representing implementation tasks
- * - Overall Forge phase structural integrity
+ * - Overall Construction phase structural integrity
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
@@ -118,7 +118,7 @@ function countBulletPoints(content: string): number {
 }
 
 /**
- * Validates UNIT-*.md files in the forge/units/ directory.
+ * Validates UNIT-*.md files in the construction/units/ directory.
  *
  * Checks structural completeness:
  * - Each unit file has frontmatter (id, title, parent_intent, status, estimated_effort)
@@ -129,13 +129,13 @@ function countBulletPoints(content: string): number {
  *
  * Also checks that all intents have at least one unit child.
  *
- * @param unitsDir - Absolute path to the forge/units/ directory
+ * @param unitsDir - Absolute path to the construction/units/ directory
  * @param intentsDir - Absolute path to the intents/ directory
  * @returns ValidationResult with coverage percentage and blocking issues
  *
  * @example
  * const result = await validateUnits(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\forge\\units',
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\units',
  *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\intents'
  * );
  * if (result.passed) {
@@ -329,7 +329,7 @@ export async function validateUnits(
 }
 
 /**
- * Validates design artifacts in forge/design/ directory.
+ * Validates design artifacts in construction/design/ directory.
  *
  * Checks:
  * - interfaces.json exists and is valid JSON
@@ -339,12 +339,12 @@ export async function validateUnits(
  * - Each component references valid interfaces
  * - Data flows reference valid components
  *
- * @param designDir - Absolute path to the forge/design/ directory
+ * @param designDir - Absolute path to the construction/design/ directory
  * @returns ValidationResult with coverage percentage and blocking issues
  *
  * @example
  * const result = await validateDesignArtifacts(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\forge\\design'
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\design'
  * );
  * if (result.passed) {
  *   console.log('All design artifacts are valid');
@@ -505,7 +505,7 @@ export async function validateDesignArtifacts(designDir: string): Promise<Valida
  *
  * @example
  * const result = await validateBolt(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\forge\\bolts\\BOLT-001.md'
+ *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\bolts\\BOLT-001.md'
  * );
  * if (result.passed) {
  *   console.log('Bolt is structurally complete');
@@ -651,7 +651,7 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
 }
 
 /**
- * High-level validation of entire Forge phase.
+ * High-level validation of entire Construction phase.
  *
  * Runs validateUnits, validateDesignArtifacts, and checks bolts.
  * Returns aggregate ValidationResult.
@@ -666,7 +666,7 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
  *   'feature-x-20240115'
  * );
  * if (result.passed) {
- *   console.log('Forge phase is structurally complete');
+ *   console.log('Construction phase is structurally complete');
  * }
  */
 export async function validateForgePhase(
@@ -676,19 +676,19 @@ export async function validateForgePhase(
   const timestamp = new Date().toISOString();
   const blockingIssues: string[] = [];
 
-  const workflowDir = join(projectPath, '.olympus', 'workflows', workflowId);
-  const forgeDir = join(workflowDir, 'forge');
+  const workflowDir = join(projectPath, 'aidlc-docs');
+  const forgeDir = join(workflowDir, 'construction');
   const unitsDir = join(forgeDir, 'units');
   const designDir = join(forgeDir, 'design');
   const boltsDir = join(forgeDir, 'bolts');
-  const intentsDir = join(workflowDir, 'intents');
+  const intentsDir = join(workflowDir, 'inception');
 
-  // Check if forge directory exists
+  // Check if construction directory exists
   if (!existsSync(forgeDir)) {
     return {
       passed: false,
       coverage_percentage: 0,
-      blocking_issues: ['Forge directory not found'],
+      blocking_issues: ['Construction directory not found'],
       timestamp,
     };
   }

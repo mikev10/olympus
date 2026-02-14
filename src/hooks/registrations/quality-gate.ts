@@ -11,7 +11,7 @@
  * auto-advance and gate bypass via flags/config.
  *
  * Key behaviors:
- * - Detects Vision→Forge and Forge→Summit transitions
+ * - Detects Inception→Construction and Construction→Operations transitions
  * - Runs V&V placeholder checks (alignment engine coming in Phase 4.5)
  * - Auto-advances based on trust level and risk tier
  * - Records all gate decisions in manifest audit trail
@@ -38,7 +38,6 @@ import type {
   AlignmentQuestion,
   GateResult,
   ManifestSchema,
-  WorkflowCheckpointV2,
 } from '../../features/workflow-engine/phase-types.js';
 import type { HookContext, HookResult } from '../types.js';
 import * as fs from 'fs-extra';
@@ -49,7 +48,7 @@ import { join } from 'path';
  * These questions guide human reviewers during gate approval.
  */
 const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
-  vision: [
+  inception: [
     {
       question: 'Does the PRD address all IDEA constraints?',
       answer: null,
@@ -75,7 +74,7 @@ const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
       passed: null,
     },
   ],
-  forge: [
+  construction: [
     {
       question: 'Do UNITS cover all INTENT acceptance criteria?',
       answer: null,
@@ -95,7 +94,7 @@ const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
       passed: null,
     },
   ],
-  summit: [
+  operations: [
     {
       question: 'Does the deployment guide cover all components?',
       answer: null,
@@ -186,14 +185,14 @@ function shouldAutoAdvance(riskTier: RiskTier, trustLevel: TrustLevel): boolean 
  */
 async function findActiveWorkflow(
   projectPath: string
-): Promise<{ workflowId: string; checkpoint: WorkflowCheckpointV2; manifestPath: string } | null> {
+): Promise<{ workflowId: string; checkpoint: any; manifestPath: string } | null> {
   try {
     const workflows = await listWorkflows(projectPath);
     if (workflows.length === 0) return null;
 
     let bestMatch: {
       workflowId: string;
-      checkpoint: WorkflowCheckpointV2;
+      checkpoint: any;
       manifestPath: string;
       updatedAt: string;
     } | null = null;
@@ -209,7 +208,7 @@ async function findActiveWorkflow(
       if (!bestMatch || checkpoint.updated_at > bestMatch.updatedAt) {
         bestMatch = {
           workflowId,
-          checkpoint: checkpoint as WorkflowCheckpointV2,
+          checkpoint,
           manifestPath,
           updatedAt: checkpoint.updated_at,
         };
@@ -237,16 +236,16 @@ async function findActiveWorkflow(
  * @returns Phase that is transitioning, or null if no transition
  */
 function detectPhaseTransition(
-  checkpoint: WorkflowCheckpointV2,
+  checkpoint: any,
   manifest: ManifestSchema | null
 ): WorkflowPhase | null {
   // Check if the current phase is completing
   const currentPhase = (checkpoint as any).current_phase as WorkflowPhase | undefined;
 
   if (!currentPhase) {
-    // Legacy checkpoint - check if Vision is completing (intents stage complete)
-    if (checkpoint.current_stage === 'intents' || checkpoint.current_stage === 'complete') {
-      return 'vision';
+    // Legacy checkpoint - check if Inception is completing (intent stage complete)
+    if (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
+      return 'inception';
     }
     return null;
   }
@@ -269,12 +268,12 @@ function detectPhaseTransition(
     }
   }
 
-  // Simple heuristic: Vision completes when intents stage is done
+  // Simple heuristic: Inception completes when intent stage is done
   if (
-    currentPhase === 'vision' &&
-    (checkpoint.current_stage === 'intents' || checkpoint.current_stage === 'complete')
+    currentPhase === 'inception' &&
+    (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
   ) {
-    return 'vision';
+    return 'inception';
   }
 
   return null;
@@ -307,7 +306,7 @@ function isGatesDisabled(projectPath: string): boolean {
  * @returns Phase with pending gate, or null if none found
  */
 function findPendingGate(manifest: ManifestSchema): WorkflowPhase | null {
-  for (const phase of ['vision', 'forge', 'summit'] as WorkflowPhase[]) {
+  for (const phase of ['discovery', 'inception', 'construction', 'operations'] as WorkflowPhase[]) {
     const phaseState = manifest.phases[phase];
     if (
       phaseState.gate_result &&

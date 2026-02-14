@@ -1,10 +1,10 @@
 /**
- * Forge Phase: Hierarchical Decomposition
+ * Construction Phase: Hierarchical Decomposition
  *
- * Decomposes high-level INTENTs from the Vision phase into hierarchical execution units:
- * - INTENT (from Vision phase) → UNIT (architectural components) → BOLT (atomic tasks)
+ * Decomposes high-level INTENTs from the Inception phase into hierarchical execution units:
+ * - INTENT (from Inception phase) → UNIT (architectural components) → BOLT (atomic tasks)
  *
- * This module provides the core decomposition logic for the Forge phase of ODLC,
+ * This module provides the core decomposition logic for the Construction phase of ODLC,
  * transforming strategic intents into executable work items.
  */
 

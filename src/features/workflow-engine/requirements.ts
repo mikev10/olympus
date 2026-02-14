@@ -2,7 +2,7 @@
  * Structured Requirements Engineering
  *
  * Provides stakeholder mapping, constraint classification, and requirements
- * traceability for the ODLC Vision phase. Links requirements across stages:
+ * traceability for the ODLC Inception phase. Links requirements across stages:
  * IDEA → PRD → SPEC → INTENTS.
  */
 

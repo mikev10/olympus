@@ -2,10 +2,11 @@
  * ODLC Phase Type System
  *
  * Type definitions for the Olympus Development Life Cycle (ODLC) phase-based workflow.
- * This system extends the existing stage-based workflow with three primary phases:
- * - Vision: Requirements gathering and depth assessment
- * - Forge: Hierarchical design and implementation planning
- * - Summit: Deployment and monitoring
+ * This system extends the existing stage-based workflow with four primary phases:
+ * - Discovery: Initial exploration and scoping
+ * - Inception: Requirements gathering and depth assessment
+ * - Construction: Hierarchical design and implementation planning
+ * - Operations: Deployment and monitoring
  *
  * Includes trust state management, risk tier classification, alignment verification,
  * and comprehensive artifact tracking for the phase-based methodology.
@@ -14,11 +15,19 @@
 // Import what we need from existing types
 import type { WorkflowStage, WorkflowStatus, ArtifactReference, ValidationResult } from './types.js';
 
-export type WorkflowPhase = 'vision' | 'forge' | 'summit';
-export type ForgeStage = 'units' | 'design' | 'build';
-// Note: ForgeStage 'build' refers to the Forge construction stage, not npm build.
-export type SummitStage = 'deploy' | 'monitor';
-export type AnyStage = WorkflowStage | ForgeStage | SummitStage;
+export type WorkflowPhase = 'discovery' | 'inception' | 'construction' | 'operations';
+
+/**
+ * Maps each workflow stage to its parent phase.
+ * Used for phase progression tracking and gate routing.
+ */
+export const STAGE_PHASE_MAP: Record<WorkflowStage, WorkflowPhase | 'complete'> = {
+  idea: 'inception',
+  intent: 'inception',
+  unit: 'construction',
+  bolt: 'construction',
+  complete: 'complete',
+};
 
 export type TrustLevel = 0 | 1 | 2 | 3;
 
@@ -109,7 +118,7 @@ export interface DepthAssessment {
   preferences: number;
   total_score: number;
   recommended_depth: 'minimal' | 'standard' | 'comprehensive';
-  skip_forge: boolean;
+  skip_units: boolean;
   risk_tier: RiskTierClassification;
 }
 
@@ -156,7 +165,7 @@ export interface ManifestArtifact {
   id: string;
   type: string;
   phase: WorkflowPhase;
-  stage: AnyStage;
+  stage: WorkflowStage;
   path: string;
   created_at: string;
   updated_at: string;
@@ -166,6 +175,10 @@ export interface ManifestArtifact {
   contract_status: 'draft' | 'active' | 'fulfilled' | 'violated' | 'stale';
   contract_version: number;
   stale_reason: string | null;
+  // BOLT audit trail fields
+  executedBy?: string | null;
+  reviewedBy?: string | null;
+  statusHistory?: Array<{ status: string; timestamp: string }>;
 }
 
 export interface ArtifactLink {
@@ -183,9 +196,9 @@ export interface GateAuditEntry {
 }
 
 export interface MethodologyMetrics {
-  vision_duration_ms: number | null;
-  forge_duration_ms: number | null;
-  summit_duration_ms: number | null;
+  inception_duration_ms: number | null;
+  construction_duration_ms: number | null;
+  operations_duration_ms: number | null;
   total_artifacts: number;
   validation_pass_rate: number;
   gate_bypass_count: number;
@@ -218,4 +231,30 @@ export interface WorkflowCheckpointV2 {
   manifest_path: string | null;
   trust_state_path: string | null;
   risk_tier: RiskTierClassification | null;
+}
+
+// Checkpoint v3 type
+export interface WorkflowCheckpointV3 {
+  schema_version: '3.0.0';
+  workflow_id: string;
+  feature_name: string;
+  current_phase: WorkflowPhase;
+  current_stage: WorkflowStage;
+  status: WorkflowStatus;
+  phases: Record<WorkflowPhase, PhaseState>;
+  manifest_path: string;
+  trust_state_path: string;
+  depth_score?: number;
+  risk_tier?: number;
+  active_unit_id?: string;
+  active_bolt_id?: string;
+  execution_mode?: 'ascent' | 'olympus' | 'ultrawork' | 'manual';
+  interview_progress?: {
+    stage: 'idea' | 'intent';
+    questions_asked: number;
+    draft_artifact_path?: string;
+  };
+  resume_context?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }

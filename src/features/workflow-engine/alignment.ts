@@ -11,6 +11,8 @@
  * - Compute verification scores (heuristic text analysis)
  * - Generate validation questions for human/AI review
  * - Run full alignment checks (verification + validation)
+ * - Run dual validation (parent + root IDEA checks)
+ * - Adaptive thresholds based on trust levels
  * - Record alignment results in manifest
  */
 
@@ -25,60 +27,54 @@ import { loadManifest, saveManifest } from './manifest.js';
 /**
  * Supported transition types between ODLC phases.
  */
-export type TransitionType =
-  | 'idea-to-prd'
-  | 'prd-to-spec'
-  | 'spec-to-intents'
-  | 'intents-to-units'
-  | 'units-to-design'
-  | 'design-to-build';
+export type TransitionType = 'idea-to-intent' | 'intent-to-unit' | 'unit-to-bolt';
 
 /**
- * Conformance thresholds (percentage) for each transition type.
+ * Root validation types for checking alignment back to the original IDEA.
+ */
+export type RootValidationType = 'unit-to-idea' | 'bolt-to-idea';
+
+/**
+ * Conformance thresholds (percentage) for each transition type and root validation type.
  * Verification must meet or exceed threshold to pass.
  */
-const CONFORMANCE_THRESHOLDS: Record<TransitionType, number> = {
-  'idea-to-prd': 90,
-  'prd-to-spec': 95,
-  'spec-to-intents': 100,
-  'intents-to-units': 100,
-  'units-to-design': 90,
-  'design-to-build': 90,
+const CONFORMANCE_THRESHOLDS: Record<TransitionType | RootValidationType, number> = {
+  'idea-to-intent': 90,
+  'intent-to-unit': 95,
+  'unit-to-bolt': 100,
+  'unit-to-idea': 80,
+  'bolt-to-idea': 70,
 };
 
 /**
- * Validation questions for each transition type.
+ * Validation questions for each transition type and root validation type.
  * Each transition has two questions:
  * - Verification question: Checks conformance to source
  * - Validation question: Checks real-world value and intent
  */
 const VALIDATION_QUESTIONS: Record<
-  TransitionType,
+  TransitionType | RootValidationType,
   { verification: string; validation: string }
 > = {
-  'idea-to-prd': {
-    verification: 'Does the PRD address all IDEA constraints?',
-    validation: 'Does the PRD solve the actual business problem?',
+  'idea-to-intent': {
+    verification: 'Does the INTENT address all IDEA constraints and success metrics?',
+    validation: 'Does the INTENT solve the actual business problem stated in the IDEA?',
   },
-  'prd-to-spec': {
-    verification: 'Does the SPEC implement all PRD user stories?',
-    validation: 'Does the SPEC achieve the intended user experience?',
+  'intent-to-unit': {
+    verification: 'Does the UNIT cover its assigned scope from the INTENT?',
+    validation: 'Will this UNIT produce a working module that contributes to the feature?',
   },
-  'spec-to-intents': {
-    verification: 'Do the INTENTS cover all SPEC components?',
-    validation: 'Are the intents decomposed to deliver real value?',
+  'unit-to-bolt': {
+    verification: 'Does the BOLT cover all acceptance criteria from the UNIT?',
+    validation: 'Does this BOLT deliver meaningful, testable progress?',
   },
-  'intents-to-units': {
-    verification: 'Do the UNITS cover all INTENT acceptance criteria?',
-    validation: 'Will these units produce a working feature?',
+  'unit-to-idea': {
+    verification: "Does this UNIT contribute to the IDEA's problem statement?",
+    validation: "Does this UNIT help achieve the IDEA's success metrics?",
   },
-  'units-to-design': {
-    verification: 'Does the DESIGN address all UNIT requirements?',
-    validation: 'Does the design align with architectural goals?',
-  },
-  'design-to-build': {
-    verification: 'Does the BUILD satisfy DESIGN contracts?',
-    validation: 'Does the implementation deliver user value?',
+  'bolt-to-idea': {
+    verification: "Does this BOLT contribute to solving the IDEA's stated problem?",
+    validation: "Is this BOLT still aligned with the original IDEA's goals?",
   },
 };
 
@@ -86,13 +82,12 @@ const VALIDATION_QUESTIONS: Record<
  * Configuration mapping for extracting relevant sections from source artifacts.
  * Different transitions require different source sections to be validated.
  */
-const TRANSITION_SOURCE_SECTIONS: Record<TransitionType, string[]> = {
-  'idea-to-prd': ['Constraints', 'Success Metrics', 'Problem Statement'],
-  'prd-to-spec': [], // Special case: extract user stories via regex
-  'spec-to-intents': ['Components', 'Architecture'],
-  'intents-to-units': [], // Special case: all bullet points from all sections
-  'units-to-design': [], // Special case: all bullet points
-  'design-to-build': [], // Special case: all bullet points
+const TRANSITION_SOURCE_SECTIONS: Record<TransitionType | RootValidationType, string[]> = {
+  'idea-to-intent': ['Problem Statement', 'Success Metrics', 'Business Constraints'],
+  'intent-to-unit': ['Business Requirements', 'Implementation Plan'],
+  'unit-to-bolt': ['Acceptance Criteria', 'Target Files'],
+  'unit-to-idea': ['Problem Statement', 'Success Metrics'],
+  'bolt-to-idea': ['Problem Statement', 'Success Metrics'],
 };
 
 /**
@@ -141,6 +136,7 @@ function parseSections(content: string): Map<string, string> {
 /**
  * Extracts bullet point text from markdown content.
  * Looks for lines starting with -, *, or + (standard markdown bullets).
+ * Also handles checkboxes [ ] and [x].
  *
  * @param content - Section content
  * @returns Array of bullet point text (without the bullet marker)
@@ -150,7 +146,8 @@ function extractBulletPoints(content: string): string[] {
   const lines = content.split('\n');
 
   for (const line of lines) {
-    const match = line.match(/^\s*[-*+]\s+(.+)$/);
+    // Match standard bullets and checkboxes
+    const match = line.match(/^\s*[-*+]\s+(?:\[[ x]\]\s+)?(.+)$/);
     if (match) {
       bullets.push(match[1].trim());
     }
@@ -164,32 +161,51 @@ function extractBulletPoints(content: string): string[] {
  * Different transitions require different extraction strategies.
  *
  * @param content - Source artifact content
- * @param transition - Transition type
+ * @param transition - Transition type or root validation type
  * @returns Array of requirement strings to validate against
  */
-function extractRequirements(content: string, transition: TransitionType): string[] {
+function extractRequirements(
+  content: string,
+  transition: TransitionType | RootValidationType
+): string[] {
   const markdownContent = removeFrontmatter(content);
 
-  // Special case: PRD to SPEC - extract user stories via regex
-  if (transition === 'prd-to-spec') {
+  // Special case: intent-to-unit - extract Proposed UNITs and Business Requirements
+  if (transition === 'intent-to-unit') {
+    const sections = parseSections(markdownContent);
     const requirements: string[] = [];
-    const lines = markdownContent.split('\n');
-    for (const line of lines) {
-      const match = line.match(/^###?\s+(US-\d+)/);
-      if (match) {
-        requirements.push(match[1]);
-      }
+
+    // Extract from Business Requirements section
+    const businessReqs = sections.get('Business Requirements');
+    if (businessReqs) {
+      requirements.push(...extractBulletPoints(businessReqs));
     }
+
+    // Extract from Implementation Plan section (Proposed UNITs)
+    const implPlan = sections.get('Implementation Plan');
+    if (implPlan) {
+      requirements.push(...extractBulletPoints(implPlan));
+    }
+
     return requirements;
   }
 
-  // Special case: Intents/Units/Design/Build - extract all bullet points
-  if (
-    transition === 'intents-to-units' ||
-    transition === 'units-to-design' ||
-    transition === 'design-to-build'
-  ) {
-    return extractBulletPoints(markdownContent);
+  // Special case: unit-to-bolt - extract Acceptance Criteria and Target Files
+  if (transition === 'unit-to-bolt') {
+    const sections = parseSections(markdownContent);
+    const requirements: string[] = [];
+
+    const acceptanceCriteria = sections.get('Acceptance Criteria');
+    if (acceptanceCriteria) {
+      requirements.push(...extractBulletPoints(acceptanceCriteria));
+    }
+
+    const targetFiles = sections.get('Target Files');
+    if (targetFiles) {
+      requirements.push(...extractBulletPoints(targetFiles));
+    }
+
+    return requirements;
   }
 
   // Standard case: extract bullets from specific sections
@@ -214,13 +230,13 @@ function extractRequirements(content: string, transition: TransitionType): strin
  *
  * @param sourceContent - Full content of source artifact
  * @param targetContent - Full content of target artifact
- * @param transition - Transition type (determines extraction strategy)
+ * @param transition - Transition type or root validation type (determines extraction strategy)
  * @returns Verification result with conformance score, coverage, and missing items
  */
 export function computeVerification(
   sourceContent: string,
   targetContent: string,
-  transition: TransitionType
+  transition: TransitionType | RootValidationType
 ): AlignmentVerificationResult {
   try {
     // Extract requirements from source
@@ -276,13 +292,15 @@ export function computeVerification(
 }
 
 /**
- * Generates validation questions for a specific transition type.
+ * Generates validation questions for a specific transition type or root validation type.
  * Questions start unanswered (answer: null, passed: null).
  *
- * @param transition - Transition type
+ * @param transition - Transition type or root validation type
  * @returns Array of unanswered validation questions
  */
-export function generateValidationQuestions(transition: TransitionType): AlignmentQuestion[] {
+export function generateValidationQuestions(
+  transition: TransitionType | RootValidationType
+): AlignmentQuestion[] {
   const questions = VALIDATION_QUESTIONS[transition];
 
   return [
@@ -309,7 +327,7 @@ export function generateValidationQuestions(transition: TransitionType): Alignme
  * @param targetContent - Full content of target artifact
  * @param sourceId - Source artifact ID
  * @param targetId - Target artifact ID
- * @param transition - Transition type
+ * @param transition - Transition type or root validation type
  * @returns Complete alignment check with verification, validation, and pass/fail status
  */
 export function runAlignmentCheck(
@@ -317,7 +335,7 @@ export function runAlignmentCheck(
   targetContent: string,
   sourceId: string,
   targetId: string,
-  transition: TransitionType
+  transition: TransitionType | RootValidationType
 ): AlignmentCheck {
   try {
     // Step 1: Compute verification
@@ -378,6 +396,72 @@ export function runAlignmentCheck(
 }
 
 /**
+ * Runs dual validation: parent check + root IDEA check.
+ * This ensures the artifact is aligned with both its immediate parent and the original IDEA.
+ *
+ * @param artifactContent - Full content of the artifact to validate
+ * @param parentContent - Full content of the parent artifact
+ * @param rootIdeaContent - Full content of the root IDEA artifact
+ * @param transition - Parent transition type
+ * @param rootTransition - Root validation type
+ * @param sourceId - Parent artifact ID
+ * @param targetId - Target artifact ID
+ * @param rootId - Root IDEA artifact ID
+ * @returns Combined result with both parent and root checks, and overall pass status
+ */
+export function runDualValidation(
+  artifactContent: string,
+  parentContent: string,
+  rootIdeaContent: string,
+  transition: TransitionType,
+  rootTransition: RootValidationType,
+  sourceId: string,
+  targetId: string,
+  rootId: string
+): { parentCheck: AlignmentCheck; rootCheck: AlignmentCheck; passed: boolean } {
+  // Run parent check
+  const parentCheck = runAlignmentCheck(parentContent, artifactContent, sourceId, targetId, transition);
+
+  // Run root IDEA check
+  const rootCheck = runAlignmentCheck(rootIdeaContent, artifactContent, rootId, targetId, rootTransition);
+
+  // Both checks must pass
+  const passed = parentCheck.alignment_passed && rootCheck.alignment_passed;
+
+  return {
+    parentCheck,
+    rootCheck,
+    passed,
+  };
+}
+
+/**
+ * Calculates adaptive threshold based on trust level.
+ * Trust 0-1: base threshold
+ * Trust 2: base - 10
+ * Trust 3: base - 20
+ * Minimum: 0
+ *
+ * @param baseThreshold - Base conformance threshold
+ * @param trustLevel - Trust level (0-3)
+ * @returns Adjusted threshold
+ */
+export function getAdaptiveThreshold(baseThreshold: number, trustLevel: number): number {
+  let adjustment = 0;
+
+  if (trustLevel >= 2) {
+    adjustment += 10;
+  }
+
+  if (trustLevel >= 3) {
+    adjustment += 10;
+  }
+
+  const adaptiveThreshold = baseThreshold - adjustment;
+  return Math.max(0, adaptiveThreshold);
+}
+
+/**
  * Records an alignment check result in the manifest.
  * Appends the check to manifest.alignment_checks and saves.
  *
@@ -400,11 +484,11 @@ export function recordAlignmentResult(manifestPath: string, check: AlignmentChec
 }
 
 /**
- * Gets the conformance threshold for a specific transition type.
+ * Gets the conformance threshold for a specific transition type or root validation type.
  *
- * @param transition - Transition type
+ * @param transition - Transition type or root validation type
  * @returns Conformance threshold percentage (0-100)
  */
-export function getConformanceThreshold(transition: TransitionType): number {
+export function getConformanceThreshold(transition: TransitionType | RootValidationType): number {
   return CONFORMANCE_THRESHOLDS[transition];
 }

@@ -1,11 +1,11 @@
 /**
- * Tests for IDEA artifact validation
+ * Tests for IDEA and INTENT artifact validation
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { validateIdea } from '../../features/workflow-engine/validation.js';
+import { validateIdea, validateIntent, clearFileCache } from '../../features/workflow-engine/validation.js';
 
 const TEST_DIR = join(process.cwd(), '.tmp-test-validation');
 
@@ -21,7 +21,7 @@ status: draft
 
 Users currently cannot securely access their accounts. We need a robust authentication system that supports multiple login methods and provides secure session management.
 
-## Business Context
+## User Personas
 
 Our platform is expanding to handle sensitive user data. Regulatory requirements (GDPR, SOC2) mandate strong authentication controls. Competitors offer 2FA and social login, which we currently lack.
 
@@ -34,7 +34,7 @@ Market research shows 45% of users abandon registration if the process is too co
 - Support 3+ authentication methods (password, Google, GitHub)
 - Meet SOC2 compliance requirements for access control
 
-## Constraints
+## Business Constraints
 
 - Must integrate with existing user database schema
 - Cannot break current session management for active users
@@ -42,13 +42,11 @@ Market research shows 45% of users abandon registration if the process is too co
 - Budget: 2 engineer-months, $15K for third-party services
 - Compliance: Must meet GDPR data retention requirements
 
-## Solution Approach
+## Out of Scope
 
-Implement OAuth 2.0 based authentication with support for:
-1. Traditional email/password with bcrypt hashing
-2. Social login (Google, GitHub) via OAuth providers
-3. Optional 2FA using TOTP (Time-based One-Time Password)
-4. JWT-based session tokens with refresh mechanism
+- Enterprise SSO integration (deferred to Phase 2)
+- Biometric authentication (not supported on web platform)
+- Password strength meter UI (handled by browser)
 `;
 
 // Test fixture: Missing problem statement
@@ -58,7 +56,7 @@ risk_tier: medium
 
 # Feature: Data Export
 
-## Business Context
+## User Personas
 
 Users need to export their data for compliance reasons.
 
@@ -67,12 +65,12 @@ Users need to export their data for compliance reasons.
 - Support CSV and JSON formats
 - Process exports within 5 minutes
 
-## Constraints
+## Business Constraints
 
 - Must handle large datasets efficiently
 - Privacy regulations require audit logging
 
-## Solution Approach
+## Out of Scope
 
 Build async export pipeline with queue processing.
 `;
@@ -88,7 +86,7 @@ risk_tier: low
 
 Users have requested a dark theme for better nighttime usage.
 
-## Business Context
+## User Personas
 
 Accessibility and user preference are key differentiators.
 
@@ -96,12 +94,12 @@ Accessibility and user preference are key differentiators.
 
 - 30% of users enable dark mode within first month
 
-## Constraints
+## Business Constraints
 
 - Must maintain WCAG AA contrast ratios
 - All components must support theme switching
 
-## Solution Approach
+## Out of Scope
 
 CSS custom properties with theme toggle component.
 `;
@@ -113,7 +111,7 @@ const NO_RISK_TIER = `# Feature: Analytics Dashboard
 
 Need real-time analytics for user behavior tracking.
 
-## Business Context
+## User Personas
 
 Data-driven decisions require visibility into user actions.
 
@@ -123,12 +121,12 @@ Data-driven decisions require visibility into user actions.
 - Support 10+ custom metric types
 - 90% uptime SLA
 
-## Constraints
+## Business Constraints
 
 - Must handle 1M+ events per day
 - Privacy-compliant data collection
 
-## Solution Approach
+## Out of Scope
 
 Event streaming pipeline with real-time aggregation.
 `;
@@ -144,7 +142,7 @@ risk_tier: high
 
 Need to accept credit card payments from customers.
 
-## Business Context
+## User Personas
 
 Revenue generation requires payment infrastructure.
 
@@ -153,7 +151,7 @@ Revenue generation requires payment infrastructure.
 - Support Visa, Mastercard, Amex
 - Process payments with 99.9% success rate
 
-## Solution Approach
+## Out of Scope
 
 Integrate with Stripe payment gateway.
 `;
@@ -169,19 +167,19 @@ risk_tier: medium
 
 Users miss important updates without notifications.
 
-## Business Context
+## User Personas
 
 ## Success Metrics
 
 - Deliver notifications within 1 minute
 - 60% open rate for transactional emails
 
-## Constraints
+## Business Constraints
 
 - Must support email and SMS channels
 - Comply with CAN-SPAM regulations
 
-## Solution Approach
+## Out of Scope
 
 Event-driven notification system with queuing.
 `;
@@ -197,7 +195,7 @@ risk_tier: low
 
 Users cannot find content efficiently in the app.
 
-## Business Context
+## User Personas
 
 Search is critical for content discovery and user engagement.
 
@@ -206,7 +204,7 @@ Search is critical for content discovery and user engagement.
 - Search results in <500ms
 - 70% of searches return relevant results
 
-## Constraints
+## Business Constraints
 
 - Must index 100K+ documents
 - Support fuzzy matching and filters
@@ -218,6 +216,8 @@ describe('validateIdea', () => {
     if (!existsSync(TEST_DIR)) {
       mkdirSync(TEST_DIR, { recursive: true });
     }
+    // Clear file cache before each test
+    clearFileCache();
   });
 
   afterEach(() => {
@@ -225,6 +225,7 @@ describe('validateIdea', () => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true, force: true });
     }
+    clearFileCache();
   });
 
   it('should pass validation for complete IDEA artifact', async () => {
@@ -250,14 +251,14 @@ describe('validateIdea', () => {
     expect(result.coverage_percentage).toBeLessThan(100);
   });
 
-  it('should fail when business context is empty', async () => {
+  it('should fail when user personas section is empty', async () => {
     const filePath = join(TEST_DIR, 'empty-context.md');
     writeFileSync(filePath, EMPTY_BUSINESS_CONTEXT, 'utf-8');
 
     const result = await validateIdea(filePath);
 
     expect(result.passed).toBe(false);
-    expect(result.blocking_issues).toContain('Business context section is empty');
+    expect(result.blocking_issues).toContain('User Personas section is empty');
   });
 
   it('should fail when only 1 success metric is present', async () => {
@@ -272,15 +273,15 @@ describe('validateIdea', () => {
     );
   });
 
-  it('should fail when constraints section is missing', async () => {
+  it('should fail when business constraints section is missing', async () => {
     const filePath = join(TEST_DIR, 'no-constraints.md');
     writeFileSync(filePath, NO_CONSTRAINTS, 'utf-8');
 
     const result = await validateIdea(filePath);
 
     expect(result.passed).toBe(false);
-    expect(result.blocking_issues).toContain('Constraints section missing');
-    expect(result.blocking_issues).toContain('Missing required section: Constraints');
+    expect(result.blocking_issues).toContain('Business Constraints section missing');
+    expect(result.blocking_issues).toContain('Missing required section: Business Constraints');
   });
 
   it('should fail when risk_tier is not specified in frontmatter', async () => {
@@ -300,7 +301,7 @@ describe('validateIdea', () => {
     const result = await validateIdea(filePath);
 
     expect(result.passed).toBe(false);
-    expect(result.blocking_issues).toContain('Missing required section: Solution Approach');
+    expect(result.blocking_issues).toContain('Missing required section: Out of Scope');
   });
 
   it('should return error when artifact file does not exist', async () => {
@@ -350,9 +351,9 @@ Some problem.
     expect(result.passed).toBe(false);
     expect(result.blocking_issues.length).toBeGreaterThan(3);
     expect(result.blocking_issues).toContain('Risk tier not specified in frontmatter');
-    expect(result.blocking_issues).toContain('Business context section is empty');
+    expect(result.blocking_issues).toContain('User Personas section is empty');
     expect(result.blocking_issues).toContain('Only 1 success metric found, need at least 2');
-    expect(result.blocking_issues).toContain('Constraints section missing');
+    expect(result.blocking_issues).toContain('Business Constraints section missing');
   });
 
   it('should handle artifacts with no frontmatter', async () => {
@@ -363,7 +364,7 @@ Some problem.
 
 Testing without frontmatter.
 
-## Business Context
+## User Personas
 
 Some context.
 
@@ -372,11 +373,11 @@ Some context.
 - Metric 1
 - Metric 2
 
-## Constraints
+## Business Constraints
 
 Some constraints.
 
-## Solution Approach
+## Out of Scope
 
 Some solution.
 `;
@@ -400,7 +401,7 @@ risk_tier: low
 
 Testing bullet point counting.
 
-## Business Context
+## User Personas
 
 Some context here.
 
@@ -410,12 +411,12 @@ Some context here.
 * Metric with asterisk
 + Metric with plus
 
-## Constraints
+## Business Constraints
 
 - Constraint 1
 * Constraint 2
 
-## Solution Approach
+## Out of Scope
 
 Implementation details.
 `;
@@ -439,7 +440,7 @@ risk_tier: medium
 
   Problem with extra spaces.
 
-## Business Context
+## User Personas
 
   Context with whitespace.
 
@@ -448,11 +449,11 @@ risk_tier: medium
   - Metric 1 with spaces
   - Metric 2 with spaces
 
-## Constraints
+## Business Constraints
 
   - Constraint with spaces
 
-## Solution Approach
+## Out of Scope
 
   Solution with spaces.
 `;
@@ -462,5 +463,361 @@ risk_tier: medium
 
     expect(result.passed).toBe(true);
     expect(result.coverage_percentage).toBe(100);
+  });
+});
+
+// Test fixtures for INTENT validation
+const VALID_INTENT = `---
+id: intent-test-workflow
+title: "User Authentication"
+parent: "idea-test-workflow"
+status: draft
+depth_score: 15
+risk_tier: 2
+---
+
+# INTENT: User Authentication
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to log in so that I can access my account
+  - Acceptance: User can log in with email and password
+- **US-002**: As a user, I want to reset my password so that I can regain access
+  - Acceptance: Password reset email is sent within 1 minute
+
+### Business Rules
+- **BR-001**: Reset links expire after 1 hour
+
+## Technical Specification
+
+### Architecture Overview
+OAuth 2.0 based authentication with JWT tokens.
+
+### API Design
+POST /auth/login - Authenticate user
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Auth Service — Core authentication logic
+- **UNIT-002**: Token Manager — JWT token lifecycle
+
+### Cross-UNIT Dependencies
+- UNIT-002 depends on UNIT-001's user validation
+`;
+
+describe('validateIntent', () => {
+  beforeEach(() => {
+    // Create test directory
+    if (!existsSync(TEST_DIR)) {
+      mkdirSync(TEST_DIR, { recursive: true });
+    }
+    // Clear file cache before each test
+    clearFileCache();
+  });
+
+  afterEach(() => {
+    // Clean up test directory
+    if (existsSync(TEST_DIR)) {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    }
+    clearFileCache();
+  });
+
+  it('should pass validation for complete INTENT artifact', async () => {
+    const filePath = join(TEST_DIR, 'valid-intent.md');
+    writeFileSync(filePath, VALID_INTENT, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(true);
+    expect(result.coverage_percentage).toBe(100);
+    expect(result.blocking_issues).toHaveLength(0);
+    expect(result.timestamp).toBeDefined();
+  });
+
+  it('should fail when frontmatter is missing required fields', async () => {
+    const filePath = join(TEST_DIR, 'missing-frontmatter.md');
+    const missingFrontmatter = `---
+id: intent-test
+title: "Test"
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: Some story
+  - Acceptance: Some acceptance
+
+## Technical Specification
+
+Some technical details.
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Some unit
+`;
+    writeFileSync(filePath, missingFrontmatter, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('Frontmatter missing required field: parent');
+    expect(result.blocking_issues).toContain('Frontmatter missing required field: status');
+    expect(result.blocking_issues).toContain('Frontmatter missing required field: depth_score');
+    expect(result.blocking_issues).toContain('Frontmatter missing required field: risk_tier');
+  });
+
+  it('should fail when Business Requirements section is missing', async () => {
+    const filePath = join(TEST_DIR, 'no-business-reqs.md');
+    const noBizReqs = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Technical Specification
+
+Some technical details.
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Some unit
+`;
+    writeFileSync(filePath, noBizReqs, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('Missing Business Requirements section');
+  });
+
+  it('should fail when no User Stories are present', async () => {
+    const filePath = join(TEST_DIR, 'no-user-stories.md');
+    const noUserStories = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+No user stories here, just text.
+
+## Technical Specification
+
+Some technical details.
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Some unit
+`;
+    writeFileSync(filePath, noUserStories, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('No User Stories found (expected US-NNN pattern)');
+  });
+
+  it('should fail when User Story is missing Acceptance criterion', async () => {
+    const filePath = join(TEST_DIR, 'no-acceptance.md');
+    const noAcceptance = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to test
+- **US-002**: As a user, I want to verify
+  - Acceptance: This one has acceptance
+
+## Technical Specification
+
+Some technical details.
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Some unit
+`;
+    writeFileSync(filePath, noAcceptance, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('User Story US-001 missing Acceptance criterion');
+  });
+
+  it('should fail when Technical Specification section is missing', async () => {
+    const filePath = join(TEST_DIR, 'no-tech-spec.md');
+    const noTechSpec = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to test
+  - Acceptance: Test acceptance
+
+## Implementation Plan
+
+### Proposed UNITs
+- **UNIT-001**: Some unit
+`;
+    writeFileSync(filePath, noTechSpec, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('Technical Specification section missing or empty');
+  });
+
+  it('should fail when Implementation Plan section is missing', async () => {
+    const filePath = join(TEST_DIR, 'no-impl-plan.md');
+    const noImplPlan = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to test
+  - Acceptance: Test acceptance
+
+## Technical Specification
+
+Some technical details.
+`;
+    writeFileSync(filePath, noImplPlan, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('Implementation Plan section missing or empty');
+  });
+
+  it('should fail when no Proposed UNITs are present', async () => {
+    const filePath = join(TEST_DIR, 'no-units.md');
+    const noUnits = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to test
+  - Acceptance: Test acceptance
+
+## Technical Specification
+
+Some technical details.
+
+## Implementation Plan
+
+Just some text, no UNITs.
+`;
+    writeFileSync(filePath, noUnits, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.blocking_issues).toContain('No Proposed UNITs found (expected UNIT-NNN pattern)');
+  });
+
+  it('should return error when artifact file does not exist', async () => {
+    const filePath = join(TEST_DIR, 'nonexistent-intent.md');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    expect(result.coverage_percentage).toBe(0);
+    expect(result.blocking_issues).toContain('Artifact file not found');
+    expect(result.timestamp).toBeDefined();
+  });
+
+  it('should calculate coverage_percentage correctly', async () => {
+    const filePath = join(TEST_DIR, 'partial-intent.md');
+    // This has 4 passing criteria out of 6:
+    // ✓ Criterion 1 (Frontmatter): All fields present - PASS (no blocking issues)
+    // ✓ Criterion 2 (Business Requirements with User Stories): Section exists with US-001 - PASS
+    // ✓ Criterion 3 (User Stories have Acceptance): US-001 has "Acceptance:" - PASS
+    // ✓ Criterion 4 (Technical Specification): Section exists and has content - PASS
+    // ✗ Criterion 5 (Implementation Plan): Section missing - FAIL
+    // ✗ Criterion 6 (Proposed UNITs): No UNIT-NNN pattern found - FAIL
+    const partialIntent = `---
+id: intent-test
+title: "Test"
+parent: "idea-test"
+status: draft
+depth_score: 10
+risk_tier: 1
+---
+
+# INTENT: Test
+
+## Business Requirements
+
+### User Stories
+- **US-001**: As a user, I want to test
+  - Acceptance: Test acceptance
+
+## Technical Specification
+
+Some technical specification content here.
+`;
+    writeFileSync(filePath, partialIntent, 'utf-8');
+
+    const result = await validateIntent(filePath);
+
+    expect(result.passed).toBe(false);
+    // 4 passed out of 6 = 67%
+    expect(result.coverage_percentage).toBe(67);
   });
 });

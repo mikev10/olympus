@@ -24,9 +24,6 @@ export type {
 // ODLC Phase Types
 export type {
   WorkflowPhase,
-  ForgeStage,
-  SummitStage,
-  AnyStage,
   TrustLevel,
   TrustState,
   TrustLevelChange,
@@ -47,7 +44,10 @@ export type {
   GateAuditEntry,
   MethodologyMetrics,
   WorkflowCheckpointV2,
+  WorkflowCheckpointV3,
 } from './phase-types.js';
+
+export { STAGE_PHASE_MAP } from './phase-types.js';
 
 // Checkpoint persistence
 export {
@@ -55,18 +55,17 @@ export {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
-  migrateCheckpointV1toV2,
+  isLegacyCheckpoint,
+  archiveLegacyWorkflow,
 } from './checkpoint.js';
 
 // Artifact management
+export type { ArtifactType } from './artifacts.js';
 export {
   ensureWorkflowDir,
   getArtifactPath,
   writeArtifact,
   readArtifact,
-  generateDependencyGraph,
-  validateDependencyGraph,
-  getExecutionOrder,
   linkMasterPlan,
   ensurePhaseWorkflowDir,
   isLegacyLayout,
@@ -92,6 +91,15 @@ export {
   getArtifactById,
   getArtifactsByPhase,
   updateContractStatus,
+  getUnitArtifacts,
+  getBoltArtifacts,
+  getBoltsByStatus,
+  isWorkflowComplete,
+  transitionToDraft,
+  transitionToActive,
+  transitionToFulfilled,
+  transitionToViolated,
+  transitionToStale,
 } from './manifest.js';
 
 // Execution and task tracking
@@ -105,7 +113,7 @@ export {
 } from './execution.js';
 
 // Validation
-export { validateIdea, validatePrd, validateSpec, validateTasks } from './validation.js';
+export { validateIdea, validateIntent, clearFileCache } from './validation.js';
 
 // Depth Assessment
 export type { DepthFactors, RiskFactors } from './depth-assessment.js';
@@ -163,16 +171,18 @@ export {
 } from './trust.js';
 
 // Alignment
-export type { TransitionType } from './alignment.js';
+export type { TransitionType, RootValidationType } from './alignment.js';
 export {
   computeVerification,
   generateValidationQuestions,
   runAlignmentCheck as runFullAlignmentCheck,
+  runDualValidation,
   recordAlignmentResult,
   getConformanceThreshold,
+  getAdaptiveThreshold,
 } from './alignment.js';
 
-// Forge Phase
+// Construction Phase
 export type {
   UnitSpec,
   BoltSpec,
@@ -212,7 +222,7 @@ export {
   validateForgePhase,
 } from './forge/validation.js';
 
-// Summit Phase
+// Operations Phase
 export type { SummitContext } from './summit/templates.js';
 export {
   generateDeployGuide,

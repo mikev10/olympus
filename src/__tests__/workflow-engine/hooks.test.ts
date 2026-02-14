@@ -25,16 +25,16 @@ function createTestCheckpoint(overrides?: Partial<WorkflowCheckpoint>): Workflow
     status: 'in_progress',
     artifacts: {
       idea: null,
-      prd: null,
-      spec: null,
-      intents: null,
+      intent: null,
+      unit: null,
+      bolt: null,
       complete: null,
     },
     validation_results: {
       idea: null,
-      prd: null,
-      spec: null,
-      intents: null,
+      intent: null,
+      unit: null,
+      bolt: null,
       complete: null,
     },
     ...overrides,
@@ -52,10 +52,10 @@ describe('Workflow Hooks', () => {
     });
 
     it('includes current stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'prd' });
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('Current stage: prd');
+      expect(prompt).toContain('Current stage: intent');
     });
 
     it('includes current status', () => {
@@ -65,40 +65,40 @@ describe('Workflow Hooks', () => {
       expect(prompt).toContain('Status: in_progress');
     });
 
-    it('includes correct agent for idea stage', () => {
+    it('handles idea stage without agent', () => {
       const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('idea-intake');
-      expect(prompt).toContain('capture and validate the initial feature concept');
-      expect(prompt).toContain('Task(subagent_type="idea-intake"');
+      expect(prompt).toContain('idea');
+      expect(prompt).toContain('capture the problem statement, personas, success metrics, and constraints');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
-    it('includes correct agent for prd stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'prd' });
+    it('handles intent stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('prd-writer');
-      expect(prompt).toContain('Product Requirements Document');
-      expect(prompt).toContain('Task(subagent_type="prd-writer"');
+      expect(prompt).toContain('intent');
+      expect(prompt).toContain('define business requirements, technical approach, and proposed UNITs');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
-    it('includes correct agent for spec stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'spec' });
+    it('handles unit stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'unit' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('spec-writer');
-      expect(prompt).toContain('technical specification');
-      expect(prompt).toContain('Task(subagent_type="spec-writer"');
+      expect(prompt).toContain('unit');
+      expect(prompt).toContain('decompose into module-scoped UNITs with interface contracts');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
-    it('includes correct agent for intents stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'intents' });
+    it('handles bolt stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'bolt' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('intent-generator');
-      expect(prompt).toContain('implementation intent files');
-      expect(prompt).toContain('Task(subagent_type="intent-generator"');
+      expect(prompt).toContain('bolt');
+      expect(prompt).toContain('execute the smallest implementation unit with domain and logical design');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
     it('handles complete stage without agent', () => {
@@ -129,10 +129,10 @@ describe('Workflow Hooks', () => {
     });
 
     it('includes interrupted stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'prd' });
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
       const prompt = buildWorkflowResumptionPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('You were interrupted during: prd');
+      expect(prompt).toContain('You were interrupted during: intent');
     });
 
     it('includes last update timestamp', () => {
@@ -162,13 +162,13 @@ describe('Workflow Hooks', () => {
       expect(prompt).not.toContain('null');
     });
 
-    it('includes correct agent for resuming stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'spec' });
+    it('handles resuming unit stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'unit' });
       const prompt = buildWorkflowResumptionPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('spec-writer');
+      expect(prompt).toContain('decompose into module-scoped UNITs with interface contracts');
       expect(prompt).toContain('Continue from where you left off');
-      expect(prompt).toContain('Task(subagent_type="spec-writer"');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
     it('returns non-empty string', () => {
@@ -183,17 +183,17 @@ describe('Workflow Hooks', () => {
   describe('buildWorkflowTransitionPrompt', () => {
     it('shows completed stage', () => {
       const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'prd');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
 
       expect(prompt).toContain('Stage idea complete!');
       expect(prompt).toContain('✓');
     });
 
     it('shows next stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'prd' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'spec');
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
-      expect(prompt).toContain('Next stage: spec');
+      expect(prompt).toContain('Next stage: unit');
     });
 
     it('lists artifacts when available', () => {
@@ -206,9 +206,9 @@ describe('Workflow Hooks', () => {
             created_at: '2024-01-15T10:00:00Z',
             validation_passed: true,
           },
-          prd: null,
-          spec: null,
-          intents: null,
+          intent: null,
+          unit: null,
+          bolt: null,
           complete: null,
         },
         validation_results: {
@@ -218,13 +218,13 @@ describe('Workflow Hooks', () => {
             blocking_issues: [],
             timestamp: '2024-01-15T10:30:00Z',
           },
-          prd: null,
-          spec: null,
-          intents: null,
+          intent: null,
+          unit: null,
+          bolt: null,
           complete: null,
         },
       });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'prd');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
 
       expect(prompt).toContain('Completed artifacts:');
       expect(prompt).toContain('IDEA-001');
@@ -234,7 +234,7 @@ describe('Workflow Hooks', () => {
 
     it('handles missing artifacts gracefully', () => {
       const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'prd');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
 
       expect(prompt).toContain('Completed artifacts:');
       expect(prompt).toContain('No artifacts recorded for idea stage');
@@ -242,59 +242,59 @@ describe('Workflow Hooks', () => {
 
     it('shows validation failed status', () => {
       const checkpoint = createTestCheckpoint({
-        current_stage: 'prd',
+        current_stage: 'intent',
         artifacts: {
           idea: null,
-          prd: {
-            id: 'PRD-001',
-            path: '.olympus/workflows/user-auth/prd.md',
+          intent: {
+            id: 'INTENT-001',
+            path: '.olympus/workflows/user-auth/intent.md',
             created_at: '2024-01-15T11:00:00Z',
             validation_passed: false,
           },
-          spec: null,
-          intents: null,
+          unit: null,
+          bolt: null,
           complete: null,
         },
         validation_results: {
           idea: null,
-          prd: {
+          intent: {
             passed: false,
             coverage_percentage: 60,
             blocking_issues: ['Missing security requirements'],
             timestamp: '2024-01-15T11:30:00Z',
           },
-          spec: null,
-          intents: null,
+          unit: null,
+          bolt: null,
           complete: null,
         },
       });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'spec');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
       expect(prompt).toContain('validated: false');
     });
 
     it('includes validation type for next stage', () => {
       const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'prd');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
 
       expect(prompt).toContain('Validation required:');
-      expect(prompt).toContain('Product requirements completeness review');
+      expect(prompt).toContain('INTENT completeness and alignment with IDEA');
     });
 
-    it('includes correct agent for next stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'prd' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'spec');
+    it('handles next stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
-      expect(prompt).toContain('spec-writer');
+      expect(prompt).toContain('decompose into module-scoped UNITs with interface contracts');
       expect(prompt).toContain('Proceed with:');
-      expect(prompt).toContain('Task(subagent_type="spec-writer"');
+      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
     it('handles transition to complete stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'intents' });
+      const checkpoint = createTestCheckpoint({ current_stage: 'bolt' });
       const prompt = buildWorkflowTransitionPrompt(checkpoint, 'complete');
 
-      expect(prompt).toContain('Stage intents complete!');
+      expect(prompt).toContain('Stage bolt complete!');
       expect(prompt).toContain('Next stage: complete');
       expect(prompt).toContain('Final workflow validation');
       expect(prompt).not.toContain('Task(subagent_type=');
@@ -302,7 +302,7 @@ describe('Workflow Hooks', () => {
 
     it('returns non-empty string', () => {
       const checkpoint = createTestCheckpoint();
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'prd');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
 
       expect(prompt).toBeTruthy();
       expect(prompt.length).toBeGreaterThan(0);
@@ -311,7 +311,7 @@ describe('Workflow Hooks', () => {
 
   describe('all prompt functions', () => {
     it('return non-empty strings for all stages', () => {
-      const stages: WorkflowStage[] = ['idea', 'prd', 'spec', 'intents', 'complete'];
+      const stages: WorkflowStage[] = ['idea', 'intent', 'unit', 'bolt', 'complete'];
 
       stages.forEach((stage) => {
         const checkpoint = createTestCheckpoint({ current_stage: stage });

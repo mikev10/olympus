@@ -16,8 +16,9 @@ import {
   loadCheckpoint,
   clearCache,
 } from '../../features/workflow-engine/checkpoint.js';
-import { validateIdea, validatePrd, clearFileCache } from '../../features/workflow-engine/validation.js';
-import { WorkflowCheckpoint } from '../../features/workflow-engine/types.js';
+import { validateIdea, validateIntent, clearFileCache } from '../../features/workflow-engine/validation.js';
+import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
+import type { WorkflowStatus } from '../../features/workflow-engine/types.js';
 
 describe('Workflow Engine Performance', () => {
   let tmpDir: string;
@@ -36,40 +37,24 @@ describe('Workflow Engine Performance', () => {
   /**
    * Helper to create a realistic checkpoint with complex data
    */
-  function createComplexCheckpoint(workflowId: string): WorkflowCheckpoint {
+  function createComplexCheckpoint(workflowId: string): WorkflowCheckpointV3 {
     return {
-      schema_version: '1.0.0',
+      schema_version: '3.0.0',
       workflow_id: workflowId,
       feature_name: `Test Feature ${workflowId}`,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      current_stage: 'prd',
-      status: 'in_progress',
-      artifacts: {
-        idea: {
-          id: 'IDEA-001',
-          path: `.olympus/workflow/${workflowId}/idea.md`,
-          created_at: new Date().toISOString(),
-          validation_passed: true,
-        },
-        prd: null,
-        spec: null,
-        intents: null,
-        complete: null,
+      current_phase: 'inception',
+      current_stage: 'intent',
+      status: 'in_progress' as WorkflowStatus,
+      phases: {
+        discovery: { status: 'complete' as WorkflowStatus, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        inception: { status: 'in_progress' as WorkflowStatus, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        construction: { status: 'not_started' as WorkflowStatus, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        operations: { status: 'not_started' as WorkflowStatus, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
       },
-      validation_results: {
-        idea: {
-          passed: true,
-          coverage_percentage: 100,
-          blocking_issues: [],
-          reviewer: 'momus',
-          timestamp: new Date().toISOString(),
-        },
-        prd: null,
-        spec: null,
-        intents: null,
-        complete: null,
-      },
+      manifest_path: 'aidlc-docs/manifest.json',
+      trust_state_path: 'aidlc-docs/trust-state.json',
       resume_context: {
         initial_prompt: 'This is a test prompt with some context data that would be typical in a real workflow execution.',
         additional_data: Array(100).fill('context data').join(' '), // Simulate larger context
@@ -211,12 +196,12 @@ describe('Workflow Engine Performance', () => {
   describe('Validation Performance', () => {
     beforeEach(async () => {
       // Create test artifacts
-      const workflowDir = join(tmpDir, '.olympus/workflow/perf-validate');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'inception');
       await fs.ensureDir(workflowDir);
     });
 
     it('validates IDEA artifact in < 100ms', async () => {
-      const ideaPath = join(tmpDir, '.olympus/workflow/perf-validate/idea.md');
+      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
       const ideaContent = `---
 risk_tier: medium
 ---
@@ -247,9 +232,9 @@ High-level approach to solving the problem.
       expect(duration).toBeLessThan(100);
     });
 
-    it('validates PRD artifact in < 100ms', async () => {
-      const ideaPath = join(tmpDir, '.olympus/workflow/perf-validate/idea.md');
-      const prdPath = join(tmpDir, '.olympus/workflow/perf-validate/prd.md');
+    it('validates INTENT artifact in < 100ms', async () => {
+      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
+      const intentPath = join(tmpDir, 'aidlc-docs', 'inception', 'intent.md');
 
       const ideaContent = `---
 risk_tier: medium
@@ -262,7 +247,7 @@ risk_tier: medium
 `;
       await fs.writeFile(ideaPath, ideaContent);
 
-      const prdContent = `## User Stories
+      const intentContent = `## User Stories
 
 ### US-001: First story
 Description of first story
@@ -280,16 +265,16 @@ Description of third story
 | Constraint 2 | US-002 | Covered |
 | Constraint 3 | US-003 | Covered |
 `;
-      await fs.writeFile(prdPath, prdContent);
+      await fs.writeFile(intentPath, intentContent);
 
-      const { duration } = await measureTime(() => validatePrd(prdPath, ideaPath));
+      const { duration } = await measureTime(() => validateIntent(intentPath));
 
-      console.log(`[PERF] PRD validation: ${duration.toFixed(2)}ms`);
+      console.log(`[PERF] INTENT validation: ${duration.toFixed(2)}ms`);
       expect(duration).toBeLessThan(100);
     });
 
     it('caches file reads during validation', async () => {
-      const ideaPath = join(tmpDir, '.olympus/workflow/perf-validate/idea.md');
+      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
       const ideaContent = `---
 risk_tier: medium
 ---
@@ -384,7 +369,7 @@ Test content
         // Load
         await loadCheckpoint(tmpDir, 'e2e-perf');
         // Update
-        checkpoint.current_stage = 'spec';
+        checkpoint.current_stage = 'unit';
         await saveCheckpoint(tmpDir, checkpoint);
         // Load again
         await loadCheckpoint(tmpDir, 'e2e-perf');
@@ -400,7 +385,7 @@ Test content
         return async () => {
           await saveCheckpoint(tmpDir, checkpoint);
           await loadCheckpoint(tmpDir, checkpoint.workflow_id);
-          checkpoint.current_stage = 'spec';
+          checkpoint.current_stage = 'unit';
           await saveCheckpoint(tmpDir, checkpoint);
         };
       });

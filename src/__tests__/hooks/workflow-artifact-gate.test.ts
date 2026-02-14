@@ -26,9 +26,7 @@ vi.mock('../../features/workflow-engine/checkpoint.js', () => ({
 // Mock validation module
 vi.mock('../../features/workflow-engine/validation.js', () => ({
   validateIdea: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
-  validatePrd: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
-  validateSpec: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
-  validateTasks: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
+  validateIntent: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
 }));
 
 // Mock fs
@@ -39,7 +37,7 @@ vi.mock('fs', () => ({
 import { registerWorkflowArtifactGateHook } from '../../hooks/registrations/workflow-artifact-gate.js';
 import { loadSessionState } from '../../learning/session-state.js';
 import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
-import { validateIdea, validatePrd, validateSpec, validateTasks } from '../../features/workflow-engine/validation.js';
+import { validateIdea, validateIntent } from '../../features/workflow-engine/validation.js';
 import { existsSync } from 'fs';
 
 describe('workflow-artifact-gate hook', () => {
@@ -116,7 +114,7 @@ describe('workflow-artifact-gate hook', () => {
       expect(result.hookSpecificOutput?.additionalContext).toBeUndefined();
     });
 
-    it('should return continue:true when agent_used is not a Vision stage agent', async () => {
+    it('should return continue:true when agent_used is not a Inception stage agent', async () => {
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
@@ -158,7 +156,7 @@ describe('workflow-artifact-gate hook', () => {
     });
   });
 
-  describe('Vision Agent Validation', () => {
+  describe('Inception Agent Validation', () => {
     beforeEach(() => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint());
@@ -188,23 +186,23 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'idea.md'));
+      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'idea.md'));
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
     });
 
-    it('should call validatePrd when prd-writer agent completes', async () => {
+    it('should call validateIntent when intent-writer agent completes', async () => {
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
         last_updated: '2025-01-01',
         recent_prompts: [],
-        pending_completion: { agent_used: 'prd-writer', task_id: 'task-1' },
+        pending_completion: { agent_used: 'intent-writer', task_id: 'task-1' },
         todo_snapshot: null,
         token_budget: null,
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
-      vi.mocked(validatePrd).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -216,46 +214,14 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(validatePrd).toHaveBeenCalledWith(
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'prd.md'),
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'idea.md')
+      expect(validateIntent).toHaveBeenCalledWith(
+        join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'intent.md')
       );
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
     });
 
-    it('should call validateSpec when spec-writer agent completes', async () => {
-      vi.mocked(loadSessionState).mockReturnValue({
-        session_id: 'test',
-        started_at: '2025-01-01',
-        last_updated: '2025-01-01',
-        recent_prompts: [],
-        pending_completion: { agent_used: 'spec-writer', task_id: 'task-1' },
-        todo_snapshot: null,
-        token_budget: null,
-        discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
-      });
-      vi.mocked(validateSpec).mockResolvedValue({
-        passed: true,
-        coverage_percentage: 100,
-        blocking_issues: [],
-        timestamp: '2025-01-01',
-      });
-
-      registerWorkflowArtifactGateHook();
-      const hooks = getHooksForEvent('PostToolUse');
-      const ctx = createPostToolUseCtx();
-      const result = await hooks[0].handler(ctx);
-
-      expect(validateSpec).toHaveBeenCalledWith(
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'spec.md'),
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'prd.md')
-      );
-      expect(result.continue).toBe(true);
-      expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
-    });
-
-    it('should call validateTasks when intent-generator agent completes', async () => {
+    it('should call validateIntent when intent-generator agent completes', async () => {
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
@@ -266,7 +232,7 @@ describe('workflow-artifact-gate hook', () => {
         token_budget: null,
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
-      vi.mocked(validateTasks).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -278,9 +244,8 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(validateTasks).toHaveBeenCalledWith(
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'intents'),
-        join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'spec.md')
+      expect(validateIntent).toHaveBeenCalledWith(
+        join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'intent.md')
       );
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
@@ -414,10 +379,10 @@ describe('workflow-artifact-gate hook', () => {
       });
     });
 
-    it('should check nested layout first (vision/ subdirectory)', async () => {
+    it('should check nested layout first (inception/ subdirectory)', async () => {
       vi.mocked(existsSync).mockImplementation((path: any) => {
         const normalizedPath = path.toString().replace(/\\/g, '/');
-        return normalizedPath.includes('.olympus/workflow/test-feature') || normalizedPath.includes('vision/idea.md');
+        return normalizedPath.includes('aidlc-docs/test-feature') || normalizedPath.includes('inception/idea.md');
       });
 
       registerWorkflowArtifactGateHook();
@@ -425,18 +390,18 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', '.olympus', 'workflow', 'test-feature', 'vision', 'idea.md'));
+      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'idea.md'));
     });
 
     it('should fall back to flat layout when nested not found', async () => {
       vi.mocked(existsSync).mockImplementation((path: any) => {
         const normalizedPath = path.toString().replace(/\\/g, '/');
         // Return true for workflow directory
-        if (normalizedPath.includes('.olympus/workflow/test-feature') && !normalizedPath.includes('idea.md')) {
+        if (normalizedPath.includes('aidlc-docs/test-feature') && !normalizedPath.includes('idea.md')) {
           return true;
         }
-        // Return false for nested vision/idea.md
-        if (normalizedPath.includes('vision/idea.md')) {
+        // Return false for nested inception/idea.md
+        if (normalizedPath.includes('inception/idea.md')) {
           return false;
         }
         // Return true for flat idea.md
@@ -448,7 +413,7 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', '.olympus', 'workflow', 'test-feature', 'idea.md'));
+      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'idea.md'));
     });
 
     it('should return continue:true when artifact not found (fail open)', async () => {
@@ -539,15 +504,22 @@ describe('workflow-artifact-gate hook', () => {
 // Helpers
 function createMockCheckpoint(overrides: Record<string, any> = {}) {
   return {
-    schema_version: '2.0.0',
+    schema_version: '3.0.0',
     workflow_id: 'test-feature',
     feature_name: 'Test Feature',
-    created_at: '2025-01-01T00:00:00.000Z',
-    updated_at: '2025-01-01T00:00:00.000Z',
+    current_phase: 'inception',
     current_stage: 'idea',
     status: 'in_progress',
-    artifacts: { idea: null, prd: null, spec: null, intents: null, complete: null },
-    validation_results: { idea: null, prd: null, spec: null, intents: null, complete: null },
+    phases: {
+      discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'in_progress', started_at: '2025-01-01T00:00:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+    },
+    manifest_path: 'aidlc-docs/test-feature/manifest.json',
+    trust_state_path: 'aidlc-docs/test-feature/trust-state.json',
+    created_at: '2025-01-01T00:00:00.000Z',
+    updated_at: '2025-01-01T00:00:00.000Z',
     ...overrides,
   };
 }

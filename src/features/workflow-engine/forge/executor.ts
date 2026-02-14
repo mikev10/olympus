@@ -1,8 +1,8 @@
 /**
- * Forge Phase Executor
+ * Construction Phase Executor
  *
- * Orchestrates the complete Forge phase execution: units → design → build.
- * This is the main entry point for the Forge stage of the ODLC methodology.
+ * Orchestrates the complete Construction phase execution: units → design → build.
+ * This is the main entry point for the Construction stage of the ODLC methodology.
  *
  * Phase pipeline:
  * 1. UNITS stage: Parse intents, decompose to units, write UNIT-*.md, validate
@@ -12,8 +12,10 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import type { ForgeStage, HierarchicalNode } from '../phase-types.js';
+import type { HierarchicalNode } from '../phase-types.js';
 import type { ValidationResult } from '../types.js';
+
+type ForgeStage = 'units' | 'design' | 'build';
 import {
   parseIntentsFromDisk,
   decomposeIntentToUnits,
@@ -54,9 +56,9 @@ export interface ForgeProgress {
 }
 
 /**
- * ForgeExecutor orchestrates the full Forge phase of ODLC.
+ * ForgeExecutor orchestrates the full Construction phase of ODLC.
  *
- * The Forge phase takes INTENTs from the Vision phase and decomposes them into
+ * The Construction phase takes INTENTs from the Inception phase and decomposes them into
  * executable work units:
  * - Units (architectural components)
  * - Design artifacts (interfaces, data flows, components)
@@ -67,7 +69,7 @@ export interface ForgeProgress {
  * const executor = new ForgeExecutor('/path/to/project', 'user-auth-workflow');
  * const result = await executor.execute(specContent);
  * if (result.passed) {
- *   console.log('Forge phase complete!');
+ *   console.log('Construction phase complete!');
  * }
  * ```
  */
@@ -83,9 +85,9 @@ export class ForgeExecutor {
   }
 
   /**
-   * Execute the full Forge phase: units → design → build.
+   * Execute the full Construction phase: units → design → build.
    *
-   * 1. Parse intents from Vision phase
+   * 1. Parse intents from Inception phase
    * 2. UNITS stage: Decompose intents into units, write UNIT-*.md files, validate
    * 3. DESIGN stage: Generate interface contracts, DFDs, components, validate
    * 4. BUILD stage: Decompose units into bolts, write BOLT-*.md files, validate
@@ -94,7 +96,7 @@ export class ForgeExecutor {
    * @returns ValidationResult with overall pass/fail and blocking issues
    */
   async execute(specContent?: string): Promise<ValidationResult> {
-    console.log('[ForgeExecutor] Starting Forge phase execution');
+    console.log('[ForgeExecutor] Starting Construction phase execution');
 
     // Execute units stage
     this.currentStage = 'units';
@@ -134,7 +136,7 @@ export class ForgeExecutor {
   }
 
   /**
-   * Get current progress of Forge execution.
+   * Get current progress of Construction execution.
    */
   getProgress(): ForgeProgress {
     let unitsTotal = 0;
@@ -181,30 +183,30 @@ export class ForgeExecutor {
   }
 
   /**
-   * Execute the UNITS stage of Forge.
+   * Execute the UNITS stage of Construction.
    *
-   * 1. Parse intents from Vision phase
+   * 1. Parse intents from Inception phase
    * 2. Auto-generate unit specs (one unit per intent in v1)
    * 3. Decompose intents to units
-   * 4. Write UNIT-*.md files to forge/units/
+   * 4. Write UNIT-*.md files to construction/units/
    * 5. Validate units
    *
    * @private
    */
   private async executeUnitsStage(): Promise<ValidationResult> {
-    const intentsDir = path.join(this.projectPath, '.olympus', 'workflow', this.workflowId, 'intents');
-    const unitsDir = path.join(this.projectPath, '.olympus', 'workflow', this.workflowId, 'forge', 'units');
+    const intentDir = path.join(this.projectPath, 'aidlc-docs', 'inception');
+    const unitsDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
 
     // Ensure units directory exists
     await fs.ensureDir(unitsDir);
 
     // Parse intents from disk
-    const intents = await parseIntentsFromDisk(intentsDir);
+    const intents = await parseIntentsFromDisk(intentDir);
     if (intents.length === 0) {
       return {
         passed: false,
         coverage_percentage: 0,
-        blocking_issues: ['No intents found in Vision phase'],
+        blocking_issues: ['No intents found in Inception phase'],
         reviewer: 'forge-executor',
         timestamp: new Date().toISOString(),
       };
@@ -245,24 +247,24 @@ export class ForgeExecutor {
     }
 
     // Validate units
-    const validationResult = await validateUnits(unitsDir, intentsDir);
+    const validationResult = await validateUnits(unitsDir, intentDir);
     return validationResult;
   }
 
   /**
-   * Execute the DESIGN stage of Forge.
+   * Execute the DESIGN stage of Construction.
    *
    * 1. Read units from disk
    * 2. Generate interface contracts
    * 3. Generate data flow diagrams
    * 4. Generate component designs
-   * 5. Write design artifacts to forge/design/
+   * 5. Write design artifacts to construction/design/
    * 6. Validate design artifacts
    *
    * @private
    */
   private async executeDesignStage(specContent?: string): Promise<ValidationResult> {
-    const unitsDir = path.join(this.projectPath, '.olympus', 'workflow', this.workflowId, 'forge', 'units');
+    const unitsDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
 
     // Read units from disk
     const unitFiles = await fs.readdir(unitsDir);
@@ -329,24 +331,20 @@ export class ForgeExecutor {
   }
 
   /**
-   * Execute the BUILD stage of Forge.
+   * Execute the BUILD stage of Construction.
    *
    * 1. For each unit in the tree, auto-generate bolt specs
    * 2. Decompose units to bolts
-   * 3. Write BOLT-*.md files to forge/bolts/
+   * 3. Write BOLT-*.md files to construction/bolts/
    * 4. Validate each bolt
    *
    * @private
    */
   private async executeBuildStage(): Promise<ValidationResult> {
-    const unitsDir = path.join(this.projectPath, '.olympus', 'workflow', this.workflowId, 'forge', 'units');
-    const boltsDir = path.join(this.projectPath, '.olympus', 'workflow', this.workflowId, 'forge', 'bolts');
-
-    // Ensure bolts directory exists
-    await fs.ensureDir(boltsDir);
+    const constructionDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
 
     // Read units from disk
-    const unitFiles = await fs.readdir(unitsDir);
+    const unitFiles = await fs.readdir(constructionDir);
     const units: HierarchicalNode[] = [];
 
     for (const file of unitFiles) {
@@ -354,7 +352,7 @@ export class ForgeExecutor {
         continue;
       }
 
-      const filePath = path.join(unitsDir, file);
+      const filePath = path.join(constructionDir, file);
       const content = await fs.readFile(filePath, 'utf-8');
       const unit = this.parseUnitFromMarkdown(content, file.replace('.md', ''));
       if (unit) {
@@ -379,6 +377,17 @@ export class ForgeExecutor {
     const blockingIssues: string[] = [];
 
     for (const unit of units) {
+      // Create per-unit directory for bolts and spec
+      const unitDir = path.join(constructionDir, unit.id);
+      await fs.ensureDir(unitDir);
+
+      // Write unit spec.md inside unit directory
+      const unitSpecPath = path.join(constructionDir, `${unit.id}.md`);
+      if (await fs.pathExists(unitSpecPath)) {
+        const unitContent = await fs.readFile(unitSpecPath, 'utf-8');
+        await fs.writeFile(path.join(unitDir, 'spec.md'), unitContent, 'utf-8');
+      }
+
       // v1: Auto-generate one bolt per unit
       const boltSpecs: BoltSpec[] = [
         {
@@ -391,9 +400,9 @@ export class ForgeExecutor {
       const bolts = decomposeUnitToBolts(unit, boltSpecs);
       allBolts.push(...bolts);
 
-      // Write bolt files
+      // Write bolt files inside per-unit directory
       for (const bolt of bolts) {
-        const boltFilePath = path.join(boltsDir, `${bolt.id}.md`);
+        const boltFilePath = path.join(unitDir, `${bolt.id}.md`);
         const boltContent = this.formatBoltMarkdown(bolt, unit.id);
         await fs.writeFile(boltFilePath, boltContent, 'utf-8');
 

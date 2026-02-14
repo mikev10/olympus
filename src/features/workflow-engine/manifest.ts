@@ -30,9 +30,8 @@ import type {
   RiskEntry,
   DepthAssessment,
   MethodologyMetrics,
-  AnyStage,
 } from './phase-types.js';
-import type { WorkflowStatus } from './types.js';
+import type { WorkflowStatus, WorkflowStage } from './types.js';
 
 /**
  * Normalizes path separators to forward slashes for Windows compatibility.
@@ -56,7 +55,7 @@ function createInitialPhaseState(): PhaseState {
 }
 
 /**
- * Creates a new manifest.json at .olympus/workflow/{id}/manifest.json.
+ * Creates a new manifest.json at aidlc-docs/manifest.json.
  * Initializes with schema version 2.0.0 and empty structures.
  *
  * @param workflowId - Unique workflow identifier
@@ -69,7 +68,7 @@ export function createManifest(
   featureName: string,
   projectPath: string
 ): string {
-  const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+  const workflowDir = path.join(projectPath, 'aidlc-docs');
   const manifestPath = path.join(workflowDir, 'manifest.json');
 
   try {
@@ -83,9 +82,10 @@ export function createManifest(
       created_at: now,
       updated_at: now,
       phases: {
-        vision: createInitialPhaseState(),
-        forge: createInitialPhaseState(),
-        summit: createInitialPhaseState(),
+        discovery: createInitialPhaseState(),
+        inception: createInitialPhaseState(),
+        construction: createInitialPhaseState(),
+        operations: createInitialPhaseState(),
       },
       depth_assessment: null,
       artifacts: [],
@@ -304,6 +304,7 @@ export function detectStaleArtifacts(manifestPath: string): string[] {
  * Cascades invalidation when an artifact changes.
  * Marks the changed artifact and all downstream artifacts as 'stale'.
  * Follows the link graph recursively.
+ * Uses state machine validation to only transition valid artifacts.
  *
  * @param manifestPath - Absolute path to manifest.json
  * @param changedArtifactId - ID of artifact that changed
@@ -325,14 +326,14 @@ export function cascadeInvalidation(manifestPath: string, changedArtifactId: str
       }
       visited.add(currentId);
 
-      // Mark artifact as stale
+      // Mark artifact as stale using in-memory transition helper
       const artifact = manifest.artifacts.find((a) => a.id === currentId);
       if (artifact) {
-        artifact.contract_status = 'stale';
-        artifact.stale_reason =
+        const reason =
           currentId === changedArtifactId
             ? 'Artifact content was modified'
             : `Parent artifact ${currentId} was modified`;
+        applyStaleTransitionInMemory(artifact, reason);
       }
 
       // Find downstream artifacts (where current is source)
@@ -413,7 +414,7 @@ export function recoverManifest(
   workflowId: string
 ): ManifestSchema | null {
   try {
-    const workflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
+    const workflowDir = path.join(projectPath, 'aidlc-docs');
     if (!fs.existsSync(workflowDir)) {
       return null;
     }
@@ -426,9 +427,10 @@ export function recoverManifest(
       created_at: now,
       updated_at: now,
       phases: {
-        vision: createInitialPhaseState(),
-        forge: createInitialPhaseState(),
-        summit: createInitialPhaseState(),
+        discovery: createInitialPhaseState(),
+        inception: createInitialPhaseState(),
+        construction: createInitialPhaseState(),
+        operations: createInitialPhaseState(),
       },
       depth_assessment: null,
       artifacts: [],
@@ -452,8 +454,8 @@ export function recoverManifest(
         const artifact: ManifestArtifact = {
           id: `recovered-${Date.now()}-${manifest.artifacts.length}`,
           type: path.extname(file.name) || 'unknown',
-          phase: 'vision',
-          stage: 'prd',
+          phase: 'inception',
+          stage: 'idea',
           path: normalizedPath,
           created_at: now,
           updated_at: now,
@@ -569,7 +571,8 @@ export function getArtifactsByPhase(
 }
 
 /**
- * Updates an artifact's contract status.
+ * Updates an artifact's contract status by delegating to the state machine.
+ * Silently handles errors (missing manifest, missing artifact, invalid transitions).
  *
  * @param manifestPath - Absolute path to manifest.json
  * @param artifactId - Artifact ID
@@ -583,30 +586,263 @@ export function updateContractStatus(
   staleReason?: string
 ): void {
   try {
-    const manifest = loadManifest(manifestPath);
-    if (!manifest) {
-      return;
+    switch (status) {
+      case 'draft':
+        transitionToDraft(manifestPath, artifactId);
+        break;
+      case 'active':
+        transitionToActive(manifestPath, artifactId);
+        break;
+      case 'fulfilled':
+        transitionToFulfilled(manifestPath, artifactId);
+        break;
+      case 'violated':
+        transitionToViolated(manifestPath, artifactId);
+        break;
+      case 'stale':
+        if (!staleReason) {
+          throw new Error('staleReason is required when setting status to "stale"');
+        }
+        transitionToStale(manifestPath, artifactId, staleReason);
+        break;
     }
-
-    const artifact = manifest.artifacts.find((a) => a.id === artifactId);
-    if (!artifact) {
-      console.error(`Artifact ${artifactId} not found in manifest`);
-      return;
-    }
-
-    if (status === 'stale' && !staleReason) {
-      throw new Error('staleReason is required when setting status to "stale"');
-    }
-
-    artifact.contract_status = status;
-    if (status === 'stale') {
-      artifact.stale_reason = staleReason!;
-    } else {
-      artifact.stale_reason = null;
-    }
-
-    saveManifest(manifestPath, manifest);
   } catch (error) {
     console.error(`Failed to update contract status in ${manifestPath}:`, error);
   }
+}
+
+/**
+ * Returns all UNIT artifacts from manifest.
+ *
+ * @param manifest - Manifest schema
+ * @returns Array of UNIT-stage artifacts
+ */
+export function getUnitArtifacts(manifest: ManifestSchema): ManifestArtifact[] {
+  return manifest.artifacts.filter((a) => a.stage === 'unit');
+}
+
+/**
+ * Returns all BOLT artifacts, optionally filtered by parent UNIT.
+ *
+ * @param manifest - Manifest schema
+ * @param unitId - Optional UNIT ID to filter by
+ * @returns Array of BOLT-stage artifacts
+ */
+export function getBoltArtifacts(manifest: ManifestSchema, unitId?: string): ManifestArtifact[] {
+  const bolts = manifest.artifacts.filter((a) => a.stage === 'bolt');
+  if (unitId) {
+    // Filter by parent link: check manifest.links for link from unitId to bolt
+    const boltIdsForUnit = new Set(
+      manifest.links
+        .filter((l) => l.source_id === unitId && (l.link_type === 'derives' || l.link_type === 'implements'))
+        .map((l) => l.target_id)
+    );
+    return bolts.filter((b) => boltIdsForUnit.has(b.id));
+  }
+  return bolts;
+}
+
+/**
+ * Returns BOLTs filtered by contract status.
+ *
+ * @param manifest - Manifest schema
+ * @param status - Contract status to filter by
+ * @returns Array of BOLT artifacts with matching status
+ */
+export function getBoltsByStatus(
+  manifest: ManifestSchema,
+  status: ManifestArtifact['contract_status']
+): ManifestArtifact[] {
+  return manifest.artifacts.filter((a) => a.stage === 'bolt' && a.contract_status === status);
+}
+
+/**
+ * Returns true when ALL BOLT contracts have status 'fulfilled'.
+ * Returns false if no BOLTs exist.
+ *
+ * @param manifest - Manifest schema
+ * @returns true if all BOLTs are fulfilled, false otherwise
+ */
+export function isWorkflowComplete(manifest: ManifestSchema): boolean {
+  const bolts = manifest.artifacts.filter((a) => a.stage === 'bolt');
+  if (bolts.length === 0) return false;
+  return bolts.every((b) => b.contract_status === 'fulfilled');
+}
+
+/**
+ * Helper for applying stale transition in-memory during cascade.
+ * Returns true if transition was applied, false if skipped.
+ * During cascade, we mark artifacts as stale regardless of current state,
+ * except if they're already stale or violated (already invalidated).
+ *
+ * @param artifact - Artifact to transition
+ * @param reason - Reason for staleness
+ * @returns true if transition applied, false if skipped
+ */
+function applyStaleTransitionInMemory(artifact: ManifestArtifact, reason: string): boolean {
+  // Skip if already stale or violated (already invalidated)
+  if (artifact.contract_status === 'stale' || artifact.contract_status === 'violated') {
+    return false;
+  }
+  artifact.contract_status = 'stale';
+  artifact.stale_reason = reason;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'stale', timestamp: new Date().toISOString() });
+  return true;
+}
+
+/**
+ * Transitions artifact to 'draft' status.
+ * Valid from: violated, stale
+ *
+ * @param manifestPath - Absolute path to manifest.json
+ * @param artifactId - Artifact ID to transition
+ */
+export function transitionToDraft(manifestPath: string, artifactId: string): void {
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    throw new Error(`Manifest not found at ${manifestPath}`);
+  }
+
+  const artifact = manifest.artifacts.find((a) => a.id === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found in manifest`);
+  }
+
+  // Valid from: violated, stale
+  if (artifact.contract_status !== 'violated' && artifact.contract_status !== 'stale') {
+    throw new Error(`Cannot transition from '${artifact.contract_status}' to 'draft'`);
+  }
+
+  artifact.contract_status = 'draft';
+  artifact.stale_reason = null;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'draft', timestamp: new Date().toISOString() });
+
+  saveManifest(manifestPath, manifest);
+}
+
+/**
+ * Transitions artifact to 'active' status.
+ * Valid from: draft, stale
+ *
+ * @param manifestPath - Absolute path to manifest.json
+ * @param artifactId - Artifact ID to transition
+ */
+export function transitionToActive(manifestPath: string, artifactId: string): void {
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    throw new Error(`Manifest not found at ${manifestPath}`);
+  }
+
+  const artifact = manifest.artifacts.find((a) => a.id === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found in manifest`);
+  }
+
+  // Valid from: draft, stale
+  if (artifact.contract_status !== 'draft' && artifact.contract_status !== 'stale') {
+    throw new Error(`Cannot transition from '${artifact.contract_status}' to 'active'`);
+  }
+
+  artifact.contract_status = 'active';
+  artifact.stale_reason = null;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'active', timestamp: new Date().toISOString() });
+
+  saveManifest(manifestPath, manifest);
+}
+
+/**
+ * Transitions artifact to 'fulfilled' status.
+ * Valid from: active ONLY
+ *
+ * @param manifestPath - Absolute path to manifest.json
+ * @param artifactId - Artifact ID to transition
+ */
+export function transitionToFulfilled(manifestPath: string, artifactId: string): void {
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    throw new Error(`Manifest not found at ${manifestPath}`);
+  }
+
+  const artifact = manifest.artifacts.find((a) => a.id === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found in manifest`);
+  }
+
+  // Valid from: active ONLY
+  if (artifact.contract_status !== 'active') {
+    throw new Error(`Cannot transition from '${artifact.contract_status}' to 'fulfilled'`);
+  }
+
+  artifact.contract_status = 'fulfilled';
+  artifact.stale_reason = null;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'fulfilled', timestamp: new Date().toISOString() });
+
+  saveManifest(manifestPath, manifest);
+}
+
+/**
+ * Transitions artifact to 'violated' status.
+ * Valid from: active ONLY
+ *
+ * @param manifestPath - Absolute path to manifest.json
+ * @param artifactId - Artifact ID to transition
+ */
+export function transitionToViolated(manifestPath: string, artifactId: string): void {
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    throw new Error(`Manifest not found at ${manifestPath}`);
+  }
+
+  const artifact = manifest.artifacts.find((a) => a.id === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found in manifest`);
+  }
+
+  // Valid from: active ONLY
+  if (artifact.contract_status !== 'active') {
+    throw new Error(`Cannot transition from '${artifact.contract_status}' to 'violated'`);
+  }
+
+  artifact.contract_status = 'violated';
+  artifact.stale_reason = null;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'violated', timestamp: new Date().toISOString() });
+
+  saveManifest(manifestPath, manifest);
+}
+
+/**
+ * Transitions artifact to 'stale' status.
+ * Valid from: active, fulfilled
+ *
+ * @param manifestPath - Absolute path to manifest.json
+ * @param artifactId - Artifact ID to transition
+ * @param reason - Reason for staleness
+ */
+export function transitionToStale(manifestPath: string, artifactId: string, reason: string): void {
+  const manifest = loadManifest(manifestPath);
+  if (!manifest) {
+    throw new Error(`Manifest not found at ${manifestPath}`);
+  }
+
+  const artifact = manifest.artifacts.find((a) => a.id === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found in manifest`);
+  }
+
+  // Valid from: active, fulfilled
+  if (artifact.contract_status !== 'active' && artifact.contract_status !== 'fulfilled') {
+    throw new Error(`Cannot transition from '${artifact.contract_status}' to 'stale'`);
+  }
+
+  artifact.contract_status = 'stale';
+  artifact.stale_reason = reason;
+  if (!artifact.statusHistory) artifact.statusHistory = [];
+  artifact.statusHistory.push({ status: 'stale', timestamp: new Date().toISOString() });
+
+  saveManifest(manifestPath, manifest);
 }

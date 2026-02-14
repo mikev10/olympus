@@ -624,7 +624,7 @@ Output: token: string
 
       await writeDesignArtifacts(testDir, 'test-workflow', design);
 
-      const designDir = path.join(testDir, '.olympus', 'workflow', 'test-workflow', 'forge', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
       const exists = await fs.pathExists(designDir);
 
       expect(exists).toBe(true);
@@ -651,10 +651,8 @@ Output: token: string
 
       const interfacesPath = path.join(
         testDir,
-        '.olympus',
-        'workflow',
-        'test-workflow',
-        'forge',
+        'aidlc-docs',
+        'construction',
         'design',
         'interfaces.json'
       );
@@ -682,10 +680,8 @@ Output: token: string
 
       const dataFlowPath = path.join(
         testDir,
-        '.olympus',
-        'workflow',
-        'test-workflow',
-        'forge',
+        'aidlc-docs',
+        'construction',
         'design',
         'data-flow.json'
       );
@@ -715,10 +711,8 @@ Output: token: string
 
       const componentsPath = path.join(
         testDir,
-        '.olympus',
-        'workflow',
-        'test-workflow',
-        'forge',
+        'aidlc-docs',
+        'construction',
         'design',
         'components.json'
       );
@@ -738,10 +732,8 @@ Output: token: string
 
       const validationPath = path.join(
         testDir,
-        '.olympus',
-        'workflow',
-        'test-workflow',
-        'forge',
+        'aidlc-docs',
+        'construction',
         'design',
         'validation.json'
       );
@@ -784,17 +776,19 @@ Output: token: string
       };
 
       await writeDesignArtifacts(testDir, 'workflow-1', design1);
-      await writeDesignArtifacts(testDir, 'workflow-2', design2);
 
       const loaded1 = await loadDesignArtifacts(testDir, 'workflow-1');
-      const loaded2 = await loadDesignArtifacts(testDir, 'workflow-2');
-
       expect(loaded1!.interfaces[0].name).toBe('Interface1');
+
+      // Second write overwrites (aidlc-docs is a flat per-project structure)
+      await writeDesignArtifacts(testDir, 'workflow-2', design2);
+
+      const loaded2 = await loadDesignArtifacts(testDir, 'workflow-2');
       expect(loaded2!.interfaces[0].name).toBe('Interface2');
     });
 
     it('should return null if only some files exist', async () => {
-      const designDir = path.join(testDir, '.olympus', 'workflow', 'incomplete', 'forge', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
       await fs.ensureDir(designDir);
 
       // Write only interfaces.json, not the others

@@ -1,7 +1,7 @@
 /**
  * Workflow Artifact Gate Hook Registration
  *
- * Validates workflow artifacts after Vision stage agents complete their work.
+ * Validates workflow artifacts after Inception stage agents complete their work.
  * Runs validation functions when idea-intake, prd-writer, spec-writer, or
  * intent-generator agents finish tasks. Injects warnings for failed validations
  * but always fails open (never blocks workflow progression).
@@ -9,7 +9,7 @@
  * Priority: 78 (runs after agent-tracking at 50, before quality-gate at 80)
  *
  * Key behaviors:
- * - Detects Task completions from Vision stage agents
+ * - Detects Task completions from Inception stage agents
  * - Loads active workflow checkpoint
  * - Runs appropriate validation function (validateIdea, validatePrd, etc.)
  * - Injects success/warning context based on validation results
@@ -21,24 +21,21 @@ import { loadSessionState } from '../../learning/session-state.js';
 import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
 import {
   validateIdea,
-  validatePrd,
-  validateSpec,
-  validateTasks,
+  validateIntent,
 } from '../../features/workflow-engine/validation.js';
 import type { HookContext, HookResult } from '../types.js';
-import type { WorkflowCheckpoint, ValidationResult } from '../../features/workflow-engine/types.js';
+import type { ValidationResult } from '../../features/workflow-engine/types.js';
 import { join } from 'path';
 import { existsSync } from 'fs';
 
 /**
- * Maps Vision stage agent names to their artifact types.
+ * Maps Inception stage agent names to their artifact types.
  * This determines which validation function to run for each agent.
  */
 const VISION_STAGE_AGENT_MAP: Record<string, string> = {
   'idea-intake': 'idea',
-  'prd-writer': 'prd',
-  'spec-writer': 'spec',
-  'intent-generator': 'intents',
+  'intent-writer': 'intent',
+  'intent-generator': 'intent',
 };
 
 /**
@@ -50,14 +47,14 @@ const VISION_STAGE_AGENT_MAP: Record<string, string> = {
  */
 async function findActiveWorkflow(
   projectPath: string
-): Promise<{ workflowId: string; checkpoint: WorkflowCheckpoint } | null> {
+): Promise<{ workflowId: string; checkpoint: any } | null> {
   try {
     const workflows = await listWorkflows(projectPath);
     if (workflows.length === 0) return null;
 
     let bestMatch: {
       workflowId: string;
-      checkpoint: WorkflowCheckpoint;
+      checkpoint: any;
       updatedAt: string;
     } | null = null;
 
@@ -90,15 +87,15 @@ async function findActiveWorkflow(
  * Supports both new nested layout (vision/) and legacy flat layout.
  *
  * @param workflowDir - Absolute path to workflow directory
- * @param artifactType - Type of artifact (idea, prd, spec, intents)
+ * @param artifactType - Type of artifact (idea, intent)
  * @returns Object containing all necessary artifact paths for validation
  */
 function getArtifactPaths(
   workflowDir: string,
   artifactType: string
 ): { artifactPath: string; referencePaths: string[] } | null {
-  // Try nested layout first (vision/ subdirectory)
-  const nestedBasePath = join(workflowDir, 'vision');
+  // Try nested layout first (inception/ subdirectory)
+  const nestedBasePath = join(workflowDir, 'inception');
   const flatBasePath = workflowDir;
 
   switch (artifactType) {
@@ -109,45 +106,17 @@ function getArtifactPaths(
       return existsSync(artifactPath) ? { artifactPath, referencePaths: [] } : null;
     }
 
-    case 'prd': {
-      const nestedPrdPath = join(nestedBasePath, 'prd.md');
-      const flatPrdPath = join(flatBasePath, 'prd.md');
-      const prdPath = existsSync(nestedPrdPath) ? nestedPrdPath : flatPrdPath;
+    case 'intent': {
+      const nestedIntentPath = join(nestedBasePath, 'intent.md');
+      const flatIntentPath = join(flatBasePath, 'intent.md');
+      const intentPath = existsSync(nestedIntentPath) ? nestedIntentPath : flatIntentPath;
 
       const nestedIdeaPath = join(nestedBasePath, 'idea.md');
       const flatIdeaPath = join(flatBasePath, 'idea.md');
       const ideaPath = existsSync(nestedIdeaPath) ? nestedIdeaPath : flatIdeaPath;
 
-      return existsSync(prdPath) && existsSync(ideaPath)
-        ? { artifactPath: prdPath, referencePaths: [ideaPath] }
-        : null;
-    }
-
-    case 'spec': {
-      const nestedSpecPath = join(nestedBasePath, 'spec.md');
-      const flatSpecPath = join(flatBasePath, 'spec.md');
-      const specPath = existsSync(nestedSpecPath) ? nestedSpecPath : flatSpecPath;
-
-      const nestedPrdPath = join(nestedBasePath, 'prd.md');
-      const flatPrdPath = join(flatBasePath, 'prd.md');
-      const prdPath = existsSync(nestedPrdPath) ? nestedPrdPath : flatPrdPath;
-
-      return existsSync(specPath) && existsSync(prdPath)
-        ? { artifactPath: specPath, referencePaths: [prdPath] }
-        : null;
-    }
-
-    case 'intents': {
-      const nestedIntentsDir = join(nestedBasePath, 'intents');
-      const flatIntentsDir = join(flatBasePath, 'intents');
-      const intentsDir = existsSync(nestedIntentsDir) ? nestedIntentsDir : flatIntentsDir;
-
-      const nestedSpecPath = join(nestedBasePath, 'spec.md');
-      const flatSpecPath = join(flatBasePath, 'spec.md');
-      const specPath = existsSync(nestedSpecPath) ? nestedSpecPath : flatSpecPath;
-
-      return existsSync(intentsDir) && existsSync(specPath)
-        ? { artifactPath: intentsDir, referencePaths: [specPath] }
+      return existsSync(intentPath) && existsSync(ideaPath)
+        ? { artifactPath: intentPath, referencePaths: [ideaPath] }
         : null;
     }
 
@@ -159,7 +128,7 @@ function getArtifactPaths(
 /**
  * Runs the appropriate validation function based on artifact type.
  *
- * @param artifactType - Type of artifact (idea, prd, spec, intents)
+ * @param artifactType - Type of artifact (idea, intent)
  * @param artifactPath - Path to the artifact to validate
  * @param referencePaths - Paths to reference artifacts needed for validation
  * @returns Validation result or null if validation type not supported
@@ -174,17 +143,8 @@ async function runValidation(
       case 'idea':
         return await validateIdea(artifactPath);
 
-      case 'prd':
-        if (referencePaths.length === 0) return null;
-        return await validatePrd(artifactPath, referencePaths[0]);
-
-      case 'spec':
-        if (referencePaths.length === 0) return null;
-        return await validateSpec(artifactPath, referencePaths[0]);
-
-      case 'intents':
-        if (referencePaths.length === 0) return null;
-        return await validateTasks(artifactPath, referencePaths[0]);
+      case 'intent':
+        return await validateIntent(artifactPath);
 
       default:
         return null;
@@ -222,7 +182,7 @@ ${result.reviewer ? `Reviewer: ${result.reviewer}\n` : ''}Please review and addr
 /**
  * Workflow Artifact Gate Hook (PostToolUse, priority 78)
  *
- * Validates workflow artifacts when Vision stage agents complete their tasks.
+ * Validates workflow artifacts when Inception stage agents complete their tasks.
  * Detects Task tool completions from idea-intake, prd-writer, spec-writer, or
  * intent-generator agents and runs the appropriate validation function.
  *
@@ -252,10 +212,10 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
       return { continue: true };
     }
 
-    // Check if this agent is a Vision stage agent
+    // Check if this agent is an Inception stage agent
     const artifactType = VISION_STAGE_AGENT_MAP[agentUsed];
     if (!artifactType) {
-      // Not a Vision stage agent - pass through
+      // Not an Inception stage agent - pass through
       return { continue: true };
     }
 
@@ -269,7 +229,7 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
     const { workflowId, checkpoint } = activeWorkflow;
 
     // Determine workflow directory
-    const workflowDir = join(ctx.directory, '.olympus', 'workflow', workflowId);
+    const workflowDir = join(ctx.directory, 'aidlc-docs', workflowId);
     if (!existsSync(workflowDir)) {
       console.error('[Olympus Artifact Gate] Workflow directory not found:', workflowDir);
       return { continue: true }; // Fail open

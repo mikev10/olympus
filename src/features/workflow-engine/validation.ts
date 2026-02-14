@@ -45,10 +45,10 @@ export function clearFileCache(): void {
  */
 const REQUIRED_SECTIONS = [
   'Problem Statement',
-  'Business Context',
+  'User Personas',
   'Success Metrics',
-  'Constraints',
-  'Solution Approach',
+  'Business Constraints',
+  'Out of Scope',
 ] as const;
 
 /**
@@ -56,9 +56,9 @@ const REQUIRED_SECTIONS = [
  *
  * Checks 6 criteria:
  * 1. Problem statement present (non-empty ## Problem Statement section)
- * 2. Business context present (non-empty ## Business Context section)
+ * 2. User Personas present (non-empty ## User Personas section)
  * 3. At least 2 success metrics (check ## Success Metrics section has 2+ bullet points)
- * 4. Constraints documented (## Constraints section present with content)
+ * 4. Business Constraints documented (## Business Constraints section present with content)
  * 5. Risk tier assessed (YAML frontmatter has risk_tier field)
  * 6. All required sections present (all 5 sections exist in document)
  *
@@ -136,11 +136,11 @@ export async function validateIdea(artifactPath: string): Promise<ValidationResu
       }
       return null;
     },
-    // Check criterion 2: Business context present and non-empty
+    // Check criterion 2: User Personas present and non-empty
     () => {
-      const businessContext = sections.get('Business Context');
-      if (!businessContext || businessContext.trim().length === 0) {
-        return 'Business context section is empty';
+      const userPersonas = sections.get('User Personas');
+      if (!userPersonas || userPersonas.trim().length === 0) {
+        return 'User Personas section is empty';
       }
       return null;
     },
@@ -157,11 +157,11 @@ export async function validateIdea(artifactPath: string): Promise<ValidationResu
       }
       return null;
     },
-    // Check criterion 4: Constraints documented
+    // Check criterion 4: Business Constraints documented
     () => {
-      const constraints = sections.get('Constraints');
+      const constraints = sections.get('Business Constraints');
       if (!constraints || constraints.trim().length === 0) {
-        return 'Constraints section missing';
+        return 'Business Constraints section missing';
       }
       return null;
     },
@@ -295,550 +295,180 @@ function countBulletPoints(content: string): number {
 }
 
 /**
- * Validates a PRD artifact for coverage against IDEA constraints.
+ * Validates an INTENT artifact for completeness.
  *
- * **Phase 2 MVP Stub Implementation**
- * This is a simplified implementation that calculates coverage but does not
- * invoke the Momus agent for critical review. Full Momus integration is
- * deferred to Phase 3.
+ * Checks 6 criteria:
+ * 1. Frontmatter has all required fields (id, title, parent, status, depth_score, risk_tier)
+ * 2. Business Requirements section exists with at least 1 User Story (US-NNN pattern)
+ * 3. Each User Story has an Acceptance criterion (look for "Acceptance:" under each US-NNN)
+ * 4. Technical Specification section exists and is non-empty
+ * 5. Implementation Plan section exists
+ * 6. Proposed UNITs section has at least 1 UNIT listed (UNIT-NNN pattern)
  *
- * Checks:
- * - PRD addresses >= 90% of IDEA constraints
- * - User stories are present
- * - Requirement coverage section exists
- *
- * TODO (Phase 3): Integrate Momus agent for:
- * - Scope drift detection
- * - Acceptance criteria completeness check
- * - Risk alignment verification
- *
- * @param artifactPath - Absolute path to the PRD artifact file
- * @param ideaPath - Absolute path to the IDEA artifact file
- * @returns ValidationResult with coverage percentage and Momus placeholder
+ * @param artifactPath - Absolute path to the INTENT artifact file
+ * @returns ValidationResult with pass/fail status, coverage percentage, and any blocking issues
  *
  * @example
- * const result = await validatePrd(
- *   '.olympus/workflows/feature-x/prd.md',
- *   '.olympus/workflows/feature-x/idea.md'
- * );
- * if (result.coverage_percentage >= 90) {
- *   console.log('PRD has sufficient coverage');
- * }
- */
-export async function validatePrd(
-  artifactPath: string,
-  ideaPath: string
-): Promise<ValidationResult> {
-  const timestamp = new Date().toISOString();
-  const blockingIssues: string[] = [];
-
-  // Read PRD artifact
-  let prdContent: string;
-  try {
-    prdContent = readFileSync(artifactPath, 'utf-8');
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read PRD artifact: ${err.message}`);
-    console.error(`[Validation] Path: ${artifactPath}`);
-
-    const errorMsg = err.code === 'ENOENT'
-      ? 'PRD artifact file not found'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading PRD artifact'
-      : `Failed to read PRD artifact: ${err.message}`;
-
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [errorMsg],
-      reviewer: 'momus',
-      timestamp,
-    };
-  }
-
-  // Read IDEA artifact
-  let ideaContent: string;
-  try {
-    ideaContent = readFileSync(ideaPath, 'utf-8');
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read IDEA artifact for PRD validation: ${err.message}`);
-    console.error(`[Validation] Path: ${ideaPath}`);
-
-    const errorMsg = err.code === 'ENOENT'
-      ? 'IDEA artifact file not found for reference'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading IDEA artifact'
-      : `Failed to read IDEA artifact: ${err.message}`;
-
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [errorMsg],
-      reviewer: 'momus',
-      timestamp,
-    };
-  }
-
-  // Parse IDEA constraints
-  const ideaMarkdown = removeFrontmatter(ideaContent);
-  const ideaSections = parseSections(ideaMarkdown);
-  const constraintsSection = ideaSections.get('Constraints');
-  const ideaConstraints = constraintsSection
-    ? countBulletPoints(constraintsSection)
-    : 0;
-
-  // Parse PRD user stories
-  const prdMarkdown = removeFrontmatter(prdContent);
-  const prdSections = parseSections(prdMarkdown);
-
-  // Count user stories (sections starting with "US-" or "### US-")
-  let userStoryCount = 0;
-  for (const line of prdMarkdown.split('\n')) {
-    if (line.match(/^###?\s+US-\d+/)) {
-      userStoryCount++;
-    }
-  }
-
-  // Check for requirement coverage section
-  const hasCoverageSection = prdSections.has('Requirement Coverage');
-
-  // Calculate coverage percentage
-  // Simplified: assume each user story addresses one constraint
-  // Real implementation would parse the coverage table
-  const coveragePercentage =
-    ideaConstraints > 0
-      ? Math.round((Math.min(userStoryCount, ideaConstraints) / ideaConstraints) * 100)
-      : 100;
-
-  // Validate completeness
-  if (userStoryCount === 0) {
-    blockingIssues.push('No user stories found in PRD');
-  }
-
-  if (!hasCoverageSection) {
-    blockingIssues.push('Missing Requirement Coverage section');
-  }
-
-  if (coveragePercentage < 90) {
-    blockingIssues.push(
-      `Coverage only ${coveragePercentage}%, need at least 90% (${userStoryCount}/${ideaConstraints} constraints addressed)`
-    );
-  }
-
-  // TODO (Phase 3): Invoke Momus agent here for critical review
-  // const momusReview = await invokeMomusAgent(prdContent, ideaContent);
-  // blockingIssues.push(...momusReview.issues);
-
-  return {
-    passed: blockingIssues.length === 0 && coveragePercentage >= 90,
-    coverage_percentage: coveragePercentage,
-    blocking_issues: blockingIssues,
-    reviewer: 'momus',  // Placeholder - real Momus review deferred to Phase 3
-    timestamp,
-  };
-}
-
-/**
- * Validates a SPEC artifact for coverage against PRD user stories.
- *
- * **Phase 2 MVP Stub Implementation**
- * This is a simplified implementation that calculates coverage but does not
- * invoke the Metis agent for critical review. Full Metis integration is
- * deferred to Phase 3.
- *
- * Checks:
- * - SPEC implements >= 95% of PRD user stories
- * - Requirement coverage section exists
- * - All components documented
- *
- * TODO (Phase 3): Integrate Metis agent for:
- * - Hidden requirements analysis
- * - Dependency mapping completeness
- * - Security considerations adequacy
- * - Performance requirements coverage
- *
- * @param specPath - Absolute path to the SPEC artifact file
- * @param prdPath - Absolute path to the PRD artifact file
- * @returns ValidationResult with coverage percentage and Metis placeholder
- *
- * @example
- * const result = await validateSpec(
- *   '.olympus/workflows/feature-x/spec.md',
- *   '.olympus/workflows/feature-x/prd.md'
- * );
- * if (result.coverage_percentage >= 95) {
- *   console.log('SPEC has sufficient PRD coverage');
- * }
- */
-export async function validateSpec(
-  specPath: string,
-  prdPath: string
-): Promise<ValidationResult> {
-  const timestamp = new Date().toISOString();
-  const blockingIssues: string[] = [];
-
-  // Read SPEC artifact
-  let specContent: string;
-  try {
-    specContent = readFileSync(specPath, 'utf-8');
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read SPEC artifact: ${err.message}`);
-    console.error(`[Validation] Path: ${specPath}`);
-
-    const errorMsg = err.code === 'ENOENT'
-      ? 'SPEC artifact file not found'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading SPEC artifact'
-      : `Failed to read SPEC artifact: ${err.message}`;
-
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [errorMsg],
-      reviewer: 'metis',
-      timestamp,
-    };
-  }
-
-  // Read PRD artifact
-  let prdContent: string;
-  try {
-    prdContent = readFileSync(prdPath, 'utf-8');
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read PRD artifact for SPEC validation: ${err.message}`);
-    console.error(`[Validation] Path: ${prdPath}`);
-
-    const errorMsg = err.code === 'ENOENT'
-      ? 'PRD artifact file not found for reference'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading PRD artifact'
-      : `Failed to read PRD artifact: ${err.message}`;
-
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [errorMsg],
-      reviewer: 'metis',
-      timestamp,
-    };
-  }
-
-  // Parse PRD user stories
-  const prdMarkdown = removeFrontmatter(prdContent);
-  const prdUserStories: string[] = [];
-  for (const line of prdMarkdown.split('\n')) {
-    const match = line.match(/^###?\s+(US-\d+)/);
-    if (match) {
-      prdUserStories.push(match[1]);
-    }
-  }
-
-  // Parse SPEC for user story coverage
-  const specMarkdown = removeFrontmatter(specContent);
-  const specSections = parseSections(specMarkdown);
-  const coverageSection = specSections.get('Requirement Coverage') || specSections.get('PRD Coverage') || '';
-
-  // Count how many PRD user stories are referenced in SPEC
-  let coveredStories = 0;
-  for (const story of prdUserStories) {
-    if (specMarkdown.includes(story)) {
-      coveredStories++;
-    }
-  }
-
-  // Calculate coverage percentage
-  const coveragePercentage =
-    prdUserStories.length > 0
-      ? Math.round((coveredStories / prdUserStories.length) * 100)
-      : 0;
-
-  // Validate completeness
-  if (prdUserStories.length === 0) {
-    blockingIssues.push('No user stories found in PRD for validation');
-  }
-
-  if (!coverageSection || coverageSection.trim().length === 0) {
-    blockingIssues.push('Missing Requirement Coverage section in SPEC');
-  }
-
-  if (coveragePercentage < 95) {
-    blockingIssues.push(
-      `Coverage only ${coveragePercentage}%, need at least 95% (${coveredStories}/${prdUserStories.length} user stories addressed)`
-    );
-  }
-
-  // Check for components section
-  const hasComponentsSection = specSections.has('Components') || specSections.has('Architecture');
-  if (!hasComponentsSection) {
-    blockingIssues.push('Missing Components or Architecture section');
-  }
-
-  // TODO (Phase 3): Invoke Metis agent here for critical review
-  // const metisReview = await invokeMetisAgent(specContent, prdContent);
-  // blockingIssues.push(...metisReview.issues);
-  // Metis should check:
-  // - Hidden requirements not explicitly stated in PRD
-  // - Dependency mapping completeness
-  // - Security considerations adequacy
-  // - Performance requirements coverage
-
-  return {
-    passed: blockingIssues.length === 0 && coveragePercentage >= 95,
-    coverage_percentage: coveragePercentage,
-    blocking_issues: blockingIssues,
-    reviewer: 'metis',  // Placeholder - real Metis review deferred to Phase 3
-    timestamp,
-  };
-}
-
-/**
- * Validates TASKS artifacts for coverage against SPEC components.
- *
- * Checks:
- * - 100% of SPEC components have tasks
- * - Dependency graph is valid (no circular dependencies)
- * - All tasks have effort estimates
- * - Effort estimates are reasonable (1, 2, 4, 8, or 16 hours)
- *
- * @param tasksDir - Absolute path to the tasks directory (contains INTENT files)
- * @param specPath - Absolute path to the SPEC artifact file
- * @returns ValidationResult with coverage percentage and validation details
- *
- * @example
- * const result = await validateTasks(
- *   '.olympus/workflows/feature-x/intents/',
- *   '.olympus/workflows/feature-x/spec.md'
- * );
+ * const result = await validateIntent('.olympus/workflows/feature-x/intent-auth.md');
  * if (result.passed) {
- *   console.log('All SPEC components have task coverage');
+ *   console.log('INTENT artifact is complete!');
+ * } else {
+ *   console.log('Issues found:', result.blocking_issues);
  * }
  */
-export async function validateTasks(
-  tasksDir: string,
-  specPath: string
-): Promise<ValidationResult> {
+export async function validateIntent(artifactPath: string): Promise<ValidationResult> {
   const timestamp = new Date().toISOString();
   const blockingIssues: string[] = [];
 
-  // Read SPEC artifact
-  let specContent: string;
+  // Read artifact file with caching
+  let content: string;
   try {
-    specContent = readFileSync(specPath, 'utf-8');
+    content = readFileWithCache(artifactPath);
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read SPEC artifact for task validation: ${err.message}`);
-    console.error(`[Validation] Path: ${specPath}`);
 
-    const errorMsg = err.code === 'ENOENT'
-      ? 'SPEC artifact file not found'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading SPEC artifact'
-      : `Failed to read SPEC artifact: ${err.message}`;
+    if (err.code === 'ENOENT') {
+      console.error(`[Validation] INTENT artifact not found: ${artifactPath}`);
+      return {
+        passed: false,
+        coverage_percentage: 0,
+        blocking_issues: ['Artifact file not found'],
+        timestamp,
+      };
+    }
 
+    if (err.code === 'EACCES' || err.code === 'EPERM') {
+      console.error(`[Validation] Permission denied reading INTENT artifact: ${artifactPath}`);
+      return {
+        passed: false,
+        coverage_percentage: 0,
+        blocking_issues: ['Permission denied reading artifact file'],
+        timestamp,
+      };
+    }
+
+    console.error(`[Validation] Failed to read INTENT artifact: ${err.message}`);
+    console.error(`[Validation] Path: ${artifactPath}`);
     return {
       passed: false,
       coverage_percentage: 0,
-      blocking_issues: [errorMsg],
+      blocking_issues: [`Failed to read artifact: ${err.message}`],
       timestamp,
     };
   }
 
-  // Parse SPEC for components
-  const specMarkdown = removeFrontmatter(specContent);
-  const specSections = parseSections(specMarkdown);
-  const componentsSection = specSections.get('Components') || specSections.get('Architecture') || '';
+  // Parse YAML frontmatter - Criterion 1
+  const frontmatter = parseFrontmatter(content);
+  const requiredFrontmatterFields = ['id', 'title', 'parent', 'status', 'depth_score', 'risk_tier'];
+  let frontmatterValid = true;
+  for (const field of requiredFrontmatterFields) {
+    if (!frontmatter || !frontmatter[field]) {
+      blockingIssues.push(`Frontmatter missing required field: ${field}`);
+      frontmatterValid = false;
+    }
+  }
 
-  // Extract component names (look for ### headings in components section)
-  const specComponents: string[] = [];
-  if (componentsSection) {
-    for (const line of componentsSection.split('\n')) {
-      const match = line.match(/^###\s+(.+)$/);
-      if (match) {
-        specComponents.push(match[1].trim());
+  // Remove frontmatter from content for section parsing
+  const markdownContent = removeFrontmatter(content);
+
+  // Parse markdown sections
+  const sections = parseSections(markdownContent);
+
+  // Track criteria pass/fail (not blocking issues count)
+  let passedCriteria = frontmatterValid ? 1 : 0;
+
+  // Run all validations
+  const validationChecks = [
+    // Check criterion 2: Business Requirements section with at least 1 User Story
+    () => {
+      const businessReqs = sections.get('Business Requirements');
+      if (!businessReqs) {
+        return 'Missing Business Requirements section';
       }
-    }
-  }
-
-  // Read INTENT files from tasksDir
-  let intentFiles: string[] = [];
-  try {
-    const fs = await import('fs');
-    const files = fs.readdirSync(tasksDir);
-    intentFiles = files.filter(f => f.endsWith('.md') || f.includes('INTENT'));
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Validation] Failed to read tasks directory: ${err.message}`);
-    console.error(`[Validation] Path: ${tasksDir}`);
-
-    const errorMsg = err.code === 'ENOENT'
-      ? 'Tasks directory not found'
-      : err.code === 'EACCES' || err.code === 'EPERM'
-      ? 'Permission denied reading tasks directory'
-      : `Failed to read tasks directory: ${err.message}`;
-
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [errorMsg],
-      timestamp,
-    };
-  }
-
-  // Parse INTENT files for component coverage
-  const coveredComponents = new Set<string>();
-  const taskEstimates: number[] = [];
-
-  for (const intentFile of intentFiles) {
-    try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const intentPath = path.join(tasksDir, intentFile);
-      const intentContent = fs.readFileSync(intentPath, 'utf-8');
-
-      // Check which components are mentioned in this INTENT
-      for (const component of specComponents) {
-        if (intentContent.includes(component)) {
-          coveredComponents.add(component);
-        }
+      const userStoryMatches = businessReqs.match(/US-\d{3}/g);
+      if (!userStoryMatches || userStoryMatches.length === 0) {
+        return 'No User Stories found (expected US-NNN pattern)';
       }
+      return null;
+    },
+    // Check criterion 3: Each User Story has Acceptance criterion
+    () => {
+      const businessReqs = sections.get('Business Requirements');
+      if (businessReqs) {
+        const userStoryMatches = businessReqs.match(/US-\d{3}/g);
+        if (userStoryMatches) {
+          for (const story of userStoryMatches) {
+            // Check if there's an "Acceptance:" line after this story ID
+            const storyIndex = businessReqs.indexOf(story);
+            const nextStoryIndex = businessReqs.indexOf('US-', storyIndex + 1);
+            const storySection = nextStoryIndex > 0
+              ? businessReqs.substring(storyIndex, nextStoryIndex)
+              : businessReqs.substring(storyIndex);
 
-      // Extract effort estimate
-      const effortMatch = intentContent.match(/estimated_effort:\s*(\d+)/i);
-      if (effortMatch) {
-        taskEstimates.push(parseInt(effortMatch[1], 10));
-      }
-    } catch (_error) {
-      // Skip unreadable files
-    }
-  }
-
-  // Calculate coverage percentage
-  const coveragePercentage =
-    specComponents.length > 0
-      ? Math.round((coveredComponents.size / specComponents.length) * 100)
-      : 100;
-
-  // Validate 100% coverage
-  if (specComponents.length === 0) {
-    blockingIssues.push('No components found in SPEC for validation');
-  } else if (coveragePercentage < 100) {
-    const uncovered = specComponents.filter(c => !coveredComponents.has(c));
-    blockingIssues.push(
-      `Incomplete coverage: ${coveragePercentage}% (missing: ${uncovered.join(', ')})`
-    );
-  }
-
-  // Validate effort estimates
-  const validEstimates = [1, 2, 4, 8, 16];
-  for (const estimate of taskEstimates) {
-    if (!validEstimates.includes(estimate)) {
-      blockingIssues.push(
-        `Invalid effort estimate: ${estimate} hours (must be 1, 2, 4, 8, or 16)`
-      );
-    }
-  }
-
-  if (intentFiles.length > 0 && taskEstimates.length === 0) {
-    blockingIssues.push('No effort estimates found in task files');
-  }
-
-  // Check for variance in estimates (within 30%)
-  if (taskEstimates.length > 1) {
-    const avgEstimate = taskEstimates.reduce((a, b) => a + b, 0) / taskEstimates.length;
-    const maxVariance = avgEstimate * 0.3;
-    for (const estimate of taskEstimates) {
-      if (Math.abs(estimate - avgEstimate) > maxVariance) {
-        // This is a warning, not a blocking issue
-        // Only add if variance is extreme (>50%)
-        if (Math.abs(estimate - avgEstimate) > avgEstimate * 0.5) {
-          blockingIssues.push(
-            `High variance in effort estimates: ${estimate}h vs avg ${Math.round(avgEstimate)}h`
-          );
-        }
-      }
-    }
-  }
-
-  // Validate dependency graph
-  try {
-    const fs = await import('fs');
-    const path = await import('path');
-    const graphPath = path.join(tasksDir, 'dependency-graph.json');
-    const graphContent = fs.readFileSync(graphPath, 'utf-8');
-    const graph = JSON.parse(graphContent);
-
-    // Basic cycle detection
-    const hasCycle = detectCycles(graph);
-    if (hasCycle) {
-      blockingIssues.push('Circular dependencies detected in dependency graph');
-    }
-
-    // Validate all referenced dependencies exist
-    const taskIds = new Set(Object.keys(graph));
-    for (const [taskId, deps] of Object.entries(graph)) {
-      if (Array.isArray(deps)) {
-        for (const dep of deps) {
-          if (!taskIds.has(dep)) {
-            blockingIssues.push(
-              `Task ${taskId} references non-existent dependency: ${dep}`
-            );
+            if (!storySection.match(/Acceptance:/i)) {
+              return `User Story ${story} missing Acceptance criterion`;
+            }
           }
         }
       }
+      return null;
+    },
+    // Check criterion 4: Technical Specification section exists and non-empty
+    () => {
+      const techSpec = sections.get('Technical Specification');
+      if (!techSpec || techSpec.trim().length === 0) {
+        return 'Technical Specification section missing or empty';
+      }
+      return null;
+    },
+    // Check criterion 5: Implementation Plan section exists
+    () => {
+      const implPlan = sections.get('Implementation Plan');
+      if (!implPlan || implPlan.trim().length === 0) {
+        return 'Implementation Plan section missing or empty';
+      }
+      return null;
+    },
+    // Check criterion 6: Proposed UNITs section has at least 1 UNIT
+    () => {
+      const implPlan = sections.get('Implementation Plan');
+      // If Implementation Plan is missing, we can't check for UNITs
+      // This is a separate criterion failure (don't return null)
+      if (!implPlan || implPlan.trim().length === 0) {
+        // Don't add a duplicate error message, just fail the criterion
+        return ''; // Return empty string to fail criterion without adding to blocking issues
+      }
+      const unitMatches = implPlan.match(/UNIT-\d{3}/g);
+      if (!unitMatches || unitMatches.length === 0) {
+        return 'No Proposed UNITs found (expected UNIT-NNN pattern)';
+      }
+      return null;
+    },
+  ];
+
+  // Execute all checks
+  for (const check of validationChecks) {
+    const issue = check();
+    if (issue !== null) {
+      // Criterion failed
+      // Only add non-empty issues to blocking issues list
+      if (issue.trim().length > 0) {
+        blockingIssues.push(issue);
+      }
+    } else {
+      // Criterion passed
+      passedCriteria++;
     }
-  } catch (_error) {
-    // Dependency graph is optional for now
-    // blockingIssues.push('Dependency graph file not found or invalid');
   }
 
+  // Calculate coverage (6 total criteria)
+  const totalCriteria = 6;
+  const coveragePercentage = Math.round((passedCriteria / totalCriteria) * 100);
+
   return {
-    passed: blockingIssues.length === 0 && coveragePercentage === 100,
+    passed: blockingIssues.length === 0,
     coverage_percentage: coveragePercentage,
     blocking_issues: blockingIssues,
     timestamp,
   };
-}
-
-/**
- * Detects cycles in a dependency graph using depth-first search.
- *
- * @param graph - Adjacency list representation of dependencies
- * @returns true if a cycle is detected, false otherwise
- */
-function detectCycles(graph: Record<string, string[]>): boolean {
-  const visited = new Set<string>();
-  const recursionStack = new Set<string>();
-
-  function dfs(node: string): boolean {
-    visited.add(node);
-    recursionStack.add(node);
-
-    const neighbors = graph[node] || [];
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        if (dfs(neighbor)) {
-          return true;
-        }
-      } else if (recursionStack.has(neighbor)) {
-        // Found a back edge - cycle detected
-        return true;
-      }
-    }
-
-    recursionStack.delete(node);
-    return false;
-  }
-
-  for (const node of Object.keys(graph)) {
-    if (!visited.has(node)) {
-      if (dfs(node)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }

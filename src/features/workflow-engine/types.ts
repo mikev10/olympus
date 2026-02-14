@@ -1,21 +1,21 @@
 /**
  * Workflow Engine Type Definitions
  *
- * Comprehensive types for the multi-stage workflow system that guides features
- * through idea → PRD → spec → intents → implementation stages.
+ * Comprehensive types for the ODLC 4-stage pipeline:
+ * idea → intent → unit → bolt → complete
  */
 
 /**
- * Workflow stages representing the progression of feature development.
+ * Workflow stages representing the 4-level ODLC pipeline.
  * Each stage produces artifacts that feed into the next stage.
  *
- * - idea: Initial feature concept and requirements
- * - prd: Product Requirements Document
- * - spec: Technical specification
- * - intents: Intent files for implementation
+ * - idea: Problem statement, personas, success metrics, constraints
+ * - intent: Business requirements, technical spec, proposed UNITs
+ * - unit: Module scope, interface contracts, acceptance criteria
+ * - bolt: Smallest execution unit — domain design, logical design, implementation steps
  * - complete: All stages finished and validated
  */
-export type WorkflowStage = 'idea' | 'prd' | 'spec' | 'intents' | 'complete';
+export type WorkflowStage = 'idea' | 'intent' | 'unit' | 'bolt' | 'complete';
 
 /**
  * Current status of a workflow or workflow stage.
@@ -25,8 +25,12 @@ export type WorkflowStage = 'idea' | 'prd' | 'spec' | 'intents' | 'complete';
  * - paused: Temporarily halted, can resume
  * - blocked: Cannot proceed due to validation failures or dependencies
  * - complete: Stage is finished and validated
+ * - awaiting_mode_selection: INTENT approved, user must choose execution mode
+ * - awaiting_dev_review: Waiting for developer review (Risk Tier 3)
+ * - deferred: Workflow paused with intent to return
+ * - archived: Workflow archived (legacy or completed)
  */
-export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked' | 'complete';
+export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked' | 'complete' | 'awaiting_mode_selection' | 'awaiting_dev_review' | 'deferred' | 'archived';
 
 /**
  * Reference to a workflow artifact (file produced by a stage).
@@ -115,39 +119,9 @@ export interface RequirementMapping {
 }
 
 /**
- * Complete workflow checkpoint representing the state of a feature's development.
- * This checkpoint is persisted to disk and can be resumed at any time.
- *
- * The checkpoint tracks:
- * - Which stage the workflow is currently in
- * - All artifacts produced at each stage
- * - Validation results for each stage
- * - Context needed to resume interrupted workflows
- *
- * @example
- * {
- *   schema_version: "1.0.0",
- *   workflow_id: "wf-2024-01-15-user-auth",
- *   feature_name: "user-authentication",
- *   created_at: "2024-01-15T10:00:00Z",
- *   updated_at: "2024-01-15T12:00:00Z",
- *   current_stage: "prd",
- *   status: "in_progress",
- *   artifacts: {
- *     idea: { id: "IDEA-001", path: ".olympus/workflows/user-auth/idea.md", ... },
- *     prd: null,
- *     spec: null,
- *     intents: null,
- *     complete: null
- *   },
- *   validation_results: {
- *     idea: { passed: true, coverage_percentage: 100, ... },
- *     prd: null,
- *     spec: null,
- *     intents: null,
- *     complete: null
- *   }
- * }
+ * @deprecated Use WorkflowCheckpointV3 from phase-types.ts instead.
+ * This interface represents the legacy v1 checkpoint format.
+ * Retained for backward compatibility during migration only.
  */
 export interface WorkflowCheckpoint {
   /** Version of the checkpoint format for migration compatibility */

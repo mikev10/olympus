@@ -51,9 +51,9 @@ export function recordPhaseComplete(phaseState: PhaseState): PhaseState {
  * Compute methodology metrics from manifest data.
  */
 export function computeMetrics(manifest: ManifestSchema): MethodologyMetrics {
-  const visionDuration = computePhaseDuration(manifest.phases.vision);
-  const forgeDuration = computePhaseDuration(manifest.phases.forge);
-  const summitDuration = computePhaseDuration(manifest.phases.summit);
+  const inceptionDuration = computePhaseDuration(manifest.phases.inception);
+  const constructionDuration = computePhaseDuration(manifest.phases.construction);
+  const operationsDuration = computePhaseDuration(manifest.phases.operations);
 
   const totalArtifacts = manifest.artifacts.length;
 
@@ -75,9 +75,9 @@ export function computeMetrics(manifest: ManifestSchema): MethodologyMetrics {
   const depthAccuracy = computeDepthAccuracy(manifest);
 
   return {
-    vision_duration_ms: visionDuration,
-    forge_duration_ms: forgeDuration,
-    summit_duration_ms: summitDuration,
+    inception_duration_ms: inceptionDuration,
+    construction_duration_ms: constructionDuration,
+    operations_duration_ms: operationsDuration,
     total_artifacts: totalArtifacts,
     validation_pass_rate: Math.round(validationPassRate * 100) / 100,
     gate_bypass_count: gateBypasses,
@@ -97,29 +97,29 @@ export function exportToLearningSystem(
   const discoveries: AgentDiscovery[] = [];
 
   // Record phase completion times as planning insights
-  if (metrics.vision_duration_ms !== null) {
+  if (metrics.inception_duration_ms !== null) {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'vision',
-      details: `Vision phase completed in ${formatDuration(metrics.vision_duration_ms)}`,
+      phase: 'inception',
+      details: `Inception phase completed in ${formatDuration(metrics.inception_duration_ms)}`,
     };
     discoveries.push(captureWorkflowDiscovery(event, context));
   }
 
-  if (metrics.forge_duration_ms !== null) {
+  if (metrics.construction_duration_ms !== null) {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'forge',
-      details: `Forge phase completed in ${formatDuration(metrics.forge_duration_ms)}`,
+      phase: 'construction',
+      details: `Construction phase completed in ${formatDuration(metrics.construction_duration_ms)}`,
     };
     discoveries.push(captureWorkflowDiscovery(event, context));
   }
 
-  if (metrics.summit_duration_ms !== null) {
+  if (metrics.operations_duration_ms !== null) {
     const event: WorkflowEvent = {
       type: 'phase_complete',
-      phase: 'summit',
-      details: `Summit phase completed in ${formatDuration(metrics.summit_duration_ms)}`,
+      phase: 'operations',
+      details: `Operations phase completed in ${formatDuration(metrics.operations_duration_ms)}`,
     };
     discoveries.push(captureWorkflowDiscovery(event, context));
   }

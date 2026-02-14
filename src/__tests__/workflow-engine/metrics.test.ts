@@ -35,9 +35,10 @@ function createTestManifest(overrides?: Partial<ManifestSchema>): ManifestSchema
     created_at: now,
     updated_at: now,
     phases: {
-      vision: createTestPhaseState(),
-      forge: createTestPhaseState(),
-      summit: createTestPhaseState(),
+      discovery: createTestPhaseState(),
+      inception: createTestPhaseState(),
+      construction: createTestPhaseState(),
+      operations: createTestPhaseState(),
     },
     depth_assessment: null,
     artifacts: [],
@@ -56,7 +57,7 @@ function createTestArtifact(overrides?: Partial<ManifestArtifact>): ManifestArti
   return {
     id: 'artifact-1',
     type: 'design',
-    phase: 'vision',
+    phase: 'inception',
     stage: 'requirements',
     path: '/test/artifact.md',
     created_at: now,
@@ -77,7 +78,7 @@ function createTestContext(): WorkflowContext {
     featureName: 'Test Feature',
     projectPath: '/test/project',
     sessionId: 'test-session',
-    phase: 'vision',
+    phase: 'inception',
   };
 }
 
@@ -220,23 +221,24 @@ describe('computePhaseDuration', () => {
 
 describe('computeMetrics', () => {
   it('computes phase durations from manifest phases', () => {
-    const visionStart = new Date('2024-01-01T00:00:00.000Z').toISOString();
-    const visionEnd = new Date('2024-01-01T00:10:00.000Z').toISOString();
-    const forgeStart = new Date('2024-01-01T00:10:00.000Z').toISOString();
-    const forgeEnd = new Date('2024-01-01T00:30:00.000Z').toISOString();
+    const inceptionStart = new Date('2024-01-01T00:00:00.000Z').toISOString();
+    const inceptionEnd = new Date('2024-01-01T00:10:00.000Z').toISOString();
+    const constructionStart = new Date('2024-01-01T00:10:00.000Z').toISOString();
+    const constructionEnd = new Date('2024-01-01T00:30:00.000Z').toISOString();
 
     const manifest = createTestManifest({
       phases: {
-        vision: createTestPhaseState({ started_at: visionStart, completed_at: visionEnd }),
-        forge: createTestPhaseState({ started_at: forgeStart, completed_at: forgeEnd }),
-        summit: createTestPhaseState(),
+        discovery: createTestPhaseState(),
+        inception: createTestPhaseState({ started_at: inceptionStart, completed_at: inceptionEnd }),
+        construction: createTestPhaseState({ started_at: constructionStart, completed_at: constructionEnd }),
+        operations: createTestPhaseState(),
       },
     });
 
     const metrics = computeMetrics(manifest);
-    expect(metrics.vision_duration_ms).toBe(600000); // 10 minutes
-    expect(metrics.forge_duration_ms).toBe(1200000); // 20 minutes
-    expect(metrics.summit_duration_ms).toBeNull();
+    expect(metrics.inception_duration_ms).toBe(600000); // 10 minutes
+    expect(metrics.construction_duration_ms).toBe(1200000); // 20 minutes
+    expect(metrics.operations_duration_ms).toBeNull();
   });
 
   it('counts total artifacts', () => {
@@ -281,9 +283,9 @@ describe('computeMetrics', () => {
   it('counts gate bypasses', () => {
     const manifest = createTestManifest({
       gate_audit: [
-        { phase: 'vision', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
-        { phase: 'forge', timestamp: new Date().toISOString(), action: 'bypassed', actor: 'flag', reason: 'testing' },
-        { phase: 'summit', timestamp: new Date().toISOString(), action: 'bypassed', actor: 'trust', reason: 'trusted' },
+        { phase: 'inception', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'construction', timestamp: new Date().toISOString(), action: 'bypassed', actor: 'flag', reason: 'testing' },
+        { phase: 'operations', timestamp: new Date().toISOString(), action: 'bypassed', actor: 'trust', reason: 'trusted' },
       ],
     });
 
@@ -294,9 +296,9 @@ describe('computeMetrics', () => {
   it('counts rework (rejections)', () => {
     const manifest = createTestManifest({
       gate_audit: [
-        { phase: 'vision', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
-        { phase: 'forge', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
-        { phase: 'summit', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'failed validation' },
+        { phase: 'inception', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
+        { phase: 'construction', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'operations', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'failed validation' },
       ],
     });
 
@@ -317,9 +319,9 @@ describe('computeMetrics', () => {
     const manifest = createTestManifest({
       depth_assessment: createTestDepthAssessment('minimal'),
       gate_audit: [
-        { phase: 'vision', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
-        { phase: 'forge', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
-        { phase: 'summit', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'inception', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'construction', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'operations', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
       ],
     });
 
@@ -331,9 +333,9 @@ describe('computeMetrics', () => {
     const manifest = createTestManifest({
       depth_assessment: createTestDepthAssessment('standard'),
       gate_audit: [
-        { phase: 'vision', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
-        { phase: 'forge', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
-        { phase: 'summit', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'inception', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
+        { phase: 'construction', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'operations', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
       ],
     });
 
@@ -347,9 +349,9 @@ describe('computeMetrics', () => {
     const manifest = createTestManifest({
       depth_assessment: createTestDepthAssessment('comprehensive'),
       gate_audit: [
-        { phase: 'vision', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
-        { phase: 'forge', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'failed' },
-        { phase: 'summit', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
+        { phase: 'inception', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'incomplete' },
+        { phase: 'construction', timestamp: new Date().toISOString(), action: 'rejected', actor: 'human', reason: 'failed' },
+        { phase: 'operations', timestamp: new Date().toISOString(), action: 'approved', actor: 'human', reason: null },
       ],
     });
 
@@ -367,9 +369,9 @@ describe('computeMetrics', () => {
 describe('exportToLearningSystem', () => {
   it('creates discoveries for completed phases', () => {
     const metrics = {
-      vision_duration_ms: 600000,
-      forge_duration_ms: 1200000,
-      summit_duration_ms: 300000,
+      inception_duration_ms: 600000,
+      construction_duration_ms: 1200000,
+      operations_duration_ms: 300000,
       total_artifacts: 5,
       validation_pass_rate: 1.0,
       gate_bypass_count: 0,
@@ -388,9 +390,9 @@ describe('exportToLearningSystem', () => {
 
   it('creates no discovery for null duration phases', () => {
     const metrics = {
-      vision_duration_ms: 600000,
-      forge_duration_ms: null,
-      summit_duration_ms: null,
+      inception_duration_ms: 600000,
+      construction_duration_ms: null,
+      operations_duration_ms: null,
       total_artifacts: 5,
       validation_pass_rate: 1.0,
       gate_bypass_count: 0,
@@ -406,9 +408,9 @@ describe('exportToLearningSystem', () => {
 
   it('creates gotcha discovery for high rework count (>2)', () => {
     const metrics = {
-      vision_duration_ms: null,
-      forge_duration_ms: null,
-      summit_duration_ms: null,
+      inception_duration_ms: null,
+      construction_duration_ms: null,
+      operations_duration_ms: null,
       total_artifacts: 5,
       validation_pass_rate: 1.0,
       gate_bypass_count: 0,
@@ -426,9 +428,9 @@ describe('exportToLearningSystem', () => {
 
   it('creates insight for low validation pass rate (<0.8)', () => {
     const metrics = {
-      vision_duration_ms: null,
-      forge_duration_ms: null,
-      summit_duration_ms: null,
+      inception_duration_ms: null,
+      construction_duration_ms: null,
+      operations_duration_ms: null,
       total_artifacts: 10,
       validation_pass_rate: 0.5,
       gate_bypass_count: 0,
@@ -446,9 +448,9 @@ describe('exportToLearningSystem', () => {
 
   it('returns empty array for perfect metrics', () => {
     const metrics = {
-      vision_duration_ms: null,
-      forge_duration_ms: null,
-      summit_duration_ms: null,
+      inception_duration_ms: null,
+      construction_duration_ms: null,
+      operations_duration_ms: null,
       total_artifacts: 5,
       validation_pass_rate: 1.0,
       gate_bypass_count: 0,
@@ -464,9 +466,9 @@ describe('exportToLearningSystem', () => {
 
   it('each discovery has valid structure', () => {
     const metrics = {
-      vision_duration_ms: 600000,
-      forge_duration_ms: null,
-      summit_duration_ms: null,
+      inception_duration_ms: 600000,
+      construction_duration_ms: null,
+      operations_duration_ms: null,
       total_artifacts: 5,
       validation_pass_rate: 1.0,
       gate_bypass_count: 0,

@@ -44,17 +44,18 @@ function createMockCheckpoint(overrides: Record<string, any> = {}) {
     feature_name: 'Test Feature',
     created_at: '2025-01-01T00:00:00.000Z',
     updated_at: '2025-01-01T00:00:00.000Z',
-    current_phase: 'vision',
+    current_phase: 'inception',
     phases: {
-      vision: { status: 'in_progress', started_at: '2025-01-01T00:00:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
-      forge: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
-      summit: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      discovery: { status: 'complete', started_at: '2025-01-01T00:00:00.000Z', completed_at: '2025-01-01T00:10:00.000Z', gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'in_progress', started_at: '2025-01-01T00:10:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
     },
-    current_stage: 'intents',
+    current_stage: 'intent',
     status: 'in_progress',
-    artifacts: { idea: null, prd: null, spec: null, intents: null, complete: null },
-    validation_results: { idea: null, prd: null, spec: null, intents: null, complete: null },
-    manifest_path: '/test/project/.olympus/workflow/test-feature/manifest.json',
+    artifacts: { idea: null, prd: null, spec: null, intent: null, complete: null },
+    validation_results: { idea: null, prd: null, spec: null, intent: null, complete: null },
+    manifest_path: '/test/project/aidlc-docs/test-feature/manifest.json',
     trust_state_path: null,
     risk_tier: null,
     ...overrides,
@@ -69,9 +70,10 @@ function createMockManifest(overrides: Record<string, any> = {}) {
     created_at: '2025-01-01T00:00:00.000Z',
     updated_at: '2025-01-01T00:00:00.000Z',
     phases: {
-      vision: { status: 'in_progress', started_at: '2025-01-01T00:00:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
-      forge: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
-      summit: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      discovery: { status: 'complete', started_at: '2025-01-01T00:00:00.000Z', completed_at: '2025-01-01T00:10:00.000Z', gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'in_progress', started_at: '2025-01-01T00:10:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
     },
     depth_assessment: null,
     artifacts: [],
@@ -191,7 +193,7 @@ describe('Quality Gate Hooks', () => {
     it('returns continue:true when all workflows are complete', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ status: 'complete', current_phase: 'summit' })
+        createMockCheckpoint({ status: 'complete', current_phase: 'operations' })
       );
 
       const hooks = getHooksForEvent('PostToolUse');
@@ -205,17 +207,18 @@ describe('Quality Gate Hooks', () => {
   });
 
   describe('qualityGateBlocker - phase transitions', () => {
-    it('detects Vision phase completion when current_stage is intents', async () => {
+    it('detects Inception phase completion when current_stage is intent', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -234,15 +237,15 @@ describe('Quality Gate Hooks', () => {
     it('does not trigger when current_stage is idea (mid-phase)', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
       );
       // Don't provide manifest - rely on stage-based fallback heuristic
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            inception: { status: 'in_progress', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -260,12 +263,12 @@ describe('Quality Gate Hooks', () => {
     it('does not re-trigger when gate is already pending', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: {
+            inception: {
               status: 'in_progress',
               gate_result: {
                 passed: false,
@@ -273,8 +276,8 @@ describe('Quality Gate Hooks', () => {
                 reason: null
               }
             },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -295,21 +298,22 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 1, score: 15, rationale: 'Low risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -334,7 +338,7 @@ describe('Quality Gate Hooks', () => {
       expect(result.hookSpecificOutput?.additionalContext).toBeUndefined();
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ phase: 'vision', actor: 'trust', action: 'approved' })
+        expect.objectContaining({ phase: 'inception', actor: 'trust', action: 'approved' })
       );
     });
 
@@ -342,18 +346,19 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 2, score: 45, rationale: 'Medium risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -382,21 +387,22 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 2, score: 45, rationale: 'Medium risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -426,18 +432,19 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 3, score: 75, rationale: 'High risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -466,18 +473,19 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 1, score: 15, rationale: 'Low risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -506,21 +514,22 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           risk_tier: { tier: 1, score: 15, rationale: 'Low risk' },
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -544,7 +553,7 @@ describe('Quality Gate Hooks', () => {
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          phase: 'vision',
+          phase: 'inception',
           actor: 'trust',
           action: 'approved',
         })
@@ -556,14 +565,15 @@ describe('Quality Gate Hooks', () => {
     it('injects STOP message when gate blocks', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -581,10 +591,10 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           validation_results: {
-            intents: {
+            intent: {
               verification_score: 0.85,
               validation_questions: [],
             }
@@ -594,9 +604,10 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -614,10 +625,10 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
+          current_stage: 'intent',
+          current_phase: 'inception',
           validation_results: {
-            intents: {
+            intent: {
               verification_score: 0.85,
               validation_questions: [
                 { question: 'Is the API design RESTful?', rationale: 'Check REST compliance' }
@@ -629,9 +640,10 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -648,14 +660,15 @@ describe('Quality Gate Hooks', () => {
     it('includes [GATE_PENDING] sentinel', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -672,13 +685,13 @@ describe('Quality Gate Hooks', () => {
     it('stores gate_result in manifest phase state', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       const manifest = createMockManifest({
         phases: {
-          vision: { status: 'in_progress', gate_result: null },
-          forge: { status: 'not_started' },
-          summit: { status: 'not_started' },
+          inception: { status: 'in_progress', gate_result: null },
+          construction: { status: 'not_started' },
+          operations: { status: 'not_started' },
         },
       });
       vi.mocked(loadManifest).mockReturnValue(manifest);
@@ -693,7 +706,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: expect.objectContaining({
                 passed: false,
                 approved_by: null,
@@ -709,7 +722,7 @@ describe('Quality Gate Hooks', () => {
     it('continues when manifest is corrupted/null', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(null);
 
@@ -741,7 +754,7 @@ describe('Quality Gate Hooks', () => {
 
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(null);
 
@@ -764,23 +777,24 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          current_stage: 'intent',
+          current_phase: 'inception',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: {
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: {
               status: 'in_progress',
               gate_result: { passed: false, approved_by: null, reason: null }
             },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -818,23 +832,24 @@ describe('Quality Gate Hooks', () => {
         vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
         vi.mocked(loadCheckpoint).mockResolvedValue(
           createMockCheckpoint({
-            current_stage: 'intents',
-            current_phase: 'vision',
-            trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+            current_stage: 'intent',
+            current_phase: 'inception',
+            trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
           })
         );
         vi.mocked(loadManifest).mockReturnValue(
           createMockManifest({
             phases: {
-              vision: {
+              discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+              inception: {
                 status: 'in_progress',
                 gate_result: { passed: false, approved_by: null, reason: null }
               },
-              forge: { status: 'not_started' },
-              summit: { status: 'not_started' },
+              construction: { status: 'not_started' },
+              operations: { status: 'not_started' },
             },
             artifacts: [
-              { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+              { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
             ],
           })
         );
@@ -868,7 +883,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: expect.objectContaining({
                 passed: true,
                 approved_by: 'human',
@@ -888,7 +903,7 @@ describe('Quality Gate Hooks', () => {
 
       expect(updateContractStatus).toHaveBeenCalledWith(
         expect.anything(),
-        'intents-001',
+        'intent-001',
         'active'
       );
     });
@@ -903,7 +918,7 @@ describe('Quality Gate Hooks', () => {
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          phase: 'vision',
+          phase: 'inception',
           actor: 'human',
           action: 'approved',
         })
@@ -944,7 +959,7 @@ describe('Quality Gate Hooks', () => {
       const ctx = createUserPromptCtx('approve');
       const result = await approver!.handler(ctx);
 
-      expect(result.hookSpecificOutput?.additionalContext).toContain('vision');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('inception');
       expect(result.hookSpecificOutput?.additionalContext).toContain('approved');
     });
   });
@@ -954,23 +969,24 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          current_stage: 'intent',
+          current_phase: 'inception',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: {
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: {
               status: 'in_progress',
               gate_result: { passed: false, approved_by: null, reason: null }
             },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -1008,7 +1024,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: expect.objectContaining({
                 passed: false,
                 feedback: 'insufficient test coverage',
@@ -1028,7 +1044,7 @@ describe('Quality Gate Hooks', () => {
 
       expect(updateContractStatus).toHaveBeenCalledWith(
         expect.anything(),
-        'intents-001',
+        'intent-001',
         'violated',
         expect.any(String)
       );
@@ -1044,7 +1060,7 @@ describe('Quality Gate Hooks', () => {
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          phase: 'vision',
+          phase: 'inception',
           actor: 'human',
           action: 'rejected',
           reason: 'incomplete requirements',
@@ -1101,23 +1117,24 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'intents',
-          current_phase: 'vision',
-          trust_state_path: '/test/project/.olympus/workflow/test-feature/trust-state.json',
+          current_stage: 'intent',
+          current_phase: 'inception',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: {
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: {
               status: 'in_progress',
               gate_result: { passed: false, approved_by: null, reason: null }
             },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
           artifacts: [
-            { id: 'intents-001', type: 'intents', phase: 'vision', path: 'intents.json', contract_status: 'draft' }
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' }
           ],
         })
       );
@@ -1145,7 +1162,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: null,
               gate_bypassed: true,
               bypass_reason: '--no-gates flag',
@@ -1192,7 +1209,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: null,
               gate_bypassed: true,
               bypass_reason: 'Config disabled',
@@ -1239,7 +1256,7 @@ describe('Quality Gate Hooks', () => {
         expect.stringContaining('manifest.json'),
         expect.objectContaining({
           phases: expect.objectContaining({
-            vision: expect.objectContaining({
+            inception: expect.objectContaining({
               gate_result: null,
               gate_bypassed: true,
               bypass_reason: 'Config disabled',
@@ -1259,7 +1276,7 @@ describe('Quality Gate Hooks', () => {
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          phase: 'vision',
+          phase: 'inception',
           actor: 'flag',
           action: 'bypassed',
         })
@@ -1302,7 +1319,7 @@ describe('Quality Gate Hooks', () => {
       expect(addGateAuditEntry).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          phase: 'vision',
+          phase: 'inception',
           actor: 'config',
           action: 'bypassed',
         })
@@ -1314,14 +1331,15 @@ describe('Quality Gate Hooks', () => {
     it('passes through normal prompts without gate pending', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -1350,17 +1368,18 @@ describe('Quality Gate Hooks', () => {
     it('passes through prompts that do not start with approve/reject', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: {
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: {
               status: 'in_progress',
               gate_result: { passed: false, approved_by: null, reason: null }
             },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -1380,14 +1399,15 @@ describe('Quality Gate Hooks', () => {
     it('[GATE_PENDING] appears in blocked gate message', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );
@@ -1404,14 +1424,15 @@ describe('Quality Gate Hooks', () => {
     it('Ascent can detect pending gate from hook output', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'intents', current_phase: 'vision' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
           phases: {
-            vision: { status: 'in_progress', gate_result: null },
-            forge: { status: 'not_started' },
-            summit: { status: 'not_started' },
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: { status: 'in_progress', gate_result: null },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
           },
         })
       );

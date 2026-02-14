@@ -1,5 +1,5 @@
 /**
- * Forge Phase - Design Stage
+ * Construction Phase - Design Stage
  *
  * The design stage takes UNITs from the decomposition stage and generates functional
  * design artifacts: interface contracts, data flow diagrams, and component designs.
@@ -301,7 +301,7 @@ export async function writeDesignArtifacts(
   workflowId: string,
   design: DesignArtifacts
 ): Promise<void> {
-  const designDir = path.join(projectPath, '.olympus', 'workflow', workflowId, 'forge', 'design');
+  const designDir = path.join(projectPath, 'aidlc-docs', 'construction', 'design');
 
   try {
     await fs.ensureDir(designDir);
@@ -331,7 +331,7 @@ export async function loadDesignArtifacts(
   projectPath: string,
   workflowId: string
 ): Promise<DesignArtifacts | null> {
-  const designDir = path.join(projectPath, '.olympus', 'workflow', workflowId, 'forge', 'design');
+  const designDir = path.join(projectPath, 'aidlc-docs', 'construction', 'design');
 
   try {
     const interfacesPath = path.join(designDir, 'interfaces.json');

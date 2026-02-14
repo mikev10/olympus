@@ -1,8 +1,8 @@
 /**
- * Forge Phase Module
+ * Construction Phase Module
  *
- * Hierarchical decomposition and design system for the ODLC Forge phase.
- * Transforms Vision phase INTENTs into executable UNITs and BOLTs.
+ * Hierarchical decomposition and design system for the ODLC Construction phase.
+ * Transforms Inception phase INTENTs into executable UNITs and BOLTs.
  */
 
 // Decomposition (INTENT → UNIT → BOLT)

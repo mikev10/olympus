@@ -2,7 +2,7 @@
  * Checkpoint Persistence Module
  *
  * Handles saving, loading, and managing workflow checkpoints on disk.
- * Checkpoints are stored in .olympus/workflow/{workflow_id}/checkpoint.json
+ * Checkpoints are stored in aidlc-docs/checkpoint.json
  *
  * Performance optimizations:
  * - In-memory cache to avoid redundant disk reads
@@ -12,19 +12,18 @@
 
 import * as fs from 'fs-extra';
 import { join } from 'path';
-import { WorkflowCheckpoint } from './types.js';
-import type { WorkflowCheckpointV2, WorkflowPhase, PhaseState, RiskTierClassification } from './phase-types.js';
+import type { WorkflowCheckpointV3 } from './phase-types.js';
 
-const WORKFLOW_DIR = '.olympus/workflow';
+const WORKFLOW_DIR = 'aidlc-docs';
 const CHECKPOINT_FILENAME = 'checkpoint.json';
 
 /**
  * In-memory cache for loaded checkpoints
  * Key: `${projectPath}:${workflowId}`
- * Value: { checkpoint: WorkflowCheckpoint, timestamp: number }
+ * Value: { checkpoint: WorkflowCheckpointV3, timestamp: number }
  */
 interface CacheEntry {
-  checkpoint: WorkflowCheckpoint;
+  checkpoint: WorkflowCheckpointV3;
   timestamp: number;
   dirty: boolean; // Track if checkpoint has been modified since last save
 }
@@ -63,84 +62,48 @@ export function invalidateCache(projectPath: string, workflowId: string): void {
 }
 
 /**
- * Helper to determine Vision phase status during v1->v2 migration
+ * Check if a checkpoint is using a legacy schema (v1 or v2).
+ *
+ * @param data - Checkpoint data to check
+ * @returns true if checkpoint is v1 or v2, false otherwise
  */
-function determineVisionStatus(currentStage: string, workflowStatus: string): string {
-  if (currentStage === 'complete') {
-    return 'complete';
+export function isLegacyCheckpoint(data: any): boolean {
+  if (!data || typeof data !== 'object' || !data.schema_version) {
+    return false;
   }
-  return workflowStatus;
+  return data.schema_version === '1.0.0' || data.schema_version === '2.0.0';
 }
 
 /**
- * Migrate a v1 checkpoint to v2 format.
- * Detects v1 by schema_version !== '2.0.0' and adds ODLC phase tracking.
+ * Archive a legacy workflow by moving its directory to .olympus/archive/.
+ * This preserves the workflow data while marking it as legacy/inactive.
+ * Uses the old .olympus/workflow path since it's specifically for archiving legacy workflows.
  *
- * @param checkpoint - v1 checkpoint to migrate
- * @returns Migrated v2 checkpoint
+ * @param projectPath - Root path of the project
+ * @param workflowId - ID of the workflow to archive
  */
-export function migrateCheckpointV1toV2(checkpoint: WorkflowCheckpoint): WorkflowCheckpointV2 {
-  // If already v2, return as-is
-  if (checkpoint.schema_version === '2.0.0') {
-    return checkpoint as unknown as WorkflowCheckpointV2;
+export async function archiveLegacyWorkflow(projectPath: string, workflowId: string): Promise<void> {
+  const workflowDir = join(projectPath, '.olympus', 'workflow', workflowId);
+  const archiveDir = join(projectPath, '.olympus/archive', workflowId);
+
+  try {
+    // Check if source exists
+    const exists = await fs.pathExists(workflowDir);
+    if (!exists) {
+      return; // No-op if workflow doesn't exist
+    }
+
+    // Ensure archive directory parent exists
+    await fs.ensureDir(join(projectPath, '.olympus/archive'));
+
+    // Move workflow to archive
+    await fs.move(workflowDir, archiveDir, { overwrite: true });
+
+    console.log(`[Checkpoint] Archived legacy workflow ${workflowId} to ${archiveDir}`);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    console.error(`[Checkpoint] Failed to archive workflow ${workflowId}: ${err.message}`);
   }
-
-  // Initialize v2 phase states
-  const phases: Record<WorkflowPhase, PhaseState> = {
-    vision: {
-      status: determineVisionStatus(checkpoint.current_stage, checkpoint.status) as any,
-      started_at: checkpoint.created_at,
-      completed_at: checkpoint.current_stage === 'complete' ? checkpoint.updated_at : null,
-      gate_result: null,
-      gate_bypassed: false,
-      bypass_reason: null,
-    },
-    forge: {
-      status: 'not_started',
-      started_at: null,
-      completed_at: null,
-      gate_result: null,
-      gate_bypassed: false,
-      bypass_reason: null,
-    },
-    summit: {
-      status: 'not_started',
-      started_at: null,
-      completed_at: null,
-      gate_result: null,
-      gate_bypassed: false,
-      bypass_reason: null,
-    },
-  };
-
-  // Create v2 checkpoint
-  const v2Checkpoint: WorkflowCheckpointV2 = {
-    schema_version: '2.0.0',
-    workflow_id: checkpoint.workflow_id,
-    feature_name: checkpoint.feature_name,
-    created_at: checkpoint.created_at,
-    updated_at: checkpoint.updated_at,
-
-    // Phase-based tracking (new in v2)
-    current_phase: 'vision', // v1 workflows were always in Vision phase
-    phases,
-
-    // Stage-based tracking (preserved from v1)
-    current_stage: checkpoint.current_stage,
-    status: checkpoint.status,
-    artifacts: checkpoint.artifacts,
-    validation_results: checkpoint.validation_results,
-
-    // Preserved context
-    resume_context: checkpoint.resume_context,
-
-    // ODLC extensions (new in v2)
-    manifest_path: null,
-    trust_state_path: null,
-    risk_tier: null,
-  };
-
-  return v2Checkpoint;
 }
 
 /**
@@ -159,14 +122,15 @@ export function migrateCheckpointV1toV2(checkpoint: WorkflowCheckpoint): Workflo
  */
 export async function saveCheckpoint(
   projectPath: string,
-  checkpoint: WorkflowCheckpoint
+  checkpoint: WorkflowCheckpointV3
 ): Promise<void> {
-  const workflowDir = join(projectPath, WORKFLOW_DIR, checkpoint.workflow_id);
+  const workflowDir = join(projectPath, WORKFLOW_DIR);
   const checkpointPath = join(workflowDir, CHECKPOINT_FILENAME);
 
   try {
-    // Update timestamp
+    // Update timestamp and schema version
     checkpoint.updated_at = new Date().toISOString();
+    checkpoint.schema_version = '3.0.0';
 
     // Ensure directory exists (cached by fs-extra)
     await fs.ensureDir(workflowDir);
@@ -235,7 +199,7 @@ export async function saveCheckpoint(
 
 /**
  * Load a workflow checkpoint from disk.
- * Returns null if checkpoint doesn't exist or if JSON is corrupt.
+ * Returns null if checkpoint doesn't exist, is corrupt, or uses a legacy schema (v1/v2).
  *
  * Performance optimizations:
  * - Uses in-memory cache to avoid redundant disk reads
@@ -244,12 +208,12 @@ export async function saveCheckpoint(
  *
  * @param projectPath - Root path of the project
  * @param workflowId - ID of the workflow to load
- * @returns Checkpoint data or null if not found/invalid
+ * @returns Checkpoint data or null if not found/invalid/legacy
  */
 export async function loadCheckpoint(
   projectPath: string,
   workflowId: string
-): Promise<WorkflowCheckpoint | null> {
+): Promise<WorkflowCheckpointV3 | null> {
   const cacheKey = getCacheKey(projectPath, workflowId);
 
   // Check cache first
@@ -262,7 +226,6 @@ export async function loadCheckpoint(
   const checkpointPath = join(
     projectPath,
     WORKFLOW_DIR,
-    workflowId,
     CHECKPOINT_FILENAME
   );
 
@@ -270,7 +233,7 @@ export async function loadCheckpoint(
     // Fast path: use readFile + JSON.parse instead of fs.readJson
     // This is faster for typical checkpoint sizes
     const fileContent = await fs.readFile(checkpointPath, 'utf-8');
-    let checkpoint = JSON.parse(fileContent) as WorkflowCheckpoint;
+    const checkpoint = JSON.parse(fileContent);
 
     // Validate schema_version exists
     if (!checkpoint.schema_version) {
@@ -280,30 +243,19 @@ export async function loadCheckpoint(
       return null;
     }
 
-    // Auto-migrate v1 -> v2 if needed
-    if (checkpoint.schema_version !== '2.0.0') {
-      try {
-        console.log(`[Checkpoint] Migrating checkpoint ${workflowId} from v${checkpoint.schema_version} to v2.0.0`);
-        checkpoint = migrateCheckpointV1toV2(checkpoint) as any;
+    // Check if legacy checkpoint (v1 or v2)
+    if (isLegacyCheckpoint(checkpoint)) {
+      console.warn(`[Checkpoint] Legacy checkpoint detected (${checkpoint.schema_version}): ${workflowId}`);
+      console.warn(`[Checkpoint] Legacy checkpoints are no longer supported. Please archive or recreate this workflow.`);
+      console.warn(`[Checkpoint] Path: ${checkpointPath}`);
+      return null;
+    }
 
-        // Save migrated checkpoint back to disk (one-way migration)
-        const estimatedSize = JSON.stringify(checkpoint).length;
-        const useCompact = estimatedSize > 10000;
-
-        if (useCompact) {
-          const jsonContent = JSON.stringify(checkpoint);
-          await fs.writeFile(checkpointPath, jsonContent, 'utf-8');
-        } else {
-          await fs.writeJson(checkpointPath, checkpoint, { spaces: 2 });
-        }
-
-        console.log(`[Checkpoint] Successfully migrated and saved checkpoint ${workflowId} to v2.0.0`);
-      } catch (migrationError) {
-        const err = migrationError as Error;
-        console.warn(`[Checkpoint] Failed to migrate checkpoint ${workflowId}: ${err.message}`);
-        console.warn(`[Checkpoint] Returning null - checkpoint may need manual migration`);
-        return null;
-      }
+    // Validate it's v3
+    if (checkpoint.schema_version !== '3.0.0') {
+      console.warn(`[Checkpoint] Unknown checkpoint schema version ${checkpoint.schema_version} for workflow ${workflowId}`);
+      console.warn(`[Checkpoint] Expected 3.0.0`);
+      return null;
     }
 
     // Update cache with fresh data
@@ -349,55 +301,60 @@ export async function loadCheckpoint(
 /**
  * List all workflow IDs in the project.
  * Returns an empty array if workflow directory doesn't exist.
+ * Since there's no longer a directory per workflow, this checks if aidlc-docs/checkpoint.json exists
+ * and returns the workflow_id from it.
  *
  * @param projectPath - Root path of the project
- * @returns Array of workflow IDs
+ * @returns Array of workflow IDs (single workflow or empty)
  */
 export async function listWorkflows(projectPath: string): Promise<string[]> {
-  const workflowsDir = join(projectPath, WORKFLOW_DIR);
+  const checkpointPath = join(projectPath, WORKFLOW_DIR, CHECKPOINT_FILENAME);
 
   try {
-    // Check if workflows directory exists
-    const exists = await fs.pathExists(workflowsDir);
+    // Check if checkpoint exists
+    const exists = await fs.pathExists(checkpointPath);
     if (!exists) {
       return [];
     }
 
-    // Read directory entries
-    const entries = await fs.readdir(workflowsDir, { withFileTypes: true });
+    // Read checkpoint and extract workflow_id
+    const content = await fs.readFile(checkpointPath, 'utf-8');
+    const checkpoint = JSON.parse(content);
 
-    // Filter to only directories
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name);
+    if (checkpoint.workflow_id) {
+      return [checkpoint.workflow_id];
+    }
+
+    return [];
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
 
     // Handle permission errors
     if (err.code === 'EACCES' || err.code === 'EPERM') {
-      console.warn(`[Checkpoint] Permission denied listing workflows in ${workflowsDir}`);
+      console.warn(`[Checkpoint] Permission denied reading checkpoint in ${checkpointPath}`);
       return [];
     }
 
     // Generic error
     console.warn(`[Checkpoint] Failed to list workflows: ${err.message}`);
-    console.warn(`[Checkpoint] Directory: ${workflowsDir}`);
+    console.warn(`[Checkpoint] Path: ${checkpointPath}`);
     return [];
   }
 }
 
 /**
  * Delete a workflow and all its associated files.
+ * Deletes the entire aidlc-docs/ directory.
  * Idempotent - no error if workflow doesn't exist.
  *
  * @param projectPath - Root path of the project
- * @param workflowId - ID of the workflow to delete
+ * @param workflowId - ID of the workflow to delete (kept for API compatibility)
  */
 export async function deleteWorkflow(
   projectPath: string,
   workflowId: string
 ): Promise<void> {
-  const workflowDir = join(projectPath, WORKFLOW_DIR, workflowId);
+  const workflowDir = join(projectPath, WORKFLOW_DIR);
 
   try {
     await fs.remove(workflowDir);

@@ -62,7 +62,7 @@ describe('Manifest System', () => {
     it('creates manifest.json at correct path', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
-      expect(manifestPath).toBe(join(tmpDir, '.olympus', 'workflow', 'test-workflow', 'manifest.json'));
+      expect(manifestPath).toBe(join(tmpDir, 'aidlc-docs', 'manifest.json'));
       expect(fs.existsSync(manifestPath)).toBe(true);
     });
 
@@ -86,9 +86,10 @@ describe('Manifest System', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
       const manifest = loadManifest(manifestPath);
 
-      expect(manifest!.phases.vision.status).toBe('not_started');
-      expect(manifest!.phases.forge.status).toBe('not_started');
-      expect(manifest!.phases.summit.status).toBe('not_started');
+      expect(manifest!.phases.discovery.status).toBe('not_started');
+      expect(manifest!.phases.inception.status).toBe('not_started');
+      expect(manifest!.phases.construction.status).toBe('not_started');
+      expect(manifest!.phases.operations.status).toBe('not_started');
     });
 
     it('initializes all arrays as empty', () => {
@@ -121,7 +122,7 @@ describe('Manifest System', () => {
 
     it('creates directory structure if needed', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'test-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
 
       expect(fs.existsSync(workflowDir)).toBe(true);
       expect(fs.statSync(workflowDir).isDirectory()).toBe(true);
@@ -282,9 +283,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -304,9 +305,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -315,9 +316,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: true,
         write_complete: true,
@@ -337,9 +338,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: 'C:\\Users\\test\\prd.md',
         validation_passed: null,
         write_complete: false,
@@ -359,9 +360,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: filePath,
         validation_passed: null,
         write_complete: true,
@@ -380,9 +381,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'nonexistent.md'),
         validation_passed: null,
         write_complete: false,
@@ -401,9 +402,9 @@ describe('Manifest System', () => {
       expect(() => {
         registerArtifact(manifestPath, {
           id: 'prd-1',
-          type: 'prd',
-          phase: 'vision',
-          stage: 'prd',
+          type: 'intent',
+          phase: 'inception',
+          stage: 'intent',
           path: join(tmpDir, 'prd.md'),
           validation_passed: null,
           write_complete: false,
@@ -417,9 +418,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -438,9 +439,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -454,9 +455,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: true,
         write_complete: true,
@@ -477,9 +478,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -489,7 +490,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -516,7 +517,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -540,9 +541,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -565,9 +566,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -577,7 +578,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -603,9 +604,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -615,7 +616,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -644,9 +645,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -656,7 +657,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -686,9 +687,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: filePath,
         validation_passed: null,
         write_complete: true,
@@ -706,9 +707,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: filePath,
         validation_passed: null,
         write_complete: true,
@@ -727,9 +728,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'nonexistent.md'),
         validation_passed: null,
         write_complete: true,
@@ -747,9 +748,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: filePath,
         validation_passed: null,
         write_complete: false,
@@ -778,9 +779,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: file1,
         validation_passed: null,
         write_complete: true,
@@ -790,7 +791,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: file2,
         validation_passed: null,
@@ -815,9 +816,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -838,9 +839,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -850,7 +851,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -878,9 +879,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -890,7 +891,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -901,7 +902,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'code-1',
         type: 'code',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'implementation',
         path: join(tmpDir, 'code.ts'),
         validation_passed: null,
@@ -939,8 +940,8 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'art-1',
         type: 'doc',
-        phase: 'vision',
-        stage: 'prd',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'art1.md'),
         validation_passed: null,
         write_complete: false,
@@ -950,8 +951,8 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'art-2',
         type: 'doc',
-        phase: 'vision',
-        stage: 'prd',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'art2.md'),
         validation_passed: null,
         write_complete: false,
@@ -988,9 +989,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1019,9 +1020,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1031,7 +1032,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1054,9 +1055,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1066,7 +1067,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1090,9 +1091,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1102,7 +1103,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1125,9 +1126,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1137,7 +1138,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1158,9 +1159,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1170,7 +1171,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1191,9 +1192,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1203,7 +1204,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1214,7 +1215,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-2',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch2.md'),
         validation_passed: null,
@@ -1243,7 +1244,7 @@ describe('Manifest System', () => {
     });
 
     it('creates manifest from discovered files', () => {
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'test-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'prd.md'), 'PRD content', 'utf-8');
       fs.writeFileSync(join(workflowDir, 'arch.md'), 'Arch content', 'utf-8');
@@ -1255,7 +1256,7 @@ describe('Manifest System', () => {
     });
 
     it('sets workflow_id and feature_name correctly', () => {
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'my-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'file.txt'), 'content', 'utf-8');
 
@@ -1266,7 +1267,7 @@ describe('Manifest System', () => {
     });
 
     it('computes checksums for found files', () => {
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'test-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'test.txt'), 'Test content', 'utf-8');
 
@@ -1277,7 +1278,7 @@ describe('Manifest System', () => {
     });
 
     it('excludes manifest.json from artifacts', () => {
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'test-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'manifest.json'), '{}', 'utf-8');
       fs.writeFileSync(join(workflowDir, 'other.txt'), 'content', 'utf-8');
@@ -1295,7 +1296,7 @@ describe('Manifest System', () => {
     });
 
     it('handles nested files in subdirectories', () => {
-      const workflowDir = join(tmpDir, '.olympus', 'workflow', 'test-workflow');
+      const workflowDir = join(tmpDir, 'aidlc-docs');
       const subDir = join(workflowDir, 'subdir');
       fs.ensureDirSync(subDir);
       fs.writeFileSync(join(subDir, 'nested.txt'), 'Nested content', 'utf-8');
@@ -1312,20 +1313,20 @@ describe('Manifest System', () => {
     it('updates phase status', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
-      updatePhaseStatus(manifestPath, 'vision', 'in_progress');
+      updatePhaseStatus(manifestPath, 'inception', 'in_progress');
 
       const manifest = loadManifest(manifestPath)!;
-      expect(manifest.phases.vision.status).toBe('in_progress');
+      expect(manifest.phases.inception.status).toBe('in_progress');
     });
 
     it('sets started_at when provided', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
       const timestamp = new Date().toISOString();
 
-      updatePhaseStatus(manifestPath, 'vision', 'in_progress', timestamp);
+      updatePhaseStatus(manifestPath, 'inception', 'in_progress', timestamp);
 
       const manifest = loadManifest(manifestPath)!;
-      expect(manifest.phases.vision.started_at).toBe(timestamp);
+      expect(manifest.phases.inception.started_at).toBe(timestamp);
     });
 
     it('sets completed_at when provided', () => {
@@ -1333,29 +1334,31 @@ describe('Manifest System', () => {
       const startTime = new Date().toISOString();
       const endTime = new Date(Date.now() + 1000).toISOString();
 
-      updatePhaseStatus(manifestPath, 'vision', 'in_progress', startTime);
-      updatePhaseStatus(manifestPath, 'vision', 'completed', undefined, endTime);
+      updatePhaseStatus(manifestPath, 'inception', 'in_progress', startTime);
+      updatePhaseStatus(manifestPath, 'inception', 'completed', undefined, endTime);
 
       const manifest = loadManifest(manifestPath)!;
-      expect(manifest.phases.vision.completed_at).toBe(endTime);
+      expect(manifest.phases.inception.completed_at).toBe(endTime);
     });
 
-    it('updates all three phases independently', () => {
+    it('updates all phases independently', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
-      updatePhaseStatus(manifestPath, 'vision', 'completed');
-      updatePhaseStatus(manifestPath, 'forge', 'in_progress');
-      updatePhaseStatus(manifestPath, 'summit', 'not_started');
+      updatePhaseStatus(manifestPath, 'discovery', 'completed');
+      updatePhaseStatus(manifestPath, 'inception', 'completed');
+      updatePhaseStatus(manifestPath, 'construction', 'in_progress');
+      updatePhaseStatus(manifestPath, 'operations', 'not_started');
 
       const manifest = loadManifest(manifestPath)!;
-      expect(manifest.phases.vision.status).toBe('completed');
-      expect(manifest.phases.forge.status).toBe('in_progress');
-      expect(manifest.phases.summit.status).toBe('not_started');
+      expect(manifest.phases.discovery.status).toBe('completed');
+      expect(manifest.phases.inception.status).toBe('completed');
+      expect(manifest.phases.construction.status).toBe('in_progress');
+      expect(manifest.phases.operations.status).toBe('not_started');
     });
 
     it('silently handles missing manifest', () => {
       expect(() => {
-        updatePhaseStatus(join(tmpDir, 'nonexistent', 'manifest.json'), 'vision', 'in_progress');
+        updatePhaseStatus(join(tmpDir, 'nonexistent', 'manifest.json'), 'inception', 'in_progress');
       }).not.toThrow();
     });
   });
@@ -1365,7 +1368,7 @@ describe('Manifest System', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
       addGateAuditEntry(manifestPath, {
-        phase: 'vision',
+        phase: 'inception',
         gate_type: 'depth',
         result: 'pass',
         bypassed: false,
@@ -1383,7 +1386,7 @@ describe('Manifest System', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
       addGateAuditEntry(manifestPath, {
-        phase: 'vision',
+        phase: 'inception',
         gate_type: 'depth',
         result: 'pass',
         bypassed: false,
@@ -1391,7 +1394,7 @@ describe('Manifest System', () => {
       });
 
       addGateAuditEntry(manifestPath, {
-        phase: 'forge',
+        phase: 'construction',
         gate_type: 'risk',
         result: 'fail',
         bypassed: true,
@@ -1408,7 +1411,7 @@ describe('Manifest System', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
       addGateAuditEntry(manifestPath, {
-        phase: 'vision',
+        phase: 'inception',
         gate_type: 'depth',
         result: 'pass',
         bypassed: false,
@@ -1418,7 +1421,7 @@ describe('Manifest System', () => {
       const manifest = loadManifest(manifestPath)!;
       const entry = manifest.gate_audit[0];
 
-      expect(entry.phase).toBe('vision');
+      expect(entry.phase).toBe('inception');
       expect(entry.gate_type).toBe('depth');
       expect(entry.result).toBe('pass');
       expect(entry.bypassed).toBe(false);
@@ -1428,7 +1431,7 @@ describe('Manifest System', () => {
     it('silently handles missing manifest', () => {
       expect(() => {
         addGateAuditEntry(join(tmpDir, 'nonexistent', 'manifest.json'), {
-          phase: 'vision',
+          phase: 'inception',
           gate_type: 'depth',
           result: 'pass',
           bypassed: false,
@@ -1444,9 +1447,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1473,9 +1476,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1485,7 +1488,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1507,9 +1510,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1518,9 +1521,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-2',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd2.md'),
         validation_passed: null,
         write_complete: false,
@@ -1528,17 +1531,17 @@ describe('Manifest System', () => {
       });
 
       const manifest = loadManifest(manifestPath)!;
-      const artifacts = getArtifactsByPhase(manifest, 'vision');
+      const artifacts = getArtifactsByPhase(manifest, 'inception');
 
       expect(artifacts).toHaveLength(2);
-      expect(artifacts.every(a => a.phase === 'vision')).toBe(true);
+      expect(artifacts.every(a => a.phase === 'inception')).toBe(true);
     });
 
     it('returns empty array for phase with no artifacts', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
       const manifest = loadManifest(manifestPath)!;
 
-      const artifacts = getArtifactsByPhase(manifest, 'forge');
+      const artifacts = getArtifactsByPhase(manifest, 'construction');
       expect(artifacts).toEqual([]);
     });
 
@@ -1547,9 +1550,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1559,7 +1562,7 @@ describe('Manifest System', () => {
       registerArtifact(manifestPath, {
         id: 'arch-1',
         type: 'architecture',
-        phase: 'forge',
+        phase: 'construction',
         stage: 'architecture',
         path: join(tmpDir, 'arch.md'),
         validation_passed: null,
@@ -1568,13 +1571,13 @@ describe('Manifest System', () => {
       });
 
       const manifest = loadManifest(manifestPath)!;
-      const visionArtifacts = getArtifactsByPhase(manifest, 'vision');
-      const forgeArtifacts = getArtifactsByPhase(manifest, 'forge');
+      const inceptionArtifacts = getArtifactsByPhase(manifest, 'inception');
+      const constructionArtifacts = getArtifactsByPhase(manifest, 'construction');
 
-      expect(visionArtifacts).toHaveLength(1);
-      expect(forgeArtifacts).toHaveLength(1);
-      expect(visionArtifacts[0].id).toBe('prd-1');
-      expect(forgeArtifacts[0].id).toBe('arch-1');
+      expect(inceptionArtifacts).toHaveLength(1);
+      expect(constructionArtifacts).toHaveLength(1);
+      expect(inceptionArtifacts[0].id).toBe('prd-1');
+      expect(constructionArtifacts[0].id).toBe('arch-1');
     });
   });
 
@@ -1584,9 +1587,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1605,9 +1608,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
@@ -1630,15 +1633,18 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,
         checksum: null,
       });
 
+      // First transition to active (valid: draft → active)
+      updateContractStatus(manifestPath, 'prd-1', 'active');
+      // Then transition to stale (valid: active → stale)
       updateContractStatus(manifestPath, 'prd-1', 'stale', 'Content modified');
 
       const manifest = loadManifest(manifestPath)!;
@@ -1652,9 +1658,9 @@ describe('Manifest System', () => {
 
       registerArtifact(manifestPath, {
         id: 'prd-1',
-        type: 'prd',
-        phase: 'vision',
-        stage: 'prd',
+        type: 'intent',
+        phase: 'inception',
+        stage: 'intent',
         path: join(tmpDir, 'prd.md'),
         validation_passed: null,
         write_complete: false,

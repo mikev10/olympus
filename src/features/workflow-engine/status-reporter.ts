@@ -39,7 +39,7 @@ export interface PhaseProgressEntry {
   artifactCount: number;
 }
 
-const PHASE_ORDER: WorkflowPhase[] = ['vision', 'forge', 'summit'];
+const PHASE_ORDER: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
 
 const CONTRACT_STATUS_ICONS: Record<string, string> = {
   draft: 'o',       // ○ draft
@@ -74,6 +74,8 @@ export function generateWorkflowReport(
 
   const summary = buildSummaryLine(manifest, phaseProgress);
 
+  const boltProgress = buildBoltProgress(manifest);
+
   const fullReport = [
     `# Workflow Status: ${manifest.feature_name}`,
     `ID: ${manifest.workflow_id}`,
@@ -83,6 +85,7 @@ export function generateWorkflowReport(
     '## Phase Progress',
     ...phaseProgress.map(p => formatPhaseProgressBar(p)),
     '',
+    boltProgress,
     depthDisplay,
     riskTierDisplay,
     trustDisplay,
@@ -148,7 +151,7 @@ export function computePhaseProgress(manifest: ManifestSchema): PhaseProgressEnt
 }
 
 /**
- * Format a phase progress bar like: Vision  [========--] 80% (in_progress)
+ * Format a phase progress bar like: Inception [========--] 80% (in_progress)
  */
 export function formatPhaseProgressBar(entry: PhaseProgressEntry): string {
   const barWidth = 20;
@@ -288,7 +291,7 @@ export function buildAlignmentSummary(checks: AlignmentCheck[]): string {
  */
 export function buildDepthDisplay(depth: DepthAssessment | null): string {
   if (!depth) return 'Depth: Not assessed';
-  return `Depth: ${depth.recommended_depth} (score: ${depth.total_score}/30)${depth.skip_forge ? ' [skip-forge]' : ''}`;
+  return `Depth: ${depth.recommended_depth} (score: ${depth.total_score}/30)${depth.skip_units ? ' [skip-units]' : ''}`;
 }
 
 /**
@@ -297,6 +300,22 @@ export function buildDepthDisplay(depth: DepthAssessment | null): string {
 export function buildRiskTierDisplay(riskTier: RiskTierClassification | null): string {
   if (!riskTier) return 'Risk Tier: Not classified';
   return `Risk Tier: ${riskTier.tier} (${riskTier.rationale})`;
+}
+
+/**
+ * Build bolt progress display
+ */
+export function buildBoltProgress(manifest: ManifestSchema): string {
+  const boltArtifacts = manifest.artifacts.filter(a => a.stage === 'bolt');
+  const total = boltArtifacts.length;
+
+  if (total === 0) return 'Bolts: 0/0';
+
+  const completed = boltArtifacts.filter(a =>
+    a.contract_status === 'active' || a.contract_status === 'fulfilled'
+  ).length;
+
+  return `Bolts: ${completed}/${total} complete`;
 }
 
 /**

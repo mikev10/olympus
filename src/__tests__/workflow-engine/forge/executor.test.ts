@@ -23,7 +23,7 @@ describe('FORGE_STAGE_AGENT_MAP', () => {
     });
   });
 
-  it('should have entries for all forge stages', () => {
+  it('should have entries for all construction stages', () => {
     expect(FORGE_STAGE_AGENT_MAP).toHaveProperty('units');
     expect(FORGE_STAGE_AGENT_MAP).toHaveProperty('design');
     expect(FORGE_STAGE_AGENT_MAP).toHaveProperty('build');
@@ -44,32 +44,32 @@ describe('ForgeExecutor', () => {
   });
 
   describe('execute()', () => {
-    it('should fail if no intents directory', async () => {
+    it('should fail if no intent directory', async () => {
       const executor = new ForgeExecutor(projectPath, workflowId);
       const result = await executor.execute();
 
       expect(result.passed).toBe(false);
-      expect(result.blocking_issues).toContain('No intents found in Vision phase');
+      expect(result.blocking_issues).toContain('No intents found in Inception phase');
     });
 
-    it('should fail if intents directory is empty', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+    it('should fail if intent directory is empty', async () => {
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       const executor = new ForgeExecutor(projectPath, workflowId);
       const result = await executor.execute();
 
       expect(result.passed).toBe(false);
-      expect(result.blocking_issues).toContain('No intents found in Vision phase');
+      expect(result.blocking_issues).toContain('No intents found in Inception phase');
     });
 
-    it('should succeed with valid intents and create all artifacts', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+    it('should succeed with valid intent and create all artifacts', async () => {
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       // Create a valid INTENT file
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Setup Database Schema
@@ -106,35 +106,35 @@ Use migration framework
       expect(result.blocking_issues).toHaveLength(0);
 
       // Verify units directory and files were created
-      const unitsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'units');
+      const unitsDir = path.join(testDir, 'aidlc-docs', 'construction');
       expect(await fs.pathExists(unitsDir)).toBe(true);
 
       const unitFiles = await fs.readdir(unitsDir);
-      const unitMarkdownFiles = unitFiles.filter(f => f.startsWith('UNIT-') && f.endsWith('.md'));
-      expect(unitMarkdownFiles.length).toBeGreaterThan(0);
+      const unitDirs = unitFiles.filter(f => f.startsWith('UNIT-'));
+      expect(unitDirs.length).toBeGreaterThan(0);
 
       // Verify design directory and files were created
-      const designDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
       expect(await fs.pathExists(designDir)).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'interfaces.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'data-flow.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'components.json'))).toBe(true);
 
-      // Verify bolts directory and files were created
-      const boltsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'bolts');
-      expect(await fs.pathExists(boltsDir)).toBe(true);
+      // Verify bolt files were created within unit directories
+      const unit001Dir = path.join(testDir, 'aidlc-docs', 'construction', 'UNIT-001');
+      expect(await fs.pathExists(unit001Dir)).toBe(true);
 
-      const boltFiles = await fs.readdir(boltsDir);
-      const boltMarkdownFiles = boltFiles.filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
+      const unit001Files = await fs.readdir(unit001Dir);
+      const boltMarkdownFiles = unit001Files.filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
       expect(boltMarkdownFiles.length).toBeGreaterThan(0);
     });
 
-    it('should create forge/units/ directory with UNIT-*.md files', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+    it('should create construction/units/ directory with UNIT-*.md files', async () => {
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: User Authentication
@@ -167,7 +167,7 @@ Use bcrypt for password hashing
       const executor = new ForgeExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const unitsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'units');
+      const unitsDir = path.join(testDir, 'aidlc-docs', 'construction');
       expect(await fs.pathExists(unitsDir)).toBe(true);
 
       const unitFiles = await fs.readdir(unitsDir);
@@ -184,12 +184,12 @@ Use bcrypt for password hashing
       expect(unitContent).toContain('estimated_effort: 8');
     });
 
-    it('should create forge/design/ directory with design artifacts', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+    it('should create construction/design/ directory with design artifacts', async () => {
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: API Endpoints
@@ -220,7 +220,7 @@ Use Express
       const executor = new ForgeExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const designDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
       expect(await fs.pathExists(designDir)).toBe(true);
 
       // Check all design artifacts exist
@@ -239,12 +239,12 @@ Use Express
       expect(components).toBeDefined();
     });
 
-    it('should create forge/bolts/ directory with BOLT-*.md files', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+    it('should create construction/bolts/ directory with BOLT-*.md files', async () => {
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Database Migration
@@ -275,15 +275,15 @@ Use Knex or Sequelize
       const executor = new ForgeExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const boltsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'bolts');
-      expect(await fs.pathExists(boltsDir)).toBe(true);
+      const unit001Dir = path.join(testDir, 'aidlc-docs', 'construction', 'UNIT-001');
+      expect(await fs.pathExists(unit001Dir)).toBe(true);
 
-      const boltFiles = await fs.readdir(boltsDir);
+      const boltFiles = await fs.readdir(unit001Dir);
       const boltFile = boltFiles.find(f => f.startsWith('BOLT-') && f.endsWith('.md'));
       expect(boltFile).toBeDefined();
 
       // Verify file content
-      const boltContent = await fs.readFile(path.join(boltsDir, boltFile!), 'utf-8');
+      const boltContent = await fs.readFile(path.join(unit001Dir, boltFile!), 'utf-8');
       expect(boltContent).toMatch(/^---/);
       expect(boltContent).toContain('id: BOLT-');
       expect(boltContent).toContain('title: Database Migration');
@@ -293,11 +293,11 @@ Use Knex or Sequelize
     });
 
     it('should return ValidationResult with passed=true on success', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Feature Implementation
@@ -339,15 +339,15 @@ Follow best practices
     });
 
     it('should return ValidationResult with passed=false if units validation fails', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      const unitsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'units');
-      await fs.ensureDir(intentsDir);
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      const unitsDir = path.join(testDir, 'aidlc-docs', 'construction');
+      await fs.ensureDir(intentDir);
       await fs.ensureDir(unitsDir);
 
       // Create an intent with an invalid effort estimate
       // This will cascade to create units with invalid effort, which will fail validation
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Test Intent
@@ -400,11 +400,11 @@ Testing
     });
 
     it('should return updated progress after units stage', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Progress Test
@@ -446,11 +446,11 @@ Monitor progress
     });
 
     it('should show design_complete flag when in design or build stage', async () => {
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: Design Flag Test
@@ -496,11 +496,11 @@ Check design_complete
   describe('Integration flow', () => {
     it('should complete full pipeline: create intents → execute → verify outputs', async () => {
       // Step 1: Create intent file
-      const intentsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'intents');
-      await fs.ensureDir(intentsDir);
+      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      await fs.ensureDir(intentDir);
 
       await fs.writeFile(
-        path.join(intentsDir, 'INTENT-001.md'),
+        path.join(intentDir, 'INTENT-001.md'),
         `---
 id: INTENT-001
 title: User Authentication System
@@ -538,7 +538,7 @@ Use bcrypt for password hashing, validate email format, JWT for sessions with 24
 `
       );
 
-      // Step 2: Execute forge
+      // Step 2: Execute construction
       const executor = new ForgeExecutor(projectPath, workflowId);
       const result = await executor.execute();
 
@@ -546,33 +546,35 @@ Use bcrypt for password hashing, validate email format, JWT for sessions with 24
       expect(result.passed).toBe(true);
       expect(result.coverage_percentage).toBe(100);
 
-      // Step 4: Verify unit files
-      const unitsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'units');
-      const unitFiles = await fs.readdir(unitsDir);
-      const unitMarkdownFiles = unitFiles.filter(f => f.startsWith('UNIT-') && f.endsWith('.md'));
-      expect(unitMarkdownFiles.length).toBe(1);
+      // Step 4: Verify unit directories
+      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionEntries = await fs.readdir(constructionDir);
+      const unitDirs = constructionEntries.filter(f => f.startsWith('UNIT-') && !f.endsWith('.md'));
+      expect(unitDirs.length).toBe(1);
 
-      // Verify UNIT-001.md content
-      const unit1Content = await fs.readFile(path.join(unitsDir, 'UNIT-001.md'), 'utf-8');
+      // Verify UNIT-001/spec.md content
+      const unit1SpecPath = path.join(constructionDir, 'UNIT-001', 'spec.md');
+      expect(await fs.pathExists(unit1SpecPath)).toBe(true);
+      const unit1Content = await fs.readFile(unit1SpecPath, 'utf-8');
       expect(unit1Content).toContain('id: UNIT-001');
       expect(unit1Content).toContain('title: User Authentication System');
       expect(unit1Content).toContain('parent_intent: INTENT-001');
       expect(unit1Content).toContain('estimated_effort: 8');
 
       // Step 5: Verify design artifacts
-      const designDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
       expect(await fs.pathExists(path.join(designDir, 'interfaces.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'data-flow.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'components.json'))).toBe(true);
 
       // Step 6: Verify bolt files
-      const boltsDir = path.join(testDir, '.olympus', 'workflow', workflowId, 'forge', 'bolts');
-      const boltFiles = await fs.readdir(boltsDir);
+      const unit001Dir = path.join(testDir, 'aidlc-docs', 'construction', 'UNIT-001');
+      const boltFiles = await fs.readdir(unit001Dir);
       const boltMarkdownFiles = boltFiles.filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
       expect(boltMarkdownFiles.length).toBe(1);
 
       // Verify BOLT-001.md content
-      const bolt1Content = await fs.readFile(path.join(boltsDir, 'BOLT-001.md'), 'utf-8');
+      const bolt1Content = await fs.readFile(path.join(unit001Dir, 'BOLT-001.md'), 'utf-8');
       expect(bolt1Content).toContain('id: BOLT-001');
       expect(bolt1Content).toContain('title: User Authentication System');
       expect(bolt1Content).toContain('parent_unit: UNIT-001');
