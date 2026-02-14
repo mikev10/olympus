@@ -10,6 +10,9 @@ import { checkIncompleteTodos } from '../todo-continuation/index.js';
 import { generateLearnedContext, formatDiscoveries } from '../../learning/hooks/learned-context.js';
 import { getDiscoveriesForInjection, markDiscoveryUseful } from '../../learning/discovery.js';
 import { loadSessionState, saveSessionState, initializeTokenBudget } from '../../learning/session-state.js';
+import { detectResumableWorkflows } from '../../features/workflow-engine/resume-detector.js';
+import { generateWorkflowSummary, generateBoltExecutionPlan } from '../../features/workflow-engine/workflow-bridge.js';
+import { loadTrustState } from '../../features/workflow-engine/trust.js';
 import type { HookContext, HookResult } from '../types.js';
 
 export function registerSessionStartHooks(): void {
@@ -58,6 +61,75 @@ export function registerSessionStartHooks(): void {
         }
       } catch (error) {
         console.error('[Olympus Learning]', error);
+      }
+
+      return { continue: true };
+    }
+  });
+
+  // Workflow Resume Detection (priority 8 - between learned context and session restore)
+  registerHook({
+    name: 'workflowResumeDetection',
+    event: 'SessionStart',
+    priority: 8,
+    handler: async (ctx: HookContext): Promise<HookResult> => {
+      try {
+        const directory = ctx.directory || process.cwd();
+        const workflows = await detectResumableWorkflows(directory);
+
+        if (workflows.length === 0) {
+          return { continue: true };
+        }
+
+        const messages: string[] = [];
+
+        for (const wf of workflows) {
+          if (wf.isLegacy) {
+            messages.push(`[Found legacy workflow: '${wf.featureName}'. Run /plan to archive and start fresh.]`);
+          } else if (wf.status === 'awaiting_mode_selection') {
+            messages.push(`[Active workflow: '${wf.featureName}' — awaiting execution mode selection.\nChoose: /ascent, /olympus, or /ultrawork to begin Construction]`);
+          } else if (wf.status === 'awaiting_dev_review') {
+            messages.push(`[Active workflow: '${wf.featureName}' — awaiting developer review (Risk Tier 3).\nReview the INTENT technical specification before proceeding to Construction.]`);
+          } else {
+            const boltProgress = wf.progress.total > 0 ? `, ${wf.progress.completed}/${wf.progress.total} BOLTs complete` : '';
+            messages.push(`[Active workflow: '${wf.featureName}' — ${wf.currentPhase} phase${boltProgress}.\nResume with /plan or check status with /workflow-status]`);
+          }
+        }
+
+        // Inject trust level
+        const trustState = loadTrustState(directory);
+        messages.push(`[Trust Level: ${trustState.current_level}]`);
+
+        // Generate workflow summary for structured context
+        const summary = await generateWorkflowSummary(directory);
+        if (summary) {
+          messages.push(summary);
+        }
+
+        // Generate bolt execution plan for structured context
+        const executionPlan = await generateBoltExecutionPlan(directory);
+        if (executionPlan) {
+          messages.push(executionPlan);
+        }
+
+        // Handle mid-interview resume info
+        for (const wf of workflows) {
+          if (wf.interviewProgress && !wf.isLegacy) {
+            messages.push(`[Interview in progress: ${wf.interviewProgress.stage} stage, ${wf.interviewProgress.questions_asked} questions asked${wf.interviewProgress.draft_artifact_path ? '. Draft artifact exists.' : ''}]`);
+          }
+        }
+
+        if (messages.length > 0) {
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'SessionStart',
+              additionalContext: messages.join('\n')
+            }
+          };
+        }
+      } catch (error) {
+        console.error('[Olympus Resume Detection] Error:', error);
       }
 
       return { continue: true };

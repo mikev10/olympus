@@ -32,6 +32,7 @@ describe('Hook Integration', () => {
         'learningFeedbackCapture',
         // SessionStart
         'learnedContextInjection',
+        'workflowResumeDetection',
         'sessionStart',
         // Stop
         'persistentMode',
@@ -81,10 +82,11 @@ describe('Hook Integration', () => {
 
     it('has SessionStart hooks', () => {
       const hooks = getHooksForEvent('SessionStart');
-      expect(hooks.length).toBeGreaterThanOrEqual(2);
+      expect(hooks.length).toBeGreaterThanOrEqual(3);
 
       const names = hooks.map(h => h.name);
       expect(names).toContain('learnedContextInjection');
+      expect(names).toContain('workflowResumeDetection');
       expect(names).toContain('sessionStart');
     });
 

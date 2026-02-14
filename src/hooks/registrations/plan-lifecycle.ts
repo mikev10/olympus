@@ -17,6 +17,9 @@ import { detectPlanFileChange, parseMomusReviewOutput, createPlanningDiscovery, 
 import { recordDiscovery } from '../../learning/discovery.js';
 import { getDiscoveriesForInjection } from '../../learning/discovery.js';
 import { loadDiscoveryConfig } from '../../learning/config.js';
+import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
+import { loadCheckpoint, saveCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
+import * as path from 'path';
 import type { HookContext, HookResult } from '../types.js';
 
 /**
@@ -275,6 +278,141 @@ export function registerPlanLifecycleHooks(): void {
         }
       } catch (error) {
         console.error('[Olympus Plan Lifecycle] Error in Prometheus learnings injection:', error);
+      }
+
+      return { continue: true };
+    }
+  });
+
+  // Hook 5: Track workflow phase transitions
+  registerHook({
+    name: 'workflowPhaseTransitionTracker',
+    event: 'PostToolUse',
+    priority: 83, // After workflow-transition messages (82)
+    handler: async (ctx: HookContext): Promise<HookResult> => {
+      try {
+        // Only process Write or Task tool calls (state-changing operations)
+        if (ctx.toolName !== 'Write' && ctx.toolName !== 'Task') {
+          return { continue: true };
+        }
+
+        if (!ctx.directory || !ctx.sessionId) {
+          return { continue: true };
+        }
+
+        const directory = ctx.directory;
+
+        // Load manifest
+        const manifestPath = path.join(directory, 'aidlc-docs', 'manifest.json');
+        const manifest = loadManifest(manifestPath);
+        if (!manifest) {
+          return { continue: true };
+        }
+
+        // Load checkpoint
+        const workflowIds = await listWorkflows(directory);
+        if (workflowIds.length === 0) {
+          return { continue: true };
+        }
+        const checkpoint = await loadCheckpoint(directory, workflowIds[0]);
+        if (!checkpoint) {
+          return { continue: true };
+        }
+
+        // Load session state for tracking
+        const state = loadSessionState(directory, ctx.sessionId);
+
+        // Determine current phase from checkpoint
+        const currentPhase = checkpoint.current_phase;
+        const lastTrackedPhase = (state as any).last_tracked_phase as string | undefined;
+
+        // Detect phase transition
+        if (lastTrackedPhase && lastTrackedPhase !== currentPhase) {
+          const now = new Date().toISOString();
+
+          // Record transition in manifest gate_audit
+          manifest.gate_audit.push({
+            phase: currentPhase,
+            timestamp: now,
+            action: 'approved',
+            actor: 'trust',
+            reason: `Phase transition: ${lastTrackedPhase} -> ${currentPhase}`,
+          });
+
+          // Update phase states in manifest
+          const previousPhase = lastTrackedPhase as 'discovery' | 'inception' | 'construction' | 'operations';
+          if (manifest.phases[previousPhase]) {
+            manifest.phases[previousPhase].status = 'complete';
+            manifest.phases[previousPhase].completed_at = now;
+          }
+          if (manifest.phases[currentPhase]) {
+            if (manifest.phases[currentPhase].status === 'not_started') {
+              manifest.phases[currentPhase].status = 'in_progress';
+              manifest.phases[currentPhase].started_at = now;
+            }
+          }
+
+          // Save manifest
+          saveManifest(manifestPath, manifest);
+
+          // Check if workflow is complete (Operations -> complete)
+          if (checkpoint.status === 'complete' || checkpoint.current_stage === 'complete') {
+            manifest.phases.operations.status = 'complete';
+            manifest.phases.operations.completed_at = now;
+            saveManifest(manifestPath, manifest);
+          }
+
+          // Update session state
+          (state as any).last_tracked_phase = currentPhase;
+          saveSessionState(directory, state);
+
+          // Build transition message
+          const phaseNames: Record<string, string> = {
+            discovery: 'Discovery',
+            inception: 'Inception',
+            construction: 'Construction',
+            operations: 'Operations',
+          };
+          const fromName = phaseNames[lastTrackedPhase] || lastTrackedPhase;
+          const toName = phaseNames[currentPhase] || currentPhase;
+
+          let transitionMessage = `Phase transition: ${fromName} → ${toName}`;
+          if (currentPhase === 'operations') {
+            transitionMessage += '\n→ Generating deployment artifacts...';
+          }
+
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PostToolUse',
+              additionalContext: `<phase-transition>\n${transitionMessage}\n</phase-transition>`,
+            },
+          };
+        }
+
+        // Track current phase if not yet tracked
+        if (!lastTrackedPhase) {
+          (state as any).last_tracked_phase = currentPhase;
+          saveSessionState(directory, state);
+        }
+
+        // Handle workflow completion
+        if (checkpoint.status === 'complete' && manifest.phases.operations.status !== 'complete') {
+          const now = new Date().toISOString();
+          manifest.phases.operations.status = 'complete';
+          manifest.phases.operations.completed_at = now;
+          saveManifest(manifestPath, manifest);
+
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PostToolUse',
+              additionalContext: '<phase-transition>\n✓ Workflow complete! All phases finished.\n</phase-transition>',
+            },
+          };
+        }
+      } catch (error) {
+        console.error('[Olympus Plan Lifecycle] Error in phase transition tracker:', error);
       }
 
       return { continue: true };

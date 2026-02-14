@@ -1828,6 +1828,7 @@ Read \`aidlc-docs/checkpoint.json\`. Interpret what you find:
 
 - **If checkpoint exists with \`status: 'awaiting_mode_selection'\`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 7) and stop — do not restart the pipeline.
 - **If checkpoint exists and is active** (any other non-terminal status): Display "Found workflow: '{name}' ({stage}). Resume? [Y/n]" and wait for user response. If they confirm, resume from the saved stage. If they decline, ask if they want to abort (\`--abort\`) or start fresh.
+- **If checkpoint has \`interview_progress\`** (mid-interview resume): The system injects interview progress info at session start. When resuming, Prometheus MUST: (1) read the draft artifact at the path indicated in the context, (2) skip questions already covered in the draft, (3) continue from the next unanswered question. If no \`interview_progress\` exists but a draft artifact path is found, restart the interview but preserve the existing draft as context.
 - **If no checkpoint exists**: Proceed to Step 1c.
 
 ### 1c. Check for legacy checkpoints
@@ -3101,62 +3102,11 @@ Start now. Create a todo list tracking each directory, then systematically gener
 description: Show status of all active structured workflows
 ---
 
-You are displaying the status of all active structured workflows in this project.
+Display the workflow status report that was injected by the system.
 
-## TASK
+The status report is generated programmatically by the Olympus hook system and injected into your context via \`<workflow-status>\` tags. Simply display it to the user.
 
-Show detailed status information for all workflows in \`.olympus/workflow/\`:
-
-1. **List All Workflows**: Use the workflow engine to list all workflows
-2. **For Each Workflow**:
-   - Show workflow ID and feature name
-   - Show current stage (IDEA, PRD, SPEC, INTENTS, or COMPLETE)
-   - Show status (not_started, in_progress, paused, blocked, complete)
-   - Show last updated timestamp
-   - Show path to checkpoint file
-   - If artifacts exist, list them with validation status
-
-3. **Format Output**:
-   \`\`\`
-   Active Workflows:
-
-   1. oauth-auth
-      Stage: PRD (in progress)
-      Status: in_progress
-      Updated: 2026-02-03 14:32:15
-      Checkpoint: .olympus/workflow/oauth-auth/checkpoint.json
-      Artifacts:
-        ✓ IDEA (validated)
-        ⧗ PRD (in progress)
-
-   2. user-settings
-      Stage: COMPLETE
-      Status: complete
-      Updated: 2026-02-02 10:15:30
-      Checkpoint: .olympus/workflow/user-settings/checkpoint.json
-      Artifacts:
-        ✓ IDEA (validated)
-        ✓ PRD (validated)
-        ✓ SPEC (validated)
-        ✓ INTENTS (4 tasks generated)
-   \`\`\`
-
-4. **No Active Workflows**:
-   If no workflows found:
-   \`\`\`
-   No active workflows found.
-
-   To start a structured workflow, use:
-   /plan <feature-name> --structured
-   \`\`\`
-
-## IMPLEMENTATION
-
-Use the checkpoint storage functions from \`src/features/workflow-engine/checkpoint.ts\`:
-- \`listWorkflows(projectPath)\` to get all workflow IDs
-- \`loadCheckpoint(projectPath, workflowId)\` to get details for each
-
-Present the information in a clear, scannable format with status indicators (✓, ⧗, ✗).`,
+If no \`<workflow-status>\` tags are present in your context, report: "No active workflows found. Start one with \`/plan <description>\`"`,
 
 };
 

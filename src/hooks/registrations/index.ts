@@ -23,6 +23,8 @@ import { registerBuildCheckHooks } from './build-check.js';
 import { registerWorkflowArtifactGateHook } from './workflow-artifact-gate.js';
 import { registerCIReviewPipelineHook } from './ci-review-pipeline.js';
 import { registerLearningAggregationHook } from './learning-aggregation.js';
+import { registerWorkflowStatusHook } from './workflow-status.js';
+import { registerWorkflowTransitionHooks } from './workflow-transition.js';
 
 /** Flag to prevent double registration */
 let registered = false;
@@ -38,6 +40,7 @@ export function registerAllHooks(): void {
 
   // Register hooks by event type
   registerAgentRoleGuardHook(); // Agent role enforcement (priority 5) - BEFORE pre-tool-use
+  registerWorkflowStatusHook(); // Workflow status reporter (priority 6) - BEFORE other UserPromptSubmit hooks
   registerUserPromptSubmitHooks();
   registerSessionStartHooks();
   registerStopHooks();
@@ -54,6 +57,7 @@ export function registerAllHooks(): void {
   registerWorkflowArtifactGateHook(); // Workflow artifact validation (priority 78) - AFTER build-check
   registerCIReviewPipelineHook(); // CI review pipeline (priority 79) - AFTER artifact-gate, BEFORE quality-gate
   registerQualityGateHooks(); // Quality gate hooks for phase transitions
+  registerWorkflowTransitionHooks(); // Workflow transition messages (priority 82) - AFTER quality-gate
   registerLearningAggregationHook(); // Learning aggregation (priority 95) - AFTER learning-capture
 
   registered = true;
@@ -87,4 +91,6 @@ export {
   registerWorkflowArtifactGateHook,
   registerCIReviewPipelineHook,
   registerLearningAggregationHook,
+  registerWorkflowStatusHook,
+  registerWorkflowTransitionHooks,
 };
