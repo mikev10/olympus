@@ -1463,6 +1463,47 @@ description: Maximum intensity mode - parallel everything, delegate aggressively
 
 $ARGUMENTS
 
+## WORKFLOW AWARENESS — MAXIMUM PARALLEL EXECUTION
+
+Before activating ultrawork, check for an active ODLC workflow:
+
+### Step 1: Detect Active Workflow
+1. Check if \`aidlc-docs/manifest.json\` exists in the project root
+2. If found, read it and \`aidlc-docs/checkpoint.json\`
+3. If no workflow found, proceed with standard ultrawork behavior below
+
+### Step 2: Dependency Analysis
+When a workflow is active, analyze the manifest to identify ALL independent BOLTs:
+- Read the full manifest to understand UNIT structure
+- BOLTs in different UNITs with no shared dependencies → independent, can run in parallel
+- BOLTs within the same UNIT → may have sequential dependencies
+- Goal: maximize the number of simultaneously executing agents
+
+### Step 3: Multi-Agent Dispatch
+Launch MULTIPLE agents simultaneously for independent BOLTs:
+- Dispatch 3-5 agents at once for independent BOLTs across different UNITs
+- Before dispatching each BOLT, update checkpoint \`active_bolt_id\`
+- Use atomic manifest updater for all concurrent manifest writes
+- Don't wait for one agent to finish before launching the next
+
+### Step 4: Gate 4 Batching
+Instead of reviewing BOLTs one at a time:
+- Collect completed BOLTs as agents finish
+- Present completed BOLTs for review in batches
+- If one BOLT is blocked at Gate 4 review, continue executing other BOLTs
+- Never idle — always have agents working
+
+### Step 5: Atomic Updates
+All manifest updates use the atomic manifest updater to prevent corruption from concurrent writes:
+- Use \`atomicManifestUpdate()\` for individual BOLT status changes
+- Use \`batchManifestUpdate()\` when updating multiple artifacts at once
+- Update checkpoint after each BOLT completion
+
+### Step 6: Completion
+When all BOLTs are fulfilled:
+1. Verify all BOLT artifacts have \`contract_status: "fulfilled"\`
+2. Report completion — workflow ready for Operations phase
+
 ## THE ULTRAWORK OATH
 
 You are now operating at **MAXIMUM INTENSITY**. Half-measures are unacceptable. Incomplete work is FAILURE. You will persist until EVERY task is VERIFIED complete.
@@ -1584,6 +1625,61 @@ description: Activate Olympus multi-agent orchestration mode
 [OLYMPUS MODE ACTIVATED - THE ASCENT NEVER ENDS]
 
 $ARGUMENTS
+
+## WORKFLOW AWARENESS
+
+Before starting orchestration, check for an active ODLC workflow:
+
+### Step 1: Detect Active Workflow
+1. Check if \`aidlc-docs/manifest.json\` exists in the project root
+2. If found, read it to get the workflow state
+3. Read \`aidlc-docs/checkpoint.json\` for resume pointers
+4. If no workflow found, proceed with standard orchestration below
+
+### Step 2: Intelligent BOLT Dispatch (when workflow is active)
+
+When an active workflow is detected, switch to BOLT dispatch mode with intelligent agent routing:
+
+**Agent Routing** (based on BOLT content analysis):
+- Code/backend BOLTs → \`olympian\` agent
+- UI/component/styling BOLTs → \`frontend-engineer\` agent
+- Debug/investigation BOLTs → \`oracle\` agent
+
+**For each pending BOLT:**
+1. Read the BOLT spec from \`aidlc-docs/construction/{parent-unit-id}/{bolt-id}.md\`
+2. Read the parent UNIT spec at \`aidlc-docs/construction/{parent-unit-id}/spec.md\` for context
+3. Update checkpoint \`active_bolt_id\` to the BOLT being dispatched
+4. Analyze BOLT content to select the right agent (code→olympian, UI→frontend-engineer, debug→oracle)
+5. Dispatch to the selected agent
+6. After agent completes:
+   a. **Gate 4**: Present code changes to the developer for review
+   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/manifest.json\` using atomic manifest updater, update checkpoint
+   c. If rejected: re-execute the BOLT with developer's feedback
+7. Update \`aidlc-docs/checkpoint.json\` with progress after each BOLT
+
+### Step 3: Parallel Execution
+
+Identify independent BOLTs for parallel dispatch:
+- BOLTs in **different UNITs** with no cross-dependencies → run in parallel
+- BOLTs **within the same UNIT** → run sequentially (dependency chain)
+- Launch multiple agents concurrently for independent BOLTs
+- Run tests/builds in background after each BOLT completion
+
+### Step 4: Gate 4 Coordination
+
+For each completed BOLT:
+1. Present the code review to the developer
+2. At Trust Level 0-1: Full blocking review required
+3. At Trust Level 2: Summary review only
+4. At Trust Level 3+: Notification only, auto-advance
+5. Use atomic manifest updater for all manifest writes
+
+### Step 5: Completion
+
+When all BOLTs are fulfilled:
+1. Verify all BOLT artifacts have \`contract_status: "fulfilled"\` in manifest
+2. Report completion to the developer
+3. The workflow is ready for Operations phase
 
 ## YOU ARE OLYMPUS
 
@@ -2259,6 +2355,55 @@ description: Start self-referential development loop until task completion
 
 $ARGUMENTS
 
+## WORKFLOW AWARENESS
+
+Before starting the persistence loop, check for an active ODLC workflow:
+
+### Step 1: Detect Active Workflow
+1. Check if \`aidlc-docs/manifest.json\` exists in the project root
+2. If found, read it to get the workflow state
+3. Read \`aidlc-docs/checkpoint.json\` for resume pointers
+4. If no workflow found, proceed with original ascent behavior below
+
+### Step 2: BOLT Dispatch Mode (when workflow is active)
+
+When an active workflow is detected, switch to BOLT dispatch mode:
+
+**For each pending BOLT (in execution order from manifest):**
+1. Read the BOLT spec from \`aidlc-docs/construction/{parent-unit-id}/{bolt-id}.md\`
+2. Read the parent UNIT spec at \`aidlc-docs/construction/{parent-unit-id}/spec.md\` for context
+3. Update checkpoint \`active_bolt_id\` to the BOLT being executed
+4. Dispatch to the appropriate agent:
+   - Code/backend BOLTs → \`olympian\` agent
+   - UI/component/styling BOLTs → \`frontend-engineer\` agent
+   - Investigation/debugging BOLTs → \`oracle\` agent
+5. After agent completes:
+   a. **Gate 4**: Present the code changes to the developer for review
+   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/manifest.json\`, update checkpoint
+   c. If rejected: re-execute the BOLT with the developer's feedback
+6. Update \`aidlc-docs/checkpoint.json\` with progress after each BOLT
+7. Continue to the next pending BOLT
+
+**Execution order**: BOLTs are ordered by UNIT ID then BOLT ID within each unit (e.g., UNIT-001/BOLT-001, UNIT-001/BOLT-002, UNIT-002/BOLT-001).
+
+**When all BOLTs in a UNIT are fulfilled**, check if the UNIT itself should be marked complete.
+
+### Step 3: Targeted Execution
+
+Support these targeted execution patterns:
+
+- \`/ascent execute BOLT-003\` — Execute only the specified BOLT, then present Gate 4
+- \`/ascent finish remaining BOLTs\` — Resume from the first pending BOLT and execute all remaining
+- \`/ascent\` (with active workflow) — Same as "finish remaining BOLTs"
+- \`/ascent <task description>\` (no active workflow) — Original behavior, no workflow mode
+
+### Step 4: Completion
+
+When all BOLTs are fulfilled:
+1. Check the manifest: all BOLT artifacts should have \`contract_status: "fulfilled"\`
+2. Report completion to the developer
+3. The workflow is ready for Operations phase
+
 ## THE ASCENT OATH
 
 You have entered the The Ascent - an INESCAPABLE development cycle that binds you to your task until VERIFIED completion. There is no early exit. There is no giving up. The only way out is through.
@@ -2369,6 +2514,7 @@ Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
 Original task: [describe the task]
 What I implemented: [list changes]
 Tests run: [test results]
+If ODLC workflow is active: verify ALL BOLTs in aidlc-docs/manifest.json have contract_status 'fulfilled'.
 Please verify this is truly complete and production-ready.")
 \`\`\`
 

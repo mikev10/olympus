@@ -310,5 +310,18 @@ export {
   batchManifestUpdate,
 } from './manifest-updater.js';
 
+// Workflow Bridge
+export type { WorkflowBridgeContext } from './workflow-bridge.js';
+export {
+  detectActiveWorkflow,
+  getPendingBolts,
+  getExecutionOrder,
+  markBoltComplete,
+  markUnitComplete,
+  getWorkflowProgress,
+  generateWorkflowSummary,
+  generateBoltExecutionPlan,
+} from './workflow-bridge.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

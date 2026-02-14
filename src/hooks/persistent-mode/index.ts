@@ -45,6 +45,8 @@ import {
 } from '../olympus-state/index.js';
 import { checkIncompleteTodos, getNextPendingTodo } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
+import { detectActiveWorkflow, getWorkflowProgress } from '../../features/workflow-engine/workflow-bridge.js';
+import { saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 
 export interface PersistentModeResult {
   /** Whether to block the stop event */
@@ -450,6 +452,50 @@ ${TODO_CONTINUATION_PROMPT}
 }
 
 /**
+ * Check for active ODLC workflow and inject progress info / block stop
+ */
+async function checkWorkflowProgress(
+  sessionId?: string,
+  directory?: string,
+  activeMode?: 'ascent' | 'ultrawork' | 'olympus' | null
+): Promise<{ progressMessage: string; shouldBlock: boolean } | null> {
+  const workingDir = directory || process.cwd();
+
+  try {
+    const ctx = await detectActiveWorkflow(workingDir);
+    if (!ctx) {
+      return null;
+    }
+
+    const progress = getWorkflowProgress(ctx.manifest);
+    const hasPendingBolts = ctx.pendingBolts.length > 0;
+
+    // Build progress message
+    let progressMessage = `\nWorkflow '${ctx.featureName}': ${progress.completed}/${progress.total} BOLTs complete (${progress.percentage}%)`;
+
+    // Add next BOLT info
+    if (ctx.pendingBolts.length > 0) {
+      const nextBoltId = ctx.pendingBolts[0];
+      progressMessage += `\nNext: ${nextBoltId}`;
+    }
+
+    // Auto-checkpoint on session end: save current progress
+    try {
+      await saveCheckpoint(workingDir, ctx.checkpoint);
+    } catch {
+      // Silent - don't block stop for checkpoint failure
+    }
+
+    // Block stop when in active execution mode with pending BOLTs
+    const shouldBlock = hasPendingBolts && (activeMode === 'ascent' || activeMode === 'ultrawork' || activeMode === 'olympus');
+
+    return { progressMessage, shouldBlock };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Main persistent mode checker
  * Checks all persistent modes in priority order and returns appropriate action
  */
@@ -463,33 +509,90 @@ export async function checkPersistentModes(
   const todoResult = await checkIncompleteTodos(sessionId, workingDir);
   const hasIncompleteTodos = todoResult.count > 0;
 
+  // Detect which execution mode is active
+  const ascentState = readAscentState(workingDir);
+  const ultraworkState = readUltraworkState(workingDir);
+  const olympusState = readOlympusState(workingDir);
+
+  let activeMode: 'ascent' | 'ultrawork' | 'olympus' | null = null;
+  if (ascentState?.active) activeMode = 'ascent';
+  else if (ultraworkState?.active) activeMode = 'ultrawork';
+  else if (olympusState?.active) activeMode = 'olympus';
+
+  // Check workflow progress (runs for all modes)
+  const workflowInfo = await checkWorkflowProgress(sessionId, workingDir, activeMode);
+
   // Priority 1: The Ascent (explicit loop mode)
   const ascentResult = await checkAscentLoop(sessionId, workingDir);
   if (ascentResult?.shouldBlock) {
+    // Inject workflow progress if available
+    if (workflowInfo) {
+      ascentResult.message = ascentResult.message + `\n${workflowInfo.progressMessage}`;
+    }
     return ascentResult;
   }
 
   // Priority 2: Ultrawork Mode (performance mode with persistence)
   const ultraworkResult = await checkUltrawork(sessionId, workingDir, hasIncompleteTodos);
   if (ultraworkResult?.shouldBlock) {
+    if (workflowInfo) {
+      ultraworkResult.message = ultraworkResult.message + `\n${workflowInfo.progressMessage}`;
+    }
     return ultraworkResult;
   }
 
   // Priority 2.5: Olympus Mode (orchestration mode with Oracle verification)
   const olympusResult = await checkOlympusMode(sessionId, workingDir, hasIncompleteTodos);
   if (olympusResult?.shouldBlock) {
+    if (workflowInfo) {
+      olympusResult.message = olympusResult.message + `\n${workflowInfo.progressMessage}`;
+    }
     return olympusResult;
+  }
+
+  // Priority 2.75: Workflow with active mode but no mode-specific block
+  // Block if workflow has pending BOLTs and we're in an active execution mode
+  if (workflowInfo?.shouldBlock) {
+    return {
+      shouldBlock: true,
+      message: `<workflow-continuation>
+
+[WORKFLOW IN PROGRESS - DO NOT STOP]
+
+${workflowInfo.progressMessage}
+
+You are in ${activeMode} mode with pending BOLTs. Continue executing the remaining BOLTs.
+
+</workflow-continuation>
+
+---
+
+`,
+      mode: activeMode || 'none' as any,
+      metadata: {}
+    };
   }
 
   // Priority 3: Todo Continuation (baseline enforcement)
   if (hasIncompleteTodos) {
     const todoContResult = await checkTodoContinuation(sessionId, workingDir);
     if (todoContResult?.shouldBlock) {
+      if (workflowInfo) {
+        todoContResult.message = todoContResult.message + `\n${workflowInfo.progressMessage}`;
+      }
       return todoContResult;
     }
   }
 
-  // No blocking needed
+  // No blocking needed - but still inject workflow info if available
+  if (workflowInfo) {
+    return {
+      shouldBlock: false,
+      message: workflowInfo.progressMessage,
+      mode: 'none'
+    };
+  }
+
   return {
     shouldBlock: false,
     message: '',
