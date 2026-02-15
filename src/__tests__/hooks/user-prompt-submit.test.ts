@@ -39,10 +39,10 @@ vi.mock('../../features/workflow-engine/checkpoint.js', () => ({
 
 vi.mock('../../features/workflow-engine/hooks.js', () => ({
   buildStructuredWorkflowPrompt: vi.fn((featureName: string, checkpoint: WorkflowCheckpoint) => {
-    return `You are beginning a structured workflow for feature: ${featureName}\n\nCurrent stage: ${checkpoint.current_stage}\nStatus: ${checkpoint.status}\n\nNext step: Invoke the idea-intake agent to capture and validate the initial feature concept\n\nUse: Task(subagent_type="idea-intake", prompt="...")`;
+    return `You are beginning a structured workflow for feature: ${featureName}\n\nCurrent stage: ${checkpoint.current_stage}\nStatus: ${checkpoint.status}\n\nNext step: Use /plan and Prometheus to create a comprehensive work plan based on the strategic context\n\nUse: /plan ${featureName}`;
   }),
   buildWorkflowResumptionPrompt: vi.fn((featureName: string, checkpoint: WorkflowCheckpoint) => {
-    return `Resuming workflow for feature: ${featureName}\n\nYou were interrupted during: ${checkpoint.current_stage}\nLast update: ${checkpoint.updated_at}\n\nResume context: ${JSON.stringify(checkpoint.resume_context, null, 2)}\n\nContinue from where you left off: Invoke the idea-intake agent to capture and validate the initial feature concept\n\nUse: Task(subagent_type="idea-intake", prompt="...")`;
+    return `Resuming workflow for feature: ${featureName}\n\nYou were interrupted during: ${checkpoint.current_stage}\nLast update: ${checkpoint.updated_at}\n\nResume context: ${JSON.stringify(checkpoint.resume_context, null, 2)}\n\nContinue from where you left off: Use /plan and Prometheus to create a comprehensive work plan\n\nUse: /plan ${featureName}`;
   }),
   buildWorkflowTransitionPrompt: vi.fn(),
 }));
@@ -143,7 +143,7 @@ describe('Structured Workflow Hook', () => {
       expect(result.hookSpecificOutput).toBeDefined();
       expect(result.hookSpecificOutput?.hookEventName).toBe('UserPromptSubmit');
       expect(result.hookSpecificOutput?.additionalContext).toContain('myfeature');
-      expect(result.hookSpecificOutput?.additionalContext).toContain('idea-intake');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('/plan');
     });
 
     it('detects /plan with kebab-case feature names', async () => {
