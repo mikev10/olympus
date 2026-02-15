@@ -255,7 +255,8 @@ export type DiscoveryCategory =
   | 'dependency'          // "Package X requires peer dependency Y"
   | 'configuration'       // "Environment variable X must be set"
   | 'planning_insight'    // "Plans need X consideration"
-  | 'workflow_gate';      // "Gate rejection/approval lessons from ODLC workflow"
+  | 'workflow_gate'       // "Gate rejection/approval lessons from ODLC workflow"
+  | 'retro_insight';      // "Retrospective pattern insight from /retro analysis"
 
 /**
  * An agent-discovered learning entry

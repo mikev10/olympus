@@ -323,5 +323,20 @@ export {
   generateBoltExecutionPlan,
 } from './workflow-bridge.js';
 
+// Retro
+export {
+  gatherRetroData,
+  analyzeRetroPatterns,
+  generateRetroSuggestions,
+  persistRetroDiscoveries,
+  runRetro,
+} from './retro.js';
+
+export type {
+  RetroData,
+  RetroPattern,
+  RetroResult,
+} from './retro.js';
+
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

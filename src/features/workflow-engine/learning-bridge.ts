@@ -32,7 +32,8 @@ export type WorkflowEventType =
   | 'bolt_execution_complete'
   | 'gate_approval_after_rejection'
   | 'depth_assessment_complete'
-  | 'execution_mode_selected';
+  | 'execution_mode_selected'
+  | 'retro_completed';
 
 export interface WorkflowEvent {
   type: WorkflowEventType;
@@ -78,6 +79,7 @@ const EVENT_CATEGORY_MAP: Record<WorkflowEventType, DiscoveryCategory> = {
   gate_approval_after_rejection: 'workflow_gate',
   depth_assessment_complete: 'planning_insight',
   execution_mode_selected: 'planning_insight',
+  retro_completed: 'retro_insight',
 };
 
 // ============================================================================
