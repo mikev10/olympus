@@ -28,7 +28,11 @@ export type WorkflowEventType =
   | 'contract_violation'
   | 'trust_level_change'
   | 'phase_complete'
-  | 'depth_override';
+  | 'depth_override'
+  | 'bolt_execution_complete'
+  | 'gate_approval_after_rejection'
+  | 'depth_assessment_complete'
+  | 'execution_mode_selected';
 
 export interface WorkflowEvent {
   type: WorkflowEventType;
@@ -70,6 +74,10 @@ const EVENT_CATEGORY_MAP: Record<WorkflowEventType, DiscoveryCategory> = {
   trust_level_change: 'planning_insight',
   phase_complete: 'pattern',
   depth_override: 'planning_insight',
+  bolt_execution_complete: 'workflow_gate',
+  gate_approval_after_rejection: 'workflow_gate',
+  depth_assessment_complete: 'planning_insight',
+  execution_mode_selected: 'planning_insight',
 };
 
 // ============================================================================
@@ -108,7 +116,7 @@ export function captureWorkflowDiscovery(
     task_context: `${context.featureName} (${event.phase}${event.stage ? '/' + event.stage : ''})`,
     files_involved: event.artifactId ? [`${event.artifactId}`] : [],
     confidence,
-    verified: event.type === 'gate_approval' || event.type === 'phase_complete',
+    verified: event.type === 'gate_approval' || event.type === 'phase_complete' || event.type === 'bolt_execution_complete',
     verification_count: 0,
     scope: 'project',
     last_useful: timestamp,
@@ -222,6 +230,22 @@ export function trackMethodologyPreferences(
       key = `phase_duration:${event.phase}`;
       value = event.details;
       break;
+    case 'bolt_execution_complete':
+      key = `bolt_completion:${event.phase}`;
+      value = event.details;
+      break;
+    case 'gate_approval_after_rejection':
+      key = `gate_revision_success:${event.phase}`;
+      value = event.stage ?? 'unknown';
+      break;
+    case 'depth_assessment_complete':
+      key = 'depth_assessment';
+      value = event.details;
+      break;
+    case 'execution_mode_selected':
+      key = 'execution_mode';
+      value = event.details;
+      break;
     default:
       key = `event:${event.type}`;
       value = event.details;
@@ -274,6 +298,14 @@ function getEventConfidence(eventType: WorkflowEventType): number {
       return 0.95;
     case 'depth_override':
       return 0.7;
+    case 'bolt_execution_complete':
+      return 0.85;
+    case 'gate_approval_after_rejection':
+      return 0.9;
+    case 'depth_assessment_complete':
+      return 0.8;
+    case 'execution_mode_selected':
+      return 0.75;
     default:
       return 0.5;
   }
@@ -297,6 +329,14 @@ function buildEventSummary(event: WorkflowEvent): string {
       return `Phase ${event.phase} completed`;
     case 'depth_override':
       return `Depth assessment overridden: ${event.details}`;
+    case 'bolt_execution_complete':
+      return `BOLT execution complete at ${event.phase}${event.stage ? '/' + event.stage : ''}: ${event.details}`;
+    case 'gate_approval_after_rejection':
+      return `Gate approved after rejection at ${event.phase}${event.stage ? '/' + event.stage : ''}`;
+    case 'depth_assessment_complete':
+      return `Depth assessment: ${event.details}`;
+    case 'execution_mode_selected':
+      return `Execution mode selected: ${event.details}`;
     default:
       return `Workflow event: ${event.type}`;
   }

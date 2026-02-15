@@ -10,6 +10,9 @@ import {
   resetTrust,
   shouldAutoAdvance,
   checkTrustReset,
+  decreaseTrust,
+  checkConsecutiveRejections,
+  recordContractViolation,
 } from '../../features/workflow-engine/trust.js';
 import type { TrustState, TrustLevel, RiskTier } from '../../features/workflow-engine/phase-types.js';
 
@@ -68,6 +71,8 @@ describe('Progressive Trust Engine', () => {
         level_history: [
           { from: 0, to: 1, reason: 'Test', timestamp: '2026-01-01T00:00:00.000Z' },
         ],
+        consecutive_rejections: 0,
+        transition_history: [],
       };
       const filePath = join(TEST_DIR, '.olympus', 'trust-state.json');
       writeFileSync(filePath, JSON.stringify(savedState, null, 2), 'utf-8');
@@ -439,6 +444,157 @@ describe('Progressive Trust Engine', () => {
       expect(loaded.current_level).toBe(2);
       expect(loaded.total_transitions).toBe(20);
       expect(loaded.level_history.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('recordTransition with metadata', () => {
+    it('accepts optional metadata parameter', () => {
+      const state = createDefaultTrustState();
+      const metadata = { gateNumber: 4, artifactId: 'BOLT-001', artifactType: 'bolt' };
+      const updated = recordTransition(state, true, false, metadata);
+      expect(updated.total_transitions).toBe(1);
+    });
+
+    it('stores metadata in transition_history', () => {
+      const state = createDefaultTrustState();
+      const metadata = { gateNumber: 4, artifactId: 'BOLT-001', artifactType: 'bolt' };
+      const updated = recordTransition(state, true, false, metadata);
+      expect(updated.transition_history).toHaveLength(1);
+      expect(updated.transition_history[0].metadata).toEqual(metadata);
+    });
+
+    it('works without metadata (backward compatible)', () => {
+      const state = createDefaultTrustState();
+      const updated = recordTransition(state, true, false);
+      expect(updated.transition_history).toHaveLength(1);
+      expect(updated.transition_history[0].metadata).toBeUndefined();
+    });
+
+    it('per-BOLT tracking accelerates trust accumulation', () => {
+      let state = createDefaultTrustState();
+      // 7 BOLTs = 7 transitions, should get close to Level 1 (10 needed)
+      for (let i = 0; i < 7; i++) {
+        state = recordTransition(state, true, false, {
+          gateNumber: 4,
+          artifactId: `BOLT-00${i + 1}`,
+          artifactType: 'bolt',
+        });
+      }
+      expect(state.total_transitions).toBe(7);
+      // 3 more transitions to reach Level 1
+      for (let i = 0; i < 3; i++) {
+        state = recordTransition(state, true, false);
+      }
+      expect(state.current_level).toBe(1);
+    });
+
+    it('caps transition_history at 100 entries', () => {
+      let state = createDefaultTrustState();
+      for (let i = 0; i < 105; i++) {
+        state = recordTransition(state, true, false);
+      }
+      expect(state.transition_history.length).toBeLessThanOrEqual(100);
+    });
+  });
+
+  describe('consecutive rejections tracking', () => {
+    it('increments consecutive_rejections on rejection', () => {
+      let state = createDefaultTrustState();
+      state = recordTransition(state, false, true);
+      expect(state.consecutive_rejections).toBe(1);
+      state = recordTransition(state, false, true);
+      expect(state.consecutive_rejections).toBe(2);
+    });
+
+    it('resets consecutive_rejections on success', () => {
+      let state = createDefaultTrustState();
+      state = recordTransition(state, false, true);
+      state = recordTransition(state, false, true);
+      expect(state.consecutive_rejections).toBe(2);
+      state = recordTransition(state, true, false);
+      expect(state.consecutive_rejections).toBe(0);
+    });
+
+    it('checkConsecutiveRejections returns true at 3+ rejections', () => {
+      let state = createDefaultTrustState();
+      state = recordTransition(state, false, true);
+      state = recordTransition(state, false, true);
+      expect(checkConsecutiveRejections(state).shouldDecrease).toBe(false);
+      state = recordTransition(state, false, true);
+      expect(checkConsecutiveRejections(state).shouldDecrease).toBe(true);
+      expect(checkConsecutiveRejections(state).reason).toContain('3+ consecutive');
+    });
+  });
+
+  describe('decreaseTrust', () => {
+    it('decreases trust by 1', () => {
+      const state: TrustState = {
+        ...createDefaultTrustState(),
+        current_level: 2,
+      };
+      const updated = decreaseTrust(state, 'Test reason');
+      expect(updated.current_level).toBe(1);
+    });
+
+    it('does not go below 0', () => {
+      const state = createDefaultTrustState(); // level 0
+      const updated = decreaseTrust(state, 'Test reason');
+      expect(updated.current_level).toBe(0);
+    });
+
+    it('adds entry to level_history', () => {
+      const state: TrustState = {
+        ...createDefaultTrustState(),
+        current_level: 2,
+      };
+      const updated = decreaseTrust(state, 'Test decrease');
+      expect(updated.level_history).toHaveLength(1);
+      expect(updated.level_history[0]).toMatchObject({
+        from: 2,
+        to: 1,
+        reason: 'Test decrease',
+      });
+    });
+
+    it('does not add history entry when already at 0', () => {
+      const state = createDefaultTrustState();
+      const updated = decreaseTrust(state, 'Already at zero');
+      expect(updated.level_history).toHaveLength(0);
+    });
+  });
+
+  describe('recordContractViolation', () => {
+    it('decreases trust by 1 with contract violation reason', () => {
+      const state: TrustState = {
+        ...createDefaultTrustState(),
+        current_level: 2,
+      };
+      const updated = recordContractViolation(state, 'BOLT-003');
+      expect(updated.current_level).toBe(1);
+      expect(updated.level_history[0].reason).toContain('Contract violation');
+      expect(updated.level_history[0].reason).toContain('BOLT-003');
+    });
+  });
+
+  describe('backward compatibility', () => {
+    it('loadTrustState initializes new fields for old data', () => {
+      // Write old format without consecutive_rejections or transition_history
+      const oldState = {
+        current_level: 1,
+        total_transitions: 15,
+        rejection_count: 1,
+        rejection_rate: 0.067,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+      };
+      // Save old format
+      const filePath = join(TEST_DIR, '.olympus', 'trust-state.json');
+      writeFileSync(filePath, JSON.stringify(oldState), 'utf-8');
+
+      const loaded = loadTrustState(TEST_DIR);
+      expect(loaded.consecutive_rejections).toBe(0);
+      expect(loaded.transition_history).toEqual([]);
     });
   });
 });

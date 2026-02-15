@@ -354,6 +354,106 @@ describe('captureWorkflowDiscovery', () => {
 
     expect(discovery.details).toContain('Depth Score: 85');
   });
+
+  it('maps bolt_execution_complete to workflow_gate category', () => {
+    const event: WorkflowEvent = {
+      type: 'bolt_execution_complete',
+      phase: 'construction',
+      stage: 'bolt',
+      details: 'BOLT-001 completed successfully',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.category).toBe('workflow_gate');
+  });
+
+  it('maps gate_approval_after_rejection to workflow_gate category', () => {
+    const event: WorkflowEvent = {
+      type: 'gate_approval_after_rejection',
+      phase: 'inception',
+      details: 'Revised INTENT approved',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.category).toBe('workflow_gate');
+  });
+
+  it('maps depth_assessment_complete to planning_insight category', () => {
+    const event: WorkflowEvent = {
+      type: 'depth_assessment_complete',
+      phase: 'inception',
+      details: 'MODERATE (score: 15)',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.category).toBe('planning_insight');
+  });
+
+  it('maps execution_mode_selected to planning_insight category', () => {
+    const event: WorkflowEvent = {
+      type: 'execution_mode_selected',
+      phase: 'construction',
+      details: 'ascent',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.category).toBe('planning_insight');
+  });
+
+  it('sets verified=true for bolt_execution_complete', () => {
+    const event: WorkflowEvent = {
+      type: 'bolt_execution_complete',
+      phase: 'construction',
+      details: 'BOLT completed',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.verified).toBe(true);
+  });
+
+  it('sets confidence 0.85 for bolt_execution_complete', () => {
+    const event: WorkflowEvent = {
+      type: 'bolt_execution_complete',
+      phase: 'construction',
+      details: 'BOLT completed',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.confidence).toBe(0.85);
+  });
+
+  it('sets confidence 0.9 for gate_approval_after_rejection', () => {
+    const event: WorkflowEvent = {
+      type: 'gate_approval_after_rejection',
+      phase: 'inception',
+      details: 'Approved',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.confidence).toBe(0.9);
+  });
+
+  it('sets confidence 0.8 for depth_assessment_complete', () => {
+    const event: WorkflowEvent = {
+      type: 'depth_assessment_complete',
+      phase: 'inception',
+      details: 'DEEP',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.confidence).toBe(0.8);
+  });
+
+  it('sets confidence 0.75 for execution_mode_selected', () => {
+    const event: WorkflowEvent = {
+      type: 'execution_mode_selected',
+      phase: 'construction',
+      details: 'ascent',
+    };
+
+    const discovery = captureWorkflowDiscovery(event, baseContext);
+    expect(discovery.confidence).toBe(0.75);
+  });
 });
 
 describe('queryRelevantDiscoveries', () => {
@@ -899,6 +999,59 @@ describe('trackMethodologyPreferences', () => {
     expect(result).toHaveLength(1);
     expect(result[0].key).toBe('event:build_failure');
     expect(result[0].value).toBe('Compilation error');
+  });
+
+  it('creates bolt_completion preference for bolt_execution_complete event', () => {
+    const event: WorkflowEvent = {
+      type: 'bolt_execution_complete',
+      phase: 'construction',
+      details: 'BOLT-001 done',
+    };
+
+    const result = trackMethodologyPreferences(event, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('bolt_completion:construction');
+    expect(result[0].value).toBe('BOLT-001 done');
+  });
+
+  it('creates gate_revision_success preference for gate_approval_after_rejection', () => {
+    const event: WorkflowEvent = {
+      type: 'gate_approval_after_rejection',
+      phase: 'inception',
+      stage: 'intent',
+      details: 'Approved after revision',
+    };
+
+    const result = trackMethodologyPreferences(event, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('gate_revision_success:inception');
+    expect(result[0].value).toBe('intent');
+  });
+
+  it('creates depth_assessment preference for depth_assessment_complete', () => {
+    const event: WorkflowEvent = {
+      type: 'depth_assessment_complete',
+      phase: 'inception',
+      details: 'MODERATE',
+    };
+
+    const result = trackMethodologyPreferences(event, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('depth_assessment');
+    expect(result[0].value).toBe('MODERATE');
+  });
+
+  it('creates execution_mode preference for execution_mode_selected', () => {
+    const event: WorkflowEvent = {
+      type: 'execution_mode_selected',
+      phase: 'construction',
+      details: 'ascent',
+    };
+
+    const result = trackMethodologyPreferences(event, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].key).toBe('execution_mode');
+    expect(result[0].value).toBe('ascent');
   });
 });
 

@@ -31,6 +31,12 @@ export const STAGE_PHASE_MAP: Record<WorkflowStage, WorkflowPhase | 'complete'> 
 
 export type TrustLevel = 0 | 1 | 2 | 3;
 
+export interface TransitionMetadata {
+  gateNumber: number;
+  artifactId: string;
+  artifactType: string;
+}
+
 export interface TrustState {
   current_level: TrustLevel;
   total_transitions: number;
@@ -39,6 +45,14 @@ export interface TrustState {
   incident_count: number;
   last_level_change: string | null;
   level_history: TrustLevelChange[];
+  // Per-BOLT tracking fields
+  consecutive_rejections: number;
+  transition_history: Array<{
+    success: boolean;
+    rejected: boolean;
+    metadata?: TransitionMetadata;
+    timestamp: string;
+  }>;
 }
 
 export interface TrustLevelChange {

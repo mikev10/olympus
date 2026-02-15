@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { TrustState, TrustLevel, TrustLevelChange, RiskTier } from './phase-types.js';
+import type { TrustState, TrustLevel, TrustLevelChange, RiskTier, TransitionMetadata } from './phase-types.js';
 
 const TRUST_STATE_FILE = '.olympus/trust-state.json';
 
@@ -16,6 +16,8 @@ export function createDefaultTrustState(): TrustState {
     incident_count: 0,
     last_level_change: null,
     level_history: [],
+    consecutive_rejections: 0,
+    transition_history: [],
   };
 }
 
@@ -33,7 +35,17 @@ export function loadTrustState(projectPath?: string): TrustState {
     }
 
     const content = readFileSync(filePath, 'utf-8');
-    return JSON.parse(content) as TrustState;
+    const parsed = JSON.parse(content) as TrustState;
+
+    // Backward compatibility: initialize new fields if they don't exist
+    if (parsed.consecutive_rejections === undefined) {
+      parsed.consecutive_rejections = 0;
+    }
+    if (!Array.isArray(parsed.transition_history)) {
+      parsed.transition_history = [];
+    }
+
+    return parsed;
   } catch (error) {
     console.error('Error loading trust state:', error);
     return createDefaultTrustState();
@@ -97,21 +109,37 @@ export function evaluateTrustLevel(state: TrustState): TrustLevel {
  * @param state - Current trust state
  * @param success - Whether transition succeeded
  * @param rejected - Whether transition was rejected by quality gate
+ * @param metadata - Optional BOLT/gate metadata for per-BOLT tracking
  */
 export function recordTransition(
   state: TrustState,
   success: boolean,
-  rejected: boolean
+  rejected: boolean,
+  metadata?: TransitionMetadata
 ): TrustState {
   const newTotalTransitions = state.total_transitions + 1;
   const newRejectionCount = rejected ? state.rejection_count + 1 : state.rejection_count;
   const newRejectionRate = newRejectionCount / newTotalTransitions;
+
+  // Track consecutive rejections
+  const newConsecutiveRejections = rejected ? state.consecutive_rejections + 1 : 0;
+
+  // Append to transition history (cap at 100 entries)
+  const historyEntry = {
+    success,
+    rejected,
+    metadata,
+    timestamp: new Date().toISOString(),
+  };
+  const newTransitionHistory = [...state.transition_history, historyEntry].slice(-100);
 
   const newState: TrustState = {
     ...state,
     total_transitions: newTotalTransitions,
     rejection_count: newRejectionCount,
     rejection_rate: newRejectionRate,
+    consecutive_rejections: newConsecutiveRejections,
+    transition_history: newTransitionHistory,
   };
 
   const newLevel = evaluateTrustLevel(newState);
@@ -192,4 +220,56 @@ export function checkTrustReset(state: TrustState): { shouldReset: boolean; reas
     shouldReset: false,
     reason: null,
   };
+}
+
+/**
+ * Decreases trust level by 1 (minimum 0).
+ * Returns new state (immutable pattern).
+ */
+export function decreaseTrust(state: TrustState, reason: string): TrustState {
+  if (state.current_level === 0) {
+    // Already at minimum, no change
+    return state;
+  }
+
+  const newLevel = (state.current_level - 1) as TrustLevel;
+  const change: TrustLevelChange = {
+    from: state.current_level,
+    to: newLevel,
+    reason,
+    timestamp: new Date().toISOString(),
+  };
+
+  return {
+    ...state,
+    current_level: newLevel,
+    last_level_change: change.timestamp,
+    level_history: [...state.level_history, change],
+  };
+}
+
+/**
+ * Checks if consecutive rejections threshold is met (3+).
+ * Returns whether trust should be decreased and the reason.
+ */
+export function checkConsecutiveRejections(state: TrustState): { shouldDecrease: boolean; reason: string | null } {
+  if (state.consecutive_rejections >= 3) {
+    return {
+      shouldDecrease: true,
+      reason: '3+ consecutive gate rejections',
+    };
+  }
+
+  return {
+    shouldDecrease: false,
+    reason: null,
+  };
+}
+
+/**
+ * Records a contract violation and decreases trust by 1.
+ * Returns new state (immutable pattern).
+ */
+export function recordContractViolation(state: TrustState, artifactId: string): TrustState {
+  return decreaseTrust(state, `Contract violation on ${artifactId}`);
 }

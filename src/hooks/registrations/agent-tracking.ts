@@ -20,6 +20,9 @@ import type { HookContext, HookResult } from '../types.js';
 import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
 import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import { recordAgentExecution } from '../../learning/efficiency.js';
+import { captureWorkflowDiscovery } from '../../features/workflow-engine/learning-bridge.js';
+import type { WorkflowEvent, WorkflowContext } from '../../features/workflow-engine/learning-bridge.js';
+import { recordDiscovery } from '../../learning/discovery.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -369,6 +372,36 @@ export function registerAgentTrackingHook(): void {
         });
 
         debugLog('agentTrackingBoltCompletion', 'BOLT execution recorded successfully');
+
+        // CCR-3: Capture BOLT execution completion as learning discovery
+        try {
+          const boltEvent: WorkflowEvent = {
+            type: 'bolt_execution_complete',
+            phase: 'construction',
+            stage: 'bolt',
+            details: `BOLT ${bolt_id} executed by ${agent_used}`,
+            artifactId: bolt_id,
+            agentName: agent_used,
+          };
+          const wfContext: WorkflowContext = {
+            workflowId: workflow_id || 'unknown',
+            featureName: workflow_id || 'unknown',
+            projectPath: ctx.directory!,
+            sessionId: ctx.sessionId!,
+            phase: 'construction',
+          };
+          const discovery = captureWorkflowDiscovery(boltEvent, wfContext);
+          recordDiscovery(discovery);
+          debugLog('agentTrackingBoltCompletion', 'BOLT completion discovery recorded', {
+            boltId: bolt_id,
+            discoveryId: discovery.id,
+          });
+        } catch (error) {
+          console.error('[Olympus Agent Tracking] Failed to capture BOLT completion discovery:', error);
+          debugLog('agentTrackingBoltCompletion', 'Failed to capture BOLT completion discovery', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       } catch (error) {
         // Silent failure - tracking should never break hooks
         debugLog('agentTrackingBoltCompletion', 'ERROR in handler', {

@@ -35,6 +35,10 @@ import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../feature
 import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
 import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
 import { generateValidationReport, getValidationReportPath } from '../../features/workflow-engine/validation-report.js';
+import { dispatchRejection } from '../../features/workflow-engine/rejection-dispatcher.js';
+import { captureWorkflowDiscovery } from '../../features/workflow-engine/learning-bridge.js';
+import type { WorkflowEvent, WorkflowContext } from '../../features/workflow-engine/learning-bridge.js';
+import { recordDiscovery } from '../../learning/discovery.js';
 import type {
   WorkflowPhase,
   TrustState,
@@ -299,6 +303,22 @@ function findPendingGate(manifest: ManifestSchema): WorkflowPhase | null {
 }
 
 /**
+ * Determines the gate number based on current workflow phase and stage.
+ */
+function getGateNumber(pendingPhase: WorkflowPhase, currentStage: string): number {
+  if (pendingPhase === 'inception') {
+    return currentStage === 'intent' ? 2 : 1;
+  }
+  if (pendingPhase === 'construction') {
+    return currentStage === 'bolt' ? 4 : 3;
+  }
+  if (pendingPhase === 'operations') {
+    return 5;
+  }
+  return 1;
+}
+
+/**
  * Extracts prompt text from various context formats.
  *
  * @param ctx - Hook context
@@ -449,6 +469,28 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
 
         saveManifest(manifestPath, manifest);
         await saveCheckpoint(ctx.directory, checkpoint);
+
+        // CCR-3: Capture Gate 3 auto-advance as learning discovery
+        try {
+          const gateEvent: WorkflowEvent = {
+            type: 'gate_approval',
+            phase: 'construction',
+            stage: 'unit',
+            details: `Gate 3 auto-advanced by Trust Level ${trustState.current_level} for Tier ${riskTier}`,
+          };
+          const wfContext: WorkflowContext = {
+            workflowId,
+            featureName: checkpoint.feature_name || workflowId,
+            projectPath: ctx.directory!,
+            sessionId: ctx.sessionId || 'unknown',
+            phase: 'construction',
+          };
+          const discovery = captureWorkflowDiscovery(gateEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[Olympus Quality Gate] Failed to capture Gate 3 auto-advance discovery:', error);
+        }
+
         return { continue: true };
       }
 
@@ -644,6 +686,28 @@ Type "approve" to proceed or "reject <reason>" to block.
         saveManifest(manifestPath, manifest);
         await saveCheckpoint(ctx.directory, checkpoint);
 
+        // CCR-3: Capture Gate 4 auto-advance as learning discovery
+        try {
+          const gateEvent: WorkflowEvent = {
+            type: 'gate_approval',
+            phase: 'construction',
+            stage: 'bolt',
+            details: `Gate 4 notification-only for BOLT ${boltId} at Trust Level ${trustState.current_level}`,
+            artifactId: boltId,
+          };
+          const wfContext: WorkflowContext = {
+            workflowId,
+            featureName: checkpoint.feature_name || workflowId,
+            projectPath: ctx.directory!,
+            sessionId: ctx.sessionId || 'unknown',
+            phase: 'construction',
+          };
+          const discovery = captureWorkflowDiscovery(gateEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[Olympus Quality Gate] Failed to capture Gate 4 auto-advance discovery:', error);
+        }
+
         // Check if all BOLTs are now fulfilled → auto-transition to Operations
         let autoTransitionMessage = '';
         try {
@@ -810,6 +874,28 @@ Type "approve" to proceed or "reject <reason>" to block.
 
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, checkpoint);
+
+      // CCR-3: Capture auto-advance gate approval as learning discovery
+      try {
+        const gateEvent: WorkflowEvent = {
+          type: 'gate_approval',
+          phase: transitioningPhase,
+          stage: checkpoint.current_stage,
+          details: `Auto-advanced by Trust Level ${trustState.current_level} for Tier ${riskTier}`,
+        };
+        const wfContext: WorkflowContext = {
+          workflowId,
+          featureName: checkpoint.feature_name || workflowId,
+          projectPath: ctx.directory!,
+          sessionId: ctx.sessionId || 'unknown',
+          phase: transitioningPhase,
+        };
+        const discovery = captureWorkflowDiscovery(gateEvent, wfContext);
+        recordDiscovery(discovery);
+      } catch (error) {
+        console.error('[Olympus Quality Gate] Failed to capture auto-advance discovery:', error);
+      }
+
       return { continue: true };
     }
 
@@ -1106,6 +1192,27 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         reason: null,
       });
 
+      // CCR-3: Capture gate approval as learning discovery
+      try {
+        const gateEvent: WorkflowEvent = {
+          type: 'gate_approval',
+          phase: pendingPhase,
+          stage: checkpoint.current_stage,
+          details: `Gate approved for ${pendingPhase} phase`,
+        };
+        const wfContext: WorkflowContext = {
+          workflowId: activeWorkflow.workflowId,
+          featureName: checkpoint.feature_name || activeWorkflow.workflowId,
+          projectPath: ctx.directory!,
+          sessionId: ctx.sessionId || 'unknown',
+          phase: pendingPhase,
+        };
+        const discovery = captureWorkflowDiscovery(gateEvent, wfContext);
+        recordDiscovery(discovery);
+      } catch (error) {
+        console.error('[Olympus Quality Gate] Failed to capture gate approval discovery:', error);
+      }
+
       // Record transition for trust evaluation
       const trustState = loadTrustState(ctx.directory);
       trustState.total_transitions += 1;
@@ -1209,6 +1316,27 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         reason,
       });
 
+      // CCR-3: Capture gate rejection as learning discovery
+      try {
+        const gateEvent: WorkflowEvent = {
+          type: 'gate_rejection',
+          phase: pendingPhase,
+          stage: checkpoint.current_stage,
+          details: reason,
+        };
+        const wfContext: WorkflowContext = {
+          workflowId: activeWorkflow.workflowId,
+          featureName: checkpoint.feature_name || activeWorkflow.workflowId,
+          projectPath: ctx.directory!,
+          sessionId: ctx.sessionId || 'unknown',
+          phase: pendingPhase,
+        };
+        const discovery = captureWorkflowDiscovery(gateEvent, wfContext);
+        recordDiscovery(discovery);
+      } catch (error) {
+        console.error('[Olympus Quality Gate] Failed to capture gate rejection discovery:', error);
+      }
+
       // Record rejection for trust evaluation
       const trustState = loadTrustState(ctx.directory);
       trustState.rejection_count += 1;
@@ -1221,9 +1349,35 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
 
-      const feedbackMessage = rejectionFeedback
-        ? rejectionFeedback
-        : `Gate rejected. Reason: ${reason}. Revise artifacts before retrying.`;
+      // Dispatch rejection for structured re-invocation
+      const gateNumber = getGateNumber(pendingPhase, checkpoint.current_stage);
+      const artifactId = pendingPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id
+        ? checkpoint.active_bolt_id
+        : manifest.artifacts.find(a => a.phase === pendingPhase)?.id ?? `${pendingPhase}-artifact`;
+      const previousRejections = manifest.gate_audit.filter(
+        e => e.phase === pendingPhase && e.action === 'rejected'
+      ).length;
+
+      let feedbackMessage: string;
+      try {
+        const dispatchResult = await dispatchRejection(
+          ctx.directory,
+          manifest.workflow_id,
+          {
+            gateNumber,
+            artifactId,
+            rejectionReason: reason,
+            rejectedBy: 'human',
+            attemptNumber: previousRejections + 1,
+          }
+        );
+        feedbackMessage = `Gate ${gateNumber} rejected ${artifactId}: ${reason}.\n\n${dispatchResult.prompt}`;
+      } catch {
+        // Fallback to basic feedback if dispatcher fails
+        feedbackMessage = rejectionFeedback
+          ? rejectionFeedback
+          : `Gate rejected. Reason: ${reason}. Revise artifacts before retrying.`;
+      }
 
       return {
         continue: true,

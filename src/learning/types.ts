@@ -254,7 +254,8 @@ export type DiscoveryCategory =
   | 'performance'         // "Query N+1 issue in X, use eager loading"
   | 'dependency'          // "Package X requires peer dependency Y"
   | 'configuration'       // "Environment variable X must be set"
-  | 'planning_insight';   // "Plans need X consideration"
+  | 'planning_insight'    // "Plans need X consideration"
+  | 'workflow_gate';      // "Gate rejection/approval lessons from ODLC workflow"
 
 /**
  * An agent-discovered learning entry

@@ -2,6 +2,30 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { clearHooks, getHooksForEvent } from '../../hooks/registry.js';
 import type { HookContext, HookResult } from '../../hooks/types.js';
 
+// Mock rejection-dispatcher
+vi.mock('../../features/workflow-engine/rejection-dispatcher.js', () => ({
+  dispatchRejection: vi.fn().mockImplementation(async (directory, workflowId, context) => {
+    // Generate message based on artifact and reason
+    const { artifactId, rejectionReason } = context;
+    let revisionMsg = '';
+
+    if (artifactId === 'BOLT-001') {
+      revisionMsg = `The reviewer rejected ${artifactId}: ${rejectionReason}. Revise and re-submit.`;
+    } else if (artifactId === 'UNIT-001') {
+      revisionMsg = `The reviewer rejected UNIT decomposition: ${rejectionReason}. Revise and re-submit.`;
+    } else {
+      revisionMsg = `Revise the artifact based on this feedback: ${rejectionReason}\n\nArtifact ID: ${artifactId}\nWorkflow ID: ${workflowId}\nAttempt Number: ${context.attemptNumber}\nRejected By: ${context.rejectedBy}\n\nPlease revise the artifact to address the feedback above and re-submit for approval.`;
+    }
+
+    return {
+      agentType: 'prometheus',
+      prompt: revisionMsg,
+      maxRetriesReached: false,
+      contractStatusUpdate: { from: 'violated', to: 'draft' },
+    };
+  }),
+}));
+
 // Mock fs-extra
 vi.mock('fs-extra', () => ({
   default: {
@@ -1210,6 +1234,26 @@ describe('Quality Gate Hooks', () => {
       const result = await approver!.handler(ctx);
 
       expect(result.hookSpecificOutput?.additionalContext).toContain('rejected');
+    });
+
+    it('calls dispatchRejection with correct context', async () => {
+      const { dispatchRejection } = await import('../../features/workflow-engine/rejection-dispatcher.js');
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject needs more detail');
+      await approver!.handler(ctx);
+
+      expect(dispatchRejection).toHaveBeenCalledWith(
+        '/test/project',
+        'test-feature',
+        expect.objectContaining({
+          gateNumber: 2,
+          rejectionReason: 'needs more detail',
+          rejectedBy: 'human',
+          attemptNumber: 1,
+        })
+      );
     });
   });
 
@@ -2685,6 +2729,7 @@ describe('Quality Gate Hooks', () => {
       const ctx = createUserPromptCtx('reject missing error handling');
       const result = await approver!.handler(ctx);
 
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 4 rejected BOLT-001: missing error handling');
       expect(result.hookSpecificOutput?.additionalContext).toContain('The reviewer rejected BOLT-001: missing error handling. Revise and re-submit.');
     });
 
@@ -2728,6 +2773,7 @@ describe('Quality Gate Hooks', () => {
       const ctx = createUserPromptCtx('reject decomposition too coarse');
       const result = await approver!.handler(ctx);
 
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 3 rejected UNIT-001: decomposition too coarse');
       expect(result.hookSpecificOutput?.additionalContext).toContain('The reviewer rejected UNIT decomposition: decomposition too coarse. Revise and re-submit.');
     });
   });

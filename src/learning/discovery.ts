@@ -59,6 +59,7 @@ export function readDiscoveries(projectPath: string): DiscoverySummary {
     dependency: 0,
     configuration: 0,
     planning_insight: 0,
+    workflow_gate: 0,
   };
 
   for (const d of all) {

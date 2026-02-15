@@ -24,6 +24,9 @@ import { validateIdea, validateIntent, clearFileCache } from './validation.js';
 import { runDualValidation } from './alignment.js';
 import { ForgeExecutor } from './forge/executor.js';
 import { executeDiscoveryPhase } from './discovery.js';
+import { captureWorkflowDiscovery } from './learning-bridge.js';
+import type { WorkflowEvent, WorkflowContext } from './learning-bridge.js';
+import { recordDiscovery } from '../../learning/discovery.js';
 import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
 
 /**
@@ -434,6 +437,27 @@ export class WorkflowEngine {
           console.log(`[WorkflowEngine] Discovery phase: ${result.artifactsGenerated.length} artifacts generated (${result.sourceFileCount} source files detected)`);
           console.log(`[WorkflowEngine] Discovery Gate: Review findings in aidlc-docs/discovery/ before proceeding to Inception`);
         }
+
+        // CCR-3: Capture discovery phase completion
+        try {
+          const phaseEvent: WorkflowEvent = {
+            type: 'phase_complete',
+            phase: 'discovery',
+            details: `${result.artifactsGenerated.length} artifacts generated, ${result.sourceFileCount} source files`,
+          };
+          const wfContext: WorkflowContext = {
+            workflowId: this.workflowId,
+            featureName: this.featureName,
+            projectPath: this.projectPath,
+            sessionId: 'engine',
+            phase: 'discovery',
+          };
+          const discovery = captureWorkflowDiscovery(phaseEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to capture discovery phase discovery:', error);
+        }
+
         break;
       }
 
@@ -456,6 +480,27 @@ export class WorkflowEngine {
           }
         }
         console.log('[WorkflowEngine] Decomposition pending — will run when Construction pipeline is implemented in Phase 3');
+
+        // CCR-3: Capture inception phase completion
+        try {
+          const phaseEvent: WorkflowEvent = {
+            type: 'phase_complete',
+            phase: 'inception',
+            details: 'Inception stages completed',
+          };
+          const wfContext: WorkflowContext = {
+            workflowId: this.workflowId,
+            featureName: this.featureName,
+            projectPath: this.projectPath,
+            sessionId: 'engine',
+            phase: 'inception',
+          };
+          const discovery = captureWorkflowDiscovery(phaseEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to capture inception phase discovery:', error);
+        }
+
         break;
       }
 
@@ -483,6 +528,27 @@ export class WorkflowEngine {
           console.error(`[WorkflowEngine] Construction phase validation failed:`, result.blocking_issues);
           throw new Error(`Construction phase validation failed: ${result.blocking_issues.join(', ')}`);
         }
+
+        // CCR-3: Capture construction phase completion
+        try {
+          const phaseEvent: WorkflowEvent = {
+            type: 'phase_complete',
+            phase: 'construction',
+            details: 'Construction phase completed',
+          };
+          const wfContext: WorkflowContext = {
+            workflowId: this.workflowId,
+            featureName: this.featureName,
+            projectPath: this.projectPath,
+            sessionId: 'engine',
+            phase: 'construction',
+          };
+          const discovery = captureWorkflowDiscovery(phaseEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to capture construction phase discovery:', error);
+        }
+
         break;
       }
 
@@ -553,6 +619,27 @@ export class WorkflowEngine {
 
         console.log(`[WorkflowEngine] Operations phase: Generated ${result.artifactsGenerated.length} artifacts (depth: ${depthLevel})`);
         console.log(`[WorkflowEngine] Operations artifacts: ${result.artifactsGenerated.join(', ')}`);
+
+        // CCR-3: Capture operations phase completion
+        try {
+          const phaseEvent: WorkflowEvent = {
+            type: 'phase_complete',
+            phase: 'operations',
+            details: `${result.artifactsGenerated.length} artifacts generated (depth: ${depthLevel})`,
+          };
+          const wfContext: WorkflowContext = {
+            workflowId: this.workflowId,
+            featureName: this.featureName,
+            projectPath: this.projectPath,
+            sessionId: 'engine',
+            phase: 'operations',
+          };
+          const discovery = captureWorkflowDiscovery(phaseEvent, wfContext);
+          recordDiscovery(discovery);
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to capture operations phase discovery:', error);
+        }
+
         break;
       }
     }
