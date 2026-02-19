@@ -18,10 +18,8 @@ import fs from 'fs-extra';
 import path from 'path';
 import {
   ConstructionExecutor,
-  ForgeExecutor,
   CONSTRUCTION_STAGE_AGENT_MAP,
-  FORGE_STAGE_AGENT_MAP,
-} from '../../../features/workflow-engine/forge/executor.js';
+} from '../../../features/workflow-engine/construction/executor.js';
 import { createManifest, loadManifest } from '../../../features/workflow-engine/manifest.js';
 
 describe('CONSTRUCTION_STAGE_AGENT_MAP', () => {
@@ -39,15 +37,6 @@ describe('CONSTRUCTION_STAGE_AGENT_MAP', () => {
     expect(CONSTRUCTION_STAGE_AGENT_MAP).toHaveProperty('design');
   });
 
-  it('should have FORGE_STAGE_AGENT_MAP as backward-compat alias', () => {
-    expect(FORGE_STAGE_AGENT_MAP).toBe(CONSTRUCTION_STAGE_AGENT_MAP);
-  });
-});
-
-describe('ForgeExecutor backward compat alias', () => {
-  it('should be the same as ConstructionExecutor', () => {
-    expect(ForgeExecutor).toBe(ConstructionExecutor);
-  });
 });
 
 describe('ConstructionExecutor', () => {
@@ -71,7 +60,7 @@ describe('ConstructionExecutor', () => {
     effort: number,
     proposedUnits?: string[]
   ): Promise<void> {
-    const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+    const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
     await fs.ensureDir(intentDir);
 
     let unitsSection = '';
@@ -113,7 +102,7 @@ ${unitsSection}
     effort: number,
     id: string = 'INTENT-001'
   ): Promise<void> {
-    const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+    const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
     await fs.ensureDir(intentDir);
 
     await fs.writeFile(
@@ -150,7 +139,7 @@ Follow best practices
    * Helper: create idea.md for dual validation
    */
   async function createIdeaFile(): Promise<void> {
-    const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+    const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
     await fs.ensureDir(intentDir);
 
     await fs.writeFile(
@@ -198,7 +187,7 @@ Test problem
       expect(result.reviewer).toBe('construction-executor');
 
       // Verify construction directory
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       expect(await fs.pathExists(constructionDir)).toBe(true);
 
       // Verify UNIT directory was created
@@ -234,7 +223,7 @@ Test problem
       expect(result.passed).toBe(true);
 
       // Should have 3 unit directories
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       for (const unitId of ['UNIT-001', 'UNIT-002', 'UNIT-003']) {
         const unitDir = path.join(constructionDir, unitId);
         expect(await fs.pathExists(unitDir)).toBe(true);
@@ -258,7 +247,7 @@ Test problem
     });
 
     it('should fail if intent directory is empty', async () => {
-      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
       await fs.ensureDir(intentDir);
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
@@ -280,7 +269,7 @@ Test problem
       expect(result.blocking_issues).toHaveLength(0);
 
       // Verify units directory and files were created
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       expect(await fs.pathExists(constructionDir)).toBe(true);
 
       const entries = await fs.readdir(constructionDir);
@@ -307,7 +296,7 @@ Test problem
       const executor = new ConstructionExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       const unitFiles = (await fs.readdir(constructionDir)).filter(
         f => f.startsWith('UNIT-') && f.endsWith('.md')
       );
@@ -331,7 +320,7 @@ Test problem
       const executor = new ConstructionExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction', 'design');
       expect(await fs.pathExists(designDir)).toBe(true);
 
       // Verify JSON is parseable
@@ -357,7 +346,7 @@ Test problem
       const executor = new ConstructionExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const unit001Dir = path.join(testDir, 'aidlc-docs', 'construction', 'UNIT-001');
+      const unit001Dir = path.join(testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-001');
       expect(await fs.pathExists(unit001Dir)).toBe(true);
 
       const boltFiles = (await fs.readdir(unit001Dir)).filter(
@@ -416,7 +405,7 @@ Test problem
       expect(result.reviewer).toBe('construction-executor');
 
       // Should have BOLT-001.md directly in construction dir
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       expect(await fs.pathExists(path.join(constructionDir, 'BOLT-001.md'))).toBe(true);
 
       // Should NOT have UNIT directories
@@ -436,7 +425,7 @@ Test problem
 
       expect(result.passed).toBe(true);
 
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       const boltContent = await fs.readFile(
         path.join(constructionDir, 'BOLT-001.md'),
         'utf-8'
@@ -445,7 +434,7 @@ Test problem
     });
 
     it('should fail in SHALLOW mode if no intent found', async () => {
-      const intentDir = path.join(testDir, 'aidlc-docs', 'inception');
+      const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
       await fs.ensureDir(intentDir);
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
@@ -654,7 +643,7 @@ Test problem
         type: 'intent',
         phase: 'inception',
         stage: 'intent',
-        path: path.join(testDir, 'aidlc-docs', 'inception', 'intent.md'),
+        path: path.join(testDir, 'aidlc-docs', workflowId, 'inception', 'intent.md'),
         validation_passed: null,
         write_complete: true,
         checksum: null,
@@ -711,7 +700,7 @@ Test problem
         type: 'intent',
         phase: 'inception',
         stage: 'intent',
-        path: path.join(testDir, 'aidlc-docs', 'inception', 'INTENT-001.md'),
+        path: path.join(testDir, 'aidlc-docs', workflowId, 'inception', 'INTENT-001.md'),
         validation_passed: null,
         write_complete: true,
         checksum: null,
@@ -765,7 +754,7 @@ Test problem
       expect(result.reviewer).toBe('construction-executor');
 
       // Step 4: Verify unit directories
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       const constructionEntries = await fs.readdir(constructionDir);
       const unitDirs = constructionEntries.filter(
         f => f.startsWith('UNIT-') && !f.endsWith('.md')
@@ -824,7 +813,7 @@ Test problem
       expect(result.passed).toBe(true);
       expect(result.coverage_percentage).toBe(100);
 
-      const constructionDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       const unit001Dir = path.join(constructionDir, 'UNIT-001');
       expect(await fs.pathExists(unit001Dir)).toBe(true);
 

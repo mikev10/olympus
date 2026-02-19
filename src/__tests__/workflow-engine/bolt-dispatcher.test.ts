@@ -39,7 +39,8 @@ describe('bolt-dispatcher', () => {
   });
 
   function createTestFixtures() {
-    const docsDir = join(TEST_DIR, 'aidlc-docs');
+    const workflowId = 'workflow-001';
+    const docsDir = join(TEST_DIR, 'aidlc-docs', workflowId);
     const inceptionDir = join(docsDir, 'inception');
     const constructionDir = join(docsDir, 'construction');
     const unit001Dir = join(constructionDir, 'UNIT-001');
@@ -540,7 +541,8 @@ Debug and investigate the authentication failure.
     });
 
     it('handles missing optional artifacts gracefully', async () => {
-      const docsDir = join(TEST_DIR, 'aidlc-docs');
+      const workflowId = 'workflow-001';
+      const docsDir = join(TEST_DIR, 'aidlc-docs', workflowId);
       const constructionDir = join(docsDir, 'construction');
       const unit999Dir = join(constructionDir, 'UNIT-999');
 

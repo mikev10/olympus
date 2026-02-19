@@ -301,7 +301,7 @@ export async function writeDesignArtifacts(
   workflowId: string,
   design: DesignArtifacts
 ): Promise<void> {
-  const designDir = path.join(projectPath, 'aidlc-docs', 'construction', 'design');
+  const designDir = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'design');
 
   try {
     await fs.ensureDir(designDir);
@@ -331,7 +331,7 @@ export async function loadDesignArtifacts(
   projectPath: string,
   workflowId: string
 ): Promise<DesignArtifacts | null> {
-  const designDir = path.join(projectPath, 'aidlc-docs', 'construction', 'design');
+  const designDir = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'design');
 
   try {
     const interfacesPath = path.join(designDir, 'interfaces.json');

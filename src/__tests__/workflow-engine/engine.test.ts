@@ -75,7 +75,7 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-feature');
       const exists = await fs.pathExists(workflowDir);
       expect(exists).toBe(true);
 
@@ -98,9 +98,14 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // After start(), the idea stage should have executed and current_stage moved to intent
+      // After start(), only initialization is done - stage is 'idea'
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
-      expect(checkpoint?.current_stage).toBe('intent');
+      expect(checkpoint?.current_stage).toBe('idea');
+
+      // Execute idea stage to move to intent
+      await engine.executeStage('idea');
+      const checkpoint2 = await loadCheckpoint(tmpDir, 'test-feature');
+      expect(checkpoint2?.current_stage).toBe('intent');
       // V3 checkpoint doesn't have artifacts field - artifacts are in manifest
     });
 
@@ -108,8 +113,11 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature with OAuth');
 
+      // Execute idea stage to create the artifact
+      await engine.executeStage('idea');
+
       // Check the idea.md file contains the prompt
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
+      const ideaPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'idea.md');
       const ideaContent = await fs.readFile(ideaPath, 'utf-8');
       expect(ideaContent).toContain('Build a test feature with OAuth');
     });
@@ -194,7 +202,7 @@ describe('WorkflowEngine', () => {
       await engine.start('Build a test feature');
 
       const result = await engine.pause();
-      expect(result).toBe('aidlc-docs/checkpoint.json');
+      expect(result).toBe('aidlc-docs/test-feature/checkpoint.json');
     });
 
     it('throws error if no checkpoint exists', async () => {
@@ -208,8 +216,11 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Idea stage was executed during start()
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
+      // Execute idea stage to create the artifact
+      await engine.executeStage('idea');
+
+      // Idea stage was executed
+      const ideaPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'idea.md');
       const exists = await fs.pathExists(ideaPath);
       expect(exists).toBe(true);
 
@@ -229,10 +240,11 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute intent stage
+      // Execute idea stage first, then intent
+      await engine.executeStage('idea');
       await engine.executeStage('intent');
 
-      const intentPath = join(tmpDir, 'aidlc-docs', 'inception', 'intent.md');
+      const intentPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'intent.md');
       const exists = await fs.pathExists(intentPath);
       expect(exists).toBe(true);
 
@@ -249,10 +261,11 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute intent stage
+      // Execute idea stage first, then intent
+      await engine.executeStage('idea');
       await engine.executeStage('intent');
 
-      const nfrPath = join(tmpDir, 'aidlc-docs', 'inception', 'nfr.md');
+      const nfrPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'nfr.md');
       const exists = await fs.pathExists(nfrPath);
       expect(exists).toBe(true);
 
@@ -273,7 +286,7 @@ describe('WorkflowEngine', () => {
       await engine.executeStage('intent');
       await engine.executeStage('unit');
 
-      const constructionPath = join(tmpDir, 'aidlc-docs', 'construction');
+      const constructionPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'construction');
       const exists = await fs.pathExists(constructionPath);
       expect(exists).toBe(true);
 
@@ -292,7 +305,7 @@ describe('WorkflowEngine', () => {
       await engine.executeStage('bolt');
 
       // Bolts are created within unit directories in construction/
-      const constructionDir = join(tmpDir, 'aidlc-docs', 'construction');
+      const constructionDir = join(tmpDir, 'aidlc-docs', 'test-feature', 'construction');
 
       // Check that construction directory exists
       expect(await fs.pathExists(constructionDir)).toBe(true);
@@ -313,6 +326,9 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
+      // Execute idea stage to advance to intent
+      await engine.executeStage('idea');
+
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       // V3 checkpoint doesn't have artifacts field - artifacts are in manifest
       expect(checkpoint?.current_stage).toBe('intent');
@@ -323,8 +339,13 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // After start, current_stage should be 'intent'
+      // After start, current_stage should be 'idea'
       let checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
+      expect(checkpoint?.current_stage).toBe('idea');
+
+      // Execute idea stage to move to intent
+      await engine.executeStage('idea');
+      checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       expect(checkpoint?.current_stage).toBe('intent');
 
       // Execute intent stage
@@ -340,6 +361,9 @@ describe('WorkflowEngine', () => {
     it('returns correct workflow information', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
+
+      // Execute idea stage to advance to intent
+      await engine.executeStage('idea');
 
       const status = await engine.getStatus();
       expect(status.workflow_id).toBe('test-feature');
@@ -375,8 +399,13 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Full Workflow Test');
       await engine.start('Build a complete feature');
 
-      // After start, we should be at intent stage with idea artifact created
+      // After start, we should be at idea stage
       let checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
+      expect(checkpoint?.current_stage).toBe('idea');
+
+      // Execute idea stage to advance to intent
+      await engine.executeStage('idea');
+      checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
       expect(checkpoint?.current_stage).toBe('intent');
 
       // Execute intent stage

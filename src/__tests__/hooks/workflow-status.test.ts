@@ -24,10 +24,16 @@ vi.mock('../../features/workflow-engine/status-reporter.js', () => ({
   generateWorkflowReport: vi.fn(),
 }));
 
+vi.mock('../../features/workflow-engine/checkpoint.js', () => ({
+  listWorkflows: vi.fn(),
+  loadCheckpoint: vi.fn(),
+}));
+
 // Import mocked modules to access mock functions
 import { loadManifest } from '../../features/workflow-engine/manifest.js';
 import { loadTrustState } from '../../features/workflow-engine/trust.js';
 import { generateWorkflowReport } from '../../features/workflow-engine/status-reporter.js';
+import { listWorkflows, loadCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 
 describe('Workflow Status Hook', () => {
   beforeEach(() => {
@@ -80,7 +86,7 @@ describe('Workflow Status Hook', () => {
       statusHook = hooks.find(h => h.name === 'workflowStatusReporter');
     });
 
-    it('detects /workflow-status invocation and returns report', () => {
+    it('detects /workflow-status invocation and returns report', async () => {
       const mockManifest: ManifestSchema = {
         schema_version: '2.0.0',
         workflow_id: 'test-workflow',
@@ -124,6 +130,10 @@ describe('Workflow Status Hook', () => {
         fullReport: '# Workflow Status: Test Feature\nID: test-workflow\n\n0/4 phases complete | 0 artifacts total',
       };
 
+      const mockCheckpoint = { status: 'in_progress', workflow_id: 'test-workflow' };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-workflow']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
       vi.mocked(loadManifest).mockReturnValue(mockManifest);
       vi.mocked(loadTrustState).mockReturnValue(mockTrustState);
       vi.mocked(generateWorkflowReport).mockReturnValue(mockReport);
@@ -134,7 +144,7 @@ describe('Workflow Status Hook', () => {
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeDefined();
@@ -146,7 +156,7 @@ describe('Workflow Status Hook', () => {
       expect(generateWorkflowReport).toHaveBeenCalledWith(mockManifest, mockTrustState);
     });
 
-    it('detects skill template expansion markers', () => {
+    it('detects skill template expansion markers', async () => {
       const mockManifest: ManifestSchema = {
         schema_version: '2.0.0',
         workflow_id: 'test-workflow',
@@ -180,6 +190,10 @@ describe('Workflow Status Hook', () => {
         fullReport: '# Workflow Status: Test Feature',
       };
 
+      const mockCheckpoint = { status: 'in_progress', workflow_id: 'test-workflow' };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-workflow']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
       vi.mocked(loadManifest).mockReturnValue(mockManifest);
       vi.mocked(loadTrustState).mockReturnValue({ current_level: 0, total_transitions: 0, rejection_count: 0, rejection_rate: 0, incident_count: 0, last_level_change: null, level_history: [] });
       vi.mocked(generateWorkflowReport).mockReturnValue(mockReport);
@@ -192,14 +206,14 @@ describe('Workflow Status Hook', () => {
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('<workflow-status>');
     });
 
-    it('returns "no active workflows" message when manifest not found', () => {
-      vi.mocked(loadManifest).mockReturnValue(null);
+    it('returns "no active workflows" message when manifest not found', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue([]);
 
       const ctx: HookContext = {
         prompt: '/workflow-status',
@@ -207,7 +221,7 @@ describe('Workflow Status Hook', () => {
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeDefined();
@@ -216,14 +230,14 @@ describe('Workflow Status Hook', () => {
       expect(generateWorkflowReport).not.toHaveBeenCalled();
     });
 
-    it('ignores non-workflow-status prompts', () => {
+    it('ignores non-workflow-status prompts', async () => {
       const ctx: HookContext = {
         prompt: '/plan my-feature',
         directory: '/test/project',
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeUndefined();
@@ -241,10 +255,8 @@ describe('Workflow Status Hook', () => {
       statusHook = hooks.find(h => h.name === 'workflowStatusReporter');
     });
 
-    it('handles errors gracefully and returns continue: true', () => {
-      vi.mocked(loadManifest).mockImplementation(() => {
-        throw new Error('File system error');
-      });
+    it('handles errors gracefully and returns continue: true', async () => {
+      vi.mocked(listWorkflows).mockRejectedValue(new Error('File system error'));
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -254,7 +266,7 @@ describe('Workflow Status Hook', () => {
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(consoleSpy).toHaveBeenCalledWith('[Olympus Workflow Status] Error generating report:', expect.any(Error));
@@ -262,7 +274,9 @@ describe('Workflow Status Hook', () => {
       consoleSpy.mockRestore();
     });
 
-    it('handles missing directory gracefully', () => {
+    it('handles missing directory gracefully', async () => {
+      vi.mocked(listWorkflows).mockResolvedValue([]);
+
       const ctx: HookContext = {
         prompt: '/workflow-status',
         sessionId: 'test-session',
@@ -270,25 +284,25 @@ describe('Workflow Status Hook', () => {
       };
 
       // Should use process.cwd() as fallback
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
     });
 
-    it('handles empty prompt gracefully', () => {
+    it('handles empty prompt gracefully', async () => {
       const ctx: HookContext = {
         prompt: '',
         directory: '/test/project',
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeUndefined();
     });
 
-    it('handles generateWorkflowReport errors gracefully', () => {
+    it('handles generateWorkflowReport errors gracefully', async () => {
       const mockManifest: ManifestSchema = {
         schema_version: '2.0.0',
         workflow_id: 'test-workflow',
@@ -311,6 +325,10 @@ describe('Workflow Status Hook', () => {
         risk_tier: null,
       };
 
+      const mockCheckpoint = { status: 'in_progress', workflow_id: 'test-workflow' };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['test-workflow']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
       vi.mocked(loadManifest).mockReturnValue(mockManifest);
       vi.mocked(loadTrustState).mockReturnValue({ current_level: 0, total_transitions: 0, rejection_count: 0, rejection_rate: 0, incident_count: 0, last_level_change: null, level_history: [] });
       vi.mocked(generateWorkflowReport).mockImplementation(() => {
@@ -325,7 +343,7 @@ describe('Workflow Status Hook', () => {
         sessionId: 'test-session',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(consoleSpy).toHaveBeenCalled();
@@ -343,22 +361,24 @@ describe('Workflow Status Hook', () => {
       statusHook = hooks.find(h => h.name === 'workflowStatusReporter');
     });
 
-    it('extracts prompt from ctx.prompt', () => {
+    it('extracts prompt from ctx.prompt', async () => {
       vi.mocked(loadManifest).mockReturnValue(null);
+      vi.mocked(listWorkflows).mockResolvedValue([]);
 
       const ctx: HookContext = {
         prompt: '/workflow-status',
         directory: '/test/project',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
-      expect(loadManifest).toHaveBeenCalled();
+      expect(loadManifest).not.toHaveBeenCalled(); // loadManifest not called when no workflows exist
     });
 
-    it('extracts prompt from ctx.parts', () => {
+    it('extracts prompt from ctx.parts', async () => {
       vi.mocked(loadManifest).mockReturnValue(null);
+      vi.mocked(listWorkflows).mockResolvedValue([]);
 
       const ctx: HookContext = {
         parts: [
@@ -367,19 +387,19 @@ describe('Workflow Status Hook', () => {
         directory: '/test/project',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
-      expect(loadManifest).toHaveBeenCalled();
+      expect(loadManifest).not.toHaveBeenCalled(); // loadManifest not called when no workflows exist
     });
 
-    it('handles empty parts array', () => {
+    it('handles empty parts array', async () => {
       const ctx: HookContext = {
         parts: [],
         directory: '/test/project',
       };
 
-      const result = statusHook.handler(ctx);
+      const result = await statusHook.handler(ctx);
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeUndefined();

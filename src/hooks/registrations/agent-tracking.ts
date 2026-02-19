@@ -245,17 +245,33 @@ export function registerAgentTrackingHook(): void {
 
           // Set executedBy on the BOLT manifest artifact
           try {
-            const manifestPath = path.join(ctx.directory, 'aidlc-docs', 'manifest.json');
-            const manifest = loadManifest(manifestPath);
-            if (manifest) {
-              const boltArtifact = manifest.artifacts.find((a) => a.id === boltMetadata.boltId);
-              if (boltArtifact) {
-                boltArtifact.executedBy = subagentType;
-                saveManifest(manifestPath, manifest);
-                debugLog('agentTracking', 'Set executedBy on BOLT artifact', {
-                  boltId: boltMetadata.boltId,
-                  executedBy: subagentType,
-                });
+            // Find active workflow
+            const workflows = await listWorkflows(ctx.directory);
+            let activeWorkflowId: string | null = null;
+
+            for (const wfId of workflows) {
+              const cp = await loadCheckpoint(ctx.directory, wfId);
+              if (cp && cp.status !== 'complete' && cp.status !== 'archived' && cp.status !== 'deferred') {
+                activeWorkflowId = wfId;
+                break;
+              }
+            }
+
+            if (!activeWorkflowId) {
+              debugLog('agentTracking', 'No active workflow found for manifest update');
+            } else {
+              const manifestPath = path.join(ctx.directory, 'aidlc-docs', activeWorkflowId, 'manifest.json');
+              const manifest = loadManifest(manifestPath);
+              if (manifest) {
+                const boltArtifact = manifest.artifacts.find((a) => a.id === boltMetadata.boltId);
+                if (boltArtifact) {
+                  boltArtifact.executedBy = subagentType;
+                  saveManifest(manifestPath, manifest);
+                  debugLog('agentTracking', 'Set executedBy on BOLT artifact', {
+                    boltId: boltMetadata.boltId,
+                    executedBy: subagentType,
+                  });
+                }
               }
             }
           } catch (error) {

@@ -325,7 +325,7 @@ export async function executeDiscoveryPhase(
 
   try {
     // Ensure discovery directory exists
-    await ensureDiscoveryDir(projectPath);
+    await ensureDiscoveryDir(projectPath, workflowId);
 
     // Update manifest to mark discovery as in_progress
     const now = new Date().toISOString();

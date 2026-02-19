@@ -302,20 +302,28 @@ export function registerPlanLifecycleHooks(): void {
 
         const directory = ctx.directory;
 
-        // Load manifest
-        const manifestPath = path.join(directory, 'aidlc-docs', 'manifest.json');
-        const manifest = loadManifest(manifestPath);
-        if (!manifest) {
+        // Find active workflow
+        const workflowIds = await listWorkflows(directory);
+        let activeWorkflowId: string | null = null;
+        let checkpoint = null;
+
+        for (const wfId of workflowIds) {
+          const cp = await loadCheckpoint(directory, wfId);
+          if (cp && cp.status !== 'complete' && cp.status !== 'archived' && cp.status !== 'deferred') {
+            activeWorkflowId = wfId;
+            checkpoint = cp;
+            break;
+          }
+        }
+
+        if (!activeWorkflowId || !checkpoint) {
           return { continue: true };
         }
 
-        // Load checkpoint
-        const workflowIds = await listWorkflows(directory);
-        if (workflowIds.length === 0) {
-          return { continue: true };
-        }
-        const checkpoint = await loadCheckpoint(directory, workflowIds[0]);
-        if (!checkpoint) {
+        // Load manifest
+        const manifestPath = path.join(directory, 'aidlc-docs', activeWorkflowId, 'manifest.json');
+        const manifest = loadManifest(manifestPath);
+        if (!manifest) {
           return { continue: true };
         }
 

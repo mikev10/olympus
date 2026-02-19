@@ -91,8 +91,14 @@ export function registerUserPromptSubmitHooks(): void {
           // Start the workflow (creates checkpoint and initializes)
           await engine.start(featureName);
 
-          // Load the checkpoint to get the initial state
-          const workflowId = featureName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+          // Load the checkpoint to get the initial state (use same slugify as engine.ts)
+          const workflowId = featureName
+            .toLowerCase()
+            .replace(/\.[a-z]{1,4}$/, '')
+            .replace(/[_\s]+/g, '-')
+            .replace(/[^a-z0-9-]/g, '')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '');
           const checkpoint = await loadCheckpoint(ctx.directory, workflowId);
 
           if (!checkpoint) {

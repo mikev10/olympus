@@ -100,7 +100,7 @@ function createBoltArtifact(
     type: 'bolt-spec',
     phase: 'construction',
     stage: 'bolt',
-    path: artifactPath ?? `aidlc-docs/construction/${id}.md`,
+    path: artifactPath ?? `aidlc-docs/test-wf-001/construction/${id}.md`,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     validation_passed: null,
@@ -121,7 +121,7 @@ function createUnitArtifact(
     type: 'unit-spec',
     phase: 'construction',
     stage: 'unit',
-    path: `aidlc-docs/construction/${id}/spec.md`,
+    path: `aidlc-docs/test-wf-001/construction/${id}/spec.md`,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     validation_passed: null,
@@ -170,7 +170,8 @@ function setupWorkflowFiles(
   checkpoint: WorkflowCheckpointV3,
   trustState?: object
 ): void {
-  const aidlcDir = path.join(testDir, 'aidlc-docs');
+  const workflowId = checkpoint.workflow_id;
+  const aidlcDir = path.join(testDir, 'aidlc-docs', workflowId);
   const olympusDir = path.join(testDir, '.olympus');
 
   fs.ensureDirSync(aidlcDir);
@@ -233,7 +234,8 @@ describe('Workflow Bridge', () => {
     });
 
     it('returns null when manifest exists but no checkpoint', async () => {
-      const aidlcDir = path.join(testDir, 'aidlc-docs');
+      const workflowId = 'test-wf-001';
+      const aidlcDir = path.join(testDir, 'aidlc-docs', workflowId);
       fs.ensureDirSync(aidlcDir);
       fs.writeFileSync(
         path.join(aidlcDir, 'manifest.json'),
@@ -269,7 +271,8 @@ describe('Workflow Bridge', () => {
     it('returns default values when trust state file is missing', async () => {
       const manifest = createTestManifest();
       const checkpoint = createTestCheckpoint();
-      const aidlcDir = path.join(testDir, 'aidlc-docs');
+      const workflowId = checkpoint.workflow_id;
+      const aidlcDir = path.join(testDir, 'aidlc-docs', workflowId);
       fs.ensureDirSync(aidlcDir);
       fs.writeFileSync(
         path.join(aidlcDir, 'manifest.json'),
@@ -470,7 +473,7 @@ describe('Workflow Bridge', () => {
 
       // Verify manifest was updated
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
       const bolt = updatedManifest.artifacts.find((a) => a.id === 'BOLT-001');
       expect(bolt!.contract_status).toBe('fulfilled');
@@ -479,7 +482,7 @@ describe('Workflow Bridge', () => {
 
       // Verify checkpoint was updated
       const updatedCheckpoint = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'checkpoint.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
       expect(updatedCheckpoint.active_bolt_id).toBe('BOLT-002');
     });
@@ -494,7 +497,7 @@ describe('Workflow Bridge', () => {
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', createGateResult());
 
       const updatedCheckpoint = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'checkpoint.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
       expect(updatedCheckpoint.active_bolt_id).toBeUndefined();
     });
@@ -509,7 +512,7 @@ describe('Workflow Bridge', () => {
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', createGateResult());
 
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
       const bolt = updatedManifest.artifacts.find((a) => a.id === 'BOLT-001');
       expect(bolt!.contract_status).toBe('fulfilled');
@@ -549,7 +552,7 @@ describe('Workflow Bridge', () => {
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', gate);
 
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
       const bolt = updatedManifest.artifacts.find((a) => a.id === 'BOLT-001');
       expect(bolt!.executedBy).toBe('human');
@@ -575,13 +578,13 @@ describe('Workflow Bridge', () => {
       await markUnitComplete(testDir, 'test-wf-001', 'UNIT-001');
 
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
       const unit = updatedManifest.artifacts.find((a) => a.id === 'UNIT-001');
       expect(unit!.contract_status).toBe('fulfilled');
 
       const updatedCheckpoint = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'checkpoint.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
       expect(updatedCheckpoint.active_unit_id).toBe('UNIT-002');
     });
@@ -596,7 +599,7 @@ describe('Workflow Bridge', () => {
       await markUnitComplete(testDir, 'test-wf-001', 'UNIT-001');
 
       const updatedCheckpoint = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'checkpoint.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
       expect(updatedCheckpoint.active_unit_id).toBeUndefined();
     });
@@ -627,7 +630,7 @@ describe('Workflow Bridge', () => {
       await markUnitComplete(testDir, 'test-wf-001', 'UNIT-001');
 
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
       const unit = updatedManifest.artifacts.find((a) => a.id === 'UNIT-001');
       expect(unit!.contract_status).toBe('fulfilled');
@@ -792,7 +795,7 @@ describe('Workflow Bridge', () => {
       setupWorkflowFiles(testDir, manifest, checkpoint);
 
       // Create spec file with heading
-      const specDir = path.join(testDir, 'aidlc-docs', 'construction');
+      const specDir = path.join(testDir, 'aidlc-docs', 'test-wf-001', 'construction');
       fs.ensureDirSync(specDir);
       fs.writeFileSync(
         path.join(specDir, 'BOLT-001.md'),
@@ -851,7 +854,7 @@ describe('Workflow Bridge', () => {
           createBoltArtifact(
             'BOLT-001',
             'active',
-            'aidlc-docs/construction/UNIT-001/ui-component.md'
+            'aidlc-docs/test-wf-001/construction/UNIT-001/ui-component.md'
           ),
         ],
       });
@@ -874,7 +877,7 @@ describe('Workflow Bridge', () => {
       setupWorkflowFiles(testDir, manifest, checkpoint);
 
       // Create unit spec file
-      const unitDir = path.join(testDir, 'aidlc-docs', 'construction', 'UNIT-001');
+      const unitDir = path.join(testDir, 'aidlc-docs', 'test-wf-001', 'construction', 'UNIT-001');
       fs.ensureDirSync(unitDir);
       fs.writeFileSync(path.join(unitDir, 'spec.md'), '# User Auth Module\n', 'utf-8');
 
@@ -921,11 +924,11 @@ describe('Workflow Bridge', () => {
 
       // Change execution mode to 'ascent' by updating checkpoint
       const currentCheckpoint = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'checkpoint.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
       currentCheckpoint.execution_mode = 'ascent';
       fs.writeFileSync(
-        path.join(testDir, 'aidlc-docs', 'checkpoint.json'),
+        path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'),
         JSON.stringify(currentCheckpoint, null, 2),
         'utf-8'
       );
@@ -933,7 +936,7 @@ describe('Workflow Bridge', () => {
 
       // Reload manifest to check pending bolts
       const updatedManifest = JSON.parse(
-        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'manifest.json'), 'utf-8')
+        fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'manifest.json'), 'utf-8')
       ) as ManifestSchema;
 
       // Verify getPendingBolts returns the remaining 3

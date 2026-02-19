@@ -22,7 +22,7 @@ import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
 import { validateIdea, validateIntent, clearFileCache } from './validation.js';
 import { runDualValidation } from './alignment.js';
-import { ForgeExecutor } from './forge/executor.js';
+import { ConstructionExecutor } from './construction/executor.js';
 import { executeDiscoveryPhase } from './discovery.js';
 import { captureWorkflowDiscovery } from './learning-bridge.js';
 import type { WorkflowEvent, WorkflowContext } from './learning-bridge.js';
@@ -83,8 +83,14 @@ export class WorkflowEngine {
   constructor(projectPath: string, featureName: string) {
     this.projectPath = projectPath;
     this.featureName = featureName;
-    // Sanitize feature name to create workflow ID
-    this.workflowId = featureName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    // Sanitize feature name to create workflow ID (slugify)
+    this.workflowId = featureName
+      .toLowerCase()
+      .replace(/\.[a-z]{1,4}$/, '')   // Strip file extensions (.md, .txt, .json, etc.)
+      .replace(/[_\s]+/g, '-')         // Convert underscores and spaces to hyphens
+      .replace(/[^a-z0-9-]/g, '')      // Remove remaining non-alphanumeric chars
+      .replace(/-+/g, '-')             // Collapse multiple hyphens
+      .replace(/^-|-$/g, '');           // Trim leading/trailing hyphens
   }
 
   /**
@@ -138,7 +144,7 @@ export class WorkflowEngine {
           bypass_reason: null,
         },
       },
-      manifest_path: `aidlc-docs/manifest.json`,
+      manifest_path: `aidlc-docs/${this.workflowId}/manifest.json`,
       trust_state_path: `.olympus/trust-state.json`,
       resume_context: {
         initial_prompt: initialPrompt,
@@ -167,40 +173,9 @@ export class WorkflowEngine {
       );
     }
 
-    // Setup interrupt handler before executing stages
-    this.setupInterruptHandler();
-
-    try {
-      // Execute the IDEA stage
-      await this.executeStage('idea');
-    } catch (error) {
-      const err = error as Error;
-      console.error(`[WorkflowEngine] Failed to execute IDEA stage: ${err.message}`);
-
-      // Try to save checkpoint as paused so workflow can be resumed
-      try {
-        const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
-        if (updatedCheckpoint) {
-          updatedCheckpoint.status = 'paused';
-          updatedCheckpoint.resume_context = {
-            ...updatedCheckpoint.resume_context,
-            error_message: err.message,
-            failed_stage: 'idea',
-          };
-          await saveCheckpoint(this.projectPath, updatedCheckpoint);
-          console.log('[WorkflowEngine] Workflow saved as paused. Resume with `/plan continue`');
-        }
-      } catch (saveError) {
-        console.warn('[WorkflowEngine] Failed to save error checkpoint:', (saveError as Error).message);
-      }
-
-      throw new Error(
-        `Failed to execute IDEA stage: ${err.message}`
-      );
-    } finally {
-      // Clean up interrupt handler after workflow completes or errors
-      this.cleanupInterruptHandler();
-    }
+    // Note: start() only initializes checkpoint and directory structure.
+    // Stage execution (IDEA interview, artifact generation) is driven by the
+    // /plan skill template interactively, not by the engine programmatically.
   }
 
   /**
@@ -326,7 +301,7 @@ export class WorkflowEngine {
     }
 
     // Return the checkpoint file path
-    return `aidlc-docs/checkpoint.json`;
+    return `aidlc-docs/${this.workflowId}/checkpoint.json`;
   }
 
   /**
@@ -418,7 +393,7 @@ export class WorkflowEngine {
    *
    * This is a NEW method that coexists with executeStage().
    * - executePhase('inception') delegates to existing executeStage() pipeline
-   * - executePhase('construction') instantiates ForgeExecutor
+   * - executePhase('construction') instantiates ConstructionExecutor
    * - executePhase('operations') generates template-based artifacts (v1 minimal)
    *
    * @param phase - The phase to execute ('discovery' | 'inception' | 'construction' | 'operations')
@@ -426,7 +401,7 @@ export class WorkflowEngine {
   async executePhase(phase: WorkflowPhase): Promise<void> {
     switch (phase) {
       case 'discovery': {
-        const manifestPath = `${this.projectPath}/aidlc-docs/manifest.json`;
+        const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
         const result = await executeDiscoveryPhase({
           projectPath: this.projectPath,
           workflowId: this.workflowId,
@@ -435,7 +410,7 @@ export class WorkflowEngine {
         });
         if (result.gateRequired) {
           console.log(`[WorkflowEngine] Discovery phase: ${result.artifactsGenerated.length} artifacts generated (${result.sourceFileCount} source files detected)`);
-          console.log(`[WorkflowEngine] Discovery Gate: Review findings in aidlc-docs/discovery/ before proceeding to Inception`);
+          console.log(`[WorkflowEngine] Discovery Gate: Review findings in aidlc-docs/${this.workflowId}/discovery/ before proceeding to Inception`);
         }
 
         // CCR-3: Capture discovery phase completion
@@ -521,7 +496,7 @@ export class WorkflowEngine {
           // Intent may not exist, continue without it
         }
 
-        const executor = new ForgeExecutor(this.projectPath, this.workflowId);
+        const executor = new ConstructionExecutor(this.projectPath, this.workflowId);
         const result = await executor.execute(intentContent);
 
         if (!result.passed) {
@@ -554,10 +529,10 @@ export class WorkflowEngine {
 
       case 'operations': {
         // Operations v2: depth-aware artifact generation with checkpoint persistence
-        const { generateOperationsArtifacts } = await import('./summit/templates.js');
+        const { generateOperationsArtifacts } = await import('./operations/templates.js');
         const { loadManifest, registerArtifact, updatePhaseStatus } = await import('./manifest.js');
 
-        const manifestPath = `${this.projectPath}/aidlc-docs/manifest.json`;
+        const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
         const manifest = loadManifest(manifestPath);
 
         // Read intent if available
@@ -595,7 +570,7 @@ export class WorkflowEngine {
 
           // Register each generated artifact in manifest
           for (const artifactName of result.artifactsGenerated) {
-            const artifactPath = `aidlc-docs/operations/${artifactName}`;
+            const artifactPath = `aidlc-docs/${this.workflowId}/operations/${artifactName}`;
             const artifactType = artifactName.replace(/\.(md|json)$/, '').toUpperCase().replace(/-/g, '_');
             registerArtifact(manifestPath, {
               id: `OPS-${artifactType}`,

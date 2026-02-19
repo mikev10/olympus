@@ -8,13 +8,13 @@ import {
   validateDesign,
   writeDesignArtifacts,
   loadDesignArtifacts,
-} from '../../../features/workflow-engine/forge/design.js';
+} from '../../../features/workflow-engine/construction/design.js';
 import type {
   InterfaceContract,
   DataFlowDiagram,
   ComponentDesign,
   DesignArtifacts,
-} from '../../../features/workflow-engine/forge/design.js';
+} from '../../../features/workflow-engine/construction/design.js';
 import type { HierarchicalNode } from '../../../features/workflow-engine/phase-types.js';
 
 describe('design.ts', () => {
@@ -624,7 +624,7 @@ Output: token: string
 
       await writeDesignArtifacts(testDir, 'test-workflow', design);
 
-      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'test-workflow', 'construction', 'design');
       const exists = await fs.pathExists(designDir);
 
       expect(exists).toBe(true);
@@ -652,6 +652,7 @@ Output: token: string
       const interfacesPath = path.join(
         testDir,
         'aidlc-docs',
+        'test-workflow',
         'construction',
         'design',
         'interfaces.json'
@@ -681,6 +682,7 @@ Output: token: string
       const dataFlowPath = path.join(
         testDir,
         'aidlc-docs',
+        'test-workflow',
         'construction',
         'design',
         'data-flow.json'
@@ -712,6 +714,7 @@ Output: token: string
       const componentsPath = path.join(
         testDir,
         'aidlc-docs',
+        'test-workflow',
         'construction',
         'design',
         'components.json'
@@ -733,6 +736,7 @@ Output: token: string
       const validationPath = path.join(
         testDir,
         'aidlc-docs',
+        'test-workflow',
         'construction',
         'design',
         'validation.json'
@@ -788,7 +792,7 @@ Output: token: string
     });
 
     it('should return null if only some files exist', async () => {
-      const designDir = path.join(testDir, 'aidlc-docs', 'construction', 'design');
+      const designDir = path.join(testDir, 'aidlc-docs', 'incomplete', 'construction', 'design');
       await fs.ensureDir(designDir);
 
       // Write only interfaces.json, not the others

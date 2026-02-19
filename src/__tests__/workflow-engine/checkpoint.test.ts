@@ -75,15 +75,15 @@ describe('Checkpoint Persistence', () => {
             bypass_reason: null,
           },
         },
-        manifest_path: 'aidlc-docs/manifest.json',
-        trust_state_path: 'aidlc-docs/trust.json',
+        manifest_path: 'aidlc-docs/test-workflow/manifest.json',
+        trust_state_path: 'aidlc-docs/test-workflow/trust.json',
       };
 
       await saveCheckpoint(tmpDir, checkpoint);
 
       const expectedPath = join(
         tmpDir,
-        'aidlc-docs/checkpoint.json'
+        'aidlc-docs/test-workflow/checkpoint.json'
       );
       const exists = await fs.pathExists(expectedPath);
       expect(exists).toBe(true);
@@ -133,12 +133,12 @@ describe('Checkpoint Persistence', () => {
             bypass_reason: null,
           },
         },
-        manifest_path: 'aidlc-docs/manifest.json',
-        trust_state_path: 'aidlc-docs/trust.json',
+        manifest_path: 'aidlc-docs/new-workflow/manifest.json',
+        trust_state_path: 'aidlc-docs/new-workflow/trust.json',
       };
 
       // Verify directory doesn't exist yet
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/new-workflow');
       const existsBefore = await fs.pathExists(workflowDir);
       expect(existsBefore).toBe(false);
 
@@ -253,7 +253,7 @@ describe('Checkpoint Persistence', () => {
 
       const checkpointPath = join(
         tmpDir,
-        'aidlc-docs/checkpoint.json'
+        'aidlc-docs/format-test/checkpoint.json'
       );
       const fileContent = await fs.readFile(checkpointPath, 'utf-8');
 
@@ -298,8 +298,8 @@ describe('Checkpoint Persistence', () => {
             bypass_reason: null,
           },
         },
-        manifest_path: 'aidlc-docs/manifest.json',
-        trust_state_path: 'aidlc-docs/trust.json',
+        manifest_path: 'aidlc-docs/v3-fields-test/manifest.json',
+        trust_state_path: 'aidlc-docs/v3-fields-test/trust.json',
         depth_score: 75,
         risk_tier: 2,
         active_unit_id: 'UNIT-001',
@@ -308,7 +308,7 @@ describe('Checkpoint Persistence', () => {
         interview_progress: {
           stage: 'intent',
           questions_asked: 5,
-          draft_artifact_path: 'aidlc-docs/intent-draft.md',
+          draft_artifact_path: 'aidlc-docs/v3-fields-test/intent-draft.md',
         },
       };
 
@@ -324,7 +324,7 @@ describe('Checkpoint Persistence', () => {
       expect(loaded?.interview_progress).toEqual({
         stage: 'intent',
         questions_asked: 5,
-        draft_artifact_path: 'aidlc-docs/intent-draft.md',
+        draft_artifact_path: 'aidlc-docs/v3-fields-test/intent-draft.md',
       });
     });
   });
@@ -374,8 +374,8 @@ describe('Checkpoint Persistence', () => {
             bypass_reason: null,
           },
         },
-        manifest_path: 'aidlc-docs/manifest.json',
-        trust_state_path: 'aidlc-docs/trust.json',
+        manifest_path: 'aidlc-docs/load-test/manifest.json',
+        trust_state_path: 'aidlc-docs/load-test/trust.json',
       };
 
       await saveCheckpoint(tmpDir, checkpoint);
@@ -388,8 +388,8 @@ describe('Checkpoint Persistence', () => {
       expect(loaded?.current_phase).toBe('inception');
       expect(loaded?.current_stage).toBe('intent');
       expect(loaded?.status).toBe('in_progress');
-      expect(loaded?.manifest_path).toBe('aidlc-docs/manifest.json');
-      expect(loaded?.trust_state_path).toBe('aidlc-docs/trust.json');
+      expect(loaded?.manifest_path).toBe('aidlc-docs/load-test/manifest.json');
+      expect(loaded?.trust_state_path).toBe('aidlc-docs/load-test/trust.json');
     });
 
     it('returns null for missing checkpoint', async () => {
@@ -398,7 +398,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('handles corrupt JSON gracefully', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/corrupt-test');
       await fs.ensureDir(workflowDir);
 
       const checkpointPath = join(workflowDir, 'checkpoint.json');
@@ -409,7 +409,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('returns null if schema_version is missing', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/no-version');
       await fs.ensureDir(workflowDir);
 
       const checkpointPath = join(workflowDir, 'checkpoint.json');
@@ -424,7 +424,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('returns null for legacy v1 checkpoints', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/legacy-v1');
       await fs.ensureDir(workflowDir);
 
       const checkpointPath = join(workflowDir, 'checkpoint.json');
@@ -443,7 +443,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('returns null for legacy v2 checkpoints', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/legacy-v2');
       await fs.ensureDir(workflowDir);
 
       const checkpointPath = join(workflowDir, 'checkpoint.json');
@@ -497,7 +497,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('returns empty array if checkpoint.json does not exist', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/empty-workflow');
       await fs.ensureDir(workflowDir);
 
       const workflows = await listWorkflows(tmpDir);
@@ -522,13 +522,13 @@ describe('Checkpoint Persistence', () => {
           construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
           operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
         },
-        manifest_path: 'aidlc-docs/manifest.json',
-        trust_state_path: 'aidlc-docs/trust.json',
+        manifest_path: 'aidlc-docs/delete-test/manifest.json',
+        trust_state_path: 'aidlc-docs/delete-test/trust.json',
       };
 
       await saveCheckpoint(tmpDir, checkpoint);
 
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/delete-test');
       const existsBefore = await fs.pathExists(workflowDir);
       expect(existsBefore).toBe(true);
 
@@ -544,7 +544,7 @@ describe('Checkpoint Persistence', () => {
     });
 
     it('removes entire workflow directory including artifacts', async () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs/full-delete-test');
       await fs.ensureDir(workflowDir);
 
       // Create checkpoint and additional files

@@ -13,8 +13,8 @@ import type { WorkflowCheckpoint, WorkflowStage } from './types.js';
 const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
   idea: null,      // IDEA stage handled by /plan entry point
   intent: null,    // INTENT stage handled by /plan entry point
-  unit: null,      // UNIT decomposition handled by ForgeExecutor
-  bolt: null,      // BOLT execution handled by ForgeExecutor
+  unit: null,      // UNIT decomposition handled by ConstructionExecutor
+  bolt: null,      // BOLT execution handled by ConstructionExecutor
   complete: null,  // No agent needed for complete stage
 };
 

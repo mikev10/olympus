@@ -50,8 +50,12 @@ export interface RetroResult {
 /**
  * Gathers all retro-relevant data from workflow artifacts.
  */
-export function gatherRetroData(projectPath: string): RetroData {
-  const manifestPath = join(projectPath, 'aidlc-docs', 'manifest.json');
+export function gatherRetroData(projectPath: string, workflowId?: string): RetroData {
+  // If workflowId not provided, scan for first available workflow
+  const resolvedWorkflowId = workflowId || '';
+  const manifestPath = resolvedWorkflowId
+    ? join(projectPath, 'aidlc-docs', resolvedWorkflowId, 'manifest.json')
+    : join(projectPath, 'aidlc-docs', 'manifest.json');
   const manifest = loadManifest(manifestPath);
   const trustState = loadTrustState(projectPath);
 
@@ -117,7 +121,9 @@ export function gatherRetroData(projectPath: string): RetroData {
 
   // Count CI failures from validation reports
   let ciFailureCount = 0;
-  const constructionPath = join(projectPath, 'aidlc-docs', 'construction');
+  const constructionPath = resolvedWorkflowId
+    ? join(projectPath, 'aidlc-docs', resolvedWorkflowId, 'construction')
+    : join(projectPath, 'aidlc-docs', 'construction');
 
   if (existsSync(constructionPath)) {
     const unitDirs = readdirSync(constructionPath, { withFileTypes: true })
@@ -335,8 +341,10 @@ export function persistRetroDiscoveries(
 /**
  * Main entry point for retro analysis.
  */
-export function runRetro(projectPath: string): RetroResult {
-  const manifestPath = join(projectPath, 'aidlc-docs', 'manifest.json');
+export function runRetro(projectPath: string, workflowId?: string): RetroResult {
+  const manifestPath = workflowId
+    ? join(projectPath, 'aidlc-docs', workflowId, 'manifest.json')
+    : join(projectPath, 'aidlc-docs', 'manifest.json');
   const manifest = loadManifest(manifestPath);
 
   if (!manifest) {
@@ -349,7 +357,7 @@ export function runRetro(projectPath: string): RetroResult {
     };
   }
 
-  const data = gatherRetroData(projectPath);
+  const data = gatherRetroData(projectPath, workflowId);
   const patterns = analyzeRetroPatterns(data);
   const suggestionsPath = generateRetroSuggestions(data, patterns, projectPath);
 

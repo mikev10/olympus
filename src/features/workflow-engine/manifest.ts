@@ -68,7 +68,7 @@ export function createManifest(
   featureName: string,
   projectPath: string
 ): string {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
   const manifestPath = path.join(workflowDir, 'manifest.json');
 
   try {
@@ -414,7 +414,7 @@ export function recoverManifest(
   workflowId: string
 ): ManifestSchema | null {
   try {
-    const workflowDir = path.join(projectPath, 'aidlc-docs');
+    const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
     if (!fs.existsSync(workflowDir)) {
       return null;
     }
@@ -876,7 +876,7 @@ export async function revalidateStaleArtifacts(
 ): Promise<RevalidationResult> {
   const result: RevalidationResult = { restored: [], stillStale: [], errors: [] };
 
-  const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+  const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   const manifest = loadManifest(manifestPath);
   if (!manifest) {
     result.errors.push('Manifest not found');

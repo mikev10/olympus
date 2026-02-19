@@ -209,7 +209,7 @@ export async function dispatchBolt(
   boltId: string
 ): Promise<BoltDispatchResult> {
   // 1. Derive parent UNIT from boltId (e.g., BOLT-001 -> UNIT-001, BOLT-003 -> need to search)
-  const docsDir = join(projectPath, 'aidlc-docs');
+  const docsDir = join(projectPath, 'aidlc-docs', workflowId);
 
   // Find the BOLT file by searching construction subdirectories
   const constructionDir = join(docsDir, 'construction');

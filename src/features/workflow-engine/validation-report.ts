@@ -154,13 +154,14 @@ export function readValidationReport(reportPath: string): string | null {
  *
  * @example
  * ```typescript
- * const reportPath = getValidationReportPath('/project/root', 'UNIT-001');
- * // Returns: '/project/root/aidlc-docs/construction/UNIT-001/validation-report.md'
+ * const reportPath = getValidationReportPath('/project/root', 'my-workflow', 'UNIT-001');
+ * // Returns: '/project/root/aidlc-docs/my-workflow/construction/UNIT-001/validation-report.md'
  * ```
  */
 export function getValidationReportPath(
   projectPath: string,
+  workflowId: string,
   unitId: string
 ): string {
-  return join(projectPath, 'aidlc-docs', 'construction', unitId, 'validation-report.md');
+  return join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'validation-report.md');
 }

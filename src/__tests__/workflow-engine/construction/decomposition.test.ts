@@ -29,7 +29,7 @@ import {
   getExecutableOrder,
   type UnitSpec,
   type BoltSpec,
-} from '../../../features/workflow-engine/forge/decomposition.js';
+} from '../../../features/workflow-engine/construction/decomposition.js';
 import type { HierarchicalNode } from '../../../features/workflow-engine/phase-types.js';
 
 describe('parseIntentsFromDisk', () => {

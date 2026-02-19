@@ -581,7 +581,7 @@ describe('discovery', () => {
         manifestPath,
       });
 
-      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'checkpoint.json');
+      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'test-wf', 'checkpoint.json');
       const checkpointContent = await fs.readJson(checkpointPath);
 
       expect(checkpointContent.current_phase).toBe('discovery');
@@ -606,7 +606,7 @@ describe('discovery', () => {
       const manifestPath = createManifest('test-wf', 'Test Feature', projectPath);
       await createTestCheckpoint(manifestPath);
 
-      const discoveryPath = path.join(projectPath, 'aidlc-docs', 'discovery');
+      const discoveryPath = path.join(projectPath, 'aidlc-docs', 'test-wf', 'discovery');
       const existsBefore = await fs.pathExists(discoveryPath);
       expect(existsBefore).toBe(false);
 
@@ -660,7 +660,7 @@ describe('discovery', () => {
         manifestPath,
       });
 
-      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'checkpoint.json');
+      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'test-wf', 'checkpoint.json');
       const checkpointContent = await fs.readJson(checkpointPath);
       expect(checkpointContent.current_phase).toBe('inception');
       expect(checkpointContent.phases.discovery.status).toBe('complete');
@@ -731,7 +731,7 @@ describe('discovery', () => {
         manifestPath,
       });
 
-      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'checkpoint.json');
+      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'test-wf', 'checkpoint.json');
       const checkpointContent = await fs.readJson(checkpointPath);
       expect(checkpointContent.current_phase).toBe('discovery');
       expect(checkpointContent.phases.discovery.status).toBe('paused');

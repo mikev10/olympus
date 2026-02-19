@@ -41,10 +41,11 @@ describe('Cascade Invalidation System', () => {
       expect(manifest).toBeTruthy();
 
       // Create artifacts
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
-      const unitPath = path.join(TEST_DIR, 'aidlc-docs', 'construction', 'UNIT-001', 'spec.md');
-      const boltPath = path.join(TEST_DIR, 'aidlc-docs', 'construction', 'UNIT-001', 'BOLT-001.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
+      const unitPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'spec.md');
+      const boltPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'BOLT-001.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
       await fs.ensureDir(path.dirname(unitPath));
@@ -145,8 +146,9 @@ describe('Cascade Invalidation System', () => {
       // Setup: Create manifest with IDEA -> INTENT chain
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
       await fs.writeFile(ideaPath, '# IDEA\nSolve problem X', 'utf-8');
@@ -199,8 +201,9 @@ describe('Cascade Invalidation System', () => {
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
       await fs.writeFile(ideaPath, '# IDEA\nSolve problem X', 'utf-8');
@@ -260,8 +263,9 @@ describe('Cascade Invalidation System', () => {
       // which is tested separately in alignment.test.ts
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
 
@@ -318,8 +322,9 @@ describe('Cascade Invalidation System', () => {
       // Setup: Create manifest with IDEA -> INTENT (intentionally misaligned)
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
 
@@ -394,7 +399,8 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       await fs.ensureDir(path.dirname(intentPath));
       await fs.writeFile(intentPath, '# INTENT\nContent', 'utf-8');
 
@@ -425,8 +431,9 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       // Register artifacts but don't create files
       registerArtifact(manifestPath, {
@@ -472,8 +479,9 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const workflowId = 'test-wf';
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.ensureDir(path.dirname(ideaPath));
 
@@ -546,14 +554,15 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', 'inception'));
+      const workflowId = 'test-wf';
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
       // Write IDEA and INTENT using writeArtifact
       await writeArtifact(TEST_DIR, 'test-wf', 'idea', '# IDEA\nOriginal content');
       await writeArtifact(TEST_DIR, 'test-wf', 'intent', '# INTENT\nOriginal content');
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       registerArtifact(manifestPath, {
         id: 'idea-001',
@@ -601,13 +610,14 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', 'inception'));
+      const workflowId = 'test-wf';
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
       // Act: Write new IDEA artifact
       await writeArtifact(TEST_DIR, 'test-wf', 'idea', '# IDEA\nNew content');
 
       // Register after write
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
       registerArtifact(manifestPath, {
         id: 'idea-001',
         type: '.md',
@@ -629,10 +639,11 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', 'inception'));
+      const workflowId = 'test-wf';
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.writeFile(ideaPath, '# IDEA\nOriginal', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nOriginal', 'utf-8');
@@ -688,10 +699,11 @@ This is a totally different feature about data visualization.`;
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', 'inception'));
+      const workflowId = 'test-wf';
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'idea.md');
-      const intentPath = path.join(TEST_DIR, 'aidlc-docs', 'inception', 'intent.md');
+      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.writeFile(ideaPath, '# IDEA\nOriginal', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nOriginal', 'utf-8');

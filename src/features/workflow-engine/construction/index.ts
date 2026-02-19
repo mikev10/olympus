@@ -14,11 +14,9 @@ export * from './design.js';
 // Construction executor (orchestrates decomposition + design)
 export {
   ConstructionExecutor,
-  ForgeExecutor,
   CONSTRUCTION_STAGE_AGENT_MAP,
-  FORGE_STAGE_AGENT_MAP,
 } from './executor.js';
-export type { ConstructionProgress, ConstructionOptions, ForgeProgress } from './executor.js';
+export type { ConstructionProgress, ConstructionOptions } from './executor.js';
 
-// Validation for forge artifacts
-export { validateUnits, validateDesignArtifacts, validateBolt, validateForgePhase, validateConstructionPhase } from './validation.js';
+// Validation for construction artifacts
+export { validateUnits, validateDesignArtifacts, validateBolt, validateConstructionPhase } from './validation.js';

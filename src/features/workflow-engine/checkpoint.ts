@@ -2,7 +2,7 @@
  * Checkpoint Persistence Module
  *
  * Handles saving, loading, and managing workflow checkpoints on disk.
- * Checkpoints are stored in aidlc-docs/checkpoint.json
+ * Checkpoints are stored in aidlc-docs/{workflowId}/checkpoint.json
  *
  * Performance optimizations:
  * - In-memory cache to avoid redundant disk reads
@@ -124,7 +124,7 @@ export async function saveCheckpoint(
   projectPath: string,
   checkpoint: WorkflowCheckpointV3
 ): Promise<void> {
-  const workflowDir = join(projectPath, WORKFLOW_DIR);
+  const workflowDir = join(projectPath, WORKFLOW_DIR, checkpoint.workflow_id);
   const checkpointPath = join(workflowDir, CHECKPOINT_FILENAME);
 
   try {
@@ -226,6 +226,7 @@ export async function loadCheckpoint(
   const checkpointPath = join(
     projectPath,
     WORKFLOW_DIR,
+    workflowId,
     CHECKPOINT_FILENAME
   );
 
@@ -301,60 +302,64 @@ export async function loadCheckpoint(
 /**
  * List all workflow IDs in the project.
  * Returns an empty array if workflow directory doesn't exist.
- * Since there's no longer a directory per workflow, this checks if aidlc-docs/checkpoint.json exists
- * and returns the workflow_id from it.
+ * Scans aidlc-docs/ subdirectories for checkpoint.json files and returns their workflow_ids.
  *
  * @param projectPath - Root path of the project
- * @returns Array of workflow IDs (single workflow or empty)
+ * @returns Array of workflow IDs
  */
 export async function listWorkflows(projectPath: string): Promise<string[]> {
-  const checkpointPath = join(projectPath, WORKFLOW_DIR, CHECKPOINT_FILENAME);
+  const baseDir = join(projectPath, WORKFLOW_DIR);
 
   try {
-    // Check if checkpoint exists
-    const exists = await fs.pathExists(checkpointPath);
-    if (!exists) {
-      return [];
+    const exists = await fs.pathExists(baseDir);
+    if (!exists) return [];
+
+    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+    const workflows: string[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const cpPath = join(baseDir, entry.name, CHECKPOINT_FILENAME);
+      if (await fs.pathExists(cpPath)) {
+        try {
+          const content = await fs.readFile(cpPath, 'utf-8');
+          const data = JSON.parse(content);
+          if (data.workflow_id) {
+            workflows.push(data.workflow_id);
+          }
+        } catch {
+          // Skip corrupt checkpoints
+        }
+      }
     }
 
-    // Read checkpoint and extract workflow_id
-    const content = await fs.readFile(checkpointPath, 'utf-8');
-    const checkpoint = JSON.parse(content);
-
-    if (checkpoint.workflow_id) {
-      return [checkpoint.workflow_id];
-    }
-
-    return [];
+    return workflows;
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
 
-    // Handle permission errors
     if (err.code === 'EACCES' || err.code === 'EPERM') {
-      console.warn(`[Checkpoint] Permission denied reading checkpoint in ${checkpointPath}`);
-      return [];
+      console.warn(`[Checkpoint] Permission denied reading ${baseDir}`);
+    } else {
+      console.warn(`[Checkpoint] Failed to list workflows: ${err.message}`);
     }
 
-    // Generic error
-    console.warn(`[Checkpoint] Failed to list workflows: ${err.message}`);
-    console.warn(`[Checkpoint] Path: ${checkpointPath}`);
     return [];
   }
 }
 
 /**
  * Delete a workflow and all its associated files.
- * Deletes the entire aidlc-docs/ directory.
+ * Deletes the workflow-specific directory aidlc-docs/{workflowId}/.
  * Idempotent - no error if workflow doesn't exist.
  *
  * @param projectPath - Root path of the project
- * @param workflowId - ID of the workflow to delete (kept for API compatibility)
+ * @param workflowId - ID of the workflow to delete
  */
 export async function deleteWorkflow(
   projectPath: string,
   workflowId: string
 ): Promise<void> {
-  const workflowDir = join(projectPath, WORKFLOW_DIR);
+  const workflowDir = join(projectPath, WORKFLOW_DIR, workflowId);
 
   try {
     await fs.remove(workflowDir);
@@ -377,5 +382,43 @@ export async function deleteWorkflow(
     // Log unexpected errors but don't throw (best effort deletion)
     console.warn(`[Checkpoint] Failed to delete workflow ${workflowId}: ${err.message}`);
     console.warn(`[Checkpoint] Path: ${workflowDir}`);
+  }
+}
+
+/**
+ * Find the currently active workflow in the project.
+ * Scans aidlc-docs/ subdirectories for a non-completed, non-archived, non-deferred checkpoint.
+ * Returns null if no active workflow found.
+ *
+ * @param projectPath - Root path of the project
+ * @returns Object with workflowId and checkpoint, or null if not found
+ */
+export async function findActiveWorkflow(projectPath: string): Promise<{ workflowId: string; checkpoint: WorkflowCheckpointV3 } | null> {
+  const baseDir = join(projectPath, WORKFLOW_DIR);
+  try {
+    const exists = await fs.pathExists(baseDir);
+    if (!exists) return null;
+
+    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const cpPath = join(baseDir, entry.name, CHECKPOINT_FILENAME);
+      if (!(await fs.pathExists(cpPath))) continue;
+      try {
+        const content = await fs.readFile(cpPath, 'utf-8');
+        const data = JSON.parse(content);
+        if (data.schema_version === '3.0.0' &&
+            data.status !== 'complete' &&
+            data.status !== 'archived' &&
+            data.status !== 'deferred') {
+          return { workflowId: data.workflow_id, checkpoint: data };
+        }
+      } catch {
+        // Skip corrupt checkpoints
+      }
+    }
+    return null;
+  } catch {
+    return null;
   }
 }

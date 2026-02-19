@@ -18,9 +18,6 @@ export interface OperationsContext {
   depthLevel: 'SHALLOW' | 'MEDIUM' | 'DEEP';
 }
 
-/** @deprecated Use OperationsContext */
-export type SummitContext = OperationsContext;
-
 /**
  * Generate deployment guide markdown
  */
@@ -436,7 +433,7 @@ export async function generateOperationsArtifacts(
   context: OperationsContext,
   projectPath: string
 ): Promise<OperationsResult> {
-  const operationsDir = path.join(projectPath, 'aidlc-docs', 'operations');
+  const operationsDir = path.join(projectPath, 'aidlc-docs', context.workflowId, 'operations');
   await fs.ensureDir(operationsDir);
 
   const generated: string[] = [];

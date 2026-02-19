@@ -3,7 +3,7 @@
  *
  * NOTE: Legacy SPEC/INTENTS validation tests have been removed as part of the ODLC V3 migration.
  * Functions validateSpec, validateTasks, generateDependencyGraph, validateDependencyGraph, and
- * getExecutionOrder were removed. The V3 system uses ForgeExecutor for decomposition.
+ * getExecutionOrder were removed. The V3 system uses ConstructionExecutor for decomposition.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -26,7 +26,7 @@ const TEST_DIR = join(tmpdir(), `spec-intents-test-${Date.now()}`);
  * - Dependency Graph (generateDependencyGraph, validateDependencyGraph, getExecutionOrder) - Functions removed
  *
  * These functions were part of the legacy ODLC workflow system. The V3 system handles
- * decomposition and validation through the ForgeExecutor and new validation system.
+ * decomposition and validation through the ConstructionExecutor and new validation system.
  */
 
 // ============================================================================
@@ -70,14 +70,14 @@ describe('Master Plan Linking', () => {
       const planPath = join(TEST_DIR, '.olympus', 'plans', 'test-workflow-003-plan.md');
       const content = readFileSync(planPath, 'utf-8');
 
-      expect(content).toContain('[Idea Document](aidlc-docs/inception/idea.md)');
-      expect(content).toContain('[Intent Document](aidlc-docs/inception/intent.md)');
-      expect(content).toContain('[Workflow Checkpoint](aidlc-docs/checkpoint.json)');
-      expect(content).toContain('aidlc-docs/inception/idea.md');
-      expect(content).toContain('aidlc-docs/construction/');
-      expect(content).toContain('aidlc-docs/operations/deploy-guide.md');
-      expect(content).toContain('aidlc-docs/checkpoint.json');
-      expect(content).toContain('aidlc-docs/manifest.json');
+      expect(content).toContain('[Idea Document](aidlc-docs/test-workflow-003/inception/idea.md)');
+      expect(content).toContain('[Intent Document](aidlc-docs/test-workflow-003/inception/intent.md)');
+      expect(content).toContain('[Workflow Checkpoint](aidlc-docs/test-workflow-003/checkpoint.json)');
+      expect(content).toContain('aidlc-docs/test-workflow-003/inception/idea.md');
+      expect(content).toContain('aidlc-docs/test-workflow-003/construction/');
+      expect(content).toContain('aidlc-docs/test-workflow-003/operations/deploy-guide.md');
+      expect(content).toContain('aidlc-docs/test-workflow-003/checkpoint.json');
+      expect(content).toContain('aidlc-docs/test-workflow-003/manifest.json');
     });
 
     it('creates plan with header containing workflow ID', async () => {

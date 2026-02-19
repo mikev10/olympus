@@ -56,7 +56,7 @@ export async function detectResumableWorkflows(projectPath: string): Promise<Res
       if (checkpoint.status === 'complete' || checkpoint.status === 'archived') continue;
 
       // Load manifest for progress info
-      const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+      const manifestPath = path.join(projectPath, 'aidlc-docs', wfId, 'manifest.json');
       const manifest = loadManifest(manifestPath);
       let progress = { completed: 0, total: 0 };
       if (manifest) {

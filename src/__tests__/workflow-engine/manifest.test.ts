@@ -62,7 +62,7 @@ describe('Manifest System', () => {
     it('creates manifest.json at correct path', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
 
-      expect(manifestPath).toBe(join(tmpDir, 'aidlc-docs', 'manifest.json'));
+      expect(manifestPath).toBe(join(tmpDir, 'aidlc-docs', 'test-workflow', 'manifest.json'));
       expect(fs.existsSync(manifestPath)).toBe(true);
     });
 
@@ -122,7 +122,7 @@ describe('Manifest System', () => {
 
     it('creates directory structure if needed', () => {
       const manifestPath = createManifest('test-workflow', 'Test Feature', tmpDir);
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-workflow');
 
       expect(fs.existsSync(workflowDir)).toBe(true);
       expect(fs.statSync(workflowDir).isDirectory()).toBe(true);
@@ -1244,7 +1244,7 @@ describe('Manifest System', () => {
     });
 
     it('creates manifest from discovered files', () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-workflow');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'prd.md'), 'PRD content', 'utf-8');
       fs.writeFileSync(join(workflowDir, 'arch.md'), 'Arch content', 'utf-8');
@@ -1256,7 +1256,7 @@ describe('Manifest System', () => {
     });
 
     it('sets workflow_id and feature_name correctly', () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'my-workflow');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'file.txt'), 'content', 'utf-8');
 
@@ -1267,7 +1267,7 @@ describe('Manifest System', () => {
     });
 
     it('computes checksums for found files', () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-workflow');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'test.txt'), 'Test content', 'utf-8');
 
@@ -1278,7 +1278,7 @@ describe('Manifest System', () => {
     });
 
     it('excludes manifest.json from artifacts', () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-workflow');
       fs.ensureDirSync(workflowDir);
       fs.writeFileSync(join(workflowDir, 'manifest.json'), '{}', 'utf-8');
       fs.writeFileSync(join(workflowDir, 'other.txt'), 'content', 'utf-8');
@@ -1296,7 +1296,7 @@ describe('Manifest System', () => {
     });
 
     it('handles nested files in subdirectories', () => {
-      const workflowDir = join(tmpDir, 'aidlc-docs');
+      const workflowDir = join(tmpDir, 'aidlc-docs', 'test-workflow');
       const subDir = join(workflowDir, 'subdir');
       fs.ensureDirSync(subDir);
       fs.writeFileSync(join(subDir, 'nested.txt'), 'Nested content', 'utf-8');

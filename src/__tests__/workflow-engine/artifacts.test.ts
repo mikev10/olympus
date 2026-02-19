@@ -33,7 +33,7 @@ describe('artifacts', () => {
     it('should create full workflow directory structure', async () => {
       await ensureWorkflowDir(projectPath, workflowId);
 
-      const workflowDir = path.join(projectPath, 'aidlc-docs');
+      const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
       const inceptionDir = path.join(workflowDir, 'inception');
       const constructionDir = path.join(workflowDir, 'construction');
       const constructionDesignDir = path.join(workflowDir, 'construction', 'design');
@@ -61,7 +61,7 @@ describe('artifacts', () => {
       // Call ensureWorkflowDir twice
       await ensureWorkflowDir(projectPath, workflowId);
 
-      const checkpointPath = path.join(projectPath, 'aidlc-docs', 'checkpoint.json');
+      const checkpointPath = path.join(projectPath, 'aidlc-docs', workflowId, 'checkpoint.json');
       const firstCheckpoint = await fs.readJson(checkpointPath);
 
       // Wait a bit to ensure timestamp would differ if file was rewritten
@@ -77,7 +77,7 @@ describe('artifacts', () => {
     it('should not create old directory structure', async () => {
       await ensureWorkflowDir(projectPath, workflowId);
 
-      const workflowDir = path.join(projectPath, 'aidlc-docs');
+      const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
       const intentsDir = path.join(workflowDir, 'intents');
       const validationDir = path.join(workflowDir, 'validation');
 
@@ -89,17 +89,17 @@ describe('artifacts', () => {
 
   describe('getArtifactPath', () => {
     it('should return correct path for idea artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'idea.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'idea.md');
       expect(getArtifactPath(projectPath, workflowId, 'idea')).toBe(expected);
     });
 
     it('should return correct path for intent artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'intent.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       expect(getArtifactPath(projectPath, workflowId, 'intent')).toBe(expected);
     });
 
     it('should return correct path for unit artifact with ID', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'spec.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'spec.md');
       expect(getArtifactPath(projectPath, workflowId, 'unit', 'UNIT-001')).toBe(expected);
     });
 
@@ -110,7 +110,7 @@ describe('artifacts', () => {
     });
 
     it('should return correct path for bolt artifact with ID and unitId', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'BOLT-001.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'BOLT-001.md');
       expect(getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001')).toBe(expected);
     });
 
@@ -127,57 +127,57 @@ describe('artifacts', () => {
     });
 
     it('should return correct path for nfr artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'inception', 'nfr.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
       expect(getArtifactPath(projectPath, workflowId, 'nfr')).toBe(expected);
     });
 
     it('should return correct path for validation-report artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'UNIT-001', 'validation-report.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'validation-report.md');
       expect(getArtifactPath(projectPath, workflowId, 'validation-report', 'UNIT-001')).toBe(expected);
     });
 
     it('should return correct path for state artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'state.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'state.md');
       expect(getArtifactPath(projectPath, workflowId, 'state')).toBe(expected);
     });
 
     it('should return correct path for audit artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
       expect(getArtifactPath(projectPath, workflowId, 'audit')).toBe(expected);
     });
 
     it('should return correct path for interfaces artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'interfaces.json');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'design', 'interfaces.json');
       expect(getArtifactPath(projectPath, workflowId, 'interfaces')).toBe(expected);
     });
 
     it('should return correct path for data-flow artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'data-flow.json');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'design', 'data-flow.json');
       expect(getArtifactPath(projectPath, workflowId, 'data-flow')).toBe(expected);
     });
 
     it('should return correct path for components artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'construction', 'design', 'components.json');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'design', 'components.json');
       expect(getArtifactPath(projectPath, workflowId, 'components')).toBe(expected);
     });
 
     it('should return correct path for deploy-guide artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'deploy-guide.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'operations', 'deploy-guide.md');
       expect(getArtifactPath(projectPath, workflowId, 'deploy-guide')).toBe(expected);
     });
 
     it('should return correct path for runbook artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'runbook.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'operations', 'runbook.md');
       expect(getArtifactPath(projectPath, workflowId, 'runbook')).toBe(expected);
     });
 
     it('should return correct path for monitoring artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'monitoring.json');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'operations', 'monitoring.json');
       expect(getArtifactPath(projectPath, workflowId, 'monitoring')).toBe(expected);
     });
 
     it('should return correct path for release-notes artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', 'operations', 'release-notes.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'operations', 'release-notes.md');
       expect(getArtifactPath(projectPath, workflowId, 'release-notes')).toBe(expected);
     });
 
@@ -376,17 +376,17 @@ describe('artifacts', () => {
 
   describe('ensureDiscoveryDir', () => {
     it('should create discovery directory', async () => {
-      await ensureDiscoveryDir(projectPath);
+      await ensureDiscoveryDir(projectPath, workflowId);
 
-      const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+      const discoveryDir = path.join(projectPath, 'aidlc-docs', workflowId, 'discovery');
       expect(await fs.pathExists(discoveryDir)).toBe(true);
     });
 
     it('should be idempotent', async () => {
-      await ensureDiscoveryDir(projectPath);
-      await ensureDiscoveryDir(projectPath);
+      await ensureDiscoveryDir(projectPath, workflowId);
+      await ensureDiscoveryDir(projectPath, workflowId);
 
-      const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+      const discoveryDir = path.join(projectPath, 'aidlc-docs', workflowId, 'discovery');
       expect(await fs.pathExists(discoveryDir)).toBe(true);
     });
   });
@@ -395,19 +395,19 @@ describe('artifacts', () => {
     it('should write state file to aidlc-docs/state.md', async () => {
       const content = '# State\n\nCurrent workflow state.';
 
-      await writeStateFile(projectPath, content);
+      await writeStateFile(projectPath, workflowId, content);
 
-      const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+      const statePath = path.join(projectPath, 'aidlc-docs', workflowId, 'state.md');
       const savedContent = await fs.readFile(statePath, 'utf-8');
 
       expect(savedContent).toBe(content);
     });
 
     it('should overwrite existing state file', async () => {
-      await writeStateFile(projectPath, 'First state');
-      await writeStateFile(projectPath, 'Second state');
+      await writeStateFile(projectPath, workflowId, 'First state');
+      await writeStateFile(projectPath, workflowId, 'Second state');
 
-      const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+      const statePath = path.join(projectPath, 'aidlc-docs', workflowId, 'state.md');
       const savedContent = await fs.readFile(statePath, 'utf-8');
 
       expect(savedContent).toBe('Second state');
@@ -416,9 +416,9 @@ describe('artifacts', () => {
 
   describe('appendAuditEntry', () => {
     it('should create audit.md with header on first call', async () => {
-      await appendAuditEntry(projectPath, 'First entry');
+      await appendAuditEntry(projectPath, workflowId, 'First entry');
 
-      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const auditPath = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
       const content = await fs.readFile(auditPath, 'utf-8');
 
       expect(content).toContain('# Audit Log');
@@ -426,10 +426,10 @@ describe('artifacts', () => {
     });
 
     it('should append entries without duplicating header', async () => {
-      await appendAuditEntry(projectPath, 'First entry');
-      await appendAuditEntry(projectPath, 'Second entry');
+      await appendAuditEntry(projectPath, workflowId, 'First entry');
+      await appendAuditEntry(projectPath, workflowId, 'Second entry');
 
-      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const auditPath = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
       const content = await fs.readFile(auditPath, 'utf-8');
 
       expect(content).toContain('First entry');
@@ -439,11 +439,11 @@ describe('artifacts', () => {
     });
 
     it('should preserve existing entries when appending', async () => {
-      await appendAuditEntry(projectPath, 'Entry 1');
-      await appendAuditEntry(projectPath, 'Entry 2');
-      await appendAuditEntry(projectPath, 'Entry 3');
+      await appendAuditEntry(projectPath, workflowId, 'Entry 1');
+      await appendAuditEntry(projectPath, workflowId, 'Entry 2');
+      await appendAuditEntry(projectPath, workflowId, 'Entry 3');
 
-      const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+      const auditPath = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
       const content = await fs.readFile(auditPath, 'utf-8');
 
       expect(content).toContain('Entry 1');

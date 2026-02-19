@@ -10,6 +10,7 @@ import { registerHook } from '../registry.js';
 import { generateWorkflowReport } from '../../features/workflow-engine/status-reporter.js';
 import { loadManifest } from '../../features/workflow-engine/manifest.js';
 import { loadTrustState } from '../../features/workflow-engine/trust.js';
+import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
 import * as path from 'path';
 import type { HookContext, HookResult } from '../types.js';
 
@@ -18,7 +19,7 @@ export function registerWorkflowStatusHook(): void {
     name: 'workflowStatusReporter',
     event: 'UserPromptSubmit',
     priority: 6,
-    handler: (ctx: HookContext): HookResult => {
+    handler: async (ctx: HookContext): Promise<HookResult> => {
       try {
         const directory = ctx.directory || process.cwd();
 
@@ -35,8 +36,30 @@ export function registerWorkflowStatusHook(): void {
           return { continue: true };
         }
 
+        // Find active workflow
+        const workflowIds = await listWorkflows(directory);
+        let activeWorkflowId: string | null = null;
+
+        for (const wfId of workflowIds) {
+          const cp = await loadCheckpoint(directory, wfId);
+          if (cp && cp.status !== 'complete' && cp.status !== 'archived' && cp.status !== 'deferred') {
+            activeWorkflowId = wfId;
+            break;
+          }
+        }
+
+        if (!activeWorkflowId) {
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'UserPromptSubmit',
+              additionalContext: `<workflow-status>\nNo active workflows found. Start one with \`/plan <description>\`\n</workflow-status>`
+            }
+          };
+        }
+
         // Load manifest
-        const manifestPath = path.join(directory, 'aidlc-docs', 'manifest.json');
+        const manifestPath = path.join(directory, 'aidlc-docs', activeWorkflowId, 'manifest.json');
         const manifest = loadManifest(manifestPath);
 
         if (!manifest) {

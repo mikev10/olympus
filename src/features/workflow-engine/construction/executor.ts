@@ -51,8 +51,6 @@ export const CONSTRUCTION_STAGE_AGENT_MAP: Record<ConstructionStage, string> = {
   design: 'olympian',
 };
 
-/** @deprecated Use CONSTRUCTION_STAGE_AGENT_MAP instead */
-export const FORGE_STAGE_AGENT_MAP = CONSTRUCTION_STAGE_AGENT_MAP;
 
 /**
  * Options for controlling Construction phase execution.
@@ -85,8 +83,6 @@ export interface ConstructionProgress {
   overall_percentage: number;
 }
 
-/** @deprecated Use ConstructionProgress instead */
-export type ForgeProgress = ConstructionProgress;
 
 /**
  * ConstructionExecutor orchestrates the full Construction phase of ODLC.
@@ -267,8 +263,8 @@ export class ConstructionExecutor {
    * @private
    */
   private async executeShallow(): Promise<ValidationResult> {
-    const intentPath = path.join(this.projectPath, 'aidlc-docs', 'inception', 'intent.md');
-    const constructionDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
+    const intentPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception', 'intent.md');
+    const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
 
     // Try new-style intent.md first, fall back to old INTENT-*.md
     let intentTitle = 'Shallow Implementation';
@@ -289,7 +285,7 @@ export class ConstructionExecutor {
       }
     } else {
       // Fall back to old-style parsing
-      const intentDir = path.join(this.projectPath, 'aidlc-docs', 'inception');
+      const intentDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception');
       const intents = await parseIntentsFromDisk(intentDir);
       if (intents.length === 0) {
         return {
@@ -355,8 +351,8 @@ export class ConstructionExecutor {
     maxBoltsPerUnit: number,
     maxTotalBolts: number
   ): Promise<ValidationResult> {
-    const intentDir = path.join(this.projectPath, 'aidlc-docs', 'inception');
-    const constructionDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
+    const intentDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception');
+    const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
 
     await fs.ensureDir(constructionDir);
 
@@ -761,7 +757,7 @@ Generated from inception/intent.md
    * @private
    */
   private async executeDesignStage(specContent?: string): Promise<ValidationResult> {
-    const constructionDir = path.join(this.projectPath, 'aidlc-docs', 'construction');
+    const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
 
     // Read units from disk
     const unitFiles = await fs.readdir(constructionDir);
@@ -805,7 +801,7 @@ Generated from inception/intent.md
     });
 
     // Register design artifacts in manifest
-    const designDir = path.join(this.projectPath, 'aidlc-docs', 'construction', 'design');
+    const designDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction', 'design');
     this.registerConstructionArtifact('design-interfaces', 'interface-contracts', 'unit', path.join(designDir, 'interfaces.json'));
     this.registerConstructionArtifact('design-data-flow', 'data-flow-diagram', 'unit', path.join(designDir, 'data-flow.json'));
     this.registerConstructionArtifact('design-components', 'component-design', 'unit', path.join(designDir, 'components.json'));
@@ -924,7 +920,7 @@ Generated from inception/intent.md
     artifactPath: string
   ): void {
     try {
-      const manifestPath = path.join(this.projectPath, 'aidlc-docs', 'manifest.json');
+      const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
       registerArtifact(manifestPath, {
         id: artifactId,
         type: artifactType,
@@ -952,7 +948,7 @@ Generated from inception/intent.md
     linkType: 'derives' | 'implements'
   ): void {
     try {
-      const manifestPath = path.join(this.projectPath, 'aidlc-docs', 'manifest.json');
+      const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
       linkArtifacts(manifestPath, {
         source_id: sourceId,
         target_id: targetId,
@@ -1141,6 +1137,3 @@ Technical approach for implementing ${bolt.title}
     }
   }
 }
-
-/** @deprecated Use ConstructionExecutor instead */
-export const ForgeExecutor = ConstructionExecutor;

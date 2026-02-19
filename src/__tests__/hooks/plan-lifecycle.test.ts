@@ -452,23 +452,14 @@ describe('Plan Lifecycle Hooks', () => {
       status: 'in_progress',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T02:00:00Z',
-      context: {
-        idea: null,
-        intents: [],
-        units: [],
-        bolts: [],
-        nfrs: [],
-        risks: [],
-        domain_design: null,
-        logical_design: null,
-        deployment_units: [],
+      phases: {
+        discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        inception: { status: 'complete', started_at: '2024-01-01T00:00:00Z', completed_at: '2024-01-01T01:00:00Z', gate_result: null, gate_bypassed: false, bypass_reason: null },
+        construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
       },
-      gate_history: [],
-      metadata: {
-        tags: [],
-        assigned_to: null,
-        priority: 'medium',
-      },
+      manifest_path: 'aidlc-docs/test-workflow/manifest.json',
+      trust_state_path: 'aidlc-docs/test-workflow/trust.json',
     });
 
     it('detects phase transition from inception to construction', async () => {
@@ -617,24 +608,16 @@ describe('Plan Lifecycle Hooks', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('Generating deployment artifacts...');
     });
 
-    it('handles workflow completion (operations -> complete)', async () => {
+    it('skips completed workflows', async () => {
       registerPlanLifecycleHooks();
       const { getHooksForEvent } = await import('../../hooks/registry.js');
       const hooks = getHooksForEvent('PostToolUse', 83);
 
-      const manifest = createMockManifest();
-      manifest.phases.operations.status = 'in_progress';
-
       const checkpoint = createMockCheckpoint('operations');
-      checkpoint.status = 'complete';
+      checkpoint.status = 'complete'; // Workflow marked complete
 
-      mocks.loadManifest.mockReturnValue(manifest);
       mocks.listWorkflows.mockResolvedValue(['test-workflow']);
       mocks.loadCheckpoint.mockResolvedValue(checkpoint);
-      mocks.loadSessionState.mockReturnValue({
-        session_id: 'test-session',
-        last_tracked_phase: 'operations',
-      } as any);
 
       const ctx: HookContext = {
         toolName: 'Write',
@@ -646,11 +629,10 @@ describe('Plan Lifecycle Hooks', () => {
       const hook = hooks.find(h => h.name === 'workflowPhaseTransitionTracker');
       const result = await hook!.handler(ctx);
 
-      expect(result.hookSpecificOutput?.additionalContext).toContain('Workflow complete! All phases finished.');
-
-      const saveCall = mocks.saveManifest.mock.calls[0];
-      const savedManifest = saveCall[1] as ManifestSchema;
-      expect(savedManifest.phases.operations.status).toBe('complete');
+      // Hook should skip completed workflows (early return)
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(mocks.loadManifest).not.toHaveBeenCalled();
     });
 
     it('ignores non-Write/Task tool calls', async () => {
@@ -677,6 +659,8 @@ describe('Plan Lifecycle Hooks', () => {
       const { getHooksForEvent } = await import('../../hooks/registry.js');
       const hooks = getHooksForEvent('PostToolUse', 83);
 
+      mocks.listWorkflows.mockResolvedValue(['test-workflow']);
+      mocks.loadCheckpoint.mockResolvedValue(createMockCheckpoint('inception'));
       mocks.loadManifest.mockReturnValue(null);
 
       const ctx: HookContext = {
@@ -690,7 +674,8 @@ describe('Plan Lifecycle Hooks', () => {
       const result = await hook!.handler(ctx);
 
       expect(result.continue).toBe(true);
-      expect(mocks.listWorkflows).not.toHaveBeenCalled();
+      expect(mocks.listWorkflows).toHaveBeenCalled();
+      expect(mocks.loadManifest).toHaveBeenCalled();
     });
 
     it('handles errors silently', async () => {
@@ -698,6 +683,8 @@ describe('Plan Lifecycle Hooks', () => {
       const { getHooksForEvent } = await import('../../hooks/registry.js');
       const hooks = getHooksForEvent('PostToolUse', 83);
 
+      mocks.listWorkflows.mockResolvedValue(['test-workflow']);
+      mocks.loadCheckpoint.mockResolvedValue(createMockCheckpoint('inception'));
       mocks.loadManifest.mockImplementation(() => {
         throw new Error('Test error');
       });

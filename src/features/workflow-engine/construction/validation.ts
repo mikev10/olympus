@@ -746,7 +746,7 @@ export async function validateConstructionPhase(
   const timestamp = new Date().toISOString();
   const blockingIssues: string[] = [];
 
-  const workflowDir = join(projectPath, 'aidlc-docs');
+  const workflowDir = join(projectPath, 'aidlc-docs', workflowId);
   const constructionDir = join(workflowDir, 'construction');
   const intentsDir = join(workflowDir, 'inception');
   const designDir = join(constructionDir, 'design');
@@ -900,6 +900,3 @@ export async function validateConstructionPhase(
     timestamp,
   };
 }
-
-/** @deprecated Use validateConstructionPhase instead */
-export const validateForgePhase = validateConstructionPhase;

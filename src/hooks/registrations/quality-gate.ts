@@ -663,7 +663,7 @@ Type "approve" to proceed or "reject <reason>" to block.
         try {
           const parentUnitId = findParentUnit(manifest, boltId);
           if (parentUnitId && ctx.directory) {
-            const reportPath = getValidationReportPath(ctx.directory, parentUnitId);
+            const reportPath = getValidationReportPath(ctx.directory, workflowId, parentUnitId);
             generateValidationReport(reportPath, parentUnitId, {
               boltId,
               boltTitle: boltArtifact?.type || 'auto-approved',
@@ -1128,7 +1128,7 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
           try {
             const parentUnitId = findParentUnit(manifest, boltId);
             if (parentUnitId) {
-              const reportPath = getValidationReportPath(ctx.directory, parentUnitId);
+              const reportPath = getValidationReportPath(ctx.directory, activeWorkflow.workflowId, parentUnitId);
               const riskTier: RiskTier =
                 (typeof checkpoint.risk_tier === 'number' ? checkpoint.risk_tier : checkpoint.risk_tier?.tier) ||
                 manifest.risk_tier?.tier || 2;

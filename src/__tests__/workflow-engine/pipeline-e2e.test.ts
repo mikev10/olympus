@@ -143,11 +143,14 @@ describe('Pipeline E2E', () => {
     it('runs a complete ODLC pipeline with all gates and phases', async () => {
       const workflowId = 'test-feature';
       const featureName = 'Test Feature';
-      const manifestPath = join(tmpDir, 'aidlc-docs', 'manifest.json');
+      const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
 
-      // --- Start engine: creates checkpoint + IDEA artifact ---
+      // --- Start engine: creates checkpoint + directory structure ---
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start('Build a user authentication system with OAuth support');
+
+      // Execute IDEA stage to create artifact
+      await engine.executeStage('idea');
 
       // Verify IDEA was written
       const ideaPath = getArtifactPath(tmpDir, workflowId, 'idea');
@@ -230,8 +233,8 @@ describe('Pipeline E2E', () => {
       });
 
       // --- Register UNITs ---
-      const unit001Path = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/spec.md', '# UNIT-001\n\nCore implementation');
-      const unit002Path = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-002/spec.md', '# UNIT-002\n\nIntegration layer');
+      const unit001Path = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/spec.md`, '# UNIT-001\n\nCore implementation');
+      const unit002Path = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-002/spec.md`, '# UNIT-002\n\nIntegration layer');
 
       registerArtifact(manifestPath, {
         id: 'UNIT-001',
@@ -263,8 +266,8 @@ describe('Pipeline E2E', () => {
       updateContractStatus(manifestPath, 'UNIT-002', 'active');
 
       // --- Register BOLTs ---
-      const bolt001Path = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/BOLT-001.md', '# BOLT-001\n\nImplement auth module');
-      const bolt002Path = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-002/BOLT-002.md', '# BOLT-002\n\nImplement API endpoints');
+      const bolt001Path = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/BOLT-001.md`, '# BOLT-001\n\nImplement auth module');
+      const bolt002Path = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-002/BOLT-002.md`, '# BOLT-002\n\nImplement API endpoints');
 
       registerArtifact(manifestPath, {
         id: 'BOLT-001',
@@ -329,7 +332,7 @@ describe('Pipeline E2E', () => {
       await engine.executePhase('operations');
 
       // Verify operations artifacts on disk
-      const opsDir = join(tmpDir, 'aidlc-docs', 'operations');
+      const opsDir = join(tmpDir, 'aidlc-docs', workflowId, 'operations');
       expect(await fs.pathExists(join(opsDir, 'deploy-guide.md'))).toBe(true);
       expect(await fs.pathExists(join(opsDir, 'runbook.md'))).toBe(true);
       expect(await fs.pathExists(join(opsDir, 'monitoring.json'))).toBe(true);
@@ -386,7 +389,7 @@ describe('Pipeline E2E', () => {
     it('completes a minimal workflow without UNIT artifacts', async () => {
       const workflowId = 'simple-fix';
       const featureName = 'Simple Fix';
-      const manifestPath = join(tmpDir, 'aidlc-docs', 'manifest.json');
+      const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
 
       // --- Force SHALLOW depth via assessDepth ---
       const shallowDepth = assessDepth({
@@ -412,7 +415,7 @@ describe('Pipeline E2E', () => {
       createManifest(workflowId, featureName, tmpDir);
 
       // --- Register IDEA ---
-      const ideaFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/idea.md', minimalIdea);
+      const ideaFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, minimalIdea);
       registerArtifact(manifestPath, {
         id: 'IDEA-001',
         type: 'IDEA',
@@ -435,7 +438,7 @@ describe('Pipeline E2E', () => {
 
       // --- Register lightweight INTENT ---
       const intentContent = '## Business Requirements\n\nFix the typo in README.\n';
-      const intentFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/intent.md', intentContent);
+      const intentFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, intentContent);
       registerArtifact(manifestPath, {
         id: 'INTENT-001',
         type: 'INTENT',
@@ -458,7 +461,7 @@ describe('Pipeline E2E', () => {
 
       // --- SHALLOW: skip UNIT decomposition, register single BOLT linked to INTENT ---
       const boltContent = '# BOLT-001\n\nFix typo in README.md line 42.\n';
-      const boltFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/BOLT-001.md', boltContent);
+      const boltFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/BOLT-001.md`, boltContent);
       registerArtifact(manifestPath, {
         id: 'BOLT-001',
         type: 'BOLT',
@@ -518,9 +521,12 @@ describe('Pipeline E2E', () => {
       const workflowId = 'resume-test';
       const featureName = 'Resume Test';
 
-      // --- Start engine: creates checkpoint + IDEA artifact ---
+      // --- Start engine: creates checkpoint + directory structure ---
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start('Build a resume-capable pipeline test');
+
+      // Execute IDEA stage to create artifact
+      await engine.executeStage('idea');
 
       // Verify IDEA was written
       const ideaPath = getArtifactPath(tmpDir, workflowId, 'idea');
@@ -581,7 +587,7 @@ describe('Pipeline E2E', () => {
     it('handles gate 4 rejection, dispatch, and successful retry', async () => {
       const workflowId = 'rejection-test';
       const featureName = 'Rejection Test';
-      const manifestPath = join(tmpDir, 'aidlc-docs', 'manifest.json');
+      const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
 
       // --- Setup: create manifest with full artifact chain ---
       createManifest(workflowId, featureName, tmpDir);
@@ -594,28 +600,28 @@ describe('Pipeline E2E', () => {
       await saveCheckpoint(tmpDir, checkpoint);
 
       // Register artifacts
-      const ideaPath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/idea.md', '# IDEA\n\n## Problem Statement\n\nTest rejection flow.');
+      const ideaPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, '# IDEA\n\n## Problem Statement\n\nTest rejection flow.');
       registerArtifact(manifestPath, {
         id: 'IDEA-001', type: 'IDEA', phase: 'inception', stage: 'idea',
         path: ideaPath, validation_passed: true, write_complete: true, checksum: null,
       });
       updateContractStatus(manifestPath, 'IDEA-001', 'active');
 
-      const intentPath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/intent.md', '# INTENT\n\n## Business Requirements\n\nTest.');
+      const intentPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, '# INTENT\n\n## Business Requirements\n\nTest.');
       registerArtifact(manifestPath, {
         id: 'INTENT-001', type: 'INTENT', phase: 'inception', stage: 'intent',
         path: intentPath, validation_passed: true, write_complete: true, checksum: null,
       });
       updateContractStatus(manifestPath, 'INTENT-001', 'active');
 
-      const unitPath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/spec.md', '# UNIT-001');
+      const unitPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/spec.md`, '# UNIT-001');
       registerArtifact(manifestPath, {
         id: 'UNIT-001', type: 'UNIT', phase: 'construction', stage: 'unit',
         path: unitPath, validation_passed: true, write_complete: true, checksum: null,
       });
       updateContractStatus(manifestPath, 'UNIT-001', 'active');
 
-      const boltPath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/BOLT-001.md', '# BOLT-001\n\nFirst attempt (has bugs).');
+      const boltPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/BOLT-001.md`, '# BOLT-001\n\nFirst attempt (has bugs).');
       registerArtifact(manifestPath, {
         id: 'BOLT-001', type: 'BOLT', phase: 'construction', stage: 'bolt',
         path: boltPath, validation_passed: true, write_complete: true, checksum: null,
@@ -701,7 +707,7 @@ describe('Pipeline E2E', () => {
     it('switches from olympus to ascent mode and continues pending BOLTs', async () => {
       const workflowId = 'mode-switch';
       const featureName = 'Mode Switch Test';
-      const manifestPath = join(tmpDir, 'aidlc-docs', 'manifest.json');
+      const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
 
       // --- Setup manifest with UNITs and 5 BOLTs ---
       createManifest(workflowId, featureName, tmpDir);
@@ -719,7 +725,7 @@ describe('Pipeline E2E', () => {
       saveTrustState(trustState, tmpDir);
 
       // Register UNIT-001
-      const unitPath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/spec.md', '# UNIT-001');
+      const unitPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/spec.md`, '# UNIT-001');
       registerArtifact(manifestPath, {
         id: 'UNIT-001', type: 'UNIT', phase: 'construction', stage: 'unit',
         path: unitPath, validation_passed: true, write_complete: true, checksum: null,
@@ -730,7 +736,7 @@ describe('Pipeline E2E', () => {
         const bId = `BOLT-00${i}`;
         const bPath = await writeArtifactFile(
           tmpDir,
-          `aidlc-docs/construction/UNIT-001/${bId}.md`,
+          `aidlc-docs/${workflowId}/construction/UNIT-001/${bId}.md`,
           `# ${bId}\n\nTask ${i} implementation.`,
         );
         registerArtifact(manifestPath, {
@@ -800,7 +806,7 @@ describe('Pipeline E2E', () => {
     it('cascades staleness from IDEA through INTENT, UNIT, and BOLT', async () => {
       const workflowId = 'cascade-test';
       const featureName = 'Cascade Test';
-      const manifestPath = join(tmpDir, 'aidlc-docs', 'manifest.json');
+      const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
 
       // --- Setup manifest ---
       createManifest(workflowId, featureName, tmpDir);
@@ -898,10 +904,10 @@ Implement cascade invalidation logic.
 `;
 
       // Write files using absolute paths
-      const ideaFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/idea.md', ideaContent);
-      const intentFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/inception/intent.md', intentContent);
-      const unitFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/spec.md', unitContent);
-      const boltFilePath = await writeArtifactFile(tmpDir, 'aidlc-docs/construction/UNIT-001/BOLT-001.md', boltContent);
+      const ideaFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, ideaContent);
+      const intentFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, intentContent);
+      const unitFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/spec.md`, unitContent);
+      const boltFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/BOLT-001.md`, boltContent);
 
       // --- Register all artifacts with absolute paths (required for revalidateStaleArtifacts) ---
       registerArtifact(manifestPath, {

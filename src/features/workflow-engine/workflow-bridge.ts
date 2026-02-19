@@ -63,19 +63,19 @@ export async function detectActiveWorkflow(
   projectPath: string
 ): Promise<WorkflowBridgeContext | null> {
   try {
-    const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
-    const manifest = loadManifest(manifestPath);
-    if (!manifest) {
-      return null;
-    }
-
-    // Get workflow IDs from checkpoint
+    // Get workflow IDs from checkpoint to find the manifest
     const workflowIds = await listWorkflows(projectPath);
     if (workflowIds.length === 0) {
       return null;
     }
 
     const workflowId = workflowIds[0];
+    const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
+    const manifest = loadManifest(manifestPath);
+    if (!manifest) {
+      return null;
+    }
+
     const checkpoint = await loadCheckpoint(projectPath, workflowId);
     if (!checkpoint) {
       return null;
@@ -192,7 +192,7 @@ export async function markBoltComplete(
   boltId: string,
   gateResult: GateResult
 ): Promise<void> {
-  const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+  const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   const manifest = loadManifest(manifestPath);
   if (!manifest) {
     throw new Error(`Manifest not found at ${manifestPath}`);
@@ -253,7 +253,7 @@ export async function markUnitComplete(
   workflowId: string,
   unitId: string
 ): Promise<void> {
-  const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+  const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   const manifest = loadManifest(manifestPath);
   if (!manifest) {
     throw new Error(`Manifest not found at ${manifestPath}`);
@@ -418,8 +418,8 @@ export async function generateWorkflowSummary(projectPath: string): Promise<stri
       if (!bolt) continue;
       const parentUnitId = findParentUnitId(ctx.manifest, boltId);
       const specPath = parentUnitId
-        ? path.join(projectPath, 'aidlc-docs', 'construction', parentUnitId, `${boltId}.md`)
-        : path.join(projectPath, 'aidlc-docs', 'construction', `${boltId}.md`);
+        ? path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', parentUnitId, `${boltId}.md`)
+        : path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', `${boltId}.md`);
       const title = readBoltTitle(specPath, boltId);
       const unitSuffix = parentUnitId ? ` (${parentUnitId})` : '';
       pendingLines.push(`- ${boltId} "${title}"${unitSuffix}`);
@@ -432,8 +432,8 @@ export async function generateWorkflowSummary(projectPath: string): Promise<stri
       if (!bolt) continue;
       const parentUnitId = findParentUnitId(ctx.manifest, boltId);
       const specPath = parentUnitId
-        ? path.join(projectPath, 'aidlc-docs', 'construction', parentUnitId, `${boltId}.md`)
-        : path.join(projectPath, 'aidlc-docs', 'construction', `${boltId}.md`);
+        ? path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', parentUnitId, `${boltId}.md`)
+        : path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', `${boltId}.md`);
       const title = readBoltTitle(specPath, boltId);
       completedLines.push(`- ${boltId} "${title}" done`);
     }
@@ -495,8 +495,8 @@ export async function generateBoltExecutionPlan(projectPath: string): Promise<st
 
       const parentUnitId = findParentUnitId(ctx.manifest, boltId);
       const specPath = parentUnitId
-        ? path.join(projectPath, 'aidlc-docs', 'construction', parentUnitId, `${boltId}.md`)
-        : path.join(projectPath, 'aidlc-docs', 'construction', `${boltId}.md`);
+        ? path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', parentUnitId, `${boltId}.md`)
+        : path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', `${boltId}.md`);
       const title = readBoltTitle(specPath, boltId);
       const agent = suggestAgent(bolt.path);
 
@@ -506,6 +506,7 @@ export async function generateBoltExecutionPlan(projectPath: string): Promise<st
         const unitSpecPath = path.join(
           projectPath,
           'aidlc-docs',
+          ctx.workflowId,
           'construction',
           parentUnitId,
           'spec.md'
@@ -526,8 +527,8 @@ export async function generateBoltExecutionPlan(projectPath: string): Promise<st
       if (!bolt) continue;
       const parentUnitId = findParentUnitId(ctx.manifest, boltId);
       const specPath = parentUnitId
-        ? path.join(projectPath, 'aidlc-docs', 'construction', parentUnitId, `${boltId}.md`)
-        : path.join(projectPath, 'aidlc-docs', 'construction', `${boltId}.md`);
+        ? path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', parentUnitId, `${boltId}.md`)
+        : path.join(projectPath, 'aidlc-docs', ctx.workflowId, 'construction', `${boltId}.md`);
       const title = readBoltTitle(specPath, boltId);
       completedLines.push(`- ${boltId} "${title}" done (fulfilled)`);
     }

@@ -12,4 +12,4 @@ export {
   generateCostAnalysis,
   generateOperationsArtifacts,
 } from './templates.js';
-export type { OperationsContext, SummitContext, OperationsResult } from './templates.js';
+export type { OperationsContext, OperationsResult } from './templates.js';

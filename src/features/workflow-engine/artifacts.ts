@@ -29,12 +29,12 @@ export type ArtifactType =
 /**
  * Ensures the workflow directory structure exists.
  * Creates:
- * - aidlc-docs/
- * - aidlc-docs/inception/
- * - aidlc-docs/construction/
- * - aidlc-docs/construction/design/
- * - aidlc-docs/operations/
- * - aidlc-docs/checkpoint.json (if not exists)
+ * - aidlc-docs/{workflowId}/
+ * - aidlc-docs/{workflowId}/inception/
+ * - aidlc-docs/{workflowId}/construction/
+ * - aidlc-docs/{workflowId}/construction/design/
+ * - aidlc-docs/{workflowId}/operations/
+ * - aidlc-docs/{workflowId}/checkpoint.json (if not exists)
  *
  * Note: Per-unit directories (UNIT-001/, etc.) are created on-demand, not upfront.
  *
@@ -42,7 +42,7 @@ export type ArtifactType =
  * @throws Error if disk is full or permissions are denied
  */
 export async function ensureWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
   const checkpointPath = path.join(workflowDir, 'checkpoint.json');
 
   try {
@@ -121,7 +121,7 @@ export function getArtifactPath(
   artifactId?: string,
   unitId?: string
 ): string {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
 
   // Mapping for artifact types to paths
   switch (artifactType) {
@@ -255,7 +255,7 @@ export async function writeArtifact(
   // After successful write, trigger cascade if this was an existing artifact
   if (isExistingArtifact) {
     try {
-      const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+      const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
       // Use dynamic import to avoid circular dependency
       const { cascadeInvalidation, loadManifest, saveManifest, computeChecksum } = await import('./manifest.js');
       const manifest = loadManifest(manifestPath);
@@ -343,7 +343,7 @@ export async function readArtifact(
   // After successful read, verify checksum against manifest
   if (content !== null) {
     try {
-      const manifestPath = path.join(projectPath, 'aidlc-docs', 'manifest.json');
+      const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
       // Use dynamic import to avoid circular dependency
       const { loadManifest, saveManifest, computeChecksum, cascadeInvalidation } = await import('./manifest.js');
       const manifest = loadManifest(manifestPath);
@@ -402,25 +402,25 @@ export async function linkMasterPlan(
 This feature was developed using the structured workflow system:
 
 ### Inception Phase
-- [Idea Document](aidlc-docs/inception/idea.md)
-- [Intent Document](aidlc-docs/inception/intent.md)
-- [Non-Functional Requirements](aidlc-docs/inception/nfr.md)
+- [Idea Document](aidlc-docs/${workflowId}/inception/idea.md)
+- [Intent Document](aidlc-docs/${workflowId}/inception/intent.md)
+- [Non-Functional Requirements](aidlc-docs/${workflowId}/inception/nfr.md)
 
 ### Construction Phase
-- [Units](aidlc-docs/construction/) - Per-unit directories (UNIT-001/, UNIT-002/, etc.)
-- [Design Artifacts](aidlc-docs/construction/design/)
+- [Units](aidlc-docs/${workflowId}/construction/) - Per-unit directories (UNIT-001/, UNIT-002/, etc.)
+- [Design Artifacts](aidlc-docs/${workflowId}/construction/design/)
 
 ### Operations Phase
-- [Deployment Guide](aidlc-docs/operations/deploy-guide.md)
-- [Runbook](aidlc-docs/operations/runbook.md)
-- [Monitoring Configuration](aidlc-docs/operations/monitoring.json)
-- [Release Notes](aidlc-docs/operations/release-notes.md)
+- [Deployment Guide](aidlc-docs/${workflowId}/operations/deploy-guide.md)
+- [Runbook](aidlc-docs/${workflowId}/operations/runbook.md)
+- [Monitoring Configuration](aidlc-docs/${workflowId}/operations/monitoring.json)
+- [Release Notes](aidlc-docs/${workflowId}/operations/release-notes.md)
 
 ### Metadata
-- [Workflow State](aidlc-docs/state.md)
-- [Audit Log](aidlc-docs/audit.md)
-- [Workflow Checkpoint](aidlc-docs/checkpoint.json)
-- [Manifest](aidlc-docs/manifest.json)
+- [Workflow State](aidlc-docs/${workflowId}/state.md)
+- [Audit Log](aidlc-docs/${workflowId}/audit.md)
+- [Workflow Checkpoint](aidlc-docs/${workflowId}/checkpoint.json)
+- [Manifest](aidlc-docs/${workflowId}/manifest.json)
 `;
 
     let content = '';
@@ -490,11 +490,11 @@ ${artifactsSection}`;
 /**
  * Ensures the phase-based workflow directory structure exists.
  * Creates:
- * - aidlc-docs/
- * - aidlc-docs/inception/
- * - aidlc-docs/construction/
- * - aidlc-docs/construction/design/
- * - aidlc-docs/operations/
+ * - aidlc-docs/{workflowId}/
+ * - aidlc-docs/{workflowId}/inception/
+ * - aidlc-docs/{workflowId}/construction/
+ * - aidlc-docs/{workflowId}/construction/design/
+ * - aidlc-docs/{workflowId}/operations/
  *
  * Note: Per-unit directories (UNIT-001/, etc.) are created on-demand, not upfront.
  *
@@ -503,7 +503,7 @@ ${artifactsSection}`;
  * @throws Error if disk is full or permissions are denied
  */
 export async function ensurePhaseWorkflowDir(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
 
   try {
     // Create base workflow directory
@@ -572,9 +572,16 @@ export async function isLegacyLayout(projectPath: string, workflowId: string): P
   const oldWorkflowDir = path.join(projectPath, '.olympus', 'workflow', workflowId);
 
   try {
-    // If aidlc-docs/ exists, it's the new layout
-    if (await fs.pathExists(newWorkflowDir)) {
-      return false;
+    // Check if aidlc-docs/ has subdirectories with inception/ in them (new workflow-id layout)
+    const exists = await fs.pathExists(newWorkflowDir);
+    if (exists) {
+      const entries = await fs.readdir(newWorkflowDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const inceptionDir = path.join(newWorkflowDir, entry.name, 'inception');
+          if (await fs.pathExists(inceptionDir)) return false;
+        }
+      }
     }
 
     // If only .olympus/workflow/{id}/ exists, it's legacy
@@ -609,7 +616,7 @@ export async function isLegacyLayout(projectPath: string, workflowId: string): P
  * @throws Error if disk is full, permissions are denied, or filesystem errors occur
  */
 export async function migrateLayout(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
   const visionDir = path.join(workflowDir, 'inception');
 
   try {
@@ -695,7 +702,7 @@ export function getPhaseArtifactPath(
   stage: string,
   filename: string
 ): string {
-  const workflowDir = path.join(projectPath, 'aidlc-docs');
+  const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
 
   // Determine subdirectory structure based on stage
   // Only 'design' maps to subdirectory in construction phase (per-unit dirs are handled separately)
@@ -712,36 +719,39 @@ export function getPhaseArtifactPath(
 
 /**
  * Ensures the discovery directory exists for brownfield workflows.
- * Creates aidlc-docs/discovery/
+ * Creates aidlc-docs/{workflowId}/discovery/
  *
  * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
  */
-export async function ensureDiscoveryDir(projectPath: string): Promise<void> {
-  const discoveryDir = path.join(projectPath, 'aidlc-docs', 'discovery');
+export async function ensureDiscoveryDir(projectPath: string, workflowId: string): Promise<void> {
+  const discoveryDir = path.join(projectPath, 'aidlc-docs', workflowId, 'discovery');
   await fs.ensureDir(discoveryDir);
 }
 
 /**
- * Writes content to the state.md file at the root of aidlc-docs/.
+ * Writes content to the state.md file at the root of aidlc-docs/{workflowId}/.
  *
  * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
  * @param content - Content to write to state.md
  */
-export async function writeStateFile(projectPath: string, content: string): Promise<void> {
-  const statePath = path.join(projectPath, 'aidlc-docs', 'state.md');
+export async function writeStateFile(projectPath: string, workflowId: string, content: string): Promise<void> {
+  const statePath = path.join(projectPath, 'aidlc-docs', workflowId, 'state.md');
   await fs.ensureDir(path.dirname(statePath));
   await fs.writeFile(statePath, content, 'utf-8');
 }
 
 /**
- * Appends an entry to the audit.md file at the root of aidlc-docs/.
+ * Appends an entry to the audit.md file at the root of aidlc-docs/{workflowId}/.
  * Creates the file with a header if it doesn't exist.
  *
  * @param projectPath - Root path of the project
+ * @param workflowId - Unique workflow identifier
  * @param entry - Entry to append to audit.md
  */
-export async function appendAuditEntry(projectPath: string, entry: string): Promise<void> {
-  const auditPath = path.join(projectPath, 'aidlc-docs', 'audit.md');
+export async function appendAuditEntry(projectPath: string, workflowId: string, entry: string): Promise<void> {
+  const auditPath = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
   await fs.ensureDir(path.dirname(auditPath));
   const exists = await fs.pathExists(auditPath);
   if (exists) {

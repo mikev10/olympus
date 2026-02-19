@@ -6,8 +6,8 @@ import {
   generateReleaseNotes,
   generateCostAnalysis,
   generateOperationsArtifacts,
-} from '../../../features/workflow-engine/summit/templates.js';
-import type { OperationsContext } from '../../../features/workflow-engine/summit/templates.js';
+} from '../../../features/workflow-engine/operations/templates.js';
+import type { OperationsContext } from '../../../features/workflow-engine/operations/templates.js';
 import type { ManifestSchema, ManifestArtifact, RiskEntry, GateAuditEntry } from '../../../features/workflow-engine/phase-types.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -51,7 +51,7 @@ function createTestContext(overrides: Partial<OperationsContext> = {}): Operatio
   };
 }
 
-describe('Summit Templates', () => {
+describe('Operations Templates', () => {
   describe('generateDeployGuide', () => {
     it('should generate valid deploy guide markdown', () => {
       const context = createTestContext();
@@ -797,7 +797,7 @@ describe('Summit Templates', () => {
       expect(result.artifactsGenerated).toContain('cost.md');
 
       // Verify files exist on disk
-      const opsDir = path.join(tmpDir, 'aidlc-docs', 'operations');
+      const opsDir = path.join(tmpDir, 'aidlc-docs', 'test-feature', 'operations');
       for (const file of result.artifactsGenerated) {
         expect(fs.existsSync(path.join(opsDir, file))).toBe(true);
       }
@@ -818,7 +818,7 @@ describe('Summit Templates', () => {
       expect(result.artifactsGenerated).toEqual(['release-notes.md']);
 
       // Verify ONLY release-notes exists
-      const opsDir = path.join(tmpDir, 'aidlc-docs', 'operations');
+      const opsDir = path.join(tmpDir, 'aidlc-docs', 'test-feature', 'operations');
       expect(fs.existsSync(path.join(opsDir, 'release-notes.md'))).toBe(true);
       expect(fs.existsSync(path.join(opsDir, 'deploy-guide.md'))).toBe(false);
       expect(fs.existsSync(path.join(opsDir, 'runbook.md'))).toBe(false);
@@ -830,7 +830,7 @@ describe('Summit Templates', () => {
       const context = createTestContext();
       const result = await generateOperationsArtifacts(context, tmpDir);
 
-      expect(result.operationsDir).toBe(path.join(tmpDir, 'aidlc-docs', 'operations'));
+      expect(result.operationsDir).toBe(path.join(tmpDir, 'aidlc-docs', 'test-feature', 'operations'));
       expect(fs.existsSync(result.operationsDir)).toBe(true);
     });
 
@@ -838,7 +838,7 @@ describe('Summit Templates', () => {
       const context = createTestContext({ featureName: 'My Feature' });
       await generateOperationsArtifacts(context, tmpDir);
 
-      const opsDir = path.join(tmpDir, 'aidlc-docs', 'operations');
+      const opsDir = path.join(tmpDir, 'aidlc-docs', 'test-feature', 'operations');
       const releaseNotes = fs.readFileSync(path.join(opsDir, 'release-notes.md'), 'utf-8');
       expect(releaseNotes).toContain('My Feature');
 

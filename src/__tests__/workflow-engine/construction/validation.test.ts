@@ -5,11 +5,10 @@ import {
   validateUnits,
   validateDesignArtifacts,
   validateBolt,
-  validateForgePhase,
   validateConstructionPhase,
-} from '../../../features/workflow-engine/forge/validation.js';
+} from '../../../features/workflow-engine/construction/validation.js';
 
-describe('Forge Validation', () => {
+describe('Construction Validation', () => {
   const testDir = join(process.cwd(), '.test-validation');
   const constructionDir = join(testDir, 'construction');
   const intentDir = join(testDir, 'inception');
@@ -1067,14 +1066,10 @@ Technical approach using migration framework
       expect(result.blocking_issues).toContain('Construction directory not found');
     });
 
-    it('validateForgePhase should be an alias for validateConstructionPhase', () => {
-      expect(validateForgePhase).toBe(validateConstructionPhase);
-    });
-
     it('should return passed=true for complete valid construction structure (new layout)', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, 'aidlc-docs');
+      const workflowDir = join(projectPath, 'aidlc-docs', workflowId);
       const constructionDir = join(workflowDir, 'construction');
       const unitDir = join(constructionDir, 'UNIT-001');
       const designDir = join(constructionDir, 'design');
@@ -1101,7 +1096,7 @@ Technical approach using migration framework
     it('should return passed=true for legacy construction structure (units/ and bolts/ dirs)', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, 'aidlc-docs');
+      const workflowDir = join(projectPath, 'aidlc-docs', workflowId);
       const constructionDir = join(workflowDir, 'construction');
       const unitsDir = join(constructionDir, 'units');
       const designDir = join(constructionDir, 'design');
@@ -1179,7 +1174,7 @@ Create migration script
     it('should aggregate blocking issues from sub-validations', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, 'aidlc-docs');
+      const workflowDir = join(projectPath, 'aidlc-docs', workflowId);
       const constructionDir = join(workflowDir, 'construction');
       const unitDir = join(constructionDir, 'UNIT-001');
       const designDir = join(constructionDir, 'design');
@@ -1212,7 +1207,7 @@ Create migration script
     it('should calculate aggregate coverage correctly', async () => {
       const projectPath = testDir;
       const workflowId = 'test-workflow';
-      const workflowDir = join(projectPath, 'aidlc-docs');
+      const workflowDir = join(projectPath, 'aidlc-docs', workflowId);
       const constructionDir = join(workflowDir, 'construction');
       const unitDir = join(constructionDir, 'UNIT-001');
       const designDir = join(constructionDir, 'design');

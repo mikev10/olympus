@@ -38,20 +38,28 @@ export function registerWorkflowTransitionHooks(): void {
           return { continue: true };
         }
 
-        // Load manifest
-        const manifestPath = path.join(directory, 'aidlc-docs', 'manifest.json');
-        const manifest = loadManifest(manifestPath);
-        if (!manifest) {
+        // Find active workflow
+        const workflowIds = await listWorkflows(directory);
+        let activeWorkflowId: string | null = null;
+        let checkpoint = null;
+
+        for (const wfId of workflowIds) {
+          const cp = await loadCheckpoint(directory, wfId);
+          if (cp && cp.status !== 'complete' && cp.status !== 'archived' && cp.status !== 'deferred') {
+            activeWorkflowId = wfId;
+            checkpoint = cp;
+            break;
+          }
+        }
+
+        if (!activeWorkflowId || !checkpoint) {
           return { continue: true };
         }
 
-        // Load checkpoint for context
-        const workflowIds = await listWorkflows(directory);
-        if (workflowIds.length === 0) {
-          return { continue: true };
-        }
-        const checkpoint = await loadCheckpoint(directory, workflowIds[0]);
-        if (!checkpoint) {
+        // Load manifest
+        const manifestPath = path.join(directory, 'aidlc-docs', activeWorkflowId, 'manifest.json');
+        const manifest = loadManifest(manifestPath);
+        if (!manifest) {
           return { continue: true };
         }
 
@@ -108,7 +116,10 @@ export function registerWorkflowTransitionHooks(): void {
             }
           }
 
-          message = `✓ INTENT locked — '${manifest.feature_name}'\nTech spec: ${intentArtifacts.length > 0 ? intentArtifacts[0].path : 'aidlc-docs/inception/intent.md'} | Risk: Tier ${riskTier}\n${unitArtifacts.length} UNITs decomposed | ${boltArtifacts.length} BOLTs queued\n→ Ready: /ascent, /olympus, or /ultrawork to begin Construction${devNotice}`;
+          const intentPath = intentArtifacts.length > 0
+            ? intentArtifacts[0].path
+            : `aidlc-docs/${activeWorkflowId}/inception/intent.md`;
+          message = `✓ INTENT locked — '${manifest.feature_name}'\nTech spec: ${intentPath} | Risk: Tier ${riskTier}\n${unitArtifacts.length} UNITs decomposed | ${boltArtifacts.length} BOLTs queued\n→ Ready: /ascent, /olympus, or /ultrawork to begin Construction${devNotice}`;
         }
         // IDEA approved
         else if (ideaArtifacts.some(a => a.contract_status === 'active' || a.contract_status === 'fulfilled') &&

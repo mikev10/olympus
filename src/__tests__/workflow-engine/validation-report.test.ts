@@ -11,8 +11,9 @@ import {
 describe('validation-report', () => {
   const testDir = join(process.cwd(), '.test-validation-report');
   const projectPath = testDir;
+  const workflowId = 'test-workflow';
   const unitId = 'UNIT-001';
-  const reportPath = join(testDir, 'aidlc-docs', 'construction', unitId, 'validation-report.md');
+  const reportPath = join(testDir, 'aidlc-docs', workflowId, 'construction', unitId, 'validation-report.md');
 
   beforeEach(() => {
     fs.ensureDirSync(testDir);
@@ -320,7 +321,7 @@ describe('validation-report', () => {
     });
 
     it('creates directory structure if it does not exist', () => {
-      const deepPath = join(testDir, 'aidlc-docs', 'construction', 'UNIT-999', 'validation-report.md');
+      const deepPath = join(testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-999', 'validation-report.md');
       const boltData: BoltValidationData = {
         boltId: 'BOLT-001',
         boltTitle: 'Test BOLT',
@@ -332,12 +333,12 @@ describe('validation-report', () => {
         riskTier: 2,
       };
 
-      expect(fs.existsSync(join(testDir, 'aidlc-docs', 'construction', 'UNIT-999'))).toBe(false);
+      expect(fs.existsSync(join(testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-999'))).toBe(false);
 
       generateValidationReport(deepPath, 'UNIT-999', boltData);
 
       expect(fs.existsSync(deepPath)).toBe(true);
-      expect(fs.existsSync(join(testDir, 'aidlc-docs', 'construction', 'UNIT-999'))).toBe(true);
+      expect(fs.existsSync(join(testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-999'))).toBe(true);
     });
 
     it('accumulates multiple BOLT sections in the same report', () => {
@@ -413,7 +414,7 @@ describe('validation-report', () => {
 
     it('returns content when file exists', () => {
       const expectedContent = '# Validation Report: UNIT-001\n\nSome content here.\n';
-      fs.ensureDirSync(join(testDir, 'aidlc-docs', 'construction', unitId));
+      fs.ensureDirSync(join(testDir, 'aidlc-docs', workflowId, 'construction', unitId));
       fs.writeFileSync(reportPath, expectedContent, 'utf-8');
 
       const content = readValidationReport(reportPath);
@@ -429,24 +430,24 @@ describe('validation-report', () => {
 
   describe('getValidationReportPath', () => {
     it('constructs correct path for validation report', () => {
-      const path = getValidationReportPath('/project/root', 'UNIT-001');
-      expect(path).toBe(join('/project/root', 'aidlc-docs', 'construction', 'UNIT-001', 'validation-report.md'));
+      const path = getValidationReportPath('/project/root', 'my-workflow', 'UNIT-001');
+      expect(path).toBe(join('/project/root', 'aidlc-docs', 'my-workflow', 'construction', 'UNIT-001', 'validation-report.md'));
     });
 
     it('handles different unit IDs correctly', () => {
-      const path1 = getValidationReportPath('/project', 'UNIT-042');
-      const path2 = getValidationReportPath('/project', 'UNIT-999');
+      const path1 = getValidationReportPath('/project', 'wf-001', 'UNIT-042');
+      const path2 = getValidationReportPath('/project', 'wf-001', 'UNIT-999');
 
-      expect(path1).toBe(join('/project', 'aidlc-docs', 'construction', 'UNIT-042', 'validation-report.md'));
-      expect(path2).toBe(join('/project', 'aidlc-docs', 'construction', 'UNIT-999', 'validation-report.md'));
+      expect(path1).toBe(join('/project', 'aidlc-docs', 'wf-001', 'construction', 'UNIT-042', 'validation-report.md'));
+      expect(path2).toBe(join('/project', 'aidlc-docs', 'wf-001', 'construction', 'UNIT-999', 'validation-report.md'));
     });
 
     it('handles different project paths correctly', () => {
-      const path1 = getValidationReportPath('/home/user/project', 'UNIT-001');
-      const path2 = getValidationReportPath('C:\\Users\\Dev\\Project', 'UNIT-001');
+      const path1 = getValidationReportPath('/home/user/project', 'workflow-123', 'UNIT-001');
+      const path2 = getValidationReportPath('C:\\Users\\Dev\\Project', 'workflow-123', 'UNIT-001');
 
-      expect(path1).toBe(join('/home/user/project', 'aidlc-docs', 'construction', 'UNIT-001', 'validation-report.md'));
-      expect(path2).toBe(join('C:\\Users\\Dev\\Project', 'aidlc-docs', 'construction', 'UNIT-001', 'validation-report.md'));
+      expect(path1).toBe(join('/home/user/project', 'aidlc-docs', 'workflow-123', 'construction', 'UNIT-001', 'validation-report.md'));
+      expect(path2).toBe(join('C:\\Users\\Dev\\Project', 'aidlc-docs', 'workflow-123', 'construction', 'UNIT-001', 'validation-report.md'));
     });
   });
 });

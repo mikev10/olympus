@@ -189,7 +189,7 @@ export type {
   UnitSpec,
   BoltSpec,
   DecompositionTree,
-} from './forge/decomposition.js';
+} from './construction/decomposition.js';
 export {
   parseIntentsFromDisk,
   parseIntentFromFile,
@@ -199,7 +199,7 @@ export {
   buildDecompositionTree,
   getLeafBolts,
   getExecutableOrder,
-} from './forge/decomposition.js';
+} from './construction/decomposition.js';
 export type {
   InterfaceContract,
   InterfaceField,
@@ -208,7 +208,7 @@ export type {
   DataFlow,
   ComponentDesign,
   DesignArtifacts,
-} from './forge/design.js';
+} from './construction/design.js';
 export {
   generateInterfaceContracts,
   generateDataFlowDiagram,
@@ -216,24 +216,21 @@ export {
   validateDesign,
   writeDesignArtifacts,
   loadDesignArtifacts,
-} from './forge/design.js';
+} from './construction/design.js';
 export {
   ConstructionExecutor,
-  ForgeExecutor,
   CONSTRUCTION_STAGE_AGENT_MAP,
-  FORGE_STAGE_AGENT_MAP,
-} from './forge/executor.js';
-export type { ConstructionProgress, ConstructionOptions, ForgeProgress } from './forge/executor.js';
+} from './construction/executor.js';
+export type { ConstructionProgress, ConstructionOptions } from './construction/executor.js';
 export {
   validateUnits,
   validateDesignArtifacts,
   validateBolt,
-  validateForgePhase,
   validateConstructionPhase,
-} from './forge/validation.js';
+} from './construction/validation.js';
 
 // Operations Phase
-export type { OperationsContext, SummitContext, OperationsResult } from './summit/templates.js';
+export type { OperationsContext, OperationsResult } from './operations/templates.js';
 export {
   generateDeployGuide,
   generateRunbook,
@@ -241,7 +238,7 @@ export {
   generateReleaseNotes,
   generateCostAnalysis,
   generateOperationsArtifacts,
-} from './summit/templates.js';
+} from './operations/templates.js';
 
 // Status Reporter
 export type { WorkflowReport, PhaseProgressEntry } from './status-reporter.js';

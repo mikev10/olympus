@@ -1468,9 +1468,25 @@ $ARGUMENTS
 Before activating ultrawork, check for an active ODLC workflow:
 
 ### Step 1: Detect Active Workflow
-1. Check if \`aidlc-docs/manifest.json\` exists in the project root
-2. If found, read it and \`aidlc-docs/checkpoint.json\`
+1. Scan \`aidlc-docs/\` subdirectories for active workflows. Look for \`checkpoint.json\` files with status 'in_progress'. Use that workflow's manifest at \`aidlc-docs/{workflowId}/manifest.json\`.
+2. If found, read the manifest and checkpoint
 3. If no workflow found, proceed with standard ultrawork behavior below
+
+### Step 1.5: Construction Decomposition (required before BOLT dispatch)
+
+If the checkpoint stage is \`construction_prep\` or \`awaiting_mode_selection\`, OR the \`aidlc-docs/{workflowId}/construction/\` directory has no \`UNIT-*/\` subdirectories, you MUST run decomposition before dispatching any BOLTs:
+
+1. **Read the INTENT**: Read \`aidlc-docs/{workflowId}/inception/intent.md\`. Extract the "### Proposed UNITs" section.
+
+2. **Create UNIT specs**: For each proposed UNIT (UNIT-001, UNIT-002, ...):
+   - Create directory \`aidlc-docs/{workflowId}/construction/UNIT-NNN/\`
+   - Write \`spec.md\` with frontmatter (id, title, parent_intent, status: pending, estimated_effort) and sections: Goal, Scope, Acceptance Criteria, Implementation Notes
+
+3. **Create BOLT specs**: Break each UNIT into 1-7 atomic BOLTs named \`BOLT-{unitNum}{A-G}\`. Write \`BOLT-{id}.md\` in each UNIT directory with frontmatter and sections: Goal, Implementation Steps, Target Files, Test Requirements, Acceptance Criteria
+
+4. **Update checkpoint**: Set \`current_phase: "construction"\`, \`current_stage: "bolt"\`, \`status: "in_progress"\`, \`bolts_total\`, \`bolts_completed: 0\`
+
+**Do NOT dispatch any BOLTs until all spec files exist on disk. Decomposition itself can run in parallel with other prep work.**
 
 ### Step 2: Dependency Analysis
 When a workflow is active, analyze the manifest to identify ALL independent BOLTs:
@@ -1497,7 +1513,7 @@ Instead of reviewing BOLTs one at a time:
 All manifest updates use the atomic manifest updater to prevent corruption from concurrent writes:
 - Use \`atomicManifestUpdate()\` for individual BOLT status changes
 - Use \`batchManifestUpdate()\` when updating multiple artifacts at once
-- Update checkpoint after each BOLT completion
+- **Track progress**: After each BOLT completes, update the BOLT's \`.md\` frontmatter (\`status: complete\`), increment \`bolts_completed\` in checkpoint, update \`updated\` timestamp. When all BOLTs in a UNIT complete, update that UNIT's \`spec.md\` status to \`complete\` and increment \`units_completed\` in checkpoint
 
 ### Step 6: Completion
 When all BOLTs are fulfilled:
@@ -1631,10 +1647,31 @@ $ARGUMENTS
 Before starting orchestration, check for an active ODLC workflow:
 
 ### Step 1: Detect Active Workflow
-1. Check if \`aidlc-docs/manifest.json\` exists in the project root
-2. If found, read it to get the workflow state
-3. Read \`aidlc-docs/checkpoint.json\` for resume pointers
-4. If no workflow found, proceed with standard orchestration below
+1. Scan \`aidlc-docs/\` subdirectories for active workflows. Look for \`checkpoint.json\` files with status 'in_progress'. Use that workflow's manifest at \`aidlc-docs/{workflowId}/manifest.json\`.
+2. If found, read the manifest and checkpoint
+3. If no workflow found, proceed with standard orchestration below
+
+### Step 1.5: Construction Decomposition (required before BOLT dispatch)
+
+If the checkpoint stage is \`construction_prep\` or \`awaiting_mode_selection\`, OR the \`aidlc-docs/{workflowId}/construction/\` directory has no \`UNIT-*/\` subdirectories, you MUST run decomposition before dispatching any BOLTs:
+
+1. **Read the INTENT**: Read \`aidlc-docs/{workflowId}/inception/intent.md\`. Extract the "### Proposed UNITs" section to get each UNIT's title, scope, and description. Also read the full Technical Specification and User Stories for context.
+
+2. **Create UNIT specs**: For each proposed UNIT (UNIT-001, UNIT-002, ...):
+   - Create directory \`aidlc-docs/{workflowId}/construction/UNIT-NNN/\`
+   - Write \`spec.md\` inside with frontmatter (\`id\`, \`title\`, \`parent_intent: INTENT-001\`, \`status: pending\`, \`estimated_effort\`) and sections: Goal, Scope & Responsibility, Acceptance Criteria (derived from INTENT user stories), Implementation Notes, Proposed BOLTs
+
+3. **Create BOLT specs**: Break each UNIT into 1-7 focused, atomic BOLTs named \`BOLT-{unitNum}{A-G}\` (e.g., BOLT-1A, BOLT-1B for UNIT-001; BOLT-2A for UNIT-002). Each BOLT should be completable in a single agent session. For each BOLT, create \`aidlc-docs/{workflowId}/construction/UNIT-NNN/BOLT-{id}.md\` with:
+   - Frontmatter: \`id\`, \`title\`, \`parent_unit\`, \`status: pending\`, \`estimated_effort\`, \`created\`
+   - Sections: Goal, Implementation Steps (specific actionable steps), Target Files (files to create/modify), Test Requirements, Acceptance Criteria
+
+4. **Update checkpoint**: Set \`current_phase: "construction"\`, \`current_stage: "bolt"\`, \`status: "in_progress"\`. Add \`bolts_total: {count}\`, \`bolts_completed: 0\`, \`units_total: {count}\`, \`units_completed: 0\`.
+
+5. **Present decomposition summary** to the user before starting execution:
+   "**Construction decomposition complete:** {N} UNITs, {M} BOLTs total."
+   List each UNIT with its BOLTs briefly.
+
+**Do NOT dispatch any BOLTs until all spec files are written to disk.**
 
 ### Step 2: Intelligent BOLT Dispatch (when workflow is active)
 
@@ -1646,16 +1683,19 @@ When an active workflow is detected, switch to BOLT dispatch mode with intellige
 - Debug/investigation BOLTs → \`oracle\` agent
 
 **For each pending BOLT:**
-1. Read the BOLT spec from \`aidlc-docs/construction/{parent-unit-id}/{bolt-id}.md\`
-2. Read the parent UNIT spec at \`aidlc-docs/construction/{parent-unit-id}/spec.md\` for context
+1. Read the BOLT spec from \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/{bolt-id}.md\`
+2. Read the parent UNIT spec at \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/spec.md\` for context
 3. Update checkpoint \`active_bolt_id\` to the BOLT being dispatched
 4. Analyze BOLT content to select the right agent (code→olympian, UI→frontend-engineer, debug→oracle)
 5. Dispatch to the selected agent
 6. After agent completes:
    a. **Gate 4**: Present code changes to the developer for review
-   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/manifest.json\` using atomic manifest updater, update checkpoint
+   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/{workflowId}/manifest.json\` using atomic manifest updater, update checkpoint
    c. If rejected: re-execute the BOLT with developer's feedback
-7. Update \`aidlc-docs/checkpoint.json\` with progress after each BOLT
+7. **Track progress** after each BOLT completes:
+   a. Update the BOLT's \`.md\` file: set \`status: complete\` in frontmatter, record completion timestamp
+   b. Update \`aidlc-docs/{workflowId}/checkpoint.json\`: increment \`bolts_completed\`, set \`active_bolt_id\` to the next pending BOLT, update \`updated\` timestamp
+   c. When ALL BOLTs in a UNIT are complete, update that UNIT's \`spec.md\` status to \`complete\` and increment \`units_completed\` in checkpoint
 
 ### Step 3: Parallel Execution
 
@@ -1789,7 +1829,7 @@ description: Discovery + Inception pipeline entry point (ODLC/AIDLC)
 
 # Prometheus - ODLC Pipeline: Discovery + Inception
 
-You are Prometheus, the strategic planner of Olympus. You guide features through the Discovery and Inception stages of the ODLC (Olympus Development Life Cycle) pipeline, producing structured artifacts in \`aidlc-docs/\`.
+You are Prometheus, the strategic planner of Olympus. You guide features through the Discovery and Inception stages of the ODLC (Olympus Development Life Cycle) pipeline, producing structured artifacts in \`aidlc-docs/{workflowId}/\` where workflowId is a slug derived from the feature name.
 
 ## Input
 
@@ -1817,17 +1857,31 @@ Before starting anything new, check for existing workflow state.
 ### 1a. Handle --abort flag
 
 If the \`--abort\` flag is present:
-1. Read \`aidlc-docs/checkpoint.json\`.
-2. If a checkpoint exists: move the entire \`aidlc-docs/\` directory to \`.olympus/archive/{workflowId}/\` (create the archive directory if needed). Confirm to the user: "Workflow '{name}' archived to \`.olympus/archive/{workflowId}/\`."
+1. Scan \`aidlc-docs/\` subdirectories for checkpoint.json files. Read each to find active workflows.
+2. If a checkpoint exists: update its status to 'archived'. Confirm to the user: "Workflow '{name}' archived at \`aidlc-docs/{workflowId}/\`."
 3. If no checkpoint exists: display "No active workflow to abort." and stop.
 4. Stop here — do not continue the pipeline.
 
-### 1b. Check aidlc-docs/checkpoint.json
+### 1b. Check aidlc-docs/{workflowId}/checkpoint.json
 
-Read \`aidlc-docs/checkpoint.json\`. Interpret what you find:
+Scan the \`aidlc-docs/\` directory for workflow subdirectories. Each subdirectory that contains a \`checkpoint.json\` represents a workflow. Read each checkpoint to determine its status.
 
 - **If checkpoint exists with \`status: 'awaiting_mode_selection'\`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 7) and stop — do not restart the pipeline.
-- **If checkpoint exists and is active** (any other non-terminal status): Display "Found workflow: '{name}' ({stage}). Resume? [Y/n]" and wait for user response. If they confirm, resume from the saved stage. If they decline, ask if they want to abort (\`--abort\`) or start fresh.
+- **If checkpoint exists at \`stage: 'idea'\` with \`status: 'in_progress'\`**: This is a freshly initialized workflow (the hook created the checkpoint). Before proceeding, **determine and confirm the workflow name**:
+
+  1. Determine the input type. The \`/plan\` argument can be:
+     - A **file path** (e.g., \`prd.md\`, \`proposal.txt\`, \`design-spec.md\`, \`requirements.docx\`, \`notes.md\`) → read the file content
+     - A **description string** (e.g., "Add user authentication", "Build a marketplace for AI tools") → use the text directly
+     - A **URL** or reference → fetch/read the content if possible
+     Users may provide a PRD, a rough idea, a spec, meeting notes, or just a sentence. Handle all cases.
+  2. From the CONTENT (never the filename or raw argument), derive a concise **1-3 word** name that captures the core product or feature being built. Examples: "ai-native-marketplace", "user-auth", "payment-system", "chat-widget".
+  3. Slugify the name: lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim.
+  4. Show the user: "Workflow name: \`{derivedName}\`. OK, or would you like a different name?"
+  5. If the user provides a different name, slugify that instead.
+  6. If the derived name differs from the current \`workflowId\` on disk, rename the directory: move \`aidlc-docs/{oldWorkflowId}/\` to \`aidlc-docs/{newWorkflowId}/\`, update the checkpoint's \`workflow_id\` and \`feature_name\` fields, and save.
+
+  Then go to Step 2 (trust state) and then Step 3 (Discovery) or Step 4 (IDEA interview). Do NOT ask "Resume?" — this is a new workflow, not a resumption. Skip Step 4a (directory/checkpoint creation) since the hook already handled it.
+- **If checkpoint exists at any other stage and is active** (not terminal): This is a previously started workflow. Display "Found workflow: '{name}' ({phase} → {stage}). Resume? [Y/n]" and wait for user response. If they confirm, resume from the saved stage. If they decline, ask if they want to abort (\`--abort\`) or start fresh.
 - **If checkpoint has \`interview_progress\`** (mid-interview resume): The system injects interview progress info at session start. When resuming, Prometheus MUST: (1) read the draft artifact at the path indicated in the context, (2) skip questions already covered in the draft, (3) continue from the next unanswered question. If no \`interview_progress\` exists but a draft artifact path is found, restart the interview but preserve the existing draft as context.
 - **If no checkpoint exists**: Proceed to Step 1c.
 
@@ -1880,7 +1934,7 @@ Dispatch two agents in parallel to analyze the existing codebase:
 
 2. \`Task(subagent_type="oracle-medium", description="Discovery: Analyze impact and risks", prompt="...")\` — Analyze the codebase for patterns, potential regression risks, change impact areas, and architectural constraints. Produce structured findings.
 
-Using the combined results from both agents, generate these 6 artifacts in \`aidlc-docs/discovery/\`:
+Using the combined results from both agents, generate these 6 artifacts in \`aidlc-docs/{workflowId}/discovery/\`:
 
 1. **analysis-plan.md** — What was analyzed and why, methodology used.
 2. **current-state-analysis.md** — Current architecture, key modules, tech stack, dependency map.
@@ -1908,14 +1962,25 @@ Wait for user approval before proceeding. If they have concerns, discuss and upd
 
 ### 4a. Create workflow directory and manifest
 
-Create the \`aidlc-docs/\` directory if it does not exist. Create \`aidlc-docs/inception/\` subdirectory.
+Generate the workflowId by slugifying the feature name:
+- Strip file extensions (.md, .txt, .json, etc.)
+- Convert to lowercase
+- Replace underscores and spaces with hyphens
+- Remove characters that aren't a-z, 0-9, or hyphens
+- Collapse multiple consecutive hyphens into one
+- Trim leading/trailing hyphens
+- Examples: "User Authentication System" → "user-authentication-system", "ai_native_marketplace_prd.md" → "ai-native-marketplace-prd"
 
-Generate a workflow ID (use a short descriptive slug derived from the feature description, e.g., \`add-auth-middleware\`).
+Create the directory structure at \`aidlc-docs/{workflowId}/\`:
+- \`aidlc-docs/{workflowId}/inception/\`
+- \`aidlc-docs/{workflowId}/construction/\`
+- \`aidlc-docs/{workflowId}/construction/design/\`
+- \`aidlc-docs/{workflowId}/operations/\`
 
-Save an initial checkpoint to \`aidlc-docs/checkpoint.json\`:
+Save an initial checkpoint to \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
-  "workflowId": "{workflow-id}",
+  "workflowId": "{workflowId}",
   "name": "{feature title}",
   "stage": "idea",
   "status": "in_progress",
@@ -1937,6 +2002,28 @@ Adjust the number of questions based on the trust level determined in Step 2. At
 
 **CRITICAL**: Ask questions DIRECTLY in your message output. They must be visible to the user immediately. Do not delegate question-asking to agents.
 
+After receiving the user's answers, save the raw interview exchange to \`aidlc-docs/{workflowId}/inception/interview-log.md\`:
+
+\`\`\`markdown
+# Interview Log: {Title}
+
+Date: {ISO-8601 date}
+Trust Level: {0-3}
+Depth: {SHALLOW|MEDIUM|DEEP or "pending"}
+
+## Questions & Answers
+
+### Q1: {The exact question you asked}
+**Answer**: {The user's verbatim response}
+
+### Q2: {The exact question you asked}
+**Answer**: {The user's verbatim response}
+
+{...repeat for all questions asked}
+\`\`\`
+
+This file preserves the raw user input for traceability and audit purposes. Update it incrementally — append each Q&A pair as answers come in so progress is saved even if the session is interrupted.
+
 ### 4c. Consult Metis for blind spots
 
 After receiving the user's answers:
@@ -1951,7 +2038,7 @@ Task(
 
 ### 4d. Generate IDEA artifact
 
-Create \`aidlc-docs/inception/idea.md\` using this template:
+Create \`aidlc-docs/{workflowId}/inception/idea.md\` using this template:
 
 \`\`\`markdown
 ---
@@ -2021,7 +2108,7 @@ This gate is ALWAYS blocking. Wait for explicit approval before proceeding. If t
 
 ### 4g. Save checkpoint (CCR-1)
 
-After IDEA approval, update \`aidlc-docs/checkpoint.json\`:
+After IDEA approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
   "stage": "intent",
@@ -2073,7 +2160,7 @@ Task(
 
 ### 5d. Generate INTENT artifact
 
-Create \`aidlc-docs/inception/intent.md\` using this template:
+Create \`aidlc-docs/{workflowId}/inception/intent.md\` using this template:
 
 \`\`\`markdown
 ---
@@ -2115,7 +2202,7 @@ Fill in all sections thoroughly based on user input, research findings, and Meti
 
 ### 5e. Generate NFR artifact
 
-Create \`aidlc-docs/inception/nfr.md\` using this template:
+Create \`aidlc-docs/{workflowId}/inception/nfr.md\` using this template:
 
 \`\`\`markdown
 ---
@@ -2204,7 +2291,7 @@ This notification is:
 
 ### 5j. Save checkpoint (CCR-1)
 
-After all INTENT gates pass, update \`aidlc-docs/checkpoint.json\`:
+After all INTENT gates pass, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
   "stage": "construction_prep",
@@ -2234,7 +2321,7 @@ Depth: {SHALLOW|MEDIUM|DEEP} | Risk Tier: {1|2|3}
 Decomposition pending — will run when Construction pipeline is implemented in Phase 3.
 
 Artifacts created:
-{List all files in aidlc-docs/ with relative paths}"
+{List all files in aidlc-docs/{workflowId}/ with relative paths}"
 
 ### 6b. Present execution mode choice
 
@@ -2249,7 +2336,7 @@ Which mode would you like to use?"
 
 ### 6c. Save final checkpoint
 
-Update \`aidlc-docs/checkpoint.json\`:
+Update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
   "stage": "construction_prep",
@@ -2361,18 +2448,39 @@ $ARGUMENTS
 Before starting the persistence loop, check for an active ODLC workflow:
 
 ### Step 1: Detect Active Workflow
-1. Check if \`aidlc-docs/manifest.json\` exists in the project root
-2. If found, read it to get the workflow state
-3. Read \`aidlc-docs/checkpoint.json\` for resume pointers
-4. If no workflow found, proceed with original ascent behavior below
+1. Scan \`aidlc-docs/\` subdirectories for active workflows. Look for \`checkpoint.json\` files with status 'in_progress'. Use that workflow's manifest at \`aidlc-docs/{workflowId}/manifest.json\`.
+2. If found, read the manifest and checkpoint
+3. If no workflow found, proceed with original ascent behavior below
+
+### Step 1.5: Construction Decomposition (required before BOLT dispatch)
+
+If the checkpoint stage is \`construction_prep\` or \`awaiting_mode_selection\`, OR the \`aidlc-docs/{workflowId}/construction/\` directory has no \`UNIT-*/\` subdirectories, you MUST run decomposition before dispatching any BOLTs:
+
+1. **Read the INTENT**: Read \`aidlc-docs/{workflowId}/inception/intent.md\`. Extract the "### Proposed UNITs" section to get each UNIT's title, scope, and description. Also read the Technical Specification and User Stories for context.
+
+2. **Create UNIT specs**: For each proposed UNIT (UNIT-001, UNIT-002, ...):
+   - Create directory \`aidlc-docs/{workflowId}/construction/UNIT-NNN/\`
+   - Write \`spec.md\` inside with frontmatter (\`id\`, \`title\`, \`parent_intent: INTENT-001\`, \`status: pending\`, \`estimated_effort\`) and sections: Goal, Scope & Responsibility, Acceptance Criteria (from INTENT user stories), Implementation Notes, Proposed BOLTs
+
+3. **Create BOLT specs**: Break each UNIT into 1-7 focused, atomic BOLTs named \`BOLT-{unitNum}{A-G}\` (e.g., BOLT-1A, BOLT-1B for UNIT-001). Each BOLT should be completable in a single agent session. For each BOLT, create \`aidlc-docs/{workflowId}/construction/UNIT-NNN/BOLT-{id}.md\` with:
+   - Frontmatter: \`id\`, \`title\`, \`parent_unit\`, \`status: pending\`, \`estimated_effort\`, \`created\`
+   - Sections: Goal, Implementation Steps (specific actionable steps), Target Files (files to create/modify), Test Requirements, Acceptance Criteria
+
+4. **Update checkpoint**: Set \`current_phase: "construction"\`, \`current_stage: "bolt"\`, \`status: "in_progress"\`. Add \`bolts_total: {count}\`, \`bolts_completed: 0\`, \`units_total: {count}\`, \`units_completed: 0\`.
+
+5. **Present decomposition summary** to the user before starting execution:
+   "**Construction decomposition complete:** {N} UNITs, {M} BOLTs total."
+   List each UNIT with its BOLTs.
+
+**Do NOT dispatch any BOLTs until all spec files are written to disk.**
 
 ### Step 2: BOLT Dispatch Mode (when workflow is active)
 
 When an active workflow is detected, switch to BOLT dispatch mode:
 
 **For each pending BOLT (in execution order from manifest):**
-1. Read the BOLT spec from \`aidlc-docs/construction/{parent-unit-id}/{bolt-id}.md\`
-2. Read the parent UNIT spec at \`aidlc-docs/construction/{parent-unit-id}/spec.md\` for context
+1. Read the BOLT spec from \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/{bolt-id}.md\`
+2. Read the parent UNIT spec at \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/spec.md\` for context
 3. Update checkpoint \`active_bolt_id\` to the BOLT being executed
 4. Dispatch to the appropriate agent:
    - Code/backend BOLTs → \`olympian\` agent
@@ -2380,9 +2488,12 @@ When an active workflow is detected, switch to BOLT dispatch mode:
    - Investigation/debugging BOLTs → \`oracle\` agent
 5. After agent completes:
    a. **Gate 4**: Present the code changes to the developer for review
-   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/manifest.json\`, update checkpoint
+   b. If approved: mark BOLT as fulfilled in \`aidlc-docs/{workflowId}/manifest.json\`, update checkpoint
    c. If rejected: re-execute the BOLT with the developer's feedback
-6. Update \`aidlc-docs/checkpoint.json\` with progress after each BOLT
+6. **Track progress** after each BOLT completes:
+   a. Update the BOLT's \`.md\` file: set \`status: complete\` in frontmatter, record completion timestamp
+   b. Update \`aidlc-docs/{workflowId}/checkpoint.json\`: increment \`bolts_completed\`, set \`active_bolt_id\` to the next pending BOLT, update \`updated\` timestamp
+   c. When ALL BOLTs in a UNIT are complete, update that UNIT's \`spec.md\` status to \`complete\` and increment \`units_completed\` in checkpoint
 7. Continue to the next pending BOLT
 
 **Execution order**: BOLTs are ordered by UNIT ID then BOLT ID within each unit (e.g., UNIT-001/BOLT-001, UNIT-001/BOLT-002, UNIT-002/BOLT-001).
@@ -2515,7 +2626,7 @@ Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
 Original task: [describe the task]
 What I implemented: [list changes]
 Tests run: [test results]
-If ODLC workflow is active: verify ALL BOLTs in aidlc-docs/manifest.json have contract_status 'fulfilled'.
+If ODLC workflow is active: verify ALL BOLTs in aidlc-docs/{workflowId}/manifest.json have contract_status 'fulfilled'.
 Please verify this is truly complete and production-ready.")
 \`\`\`
 
@@ -3125,9 +3236,9 @@ The /retro command analyzes your ODLC workflow's guardrail events (gate rejectio
 ## Steps
 
 ### Step 1: Locate Workflow Data
-1. Check if \`aidlc-docs/manifest.json\` exists in the project root
+1. Scan \`aidlc-docs/\` subdirectories for workflow data. Look for \`manifest.json\` files.
 2. If not found, report: "No workflow data found for retro analysis"
-3. If found, proceed with analysis
+3. If found, proceed with analysis using \`aidlc-docs/{workflowId}/manifest.json\`
 
 ### Step 2: Gather Retro Data
 Collect from the workflow manifest and trust state:
