@@ -102,8 +102,8 @@ Olympus uses specialized AI agents named after figures from Greek mythology. Eac
 | **Explore**         | —                         | **Codebase searcher.** Fast, lightweight agent that searches files, patterns, and code structure. Used by other agents to understand existing code.                                          | All stages                         |
 | **Librarian**       | —                         | **Documentation researcher.** Finds relevant documentation, best practices, and external references. Brings outside knowledge in.                                                            | INTENT, BOLT                       |
 | **QA-Tester**       | —                         | **Test validator.** Runs and validates tests interactively. Ensures code changes work correctly before approval.                                                                             | BOLT execution                     |
-| **Document-Writer** | —                         | **Technical writer.** Generates deployment guides, runbooks, release notes, and other documentation artifacts.                                                                               | Summit phase                       |
-| **Forge Executor**  | The forge of Hephaestus   | **Decomposition engine.** Breaks down an INTENT into UNITs (architectural modules) and then into BOLTs (coding tasks). Orchestrates the build phase.                                         | UNIT, BOLT                         |
+| **Document-Writer** | —                         | **Technical writer.** Generates deployment guides, runbooks, release notes, and other documentation artifacts.                                                                               | Operations phase                   |
+| **Construction Executor** | The forge of Hephaestus | **Decomposition engine.** Breaks down an INTENT into UNITs (architectural modules) and then into BOLTs (coding tasks). Orchestrates the build phase.                                    | UNIT, BOLT                         |
 
 > **Why mythology?** Each agent's name reflects its purpose. Prometheus brings _foresight_ to planning. Metis provides _wise counsel_. Momus offers _honest criticism_. Together, they form a pantheon of specialized AI that collaborates with human judgment at every gate.
 
@@ -1026,10 +1026,10 @@ Each stage produces specific artifacts tracked by `manifest.json`:
 | ------ | ------------------------------------------------------------------------- | --------------- |
 | IDEA   | `idea.md` — problem statement, personas, stories, metrics                 | `vision/`       |
 | INTENT | `intent.md` — business reqs, technical spec, implementation plan          | `vision/`       |
-| UNIT   | `UNIT-001.md` ... `UNIT-N.md` — module specs with interfaces              | `forge/units/`  |
-| UNIT   | `interfaces.json`, `data-flow.json`, `components.json` — design artifacts | `forge/design/` |
-| BOLT   | `BOLT-001.md` ... `BOLT-M.md` — coding tasks with audit trail             | `forge/bolts/`  |
-| Summit | Deploy guide, runbook, monitoring config, release notes                   | `summit/`       |
+| UNIT   | `UNIT-001.md` ... `UNIT-N.md` — module specs with interfaces              | `construction/units/`  |
+| UNIT   | `interfaces.json`, `data-flow.json`, `components.json` — design artifacts | `construction/design/` |
+| BOLT   | `BOLT-001.md` ... `BOLT-M.md` — coding tasks with audit trail             | `construction/bolts/`  |
+| Summit | Deploy guide, runbook, monitoring config, release notes                   | `operations/`          |
 
 ---
 
@@ -1268,7 +1268,7 @@ Every workflow lives in a self-contained directory with all its state:
   │                               - Implementation plan (units breakdown)
   │                               - Traceability back to IDEA
   │
-  ├── forge/                   ← FORGE PHASE artifacts
+  ├── construction/            ← CONSTRUCTION PHASE artifacts
   │   ├── units/               ← Architectural modules
   │   │   ├── UNIT-001.md      ← "Auth API Module"
   │   │   │                       - Scope & responsibility
@@ -1294,7 +1294,7 @@ Every workflow lives in a self-contained directory with all its state:
   │       ├── BOLT-003.md      ← "Add token validation"
   │       └── BOLT-004.md      ← "Build reset UI form"
   │
-  └── summit/                  ← SUMMIT PHASE artifacts
+  └── operations/              ← OPERATIONS PHASE artifacts
       ├── deploy-guide.md      ← Step-by-step deployment instructions
       ├── runbook.md           ← Operations runbook (troubleshooting)
       ├── monitoring.json      ← Monitoring & alerting configuration
@@ -1653,7 +1653,7 @@ Not everything needs to be built from scratch. Here's an honest assessment of wh
 - **Manifest system** (`manifest.ts`) — Functions exist, tests pass (~100 tests). Needs: execution modes to read/write it during BOLT dispatch
 - **Checkpoint system** (`checkpoint.ts`) — Functions exist, tests pass. Needs: /plan to use it for workflow resume detection
 - **Status reporter** (`status-reporter.ts`) — Functions exist, tests pass (~100 tests). Needs: wiring to /workflow-status slash command
-- **Forge Executor** (`forge/executor.ts`) — Decomposition works. Needs: actual agent dispatch (BOLT specs exist but aren't sent to olympian)
+- **Construction Executor** (`construction/executor.ts`) — Decomposition works. Needs: actual agent dispatch (BOLT specs exist but aren't sent to olympian)
 - **Quality gate hooks** (`quality-gate.ts`) — Phase-level gates work. Needs: per-BOLT and per-UNIT gate extensions
 
 **Does not exist yet (new code required):**
@@ -1678,8 +1678,8 @@ The key insight: **most of the pipeline components already exist as tested libra
   │  - alignment.ts      │            │  - Resume detector │         │                    │
   │  - depth-assessment  │            │  - Rejection disp. │         └────────────────────┘
   │  - status-reporter   │            └───────────────────┘
-  │  - forge/executor    │                    │
-  │  - forge/validation  │            ┌───────────────────┐
+  │  - construction/executor    │                    │
+  │  - construction/validation  │            ┌───────────────────┐
   │  - quality-gate hook │            │ Agents (no changes)│
   └─────────────────────┘            │  - olympian        │
                                       │  - oracle          │
