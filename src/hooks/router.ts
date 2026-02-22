@@ -11,15 +11,14 @@ import { loadConfig } from '../config/loader.js';
 import type { PluginConfig } from '../shared/types.js';
 
 /**
- * Get hook timeout from config (default 100ms).
+ * Get hook timeout from config (default 5000ms).
  */
 function getHookTimeout(config: PluginConfig): number {
-  // Look for hooks.timeout or default to 100ms
   const hooksConfig = (config as Record<string, unknown>).hooks as Record<string, unknown> | undefined;
   if (hooksConfig && typeof hooksConfig.timeoutMs === 'number') {
     return hooksConfig.timeoutMs;
   }
-  return 100;
+  return 5000;
 }
 
 /**

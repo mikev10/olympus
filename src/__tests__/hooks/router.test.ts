@@ -14,7 +14,7 @@ vi.mock('../../config/loader.js', () => ({
   loadConfig: vi.fn().mockReturnValue({
     hooks: {
       enabled: true,
-      hookTimeoutMs: 100
+      timeoutMs: 100
     }
   }),
   DEFAULT_CONFIG: {}
@@ -307,7 +307,7 @@ describe('Hook Router', () => {
         name: 'slow',
         event: 'UserPromptSubmit',
         handler: async () => {
-          await new Promise(r => setTimeout(r, 200)); // Exceeds 100ms timeout
+          await new Promise(r => setTimeout(r, 200)); // Exceeds 100ms config timeout
           return { continue: true, message: 'slow' };
         }
       });
@@ -356,14 +356,12 @@ describe('Hook Router', () => {
     });
 
     it('respects custom timeout from config', async () => {
-      // This test verifies that timeouts work with different values
-      // Since the mock is set globally to 100ms, we test that a hook
-      // timing out respects that configured value
+      // This test verifies that timeouts work with the config-provided value (100ms)
       registerHook({
         name: 'slowHook',
         event: 'UserPromptSubmit',
         handler: async () => {
-          await new Promise(r => setTimeout(r, 150)); // Exceeds 100ms default timeout
+          await new Promise(r => setTimeout(r, 200)); // Exceeds 100ms config timeout
           return { continue: true, message: 'done' };
         }
       });

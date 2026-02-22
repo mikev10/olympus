@@ -49,6 +49,10 @@ docs/hackathon.md
 docs/olympus-vs-aidlc-analysis.md
 docs/Vesta AI-SDLC Playbook v1.0.pdf
 docs/chat-history.md
+docs/aidlc-rules
+docs/hackathon
+docs/presentation-logs
+docs/drafts
 
 # Local RAG / embedding data
 lancedb/

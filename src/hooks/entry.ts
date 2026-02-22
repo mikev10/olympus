@@ -96,8 +96,28 @@ async function main(): Promise<void> {
   // Route to appropriate hooks
   const result = await routeHook(event, context);
 
+  // Map internal HookResult to Claude Code's expected output format
+  // Claude Code expects: { continue, stopReason, hookSpecificOutput: { additionalContext } }
+  // Our internal format uses: { continue, message, stopReason }
+  const output: Record<string, unknown> = {
+    continue: result.continue,
+  };
+
+  if (result.stopReason) {
+    output.stopReason = result.stopReason;
+  }
+
+  // Map aggregated messages to hookSpecificOutput.additionalContext
+  // This is the field Claude Code actually injects into the AI's context
+  if (result.message) {
+    output.hookSpecificOutput = {
+      hookEventName: event,
+      additionalContext: result.message,
+    };
+  }
+
   // Output result as JSON
-  console.log(JSON.stringify(result));
+  console.log(JSON.stringify(output));
 
   // Force exit to prevent hanging (stdin may keep process alive)
   process.exit(0);
