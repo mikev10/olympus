@@ -6,7 +6,6 @@
  * contract status transitions, and structured re-invocation prompts.
  */
 
-import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { ManifestSchema } from './phase-types.js';
 

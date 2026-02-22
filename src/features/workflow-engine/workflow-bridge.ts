@@ -24,6 +24,8 @@ import {
   getUnitArtifacts,
   getBoltsByStatus,
   isWorkflowComplete as manifestIsWorkflowComplete,
+  transitionToActive,
+  transitionToFulfilled,
 } from './manifest.js';
 import { loadCheckpoint, saveCheckpoint, listWorkflows } from './checkpoint.js';
 import { loadTrustState } from './trust.js';
@@ -193,39 +195,38 @@ export async function markBoltComplete(
   gateResult: GateResult
 ): Promise<void> {
   const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
-  const manifest = loadManifest(manifestPath);
+  let manifest = loadManifest(manifestPath);
   if (!manifest) {
     throw new Error(`Manifest not found at ${manifestPath}`);
   }
 
-  // Find the BOLT artifact
-  const artifact = manifest.artifacts.find((a) => a.id === boltId);
+  let artifact = manifest.artifacts.find((a) => a.id === boltId);
   if (!artifact) {
     throw new Error(`BOLT artifact ${boltId} not found in manifest`);
   }
 
-  // Transition to fulfilled: handle draft -> active -> fulfilled if needed
+  // Use state machine for transitions: draft -> active -> fulfilled
   if (artifact.contract_status === 'draft') {
-    artifact.contract_status = 'active';
-    if (!artifact.statusHistory) artifact.statusHistory = [];
-    artifact.statusHistory.push({ status: 'active', timestamp: new Date().toISOString() });
+    transitionToActive(manifestPath, boltId);
   }
 
+  // Reload manifest after potential active transition
+  manifest = loadManifest(manifestPath)!;
+  artifact = manifest.artifacts.find((a) => a.id === boltId)!;
+
   if (artifact.contract_status === 'active') {
-    artifact.contract_status = 'fulfilled';
-    if (!artifact.statusHistory) artifact.statusHistory = [];
-    artifact.statusHistory.push({ status: 'fulfilled', timestamp: new Date().toISOString() });
+    transitionToFulfilled(manifestPath, boltId);
   } else if (artifact.contract_status !== 'fulfilled') {
     throw new Error(
       `Cannot transition BOLT ${boltId} from '${artifact.contract_status}' to 'fulfilled'`
     );
   }
 
-  // Set audit trail fields
+  // Reload manifest to set audit trail fields
+  manifest = loadManifest(manifestPath)!;
+  artifact = manifest.artifacts.find((a) => a.id === boltId)!;
   artifact.executedBy = gateResult.approved_by ?? null;
   artifact.reviewedBy = gateResult.approved_by ?? null;
-
-  // Save manifest
   saveManifest(manifestPath, manifest);
 
   // Update checkpoint: advance active_bolt_id to next pending bolt
@@ -254,35 +255,33 @@ export async function markUnitComplete(
   unitId: string
 ): Promise<void> {
   const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
-  const manifest = loadManifest(manifestPath);
+  let manifest = loadManifest(manifestPath);
   if (!manifest) {
     throw new Error(`Manifest not found at ${manifestPath}`);
   }
 
-  // Find the UNIT artifact
-  const artifact = manifest.artifacts.find((a) => a.id === unitId);
+  let artifact = manifest.artifacts.find((a) => a.id === unitId);
   if (!artifact) {
     throw new Error(`UNIT artifact ${unitId} not found in manifest`);
   }
 
-  // Transition to fulfilled: handle draft -> active -> fulfilled if needed
+  // Use state machine for transitions — each call loads/saves internally, requiring reloads
   if (artifact.contract_status === 'draft') {
-    artifact.contract_status = 'active';
-    if (!artifact.statusHistory) artifact.statusHistory = [];
-    artifact.statusHistory.push({ status: 'active', timestamp: new Date().toISOString() });
+    transitionToActive(manifestPath, unitId);
   }
 
+  manifest = loadManifest(manifestPath)!;
+  artifact = manifest.artifacts.find((a) => a.id === unitId)!;
+
   if (artifact.contract_status === 'active') {
-    artifact.contract_status = 'fulfilled';
-    if (!artifact.statusHistory) artifact.statusHistory = [];
-    artifact.statusHistory.push({ status: 'fulfilled', timestamp: new Date().toISOString() });
+    transitionToFulfilled(manifestPath, unitId);
   } else if (artifact.contract_status !== 'fulfilled') {
     throw new Error(
       `Cannot transition UNIT ${unitId} from '${artifact.contract_status}' to 'fulfilled'`
     );
   }
 
-  // Save manifest
+  manifest = loadManifest(manifestPath)!;
   saveManifest(manifestPath, manifest);
 
   // Update checkpoint: advance active_unit_id to next pending unit
