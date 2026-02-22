@@ -58,6 +58,32 @@ describe('WorkflowEngine', () => {
       const engineAny = engine as any;
       expect(engineAny.workflowId).toBe('feature-with-spaces');
     });
+
+    it('truncates slug longer than 80 chars', () => {
+      const longName = 'a-very-long-feature-name-that-goes-on-and-on-and-on-and-produces-a-slug-beyond-eighty-characters';
+      const engine = new WorkflowEngine(tmpDir, longName);
+      const engineAny = engine as any;
+      expect(engineAny.workflowId.length).toBeLessThanOrEqual(80);
+    });
+
+    it('truncated slug does not end with a hyphen', () => {
+      const longName = 'abcdefghij-abcdefghij-abcdefghij-abcdefghij-abcdefghij-abcdefghij-abcdefghij-abcdefghij';
+      const engine = new WorkflowEngine(tmpDir, longName);
+      const engineAny = engine as any;
+      expect(engineAny.workflowId).not.toMatch(/-$/);
+    });
+
+    it('throws error when feature name produces empty slug', () => {
+      expect(() => new WorkflowEngine(tmpDir, '---')).toThrow(
+        'Feature name produced an empty workflow ID after sanitization'
+      );
+    });
+
+    it('throws error when feature name is only special characters', () => {
+      expect(() => new WorkflowEngine(tmpDir, '!@#$%^&*()')).toThrow(
+        'Feature name produced an empty workflow ID after sanitization'
+      );
+    });
   });
 
   describe('start()', () => {

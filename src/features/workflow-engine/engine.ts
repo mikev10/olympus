@@ -84,13 +84,25 @@ export class WorkflowEngine {
     this.projectPath = projectPath;
     this.featureName = featureName;
     // Sanitize feature name to create workflow ID (slugify)
-    this.workflowId = featureName
+    let slug = featureName
       .toLowerCase()
       .replace(/\.[a-z]{1,4}$/, '')   // Strip file extensions (.md, .txt, .json, etc.)
       .replace(/[_\s]+/g, '-')         // Convert underscores and spaces to hyphens
       .replace(/[^a-z0-9-]/g, '')      // Remove remaining non-alphanumeric chars
       .replace(/-+/g, '-')             // Collapse multiple hyphens
       .replace(/^-|-$/g, '');           // Trim leading/trailing hyphens
+
+    // Defense-in-depth: truncate overly long slugs
+    if (slug.length > 80) {
+      slug = slug.substring(0, 80).replace(/-$/, '');
+    }
+
+    // Reject empty slugs
+    if (!slug) {
+      throw new Error('Feature name produced an empty workflow ID after sanitization');
+    }
+
+    this.workflowId = slug;
   }
 
   /**

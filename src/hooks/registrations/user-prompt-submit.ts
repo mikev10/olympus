@@ -84,6 +84,21 @@ export function registerUserPromptSubmitHooks(): void {
           featureName = featureName.replace(projectTypeMatch[0], '').trim();
         }
 
+        // Validate feature name
+        // Reject if too long (likely assistant output, not a real feature name)
+        if (featureName.length > 120) {
+          console.error('[Structured Workflow] Feature name too long, likely not a real feature name:', featureName.substring(0, 50) + '...');
+          return { continue: true };
+        }
+
+        // Reject if it looks like a sentence/conversation rather than a feature name
+        // Real feature names don't typically contain common sentence patterns
+        const sentencePatterns = /\b(lets|let's|please|proceed|creating|we should|i want to|i need to|going to)\b/i;
+        if (sentencePatterns.test(featureName)) {
+          console.error('[Structured Workflow] Feature name looks like conversational text, skipping:', featureName.substring(0, 50) + '...');
+          return { continue: true };
+        }
+
         try {
           // Create new workflow engine instance
           const engine = new WorkflowEngine(ctx.directory, featureName);

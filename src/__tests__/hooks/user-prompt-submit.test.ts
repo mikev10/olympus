@@ -1146,6 +1146,121 @@ describe('Structured Workflow Hook', () => {
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput).toBeUndefined();
     });
+
+    it('rejects feature name longer than 120 chars without creating workflow', async () => {
+      const longName = 'a'.repeat(121);
+      const ctx: HookContext = {
+        prompt: `/plan ${longName}`,
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(WorkflowEngine).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[Structured Workflow] Feature name too long, likely not a real feature name:',
+        expect.stringContaining('...')
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('rejects feature name containing sentence pattern "lets proceed"', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan lets proceed with creating the intent for this feature',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(WorkflowEngine).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[Structured Workflow] Feature name looks like conversational text, skipping:',
+        expect.any(String)
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    it('rejects feature name containing sentence pattern "i want to"', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan i want to build a shopping cart',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput).toBeUndefined();
+      expect(WorkflowEngine).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it('allows normal feature name "User Authentication"', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan User Authentication',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'user-authentication',
+        feature_name: 'User Authentication',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: { idea: null, prd: null, spec: null, intent: null, complete: null },
+        validation_results: { idea: null, prd: null, spec: null, intent: null, complete: null },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(WorkflowEngine).toHaveBeenCalledWith('/test/project', 'User Authentication');
+    });
+
+    it('allows normal feature name "shopping-cart-feature"', async () => {
+      const ctx: HookContext = {
+        prompt: '/plan shopping-cart-feature',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      vi.mocked(loadCheckpoint).mockResolvedValue({
+        schema_version: '1.0.0',
+        workflow_id: 'shopping-cart-feature',
+        feature_name: 'shopping-cart-feature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_stage: 'idea',
+        status: 'in_progress',
+        artifacts: { idea: null, prd: null, spec: null, intent: null, complete: null },
+        validation_results: { idea: null, prd: null, spec: null, intent: null, complete: null },
+        resume_context: {},
+      });
+
+      const result = await workflowHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(WorkflowEngine).toHaveBeenCalledWith('/test/project', 'shopping-cart-feature');
+    });
   });
 
   describe('Prompt Context Extraction', () => {
