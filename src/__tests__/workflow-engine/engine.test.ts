@@ -9,6 +9,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
 import { loadCheckpoint, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
+import { loadLevel1Plan } from '../../features/workflow-engine/level1-plan.js';
+import { createManifest, loadManifest } from '../../features/workflow-engine/manifest.js';
 import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
 import type { WorkflowStatus, WorkflowStage } from '../../features/workflow-engine/types.js';
 
@@ -116,36 +118,30 @@ describe('WorkflowEngine', () => {
       await engine.start('Build a test feature');
 
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
-      // After start, the idea stage has executed and we've moved to prd
       expect(checkpoint?.status).toBe('in_progress');
     });
 
-    it('executes idea stage after start', async () => {
+    it('starts at intent stage', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // After start(), only initialization is done - stage is 'idea'
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
-      expect(checkpoint?.current_stage).toBe('idea');
+      expect(checkpoint?.current_stage).toBe('intent');
 
-      // Execute idea stage to move to intent
-      await engine.executeStage('idea');
+      await engine.executeStage('intent');
       const checkpoint2 = await loadCheckpoint(tmpDir, 'test-feature');
-      expect(checkpoint2?.current_stage).toBe('intent');
-      // V3 checkpoint doesn't have artifacts field - artifacts are in manifest
+      expect(checkpoint2?.current_stage).toBe('unit');
     });
 
     it('stores initial prompt in resume_context', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature with OAuth');
 
-      // Execute idea stage to create the artifact
-      await engine.executeStage('idea');
+      await engine.executeStage('intent');
 
-      // Check the idea.md file contains the prompt
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'idea.md');
-      const ideaContent = await fs.readFile(ideaPath, 'utf-8');
-      expect(ideaContent).toContain('Build a test feature with OAuth');
+      const intentPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'intent.md');
+      const intentContent = await fs.readFile(intentPath, 'utf-8');
+      expect(intentContent).toContain('Build a test feature with OAuth');
     });
   });
 
@@ -238,36 +234,10 @@ describe('WorkflowEngine', () => {
   });
 
   describe('executeStage()', () => {
-    it("creates idea artifact for 'idea' stage", async () => {
-      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
-      await engine.start('Build a test feature');
-
-      // Execute idea stage to create the artifact
-      await engine.executeStage('idea');
-
-      // Idea stage was executed
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'idea.md');
-      const exists = await fs.pathExists(ideaPath);
-      expect(exists).toBe(true);
-
-      const content = await fs.readFile(ideaPath, 'utf-8');
-      expect(content).toContain('## Problem Statement');
-      expect(content).toContain('Build a test feature');
-      expect(content).toContain('## User Personas');
-      expect(content).toContain('## Success Metrics');
-      expect(content).toContain('## Business Constraints');
-      expect(content).toContain('## Out of Scope');
-      expect(content).toContain('id: idea-test-feature');
-      expect(content).toContain('status: draft');
-      expect(content).toContain('author: "workflow-engine"');
-    });
-
     it("creates intent artifact for 'intent' stage", async () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute idea stage first, then intent
-      await engine.executeStage('idea');
       await engine.executeStage('intent');
 
       const intentPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'intent.md');
@@ -287,8 +257,6 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute idea stage first, then intent
-      await engine.executeStage('idea');
       await engine.executeStage('intent');
 
       const nfrPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'nfr.md');
@@ -352,12 +320,12 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute idea stage to advance to intent
-      await engine.executeStage('idea');
+      // Execute intent stage to advance to unit
+      await engine.executeStage('intent');
 
       const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       // V3 checkpoint doesn't have artifacts field - artifacts are in manifest
-      expect(checkpoint?.current_stage).toBe('intent');
+      expect(checkpoint?.current_stage).toBe('unit');
       expect(checkpoint?.status).toBe('in_progress');
     });
 
@@ -365,16 +333,11 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // After start, current_stage should be 'idea'
+      // After start, current_stage should be 'intent'
       let checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
-      expect(checkpoint?.current_stage).toBe('idea');
-
-      // Execute idea stage to move to intent
-      await engine.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       expect(checkpoint?.current_stage).toBe('intent');
 
-      // Execute intent stage
+      // Execute intent stage to move to unit
       await engine.executeStage('intent');
       checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
       expect(checkpoint?.current_stage).toBe('unit');
@@ -388,13 +351,12 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute idea stage to advance to intent
-      await engine.executeStage('idea');
+      await engine.executeStage('intent');
 
       const status = await engine.getStatus();
       expect(status.workflow_id).toBe('test-feature');
       expect(status.feature_name).toBe('Test Feature');
-      expect(status.current_stage).toBe('intent');
+      expect(status.current_stage).toBe('unit');
       expect(status.status).toBe('in_progress');
       // Artifacts are tracked in manifest, not checkpoint
     });
@@ -425,14 +387,12 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Full Workflow Test');
       await engine.start('Build a complete feature');
 
-      // After start, we should be at idea stage
       let checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
-      expect(checkpoint?.current_stage).toBe('idea');
-
-      // Execute idea stage to advance to intent
-      await engine.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
       expect(checkpoint?.current_stage).toBe('intent');
+
+      await engine.executeStage('intent');
+      checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
+      expect(checkpoint?.current_stage).toBe('unit');
 
       // Execute intent stage
       await engine.executeStage('intent');
@@ -571,7 +531,7 @@ describe('WorkflowEngine', () => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         current_phase: 'inception',
-        current_stage: 'idea',
+        current_stage: 'intent',
         status: 'in_progress',
         phases: {
           discovery: { status: 'complete', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
@@ -606,6 +566,128 @@ describe('WorkflowEngine', () => {
       const savedCheckpoint = await loadCheckpoint(tmpDir, 'interrupt-context-test');
       expect(savedCheckpoint?.resume_context?.initial_prompt).toBe(initialPrompt);
       expect(savedCheckpoint?.resume_context?.interrupted_at).toBeDefined();
+    });
+  });
+
+  describe('Level 1 Plan integration', () => {
+    it('start() generates Level 1 Plan and updates checkpoint', async () => {
+      createManifest('l1-plan-feature', 'L1 Plan Feature', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'L1 Plan Feature');
+      await engine.start('Build a brand new greenfield application');
+
+      const checkpoint = await loadCheckpoint(tmpDir, 'l1-plan-feature') as WorkflowCheckpointV3;
+      expect(checkpoint).not.toBeNull();
+      expect(checkpoint.level1_plan_path).toBeDefined();
+      expect(checkpoint.pathway_type).toBeDefined();
+      expect(checkpoint.skipped_phases).toBeDefined();
+      expect(Array.isArray(checkpoint.skipped_phases)).toBe(true);
+
+      const plan = loadLevel1Plan(tmpDir, 'l1-plan-feature');
+      expect(plan).not.toBeNull();
+      expect(plan!.pathway).toBeDefined();
+      expect(plan!.risk_assessment).toMatch(/^(LOW|MEDIUM|HIGH)$/);
+      expect(typeof plan!.estimated_bolts).toBe('number');
+      expect(['minimal', 'standard', 'comprehensive']).toContain(plan!.estimated_depth);
+      expect(plan!.phases).toBeDefined();
+      expect(Array.isArray(plan!.stages)).toBe(true);
+    });
+
+    it('start() on empty temp dir produces greenfield pathway and skips discovery', async () => {
+      createManifest('greenfield-app', 'Greenfield App', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Greenfield App');
+      await engine.start('Build a new greenfield app from scratch');
+
+      const checkpoint = await loadCheckpoint(tmpDir, 'greenfield-app') as WorkflowCheckpointV3;
+      expect(checkpoint.pathway_type).toBe('greenfield');
+      expect(checkpoint.skipped_phases).toContain('discovery');
+
+      const plan = loadLevel1Plan(tmpDir, 'greenfield-app');
+      expect(plan).not.toBeNull();
+      expect(plan!.pathway).toBe('greenfield');
+      expect(plan!.phases.discovery.included).toBe(false);
+    });
+
+    it('executePhase() skips phases excluded by L1 Plan and marks them complete', async () => {
+      createManifest('skip-phase-test', 'Skip Phase Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Skip Phase Test');
+      await engine.start('Build a brand new application');
+
+      await expect(engine.executePhase('discovery')).resolves.toBeUndefined();
+
+      const checkpoint = await loadCheckpoint(tmpDir, 'skip-phase-test') as WorkflowCheckpointV3;
+      expect(checkpoint.phases.discovery.status).toBe('complete');
+      expect(checkpoint.phases.discovery.gate_bypassed).toBe(true);
+      expect(checkpoint.phases.discovery.bypass_reason).toContain('Level 1 Plan');
+    });
+
+    it('executePhase() skipped phase has completed_at timestamp', async () => {
+      createManifest('timestamp-test', 'Timestamp Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Timestamp Test');
+      await engine.start('Build a new greenfield system');
+
+      const before = new Date().toISOString();
+      await engine.executePhase('discovery');
+      const after = new Date().toISOString();
+
+      const checkpoint = await loadCheckpoint(tmpDir, 'timestamp-test') as WorkflowCheckpointV3;
+      const completedAt = checkpoint.phases.discovery.completed_at;
+      expect(completedAt).not.toBeNull();
+      expect(completedAt! >= before || completedAt! <= after).toBe(true);
+    });
+
+    it('executePhase() works normally when no L1 Plan exists (backward compat)', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'No Plan Test');
+      await engine.start('Build a test feature');
+
+      const planPath = join(tmpDir, 'aidlc-docs', 'no-plan-test', 'level1-plan.md');
+      await fs.remove(planPath);
+
+      await expect(engine.executePhase('inception')).resolves.toBeUndefined();
+
+      const intentPath = join(tmpDir, 'aidlc-docs', 'no-plan-test', 'inception', 'intent.md');
+      expect(await fs.pathExists(intentPath)).toBe(true);
+    });
+
+    it('skipped phases have gate_audit entries in manifest', async () => {
+      createManifest('audit-entry-test', 'Audit Entry Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Audit Entry Test');
+      await engine.start('Build a brand new greenfield product');
+
+      const manifestPath = join(tmpDir, 'aidlc-docs', 'audit-entry-test', 'manifest.json');
+      await engine.executePhase('discovery');
+
+      const manifest = loadManifest(manifestPath);
+      expect(manifest).not.toBeNull();
+      expect(Array.isArray(manifest!.gate_audit)).toBe(true);
+
+      const bypassEntry = manifest!.gate_audit.find(
+        (e) => e.phase === 'discovery' && e.action === 'bypassed'
+      );
+      expect(bypassEntry).toBeDefined();
+      expect(bypassEntry!.actor).toBe('config');
+      expect(bypassEntry!.reason).toContain('Level 1 Plan');
+    });
+
+    it('approveLevel1Plan() stamps approved_at and approved_by on the artifact', async () => {
+      createManifest('approval-test', 'Approval Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Approval Test');
+      await engine.start('Build a brand new approval workflow');
+
+      const planBefore = loadLevel1Plan(tmpDir, 'approval-test');
+      expect(planBefore).not.toBeNull();
+      expect(planBefore!.approved_at).toBeNull();
+      expect(planBefore!.approved_by).toBeNull();
+
+      await engine.approveLevel1Plan('Looks good to me');
+
+      const planAfter = loadLevel1Plan(tmpDir, 'approval-test');
+      expect(planAfter).not.toBeNull();
+      expect(planAfter!.approved_at).not.toBeNull();
+    });
+
+    it('approveLevel1Plan() throws when no plan exists', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'No Plan Approval');
+      await expect(engine.approveLevel1Plan()).rejects.toThrow('No Level 1 Plan found');
     });
   });
 });

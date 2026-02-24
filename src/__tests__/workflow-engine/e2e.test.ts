@@ -2,10 +2,10 @@
  * End-to-End Workflow Tests
  *
  * Comprehensive E2E tests covering all Phase 5 acceptance criteria:
- * 1. Full workflow: create workflow, execute all stages (IDEA→INTENT→UNIT→BOLT)
+ * 1. Full workflow: create workflow, execute all stages (INTENT→UNIT→BOLT)
  * 2. Interrupt and resume workflow (pause mid-execution, resume in new session)
  * 3. Validation failure and retry (fail validation, fix issue, retry)
- * 4. Manual command workflow (use /idea, /intent, /unit, /bolt commands separately)
+ * 4. Manual command workflow (use /intent, /unit, /bolt commands separately)
  * 5. Error recovery scenarios (corrupt checkpoint, missing artifacts, etc.)
  */
 
@@ -66,72 +66,45 @@ describe('End-to-End Workflow Tests', () => {
   });
 
   // ============================================================================
-  // Scenario 1: Full workflow completion (IDEA → INTENT → UNIT → BOLT → COMPLETE)
+  // Scenario 1: Full workflow completion (INTENT → UNIT → BOLT → COMPLETE)
   // ============================================================================
 
   describe('Scenario 1: Full Workflow Completion', () => {
-    it('completes full workflow from IDEA to INTENT', async () => {
+    it('completes full workflow from INTENT to UNIT', async () => {
       const featureName = 'OAuth Authentication';
       const initialPrompt = 'Build OAuth authentication with Google provider';
 
-      // Start workflow
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start(initialPrompt);
 
-      // Verify we're at IDEA stage after start
       let checkpoint = await loadCheckpoint(tmpDir, 'oauth-authentication');
       expect(checkpoint).not.toBeNull();
-      expect(checkpoint?.current_stage).toBe('idea');
-
-      // Execute IDEA stage
-      await engine.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, 'oauth-authentication');
       expect(checkpoint?.current_stage).toBe('intent');
 
-      // Verify IDEA artifact exists
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'oauth-authentication', 'inception', 'idea.md');
-      expect(await fs.pathExists(ideaPath)).toBe(true);
-      const ideaContent = await fs.readFile(ideaPath, 'utf-8');
-      expect(ideaContent).toContain('OAuth Authentication');
-      expect(ideaContent).toContain(initialPrompt);
-
-      // Execute INTENT stage
       await engine.executeStage('intent');
       checkpoint = await loadCheckpoint(tmpDir, 'oauth-authentication');
       expect(checkpoint?.current_stage).toBe('unit');
 
-      // Verify INTENT artifact exists
       const intentPath = join(tmpDir, 'aidlc-docs', 'oauth-authentication', 'inception', 'intent.md');
       expect(await fs.pathExists(intentPath)).toBe(true);
-
-      // NOTE: UNIT and BOLT stages not yet implemented in engine
-      // Test ends at INTENT stage for now
+      const intentContent = await fs.readFile(intentPath, 'utf-8');
+      expect(intentContent).toContain('OAuth Authentication');
     });
 
     it('verifies workflow status at each stage', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Status Test Feature');
       await engine.start('Test status tracking');
 
-      // Check status after start (at IDEA stage)
       let status = await engine.getStatus();
       expect(status.workflow_id).toBe('status-test-feature');
       expect(status.feature_name).toBe('Status Test Feature');
-      expect(status.current_stage).toBe('idea');
+      expect(status.current_stage).toBe('intent');
       expect(status.status).toBe('in_progress');
 
-      // Execute IDEA stage
-      await engine.executeStage('idea');
-      status = await engine.getStatus();
-      expect(status.current_stage).toBe('intent');
-
-      // Execute INTENT and check status
       await engine.executeStage('intent');
       status = await engine.getStatus();
       expect(status.current_stage).toBe('unit');
       expect(status.updated_at).toBeDefined();
-
-      // NOTE: UNIT and BOLT stages not yet implemented in engine
-      // Test ends at INTENT stage for now
     });
 
     it('tracks validation results for each stage', async () => {
@@ -140,7 +113,6 @@ describe('End-to-End Workflow Tests', () => {
 
       const checkpoint = await loadCheckpoint(tmpDir, 'validation-test');
 
-      // Verify checkpoint exists and has phase state
       expect(checkpoint).not.toBeNull();
       expect(checkpoint?.phases.inception).toBeDefined();
       expect(checkpoint?.phases.inception.status).toBe('in_progress');
@@ -155,33 +127,24 @@ describe('End-to-End Workflow Tests', () => {
     it('pauses workflow and resumes in new session', async () => {
       const featureName = 'Pausable Feature';
 
-      // Start workflow and execute first stage
       const engine1 = new WorkflowEngine(tmpDir, featureName);
       await engine1.start('Feature that gets paused');
 
-      // Execute IDEA stage to advance to INTENT
-      await engine1.executeStage('idea');
-
-      // Verify we're at INTENT stage
       let checkpoint = await loadCheckpoint(tmpDir, 'pausable-feature');
       expect(checkpoint?.current_stage).toBe('intent');
       expect(checkpoint?.status).toBe('in_progress');
 
-      // Pause the workflow
       const checkpointPath = await engine1.pause();
       expect(checkpointPath).toContain('checkpoint.json');
 
-      // Verify workflow is paused
       checkpoint = await loadCheckpoint(tmpDir, 'pausable-feature');
       expect(checkpoint?.status).toBe('paused');
 
-      // Resume in new session (simulate new process)
-      clearCache(); // Clear cache to simulate new session
+      clearCache();
       const engine2 = new WorkflowEngine(tmpDir, featureName);
       const resumeMessage = await engine2.resume();
       expect(resumeMessage).toContain('Resumed workflow from stage: intent');
 
-      // Verify workflow resumed and executed INTENT stage
       checkpoint = await loadCheckpoint(tmpDir, 'pausable-feature');
       expect(checkpoint?.current_stage).toBe('unit');
       expect(['in_progress', 'complete']).toContain(checkpoint?.status);
@@ -191,23 +154,16 @@ describe('End-to-End Workflow Tests', () => {
       const engine = new WorkflowEngine(tmpDir, 'Resume Test');
       await engine.start('Test resume functionality');
 
-      // Execute IDEA stage to advance to INTENT
-      await engine.executeStage('idea');
-
-      // Pause at INTENT stage
       await engine.pause();
       let checkpoint = await loadCheckpoint(tmpDir, 'resume-test');
       expect(checkpoint?.current_stage).toBe('intent');
 
-      // Resume and verify it continues from INTENT
       clearCache();
       const engine2 = new WorkflowEngine(tmpDir, 'Resume Test');
       await engine2.resume();
 
       checkpoint = await loadCheckpoint(tmpDir, 'resume-test');
       expect(checkpoint?.current_stage).toBe('unit');
-
-      // NOTE: UNIT stage not yet implemented, test ends here
     });
 
     it('preserves initial prompt and context across pause/resume', async () => {
@@ -215,43 +171,32 @@ describe('End-to-End Workflow Tests', () => {
       const engine1 = new WorkflowEngine(tmpDir, 'Context Test');
       await engine1.start(initialPrompt);
 
-      // Pause workflow
       await engine1.pause();
 
-      // Resume and verify context is preserved
       clearCache();
       const engine2 = new WorkflowEngine(tmpDir, 'Context Test');
       await engine2.resume();
 
-      // Check that initial prompt is still in the IDEA artifact
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'context-test', 'inception', 'idea.md');
-      const ideaContent = await fs.readFile(ideaPath, 'utf-8');
-      expect(ideaContent).toContain(initialPrompt);
+      const intentPath = join(tmpDir, 'aidlc-docs', 'context-test', 'inception', 'intent.md');
+      const intentContent = await fs.readFile(intentPath, 'utf-8');
+      expect(intentContent).toContain('Context Test');
     });
 
     it('handles multiple pause/resume cycles', async () => {
       const engine1 = new WorkflowEngine(tmpDir, 'Multi Pause Test');
       await engine1.start('Test multiple pauses');
 
-      // Execute IDEA stage
-      await engine1.executeStage('idea');
-
-      // First pause after IDEA
       await engine1.pause();
       let checkpoint = await loadCheckpoint(tmpDir, 'multi-pause-test');
       expect(checkpoint?.current_stage).toBe('intent');
 
-      // First resume and execute INTENT
       clearCache();
       const engine2 = new WorkflowEngine(tmpDir, 'Multi Pause Test');
       await engine2.resume();
 
-      // Second pause after INTENT
       await engine2.pause();
       checkpoint = await loadCheckpoint(tmpDir, 'multi-pause-test');
       expect(checkpoint?.current_stage).toBe('unit');
-
-      // NOTE: UNIT stage not yet implemented, test ends here
     });
 
     it.skip('returns appropriate message when resuming completed workflow', async () => {
@@ -294,7 +239,7 @@ describe('End-to-End Workflow Tests', () => {
       expect(checkpoint?.current_phase).toBe('inception');
     });
 
-    it('validates INTENT with full coverage of IDEA constraints', async () => {
+    it('validates INTENT with full coverage of INTENT constraints', async () => {
       const workflowId = 'coverage-test';
       const engine = new WorkflowEngine(tmpDir, 'Coverage Test');
       await engine.start('Test coverage validation');
@@ -314,16 +259,15 @@ describe('End-to-End Workflow Tests', () => {
 
       const checkpoint = await loadCheckpoint(tmpDir, 'coverage-test-2');
 
-      // Verify checkpoint tracks workflow progression - starts at idea
       expect(checkpoint).not.toBeNull();
       expect(checkpoint?.current_phase).toBe('inception');
-      expect(checkpoint?.current_stage).toBe('idea');
+      expect(checkpoint?.current_stage).toBe('intent');
     });
 
-    it('INTENT validation checks IDEA constraint coverage', async () => {
+    it('INTENT validation checks constraint coverage', async () => {
       const workflowId = 'intent-validation-test';
 
-      // Create a valid IDEA artifact
+      // Create a valid INTENT artifact
       const engine = new WorkflowEngine(tmpDir, 'INTENT Validation Test');
       await engine.start('Test INTENT validation');
 
@@ -344,32 +288,19 @@ describe('End-to-End Workflow Tests', () => {
   describe('Scenario 4: Manual Command Workflow', () => {
     it('executes stages independently using manual commands', async () => {
       const featureName = 'Manual Feature';
-      const workflowId = 'manual-feature'; // Matches sanitized workflow ID
+      const workflowId = 'manual-feature';
 
-      // Manually execute IDEA stage (simulating /idea command)
       const engine1 = new WorkflowEngine(tmpDir, featureName);
       await engine1.start('Feature built with manual commands');
 
       let checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint).not.toBeNull();
-      expect(checkpoint?.current_stage).toBe('idea');
-
-      // Execute idea stage to advance to intent
-      await engine1.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint?.current_stage).toBe('intent');
 
-      // Manually execute INTENT stage (simulating /intent command)
-      clearCache();
-      const engine2 = new WorkflowEngine(tmpDir, featureName);
-      await engine2.executeStage('intent');
-
+      await engine1.executeStage('intent');
       checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint).not.toBeNull();
       expect(checkpoint?.current_stage).toBe('unit');
-
-      // NOTE: UNIT and BOLT stages not yet implemented
-      // Test ends at INTENT stage for now
     });
 
     it('creates new workflow if checkpoint does not exist', async () => {
@@ -393,22 +324,16 @@ describe('End-to-End Workflow Tests', () => {
     it('loads existing checkpoint when it exists', async () => {
       const workflowId = 'existing-workflow-test';
 
-      // Create initial workflow
       const engine1 = new WorkflowEngine(tmpDir, 'Existing Workflow Test');
       await engine1.start('Initial workflow creation');
 
       const initialCheckpoint = await loadCheckpoint(tmpDir, workflowId);
       const createdAt = initialCheckpoint?.created_at;
 
-      // Execute idea stage first
-      await engine1.executeStage('idea');
-
-      // Create new engine instance and execute next stage
       clearCache();
       const engine2 = new WorkflowEngine(tmpDir, 'Existing Workflow Test');
       await engine2.executeStage('intent');
 
-      // Verify the same workflow was used (created_at unchanged)
       const updatedCheckpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(updatedCheckpoint?.created_at).toBe(createdAt);
       expect(updatedCheckpoint?.current_stage).toBe('unit');
@@ -418,21 +343,12 @@ describe('End-to-End Workflow Tests', () => {
       const engine = new WorkflowEngine(tmpDir, 'Stage Update Test');
       await engine.start('Test stage updates');
 
-      // Verify stage is at idea after start
       let checkpoint = await loadCheckpoint(tmpDir, 'stage-update-test');
-      expect(checkpoint?.current_stage).toBe('idea');
-
-      // Execute idea stage to advance
-      await engine.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, 'stage-update-test');
       expect(checkpoint?.current_stage).toBe('intent');
 
       await engine.executeStage('intent');
       checkpoint = await loadCheckpoint(tmpDir, 'stage-update-test');
       expect(checkpoint?.current_stage).toBe('unit');
-
-      // NOTE: UNIT and BOLT stages not yet implemented
-      // Test ends at INTENT stage for now
     });
   });
 
@@ -476,17 +392,11 @@ describe('End-to-End Workflow Tests', () => {
       const workflowId = 'missing-artifact-test';
       const engine = new WorkflowEngine(tmpDir, 'Missing Artifact Test');
 
-      // Create workflow and IDEA artifact
       await engine.start('Test missing artifacts');
-      await engine.executeStage('idea');
 
-      // Delete the IDEA artifact
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'missing-artifact-test', 'inception', 'idea.md');
-      await fs.remove(ideaPath);
+      const intentPath = join(tmpDir, 'aidlc-docs', 'missing-artifact-test', 'inception', 'intent.md');
+      await fs.remove(intentPath);
 
-      // Try to execute INTENT stage (which needs IDEA artifact)
-      // This should still work as the engine creates checkpoint references
-      // but validation might fail due to missing file
       await engine.executeStage('intent');
 
       const checkpoint = await loadCheckpoint(tmpDir, workflowId);
@@ -521,14 +431,12 @@ describe('End-to-End Workflow Tests', () => {
     it('handles checkpoint without schema_version as invalid', async () => {
       const workflowId = 'no-schema-test';
 
-      // Create checkpoint without schema_version
       const checkpointData = {
         workflow_id: workflowId,
         feature_name: 'No Schema Test',
-        current_stage: 'idea' as WorkflowStage,
+        current_stage: 'intent' as WorkflowStage,
         current_phase: 'inception',
         status: 'in_progress' as const,
-        // Missing schema_version
       };
 
       const aidlcDir = join(tmpDir, 'aidlc-docs');
@@ -603,16 +511,13 @@ describe('End-to-End Workflow Tests', () => {
       const checkpoint1 = await loadCheckpoint(tmpDir, 'timestamp-test');
       const firstUpdate = checkpoint1?.updated_at;
 
-      // Wait a moment to ensure timestamp changes
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Execute next stage
       await engine.executeStage('intent');
 
       const checkpoint2 = await loadCheckpoint(tmpDir, 'timestamp-test');
       const secondUpdate = checkpoint2?.updated_at;
 
-      // Verify created_at stays the same but updated_at changes
       expect(checkpoint2?.created_at).toBe(checkpoint1?.created_at);
       expect(secondUpdate).not.toBe(firstUpdate);
       expect(new Date(secondUpdate!).getTime()).toBeGreaterThan(new Date(firstUpdate!).getTime());
@@ -623,20 +528,11 @@ describe('End-to-End Workflow Tests', () => {
       await engine.start('Test stage sequence');
 
       const checkpoint1 = await loadCheckpoint(tmpDir, 'stage-sequence-test');
-      expect(checkpoint1?.current_stage).toBe('idea');
+      expect(checkpoint1?.current_stage).toBe('intent');
 
-      // Execute IDEA to advance to INTENT
-      await engine.executeStage('idea');
-      const checkpoint1b = await loadCheckpoint(tmpDir, 'stage-sequence-test');
-      expect(checkpoint1b?.current_stage).toBe('intent');
-
-      // Execute INTENT
       await engine.executeStage('intent');
       const checkpoint2 = await loadCheckpoint(tmpDir, 'stage-sequence-test');
       expect(checkpoint2?.current_stage).toBe('unit');
-
-      // NOTE: UNIT and BOLT stages not yet implemented
-      // Test ends at INTENT stage for now
     });
 
     it('verifies workflow ID sanitization', async () => {
@@ -651,15 +547,12 @@ describe('End-to-End Workflow Tests', () => {
     });
 
     it('handles multiple concurrent workflows in same project', async () => {
-      // Start first workflow
       const engine1 = new WorkflowEngine(tmpDir, 'Workflow One');
       await engine1.start('First workflow');
 
-      // Start second workflow
       const engine2 = new WorkflowEngine(tmpDir, 'Workflow Two');
       await engine2.start('Second workflow');
 
-      // Verify both checkpoints exist
       const checkpoint1 = await loadCheckpoint(tmpDir, 'workflow-one');
       const checkpoint2 = await loadCheckpoint(tmpDir, 'workflow-two');
 
@@ -668,13 +561,10 @@ describe('End-to-End Workflow Tests', () => {
       expect(checkpoint1?.workflow_id).toBe('workflow-one');
       expect(checkpoint2?.workflow_id).toBe('workflow-two');
 
-      // Advance first workflow
-      await engine1.executeStage('idea');
       await engine1.executeStage('intent');
 
-      // Verify second workflow is unaffected
       const checkpoint2Updated = await loadCheckpoint(tmpDir, 'workflow-two');
-      expect(checkpoint2Updated?.current_stage).toBe('idea');
+      expect(checkpoint2Updated?.current_stage).toBe('intent');
     });
 
     it('verifies directory structure is created correctly', async () => {
@@ -739,16 +629,10 @@ describe('End-to-End Workflow Tests', () => {
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start('Test full ODLC lifecycle');
 
-      // Verify we're at IDEA stage after start
       let checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint).not.toBeNull();
-      expect(checkpoint?.current_stage).toBe('idea');
-      expect(checkpoint?.current_phase).toBe('inception');
-
-      // Execute IDEA stage to advance
-      await engine.executeStage('idea');
-      checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint?.current_stage).toBe('intent');
+      expect(checkpoint?.current_phase).toBe('inception');
 
       // 2. Create manifest to track ODLC artifacts
       const manifestPath = createManifest(workflowId, featureName, tmpDir);
@@ -758,28 +642,25 @@ describe('End-to-End Workflow Tests', () => {
       expect(manifest).not.toBeNull();
       expect(manifest!.schema_version).toBe('2.0.0');
 
-      // 3. Register Inception artifacts in manifest
       registerArtifact(manifestPath, {
-        id: 'IDEA-001',
-        type: 'idea',
+        id: 'INTENT-REG-001',
+        type: 'intent',
         phase: 'inception',
-        stage: 'idea',
-        path: `inception/idea.md`,
+        stage: 'intent',
+        path: `inception/intent.md`,
         validation_passed: true,
         write_complete: true,
         checksum: null,
       });
 
-      // Set contract status to active
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
+      updateContractStatus(manifestPath, 'INTENT-REG-001', 'active');
 
-      // 4. Add gate audit entry
       addGateAuditEntry(manifestPath, {
         phase: 'inception',
         timestamp: new Date().toISOString(),
         action: 'approved',
         actor: 'human',
-        reason: 'IDEA approved for development',
+        reason: 'INTENT approved for development',
       });
 
       // 5. Generate Operations artifacts
@@ -825,8 +706,8 @@ describe('End-to-End Workflow Tests', () => {
 
       // Register artifacts in different phases
       const artifacts: Partial<ManifestArtifact>[] = [
-        { id: 'IDEA-001', type: 'idea', phase: 'inception', stage: 'idea', contract_status: 'active', validation_passed: true },
         { id: 'INTENT-001', type: 'intent', phase: 'inception', stage: 'intent', contract_status: 'active', validation_passed: true },
+        { id: 'INTENT-002', type: 'intent', phase: 'inception', stage: 'intent', contract_status: 'active', validation_passed: true },
         { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', contract_status: 'draft', validation_passed: null },
       ];
 
@@ -871,7 +752,7 @@ describe('End-to-End Workflow Tests', () => {
       // Verify report structure
       expect(report.summary).toContain('artifacts total');
       expect(report.phaseProgress).toHaveLength(4); // discovery, inception, construction, operations
-      expect(report.artifactTree).toContain('IDEA-001');
+      expect(report.artifactTree).toContain('INTENT-001');
       expect(report.artifactTree).toContain('UNIT-001');
       expect(report.trustDisplay).toContain('Baseline');
       expect(report.fullReport).toContain('Workflow Status');
@@ -946,20 +827,18 @@ describe('End-to-End Workflow Tests', () => {
 
       const manifestPath = createManifest(workflowId, featureName, tmpDir);
 
-      // Register artifacts with validation results
-      registerArtifact(manifestPath, {
-        id: 'IDEA-001', type: 'idea', phase: 'inception', stage: 'idea',
-        path: 'inception/idea.md', validation_passed: true,
-        write_complete: true, checksum: null,
-      });
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
-
       registerArtifact(manifestPath, {
         id: 'INTENT-001', type: 'intent', phase: 'inception', stage: 'intent',
-        path: 'inception/intent.md', validation_passed: false,
+        path: 'inception/intent.md', validation_passed: true,
         write_complete: true, checksum: null,
       });
-      // INTENT-001 stays as 'draft' since validation failed
+      updateContractStatus(manifestPath, 'INTENT-001', 'active');
+
+      registerArtifact(manifestPath, {
+        id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit',
+        path: 'construction/UNIT-001/spec.md', validation_passed: false,
+        write_complete: true, checksum: null,
+      });
 
       // Add gate entries
       addGateAuditEntry(manifestPath, {

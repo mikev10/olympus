@@ -360,15 +360,15 @@ export class ConstructionExecutor {
     const intentPath = path.join(intentDir, 'intent.md');
     const parsed = await parseIntentFromFile(intentPath);
 
-    // Read IDEA content for dual validation
-    const ideaPath = path.join(intentDir, 'idea.md');
-    let ideaContent = '';
+    // Read INTENT content for dual validation
+    const intentFilePath = path.join(intentDir, 'intent.md');
+    let intentContent = '';
     try {
-      if (await fs.pathExists(ideaPath)) {
-        ideaContent = await fs.readFile(ideaPath, 'utf-8');
+      if (await fs.pathExists(intentFilePath)) {
+        intentContent = await fs.readFile(intentFilePath, 'utf-8');
       }
     } catch {
-      // idea.md is optional for validation
+      // intent.md is optional for validation
     }
 
     if (parsed) {
@@ -379,7 +379,7 @@ export class ConstructionExecutor {
         maxUnits,
         maxBoltsPerUnit,
         maxTotalBolts,
-        ideaContent
+        intentContent
       );
     }
 
@@ -390,7 +390,7 @@ export class ConstructionExecutor {
       maxUnits,
       maxBoltsPerUnit,
       maxTotalBolts,
-      ideaContent
+      intentContent
     );
   }
 
@@ -406,9 +406,8 @@ export class ConstructionExecutor {
     maxUnits: number,
     maxBoltsPerUnit: number,
     maxTotalBolts: number,
-    ideaContent: string
+    rootIntentContent: string
   ): Promise<ValidationResult> {
-    // Build an intent HierarchicalNode from parsed content
     const intentContent = parsed.content;
     const titleMatch = intentContent.match(/^title:\s*(.+)$/m);
     const effortMatch = intentContent.match(/^estimated_effort:\s*(\d+)/m);
@@ -499,8 +498,7 @@ Generated from inception/intent.md
       this.registerConstructionArtifact(unit.id, 'unit', 'unit', path.join(unitDir, 'spec.md'));
       this.linkConstructionArtifacts(intentId, unit.id, 'derives');
 
-      // Run dual validation for this UNIT (non-blocking)
-      this.runUnitValidation(unitContent, intentContent, ideaContent, intentNode.id, unit.id);
+      this.runUnitValidation(unitContent, intentContent, rootIntentContent, intentNode.id, unit.id);
 
       // Parse proposed BOLTs from the unit description or create default
       const matchingProposed = parsed.proposedUnits.find(
@@ -531,8 +529,7 @@ Generated from inception/intent.md
         this.registerConstructionArtifact(bolt.id, 'bolt', 'bolt', boltFilePath);
         this.linkConstructionArtifacts(unit.id, bolt.id, 'derives');
 
-        // Run dual validation for this BOLT (non-blocking)
-        this.runBoltValidation(boltContent, unitContent, ideaContent, unit.id, bolt.id);
+        this.runBoltValidation(boltContent, unitContent, rootIntentContent, unit.id, bolt.id);
 
         // Validate bolt structure
         const boltResult = await validateBolt(boltFilePath);
@@ -599,9 +596,8 @@ Generated from inception/intent.md
     maxUnits: number,
     maxBoltsPerUnit: number,
     maxTotalBolts: number,
-    ideaContent: string
+    rootIntentContent: string
   ): Promise<ValidationResult> {
-    // Parse intents from disk (legacy INTENT-*.md)
     const intents = await parseIntentsFromDisk(intentDir);
     if (intents.length === 0) {
       return {
@@ -660,8 +656,7 @@ Generated from inception/intent.md
         this.registerConstructionArtifact(unit.id, 'unit', 'unit', path.join(unitDir, 'spec.md'));
         this.linkConstructionArtifacts(intent.id, unit.id, 'derives');
 
-        // Run dual validation (non-blocking)
-        this.runUnitValidation(unitContent, intentFileContent, ideaContent, intent.id, unit.id);
+        this.runUnitValidation(unitContent, intentFileContent, rootIntentContent, intent.id, unit.id);
 
         // Generate bolts per unit
         this.currentStage = 'bolt';
@@ -686,8 +681,7 @@ Generated from inception/intent.md
           this.registerConstructionArtifact(bolt.id, 'bolt', 'bolt', boltFilePath);
           this.linkConstructionArtifacts(unit.id, bolt.id, 'derives');
 
-          // Run dual validation for bolt (non-blocking)
-          this.runBoltValidation(boltContent, unitContent, ideaContent, unit.id, bolt.id);
+          this.runBoltValidation(boltContent, unitContent, rootIntentContent, unit.id, bolt.id);
 
           // Validate bolt
           const boltResult = await validateBolt(boltFilePath);
@@ -829,20 +823,14 @@ Generated from inception/intent.md
     };
   }
 
-  /**
-   * Run dual validation for a UNIT against INTENT (parent) and IDEA (root).
-   * Non-blocking: logs warnings on failure but does not stop execution.
-   *
-   * @private
-   */
   private runUnitValidation(
     unitContent: string,
     intentContent: string,
-    ideaContent: string,
+    rootIntentContent: string,
     intentId: string,
     unitId: string
   ): void {
-    if (!intentContent || !ideaContent) {
+    if (!intentContent || !rootIntentContent) {
       return;
     }
 
@@ -850,12 +838,12 @@ Generated from inception/intent.md
       const result = runDualValidation(
         unitContent,
         intentContent,
-        ideaContent,
+        rootIntentContent,
         'intent-to-unit',
-        'unit-to-idea',
+        'unit-to-intent',
         intentId,
         unitId,
-        `idea-${this.workflowId}`
+        `intent-${this.workflowId}`
       );
 
       if (!result.passed) {
@@ -868,20 +856,14 @@ Generated from inception/intent.md
     }
   }
 
-  /**
-   * Run dual validation for a BOLT against UNIT (parent) and IDEA (root).
-   * Non-blocking: logs warnings on failure but does not stop execution.
-   *
-   * @private
-   */
   private runBoltValidation(
     boltContent: string,
     unitContent: string,
-    ideaContent: string,
+    rootIntentContent: string,
     unitId: string,
     boltId: string
   ): void {
-    if (!unitContent || !ideaContent) {
+    if (!unitContent || !rootIntentContent) {
       return;
     }
 
@@ -889,12 +871,12 @@ Generated from inception/intent.md
       const result = runDualValidation(
         boltContent,
         unitContent,
-        ideaContent,
+        rootIntentContent,
         'unit-to-bolt',
-        'bolt-to-idea',
+        'bolt-to-intent',
         unitId,
         boltId,
-        `idea-${this.workflowId}`
+        `intent-${this.workflowId}`
       );
 
       if (!result.passed) {
@@ -1025,7 +1007,7 @@ Implementation details for ${unit.title}.
 
 ## Traceability
 - Parent INTENT: ${parentIntentId} (inception/intent.md)
-- Root IDEA: idea-${this.workflowId} (inception/idea.md)
+- Root INTENT: intent-${this.workflowId} (inception/intent.md)
 `;
   }
 
@@ -1086,7 +1068,7 @@ Technical approach for implementing ${bolt.title}
 
 ## Traceability
 - Parent UNIT: ${parentUnitId} (construction/${parentUnitId}/spec.md)
-- Root IDEA: idea-${this.workflowId} (inception/idea.md)
+- Root INTENT: intent-${this.workflowId} (inception/intent.md)
 `;
   }
 

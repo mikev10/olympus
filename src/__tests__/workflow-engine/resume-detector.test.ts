@@ -140,7 +140,7 @@ describe('resume-detector', () => {
     await fs.ensureDir(legacyDir);
 
     const testCases = [
-      { stage: 'idea', expectedStage: 'idea', expectedPhase: 'inception' },
+      { stage: 'idea', expectedStage: 'intent', expectedPhase: 'inception' },
       { stage: 'prd', expectedStage: 'intent', expectedPhase: 'inception' },
       { stage: 'spec', expectedStage: 'unit', expectedPhase: 'construction' },
       { stage: 'intents', expectedStage: 'bolt', expectedPhase: 'construction' },

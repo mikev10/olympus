@@ -32,7 +32,7 @@ vi.mock('../../features/workflow-engine/validation.js', () => ({
 
 // Mock depth-assessment module
 vi.mock('../../features/workflow-engine/depth-assessment.js', () => ({
-  assessDepthFromIdea: vi.fn().mockReturnValue({
+  assessDepthFromIntent: vi.fn().mockReturnValue({
     clarity: 2,
     complexity: 3,
     scope: 2,
@@ -55,14 +55,14 @@ vi.mock('../../features/workflow-engine/manifest.js', () => ({
 // Mock fs
 vi.mock('fs', () => ({
   existsSync: vi.fn().mockReturnValue(false),
-  readFileSync: vi.fn().mockReturnValue('# IDEA\n## Problem Statement\nTest'),
+  readFileSync: vi.fn().mockReturnValue('# INTENT\n## Business Requirements\nTest'),
 }));
 
 import { registerWorkflowArtifactGateHook } from '../../hooks/registrations/workflow-artifact-gate.js';
 import { loadSessionState } from '../../learning/session-state.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import { validateIdea, validateIntent } from '../../features/workflow-engine/validation.js';
-import { assessDepthFromIdea } from '../../features/workflow-engine/depth-assessment.js';
+import { assessDepthFromIntent } from '../../features/workflow-engine/depth-assessment.js';
 import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import { existsSync, readFileSync } from 'fs';
 
@@ -189,7 +189,7 @@ describe('workflow-artifact-gate hook', () => {
       vi.mocked(existsSync).mockReturnValue(true);
     });
 
-    it('should call validateIdea when prometheus agent completes with current_stage=idea', async () => {
+    it('should call validateIntent when prometheus agent completes with current_stage=intent', async () => {
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
@@ -200,8 +200,8 @@ describe('workflow-artifact-gate hook', () => {
         token_budget: null,
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
-      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -213,7 +213,7 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'idea.md'));
+      expect(validateIntent).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'intent.md'));
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
     });
@@ -249,7 +249,7 @@ describe('workflow-artifact-gate hook', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('PASSED');
     });
 
-    it('should default to idea validation for prometheus with unknown stage', async () => {
+    it('should default to intent validation for prometheus with unknown stage', async () => {
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
@@ -261,7 +261,7 @@ describe('workflow-artifact-gate hook', () => {
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
       vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'discovery' }));
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -273,7 +273,7 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalled();
+      expect(validateIntent).toHaveBeenCalled();
       expect(result.continue).toBe(true);
     });
   });
@@ -281,7 +281,7 @@ describe('workflow-artifact-gate hook', () => {
   describe('Validation Results', () => {
     beforeEach(() => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
-      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
@@ -296,7 +296,7 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should inject success message when validation passes', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -314,7 +314,7 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should inject warning message when validation fails', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: false,
         coverage_percentage: 60,
         blocking_issues: ['Missing critical section'],
@@ -332,7 +332,7 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should include blocking issues in warning', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: false,
         coverage_percentage: 60,
         blocking_issues: ['Missing problem statement', 'Missing success metrics'],
@@ -350,7 +350,7 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should include coverage percentage in warning', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: false,
         coverage_percentage: 45,
         blocking_issues: ['Missing critical section'],
@@ -367,7 +367,7 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should always return continue:true even on validation failure', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: false,
         coverage_percentage: 0,
         blocking_issues: ['Everything is wrong'],
@@ -386,7 +386,7 @@ describe('workflow-artifact-gate hook', () => {
   describe('Path Resolution', () => {
     beforeEach(() => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
-      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
         started_at: '2025-01-01',
@@ -397,7 +397,7 @@ describe('workflow-artifact-gate hook', () => {
         token_budget: null,
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -408,7 +408,7 @@ describe('workflow-artifact-gate hook', () => {
     it('should check nested layout first (inception/ subdirectory)', async () => {
       vi.mocked(existsSync).mockImplementation((path: any) => {
         const normalizedPath = path.toString().replace(/\\/g, '/');
-        return normalizedPath.includes('aidlc-docs/test-feature') || normalizedPath.includes('inception/idea.md');
+        return normalizedPath.includes('aidlc-docs/test-feature') || normalizedPath.includes('inception/intent.md');
       });
 
       registerWorkflowArtifactGateHook();
@@ -416,22 +416,19 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'idea.md'));
+      expect(validateIntent).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'inception', 'intent.md'));
     });
 
     it('should fall back to flat layout when nested not found', async () => {
       vi.mocked(existsSync).mockImplementation((path: any) => {
         const normalizedPath = path.toString().replace(/\\/g, '/');
-        // Return true for workflow directory
-        if (normalizedPath.includes('aidlc-docs/test-feature') && !normalizedPath.includes('idea.md')) {
+        if (normalizedPath.includes('aidlc-docs/test-feature') && !normalizedPath.includes('intent.md')) {
           return true;
         }
-        // Return false for all nested inception/idea.md paths
-        if (normalizedPath.includes('inception/idea.md')) {
+        if (normalizedPath.includes('inception/intent.md')) {
           return false;
         }
-        // Return true for flat idea.md
-        return normalizedPath.endsWith('idea.md');
+        return normalizedPath.endsWith('intent.md');
       });
 
       registerWorkflowArtifactGateHook();
@@ -439,7 +436,7 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       await hooks[0].handler(ctx);
 
-      expect(validateIdea).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'idea.md'));
+      expect(validateIntent).toHaveBeenCalledWith(join('/test/project', 'aidlc-docs', 'test-feature', 'intent.md'));
     });
 
     it('should return continue:true when artifact not found (fail open)', async () => {
@@ -495,9 +492,9 @@ describe('workflow-artifact-gate hook', () => {
     });
 
     it('should return continue:true when validation function throws', async () => {
-      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(validateIdea).mockRejectedValue(new Error('Validation error'));
+      vi.mocked(validateIntent).mockRejectedValue(new Error('Validation error'));
 
       registerWorkflowArtifactGateHook();
       const hooks = getHooksForEvent('PostToolUse');
@@ -526,10 +523,10 @@ describe('workflow-artifact-gate hook', () => {
     });
   });
 
-  describe('Depth Assessment after IDEA validation', () => {
+  describe('Depth Assessment after INTENT validation', () => {
     beforeEach(() => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
-      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+      vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(loadSessionState).mockReturnValue({
         session_id: 'test',
@@ -541,11 +538,11 @@ describe('workflow-artifact-gate hook', () => {
         token_budget: null,
         discovery_volume: { session_count: 0, daily_count: 0, daily_reset_at: '2025-01-01' },
       });
-      vi.mocked(readFileSync).mockReturnValue('# IDEA\n## Problem Statement\nTest problem');
+      vi.mocked(readFileSync).mockReturnValue('# INTENT\n## Business Requirements\nTest requirement');
     });
 
-    it('should run depth assessment after IDEA validation passes', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+    it('should run depth assessment after INTENT validation passes', async () => {
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -578,14 +575,14 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(assessDepthFromIdea).toHaveBeenCalled();
+      expect(assessDepthFromIntent).toHaveBeenCalled();
       expect(result.hookSpecificOutput?.additionalContext).toContain('[Depth Assessment]');
       expect(result.hookSpecificOutput?.additionalContext).toContain('Score: 14/30');
       expect(result.hookSpecificOutput?.additionalContext).toContain('MEDIUM');
     });
 
     it('should store depth score in manifest and checkpoint', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -638,11 +635,11 @@ describe('workflow-artifact-gate hook', () => {
       );
     });
 
-    it('should NOT run depth assessment if IDEA validation fails', async () => {
-      vi.mocked(validateIdea).mockResolvedValue({
+    it('should NOT run depth assessment if INTENT validation fails', async () => {
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: false,
         coverage_percentage: 40,
-        blocking_issues: ['Missing problem statement'],
+        blocking_issues: ['Missing business requirements'],
         timestamp: '2025-01-01',
       });
 
@@ -651,11 +648,11 @@ describe('workflow-artifact-gate hook', () => {
       const ctx = createPostToolUseCtx();
       const result = await hooks[0].handler(ctx);
 
-      expect(assessDepthFromIdea).not.toHaveBeenCalled();
+      expect(assessDepthFromIntent).not.toHaveBeenCalled();
       expect(result.hookSpecificOutput?.additionalContext).not.toContain('[Depth Assessment]');
     });
 
-    it('should NOT run depth assessment for intent validation', async () => {
+    it('should run depth assessment for intent validation when it passes', async () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
       vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
@@ -663,18 +660,39 @@ describe('workflow-artifact-gate hook', () => {
         blocking_issues: [],
         timestamp: '2025-01-01',
       });
+      vi.mocked(loadManifest).mockReturnValue({
+        schema_version: '2.0.0',
+        workflow_id: 'test-feature',
+        feature_name: 'Test',
+        created_at: '2025-01-01',
+        updated_at: '2025-01-01',
+        phases: {
+          discovery: { status: 'complete' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'in_progress' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        depth_assessment: null as any,
+        artifacts: [] as any[],
+        links: [] as any[],
+        risks: [] as any[],
+        gate_audit: [] as any[],
+        metrics: null,
+        alignment_checks: [] as any[],
+        risk_tier: null as any,
+      });
 
       registerWorkflowArtifactGateHook();
       const hooks = getHooksForEvent('PostToolUse');
       const ctx = createPostToolUseCtx();
       await hooks[0].handler(ctx);
 
-      expect(assessDepthFromIdea).not.toHaveBeenCalled();
+      expect(assessDepthFromIntent).toHaveBeenCalled();
     });
 
     it('should fail open if depth assessment throws', async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      vi.mocked(validateIdea).mockResolvedValue({
+      vi.mocked(validateIntent).mockResolvedValue({
         passed: true,
         coverage_percentage: 100,
         blocking_issues: [],
@@ -708,7 +726,7 @@ function createMockCheckpoint(overrides: Record<string, any> = {}) {
     workflow_id: 'test-feature',
     feature_name: 'Test Feature',
     current_phase: 'inception',
-    current_stage: 'idea',
+    current_stage: 'intent',
     status: 'in_progress',
     phases: {
       discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },

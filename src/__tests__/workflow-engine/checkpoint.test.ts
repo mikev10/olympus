@@ -39,7 +39,7 @@ describe('Checkpoint Persistence', () => {
         created_at: '2024-01-15T10:00:00Z',
         updated_at: '2024-01-15T10:00:00Z',
         current_phase: 'inception',
-        current_stage: 'idea',
+        current_stage: 'intent',
         status: 'in_progress',
         phases: {
           discovery: {
@@ -478,7 +478,7 @@ describe('Checkpoint Persistence', () => {
         created_at: '2024-01-15T10:00:00Z',
         updated_at: '2024-01-15T10:00:00Z',
         current_phase: 'inception',
-        current_stage: 'idea',
+        current_stage: 'intent',
         status: 'in_progress',
         phases: {
           discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
@@ -514,7 +514,7 @@ describe('Checkpoint Persistence', () => {
         created_at: '2024-01-15T10:00:00Z',
         updated_at: '2024-01-15T10:00:00Z',
         current_phase: 'inception',
-        current_stage: 'idea',
+        current_stage: 'intent',
         status: 'in_progress',
         phases: {
           discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },

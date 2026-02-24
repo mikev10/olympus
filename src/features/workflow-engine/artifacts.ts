@@ -4,7 +4,6 @@ import { WorkflowStage } from './types.js';
 import { WorkflowPhase } from './phase-types.js';
 
 export type ArtifactType =
-  | 'idea'
   | 'intent'
   | 'nfr'
   | 'unit'
@@ -24,7 +23,8 @@ export type ArtifactType =
   | 'regression-baseline'
   | 'change-impact'
   | 'static-model'
-  | 'dynamic-model';
+  | 'dynamic-model'
+  | 'LEVEL1_PLAN';
 
 /**
  * Ensures the workflow directory structure exists.
@@ -57,7 +57,7 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
     if (!await fs.pathExists(checkpointPath)) {
       await fs.writeJson(checkpointPath, {
         workflow_id: workflowId,
-        current_stage: 'idea',
+        current_stage: 'intent',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }, { spaces: 2 });
@@ -125,8 +125,6 @@ export function getArtifactPath(
 
   // Mapping for artifact types to paths
   switch (artifactType) {
-    case 'idea':
-      return path.join(workflowDir, 'inception', 'idea.md');
     case 'intent':
       return path.join(workflowDir, 'inception', 'intent.md');
     case 'nfr':
@@ -179,6 +177,8 @@ export function getArtifactPath(
       return path.join(workflowDir, 'discovery', 'static-model.md');
     case 'dynamic-model':
       return path.join(workflowDir, 'discovery', 'dynamic-model.md');
+    case 'LEVEL1_PLAN':
+      return path.join(workflowDir, 'level1-plan.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }
@@ -402,7 +402,6 @@ export async function linkMasterPlan(
 This feature was developed using the structured workflow system:
 
 ### Inception Phase
-- [Idea Document](aidlc-docs/${workflowId}/inception/idea.md)
 - [Intent Document](aidlc-docs/${workflowId}/inception/intent.md)
 - [Non-Functional Requirements](aidlc-docs/${workflowId}/inception/nfr.md)
 
@@ -509,7 +508,7 @@ export async function ensurePhaseWorkflowDir(projectPath: string, workflowId: st
     // Create base workflow directory
     await fs.ensureDir(workflowDir);
 
-    // Create Inception phase directory (idea.md and intent.md go directly in inception/)
+    // Create Inception phase directory (intent.md goes directly in inception/)
     await fs.ensureDir(path.join(workflowDir, 'inception'));
 
     // Create Construction phase directories
@@ -599,8 +598,6 @@ export async function isLegacyLayout(projectPath: string, workflowId: string): P
 
 /**
  * Migrates a workflow from the legacy layout to the new phase-based layout.
- * Moves:
- * - idea.md -> inception/idea.md
  *
  * Preserves:
  * - checkpoint.json (moves to aidlc-docs/)
@@ -627,14 +624,6 @@ export async function migrateLayout(projectPath: string, workflowId: string): Pr
 
     // Create the phase-based directory structure
     await ensurePhaseWorkflowDir(projectPath, workflowId);
-
-    // Move idea.md if it exists
-    const ideaSource = path.join(workflowDir, 'idea.md');
-    const ideaTarget = path.join(workflowDir, 'inception', 'idea.md');
-
-    if (await fs.pathExists(ideaSource)) {
-      await fs.move(ideaSource, ideaTarget, { overwrite: false });
-    }
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
 
@@ -686,8 +675,8 @@ export async function migrateLayout(projectPath: string, workflowId: string): Pr
  * @returns Absolute path to the artifact file
  *
  * @example
- * getPhaseArtifactPath(p, id, 'inception', 'idea', 'idea.md')
- * // Returns: aidlc-docs/inception/idea.md
+ * getPhaseArtifactPath(p, id, 'inception', 'intent', 'intent.md')
+ * // Returns: aidlc-docs/inception/intent.md
  *
  * getPhaseArtifactPath(p, id, 'construction', 'design', 'interfaces.json')
  * // Returns: aidlc-docs/construction/design/interfaces.json

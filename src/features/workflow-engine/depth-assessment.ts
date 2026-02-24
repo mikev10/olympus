@@ -10,7 +10,7 @@
  * data sensitivity, and compliance impact.
  */
 
-import type { DepthAssessment, RiskTier, RiskTierClassification } from './phase-types.js';
+import type { DepthAssessment, RiskTier, RiskTierClassification, PathwayType } from './phase-types.js';
 
 export interface DepthFactors {
   clarity: number;       // 1-5: how clear are requirements?
@@ -209,15 +209,15 @@ function generateRiskRationale(tier: RiskTier, factors: RiskFactors): string {
 }
 
 /**
- * Assess depth from IDEA artifact content
+ * Assess depth from INTENT artifact content
  *
  * Parses markdown sections and heuristically scores the 6 factors.
  *
- * @param ideaContent - The IDEA artifact markdown content
+ * @param intentContent - The INTENT artifact markdown content
  * @returns Complete depth assessment
  */
-export function assessDepthFromIdea(ideaContent: string): DepthAssessment {
-  const sections = parseIdeaSections(ideaContent);
+export function assessDepthFromIntent(intentContent: string): DepthAssessment {
+  const sections = parseIntentSections(intentContent);
 
   // Score each factor heuristically
   const clarity = scoreClarity(sections);
@@ -228,7 +228,7 @@ export function assessDepthFromIdea(ideaContent: string): DepthAssessment {
   const preferences = scorePreferences(sections);
 
   // Derive risk factors from content
-  const riskFactors = deriveRiskFactorsFromIdea(ideaContent, sections);
+  const riskFactors = deriveRiskFactorsFromIntent(intentContent, sections);
 
   const factors: DepthFactors = {
     clarity,
@@ -248,10 +248,7 @@ export function assessDepthFromIdea(ideaContent: string): DepthAssessment {
   return assessment;
 }
 
-/**
- * Parse IDEA markdown into sections
- */
-interface IdeaSections {
+interface IntentSections {
   problemStatement: string;
   userPersonas: string;
   successMetrics: string;
@@ -259,8 +256,8 @@ interface IdeaSections {
   outOfScope: string;
 }
 
-function parseIdeaSections(content: string): IdeaSections {
-  const sections: IdeaSections = {
+function parseIntentSections(content: string): IntentSections {
+  const sections: IntentSections = {
     problemStatement: '',
     userPersonas: '',
     businessConstraints: '',
@@ -310,7 +307,7 @@ function parseIdeaSections(content: string): IdeaSections {
  * Score clarity (1-5, lower = clearer)
  * More detail in problem/personas = higher clarity = LOWER score
  */
-function scoreClarity(sections: IdeaSections): number {
+function scoreClarity(sections: IntentSections): number {
   const totalLength = sections.problemStatement.length + sections.userPersonas.length;
 
   // More detail = clearer = lower score
@@ -325,7 +322,7 @@ function scoreClarity(sections: IdeaSections): number {
  * Score complexity (1-5)
  * More bullet points and components = higher complexity
  */
-function scoreComplexity(sections: IdeaSections): number {
+function scoreComplexity(sections: IntentSections): number {
   const bulletPoints = (sections.userPersonas.match(/^[-*+]\s/gm) || []).length;
   const componentKeywords = ['component', 'service', 'module', 'layer', 'system', 'integration', 'api'];
   const componentCount = componentKeywords.filter(kw => sections.userPersonas.toLowerCase().includes(kw)).length;
@@ -343,7 +340,7 @@ function scoreComplexity(sections: IdeaSections): number {
  * Score scope (1-5)
  * More constraints and metrics = larger scope
  */
-function scoreScope(sections: IdeaSections): number {
+function scoreScope(sections: IntentSections): number {
   const constraintBullets = (sections.businessConstraints.match(/^[-*+]\s/gm) || []).length;
   const metricBullets = (sections.successMetrics.match(/^[-*+]\s/gm) || []).length;
 
@@ -360,7 +357,7 @@ function scoreScope(sections: IdeaSections): number {
  * Score risk (1-5)
  * More risk keywords = higher risk
  */
-function scoreRisk(sections: IdeaSections): number {
+function scoreRisk(sections: IntentSections): number {
   const riskKeywords = [
     'security', 'compliance', 'data', 'migration', 'breaking',
     'irreversible', 'pii', 'gdpr', 'authentication', 'payment',
@@ -383,7 +380,7 @@ function scoreRisk(sections: IdeaSections): number {
  * Score context (1-5)
  * More "out of scope" items = LESS context needed = LOWER score
  */
-function scoreContext(sections: IdeaSections): number {
+function scoreContext(sections: IntentSections): number {
   const contextLength = sections.outOfScope.length;
 
   // More out-of-scope content = LOWER context score (less context needed)
@@ -398,7 +395,7 @@ function scoreContext(sections: IdeaSections): number {
  * Score preferences (1-5)
  * More must/should/could keywords = more choices = higher score
  */
-function scorePreferences(sections: IdeaSections): number {
+function scorePreferences(sections: IntentSections): number {
   const preferenceKeywords = ['must', 'should', 'could', 'prefer', 'optional', 'required', 'nice to have'];
   const allText = sections.businessConstraints + sections.userPersonas;
   const lowerText = allText.toLowerCase();
@@ -415,7 +412,7 @@ function scorePreferences(sections: IdeaSections): number {
 /**
  * Derive risk factors from IDEA content
  */
-function deriveRiskFactorsFromIdea(content: string, sections: IdeaSections): RiskFactors {
+function deriveRiskFactorsFromIntent(content: string, sections: IntentSections): RiskFactors {
   const lowerContent = content.toLowerCase();
 
   // Reversibility
@@ -476,18 +473,18 @@ function deriveRiskFactorsFromIdea(content: string, sections: IdeaSections): Ris
 export type DepthOverride = 'shallow' | 'medium' | 'deep';
 
 export function assessDepthWithOverride(
-  ideaContent: string,
+  intentContent: string,
   depthOverride?: DepthOverride
 ): DepthAssessment {
   if (depthOverride) {
-    return createOverriddenAssessment(depthOverride, ideaContent);
+    return createOverriddenAssessment(depthOverride, intentContent);
   }
-  return assessDepthFromIdea(ideaContent);
+  return assessDepthFromIntent(intentContent);
 }
 
-function createOverriddenAssessment(override: DepthOverride, ideaContent: string): DepthAssessment {
+function createOverriddenAssessment(override: DepthOverride, intentContent: string): DepthAssessment {
   // Get the natural assessment for risk tier calculation
-  const natural = assessDepthFromIdea(ideaContent);
+  const natural = assessDepthFromIntent(intentContent);
 
   const overrideScores: Record<DepthOverride, number> = {
     shallow: 5,
@@ -582,4 +579,14 @@ export function getRiskTierLabel(tier: RiskTier): string {
     case 3:
       return 'Tier 3: High Risk';
   }
+}
+
+export function adjustDepthForPathway(assessment: DepthAssessment, pathway: PathwayType): DepthAssessment {
+  if (pathway === 'bugfix') {
+    return { ...assessment, recommended_depth: 'minimal', total_score: Math.min(assessment.total_score, 10) };
+  }
+  if (pathway === 'optimization') {
+    return { ...assessment, recommended_depth: assessment.recommended_depth === 'comprehensive' ? 'standard' : assessment.recommended_depth, total_score: Math.min(assessment.total_score, 20) };
+  }
+  return assessment;
 }

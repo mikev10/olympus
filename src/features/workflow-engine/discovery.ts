@@ -347,7 +347,7 @@ export async function executeDiscoveryPhase(
         id: `DISCOVERY-${artifactType}`,
         type: artifactType,
         phase: 'discovery' as WorkflowPhase,
-        stage: 'idea' as WorkflowStage, // discovery has no stage, use 'idea' as placeholder
+        stage: 'intent' as WorkflowStage,
         path: artifactPath,
         validation_passed: null,
         write_complete: true,

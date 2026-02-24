@@ -72,6 +72,13 @@ Some other content.
       join(inceptionDir, 'intent.md'),
       `# INTENT: Test Feature
 
+## Problem Statement
+Users need a new feature to solve problem X.
+
+## Success Metrics
+- Metric 1: 90% success rate
+- Metric 2: Response time < 100ms
+
 ## Business Requirements
 - REQ-001: Feature must handle edge cases
 - REQ-002: Feature must be accessible
@@ -506,7 +513,7 @@ Debug and investigate the authentication failure.
       expect(result.context.boltSpec).toContain('BOLT-001: Implement Core Module A');
       expect(result.context.unitSpec).toContain('UNIT-001: Core Module');
       expect(result.context.intentSummary).toContain('Business Requirements');
-      expect(result.context.ideaSummary).toContain('Problem Statement');
+      expect(result.context.intentSummary2).toContain('Problem Statement');
       expect(result.context.targetFiles).toEqual([
         'src/core/ModuleA.ts',
         'src/core/ModuleA.test.ts',
@@ -536,7 +543,7 @@ Debug and investigate the authentication failure.
       expect(result.context).toHaveProperty('boltSpec');
       expect(result.context).toHaveProperty('unitSpec');
       expect(result.context).toHaveProperty('intentSummary');
-      expect(result.context).toHaveProperty('ideaSummary');
+      expect(result.context).toHaveProperty('intentSummary2');
       expect(result.context).toHaveProperty('targetFiles');
     });
 
@@ -561,9 +568,9 @@ Debug and investigate the authentication failure.
       const result = await dispatchBolt(TEST_DIR, 'workflow-001', 'BOLT-999');
 
       expect(result.boltId).toBe('BOLT-999');
-      expect(result.context.unitSpec).toBe(''); // Unit spec is missing
-      expect(result.context.intentSummary).toBe(''); // Intent is missing
-      expect(result.context.ideaSummary).toBe(''); // Idea is missing
+      expect(result.context.unitSpec).toBe('');
+      expect(result.context.intentSummary).toBe('');
+      expect(result.context.intentSummary2).toBe('');
       expect(result.agentType).toBe('olympian');
     });
 

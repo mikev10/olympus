@@ -70,10 +70,9 @@ describe('Master Plan Linking', () => {
       const planPath = join(TEST_DIR, '.olympus', 'plans', 'test-workflow-003-plan.md');
       const content = readFileSync(planPath, 'utf-8');
 
-      expect(content).toContain('[Idea Document](aidlc-docs/test-workflow-003/inception/idea.md)');
       expect(content).toContain('[Intent Document](aidlc-docs/test-workflow-003/inception/intent.md)');
       expect(content).toContain('[Workflow Checkpoint](aidlc-docs/test-workflow-003/checkpoint.json)');
-      expect(content).toContain('aidlc-docs/test-workflow-003/inception/idea.md');
+      expect(content).toContain('aidlc-docs/test-workflow-003/inception/intent.md');
       expect(content).toContain('aidlc-docs/test-workflow-003/construction/');
       expect(content).toContain('aidlc-docs/test-workflow-003/operations/deploy-guide.md');
       expect(content).toContain('aidlc-docs/test-workflow-003/checkpoint.json');
@@ -143,7 +142,7 @@ More content
       const updatedContent = readFileSync(planPath, 'utf-8');
 
       // Should have new artifacts section
-      expect(updatedContent).toContain('[Idea Document]');
+      expect(updatedContent).toContain('[Intent Document]');
       expect(updatedContent).toContain('[Intent Document]');
 
       // Should not have old content
@@ -179,7 +178,7 @@ Content 2
       const updatedContent = readFileSync(planPath, 'utf-8');
 
       expect(updatedContent).toContain('## Structured Artifacts');
-      expect(updatedContent).toContain('[Idea Document]');
+      expect(updatedContent).toContain('[Intent Document]');
       expect(updatedContent).toContain('Content 1');
       expect(updatedContent).toContain('Content 2');
     });

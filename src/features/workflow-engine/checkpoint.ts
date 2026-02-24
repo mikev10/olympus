@@ -259,6 +259,12 @@ export async function loadCheckpoint(
       return null;
     }
 
+    // Migrate legacy 'idea' stage to 'intent' (IDEA→INTENT merge)
+    if (checkpoint.current_stage === 'idea') {
+      console.warn(`[Checkpoint] Migrating legacy 'idea' stage to 'intent' for workflow ${workflowId}`);
+      checkpoint.current_stage = 'intent';
+    }
+
     // Update cache with fresh data
     checkpointCache.set(cacheKey, {
       checkpoint: structuredClone(checkpoint),

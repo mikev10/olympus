@@ -1843,7 +1843,7 @@ $ARGUMENTS
 
 Extract flags from the input above:
 
-- \`--depth shallow|medium|deep\` — Override automatic depth assessment. If not provided, depth will be assessed automatically after the IDEA stage.
+- \`--depth shallow|medium|deep\` — Override automatic depth assessment. If not provided, depth will be assessed automatically after the INTENT stage.
 - \`--brownfield\` — Force Discovery phase even if the repository appears empty.
 - \`--greenfield\` — Skip Discovery phase even if the repository has existing source code.
 - \`--abort\` — Abort the current active workflow (archive it).
@@ -1867,20 +1867,20 @@ If the \`--abort\` flag is present:
 Scan the \`aidlc-docs/\` directory for workflow subdirectories. Each subdirectory that contains a \`checkpoint.json\` represents a workflow. Read each checkpoint to determine its status.
 
 - **If checkpoint exists with \`status: 'awaiting_mode_selection'\`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 7) and stop — do not restart the pipeline.
-- **If checkpoint exists at \`stage: 'idea'\` with \`status: 'in_progress'\`**: This is a freshly initialized workflow (the hook created the checkpoint). Before proceeding, **determine and confirm the workflow name**:
+- **If checkpoint exists at \`stage: 'intent'\` with \`status: 'in_progress'\`**: This is a freshly initialized workflow (the hook created the checkpoint). Before proceeding, **determine and confirm the workflow name**:
 
   1. Determine the input type. The \`/plan\` argument can be:
      - A **file path** (e.g., \`prd.md\`, \`proposal.txt\`, \`design-spec.md\`, \`requirements.docx\`, \`notes.md\`) → read the file content
      - A **description string** (e.g., "Add user authentication", "Build a marketplace for AI tools") → use the text directly
      - A **URL** or reference → fetch/read the content if possible
-     Users may provide a PRD, a rough idea, a spec, meeting notes, or just a sentence. Handle all cases.
+     Users may provide a PRD, a rough concept, a spec, meeting notes, or just a sentence. Handle all cases.
   2. From the CONTENT (never the filename or raw argument), derive a concise **1-3 word** name that captures the core product or feature being built. Examples: "ai-native-marketplace", "user-auth", "payment-system", "chat-widget".
   3. Slugify the name: lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim.
   4. Show the user: "Workflow name: \`{derivedName}\`. OK, or would you like a different name?"
   5. If the user provides a different name, slugify that instead.
   6. If the derived name differs from the current \`workflowId\` on disk, rename the directory: move \`aidlc-docs/{oldWorkflowId}/\` to \`aidlc-docs/{newWorkflowId}/\`, update the checkpoint's \`workflow_id\` and \`feature_name\` fields, and save.
 
-  Then go to Step 2 (trust state) and then Step 3 (Discovery) or Step 4 (IDEA interview). Do NOT ask "Resume?" — this is a new workflow, not a resumption. Skip Step 4a (directory/checkpoint creation) since the hook already handled it.
+  Then go to Step 2 (trust state) and then Step 3 (Discovery) or Step 4 (INTENT interview). Do NOT ask "Resume?" — this is a new workflow, not a resumption. Skip Step 4a (directory/checkpoint creation) since the hook already handled it.
 - **If checkpoint exists at any other stage and is active** (not terminal): This is a previously started workflow. Display "Found workflow: '{name}' ({phase} → {stage}). Resume? [Y/n]" and wait for user response. If they confirm, resume from the saved stage. If they decline, ask if they want to abort (\`--abort\`) or start fresh.
 - **If checkpoint has \`interview_progress\`** (mid-interview resume): The system injects interview progress info at session start. When resuming, Prometheus MUST: (1) read the draft artifact at the path indicated in the context, (2) skip questions already covered in the draft, (3) continue from the next unanswered question. If no \`interview_progress\` exists but a draft artifact path is found, restart the interview but preserve the existing draft as context.
 - **If no checkpoint exists**: Proceed to Step 1c.
@@ -1897,14 +1897,14 @@ If there is no active workflow AND no feature description was provided in the in
 
 ## Step 2: Read Trust State
 
-Read \`.olympus/trust-state.json\` at workflow start. Determine the trust level (0-3). This affects how many interview questions you ask in the IDEA stage:
+Read \`.olympus/trust-state.json\` at workflow start. Determine the trust level (0-3). This affects how many interview questions you ask in the INTENT stage:
 
-| Trust Level | IDEA Interview Questions |
-|-------------|--------------------------|
-| 0 (new)     | 5 or more questions      |
-| 1 (low)     | 3-4 questions            |
-| 2 (medium)  | 2-3 questions            |
-| 3 (high)    | 1-2 questions            |
+| Trust Level | INTENT Interview Questions |
+|-------------|----------------------------|
+| 0 (new)     | 5 or more questions        |
+| 1 (low)     | 3-4 questions              |
+| 2 (medium)  | 2-3 questions              |
+| 3 (high)    | 1-2 questions              |
 
 If the trust state file does not exist, assume Trust Level 0.
 
@@ -1924,7 +1924,7 @@ Determine whether this is a brownfield (existing codebase) or greenfield (new pr
 - If depth is SHALLOW (either from \`--depth shallow\` or from later assessment), skip Discovery entirely.
 
 ### If Discovery is skipped
-Proceed directly to Step 4 (IDEA stage).
+Proceed directly to Step 4 (INTENT stage).
 
 ### If Discovery runs
 
@@ -1952,13 +1952,13 @@ After generating all 6 artifacts, present a summary of key findings to the user:
 - [Key risks or constraints discovered]
 - [Integration points that will be affected]
 
-Approve Discovery findings to proceed to IDEA stage? [Y/n]"
+Approve Discovery findings to proceed to INTENT stage? [Y/n]"
 
 Wait for user approval before proceeding. If they have concerns, discuss and update artifacts as needed.
 
 ---
 
-## Step 4: IDEA Stage
+## Step 4: INTENT Stage
 
 ### 4a. Create workflow directory and manifest
 
@@ -1982,7 +1982,7 @@ Save an initial checkpoint to \`aidlc-docs/{workflowId}/checkpoint.json\`:
 {
   "workflowId": "{workflowId}",
   "name": "{feature title}",
-  "stage": "idea",
+  "stage": "intent",
   "status": "in_progress",
   "created": "{ISO-8601}",
   "updated": "{ISO-8601}",
@@ -2031,25 +2031,25 @@ After receiving the user's answers:
 \`\`\`
 Task(
   subagent_type="metis",
-  description="IDEA blind spot analysis",
+  description="INTENT blind spot analysis",
   prompt="Review this feature proposal and identify blind spots, unstated assumptions, and missing considerations. Feature: {summarize the feature and user's answers}. Discovery findings: {summarize if Discovery ran, otherwise 'greenfield project'}."
 )
 \`\`\`
 
-### 4d. Generate IDEA artifact
+### 4d. Generate INTENT artifact
 
-Create \`aidlc-docs/{workflowId}/inception/idea.md\` using this template:
+Create \`aidlc-docs/{workflowId}/inception/intent.md\` using this template:
 
 \`\`\`markdown
 ---
-id: idea-{workflow-id}
+id: intent-{workflow-id}
 title: "{title}"
 status: draft
 created: "{ISO-8601 date}"
 author: "{user or prometheus}"
 ---
 
-# IDEA: {Title}
+# INTENT: {Title}
 
 ## Problem Statement
 {What problem does this solve? Who is affected? Why does it matter now?}
@@ -2089,26 +2089,26 @@ Derive a risk tier from the score:
 
 Update the checkpoint with the depth and risk information.
 
-### 4f. Gate 1: IDEA Approval (ALWAYS BLOCKING)
+### 4f. Gate 1: INTENT Approval (ALWAYS BLOCKING)
 
-Present the IDEA document to the user (the PM):
+Present the INTENT document to the user (the PM):
 
-"**IDEA document ready for review.**
+"**INTENT document ready for review.**
 
-{Display the full IDEA document contents}
+{Display the full INTENT document contents}
 
 **Depth assessment**: {SHALLOW|MEDIUM|DEEP} (score: {N}/30)
 - Scope: {N}/10 — {brief rationale}
 - Complexity: {N}/10 — {brief rationale}
 - Risk: {N}/10 — {brief rationale}
 
-Approve IDEA to proceed to INTENT stage? [Y/n]"
+Approve INTENT to proceed? [Y/n]"
 
-This gate is ALWAYS blocking. Wait for explicit approval before proceeding. If the user requests changes, update the IDEA document and present again.
+This gate is ALWAYS blocking. Wait for explicit approval before proceeding. If the user requests changes, update the INTENT document and present again.
 
 ### 4g. Save checkpoint (CCR-1)
 
-After IDEA approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
+After INTENT approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
   "stage": "intent",
@@ -2117,7 +2117,7 @@ After IDEA approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "depth": "{SHALLOW|MEDIUM|DEEP}",
   "depthScore": {3-30},
   "riskTier": {1-3},
-  "gatesCompleted": ["idea"]
+  "gatesCompleted": ["intent"]
 }
 \`\`\`
 
@@ -2132,7 +2132,7 @@ Ask the user about:
 - **Constraints**: Technical constraints, compatibility requirements, timeline?
 - **Priorities**: What is most important? What can be deferred?
 
-Keep questions focused and informed by the IDEA document and any Discovery findings.
+Keep questions focused and informed by the INTENT document and any Discovery findings.
 
 ### 5b. AI-driven research (silent, parallel)
 
@@ -2166,7 +2166,6 @@ Create \`aidlc-docs/{workflowId}/inception/intent.md\` using this template:
 ---
 id: intent-{workflow-id}
 title: "{title}"
-parent: "idea-{workflow-id}"
 status: draft
 created: "{ISO-8601 date}"
 depth_score: {1-30}
@@ -2234,12 +2233,12 @@ created: "{ISO-8601 date}"
 - **Design-time NFRs** (security, compliance, accessibility) are gate-blocking — they participate in dual validation and must be satisfied before proceeding.
 - **Runtime NFRs** (performance, availability) are tracked in the manifest but are NOT gate-blocking.
 
-### 5f. Dual validation (INTENT against IDEA)
+### 5f. Self-consistency validation
 
-Verify that the INTENT document is consistent with the IDEA document:
-- Every persona from IDEA has at least one user story in INTENT.
-- Every success metric from IDEA maps to an acceptance criterion or NFR in INTENT.
-- Nothing in INTENT contradicts the "Out of Scope" section of IDEA.
+Verify that the INTENT document is internally consistent:
+- Every persona has at least one user story.
+- Every success metric maps to an acceptance criterion or NFR.
+- The "Out of Scope" section has no contradictions with stated user stories.
 - Design-time NFRs are addressed in the Technical Specification.
 
 If inconsistencies are found, flag them and resolve before proceeding to the gate.
@@ -2266,7 +2265,7 @@ The Momus review requirement depends on trust and risk:
   Task(
     subagent_type="momus",
     description="INTENT review",
-    prompt="Critically review this INTENT document for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks. INTENT: {full intent document}. IDEA: {full idea document}."
+    prompt="Critically review this INTENT document for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks. INTENT: {full intent document}."
   )
   \`\`\`
   Present Momus feedback to the user. Address any critical issues before proceeding.
@@ -2297,7 +2296,7 @@ After all INTENT gates pass, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "stage": "construction_prep",
   "status": "in_progress",
   "updated": "{ISO-8601}",
-  "gatesCompleted": ["idea", "intent", "intent_business", "momus_review"]
+  "gatesCompleted": ["intent", "intent_business", "momus_review"]
 }
 \`\`\`
 
@@ -2314,7 +2313,7 @@ Based on the assessed depth:
 
 Display this message:
 
-"**Inception complete.** IDEA and INTENT documents approved.
+"**Inception complete.** INTENT document approved.
 
 Depth: {SHALLOW|MEDIUM|DEEP} | Risk Tier: {1|2|3}
 
@@ -2342,7 +2341,7 @@ Update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "stage": "construction_prep",
   "status": "awaiting_mode_selection",
   "updated": "{ISO-8601}",
-  "gatesCompleted": ["idea", "intent", "intent_business", "momus_review", "construction_prep"]
+  "gatesCompleted": ["intent", "intent_business", "momus_review", "construction_prep"]
 }
 \`\`\`
 
@@ -2355,8 +2354,8 @@ Update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 3. **ARTIFACTS ARE STRUCTURED**: Always use the exact templates provided above. Fill in all sections — do not leave template placeholders.
 4. **CHECKPOINTS ARE MANDATORY**: Save checkpoint state after every stage transition. This enables resume on interruption.
 5. **TRUST ADJUSTS CEREMONY**: Higher trust means fewer questions and lighter gates. Lower trust means more thorough validation.
-6. **DISCOVERY IS OPTIONAL**: Only runs for brownfield projects at non-SHALLOW depth. Greenfield projects skip straight to IDEA.
-7. **DUAL VALIDATION CATCHES DRIFT**: The INTENT-vs-IDEA check prevents scope drift between stages.
+6. **DISCOVERY IS OPTIONAL**: Only runs for brownfield projects at non-SHALLOW depth. Greenfield projects skip straight to INTENT.
+7. **SELF-CONSISTENCY VALIDATION**: Check the INTENT document for internal consistency before proceeding to gates.
 8. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian) should happen without announcing them to the user. Only surface findings in the artifacts.
 
 Begin by parsing the input, checking for active workflows, and starting the appropriate pipeline stage.`,
@@ -3044,7 +3043,7 @@ For full test protocol details, see \`.claude/skills/smoke-test/skill.md\`
 `,
 
   'workflow-test.md': `---
-description: End-to-end structured workflow test - exercises every stage from IDEA through BUILD, then cleans up
+description: End-to-end structured workflow test - exercises every stage from INTENT through BUILD, then cleans up
 ---
 
 $ARGUMENTS
@@ -3056,13 +3055,13 @@ You are running an end-to-end test of the Olympus structured workflow engine.
 ### Complete Pipeline
 
 \`\`\`
-IDEA → PRD → SPEC → INTENTS → UNITS → DESIGN → BUILD
+INTENT → PRD → SPEC → UNITS → DESIGN → BUILD
 \`\`\`
 
 ### What This Does
 
 1. Creates a test workflow \`smoke-test-hello-world\` in \`.olympus/workflow/\`
-2. Walks through all 7 stages: IDEA, PRD, SPEC, INTENTS, UNITS, DESIGN, BUILD
+2. Walks through all 6 stages: INTENT, PRD, SPEC, UNITS, DESIGN, BUILD
 3. Creates minimal test artifacts at each stage in the correct directory structure
 4. Updates checkpoint.json after each stage to verify state transitions
 5. Verifies all 13 artifacts are created in the correct locations
@@ -3071,16 +3070,16 @@ IDEA → PRD → SPEC → INTENTS → UNITS → DESIGN → BUILD
 ### Quick Protocol
 
 1. **Setup**: Delete leftover \`.olympus/workflow/smoke-test-hello-world/\`, create fresh directory structure
-2. **Create checkpoint.json** with schema v2.0.0, initial state: inception/idea
-3. **Inception phase**: Write idea.md → prd.md → spec.md → INTENT-*.md (update checkpoint after each)
+2. **Create checkpoint.json** with schema v2.0.0, initial state: inception/intent
+3. **Inception phase**: Write intent.md → prd.md → spec.md → UNIT-*.md (update checkpoint after each)
 4. **Construction phase**: Write UNIT-*.md → design docs (interfaces.md, data-flow.md, components.md) → BUILD stage creates BOLT-*.md (update checkpoint after each)
 5. **BUILD verification**: Read final checkpoint, verify all stages complete, count all 13 artifacts
 6. **Cleanup**: Delete \`.olympus/workflow/smoke-test-hello-world/\` entirely, verify deletion
-7. **Report**: Print PASS/FAIL table for each of the 7 stages
+7. **Report**: Print PASS/FAIL table for each of the 6 stages
 
 ### Arguments
-- No args: Full test (all 7 stages)
-- \`inception\`: Inception phase only (IDEA/PRD/SPEC/INTENTS)
+- No args: Full test (all 6 stages)
+- \`inception\`: Inception phase only (INTENT/PRD/SPEC)
 - \`construction\`: Construction phase only (UNITS/DESIGN/BUILD)
 - \`cleanup\`: Delete leftover test artifacts
 
@@ -3742,7 +3741,7 @@ export function install(options: InstallOptions = {}): InstallResult {
       'review.md',
       'ultrawork.md',
       'workflow-status.md',
-      'idea.md',
+      'intent.md',
       'prd.md',
       'spec.md',
       'intents.md',

@@ -148,8 +148,8 @@ function createMockCheckpoint(overrides: Record<string, any> = {}) {
     },
     current_stage: 'intent',
     status: 'in_progress',
-    artifacts: { idea: null, prd: null, spec: null, intent: null, complete: null },
-    validation_results: { idea: null, prd: null, spec: null, intent: null, complete: null },
+    artifacts: { intent: null, unit: null, bolt: null, complete: null },
+    validation_results: { intent: null, unit: null, bolt: null, complete: null },
     manifest_path: '/test/project/aidlc-docs/test-feature/manifest.json',
     trust_state_path: null,
     risk_tier: null,
@@ -341,10 +341,10 @@ describe('Quality Gate Hooks', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
     });
 
-    it('triggers Gate 1 when current_stage is idea', async () => {
+    it('triggers gate when current_stage is intent', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
@@ -365,7 +365,7 @@ describe('Quality Gate Hooks', () => {
 
       expect(result.continue).toBe(true);
       expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
-      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 1 (IDEA review)');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 1 (INTENT review)');
     });
 
     it('does not re-trigger when gate is already pending', async () => {
@@ -766,7 +766,7 @@ describe('Quality Gate Hooks', () => {
       const ctx = createPostToolUseCtx();
       const result = await blocker!.handler(ctx);
 
-      expect(result.hookSpecificOutput?.additionalContext).toContain('Does the INTENT address all IDEA constraints?');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Does the INTENT address all stated constraints?');
     });
 
     it('includes [GATE_PENDING] sentinel', async () => {
@@ -1475,7 +1475,7 @@ describe('Quality Gate Hooks', () => {
     it('passes through normal prompts without gate pending', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
@@ -1788,33 +1788,7 @@ describe('Quality Gate Hooks', () => {
   });
 
   describe('Stage-level gates (Gate 1 / Gate 2)', () => {
-    it('Gate 1 fires after IDEA stage with correct label', async () => {
-      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
-      vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
-      );
-      vi.mocked(loadManifest).mockReturnValue(
-        createMockManifest({
-          phases: {
-            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
-            inception: { status: 'in_progress', gate_result: null },
-            construction: { status: 'not_started' },
-            operations: { status: 'not_started' },
-          },
-        })
-      );
-
-      const hooks = getHooksForEvent('PostToolUse');
-      const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
-
-      const ctx = createPostToolUseCtx();
-      const result = await blocker!.handler(ctx);
-
-      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 1 (IDEA review)');
-      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
-    });
-
-    it('Gate 2 fires after INTENT stage with correct label', async () => {
+    it('Gate 1 fires after INTENT stage with correct label', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
@@ -1836,14 +1810,14 @@ describe('Quality Gate Hooks', () => {
       const ctx = createPostToolUseCtx();
       const result = await blocker!.handler(ctx);
 
-      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 2 (INTENT review)');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 1 (INTENT review)');
       expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
     });
 
-    it('Gate 1 uses structural verification (no intent.md needed)', async () => {
+    it('Gate 1 fires after INTENT stage with correct label', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_stage: 'idea', current_phase: 'inception' })
+        createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
       );
       vi.mocked(loadManifest).mockReturnValue(
         createMockManifest({
@@ -1855,20 +1829,18 @@ describe('Quality Gate Hooks', () => {
           },
         })
       );
-      vi.mocked(readFileSync).mockReturnValue('# IDEA\n## Problem Statement\nTest problem');
 
       const hooks = getHooksForEvent('PostToolUse');
       const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
 
       const ctx = createPostToolUseCtx();
-      await blocker!.handler(ctx);
+      const result = await blocker!.handler(ctx);
 
-      // Gate 1 should call computeVerification (structural check), NOT runDualValidation
-      expect(computeVerification).toHaveBeenCalled();
-      expect(runDualValidation).not.toHaveBeenCalled();
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Gate 1 (INTENT review)');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[GATE_PENDING]');
     });
 
-    it('Gate 2 uses runDualValidation for intent stage', async () => {
+    it('Gate 2 uses computeVerification for intent stage (self-consistency check)', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({ current_stage: 'intent', current_phase: 'inception' })
@@ -1884,25 +1856,6 @@ describe('Quality Gate Hooks', () => {
         })
       );
       vi.mocked(readFileSync).mockReturnValue('# Content');
-      vi.mocked(runDualValidation).mockReturnValue({
-        parentCheck: {
-          source_artifact_id: 'idea',
-          target_artifact_id: 'intent',
-          verification: { conformance_score: 85, coverage_percentage: 90, missing_items: [], passed: true },
-          validation: { alignment_score: 80, alignment_questions: [], passed: true },
-          alignment_passed: true,
-          checked_at: '2025-01-01T00:00:00.000Z',
-        },
-        rootCheck: {
-          source_artifact_id: 'idea',
-          target_artifact_id: 'intent',
-          verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
-          validation: { alignment_score: 75, alignment_questions: [], passed: true },
-          alignment_passed: true,
-          checked_at: '2025-01-01T00:00:00.000Z',
-        },
-        passed: true,
-      });
 
       const hooks = getHooksForEvent('PostToolUse');
       const blocker = hooks.find(h => h.name === 'qualityGateBlocker');
@@ -1910,16 +1863,12 @@ describe('Quality Gate Hooks', () => {
       const ctx = createPostToolUseCtx();
       await blocker!.handler(ctx);
 
-      expect(runDualValidation).toHaveBeenCalledWith(
-        expect.any(String),  // intentContent
-        expect.any(String),  // ideaContent
-        expect.any(String),  // rootIdeaContent
-        'idea-to-intent',
-        'unit-to-idea',
-        'idea',
-        'intent',
-        'idea'
+      expect(computeVerification).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        'intent-to-unit'
       );
+      expect(runDualValidation).not.toHaveBeenCalled();
     });
 
     it('gate_result is reset after approval so next stage gate can fire', async () => {
@@ -1932,7 +1881,7 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
-          current_stage: 'idea',
+          current_stage: 'intent',
           current_phase: 'inception',
         })
       );
@@ -2097,7 +2046,7 @@ describe('Quality Gate Hooks', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('[BLOCKING - Acknowledgment Required]');
     });
 
-    it('runs dual validation with unit-to-idea root check', async () => {
+    it('runs dual validation with unit-to-intent root check', async () => {
       setupGate3Mocks();
 
       const hooks = getHooksForEvent('PostToolUse');
@@ -2111,7 +2060,7 @@ describe('Quality Gate Hooks', () => {
         expect.any(String),
         expect.any(String),
         'intent-to-unit',
-        'unit-to-idea',
+        'unit-to-intent',
         expect.any(String),
         expect.any(String),
         expect.any(String)
@@ -2223,7 +2172,7 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(readFileSync).mockReturnValue('# Content');
       vi.mocked(runDualValidation).mockReturnValue({
         parentCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'BOLT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },
@@ -2231,7 +2180,7 @@ describe('Quality Gate Hooks', () => {
           checked_at: '2025-01-01T00:00:00.000Z',
         },
         rootCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'BOLT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },
@@ -2310,7 +2259,7 @@ describe('Quality Gate Hooks', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('[BLOCKING - Acknowledgment Required]');
     });
 
-    it('runs dual validation with bolt-to-idea root check', async () => {
+    it('runs dual validation with bolt-to-intent root check', async () => {
       setupGate4Mocks();
 
       const hooks = getHooksForEvent('PostToolUse');
@@ -2324,7 +2273,7 @@ describe('Quality Gate Hooks', () => {
         expect.any(String),
         expect.any(String),
         'unit-to-bolt',
-        'bolt-to-idea',
+        'bolt-to-intent',
         expect.any(String),
         'BOLT-001',
         expect.any(String)
@@ -2868,7 +2817,7 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(readFileSync).mockReturnValue('# Content');
       vi.mocked(runDualValidation).mockReturnValue({
         parentCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'BOLT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },
@@ -2876,7 +2825,7 @@ describe('Quality Gate Hooks', () => {
           checked_at: '2025-01-01T00:00:00.000Z',
         },
         rootCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'BOLT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },

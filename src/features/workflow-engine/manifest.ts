@@ -455,7 +455,7 @@ export function recoverManifest(
           id: `recovered-${Date.now()}-${manifest.artifacts.length}`,
           type: path.extname(file.name) || 'unknown',
           phase: 'inception',
-          stage: 'idea',
+          stage: 'intent',
           path: normalizedPath,
           created_at: now,
           updated_at: now,
@@ -901,9 +901,9 @@ export async function revalidateStaleArtifacts(
         continue;
       }
 
-      // Find root IDEA artifact
-      const ideaArtifact = manifest.artifacts.find((a) => a.stage === 'idea');
-      if (!ideaArtifact) {
+      // Find root INTENT artifact
+      const intentArtifact = manifest.artifacts.find((a) => a.stage === 'intent');
+      if (!intentArtifact) {
         result.stillStale.push(artifact.id);
         continue;
       }
@@ -915,29 +915,26 @@ export async function revalidateStaleArtifacts(
       const parentContent = fs.existsSync(parentArtifact.path)
         ? fs.readFileSync(parentArtifact.path, 'utf-8')
         : null;
-      const ideaContent = fs.existsSync(ideaArtifact.path)
-        ? fs.readFileSync(ideaArtifact.path, 'utf-8')
+      const intentContent = fs.existsSync(intentArtifact.path)
+        ? fs.readFileSync(intentArtifact.path, 'utf-8')
         : null;
 
-      if (!artifactContent || !parentContent || !ideaContent) {
+      if (!artifactContent || !parentContent || !intentContent) {
         result.stillStale.push(artifact.id);
         continue;
       }
 
       // Determine transition types based on artifact stage
       const { runDualValidation } = await import('./alignment.js');
-      let transition: 'idea-to-intent' | 'intent-to-unit' | 'unit-to-bolt';
-      let rootTransition: 'unit-to-idea' | 'bolt-to-idea';
+      let transition: 'intent-to-unit' | 'unit-to-bolt';
+      let rootTransition: 'unit-to-intent' | 'bolt-to-intent';
 
-      if (artifact.stage === 'intent') {
-        transition = 'idea-to-intent';
-        rootTransition = 'unit-to-idea'; // closest available for intent
-      } else if (artifact.stage === 'unit') {
+      if (artifact.stage === 'unit') {
         transition = 'intent-to-unit';
-        rootTransition = 'unit-to-idea';
+        rootTransition = 'unit-to-intent';
       } else if (artifact.stage === 'bolt') {
         transition = 'unit-to-bolt';
-        rootTransition = 'bolt-to-idea';
+        rootTransition = 'bolt-to-intent';
       } else {
         result.stillStale.push(artifact.id);
         continue;
@@ -947,12 +944,12 @@ export async function revalidateStaleArtifacts(
       const dualResult = runDualValidation(
         artifactContent,
         parentContent,
-        ideaContent,
+        intentContent,
         transition,
         rootTransition,
         parentArtifact.id,
         artifact.id,
-        ideaArtifact.id
+        intentArtifact.id
       );
 
       if (dualResult.passed) {

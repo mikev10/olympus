@@ -22,7 +22,6 @@ export type WorkflowPhase = 'discovery' | 'inception' | 'construction' | 'operat
  * Used for phase progression tracking and gate routing.
  */
 export const STAGE_PHASE_MAP: Record<WorkflowStage, WorkflowPhase | 'complete'> = {
-  idea: 'inception',
   intent: 'inception',
   unit: 'construction',
   bolt: 'construction',
@@ -264,11 +263,37 @@ export interface WorkflowCheckpointV3 {
   active_bolt_id?: string;
   execution_mode?: 'ascent' | 'olympus' | 'ultrawork' | 'manual';
   interview_progress?: {
-    stage: 'idea' | 'intent';
+    stage: 'intent';
     questions_asked: number;
     draft_artifact_path?: string;
   };
   resume_context?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  level1_plan_path?: string;
+  pathway_type?: PathwayType;
+  skipped_phases?: WorkflowPhase[];
+  bolt_plan_path?: string;
+}
+
+export type PathwayType = 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization';
+
+export interface Level1PlanStage {
+  phase: WorkflowPhase;
+  stage: string;
+  included: boolean;
+  rationale: string;
+}
+
+export interface Level1Plan {
+  pathway: PathwayType;
+  risk_assessment: 'LOW' | 'MEDIUM' | 'HIGH';
+  risk_tier: RiskTier;
+  phases: Record<WorkflowPhase, { included: boolean; rationale: string }>;
+  stages: Level1PlanStage[];
+  estimated_bolts: number;
+  estimated_depth: 'minimal' | 'standard' | 'comprehensive';
+  generated_at: string;
+  approved_at: string | null;
+  approved_by: 'human' | null;
 }

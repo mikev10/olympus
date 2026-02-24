@@ -78,7 +78,6 @@ export function registerWorkflowTransitionHooks(): void {
         const completedBolts = boltArtifacts.filter(a => a.contract_status === 'fulfilled');
         const unitArtifacts = getUnitArtifacts(manifest);
         const intentArtifacts = manifest.artifacts.filter(a => a.stage === 'intent');
-        const ideaArtifacts = manifest.artifacts.filter(a => a.stage === 'idea');
 
         // All BOLTs complete
         if (boltArtifacts.length > 0 && completedBolts.length === boltArtifacts.length &&
@@ -120,15 +119,6 @@ export function registerWorkflowTransitionHooks(): void {
             ? intentArtifacts[0].path
             : `aidlc-docs/${activeWorkflowId}/inception/intent.md`;
           message = `✓ INTENT locked — '${manifest.feature_name}'\nTech spec: ${intentPath} | Risk: Tier ${riskTier}\n${unitArtifacts.length} UNITs decomposed | ${boltArtifacts.length} BOLTs queued\n→ Ready: /ascent, /olympus, or /ultrawork to begin Construction${devNotice}`;
-        }
-        // IDEA approved
-        else if (ideaArtifacts.some(a => a.contract_status === 'active' || a.contract_status === 'fulfilled') &&
-                 checkpoint.current_stage === 'idea' &&
-                 lastGateEntry?.phase === 'inception' && lastGateEntry?.action === 'approved') {
-          const depth = manifest.depth_assessment;
-          const depthStr = depth ? `Depth: ${depth.recommended_depth} (${depth.total_score}/30)` : 'Depth: Not assessed';
-          const riskTier = manifest.risk_tier?.tier ?? 0;
-          message = `✓ IDEA approved — '${manifest.feature_name}'\n${depthStr} | Risk: Tier ${riskTier} | Trust: Level ${trustState.current_level}\n→ Next: INTENT stage. Prometheus will interview you about business requirements.`;
         }
 
         if (message) {

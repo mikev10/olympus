@@ -23,7 +23,7 @@
 
 import { registerHook } from '../registry.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
-import { assessDepthFromIdea, getDepthQuestionLimits } from '../../features/workflow-engine/depth-assessment.js';
+import { assessDepthFromIntent, getDepthQuestionLimits } from '../../features/workflow-engine/depth-assessment.js';
 import {
   loadManifest,
   saveManifest,
@@ -62,19 +62,19 @@ import { readFileSync } from 'fs';
 const VV_QUESTIONS: Record<string, AlignmentQuestion[]> = {
   inception: [
     {
-      question: 'Does the INTENT address all IDEA constraints?',
+      question: 'Does the INTENT address all stated constraints?',
       answer: null,
       answered_by: null,
       passed: null,
     },
     {
-      question: 'Does the INTENT solve the actual business problem defined in the IDEA?',
+      question: 'Does the INTENT solve the actual business problem?',
       answer: null,
       answered_by: null,
       passed: null,
     },
     {
-      question: 'Are NFRs properly derived from IDEA constraints?',
+      question: 'Are NFRs properly derived from INTENT constraints?',
       answer: null,
       answered_by: null,
       passed: null,
@@ -212,7 +212,7 @@ function detectPhaseTransition(
 
   if (!currentPhase) {
     // Legacy checkpoint - check if Inception stage gates are needed
-    if (checkpoint.current_stage === 'idea' || checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
+    if (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
       return 'inception';
     }
     return null;
@@ -236,10 +236,10 @@ function detectPhaseTransition(
     }
   }
 
-  // Inception has stage-level gates: Gate 1 after IDEA, Gate 2 after INTENT
+  // Inception has stage-level gates: Gate 1 and Gate 2 both fire during INTENT stage
   if (
     currentPhase === 'inception' &&
-    (checkpoint.current_stage === 'idea' || checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
+    (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete')
   ) {
     return 'inception';
   }
@@ -498,7 +498,7 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
       let verification: AlignmentVerificationResult;
       try {
         const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
-        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+        const intentContent = readFileSync(join(inceptionDir, 'intent.md'), 'utf-8');
         // Find a UNIT spec to validate against
         const unitArtifacts = manifest.artifacts.filter(a => a.stage === 'unit');
         const unitContent = unitArtifacts.length > 0
@@ -507,13 +507,13 @@ async function qualityGateBlocker(ctx: HookContext): Promise<HookResult> {
 
         const dualResult = runDualValidation(
           unitContent,      // artifact
-          ideaContent,      // parent (IDEA for unit check)
-          ideaContent,      // root
+          intentContent,    // parent (INTENT for unit check)
+          intentContent,    // root
           'intent-to-unit', // transition (parent transition type)
-          'unit-to-idea',   // root check
-          'idea',           // sourceId
+          'unit-to-intent', // root check
+          'intent',         // sourceId
           unitArtifacts[0]?.id || 'unit',  // targetId
-          'idea'            // rootId
+          'intent'          // rootId
         );
         verification = {
           conformance_score: dualResult.parentCheck.verification.conformance_score,
@@ -588,11 +588,11 @@ Type "approve" to proceed or "reject <reason>" to block.
       const boltId = checkpoint.active_bolt_id;
       const gate4Behavior = getGate4TrustBehavior(trustState.current_level, riskTier);
 
-      // Run V&V dual validation for bolt-to-idea
+      // Run V&V dual validation for bolt-to-intent
       let verification: AlignmentVerificationResult;
       try {
         const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
-        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+        const intentContent = readFileSync(join(inceptionDir, 'intent.md'), 'utf-8');
         const boltArtifact = manifest.artifacts.find(a => a.id === boltId);
         const boltContent = boltArtifact
           ? readFileSync(join(ctx.directory, boltArtifact.path), 'utf-8')
@@ -600,13 +600,13 @@ Type "approve" to proceed or "reject <reason>" to block.
 
         const dualResult = runDualValidation(
           boltContent,      // artifact
-          ideaContent,      // parent
-          ideaContent,      // root
+          intentContent,    // parent
+          intentContent,    // root
           'unit-to-bolt',   // transition (parent transition type)
-          'bolt-to-idea',   // root check
-          'idea',           // sourceId
+          'bolt-to-intent', // root check
+          'intent',         // sourceId
           boltId,           // targetId
-          'idea'            // rootId
+          'intent'          // rootId
         );
         verification = {
           conformance_score: dualResult.parentCheck.verification.conformance_score,
@@ -907,33 +907,12 @@ Type "approve" to proceed or "reject <reason>" to block.
     if (transitioningPhase === 'inception') {
       try {
         const inceptionDir = join(ctx.directory, 'aidlc-docs', workflowId, 'inception');
-        const ideaContent = readFileSync(join(inceptionDir, 'idea.md'), 'utf-8');
+        const intentContent = readFileSync(join(inceptionDir, 'intent.md'), 'utf-8');
 
-        if (checkpoint.current_stage === 'intent' || checkpoint.current_stage === 'complete') {
-          // Gate 2: INTENT exists, run dual validation against IDEA
-          const intentContent = readFileSync(join(inceptionDir, 'intent.md'), 'utf-8');
-          const dualResult = runDualValidation(
-            intentContent,    // artifact
-            ideaContent,      // parent
-            ideaContent,      // root (same as parent for inception)
-            'idea-to-intent', // transition
-            'unit-to-idea',   // root transition (closest available)
-            'idea',           // sourceId
-            'intent',         // targetId
-            'idea'            // rootId
-          );
-          verification = {
-            conformance_score: dualResult.parentCheck.verification.conformance_score,
-            coverage_percentage: dualResult.parentCheck.verification.coverage_percentage,
-            missing_items: dualResult.parentCheck.verification.missing_items,
-            passed: dualResult.passed,
-          };
-          questions = generateValidationQuestions('idea-to-intent');
-        } else {
-          // Gate 1: Only IDEA exists, do structural verification
-          verification = computeVerification(ideaContent, ideaContent, 'idea-to-intent');
-          questions = VV_QUESTIONS[transitioningPhase] || [];
-        }
+        // After IDEA→INTENT merge, inception has a single stage (INTENT).
+        // Run a self-consistency structural check on the INTENT document.
+        verification = computeVerification(intentContent, intentContent, 'intent-to-unit');
+        questions = VV_QUESTIONS[transitioningPhase] || [];
       } catch {
         // Fail-open fallback
         verification = {
@@ -990,8 +969,8 @@ Type "approve" to proceed or "reject <reason>" to block.
 
     // Return with context injection to block and request approval
     const devPrefix = riskTier === 3 ? '[BLOCKING - Acknowledgment Required] ' : '';
-    const gateLabel = checkpoint.current_stage === 'idea' ? 'Gate 1 (IDEA review)' :
-                      checkpoint.current_stage === 'intent' ? 'Gate 2 (INTENT review)' :
+    const gateLabel = checkpoint.current_stage === 'intent' ? 'Gate 1 (INTENT review)' :
+                      checkpoint.current_stage === 'complete' ? 'Gate 2 (INTENT review)' :
                       `${transitioningPhase} transition`;
     const message = `${devPrefix}STOP: ${gateLabel} requires approval.
 

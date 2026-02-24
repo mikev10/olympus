@@ -21,17 +21,15 @@ function createTestCheckpoint(overrides?: Partial<WorkflowCheckpoint>): Workflow
     feature_name: 'user-authentication',
     created_at: '2024-01-15T10:00:00Z',
     updated_at: '2024-01-15T12:00:00Z',
-    current_stage: 'idea',
+    current_stage: 'intent',
     status: 'in_progress',
     artifacts: {
-      idea: null,
       intent: null,
       unit: null,
       bolt: null,
       complete: null,
     },
     validation_results: {
-      idea: null,
       intent: null,
       unit: null,
       bolt: null,
@@ -63,15 +61,6 @@ describe('Workflow Hooks', () => {
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
       expect(prompt).toContain('Status: in_progress');
-    });
-
-    it('handles idea stage without agent', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
-
-      expect(prompt).toContain('idea');
-      expect(prompt).toContain('capture the problem statement, personas, success metrics, and constraints');
-      expect(prompt).not.toContain('Task(subagent_type=');
     });
 
     it('handles intent stage without agent', () => {

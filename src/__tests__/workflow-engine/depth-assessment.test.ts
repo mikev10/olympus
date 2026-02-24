@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assessDepth,
   classifyRiskTier,
-  assessDepthFromIdea,
+  assessDepthFromIntent,
   getDepthLabel,
   getRiskTierLabel,
 } from '../../features/workflow-engine/depth-assessment.js';
@@ -411,7 +411,7 @@ describe('classifyRiskTier', () => {
   });
 });
 
-describe('assessDepthFromIdea', () => {
+describe('assessDepthFromIntent', () => {
   const SIMPLE_IDEA = `
 # Feature: Add Logging
 
@@ -480,7 +480,7 @@ This is a system-wide infrastructure change affecting multiple services across a
 `;
 
   it('should return low depth for simple IDEA', () => {
-    const result = assessDepthFromIdea(SIMPLE_IDEA);
+    const result = assessDepthFromIntent(SIMPLE_IDEA);
 
     // Simple IDEA: short content scores high on context/clarity (less info = needs more)
     // So total_score lands in standard range, not minimal
@@ -489,7 +489,7 @@ This is a system-wide infrastructure change affecting multiple services across a
   });
 
   it('should return comprehensive depth for complex IDEA', () => {
-    const result = assessDepthFromIdea(COMPLEX_IDEA);
+    const result = assessDepthFromIntent(COMPLEX_IDEA);
 
     expect(result.total_score).toBeGreaterThanOrEqual(21);
     expect(result.recommended_depth).toBe('comprehensive');
@@ -524,7 +524,7 @@ Registered users who want to manage their account settings, update personal deta
 Requested by 50% of users in feedback surveys. Core feature for user engagement.
 `;
 
-    const result = assessDepthFromIdea(moderateIdea);
+    const result = assessDepthFromIntent(moderateIdea);
 
     expect(result.total_score).toBeGreaterThan(10);
     expect(result.total_score).toBeLessThan(21);
@@ -545,7 +545,7 @@ Need to migrate user data to new schema.
 - Must run during maintenance window
 `;
 
-    const result = assessDepthFromIdea(migrationIdea);
+    const result = assessDepthFromIntent(migrationIdea);
 
     expect(result.risk_tier.factors.reversibility).toBe('difficult');
   });
@@ -563,7 +563,7 @@ This change affects all users of the system.
 Apply rate limits across all API endpoints.
 `;
 
-    const result = assessDepthFromIdea(systemWideIdea);
+    const result = assessDepthFromIntent(systemWideIdea);
 
     expect(result.risk_tier.factors.blast_radius).toBe('system-wide');
   });
@@ -581,7 +581,7 @@ Users need to export their PII data for compliance.
 - Must handle sensitive personal information
 `;
 
-    const result = assessDepthFromIdea(piiIdea);
+    const result = assessDepthFromIntent(piiIdea);
 
     expect(result.risk_tier.factors.data_sensitivity).toBe('user-facing');
   });
@@ -595,7 +595,7 @@ Users need to export their PII data for compliance.
 Add authentication token management.
 `;
 
-    const result = assessDepthFromIdea(authIdea);
+    const result = assessDepthFromIntent(authIdea);
 
     expect(result.risk_tier.factors.data_sensitivity).toBe('user-facing');
   });
@@ -609,7 +609,7 @@ Add authentication token management.
 - Must comply with GDPR requirements
 `;
 
-    const result = assessDepthFromIdea(gdprIdea);
+    const result = assessDepthFromIntent(gdprIdea);
 
     expect(result.risk_tier.factors.compliance_impact).toBe('major');
   });
@@ -623,13 +623,13 @@ Add authentication token management.
 Required for compliance with regulatory standards.
 `;
 
-    const result = assessDepthFromIdea(complianceIdea);
+    const result = assessDepthFromIntent(complianceIdea);
 
     expect(result.risk_tier.factors.compliance_impact).toBe('major');
   });
 
   it('should handle empty content without error', () => {
-    const result = assessDepthFromIdea('');
+    const result = assessDepthFromIntent('');
 
     // Empty content: clarity=5 (unclear), context=5 (no context), etc.
     // Score will be moderate due to high "need" scores
@@ -645,8 +645,8 @@ Required for compliance with regulatory standards.
 This is just a title and some text.
 `;
 
-    expect(() => assessDepthFromIdea(incompleteidea)).not.toThrow();
-    const result = assessDepthFromIdea(incompleteidea);
+    expect(() => assessDepthFromIntent(incompleteidea)).not.toThrow();
+    const result = assessDepthFromIntent(incompleteidea);
     expect(result.recommended_depth).toBeDefined();
   });
 });

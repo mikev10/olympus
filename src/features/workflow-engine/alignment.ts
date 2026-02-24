@@ -11,7 +11,7 @@
  * - Compute verification scores (heuristic text analysis)
  * - Generate validation questions for human/AI review
  * - Run full alignment checks (verification + validation)
- * - Run dual validation (parent + root IDEA checks)
+ * - Run dual validation (parent + root INTENT checks)
  * - Adaptive thresholds based on trust levels
  * - Record alignment results in manifest
  */
@@ -27,23 +27,22 @@ import { loadManifest, saveManifest } from './manifest.js';
 /**
  * Supported transition types between ODLC phases.
  */
-export type TransitionType = 'idea-to-intent' | 'intent-to-unit' | 'unit-to-bolt';
+export type TransitionType = 'intent-to-unit' | 'unit-to-bolt';
 
 /**
- * Root validation types for checking alignment back to the original IDEA.
+ * Root validation types for checking alignment back to the original INTENT.
  */
-export type RootValidationType = 'unit-to-idea' | 'bolt-to-idea';
+export type RootValidationType = 'unit-to-intent' | 'bolt-to-intent';
 
 /**
  * Conformance thresholds (percentage) for each transition type and root validation type.
  * Verification must meet or exceed threshold to pass.
  */
 const CONFORMANCE_THRESHOLDS: Record<TransitionType | RootValidationType, number> = {
-  'idea-to-intent': 90,
   'intent-to-unit': 95,
   'unit-to-bolt': 100,
-  'unit-to-idea': 80,
-  'bolt-to-idea': 70,
+  'unit-to-intent': 80,
+  'bolt-to-intent': 70,
 };
 
 /**
@@ -56,10 +55,6 @@ const VALIDATION_QUESTIONS: Record<
   TransitionType | RootValidationType,
   { verification: string; validation: string }
 > = {
-  'idea-to-intent': {
-    verification: 'Does the INTENT address all IDEA constraints and success metrics?',
-    validation: 'Does the INTENT solve the actual business problem stated in the IDEA?',
-  },
   'intent-to-unit': {
     verification: 'Does the UNIT cover its assigned scope from the INTENT?',
     validation: 'Will this UNIT produce a working module that contributes to the feature?',
@@ -68,13 +63,13 @@ const VALIDATION_QUESTIONS: Record<
     verification: 'Does the BOLT cover all acceptance criteria from the UNIT?',
     validation: 'Does this BOLT deliver meaningful, testable progress?',
   },
-  'unit-to-idea': {
-    verification: "Does this UNIT contribute to the IDEA's problem statement?",
-    validation: "Does this UNIT help achieve the IDEA's success metrics?",
+  'unit-to-intent': {
+    verification: "Does this UNIT contribute to the INTENT's problem statement?",
+    validation: "Does this UNIT help achieve the INTENT's success metrics?",
   },
-  'bolt-to-idea': {
-    verification: "Does this BOLT contribute to solving the IDEA's stated problem?",
-    validation: "Is this BOLT still aligned with the original IDEA's goals?",
+  'bolt-to-intent': {
+    verification: "Does this BOLT contribute to solving the INTENT's stated problem?",
+    validation: "Is this BOLT still aligned with the original INTENT's goals?",
   },
 };
 
@@ -83,11 +78,10 @@ const VALIDATION_QUESTIONS: Record<
  * Different transitions require different source sections to be validated.
  */
 const TRANSITION_SOURCE_SECTIONS: Record<TransitionType | RootValidationType, string[]> = {
-  'idea-to-intent': ['Problem Statement', 'Success Metrics', 'Business Constraints'],
   'intent-to-unit': ['Business Requirements', 'Implementation Plan'],
   'unit-to-bolt': ['Acceptance Criteria', 'Target Files'],
-  'unit-to-idea': ['Problem Statement', 'Success Metrics'],
-  'bolt-to-idea': ['Problem Statement', 'Success Metrics'],
+  'unit-to-intent': ['Problem Statement', 'Success Metrics'],
+  'bolt-to-intent': ['Problem Statement', 'Success Metrics'],
 };
 
 /**
@@ -396,23 +390,23 @@ export function runAlignmentCheck(
 }
 
 /**
- * Runs dual validation: parent check + root IDEA check.
- * This ensures the artifact is aligned with both its immediate parent and the original IDEA.
+ * Runs dual validation: parent check + root INTENT check.
+ * This ensures the artifact is aligned with both its immediate parent and the original INTENT.
  *
  * @param artifactContent - Full content of the artifact to validate
  * @param parentContent - Full content of the parent artifact
- * @param rootIdeaContent - Full content of the root IDEA artifact
+ * @param rootIntentContent - Full content of the root INTENT artifact
  * @param transition - Parent transition type
  * @param rootTransition - Root validation type
  * @param sourceId - Parent artifact ID
  * @param targetId - Target artifact ID
- * @param rootId - Root IDEA artifact ID
+ * @param rootId - Root INTENT artifact ID
  * @returns Combined result with both parent and root checks, and overall pass status
  */
 export function runDualValidation(
   artifactContent: string,
   parentContent: string,
-  rootIdeaContent: string,
+  rootIntentContent: string,
   transition: TransitionType,
   rootTransition: RootValidationType,
   sourceId: string,
@@ -422,8 +416,8 @@ export function runDualValidation(
   // Run parent check
   const parentCheck = runAlignmentCheck(parentContent, artifactContent, sourceId, targetId, transition);
 
-  // Run root IDEA check
-  const rootCheck = runAlignmentCheck(rootIdeaContent, artifactContent, rootId, targetId, rootTransition);
+  // Run root INTENT check
+  const rootCheck = runAlignmentCheck(rootIntentContent, artifactContent, rootId, targetId, rootTransition);
 
   // Both checks must pass
   const passed = parentCheck.alignment_passed && rootCheck.alignment_passed;

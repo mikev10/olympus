@@ -95,7 +95,7 @@ function createMockCheckpoint(overrides?: Partial<WorkflowCheckpointV3>): Workfl
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     current_phase: 'inception',
-    current_stage: 'idea',
+    current_stage: 'intent',
     status: 'in_progress',
     depth_assessment: null,
     risk_tier: null,
@@ -215,17 +215,17 @@ describe('workflow-transition hook', () => {
     expect(result.hookSpecificOutput).toBeUndefined();
   });
 
-  it('should emit IDEA approved message with depth/risk/trust info', async () => {
+  it('should emit INTENT locked message when intent artifact is active', async () => {
     registerWorkflowTransitionHooks();
 
     const manifest = createMockManifest({
       artifacts: [
         {
-          id: 'idea-001',
-          stage: 'idea',
-          type: 'idea',
-          path: 'aidlc-docs/idea.md',
-          description: 'Idea document',
+          id: 'intent-001',
+          stage: 'intent',
+          type: 'intent',
+          path: 'aidlc-docs/intent.md',
+          description: 'Intent document',
           contract_status: 'active',
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
@@ -237,17 +237,17 @@ describe('workflow-transition hook', () => {
       gate_audit: [
         {
           phase: 'inception',
-          gate_name: 'Gate 1',
+          gate_name: 'Gate 2',
           action: 'approved',
           timestamp: '2024-01-01T00:00:00Z',
-          reason: 'IDEA approved',
+          reason: 'INTENT approved',
           reviewer: 'system',
         },
       ],
     });
 
     mockLoadManifest.mockReturnValue(manifest);
-    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
     mockLoadTrustState.mockReturnValue(createMockTrustState(1));
 
     const ctx: HookContext = {
@@ -263,12 +263,9 @@ describe('workflow-transition hook', () => {
     const result = await hook!.handler(ctx);
     expect(result.continue).toBe(true);
     expect(result.hookSpecificOutput).toBeDefined();
-    expect(result.hookSpecificOutput?.additionalContext).toContain('✓ IDEA approved');
+    expect(result.hookSpecificOutput?.additionalContext).toContain('✓ INTENT locked');
     expect(result.hookSpecificOutput?.additionalContext).toContain('Test Feature');
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Depth: standard (20/30)');
     expect(result.hookSpecificOutput?.additionalContext).toContain('Risk: Tier 1');
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Trust: Level 1');
-    expect(result.hookSpecificOutput?.additionalContext).toContain('INTENT stage');
   });
 
   it('should emit INTENT locked message with unit/bolt counts', async () => {
@@ -586,11 +583,11 @@ describe('workflow-transition hook', () => {
     const manifest = createMockManifest({
       artifacts: [
         {
-          id: 'idea-001',
-          stage: 'idea',
-          type: 'idea',
-          path: 'aidlc-docs/idea.md',
-          description: 'Idea document',
+          id: 'intent-001',
+          stage: 'intent',
+          type: 'intent',
+          path: 'aidlc-docs/intent.md',
+          description: 'Intent document',
           contract_status: 'active',
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
@@ -602,17 +599,17 @@ describe('workflow-transition hook', () => {
       gate_audit: [
         {
           phase: 'inception',
-          gate_name: 'Gate 1',
+          gate_name: 'Gate 2',
           action: 'approved',
           timestamp: '2024-01-01T00:00:00Z',
-          reason: 'IDEA approved',
+          reason: 'INTENT approved',
           reviewer: 'system',
         },
       ],
     });
 
     mockLoadManifest.mockReturnValue(manifest);
-    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({ current_stage: 'idea' }));
+    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({ current_stage: 'intent' }));
 
     const ctx: HookContext = {
       directory: '/test',
@@ -627,6 +624,6 @@ describe('workflow-transition hook', () => {
     const result = await hook!.handler(ctx);
     expect(result.continue).toBe(true);
     expect(result.hookSpecificOutput).toBeDefined();
-    expect(result.hookSpecificOutput?.additionalContext).toContain('✓ IDEA approved');
+    expect(result.hookSpecificOutput?.additionalContext).toContain('✓ INTENT locked');
   });
 });

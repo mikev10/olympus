@@ -2,13 +2,13 @@
  * WorkflowEngine - Core orchestrator for the multi-stage workflow system
  *
  * Manages the progression of features through stages:
- * IDEA → INTENT → UNIT → BOLT → COMPLETE
+ * INTENT → UNIT → BOLT → COMPLETE
  *
  * Features:
  * - Checkpoint-based persistence for resumable workflows
  * - Artifact generation and tracking
  * - Status management (in_progress, paused, complete)
- * - Dual validation (parent + root IDEA alignment) at stage transitions
+ * - Dual validation (parent + root INTENT alignment) at stage transitions
  */
 
 import * as fs from 'fs';
@@ -20,19 +20,21 @@ import {
 } from './types.js';
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
-import { validateIdea, validateIntent, clearFileCache } from './validation.js';
-import { runDualValidation } from './alignment.js';
+import { validateIntent, clearFileCache } from './validation.js';
 import { ConstructionExecutor } from './construction/executor.js';
-import { executeDiscoveryPhase } from './discovery.js';
+import { executeDiscoveryPhase, detectBrownfield } from './discovery.js';
 import { captureWorkflowDiscovery } from './learning-bridge.js';
 import type { WorkflowEvent, WorkflowContext } from './learning-bridge.js';
 import { recordDiscovery } from '../../learning/discovery.js';
 import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
+import { detectPathway, generateLevel1Plan, writeLevel1PlanArtifact, loadLevel1Plan, isPhaseIncluded } from './level1-plan.js';
+import { assessDepthFromIntent } from './depth-assessment.js';
+import { addGateAuditEntry } from './manifest.js';
 
 /**
  * Ordered list of workflow stages for progression validation
  */
-const STAGE_ORDER: WorkflowStage[] = ['idea', 'intent', 'unit', 'bolt', 'complete'];
+const STAGE_ORDER: WorkflowStage[] = ['intent', 'unit', 'bolt', 'complete'];
 
 /**
  * Get the next stage in the workflow progression
@@ -106,7 +108,7 @@ export class WorkflowEngine {
   }
 
   /**
-   * Start a new workflow from the IDEA stage
+   * Start a new workflow from the INTENT stage
    *
    * @param initialPrompt - The user's initial description of the feature
    * @throws Error if disk is full, permissions are denied, or workflow initialization fails
@@ -120,7 +122,7 @@ export class WorkflowEngine {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       current_phase: 'inception',
-      current_stage: 'idea',
+      current_stage: 'intent',
       status: 'in_progress',
       phases: {
         discovery: {
@@ -185,8 +187,45 @@ export class WorkflowEngine {
       );
     }
 
+    try {
+      const brownfieldResult = await detectBrownfield(this.projectPath);
+      const sourceFileCount = brownfieldResult.sourceFileCount ?? 0;
+      const pathwayType = await detectPathway(this.projectPath, initialPrompt);
+      const depthAssessment = assessDepthFromIntent(initialPrompt);
+
+      const plan = await generateLevel1Plan({
+        projectPath: this.projectPath,
+        workflowId: this.workflowId,
+        intentText: initialPrompt,
+        depthAssessment,
+        pathwayType,
+        sourceFileCount,
+      });
+
+      const planPath = await writeLevel1PlanArtifact(this.projectPath, this.workflowId, plan);
+
+      const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+      if (updatedCheckpoint) {
+        (updatedCheckpoint as WorkflowCheckpointV3).level1_plan_path = planPath;
+        (updatedCheckpoint as WorkflowCheckpointV3).pathway_type = pathwayType;
+        const allPhases: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
+        (updatedCheckpoint as WorkflowCheckpointV3).skipped_phases = allPhases.filter(p => !isPhaseIncluded(plan, p));
+        await saveCheckpoint(this.projectPath, updatedCheckpoint);
+      }
+
+      console.log(`[WorkflowEngine] Generated Level 1 Plan: pathway=${pathwayType}, depth=${plan.estimated_depth}, bolts=${plan.estimated_bolts}`);
+      if (plan.stages.some(s => !s.included)) {
+        const skippedStages = plan.stages.filter(s => !s.included).map(s => `${s.phase}/${s.stage}`);
+        console.log(`[WorkflowEngine] Stages excluded by plan: ${skippedStages.join(', ')}`);
+      }
+    } catch (error) {
+      // L1 Plan generation is non-blocking - workflow can proceed without it
+      console.warn(`[WorkflowEngine] Failed to generate Level 1 Plan: ${(error as Error).message}`);
+      console.warn('[WorkflowEngine] Workflow will proceed without adaptive phase selection');
+    }
+
     // Note: start() only initializes checkpoint and directory structure.
-    // Stage execution (IDEA interview, artifact generation) is driven by the
+    // Stage execution (INTENT interview, artifact generation) is driven by the
     // /plan skill template interactively, not by the engine programmatically.
   }
 
@@ -334,9 +373,6 @@ export class WorkflowEngine {
 
     // Dispatch to stage handler
     switch (stage) {
-      case 'idea':
-        await this.executeIdeaStage(checkpoint);
-        break;
       case 'intent':
         await this.executeIntentStage(checkpoint);
         break;
@@ -411,6 +447,37 @@ export class WorkflowEngine {
    * @param phase - The phase to execute ('discovery' | 'inception' | 'construction' | 'operations')
    */
   async executePhase(phase: WorkflowPhase): Promise<void> {
+    const plan = loadLevel1Plan(this.projectPath, this.workflowId);
+    if (plan && !isPhaseIncluded(plan, phase)) {
+      console.log(`[WorkflowEngine] Skipping ${phase} phase (excluded by Level 1 Plan: ${plan.phases[phase]?.rationale || 'no rationale'})`);
+
+      const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+      if (checkpoint) {
+        const v3 = checkpoint as WorkflowCheckpointV3;
+        if (v3.phases && v3.phases[phase]) {
+          v3.phases[phase].status = 'complete';
+          v3.phases[phase].completed_at = new Date().toISOString();
+          v3.phases[phase].gate_bypassed = true;
+          v3.phases[phase].bypass_reason = 'Excluded by Level 1 Plan';
+        }
+        await saveCheckpoint(this.projectPath, checkpoint);
+      }
+
+      const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
+      try {
+        addGateAuditEntry(manifestPath, {
+          phase,
+          action: 'bypassed',
+          actor: 'config',
+          reason: `Excluded by Level 1 Plan (pathway: ${plan.pathway})`,
+        });
+      } catch {
+        // Manifest may not exist yet - non-fatal
+      }
+
+      return;
+    }
+
     switch (phase) {
       case 'discovery': {
         const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
@@ -449,22 +516,14 @@ export class WorkflowEngine {
       }
 
       case 'inception': {
-        // Delegate to existing stage-based pipeline
+        // Delegate to existing stage-based pipeline - INTENT is the only inception stage
         const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
         if (!checkpoint) {
           throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
         }
 
-        const stageOrder: WorkflowStage[] = ['idea', 'intent'];
-        for (const stage of stageOrder) {
-          if (checkpoint.current_stage === stage || checkpoint.current_stage === 'idea') {
-            await this.executeStage(stage);
-            // Reload checkpoint after each stage
-            const updated = await loadCheckpoint(this.projectPath, this.workflowId);
-            if (updated && updated.current_stage === 'complete') {
-              break;
-            }
-          }
+        if (checkpoint.current_stage === 'intent') {
+          await this.executeStage('intent');
         }
         console.log('[WorkflowEngine] Decomposition pending — will run when Construction pipeline is implemented in Phase 3');
 
@@ -632,6 +691,32 @@ export class WorkflowEngine {
     }
   }
 
+  async approveLevel1Plan(feedback?: string): Promise<void> {
+    const plan = loadLevel1Plan(this.projectPath, this.workflowId);
+    if (!plan) {
+      throw new Error(`No Level 1 Plan found for workflow: ${this.workflowId}`);
+    }
+
+    plan.approved_at = new Date().toISOString();
+    plan.approved_by = 'human';
+
+    await writeLevel1PlanArtifact(this.projectPath, this.workflowId, plan);
+
+    const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
+    try {
+      addGateAuditEntry(manifestPath, {
+        phase: 'inception',
+        action: 'approved',
+        actor: 'human',
+        reason: feedback || 'Level 1 Plan approved',
+      });
+    } catch {
+      // Manifest may not exist - non-fatal
+    }
+
+    console.log('[WorkflowEngine] Level 1 Plan approved');
+  }
+
   // ============================================================================
   // Interrupt Handling
   // ============================================================================
@@ -688,29 +773,29 @@ export class WorkflowEngine {
   // ============================================================================
 
   /**
-   * Execute the IDEA stage
+   * Execute the INTENT stage (merged IDEA + INTENT)
    *
-   * Generates the IDEA artifact following the structured format expected by validation.
-   * The artifact includes problem statement, user personas, success metrics,
-   * business constraints, and out of scope sections.
+   * Generates all Inception content in a single pass:
+   * 1. inception/intent.md - Problem statement, personas, success metrics, constraints,
+   *    business requirements, technical specification, implementation plan
+   * 2. inception/nfr.md - Non-functional requirements (security, performance, etc.)
    */
-  private async executeIdeaStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+  private async executeIntentStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     const initialPrompt = checkpoint.resume_context?.initial_prompt || 'No initial prompt provided';
 
-    console.log(`[WorkflowEngine] Executing IDEA stage for feature: ${this.featureName}`);
+    console.log(`[WorkflowEngine] Executing INTENT stage for feature: ${this.featureName}`);
     console.log(`[WorkflowEngine] Initial prompt: ${initialPrompt}`);
-    console.log('[WorkflowEngine] Generating IDEA artifact with structured format');
+    console.log('[WorkflowEngine] Generating merged INTENT artifact with full inception content');
 
-    // Generate a properly formatted IDEA artifact that passes validation
-    const ideaId = `idea-${this.workflowId}`;
+    const intentId = `intent-${this.workflowId}`;
     const timestamp = new Date().toISOString();
 
-    const ideaContent = `---
-id: ${ideaId}
+    const intentContent = `---
+id: ${intentId}
 title: ${this.featureName}
 status: draft
 created: ${timestamp}
-author: "workflow-engine"
+depth_score: 3
 risk_tier: 2
 ---
 
@@ -734,7 +819,7 @@ This feature addresses a specific need identified by stakeholders. The goal is t
 - **Metric 2**: Zero critical bugs in production within first 30 days (target: 0 P0/P1 issues)
 - **Metric 3**: Positive user feedback and adoption rate (target: >80% user satisfaction)
 
-## Business Constraints
+## Constraints & Boundaries
 
 - **Technical**: Must integrate with existing system architecture and maintain compatibility
 - **Timeline**: Development should follow standard sprint cycles and delivery timelines
@@ -749,79 +834,11 @@ This feature addresses a specific need identified by stakeholders. The goal is t
 - Features that require additional budget allocation
 - Changes to unrelated system components
 
----
-*Generated by WorkflowEngine*
-`;
+## Failure Modes & Edge Cases
 
-    await writeArtifact(this.projectPath, this.workflowId, 'idea', ideaContent);
-
-    // Validate the generated artifact
-    const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
-    console.log(`[WorkflowEngine] Validating IDEA artifact at: ${ideaPath}`);
-
-    const validationResult = await validateIdea(ideaPath);
-
-    // Note: V3 checkpoints don't store validation_results inline - they use manifest
-    // For now, just log the validation result
-    if (!validationResult.passed) {
-      console.log('[WorkflowEngine] IDEA validation failed:', validationResult.blocking_issues);
-      console.log(`[WorkflowEngine] Coverage: ${validationResult.coverage_percentage}%`);
-    } else {
-      console.log('[WorkflowEngine] IDEA validation passed');
-    }
-
-    // CCR-1: Save checkpoint after artifact generation
-    const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
-    if (updatedCheckpoint) {
-      const v3Checkpoint = updatedCheckpoint as WorkflowCheckpointV3;
-      if (v3Checkpoint.interview_progress) {
-        v3Checkpoint.interview_progress.stage = 'idea';
-      }
-      updatedCheckpoint.updated_at = new Date().toISOString();
-      await saveCheckpoint(this.projectPath, updatedCheckpoint);
-    }
-  }
-
-  /**
-   * Execute the INTENT stage
-   *
-   * Reads the approved IDEA artifact and generates:
-   * 1. inception/intent.md - Business requirements, technical specification, implementation plan
-   * 2. inception/nfr.md - Non-functional requirements (security, performance, etc.)
-   *
-   * Runs dual validation (parent + root IDEA alignment) for the idea-to-intent transition.
-   */
-  private async executeIntentStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing INTENT stage for feature: ${this.featureName}`);
-
-    // Read the approved IDEA artifact
-    const ideaPath = getArtifactPath(this.projectPath, this.workflowId, 'idea');
-    console.log(`[WorkflowEngine] Reading IDEA artifact from: ${ideaPath}`);
-
-    let ideaContent: string;
-    try {
-      ideaContent = fs.readFileSync(ideaPath, 'utf-8');
-    } catch {
-      ideaContent = '';
-      console.warn('[WorkflowEngine] Could not read IDEA artifact, proceeding with empty context');
-    }
-
-    console.log('[WorkflowEngine] Generating INTENT artifact with business requirements and technical specification');
-
-    const ideaId = `idea-${this.workflowId}`;
-    const intentId = `intent-${this.workflowId}`;
-    const timestamp = new Date().toISOString();
-
-    // Generate INTENT artifact with new template format
-    const intentContent = `---
-id: ${intentId}
-title: ${this.featureName}
-parent: "${ideaId}"
-status: draft
-created: ${timestamp}
-depth_score: 3
-risk_tier: 2
----
+- System unavailability during deployment
+- Data migration edge cases
+- Concurrent user access patterns
 
 ## Business Requirements
 
@@ -923,7 +940,7 @@ The implementation follows the existing system architecture patterns. Core funct
 - Regular technical reviews and architecture discussions
 
 ---
-*Generated by WorkflowEngine based on ${ideaId}*
+*Generated by WorkflowEngine based on ${intentId}*
 `;
 
     await writeArtifact(this.projectPath, this.workflowId, 'intent', intentContent);
@@ -984,23 +1001,6 @@ created: ${timestamp}
 
     await writeArtifact(this.projectPath, this.workflowId, 'nfr', nfrContent);
     console.log('[WorkflowEngine] Generated NFR artifact at inception/nfr.md');
-
-    // Run dual validation (parent + root IDEA alignment)
-    try {
-      const dualResult = runDualValidation(
-        intentContent,
-        ideaContent,
-        ideaContent,
-        'idea-to-intent',
-        'unit-to-idea',
-        ideaId,
-        intentId,
-        ideaId
-      );
-      console.log(`[WorkflowEngine] Dual validation: parent=${dualResult.parentCheck.alignment_passed}, root=${dualResult.rootCheck.alignment_passed}, overall=${dualResult.passed}`);
-    } catch (error) {
-      console.error('[WorkflowEngine] Dual validation error (non-blocking):', (error as Error).message);
-    }
 
     // Validate the generated artifact
     const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');

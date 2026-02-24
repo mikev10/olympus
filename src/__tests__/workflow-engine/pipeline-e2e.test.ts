@@ -6,7 +6,7 @@
  * pipeline functions (manifest, checkpoint, alignment, depth, trust, etc.) are real.
  *
  * Scenarios:
- * 1. Full Pipeline: IDEA -> INTENT -> UNIT -> BOLT -> Operations -> DONE
+ * 1. Full Pipeline: INTENT -> UNIT -> BOLT -> Operations -> DONE
  * 2. SHALLOW Path: skip UNIT decomposition
  * 3. Resume: pause and resume a workflow
  * 4. Rejection/Retry: gate rejection -> dispatch -> re-execute
@@ -33,7 +33,7 @@ import {
   updatePhaseStatus,
   isWorkflowComplete,
 } from '../../features/workflow-engine/manifest.js';
-import { assessDepth, assessDepthFromIdea } from '../../features/workflow-engine/depth-assessment.js';
+import { assessDepth, assessDepthFromIntent } from '../../features/workflow-engine/depth-assessment.js';
 import { detectResumableWorkflows } from '../../features/workflow-engine/resume-detector.js';
 import { dispatchRejection } from '../../features/workflow-engine/rejection-dispatcher.js';
 import {
@@ -44,7 +44,6 @@ import {
   getExecutionOrder,
   detectActiveWorkflow,
 } from '../../features/workflow-engine/workflow-bridge.js';
-import { runDualValidation } from '../../features/workflow-engine/alignment.js';
 import { writeArtifact, getArtifactPath } from '../../features/workflow-engine/artifacts.js';
 import { captureWorkflowDiscovery } from '../../features/workflow-engine/learning-bridge.js';
 import { createDefaultTrustState, saveTrustState } from '../../features/workflow-engine/trust.js';
@@ -96,7 +95,7 @@ function makeCheckpoint(
     created_at: now,
     updated_at: now,
     current_phase: 'inception',
-    current_stage: 'idea',
+    current_stage: 'intent',
     status: 'in_progress',
     phases: {
       discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
@@ -139,7 +138,7 @@ describe('Pipeline E2E', () => {
   // =========================================================================
   // Scenario 1: Full Pipeline
   // =========================================================================
-  describe('Scenario 1: Full Pipeline (IDEA -> INTENT -> UNIT -> BOLT -> Operations -> DONE)', () => {
+  describe('Scenario 1: Full Pipeline (INTENT -> UNIT -> BOLT -> Operations -> DONE)', () => {
     it('runs a complete ODLC pipeline with all gates and phases', async () => {
       const workflowId = 'test-feature';
       const featureName = 'Test Feature';
@@ -149,17 +148,7 @@ describe('Pipeline E2E', () => {
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start('Build a user authentication system with OAuth support');
 
-      // Execute IDEA stage to create artifact
-      await engine.executeStage('idea');
-
-      // Verify IDEA was written
-      const ideaPath = getArtifactPath(tmpDir, workflowId, 'idea');
-      expect(await fs.pathExists(ideaPath)).toBe(true);
-      const ideaContent = await fs.readFile(ideaPath, 'utf-8');
-      expect(ideaContent).toContain('Problem Statement');
-
-      // --- Execute INTENT stage ---
-      clearCache();
+      // Execute INTENT stage to create artifact
       await engine.executeStage('intent');
 
       const intentPath = getArtifactPath(tmpDir, workflowId, 'intent');
@@ -172,30 +161,9 @@ describe('Pipeline E2E', () => {
       expect(await fs.pathExists(manifestPath)).toBe(true);
 
       // --- Depth assessment ---
-      const depth = assessDepthFromIdea(ideaContent);
+      const depth = assessDepthFromIntent(intentContent);
       expect(depth.total_score).toBeGreaterThanOrEqual(6);
       expect(depth.total_score).toBeLessThanOrEqual(30);
-
-      // --- Register IDEA artifact ---
-      registerArtifact(manifestPath, {
-        id: 'IDEA-001',
-        type: 'IDEA',
-        phase: 'inception',
-        stage: 'idea',
-        path: ideaPath,
-        validation_passed: true,
-        write_complete: true,
-        checksum: null,
-      });
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
-
-      // --- Gate 1: IDEA approved ---
-      addGateAuditEntry(manifestPath, {
-        phase: 'inception',
-        action: 'approved',
-        actor: 'human',
-        reason: 'IDEA looks good',
-      });
 
       // --- Register INTENT artifact ---
       registerArtifact(manifestPath, {
@@ -210,26 +178,12 @@ describe('Pipeline E2E', () => {
       });
       updateContractStatus(manifestPath, 'INTENT-001', 'active');
 
-      // --- Run dual validation for idea-to-intent ---
-      const dualResult = runDualValidation(
-        intentContent,
-        ideaContent,
-        ideaContent,
-        'idea-to-intent',
-        'unit-to-idea',
-        'IDEA-001',
-        'INTENT-001',
-        'IDEA-001',
-      );
-      expect(dualResult.parentCheck).toBeDefined();
-      expect(dualResult.rootCheck).toBeDefined();
-
-      // --- Gate 2: INTENT approved ---
+      // --- Gate 1: INTENT approved ---
       addGateAuditEntry(manifestPath, {
         phase: 'inception',
         action: 'approved',
         actor: 'human',
-        reason: 'INTENT specification approved',
+        reason: 'INTENT looks good',
       });
 
       // --- Register UNITs ---
@@ -404,41 +358,16 @@ describe('Pipeline E2E', () => {
       expect(shallowDepth.skip_units).toBe(true);
       expect(shallowDepth.recommended_depth).toBe('minimal');
 
-      // --- Also verify assessDepthFromIdea with minimal content ---
-      const minimalIdea = '## Problem Statement\n\nFix a typo.\n\n## Out of Scope\n\nEverything else.\n';
-      const ideaDepth = assessDepthFromIdea(minimalIdea);
-      expect(ideaDepth.total_score).toBeLessThanOrEqual(15);
-      // Note: assessDepthFromIdea may not always produce <= 10 for such minimal content
-      // because heuristics depend on section lengths; the assessDepth(factors) test above is definitive.
+      // --- Also verify assessDepthFromIntent with minimal content ---
+      const minimalIntent = '## Business Requirements\n\nFix a typo.\n\n## Out of Scope\n\nEverything else.\n';
+      const intentDepth = assessDepthFromIntent(minimalIntent);
+      expect(intentDepth.total_score).toBeLessThanOrEqual(15);
 
       // --- Create manifest ---
       createManifest(workflowId, featureName, tmpDir);
 
-      // --- Register IDEA ---
-      const ideaFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, minimalIdea);
-      registerArtifact(manifestPath, {
-        id: 'IDEA-001',
-        type: 'IDEA',
-        phase: 'inception',
-        stage: 'idea',
-        path: ideaFilePath,
-        validation_passed: true,
-        write_complete: true,
-        checksum: null,
-      });
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
-
-      // Gate 1 approved
-      addGateAuditEntry(manifestPath, {
-        phase: 'inception',
-        action: 'approved',
-        actor: 'trust',
-        reason: 'SHALLOW: auto-approved',
-      });
-
-      // --- Register lightweight INTENT ---
-      const intentContent = '## Business Requirements\n\nFix the typo in README.\n';
-      const intentFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, intentContent);
+      // --- Register INTENT ---
+      const intentFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, minimalIntent);
       registerArtifact(manifestPath, {
         id: 'INTENT-001',
         type: 'INTENT',
@@ -451,7 +380,7 @@ describe('Pipeline E2E', () => {
       });
       updateContractStatus(manifestPath, 'INTENT-001', 'active');
 
-      // Gate 2 approved
+      // Gate 1 approved
       addGateAuditEntry(manifestPath, {
         phase: 'inception',
         action: 'approved',
@@ -525,15 +454,7 @@ describe('Pipeline E2E', () => {
       const engine = new WorkflowEngine(tmpDir, featureName);
       await engine.start('Build a resume-capable pipeline test');
 
-      // Execute IDEA stage to create artifact
-      await engine.executeStage('idea');
-
-      // Verify IDEA was written
-      const ideaPath = getArtifactPath(tmpDir, workflowId, 'idea');
-      expect(await fs.pathExists(ideaPath)).toBe(true);
-
-      // --- Execute INTENT stage ---
-      clearCache();
+      // Execute INTENT stage to create artifact
       await engine.executeStage('intent');
 
       const intentPath = getArtifactPath(tmpDir, workflowId, 'intent');
@@ -566,7 +487,6 @@ describe('Pipeline E2E', () => {
       expect(resumeInfo.status).toBe('paused');
 
       // --- Verify data integrity: artifacts still on disk ---
-      expect(await fs.pathExists(ideaPath)).toBe(true);
       expect(await fs.pathExists(intentPath)).toBe(true);
 
       // --- Verify checkpoint can be reloaded correctly ---
@@ -600,14 +520,7 @@ describe('Pipeline E2E', () => {
       await saveCheckpoint(tmpDir, checkpoint);
 
       // Register artifacts
-      const ideaPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, '# IDEA\n\n## Problem Statement\n\nTest rejection flow.');
-      registerArtifact(manifestPath, {
-        id: 'IDEA-001', type: 'IDEA', phase: 'inception', stage: 'idea',
-        path: ideaPath, validation_passed: true, write_complete: true, checksum: null,
-      });
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
-
-      const intentPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, '# INTENT\n\n## Business Requirements\n\nTest.');
+      const intentPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, '# INTENT\n\n## Business Requirements\n\nTest rejection flow.');
       registerArtifact(manifestPath, {
         id: 'INTENT-001', type: 'INTENT', phase: 'inception', stage: 'intent',
         path: intentPath, validation_passed: true, write_complete: true, checksum: null,
@@ -803,7 +716,7 @@ describe('Pipeline E2E', () => {
   // Scenario 6: Cascade Invalidation
   // =========================================================================
   describe('Scenario 6: Cascade Invalidation (propagate staleness through artifact graph)', () => {
-    it('cascades staleness from IDEA through INTENT, UNIT, and BOLT', async () => {
+    it('cascades staleness from INTENT through UNIT and BOLT', async () => {
       const workflowId = 'cascade-test';
       const featureName = 'Cascade Test';
       const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');
@@ -811,44 +724,8 @@ describe('Pipeline E2E', () => {
       // --- Setup manifest ---
       createManifest(workflowId, featureName, tmpDir);
 
-      // --- Write artifact files with matching content for dual validation ---
-      const ideaContent = `---
-id: IDEA-001
-title: Cascade Test
-status: draft
----
-
-## Problem Statement
-
-**Feature**: Cascade Test
-
-This feature tests cascade invalidation through the artifact dependency graph. The goal is to ensure that when a parent artifact changes, all downstream artifacts are marked as stale.
-
-## User Personas
-
-- **Primary User**: End users who will directly interact with this feature
-- **Developer**: Engineers who will maintain this feature
-
-## Success Metrics
-
-- **Metric 1**: Successful cascade propagation (target: 100%)
-- **Metric 2**: Zero data loss during invalidation (target: 0 issues)
-
-## Business Constraints
-
-- **Technical**: Must integrate with existing manifest system
-- **Timeline**: Must complete within test execution time
-
-## Out of Scope
-
-- Future enhancements not included in initial requirements
-- Integration with systems outside the current scope
-- Features that require additional budget allocation
-`;
-
       const intentContent = `---
 id: INTENT-001
-parent: "IDEA-001"
 status: draft
 ---
 
@@ -903,18 +780,9 @@ Implement cascade invalidation logic.
 - src/features/workflow-engine/manifest.ts
 `;
 
-      // Write files using absolute paths
-      const ideaFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/idea.md`, ideaContent);
       const intentFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/inception/intent.md`, intentContent);
       const unitFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/spec.md`, unitContent);
       const boltFilePath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/BOLT-001.md`, boltContent);
-
-      // --- Register all artifacts with absolute paths (required for revalidateStaleArtifacts) ---
-      registerArtifact(manifestPath, {
-        id: 'IDEA-001', type: 'IDEA', phase: 'inception', stage: 'idea',
-        path: ideaFilePath, validation_passed: true, write_complete: true, checksum: null,
-      });
-      updateContractStatus(manifestPath, 'IDEA-001', 'active');
 
       registerArtifact(manifestPath, {
         id: 'INTENT-001', type: 'INTENT', phase: 'inception', stage: 'intent',
@@ -934,41 +802,25 @@ Implement cascade invalidation logic.
       });
       updateContractStatus(manifestPath, 'BOLT-001', 'active');
 
-      // --- Set up links: IDEA -> INTENT -> UNIT-001 -> BOLT-001 ---
-      linkArtifacts(manifestPath, { source_id: 'IDEA-001', target_id: 'INTENT-001', link_type: 'derives' });
       linkArtifacts(manifestPath, { source_id: 'INTENT-001', target_id: 'UNIT-001', link_type: 'derives' });
       linkArtifacts(manifestPath, { source_id: 'UNIT-001', target_id: 'BOLT-001', link_type: 'implements' });
 
-      // Verify all are active before cascade
       let manifest = loadManifest(manifestPath)!;
       expect(manifest.artifacts.every(a => a.contract_status === 'active')).toBe(true);
 
-      // --- Trigger cascade invalidation from IDEA ---
-      cascadeInvalidation(manifestPath, 'IDEA-001');
+      cascadeInvalidation(manifestPath, 'INTENT-001');
 
-      // --- Verify all artifacts are stale ---
       manifest = loadManifest(manifestPath)!;
-      expect(manifest.artifacts.find(a => a.id === 'IDEA-001')!.contract_status).toBe('stale');
       expect(manifest.artifacts.find(a => a.id === 'INTENT-001')!.contract_status).toBe('stale');
       expect(manifest.artifacts.find(a => a.id === 'UNIT-001')!.contract_status).toBe('stale');
       expect(manifest.artifacts.find(a => a.id === 'BOLT-001')!.contract_status).toBe('stale');
 
-      // --- Revalidate stale artifacts ---
-      // revalidateStaleArtifacts reads files from the paths stored in the manifest.
-      // Since we stored absolute paths and wrote matching content, validation should pass
-      // for INTENT (has parent link to IDEA), UNIT (has parent link to INTENT),
-      // and BOLT (has parent link to UNIT).
-      // IDEA itself has no parent link, so it will stay stale.
       const revalResult = await revalidateStaleArtifacts(tmpDir, workflowId);
 
-      // IDEA has no parent link, so stays stale
-      expect(revalResult.stillStale).toContain('IDEA-001');
+      // INTENT has no parent link, so stays stale
+      expect(revalResult.stillStale).toContain('INTENT-001');
 
-      // INTENT, UNIT, BOLT have parent links and readable content files.
-      // Whether they are restored depends on dual validation pass/fail.
-      // The restored + stillStale should account for all stale artifacts.
       const allRevalidated = [...revalResult.restored, ...revalResult.stillStale];
-      expect(allRevalidated).toContain('IDEA-001');
       expect(allRevalidated).toContain('INTENT-001');
       expect(allRevalidated).toContain('UNIT-001');
       expect(allRevalidated).toContain('BOLT-001');
@@ -977,7 +829,6 @@ Implement cascade invalidation logic.
       // Verify the final manifest state is consistent
       const finalManifest = loadManifest(manifestPath)!;
       for (const artifact of finalManifest.artifacts) {
-        // Every artifact should be either 'active' (restored) or 'stale' (not restored)
         expect(['active', 'stale']).toContain(artifact.contract_status);
       }
     });

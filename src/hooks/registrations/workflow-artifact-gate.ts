@@ -11,8 +11,8 @@
  *
  * Key behaviors:
  * - Detects Task completions from Inception stage agents (prometheus)
- * - Loads active workflow checkpoint to determine artifact type from current_stage
- * - Runs appropriate validation function (validateIdea, validateIntent)
+ * - Loads active workflow checkpoint to determine artifact type
+ * - Runs validateIntent validation function
  * - Looks in aidlc-docs/ directory structure for artifacts
  * - Injects success/warning context based on validation results
  * - Always returns continue: true (fail-open approach)
@@ -22,10 +22,9 @@ import { registerHook } from '../registry.js';
 import { loadSessionState } from '../../learning/session-state.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import {
-  validateIdea,
   validateIntent,
 } from '../../features/workflow-engine/validation.js';
-import { assessDepthFromIdea } from '../../features/workflow-engine/depth-assessment.js';
+import { assessDepthFromIntent } from '../../features/workflow-engine/depth-assessment.js';
 import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import type { HookContext, HookResult } from '../types.js';
 import type { ValidationResult } from '../../features/workflow-engine/types.js';
@@ -103,24 +102,13 @@ function getArtifactPaths(
   const flatBasePath = workflowDir;
 
   switch (artifactType) {
-    case 'idea': {
-      const nestedPath = join(nestedBasePath, 'idea.md');
-      const flatPath = join(flatBasePath, 'idea.md');
-      const artifactPath = existsSync(nestedPath) ? nestedPath : flatPath;
-      return existsSync(artifactPath) ? { artifactPath, referencePaths: [] } : null;
-    }
-
     case 'intent': {
       const nestedIntentPath = join(nestedBasePath, 'intent.md');
       const flatIntentPath = join(flatBasePath, 'intent.md');
       const intentPath = existsSync(nestedIntentPath) ? nestedIntentPath : flatIntentPath;
 
-      const nestedIdeaPath = join(nestedBasePath, 'idea.md');
-      const flatIdeaPath = join(flatBasePath, 'idea.md');
-      const ideaPath = existsSync(nestedIdeaPath) ? nestedIdeaPath : flatIdeaPath;
-
-      return existsSync(intentPath) && existsSync(ideaPath)
-        ? { artifactPath: intentPath, referencePaths: [ideaPath] }
+      return existsSync(intentPath)
+        ? { artifactPath: intentPath, referencePaths: [] }
         : null;
     }
 
@@ -144,9 +132,6 @@ async function runValidation(
 ): Promise<ValidationResult | null> {
   try {
     switch (artifactType) {
-      case 'idea':
-        return await validateIdea(artifactPath);
-
       case 'intent':
         return await validateIntent(artifactPath);
 
@@ -232,14 +217,7 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
 
     const { workflowId, checkpoint } = activeWorkflow;
 
-    // Determine artifact type from checkpoint's current_stage
-    let artifactType: string;
-    if (agentUsed === 'prometheus') {
-      // Prometheus handles both idea and intent stages
-      artifactType = checkpoint.current_stage === 'intent' ? 'intent' : 'idea';
-    } else {
-      artifactType = 'idea'; // Default fallback
-    }
+    const artifactType = 'intent';
 
     // Determine workflow directory
     const workflowDir = join(ctx.directory, 'aidlc-docs', workflowId);
@@ -273,11 +251,10 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
     // Format and inject validation message
     let message = formatValidationMessage(artifactType, validationResult);
 
-    // After IDEA validation, trigger depth assessment and store results
-    if (artifactType === 'idea' && validationResult.passed) {
+    if (artifactType === 'intent' && validationResult.passed) {
       try {
-        const ideaContent = readFileSync(paths.artifactPath, 'utf-8');
-        const depthAssessment = assessDepthFromIdea(ideaContent);
+        const intentFileContent = readFileSync(paths.artifactPath, 'utf-8');
+        const depthAssessment = assessDepthFromIntent(intentFileContent);
 
         // Store in manifest
         const manifestPath = checkpoint.manifest_path ||

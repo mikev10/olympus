@@ -95,13 +95,13 @@ export async function detectResumableWorkflows(projectPath: string): Promise<Res
 
           // Map old stage names to new ones
           const stageMap: Record<string, WorkflowStage> = {
-            'idea': 'idea',
+            'idea': 'intent',
             'prd': 'intent',
             'spec': 'unit',
             'intents': 'bolt',
             'complete': 'complete',
           };
-          const stage = stageMap[data.current_stage] || 'idea';
+          const stage = stageMap[data.current_stage] || 'intent';
           const phase = (STAGE_PHASE_MAP[stage] === 'complete' ? 'operations' : STAGE_PHASE_MAP[stage]) as WorkflowPhase;
 
           results.push({

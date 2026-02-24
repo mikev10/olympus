@@ -16,31 +16,18 @@ vi.mock('../../features/workflow-engine/manifest.js', () => ({
   saveManifest: vi.fn(),
 }));
 
-// Test fixtures for the new 4-stage ODLC pipeline
-const IDEA_CONTENT = `---
-risk_tier: 2
----
-# Feature IDEA
-
-## Problem Statement
-- Users need secure authentication
-- System must scale to enterprise use
-
-## Success Metrics
-- 99.9% uptime SLA
-- < 200ms authentication response time
-- Support 10,000 concurrent users
-
-## Business Constraints
-- Must integrate with existing SSO providers
-- Must comply with SOC2 requirements
-- Launch within Q1 2026
-`;
+// Test fixtures for the 4-stage ODLC pipeline
 
 const INTENT_CONTENT = `---
 type: intent
 ---
 # Authentication System INTENT
+
+## Problem Statement
+- Users need secure authentication
+- System must scale to enterprise use
+- Must integrate with existing SSO providers
+- Must comply with SOC2 requirements
 
 ## Business Requirements
 - Users need secure authentication
@@ -54,8 +41,7 @@ type: intent
 - UNIT-002: SSO connector for enterprise providers
 - UNIT-003: Session management and token validation
 
-## Success Criteria
-The system achieves:
+## Success Metrics
 - 99.9% uptime SLA
 - < 200ms authentication response time
 - Support 10,000 concurrent users
@@ -97,12 +83,15 @@ type: bolt
 # BOLT-001: OAuth2 Core Implementation
 
 ## Implementation Details
-Addresses the following from the IDEA:
+Addresses the following from the INTENT:
 - Users need secure authentication
 - System must scale to enterprise use
+- Must integrate with existing SSO providers
+- Must comply with SOC2 requirements
 - 99.9% uptime SLA
 - < 200ms authentication response time
 - Support 10,000 concurrent users
+- Launch within Q1 2026
 
 Implements OAuth2 authorization code flow with the following:
 - Implement OAuth2 authorization code flow
@@ -117,63 +106,6 @@ Implements OAuth2 authorization code flow with the following:
 `;
 
 describe('computeVerification', () => {
-  describe('idea-to-intent transition', () => {
-    it('passes when INTENT covers IDEA constraints and success metrics (>= 90%)', () => {
-      const result = computeVerification(IDEA_CONTENT, INTENT_CONTENT, 'idea-to-intent');
-
-      expect(result.passed).toBe(true);
-      expect(result.conformance_score).toBeGreaterThanOrEqual(90);
-      expect(result.coverage_percentage).toBeGreaterThanOrEqual(90);
-      expect(result.missing_items.length).toBeLessThanOrEqual(1);
-    });
-
-    it('fails when INTENT misses IDEA requirements (< 90%)', () => {
-      const incompleteIntent = `# Intent
-
-## Business Requirements
-- Users need secure authentication
-`;
-
-      const result = computeVerification(IDEA_CONTENT, incompleteIntent, 'idea-to-intent');
-
-      expect(result.passed).toBe(false);
-      expect(result.conformance_score).toBeLessThan(90);
-      expect(result.missing_items.length).toBeGreaterThan(0);
-    });
-
-    it('extracts requirements from Problem Statement, Success Metrics, and Business Constraints', () => {
-      const ideaWithSections = `---
-risk_tier: 1
----
-# IDEA
-
-## Problem Statement
-- Critical requirement A
-- Critical requirement B
-
-## Success Metrics
-- Metric 1
-- Metric 2
-
-## Business Constraints
-- Constraint X
-- Constraint Y
-`;
-
-      const intentCoveringAll = `# Intent
-
-Critical requirement A and Critical requirement B are addressed.
-Metric 1 and Metric 2 will be tracked.
-Constraint X and Constraint Y are implemented.
-`;
-
-      const result = computeVerification(ideaWithSections, intentCoveringAll, 'idea-to-intent');
-
-      expect(result.conformance_score).toBe(100);
-      expect(result.missing_items).toEqual([]);
-    });
-  });
-
   describe('intent-to-unit transition', () => {
     it('passes when UNIT covers INTENT scope (>= 95%)', () => {
       const result = computeVerification(INTENT_CONTENT, UNIT_CONTENT, 'intent-to-unit');
@@ -287,22 +219,23 @@ Implemented: Already done, To be done, Also done
   });
 
   describe('Root validation types', () => {
-    describe('unit-to-idea', () => {
-      it('passes when UNIT contributes to IDEA (>= 80%)', () => {
-        const result = computeVerification(IDEA_CONTENT, UNIT_CONTENT, 'unit-to-idea');
+    describe('unit-to-intent', () => {
+      it('passes when UNIT contributes to INTENT (>= 80%)', () => {
+        const result = computeVerification(INTENT_CONTENT, UNIT_CONTENT, 'unit-to-intent');
 
         expect(result.passed).toBe(true);
         expect(result.conformance_score).toBeGreaterThanOrEqual(80);
       });
 
-      it('extracts from Problem Statement and Success Metrics', () => {
-        const idea = `# IDEA
+      it('extracts from Business Requirements and Implementation Plan', () => {
+        const intent = `# INTENT
 
-## Problem Statement
+## Business Requirements
 - Problem A
 - Problem B
 
-## Success Metrics
+## Implementation Plan
+### Proposed UNITs
 - Metric X
 - Metric Y
 `;
@@ -312,27 +245,28 @@ Implemented: Already done, To be done, Also done
 Addresses Problem A, Problem B, Metric X, and Metric Y
 `;
 
-        const result = computeVerification(idea, unit, 'unit-to-idea');
+        const result = computeVerification(intent, unit, 'unit-to-intent');
 
         expect(result.conformance_score).toBe(100);
       });
     });
 
-    describe('bolt-to-idea', () => {
-      it('passes when BOLT aligns with IDEA (>= 70%)', () => {
-        const result = computeVerification(IDEA_CONTENT, BOLT_CONTENT, 'bolt-to-idea');
+    describe('bolt-to-intent', () => {
+      it('passes when BOLT aligns with INTENT (>= 70%)', () => {
+        const result = computeVerification(INTENT_CONTENT, BOLT_CONTENT, 'bolt-to-intent');
 
         expect(result.passed).toBe(true);
         expect(result.conformance_score).toBeGreaterThanOrEqual(70);
       });
 
-      it('extracts from Problem Statement and Success Metrics', () => {
-        const idea = `# IDEA
+      it('extracts from Business Requirements and Implementation Plan', () => {
+        const intent = `# INTENT
 
-## Problem Statement
+## Business Requirements
 - Core problem to solve
 
-## Success Metrics
+## Implementation Plan
+### Proposed UNITs
 - Key metric to achieve
 `;
 
@@ -341,13 +275,13 @@ Addresses Problem A, Problem B, Metric X, and Metric Y
 Solves Core problem to solve and achieves Key metric to achieve
 `;
 
-        const result = computeVerification(idea, bolt, 'bolt-to-idea');
+        const result = computeVerification(intent, bolt, 'bolt-to-intent');
 
         expect(result.conformance_score).toBe(100);
       });
 
       it('lower threshold allows partial alignment', () => {
-        const idea = `# IDEA
+        const intent = `# INTENT
 
 ## Problem Statement
 - Problem 1
@@ -364,10 +298,8 @@ Solves Core problem to solve and achieves Key metric to achieve
 Addresses Problem 1, Problem 2, and Metric A
 `;
 
-        const result = computeVerification(idea, partialBolt, 'bolt-to-idea');
+        const result = computeVerification(intent, partialBolt, 'bolt-to-intent');
 
-        // Should pass at 70% threshold with 3/5 = 60% coverage
-        // Actually covers 3 out of 5 = 60%, which is below 70%
         expect(result.conformance_score).toBe(60);
         expect(result.passed).toBe(false);
       });
@@ -376,7 +308,7 @@ Addresses Problem 1, Problem 2, and Metric A
 
   describe('Edge cases', () => {
     it('empty source content returns 100% score', () => {
-      const result = computeVerification('', INTENT_CONTENT, 'idea-to-intent');
+      const result = computeVerification('', UNIT_CONTENT, 'intent-to-unit');
 
       expect(result.passed).toBe(true);
       expect(result.conformance_score).toBe(100);
@@ -385,7 +317,7 @@ Addresses Problem 1, Problem 2, and Metric A
     });
 
     it('empty target content with non-empty source returns 0%', () => {
-      const result = computeVerification(IDEA_CONTENT, '', 'idea-to-intent');
+      const result = computeVerification(INTENT_CONTENT, '', 'intent-to-unit');
 
       expect(result.passed).toBe(false);
       expect(result.conformance_score).toBe(0);
@@ -393,37 +325,37 @@ Addresses Problem 1, Problem 2, and Metric A
     });
 
     it('handles content without frontmatter', () => {
-      const noFrontmatter = `# IDEA
+      const noFrontmatter = `# INTENT
 
-## Problem Statement
+## Business Requirements
 - Requirement A
 - Requirement B
 `;
 
-      const target = `# Intent
+      const target = `# UNIT
 
 Covers Requirement A and Requirement B
 `;
 
-      const result = computeVerification(noFrontmatter, target, 'idea-to-intent');
+      const result = computeVerification(noFrontmatter, target, 'intent-to-unit');
 
       expect(result.conformance_score).toBe(100);
     });
 
     it('case-insensitive matching', () => {
-      const source = `# Source
+      const source = `# INTENT
 
-## Problem Statement
+## Business Requirements
 - OAuth2 Authentication
 - SSO Integration
 `;
 
-      const target = `# Target
+      const target = `# UNIT
 
 oauth2 authentication and sso integration are implemented
 `;
 
-      const result = computeVerification(source, target, 'idea-to-intent');
+      const result = computeVerification(source, target, 'intent-to-unit');
 
       expect(result.conformance_score).toBe(100);
       expect(result.missing_items).toEqual([]);
@@ -431,15 +363,15 @@ oauth2 authentication and sso integration are implemented
 
     it('source with no extractable requirements returns 100%', () => {
       const noRequirements = `---
-risk_tier: 1
+type: intent
 ---
-# IDEA
+# INTENT
 
-## Problem Statement
+## Business Requirements
 Just plain text, no bullets
 `;
 
-      const result = computeVerification(noRequirements, INTENT_CONTENT, 'idea-to-intent');
+      const result = computeVerification(noRequirements, UNIT_CONTENT, 'intent-to-unit');
 
       expect(result.passed).toBe(true);
       expect(result.conformance_score).toBe(100);
@@ -451,11 +383,10 @@ Just plain text, no bullets
 
 describe('generateValidationQuestions', () => {
   const allTypes: Array<TransitionType | RootValidationType> = [
-    'idea-to-intent',
     'intent-to-unit',
     'unit-to-bolt',
-    'unit-to-idea',
-    'bolt-to-idea',
+    'unit-to-intent',
+    'bolt-to-intent',
   ];
 
   allTypes.forEach((transition) => {
@@ -490,13 +421,6 @@ describe('generateValidationQuestions', () => {
   });
 
   describe('question content validation', () => {
-    it('idea-to-intent asks about IDEA constraints and problem', () => {
-      const questions = generateValidationQuestions('idea-to-intent');
-      expect(questions[0].question).toContain('INTENT');
-      expect(questions[0].question).toContain('IDEA');
-      expect(questions[1].question).toContain('business problem');
-    });
-
     it('intent-to-unit asks about INTENT scope and working module', () => {
       const questions = generateValidationQuestions('intent-to-unit');
       expect(questions[0].question).toContain('UNIT');
@@ -511,17 +435,17 @@ describe('generateValidationQuestions', () => {
       expect(questions[1].question).toContain('testable progress');
     });
 
-    it('unit-to-idea asks about IDEA contribution', () => {
-      const questions = generateValidationQuestions('unit-to-idea');
+    it('unit-to-intent asks about INTENT contribution', () => {
+      const questions = generateValidationQuestions('unit-to-intent');
       expect(questions[0].question).toContain('UNIT');
-      expect(questions[0].question).toContain('IDEA');
+      expect(questions[0].question).toContain('INTENT');
       expect(questions[1].question).toContain('success metrics');
     });
 
-    it('bolt-to-idea asks about IDEA alignment', () => {
-      const questions = generateValidationQuestions('bolt-to-idea');
+    it('bolt-to-intent asks about INTENT alignment', () => {
+      const questions = generateValidationQuestions('bolt-to-intent');
       expect(questions[0].question).toContain('BOLT');
-      expect(questions[0].question).toContain('IDEA');
+      expect(questions[0].question).toContain('INTENT');
       expect(questions[1].question).toContain('goals');
     });
   });
@@ -529,7 +453,7 @@ describe('generateValidationQuestions', () => {
 
 describe('runAlignmentCheck', () => {
   it('returns AlignmentCheck with both verification and validation', () => {
-    const result = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const result = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(result).toHaveProperty('verification');
     expect(result).toHaveProperty('validation');
@@ -539,16 +463,16 @@ describe('runAlignmentCheck', () => {
   });
 
   it('alignment_passed is false when validation questions are unanswered', () => {
-    const result = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const result = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(result.validation.passed).toBe(false);
     expect(result.alignment_passed).toBe(false);
   });
 
   it('alignment_passed is false when verification fails', () => {
-    const incompleteIntent = `# Intent\n\nNo requirements covered`;
+    const incompleteUnit = `# UNIT\n\nNo requirements covered`;
 
-    const result = runAlignmentCheck(IDEA_CONTENT, incompleteIntent, 'idea-1', 'intent-1', 'idea-to-intent');
+    const result = runAlignmentCheck(INTENT_CONTENT, incompleteUnit, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(result.verification.passed).toBe(false);
     expect(result.alignment_passed).toBe(false);
@@ -556,11 +480,11 @@ describe('runAlignmentCheck', () => {
 
   it('returns correct sourceId and targetId', () => {
     const result = runAlignmentCheck(
-      IDEA_CONTENT,
       INTENT_CONTENT,
+      UNIT_CONTENT,
       'source-123',
       'target-456',
-      'idea-to-intent'
+      'intent-to-unit'
     );
 
     expect(result.source_artifact_id).toBe('source-123');
@@ -568,7 +492,7 @@ describe('runAlignmentCheck', () => {
   });
 
   it('checked_at is a valid ISO timestamp', () => {
-    const result = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const result = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(result.checked_at).toBeTruthy();
     const date = new Date(result.checked_at);
@@ -576,7 +500,7 @@ describe('runAlignmentCheck', () => {
   });
 
   it('works with root validation types', () => {
-    const result = runAlignmentCheck(IDEA_CONTENT, UNIT_CONTENT, 'idea-1', 'unit-1', 'unit-to-idea');
+    const result = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'unit-to-intent');
 
     expect(result.verification).toBeDefined();
     expect(result.validation).toBeDefined();
@@ -589,12 +513,12 @@ describe('runDualValidation', () => {
     const result = runDualValidation(
       UNIT_CONTENT,
       INTENT_CONTENT,
-      IDEA_CONTENT,
+      INTENT_CONTENT,
       'intent-to-unit',
-      'unit-to-idea',
+      'unit-to-intent',
       'intent-1',
       'unit-1',
-      'idea-1'
+      'intent-root-1'
     );
 
     expect(result).toHaveProperty('parentCheck');
@@ -604,7 +528,7 @@ describe('runDualValidation', () => {
     expect(result.parentCheck.source_artifact_id).toBe('intent-1');
     expect(result.parentCheck.target_artifact_id).toBe('unit-1');
 
-    expect(result.rootCheck.source_artifact_id).toBe('idea-1');
+    expect(result.rootCheck.source_artifact_id).toBe('intent-root-1');
     expect(result.rootCheck.target_artifact_id).toBe('unit-1');
   });
 
@@ -612,23 +536,20 @@ describe('runDualValidation', () => {
     const result = runDualValidation(
       UNIT_CONTENT,
       INTENT_CONTENT,
-      IDEA_CONTENT,
+      INTENT_CONTENT,
       'intent-to-unit',
-      'unit-to-idea',
+      'unit-to-intent',
       'intent-1',
       'unit-1',
-      'idea-1'
+      'intent-root-1'
     );
 
-    // Both verifications should pass, but validations are unanswered
     expect(result.parentCheck.verification.passed).toBe(true);
     expect(result.rootCheck.verification.passed).toBe(true);
 
-    // But alignment_passed requires both verification AND validation
     expect(result.parentCheck.alignment_passed).toBe(false);
     expect(result.rootCheck.alignment_passed).toBe(false);
 
-    // So overall passed should be false
     expect(result.passed).toBe(false);
   });
 
@@ -638,12 +559,12 @@ describe('runDualValidation', () => {
     const result = runDualValidation(
       incompleteBolt,
       UNIT_CONTENT,
-      IDEA_CONTENT,
+      INTENT_CONTENT,
       'unit-to-bolt',
-      'bolt-to-idea',
+      'bolt-to-intent',
       'unit-1',
       'bolt-1',
-      'idea-1'
+      'intent-1'
     );
 
     expect(result.parentCheck.verification.passed).toBe(false);
@@ -654,18 +575,18 @@ describe('runDualValidation', () => {
     const unrelatedUnit = `# UNIT
 
 ## Acceptance Criteria
-- [ ] Something completely unrelated to the IDEA
+- [ ] Something completely unrelated to the INTENT
 `;
 
     const result = runDualValidation(
       unrelatedUnit,
       INTENT_CONTENT,
-      IDEA_CONTENT,
+      INTENT_CONTENT,
       'intent-to-unit',
-      'unit-to-idea',
+      'unit-to-intent',
       'intent-1',
       'unit-1',
-      'idea-1'
+      'intent-root-1'
     );
 
     expect(result.rootCheck.verification.passed).toBe(false);
@@ -676,12 +597,12 @@ describe('runDualValidation', () => {
     const result = runDualValidation(
       UNIT_CONTENT,
       INTENT_CONTENT,
-      IDEA_CONTENT,
+      INTENT_CONTENT,
       'intent-to-unit',
-      'unit-to-idea',
+      'unit-to-intent',
       'intent-1',
       'unit-1',
-      'idea-1'
+      'intent-root-1'
     );
 
     expect(result.parentCheck.verification.conformance_score).toBeGreaterThan(0);
@@ -726,10 +647,6 @@ describe('getAdaptiveThreshold', () => {
 
 describe('getConformanceThreshold', () => {
   describe('transition types', () => {
-    it('returns 90 for idea-to-intent', () => {
-      expect(getConformanceThreshold('idea-to-intent')).toBe(90);
-    });
-
     it('returns 95 for intent-to-unit', () => {
       expect(getConformanceThreshold('intent-to-unit')).toBe(95);
     });
@@ -740,12 +657,12 @@ describe('getConformanceThreshold', () => {
   });
 
   describe('root validation types', () => {
-    it('returns 80 for unit-to-idea', () => {
-      expect(getConformanceThreshold('unit-to-idea')).toBe(80);
+    it('returns 80 for unit-to-intent', () => {
+      expect(getConformanceThreshold('unit-to-intent')).toBe(80);
     });
 
-    it('returns 70 for bolt-to-idea', () => {
-      expect(getConformanceThreshold('bolt-to-idea')).toBe(70);
+    it('returns 70 for bolt-to-intent', () => {
+      expect(getConformanceThreshold('bolt-to-intent')).toBe(70);
     });
   });
 });
@@ -770,7 +687,7 @@ describe('recordAlignmentResult', () => {
     };
     loadManifest.mockReturnValue(mockManifest);
 
-    const check = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const check = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
     recordAlignmentResult('/path/to/manifest.json', check);
 
     expect(loadManifest).toHaveBeenCalledWith('/path/to/manifest.json');
@@ -785,7 +702,7 @@ describe('recordAlignmentResult', () => {
   it('returns silently when manifest is null', () => {
     loadManifest.mockReturnValue(null);
 
-    const check = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const check = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(() => {
       recordAlignmentResult('/path/to/manifest.json', check);
@@ -800,7 +717,7 @@ describe('recordAlignmentResult', () => {
       throw new Error('File read error');
     });
 
-    const check = runAlignmentCheck(IDEA_CONTENT, INTENT_CONTENT, 'idea-1', 'intent-1', 'idea-to-intent');
+    const check = runAlignmentCheck(INTENT_CONTENT, UNIT_CONTENT, 'intent-1', 'unit-1', 'intent-to-unit');
 
     expect(() => {
       recordAlignmentResult('/path/to/manifest.json', check);

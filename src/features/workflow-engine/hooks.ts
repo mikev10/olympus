@@ -11,7 +11,6 @@ import type { WorkflowCheckpoint, WorkflowStage } from './types.js';
  * Map workflow stages to their corresponding agent types.
  */
 const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
-  idea: null,      // IDEA stage handled by /plan entry point
   intent: null,    // INTENT stage handled by /plan entry point
   unit: null,      // UNIT decomposition handled by ConstructionExecutor
   bolt: null,      // BOLT execution handled by ConstructionExecutor
@@ -23,10 +22,8 @@ const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
  */
 function getStageTaskDescription(stage: WorkflowStage): string {
   switch (stage) {
-    case 'idea':
-      return 'capture the problem statement, personas, success metrics, and constraints';
     case 'intent':
-      return 'define business requirements, technical approach, and proposed UNITs';
+      return 'capture the problem statement, personas, success metrics, constraints, and define business requirements, technical approach, and proposed UNITs';
     case 'unit':
       return 'decompose into module-scoped UNITs with interface contracts';
     case 'bolt':

@@ -45,6 +45,9 @@ export type {
   MethodologyMetrics,
   WorkflowCheckpointV2,
   WorkflowCheckpointV3,
+  PathwayType,
+  Level1PlanStage,
+  Level1Plan,
 } from './phase-types.js';
 
 export { STAGE_PHASE_MAP } from './phase-types.js';
@@ -122,9 +125,10 @@ export type { DepthFactors, RiskFactors } from './depth-assessment.js';
 export {
   assessDepth,
   classifyRiskTier,
-  assessDepthFromIdea,
+  assessDepthFromIntent,
   getDepthLabel,
   getRiskTierLabel,
+  adjustDepthForPathway,
 } from './depth-assessment.js';
 
 // Requirements
@@ -334,6 +338,17 @@ export type {
   RetroPattern,
   RetroResult,
 } from './retro.js';
+
+export type { Level1PlanOptions } from './level1-plan.js';
+export {
+  detectPathway,
+  generateLevel1Plan,
+  writeLevel1PlanArtifact,
+  loadLevel1Plan,
+  isPhaseIncluded,
+  isStageIncluded,
+  LEVEL1_PLAN_FORMAT_INSTRUCTIONS,
+} from './level1-plan.js';
 
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

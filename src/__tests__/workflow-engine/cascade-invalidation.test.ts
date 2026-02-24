@@ -59,7 +59,7 @@ describe('Cascade Invalidation System', () => {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -158,7 +158,7 @@ describe('Cascade Invalidation System', () => {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -213,7 +213,7 @@ describe('Cascade Invalidation System', () => {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -279,7 +279,7 @@ describe('Cascade Invalidation System', () => {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -354,7 +354,7 @@ This is a totally different feature about data visualization.`;
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -440,7 +440,7 @@ This is a totally different feature about data visualization.`;
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -495,7 +495,7 @@ This is a totally different feature about data visualization.`;
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
+        stage: 'intent',
         path: ideaPath,
         validation_passed: true,
         write_complete: true,
@@ -557,19 +557,20 @@ This is a totally different feature about data visualization.`;
       const workflowId = 'test-wf';
       await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      // Write IDEA and INTENT using writeArtifact
-      await writeArtifact(TEST_DIR, 'test-wf', 'idea', '# IDEA\nOriginal content');
+      const inceptionDir = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception');
+      await fs.ensureDir(inceptionDir);
+      const sourceIntentPath = path.join(inceptionDir, 'source-intent.md');
+      await fs.writeFile(sourceIntentPath, '# SOURCE\nOriginal content', 'utf-8');
       await writeArtifact(TEST_DIR, 'test-wf', 'intent', '# INTENT\nOriginal content');
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       registerArtifact(manifestPath, {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
-        path: ideaPath,
+        stage: 'intent',
+        path: sourceIntentPath,
         validation_passed: true,
         write_complete: true,
       });
@@ -596,8 +597,8 @@ This is a totally different feature about data visualization.`;
       });
       saveManifest(manifestPath, manifest);
 
-      // Act: Write to existing IDEA artifact (should trigger cascade)
-      await writeArtifact(TEST_DIR, 'test-wf', 'idea', '# IDEA\nModified content');
+      // Act: Write to existing INTENT artifact (should trigger cascade)
+      await writeArtifact(TEST_DIR, 'test-wf', 'intent', '# INTENT\nModified content');
 
       // Assert: INTENT should be marked stale
       const manifestAfter = loadManifest(manifestPath)!;
@@ -613,17 +614,17 @@ This is a totally different feature about data visualization.`;
       const workflowId = 'test-wf';
       await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      // Act: Write new IDEA artifact
-      await writeArtifact(TEST_DIR, 'test-wf', 'idea', '# IDEA\nNew content');
+      // Act: Write new INTENT artifact
+      await writeArtifact(TEST_DIR, 'test-wf', 'intent', '# INTENT\nNew content');
 
       // Register after write
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentPath2 = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       registerArtifact(manifestPath, {
         id: 'idea-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
-        path: ideaPath,
+        stage: 'intent',
+        path: intentPath2,
         validation_passed: true,
         write_complete: true,
       });
@@ -642,18 +643,18 @@ This is a totally different feature about data visualization.`;
       const workflowId = 'test-wf';
       await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const nfrPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.writeFile(ideaPath, '# IDEA\nOriginal', 'utf-8');
+      await fs.writeFile(nfrPath, '# NFR\nOriginal', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nOriginal', 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'nfr-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
-        path: ideaPath,
+        stage: 'intent',
+        path: nfrPath,
         validation_passed: true,
         write_complete: true,
       });
@@ -669,7 +670,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'nfr-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -680,11 +681,11 @@ This is a totally different feature about data visualization.`;
       });
       saveManifest(manifestPath, manifest);
 
-      // Act: Manually edit IDEA file (bypass writeArtifact)
-      await fs.writeFile(ideaPath, '# IDEA\nManually edited', 'utf-8');
+      // Act: Manually edit NFR file (bypass writeArtifact)
+      await fs.writeFile(nfrPath, '# NFR\nManually edited', 'utf-8');
 
       // Read the artifact (should detect checksum mismatch)
-      const content = await readArtifact(TEST_DIR, 'test-wf', 'idea');
+      const content = await readArtifact(TEST_DIR, 'test-wf', 'nfr');
 
       expect(content).toContain('Manually edited');
 
@@ -702,18 +703,18 @@ This is a totally different feature about data visualization.`;
       const workflowId = 'test-wf';
       await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
 
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const nfrPath2 = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.writeFile(ideaPath, '# IDEA\nOriginal', 'utf-8');
+      await fs.writeFile(nfrPath2, '# NFR\nOriginal', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nOriginal', 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'nfr-001',
         type: '.md',
         phase: 'inception',
-        stage: 'idea',
-        path: ideaPath,
+        stage: 'intent',
+        path: nfrPath2,
         validation_passed: true,
         write_complete: true,
       });
@@ -729,7 +730,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'nfr-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -741,7 +742,7 @@ This is a totally different feature about data visualization.`;
       saveManifest(manifestPath, manifest);
 
       // Act: Read without modification
-      await readArtifact(TEST_DIR, 'test-wf', 'idea');
+      await readArtifact(TEST_DIR, 'test-wf', 'nfr');
 
       // Assert: INTENT should still be active (no cascade)
       const manifestAfter = loadManifest(manifestPath)!;

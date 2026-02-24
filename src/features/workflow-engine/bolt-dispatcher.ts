@@ -9,8 +9,8 @@ export interface BoltDispatchResult {
   context: {
     boltSpec: string; // Full BOLT spec content
     unitSpec: string; // Parent UNIT spec for context
-    intentSummary: string; // Relevant sections of INTENT
-    ideaSummary: string; // Problem statement from root IDEA
+    intentSummary: string;
+    intentSummary2: string;
     targetFiles: string[]; // Files the BOLT should modify
   };
 }
@@ -177,7 +177,7 @@ function isDebugWork(boltSpec: string): boolean {
  * Build the execution prompt for a BOLT.
  */
 export function buildBoltPrompt(
-  ideaSummary: string,
+  intentProblemSummary: string,
   intentSummary: string,
   unitSpec: string,
   boltSpec: string
@@ -185,7 +185,7 @@ export function buildBoltPrompt(
   return `You are executing a coding task as part of a structured workflow.
 
 ## Context
-**Problem**: ${ideaSummary}
+**Problem**: ${intentProblemSummary}
 **Technical Plan**: ${intentSummary}
 **Module**: ${unitSpec}
 
@@ -231,12 +231,8 @@ export async function dispatchBolt(
     'Technical Specification',
   ]);
 
-  // 4. Read IDEA summary (Problem Statement + Success Metrics)
-  const ideaPath = join(docsDir, 'inception', 'idea.md');
-  const ideaContent = existsSync(ideaPath)
-    ? readFileSync(ideaPath, 'utf-8')
-    : '';
-  const ideaSummary = extractSections(ideaContent, [
+  // 4. Read Problem Statement + Success Metrics from INTENT
+  const intentSummary2 = extractSections(intentContent, [
     'Problem Statement',
     'Success Metrics',
   ]);
@@ -248,7 +244,7 @@ export async function dispatchBolt(
   const agentType = selectAgentForBolt(boltSpec);
 
   // 7. Construct prompt
-  const prompt = buildBoltPrompt(ideaSummary, intentSummary, unitSpec, boltSpec);
+  const prompt = buildBoltPrompt(intentSummary2, intentSummary, unitSpec, boltSpec);
 
   return {
     boltId,
@@ -258,7 +254,7 @@ export async function dispatchBolt(
       boltSpec,
       unitSpec,
       intentSummary,
-      ideaSummary,
+      intentSummary2,
       targetFiles,
     },
   };

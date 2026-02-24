@@ -51,7 +51,7 @@ describe('artifacts', () => {
       const checkpoint = await fs.readJson(checkpointPath);
       expect(checkpoint).toMatchObject({
         workflow_id: workflowId,
-        current_stage: 'idea',
+        current_stage: 'intent',
       });
       expect(checkpoint.created_at).toBeDefined();
       expect(checkpoint.updated_at).toBeDefined();
@@ -88,11 +88,6 @@ describe('artifacts', () => {
   });
 
   describe('getArtifactPath', () => {
-    it('should return correct path for idea artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'idea.md');
-      expect(getArtifactPath(projectPath, workflowId, 'idea')).toBe(expected);
-    });
-
     it('should return correct path for intent artifact', () => {
       const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       expect(getArtifactPath(projectPath, workflowId, 'intent')).toBe(expected);
@@ -182,27 +177,24 @@ describe('artifacts', () => {
     });
 
     it('should handle cross-platform paths correctly', () => {
-      // Test that path.join produces correct separators for the platform
-      const artifactPath = getArtifactPath(projectPath, workflowId, 'idea');
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'intent');
 
-      // Path should contain platform-specific separators
       expect(artifactPath).toContain('aidlc-docs');
       expect(artifactPath).toContain('inception');
-      expect(artifactPath).toContain('idea.md');
+      expect(artifactPath).toContain('intent.md');
 
-      // Verify it's a valid path (no mixing of separators)
       const normalized = path.normalize(artifactPath);
       expect(artifactPath).toBe(normalized);
     });
   });
 
   describe('writeArtifact', () => {
-    it('should write idea artifact content correctly', async () => {
-      const content = '# Test Idea\n\nThis is a test idea document.';
+    it('should write intent artifact content correctly (first)', async () => {
+      const content = '# Test Intent\n\nThis is a test intent document.';
 
-      await writeArtifact(projectPath, workflowId, 'idea', content);
+      await writeArtifact(projectPath, workflowId, 'intent', content);
 
-      const artifactPath = getArtifactPath(projectPath, workflowId, 'idea');
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'intent');
       const savedContent = await fs.readFile(artifactPath, 'utf-8');
 
       expect(savedContent).toBe(content);
@@ -277,20 +269,20 @@ describe('artifacts', () => {
     });
 
     it('should overwrite existing artifact', async () => {
-      await writeArtifact(projectPath, workflowId, 'idea', 'First version');
-      await writeArtifact(projectPath, workflowId, 'idea', 'Second version');
+      await writeArtifact(projectPath, workflowId, 'intent', 'First version');
+      await writeArtifact(projectPath, workflowId, 'intent', 'Second version');
 
-      const content = await readArtifact(projectPath, workflowId, 'idea');
+      const content = await readArtifact(projectPath, workflowId, 'intent');
       expect(content).toBe('Second version');
     });
   });
 
   describe('readArtifact', () => {
-    it('should read idea artifact content correctly', async () => {
-      const content = '# Idea\n\nDetailed idea here.';
-      await writeArtifact(projectPath, workflowId, 'idea', content);
+    it('should read intent artifact content correctly (first)', async () => {
+      const content = '# Intent\n\nDetailed intent here (first).';
+      await writeArtifact(projectPath, workflowId, 'intent', content);
 
-      const readContent = await readArtifact(projectPath, workflowId, 'idea');
+      const readContent = await readArtifact(projectPath, workflowId, 'intent');
       expect(readContent).toBe(content);
     });
 
@@ -319,7 +311,7 @@ describe('artifacts', () => {
     });
 
     it('should return null for missing file', async () => {
-      const content = await readArtifact(projectPath, workflowId, 'idea');
+      const content = await readArtifact(projectPath, workflowId, 'intent');
       expect(content).toBeNull();
     });
 
@@ -339,12 +331,10 @@ describe('artifacts', () => {
 
   describe('cross-platform path handling', () => {
     it('should handle Windows-style paths correctly', async () => {
-      // Create a Windows-style path (even on Unix, path.join should normalize it)
       const windowsStylePath = 'C:\\Users\\Test\\Project';
-      const artifactPath = getArtifactPath(windowsStylePath, workflowId, 'idea');
+      const artifactPath = getArtifactPath(windowsStylePath, workflowId, 'intent');
 
-      // Verify path components are present
-      expect(artifactPath).toContain('idea.md');
+      expect(artifactPath).toContain('intent.md');
       expect(artifactPath).toContain('inception');
 
       // Path should be normalized for the platform
@@ -364,11 +354,10 @@ describe('artifacts', () => {
     });
 
     it('should write and read across different path styles', async () => {
-      // Use current tmpDir which works on any platform
       const content = 'Cross-platform test content';
 
-      await writeArtifact(projectPath, workflowId, 'idea', content);
-      const readContent = await readArtifact(projectPath, workflowId, 'idea');
+      await writeArtifact(projectPath, workflowId, 'intent', content);
+      const readContent = await readArtifact(projectPath, workflowId, 'intent');
 
       expect(readContent).toBe(content);
     });
