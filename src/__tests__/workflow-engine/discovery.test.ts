@@ -127,7 +127,7 @@ describe('discovery', () => {
     it('should export array of 6 artifact types', () => {
       expect(DISCOVERY_ARTIFACTS).toBeDefined();
       expect(Array.isArray(DISCOVERY_ARTIFACTS)).toBe(true);
-      expect(DISCOVERY_ARTIFACTS.length).toBe(6);
+      expect(DISCOVERY_ARTIFACTS.length).toBe(7);
     });
 
     it('should include all expected artifact types', () => {
@@ -137,6 +137,7 @@ describe('discovery', () => {
       expect(DISCOVERY_ARTIFACTS).toContain('change-impact');
       expect(DISCOVERY_ARTIFACTS).toContain('static-model');
       expect(DISCOVERY_ARTIFACTS).toContain('dynamic-model');
+      expect(DISCOVERY_ARTIFACTS).toContain('workspace-scan');
     });
   });
 
@@ -447,6 +448,7 @@ describe('discovery', () => {
       const featureName = 'User Authentication System';
 
       for (const artifactType of DISCOVERY_ARTIFACTS) {
+        if (artifactType === 'workspace-scan') continue;
         const template = getDiscoveryTemplate(artifactType, featureName);
         expect(template).toContain(featureName);
       }
@@ -454,6 +456,7 @@ describe('discovery', () => {
 
     it('should start with markdown heading for all templates', () => {
       for (const artifactType of DISCOVERY_ARTIFACTS) {
+        if (artifactType === 'workspace-scan') continue;
         const template = getDiscoveryTemplate(artifactType, 'Test Feature');
         expect(template.trimStart().startsWith('#')).toBe(true);
       }

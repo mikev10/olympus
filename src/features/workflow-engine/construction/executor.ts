@@ -256,6 +256,117 @@ export class ConstructionExecutor {
     };
   }
 
+  async executeBoltWithPlanApproval(
+    boltId: string,
+    unitId: string,
+    options: { projectPath?: string; workflowId?: string } = {}
+  ): Promise<{ status: 'awaiting_bolt_plan_approval'; boltPlanPath: string; prompt: string }> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
+    const { buildBoltPlanPath, dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
+
+    const boltPlanPath = buildBoltPlanPath(projectPath, workflowId, unitId, boltId);
+    const dispatch = await dispatchBolt(projectPath, workflowId, boltId);
+
+    const prompt = buildBoltPrompt(
+      dispatch.context.intentSummary2,
+      dispatch.context.intentSummary,
+      dispatch.context.unitSpec,
+      dispatch.context.boltSpec,
+      boltPlanPath
+    );
+
+    return {
+      status: 'awaiting_bolt_plan_approval',
+      boltPlanPath,
+      prompt,
+    };
+  }
+
+  async approveBoltPlan(
+    boltId: string,
+    unitId: string,
+    feedback?: string
+  ): Promise<{ status: 'executing_bolt_plan'; prompt: string }> {
+    const { buildBoltPlanPath, dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
+    const { addGateAuditEntry } = await import('../manifest.js');
+
+    const boltPlanPath = buildBoltPlanPath(this.projectPath, this.workflowId, unitId, boltId);
+
+    const planExists = await fs.pathExists(boltPlanPath);
+    if (!planExists) {
+      throw new Error(`BOLT plan file not found at ${boltPlanPath}. The agent must create the plan before it can be approved.`);
+    }
+
+    const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
+    try {
+      addGateAuditEntry(manifestPath, {
+        phase: 'construction',
+        action: 'approved',
+        actor: 'human',
+        reason: feedback || `BOLT plan ${boltId} approved by developer`,
+      });
+    } catch (err) {
+      console.error(`[ConstructionExecutor] Failed to record gate audit for ${boltId}:`, err);
+    }
+
+    const dispatch = await dispatchBolt(this.projectPath, this.workflowId, boltId);
+    const prompt = buildBoltPrompt(
+      dispatch.context.intentSummary2,
+      dispatch.context.intentSummary,
+      dispatch.context.unitSpec,
+      dispatch.context.boltSpec
+    );
+
+    return {
+      status: 'executing_bolt_plan',
+      prompt,
+    };
+  }
+
+  async autoApproveBoltPlan(
+    boltId: string,
+    unitId: string,
+    trustLevel: number
+  ): Promise<{ status: 'executing_bolt_plan'; prompt: string }> {
+    const { addGateAuditEntry } = await import('../manifest.js');
+
+    const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
+    const isSilent = trustLevel >= 3;
+
+    try {
+      addGateAuditEntry(manifestPath, {
+        phase: 'construction',
+        action: 'approved',
+        actor: 'trust',
+        reason: isSilent
+          ? `BOLT plan ${boltId} auto-approved silently (trust level ${trustLevel})`
+          : `BOLT plan ${boltId} auto-approved with notification (trust level ${trustLevel})`,
+      });
+    } catch (err) {
+      console.error(`[ConstructionExecutor] Failed to record gate audit for ${boltId}:`, err);
+    }
+
+    if (!isSilent) {
+      console.log(`[ConstructionExecutor] BOLT plan ${boltId} auto-approved (trust level ${trustLevel})`);
+    }
+
+    const { dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
+    const dispatch = await dispatchBolt(this.projectPath, this.workflowId, boltId);
+    const prompt = buildBoltPrompt(
+      dispatch.context.intentSummary2,
+      dispatch.context.intentSummary,
+      dispatch.context.unitSpec,
+      dispatch.context.boltSpec
+    );
+
+    return {
+      status: 'executing_bolt_plan',
+      prompt,
+    };
+  }
+
   /**
    * Execute SHALLOW mode: create a single BOLT directly from INTENT content.
    * No UNITs, no design artifacts.

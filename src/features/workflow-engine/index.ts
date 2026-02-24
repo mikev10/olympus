@@ -174,6 +174,7 @@ export {
   resetTrust,
   shouldAutoAdvance,
   checkTrustReset,
+  shouldAutoApproveBoltPlan,
 } from './trust.js';
 
 // Alignment
@@ -349,6 +350,52 @@ export {
   isStageIncluded,
   LEVEL1_PLAN_FORMAT_INSTRUCTIONS,
 } from './level1-plan.js';
+
+// Brownfield Scanner
+export type {
+  DirectoryNode,
+  ImportEdge,
+  WorkspaceScanResult,
+} from './brownfield-scanner.js';
+export {
+  scanWorkspace,
+  selectKeyFiles,
+  selectIntentRelevantFiles,
+  WORKSPACE_SCAN_SCHEMA,
+  SKIP_DIRS as SCANNER_SKIP_DIRS,
+} from './brownfield-scanner.js';
+
+// Brownfield Analysis
+export type {
+  BrownfieldAnalysisOptions,
+  ModuleDescription,
+  DependencyEdge,
+  DataModelDescription,
+  StaticModel,
+  UseCaseFlow,
+  EventPattern,
+  DynamicModel,
+} from './brownfield-analysis.js';
+export {
+  buildStaticModelPrompt,
+  buildDynamicModelPrompt,
+  parseStaticModelResponse,
+  parseDynamicModelResponse,
+  writeModelsToArtifacts,
+  STATIC_MODEL_FORMAT_INSTRUCTIONS,
+  DYNAMIC_MODEL_FORMAT_INSTRUCTIONS,
+} from './brownfield-analysis.js';
+
+// Bolt Dispatcher
+export {
+  buildBoltPlanPath,
+  buildBoltPrompt,
+  dispatchBolt,
+  BOLT_PLAN_FORMAT_INSTRUCTIONS,
+} from './bolt-dispatcher.js';
+
+// Discovery (brownfield integration)
+export { populateDiscoveryModels } from './discovery.js';
 
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';

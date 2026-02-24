@@ -266,10 +266,10 @@ export function checkConsecutiveRejections(state: TrustState): { shouldDecrease:
   };
 }
 
-/**
- * Records a contract violation and decreases trust by 1.
- * Returns new state (immutable pattern).
- */
 export function recordContractViolation(state: TrustState, artifactId: string): TrustState {
   return decreaseTrust(state, `Contract violation on ${artifactId}`);
+}
+
+export function shouldAutoApproveBoltPlan(trustState: TrustState): boolean {
+  return trustState.current_level >= 2;
 }

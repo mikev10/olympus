@@ -2,6 +2,15 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getAgentPerformanceForRouting } from '../../learning/efficiency.js';
 
+export function buildBoltPlanPath(
+  projectPath: string,
+  workflowId: string,
+  unitId: string,
+  boltId: string
+): string {
+  return join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, `${boltId}-plan.md`);
+}
+
 export interface BoltDispatchResult {
   boltId: string;
   agentType: string; // 'olympian' | 'frontend-engineer' | 'oracle'
@@ -173,23 +182,32 @@ function isDebugWork(boltSpec: string): boolean {
   return debugKeywords.some((keyword) => lowerSpec.includes(keyword));
 }
 
-/**
- * Build the execution prompt for a BOLT.
- */
 export function buildBoltPrompt(
   intentProblemSummary: string,
   intentSummary: string,
   unitSpec: string,
-  boltSpec: string
+  boltSpec: string,
+  boltPlanPath?: string
 ): string {
+  const planInstructions = boltPlanPath ? `
+## Execution Protocol
+BEFORE implementing, you MUST:
+1. Create an execution plan in a markdown file with checkboxes for each step
+2. Save the plan to: ${boltPlanPath}
+3. STOP and request review of the plan
+4. After approval, execute the plan step by step, checking off each item
+
+Do NOT begin implementation until the plan is approved.
+
+` : '';
+
   return `You are executing a coding task as part of a structured workflow.
 
 ## Context
 **Problem**: ${intentProblemSummary}
 **Technical Plan**: ${intentSummary}
 **Module**: ${unitSpec}
-
-## Your Task
+${planInstructions}## Your Task
 ${boltSpec}
 
 ## Instructions
@@ -259,3 +277,11 @@ export async function dispatchBolt(
     },
   };
 }
+
+export const BOLT_PLAN_FORMAT_INSTRUCTIONS = `A BOLT execution plan must contain:
+1. A title line: "# BOLT Plan: {boltId}"
+2. A checklist of implementation steps using markdown checkboxes (- [ ] step)
+3. Each step should be specific and actionable
+4. Steps should be ordered by dependency (prerequisites first)
+5. Include a "## Verification" section with test/validation checkboxes
+The plan file is saved at: aidlc-docs/{workflowId}/construction/{unitId}/{boltId}-plan.md`;
