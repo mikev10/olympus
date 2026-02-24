@@ -351,3 +351,80 @@ export function appendToAudit(
     console.error(`Failed to append to audit for workflow ${workflowId}:`, error);
   }
 }
+
+export interface AuditInteraction {
+  timestamp: string; // ISO 8601
+  stage: string;
+  interactionType: 'user_input' | 'ai_prompt' | 'approval_request' | 'approval_response' | 'change_request' | 'error';
+  content: string; // complete raw text — never summarized
+  context: string; // stage and action description
+}
+
+export function appendInteraction(
+  projectPath: string,
+  workflowId: string,
+  interaction: AuditInteraction
+): void {
+  try {
+    const auditPath = path.join(projectPath, 'aidlc-docs', workflowId, 'audit.md');
+
+    if (!fs.existsSync(auditPath)) {
+      const header = [
+        `# Audit Report`,
+        '',
+        `Generated: ${new Date().toISOString()}`,
+        `Workflow ID: ${workflowId}`,
+        '',
+      ].join('\n');
+
+      fs.ensureDirSync(path.dirname(auditPath));
+      fs.writeFileSync(auditPath, header, 'utf-8');
+    }
+
+    const block = [
+      '',
+      `### [${interaction.interactionType}] ${interaction.timestamp}`,
+      `**Stage:** ${interaction.stage}`,
+      `**Context:** ${interaction.context}`,
+      '',
+      interaction.content,
+      '',
+    ].join('\n');
+
+    fs.appendFileSync(auditPath, block, 'utf-8');
+  } catch (error) {
+    console.error(`Failed to append interaction to audit for workflow ${workflowId}:`, error);
+  }
+}
+
+export function logApprovalPrompt(
+  projectPath: string,
+  workflowId: string,
+  stage: string,
+  prompt: string
+): void {
+  const interaction: AuditInteraction = {
+    timestamp: new Date().toISOString(),
+    stage,
+    interactionType: 'approval_request',
+    content: prompt,
+    context: `Approval prompt presented at ${stage} stage`,
+  };
+  appendInteraction(projectPath, workflowId, interaction);
+}
+
+export function logApprovalResponse(
+  projectPath: string,
+  workflowId: string,
+  stage: string,
+  response: string
+): void {
+  const interaction: AuditInteraction = {
+    timestamp: new Date().toISOString(),
+    stage,
+    interactionType: 'approval_response',
+    content: response,
+    context: `Approval response received at ${stage} stage`,
+  };
+  appendInteraction(projectPath, workflowId, interaction);
+}

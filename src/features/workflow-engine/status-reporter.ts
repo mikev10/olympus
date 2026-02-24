@@ -19,6 +19,7 @@ import type {
   AlignmentCheck,
   GateAuditEntry,
   RiskEntry,
+  WorkflowCheckpointV3,
 } from './phase-types.js';
 
 export interface WorkflowReport {
@@ -327,4 +328,73 @@ function buildSummaryLine(manifest: ManifestSchema, progress: PhaseProgressEntry
   const completePhases = progress.filter(p => p.percentage === 100 && p.status === 'complete');
 
   return `${completePhases.length}/${PHASE_ORDER.length} phases complete | ${totalArtifacts} artifacts total`;
+}
+
+/**
+ * Generate a welcome message displayed once at workflow start
+ */
+export function generateWelcomeMessage(): string {
+  return `## Welcome to AIDLC Adaptive Workflow
+
+This workflow follows the AI-Driven Development Life Cycle (AI-DLC) methodology.
+
+### Three-Phase Lifecycle
+1. **Inception** — Define what to build and why (requirements, stories, design)
+2. **Construction** — Build it right (domain design, functional design, code generation)
+3. **Operations** — Ship and monitor (deployment, runbook, monitoring)
+
+### Your Role
+- **Inception**: Answer questions, approve artifacts, provide domain expertise
+- **Construction**: Review designs, approve bolt plans, verify code
+- **Operations**: Validate deployment guides, confirm monitoring setup
+
+The workflow adapts to your project's complexity and your trust level.`;
+}
+
+/**
+ * Generate a welcome back message showing current status and options for resuming
+ */
+export function generateWelcomeBackMessage(checkpoint: WorkflowCheckpointV3, featureName: string): string {
+  const phase = checkpoint.current_phase;
+  const stage = checkpoint.current_stage;
+  const pathway = checkpoint.pathway_type ?? 'unknown';
+
+  return `## Welcome Back — ${featureName}
+
+**Current Phase:** ${phase}
+**Current Stage:** ${stage}
+**Pathway:** ${pathway}
+**Workflow ID:** ${checkpoint.workflow_id}
+
+### Options
+1. **Continue where you left off** — Resume from ${stage}
+2. **Review a previous stage** — Go back and review completed artifacts`;
+}
+
+/**
+ * Get context loading recommendations based on current workflow stage
+ */
+export function getContextLoadingRecommendation(stage: string): string[] {
+  const earlyStages = ['intent', 'discovery'];
+  const requirementsStages = ['requirements', 'stories'];
+  const designStages = ['architecture', 'design', 'domain-design', 'logical-design'];
+  const codeStages = ['code', 'bolt', 'implementation'];
+
+  if (earlyStages.includes(stage)) {
+    return ['workspace-scan'];
+  }
+
+  if (requirementsStages.includes(stage)) {
+    return ['workspace-scan', 'reverse-engineering', 'requirements'];
+  }
+
+  if (designStages.includes(stage)) {
+    return ['requirements', 'user-stories', 'architecture', 'design-artifacts'];
+  }
+
+  if (codeStages.includes(stage)) {
+    return ['requirements', 'user-stories', 'architecture', 'design-artifacts', 'existing-code'];
+  }
+
+  return ['workspace-scan'];
 }

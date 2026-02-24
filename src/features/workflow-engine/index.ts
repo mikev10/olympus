@@ -433,3 +433,146 @@ export {
   formatForCeremony,
   getCeremonyArtifactTemplates,
 } from './ceremony.js';
+
+// Phase 4: Question Manager
+export type { Question, AnsweredQuestion, Contradiction, Ambiguity } from './question-manager.js';
+export {
+  generateQuestionFile,
+  readAnsweredFile,
+  detectContradictions,
+  detectAmbiguities,
+  generateClarificationFile,
+  allQuestionsResolved,
+  AMBIGUITY_TRIGGER_PHRASES as QA_AMBIGUITY_TRIGGER_PHRASES,
+} from './question-manager.js';
+
+// Phase 4: Audit Interaction Logging (extends audit-generator)
+export type { AuditInteraction } from './audit-generator.js';
+export {
+  appendInteraction,
+  logApprovalPrompt,
+  logApprovalResponse,
+} from './audit-generator.js';
+
+// Phase 4: Construction Design Stages
+export type { ConstructionDesignStage, UnitDesignState, UserStory, UnitDefinition } from './phase-types.js';
+export type { DomainDesignArtifact } from './construction/domain-design.js';
+export {
+  buildDomainDesignPrompt,
+  parseDomainDesignResponse,
+  writeDomainDesignArtifact,
+} from './construction/domain-design.js';
+export type { FunctionalDesignArtifacts } from './construction/functional-design.js';
+export {
+  buildFunctionalDesignPrompt,
+  parseFunctionalDesignResponse,
+  writeFunctionalDesignArtifacts,
+} from './construction/functional-design.js';
+export type { LogicalDesignArtifact } from './construction/nfr-design.js';
+export {
+  buildNFRRequirementsPrompt,
+  buildNFRDesignPrompt,
+  buildLogicalDesignPrompt,
+  writeNFRRequirements,
+  writeNFRDesign,
+  writeLogicalDesignArtifact,
+} from './construction/nfr-design.js';
+export {
+  buildInfrastructureDesignPrompt,
+  writeInfrastructureDesign,
+} from './construction/infrastructure-design.js';
+
+// Phase 4: Extended Brownfield Artifacts
+export {
+  generateComponentInventory,
+  generateTechnologyStack,
+  generateDependencies,
+} from './brownfield-scanner.js';
+export {
+  buildBusinessOverviewPrompt,
+  buildAPIDocumentationPrompt,
+  buildCodeQualityPrompt,
+} from './brownfield-analysis.js';
+export { writeExtendedDiscoveryArtifacts } from './discovery.js';
+
+// Phase 4: Overconfidence Guard
+export type { OverconfidenceCheck } from './overconfidence-guard.js';
+export {
+  OVERCONFIDENCE_RULES,
+  RED_FLAG_INDICATORS,
+  AMBIGUITY_TRIGGER_PHRASES,
+  checkForOverconfidence,
+  getOverconfidenceRulesText,
+} from './overconfidence-guard.js';
+
+// Phase 4: Content Validation
+export type { ValidationResult as ContentValidationResult } from './content-validation.js';
+export {
+  validateMermaidSyntax,
+  validateAsciiDiagram,
+  validateMarkdown,
+  validateAndFallback,
+  CONTENT_VALIDATION_RULES,
+} from './content-validation.js';
+
+// Phase 4: Application Design
+export type {
+  ComponentDefinition,
+  ServiceDefinition,
+  ComponentDependency,
+  ApplicationDesignArtifacts,
+} from './application-design.js';
+export {
+  buildApplicationDesignPrompt,
+  parseApplicationDesignResponse,
+  writeApplicationDesignArtifacts,
+  APPLICATION_DESIGN_FORMAT_INSTRUCTIONS,
+} from './application-design.js';
+
+// Phase 4: Workflow Changes
+export type { ChangeType, ChangeRequest, ChangeImpact, WorkflowState } from './workflow-changes.js';
+export {
+  assessChangeImpact,
+  archiveArtifacts,
+  resetStages,
+  logChangeRequest,
+} from './workflow-changes.js';
+
+// Phase 4: Completion Messages
+export {
+  INCEPTION_COMPLETION_FORMAT,
+  CONSTRUCTION_COMPLETION_FORMAT,
+  buildCompletionMessage,
+  formatSummaryBullets,
+  COMPLETION_MESSAGE_RULES,
+} from './completion-messages.js';
+
+// Phase 4: State File
+export {
+  generateStateFile,
+  updateStateFile,
+  STATE_FILE_RULES,
+} from './state-file.js';
+
+// Phase 4: Execution Plan Visualization
+export { generatePlanVisualization } from './level1-plan.js';
+
+// Phase 4: Error Recovery
+export type { ErrorSeverity, WorkflowError, RecoveryResult } from './error-recovery.js';
+export {
+  assessErrorSeverity,
+  recoverPartialCompletion,
+  recoverCorruptedState,
+  recoverMissingArtifacts,
+  handleUserRestart,
+  handleUserSkip,
+  ERROR_LOG_FORMAT,
+  RECOVERY_LOG_FORMAT,
+} from './error-recovery.js';
+
+// Phase 4: Session Continuity
+export {
+  generateWelcomeMessage,
+  generateWelcomeBackMessage,
+  getContextLoadingRecommendation,
+} from './status-reporter.js';

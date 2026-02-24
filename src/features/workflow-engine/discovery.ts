@@ -5,7 +5,7 @@ import { registerArtifact, updatePhaseStatus, addGateAuditEntry } from './manife
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import type { WorkflowPhase } from './phase-types.js';
 import type { WorkflowStage } from './types.js';
-import { scanWorkspace, selectKeyFiles, selectIntentRelevantFiles } from './brownfield-scanner.js';
+import { scanWorkspace, selectKeyFiles, selectIntentRelevantFiles, generateComponentInventory, generateTechnologyStack, generateDependencies } from './brownfield-scanner.js';
 import type { WorkspaceScanResult } from './brownfield-scanner.js';
 import { buildStaticModelPrompt, writeModelsToArtifacts } from './brownfield-analysis.js';
 
@@ -500,6 +500,72 @@ export async function populateDiscoveryModels(
     console.error('[Discovery] Failed to populate discovery models:', error);
     throw new Error(`Failed to populate discovery models: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+export async function writeExtendedDiscoveryArtifacts(
+  projectPath: string,
+  workflowId: string,
+  scan: WorkspaceScanResult,
+  agentGeneratedArtifacts: {
+    businessOverview?: string;
+    codeStructure?: string;
+    apiDocumentation?: string;
+    codeQualityAssessment?: string;
+  }
+): Promise<string[]> {
+  const discoveryDir = path.join(projectPath, 'aidlc-docs', workflowId, 'discovery');
+  await fs.ensureDir(discoveryDir);
+
+  const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
+  const writtenPaths: string[] = [];
+
+  const scannerArtifacts: Array<{ id: string; filename: string; content: string }> = [
+    { id: 'component-inventory', filename: 'component-inventory.md', content: generateComponentInventory(scan) },
+    { id: 'technology-stack', filename: 'technology-stack.md', content: generateTechnologyStack(scan) },
+    { id: 'dependencies', filename: 'dependencies.md', content: generateDependencies(scan) },
+  ];
+
+  for (const artifact of scannerArtifacts) {
+    const filePath = path.join(discoveryDir, artifact.filename);
+    await fs.writeFile(filePath, artifact.content, 'utf8');
+    registerArtifact(manifestPath, {
+      id: `DISCOVERY-${artifact.id}`,
+      type: artifact.id,
+      phase: 'discovery' as WorkflowPhase,
+      stage: 'intent' as WorkflowStage,
+      path: filePath,
+      validation_passed: null,
+      write_complete: true,
+      checksum: null,
+    });
+    writtenPaths.push(filePath);
+  }
+
+  const agentArtifacts: Array<{ id: string; filename: string; content: string | undefined }> = [
+    { id: 'business-overview', filename: 'business-overview.md', content: agentGeneratedArtifacts.businessOverview },
+    { id: 'code-structure', filename: 'code-structure.md', content: agentGeneratedArtifacts.codeStructure },
+    { id: 'api-documentation', filename: 'api-documentation.md', content: agentGeneratedArtifacts.apiDocumentation },
+    { id: 'code-quality-assessment', filename: 'code-quality-assessment.md', content: agentGeneratedArtifacts.codeQualityAssessment },
+  ];
+
+  for (const artifact of agentArtifacts) {
+    if (!artifact.content) continue;
+    const filePath = path.join(discoveryDir, artifact.filename);
+    await fs.writeFile(filePath, artifact.content, 'utf8');
+    registerArtifact(manifestPath, {
+      id: `DISCOVERY-${artifact.id}`,
+      type: artifact.id,
+      phase: 'discovery' as WorkflowPhase,
+      stage: 'intent' as WorkflowStage,
+      path: filePath,
+      validation_passed: null,
+      write_complete: true,
+      checksum: null,
+    });
+    writtenPaths.push(filePath);
+  }
+
+  return writtenPaths;
 }
 
 /**

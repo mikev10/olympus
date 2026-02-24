@@ -275,6 +275,8 @@ export interface WorkflowCheckpointV3 {
   pathway_type?: PathwayType;
   skipped_phases?: WorkflowPhase[];
   bolt_plan_path?: string;
+  plan_steps_total?: number;
+  plan_steps_completed?: number;
 }
 
 export type PathwayType = 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization';
@@ -304,4 +306,28 @@ export interface CeremonyConfig {
   pause_between_steps: boolean;
   output_format: 'standard' | 'presentation';
   review_prompt_style: 'inline' | 'explicit';
+}
+
+export type ConstructionDesignStage = 'domain-design' | 'functional-design' | 'nfr-requirements' | 'nfr-design' | 'infrastructure-design' | 'code-generation';
+
+export interface UnitDesignState {
+  unitId: string;
+  unitName: string;
+  completedStages: ConstructionDesignStage[];
+  currentStage: ConstructionDesignStage | null;
+  artifacts: Partial<Record<ConstructionDesignStage, string[]>>;
+}
+
+export interface UserStory {
+  id: string;
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+}
+
+export interface UnitDefinition {
+  id: string;
+  name: string;
+  description: string;
+  scope: string;
 }

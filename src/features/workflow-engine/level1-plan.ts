@@ -260,7 +260,10 @@ export async function writeLevel1PlanArtifact(
 
   try {
     await fs.mkdir(artifactDir, { recursive: true });
-    await fs.writeFile(artifactPath, renderPlanMarkdown(workflowId, plan), 'utf-8');
+    const markdown = renderPlanMarkdown(workflowId, plan);
+    const visualization = generatePlanVisualization(plan);
+    const fullContent = markdown + '\n## Execution Plan Visualization\n\n' + visualization + '\n';
+    await fs.writeFile(artifactPath, fullContent, 'utf-8');
   } catch (error) {
     console.error('[Level1Plan] Failed to write artifact:', error);
     throw error;
@@ -391,3 +394,87 @@ export const LEVEL1_PLAN_FORMAT_INSTRUCTIONS = `A Level 1 Plan document must con
 Pathway values: greenfield | brownfield-enhancement | brownfield-refactor | bugfix | optimization
 Risk Assessment values: LOW | MEDIUM | HIGH
 Estimated Depth values: minimal | standard | comprehensive`;
+
+export function generatePlanVisualization(plan: Level1Plan): string {
+  const lines: string[] = [];
+  lines.push('```mermaid');
+  lines.push('flowchart TD');
+  lines.push('');
+
+  lines.push('  classDef execute fill:#4CAF50,color:#fff,stroke:#388E3C');
+  lines.push('  classDef skip fill:#BDBDBD,color:#424242,stroke:#9E9E9E');
+  lines.push('  classDef conditional fill:#FFA726,color:#fff,stroke:#F57C00');
+  lines.push('');
+
+  const phaseOrder: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
+
+  for (const phase of phaseOrder) {
+    const phaseConfig = plan.phases[phase];
+    const phaseId = phase.charAt(0).toUpperCase() + phase.slice(1);
+
+    if (!phaseConfig.included) {
+      const nodeId = `${phase}_skip`;
+      lines.push(`  ${nodeId}["${phaseId} (SKIPPED)"]`);
+      lines.push(`  class ${nodeId} skip`);
+    } else {
+      lines.push(`  subgraph ${phaseId}["${phaseId} Phase"]`);
+
+      const phaseStages = plan.stages.filter((s) => s.phase === phase);
+      for (const stage of phaseStages) {
+        const stageId = `${phase}_${stage.stage.replace(/-/g, '_')}`;
+        const label = stage.stage.replace(/-/g, ' ');
+
+        if (stage.included) {
+          lines.push(`    ${stageId}["${label}"]`);
+          lines.push(`    class ${stageId} execute`);
+        } else {
+          lines.push(`    ${stageId}["${label} (SKIP)"]`);
+          lines.push(`    class ${stageId} skip`);
+        }
+      }
+
+      const stageIds = phaseStages.map((s) => `${phase}_${s.stage.replace(/-/g, '_')}`);
+      for (let i = 0; i < stageIds.length - 1; i++) {
+        lines.push(`    ${stageIds[i]} --> ${stageIds[i + 1]}`);
+      }
+
+      lines.push('  end');
+    }
+    lines.push('');
+  }
+
+  for (let i = 0; i < phaseOrder.length - 1; i++) {
+    const currPhase = phaseOrder[i];
+    const nextPhase = phaseOrder[i + 1];
+
+    const currStages = plan.stages.filter((s) => s.phase === currPhase);
+    const nextStages = plan.stages.filter((s) => s.phase === nextPhase);
+
+    const currIncluded = plan.phases[currPhase].included;
+    const nextIncluded = plan.phases[nextPhase].included;
+
+    let fromId: string;
+    let toId: string;
+
+    if (currIncluded && currStages.length > 0) {
+      fromId = `${currPhase}_${currStages[currStages.length - 1].stage.replace(/-/g, '_')}`;
+    } else {
+      fromId = `${currPhase}_skip`;
+    }
+
+    if (nextIncluded && nextStages.length > 0) {
+      toId = `${nextPhase}_${nextStages[0].stage.replace(/-/g, '_')}`;
+    } else {
+      toId = `${nextPhase}_skip`;
+    }
+
+    if (!currIncluded || !nextIncluded) {
+      lines.push(`  ${fromId} -.-> ${toId}`);
+    } else {
+      lines.push(`  ${fromId} --> ${toId}`);
+    }
+  }
+
+  lines.push('```');
+  return lines.join('\n');
+}

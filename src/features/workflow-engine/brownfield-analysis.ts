@@ -410,6 +410,169 @@ export function parseDynamicModelResponse(response: string): DynamicModel {
   return model;
 }
 
+export function buildBusinessOverviewPrompt(options: BrownfieldAnalysisOptions): string {
+  const { projectPath, featureName, scanResult, keyFiles, intentText } = options;
+
+  const treeText = flattenDirectoryTree(scanResult.directoryTree, 0);
+
+  const keyFileSections = keyFiles
+    .map(filePath => {
+      const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(projectPath, filePath);
+      const raw = readFileSafe(resolved);
+      const truncated = truncateContent(raw, 100);
+      return `### ${toForwardSlashes(filePath)}\n\`\`\`\n${truncated}\n\`\`\``;
+    })
+    .join('\n\n');
+
+  return `You are analyzing an existing project to produce a business context document for the feature: "${featureName}".
+
+## Project Intent
+${intentText}
+
+## Project Directory Tree
+${treeText || '  (empty)'}
+
+## Key Source Files
+
+${keyFileSections || '(no key files provided)'}
+
+---
+
+Based on the above, produce a Business Overview with these markdown sections:
+
+## Business Context
+A concise description of what the application does and who uses it.
+
+## Business Transactions
+A list of major user-facing workflows or operations the system supports.
+
+## Business Dictionary
+A glossary of key domain terms used in the codebase.
+
+Be precise and grounded in the actual code shown above.`;
+}
+
+export function buildAPIDocumentationPrompt(options: BrownfieldAnalysisOptions): string {
+  const { projectPath, featureName, scanResult, keyFiles, relevantFiles } = options;
+
+  const routeAndControllerFiles = [...keyFiles, ...relevantFiles].filter(f => {
+    const lower = f.toLowerCase().replace(/\\/g, '/');
+    return (
+      lower.includes('route') ||
+      lower.includes('controller') ||
+      lower.includes('handler') ||
+      lower.includes('api') ||
+      lower.includes('endpoint')
+    );
+  });
+
+  const filesToShow = routeAndControllerFiles.length > 0 ? routeAndControllerFiles : keyFiles;
+
+  const fileSections = filesToShow
+    .slice(0, 15)
+    .map(filePath => {
+      const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(projectPath, filePath);
+      const raw = readFileSafe(resolved);
+      const truncated = truncateContent(raw, 150);
+      return `### ${toForwardSlashes(filePath)}\n\`\`\`\n${truncated}\n\`\`\``;
+    })
+    .join('\n\n');
+
+  const configList = scanResult.configFiles.length > 0
+    ? scanResult.configFiles.map(f => `  - ${f}`).join('\n')
+    : '  (none detected)';
+
+  return `You are analyzing an existing project to produce API documentation for the feature: "${featureName}".
+
+## Configuration Files
+${configList}
+
+## Route / Controller / Handler Files
+
+${fileSections || '(no route or controller files found)'}
+
+---
+
+Based on the above, produce API Documentation with these markdown sections:
+
+## REST APIs
+| Method | Path | Description |
+|--------|------|-------------|
+(one row per endpoint)
+
+## Internal APIs
+| Module | Interface | Description |
+|--------|-----------|-------------|
+(one row per significant module interface)
+
+## Data Models
+| Model | Fields | Used In |
+|-------|--------|---------|
+(one row per request/response shape or data model)
+
+Be precise and grounded in the actual code shown above.`;
+}
+
+export function buildCodeQualityPrompt(options: BrownfieldAnalysisOptions): string {
+  const { projectPath, featureName, scanResult, keyFiles } = options;
+
+  const totalSourceFiles = Object.values(scanResult.languageDistribution).reduce((a, b) => a + b, 0);
+  const langSummary = Object.entries(scanResult.languageDistribution)
+    .sort((a, b) => b[1] - a[1])
+    .map(([ext, count]) => `  ${ext}: ${count} files`)
+    .join('\n');
+
+  const configList = scanResult.configFiles.length > 0
+    ? scanResult.configFiles.map(f => `  - ${f}`).join('\n')
+    : '  (none detected)';
+
+  const sampleFileSections = keyFiles
+    .slice(0, 10)
+    .map(filePath => {
+      const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(projectPath, filePath);
+      const raw = readFileSafe(resolved);
+      const truncated = truncateContent(raw, 80);
+      return `### ${toForwardSlashes(filePath)}\n\`\`\`\n${truncated}\n\`\`\``;
+    })
+    .join('\n\n');
+
+  return `You are performing a code quality assessment of an existing project for the feature: "${featureName}".
+
+## Scan Statistics
+Total files: ${scanResult.totalFiles}
+Source files: ${totalSourceFiles}
+Entry points: ${scanResult.entryPoints.length}
+Import edges: ${scanResult.importGraph.length}
+
+## Language Distribution
+${langSummary || '  (none)'}
+
+## Configuration Files
+${configList}
+
+## Sample Source Files
+
+${sampleFileSections || '(no sample files provided)'}
+
+---
+
+Based on the above, produce a Code Quality Assessment with these markdown sections:
+
+## Test Coverage
+Describe what is tested, identify obvious gaps in test coverage.
+
+## Code Quality Indicators
+Assess naming conventions, code structure, and observable patterns.
+
+## Technical Debt
+List known issues, TODOs, or areas requiring significant refactoring.
+
+## Patterns and Anti-patterns
+Identify good patterns being applied and any anti-patterns observed.
+
+Be specific and grounded in the actual code shown above.`;
+}
+
 export async function writeModelsToArtifacts(
   projectPath: string,
   workflowId: string,

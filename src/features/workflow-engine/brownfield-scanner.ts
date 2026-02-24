@@ -380,3 +380,201 @@ export function selectIntentRelevantFiles(
 
   return result.slice(0, maxFiles);
 }
+
+const EXT_TO_LANGUAGE: Record<string, string> = {
+  '.ts': 'TypeScript',
+  '.tsx': 'TypeScript',
+  '.js': 'JavaScript',
+  '.jsx': 'JavaScript',
+  '.py': 'Python',
+  '.go': 'Go',
+  '.rs': 'Rust',
+  '.java': 'Java',
+  '.rb': 'Ruby',
+  '.cs': 'C#',
+  '.cpp': 'C/C++',
+  '.c': 'C/C++',
+  '.swift': 'Swift',
+  '.kt': 'Kotlin',
+};
+
+const APPLICATION_DIRS = new Set(['app', 'src', 'pages', 'routes', 'controllers', 'handlers']);
+const INFRASTRUCTURE_DIRS = new Set(['infra', 'deploy', 'docker', 'terraform', 'k8s', 'ci', 'scripts']);
+const SHARED_DIRS = new Set(['shared', 'common', 'utils', 'lib', 'helpers']);
+const TEST_DIRS = new Set(['test', 'tests', '__tests__', 'spec', 'e2e']);
+
+export function generateComponentInventory(scan: WorkspaceScanResult): string {
+  const categories: Record<string, Array<{ name: string; path: string; fileCount: number }>> = {
+    Application: [],
+    Infrastructure: [],
+    Shared: [],
+    Test: [],
+    Other: [],
+  };
+
+  for (const node of scan.directoryTree) {
+    const nameLower = node.name.toLowerCase();
+    if (APPLICATION_DIRS.has(nameLower)) {
+      categories.Application.push(node);
+    } else if (INFRASTRUCTURE_DIRS.has(nameLower)) {
+      categories.Infrastructure.push(node);
+    } else if (SHARED_DIRS.has(nameLower)) {
+      categories.Shared.push(node);
+    } else if (TEST_DIRS.has(nameLower)) {
+      categories.Test.push(node);
+    } else {
+      categories.Other.push(node);
+    }
+  }
+
+  let totalComponents = 0;
+  const sections: string[] = ['# Component Inventory\n'];
+
+  const categoryNames = ['Application', 'Infrastructure', 'Shared', 'Test', 'Other'];
+  for (const cat of categoryNames) {
+    const components = categories[cat];
+    sections.push(`## ${cat} Components`);
+    sections.push('| Component | Path | File Count |');
+    sections.push('|-----------|------|------------|');
+    if (components.length === 0) {
+      sections.push('| (none) | - | - |');
+    } else {
+      for (const c of components) {
+        sections.push(`| ${c.name} | ${c.path.replace(/\\/g, '/')} | ${c.fileCount} |`);
+        totalComponents++;
+      }
+    }
+    sections.push('');
+  }
+
+  sections.push(`**Total Components:** ${totalComponents}`);
+  sections.push(`**Total Files:** ${scan.totalFiles}`);
+
+  return sections.join('\n');
+}
+
+export function generateTechnologyStack(scan: WorkspaceScanResult): string {
+  const totalSourceFiles = Object.values(scan.languageDistribution).reduce((a, b) => a + b, 0);
+
+  const langTotals: Record<string, number> = {};
+  for (const [ext, count] of Object.entries(scan.languageDistribution)) {
+    const lang = EXT_TO_LANGUAGE[ext] ?? ext;
+    langTotals[lang] = (langTotals[lang] ?? 0) + count;
+  }
+
+  const langRows = Object.entries(langTotals)
+    .sort((a, b) => b[1] - a[1])
+    .map(([lang, count]) => {
+      const pct = totalSourceFiles > 0 ? ((count / totalSourceFiles) * 100).toFixed(1) : '0.0';
+      return `| ${lang} | ${count} | ${pct}% |`;
+    });
+
+  const frameworks: string[] = [];
+  const buildTools: string[] = [];
+  const testTools: string[] = [];
+
+  const CONFIG_DETECTIONS: Array<{ pattern: RegExp; category: 'framework' | 'build' | 'test'; label: string }> = [
+    { pattern: /next\.config\.(js|ts)/, category: 'framework', label: 'Next.js' },
+    { pattern: /angular\.json/, category: 'framework', label: 'Angular' },
+    { pattern: /nuxt\.config\.(js|ts)/, category: 'framework', label: 'Nuxt.js' },
+    { pattern: /svelte\.config\.(js|ts)/, category: 'framework', label: 'SvelteKit' },
+    { pattern: /vite\.config\.(js|ts)/, category: 'build', label: 'Vite' },
+    { pattern: /webpack\.config\.(js|ts)/, category: 'build', label: 'webpack' },
+    { pattern: /rollup\.config\.(js|ts)/, category: 'build', label: 'Rollup' },
+    { pattern: /babel\.config\.(js|json)|\.babelrc/, category: 'build', label: 'Babel' },
+    { pattern: /jest\.config\.(js|ts)/, category: 'test', label: 'Jest' },
+    { pattern: /vitest\.config\.(js|ts)/, category: 'test', label: 'Vitest' },
+    { pattern: /pytest\.ini|pyproject\.toml/, category: 'test', label: 'pytest' },
+    { pattern: /\.mocharc\.(js|yml|json)/, category: 'test', label: 'Mocha' },
+  ];
+
+  for (const configFile of scan.configFiles) {
+    for (const detection of CONFIG_DETECTIONS) {
+      if (detection.pattern.test(configFile)) {
+        const entry = `- ${detection.label} (detected from \`${configFile}\`)`;
+        if (detection.category === 'framework' && !frameworks.includes(entry)) frameworks.push(entry);
+        if (detection.category === 'build' && !buildTools.includes(entry)) buildTools.push(entry);
+        if (detection.category === 'test' && !testTools.includes(entry)) testTools.push(entry);
+      }
+    }
+  }
+
+  const lines: string[] = [
+    '# Technology Stack\n',
+    '## Languages',
+    '| Language | Files | Percentage |',
+    '|----------|-------|------------|',
+    ...langRows,
+    '',
+    '## Frameworks',
+    ...(frameworks.length > 0 ? frameworks : ['- (none detected)']),
+    '',
+    '## Build Tools',
+    ...(buildTools.length > 0 ? buildTools : ['- (none detected)']),
+    '',
+    '## Testing Tools',
+    ...(testTools.length > 0 ? testTools : ['- (none detected)']),
+  ];
+
+  return lines.join('\n');
+}
+
+export function generateDependencies(scan: WorkspaceScanResult): string {
+  const externalCounts: Record<string, number> = {};
+  const internalEdges: Array<{ source: string; target: string }> = [];
+
+  for (const edge of scan.importGraph) {
+    const imp = edge.importedModule;
+    if (imp.startsWith('.')) {
+      const sourceSeg = firstSegment(edge.sourceFile);
+      const targetSeg = firstSegment(imp);
+      if (sourceSeg && targetSeg && sourceSeg !== targetSeg) {
+        internalEdges.push({ source: sourceSeg, target: targetSeg });
+      }
+    } else {
+      const pkg = imp.split('/')[0] ?? imp;
+      if (pkg) {
+        externalCounts[pkg] = (externalCounts[pkg] ?? 0) + 1;
+      }
+    }
+  }
+
+  const extRows = Object.entries(externalCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([pkg, count]) => `| \`${pkg}\` | ${count} |`);
+
+  const mermaidEdgeSet = new Set<string>();
+  for (const e of internalEdges) {
+    mermaidEdgeSet.add(`  ${sanitizeMermaidId(e.source)} --> ${sanitizeMermaidId(e.target)}`);
+  }
+  const mermaidEdges = Array.from(mermaidEdgeSet).slice(0, 40);
+
+  const lines: string[] = [
+    '# Dependencies\n',
+    '## External Dependencies',
+    '| Package | Import Count |',
+    '|---------|-------------|',
+    ...(extRows.length > 0 ? extRows : ['| (none detected) | - |']),
+    '',
+    '## Internal Module Dependencies',
+    '```mermaid',
+    'graph LR',
+    ...(mermaidEdges.length > 0 ? mermaidEdges : ['  (no internal edges detected)']),
+    '```',
+    '',
+    'Top-level modules only (first path segment after root).',
+  ];
+
+  return lines.join('\n');
+}
+
+function firstSegment(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const stripped = normalized.replace(/^(\.\.?\/)+/, '');
+  const seg = stripped.split('/')[0] ?? '';
+  return seg.replace(/\.[^/.]+$/, '');
+}
+
+function sanitizeMermaidId(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_]/g, '_') || 'root';
+}
