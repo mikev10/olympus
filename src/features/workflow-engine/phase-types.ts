@@ -192,6 +192,7 @@ export interface ManifestArtifact {
   executedBy?: string | null;
   reviewedBy?: string | null;
   statusHistory?: Array<{ status: string; timestamp: string }>;
+  review_status?: 'pending_review' | 'reviewed' | 'approved' | 'revision_requested';
 }
 
 export interface ArtifactLink {
@@ -296,4 +297,11 @@ export interface Level1Plan {
   generated_at: string;
   approved_at: string | null;
   approved_by: 'human' | null;
+}
+
+export interface CeremonyConfig {
+  ceremony_mode: boolean;
+  pause_between_steps: boolean;
+  output_format: 'standard' | 'presentation';
+  review_prompt_style: 'inline' | 'explicit';
 }

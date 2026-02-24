@@ -25,6 +25,12 @@ import { execSync } from 'child_process';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+import { STATIC_MODEL_FORMAT_INSTRUCTIONS, DYNAMIC_MODEL_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/brownfield-analysis.js';
+import { LEVEL1_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/level1-plan.js';
+import { WORKSPACE_SCAN_SCHEMA } from '../features/workflow-engine/brownfield-scanner.js';
+import { BOLT_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/bolt-dispatcher.js';
+import { PRFAQ_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/prfaq-generator.js';
+
 import {
   HOOK_SCRIPTS,
   getHookScripts,
@@ -1850,6 +1856,16 @@ Extract flags from the input above:
 
 Everything remaining after flag extraction is the **feature description**. Store it for use throughout the pipeline.
 
+## Step 0b: Check Ceremony Config
+
+Read \`.olympus/config.json\` for a \`ceremony\` key. If \`ceremony_mode: true\`:
+- Add explicit "--- TEAM REVIEW POINT ---" markers before each gate
+- Add "TEAM: Please review the above and provide feedback before we proceed." prompts
+- Use section separators for screen-share readability
+If absent or false, proceed with standard formatting.
+
+---
+
 ## Step 1: Check for Active Workflows
 
 Before starting anything new, check for existing workflow state.
@@ -1928,20 +1944,27 @@ Proceed directly to Step 4 (INTENT stage).
 
 ### If Discovery runs
 
-Dispatch two agents in parallel to analyze the existing codebase:
+Dispatch agents to analyze the existing codebase using structured output formats:
 
-1. \`Task(subagent_type="explore-medium", description="Discovery: Analyze project structure and current state", prompt="...")\` — Analyze the project's file structure, key modules, entry points, dependencies, and overall architecture. Produce structured findings.
+**First**, generate a workspace scan artifact by walking the project:
+- Use \`Glob\` and \`Read\` to survey the project structure
+- Write \`aidlc-docs/{workflowId}/discovery/workspace-scan.json\` conforming to the WorkspaceScanResult schema:
+${WORKSPACE_SCAN_SCHEMA}
 
-2. \`Task(subagent_type="oracle-medium", description="Discovery: Analyze impact and risks", prompt="...")\` — Analyze the codebase for patterns, potential regression risks, change impact areas, and architectural constraints. Produce structured findings.
+**Then**, dispatch two agents in parallel for deeper analysis:
 
-Using the combined results from both agents, generate these 6 artifacts in \`aidlc-docs/{workflowId}/discovery/\`:
+1. \`Task(subagent_type="explore-medium", description="Discovery: Static code model", prompt="Analyze the project at {projectPath} and produce a **Static Model** in markdown. ${STATIC_MODEL_FORMAT_INSTRUCTIONS}")\`
+
+2. \`Task(subagent_type="oracle-medium", description="Discovery: Dynamic behavior model", prompt="Analyze the project at {projectPath} and produce a **Dynamic Model** in markdown. ${DYNAMIC_MODEL_FORMAT_INSTRUCTIONS}")\`
+
+Using the combined results, generate these 6 artifacts in \`aidlc-docs/{workflowId}/discovery/\`:
 
 1. **analysis-plan.md** — What was analyzed and why, methodology used.
 2. **current-state-analysis.md** — Current architecture, key modules, tech stack, dependency map.
 3. **regression-baseline.md** — Existing tests, coverage areas, known fragile areas, baseline behavior to preserve.
 4. **change-impact.md** — Areas likely affected by the proposed feature, ripple effects, integration points.
-5. **static-model.md** — Module dependency graph, type relationships, import chains.
-6. **dynamic-model.md** — Runtime flow, event chains, data flow through the system.
+5. **static-model.md** — Write the explore-medium agent's output (StaticModel format) to this file.
+6. **dynamic-model.md** — Write the oracle-medium agent's output (DynamicModel format) to this file.
 
 ### Discovery Gate
 
@@ -2089,6 +2112,32 @@ Derive a risk tier from the score:
 
 Update the checkpoint with the depth and risk information.
 
+### 4e.5. Generate Level 1 Plan
+
+Based on the depth assessment and brownfield detection, generate a Level 1 Plan:
+
+1. Classify the pathway type:
+   - **greenfield**: No existing source files (or <3 source files)
+   - **brownfield-enhancement**: Existing codebase + intent mentions "add", "new", "feature", "implement"
+   - **brownfield-refactor**: Existing codebase + intent mentions "refactor", "restructure", "migrate", "rewrite"
+   - **bugfix**: Intent mentions "fix", "bug", "broken", "regression", "error"
+   - **optimization**: Intent mentions "optimize", "performance", "speed", "cache", "reduce"
+
+2. Determine which phases and stages are included based on pathway:
+   - greenfield: Skip Discovery. Include Inception + Construction + Operations.
+   - brownfield-enhancement: Include all phases.
+   - brownfield-refactor: Include all phases. Skip PRFAQ in Inception.
+   - bugfix: Skip Discovery. Minimal Inception (no PRFAQ, no Momus). Shallow Construction (single BOLT).
+   - optimization: Include all phases. Full Operations (monitoring focus).
+
+3. Write the Level 1 Plan artifact to \`aidlc-docs/{workflowId}/level1-plan.md\`:
+
+${LEVEL1_PLAN_FORMAT_INSTRUCTIONS}
+
+4. Present the L1 Plan summary alongside the INTENT document at Gate 1.
+
+The L1 Plan controls subsequent behavior: if Discovery was skipped by L1 Plan, Step 3 is skipped. If PRFAQ is excluded, PRFAQ generation is skipped. The L1 Plan is the **authoritative source** for which stages execute.
+
 ### 4f. Gate 1: INTENT Approval (ALWAYS BLOCKING)
 
 Present the INTENT document to the user (the PM):
@@ -2117,7 +2166,10 @@ After INTENT approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "depth": "{SHALLOW|MEDIUM|DEEP}",
   "depthScore": {3-30},
   "riskTier": {1-3},
-  "gatesCompleted": ["intent"]
+  "gatesCompleted": ["intent"],
+  "level1_plan_path": "aidlc-docs/{workflowId}/level1-plan.md",
+  "pathway_type": "{pathway_type}",
+  "skipped_phases": ["{phases excluded by L1 Plan}"]
 }
 \`\`\`
 
@@ -2233,6 +2285,22 @@ created: "{ISO-8601 date}"
 - **Design-time NFRs** (security, compliance, accessibility) are gate-blocking — they participate in dual validation and must be satisfied before proceeding.
 - **Runtime NFRs** (performance, availability) are tracked in the manifest but are NOT gate-blocking.
 
+### 5e.5. PRFAQ Generation (if included in L1 Plan)
+
+Check the Level 1 Plan: if the PRFAQ stage is included (not bugfix or brownfield-refactor pathways):
+
+1. Build a PRFAQ prompt using the Amazon PRFAQ format:
+${PRFAQ_FORMAT_INSTRUCTIONS}
+
+2. Dispatch an agent to generate the PRFAQ:
+   \`\`\`
+   Task(subagent_type="olympian", description="Generate PRFAQ", prompt="Generate an Amazon-style PRFAQ for: {feature name}. Context: {INTENT document summary}. {PRFAQ format instructions}")
+   \`\`\`
+3. Write the result to \`aidlc-docs/{workflowId}/inception/prfaq.md\`
+4. If generation fails, log a warning and continue — PRFAQ is non-blocking.
+
+If the L1 Plan excludes PRFAQ (bugfix/brownfield-refactor pathways), skip this step entirely.
+
 ### 5f. Self-consistency validation
 
 Verify that the INTENT document is internally consistent:
@@ -2268,6 +2336,7 @@ The Momus review requirement depends on trust and risk:
     prompt="Critically review this INTENT document for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks. INTENT: {full intent document}."
   )
   \`\`\`
+  After Momus returns, save the review output to \`aidlc-docs/{workflowId}/inception/intent-review.md\` with metadata: reviewer (momus), trigger (automatic), trust level at time of review, and verdict.
   Present Momus feedback to the user. Address any critical issues before proceeding.
 
 - **Trust 2+**: Momus review is on-demand. Tell the user: "Optional: Run \`/review\` for Momus feedback on the INTENT document."
@@ -2296,7 +2365,10 @@ After all INTENT gates pass, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "stage": "construction_prep",
   "status": "in_progress",
   "updated": "{ISO-8601}",
-  "gatesCompleted": ["intent", "intent_business", "momus_review"]
+  "gatesCompleted": ["intent", "intent_business", "momus_review"],
+  "level1_plan_path": "aidlc-docs/{workflowId}/level1-plan.md",
+  "pathway_type": "{pathway_type}",
+  "skipped_phases": ["{phases excluded by L1 Plan}"]
 }
 \`\`\`
 
@@ -2366,34 +2438,72 @@ description: Review a plan with Momus
 
 [DELEGATION REQUIRED]
 
-You must delegate this plan review to the Momus agent.
+You must delegate this review to the Momus agent with criteria tailored to the artifact type.
 
-**IMMEDIATELY** use the Task tool to spawn the momus agent:
+## Artifact Type Detection
+
+Determine the artifact type from the file path provided in \`$ARGUMENTS\`:
+
+| Path Pattern | Artifact Type |
+|-------------|--------------|
+| \`.olympus/plans/*\` | Plan |
+| \`*/inception/intent.md\` | Intent |
+| \`*/inception/user-stories/*\` | User Stories |
+| \`*/inception/application-design/unit-of-work*.md\` | Unit Decomposition |
+| \`*/construction/*/BOLT-*-plan.md\` or \`*/construction/*/bolt-*-plan.md\` | Bolt Plan |
+| \`*/inception/application-design/components.md\` or \`*/inception/application-design/services.md\` | Design Docs |
+| \`*/audit.md\` | Audit Trail |
+| No path provided | Plan (default — review latest plan in \`.olympus/plans/\`) |
+| Unknown path | Generic |
+
+## Per-Artifact Evaluation Criteria
+
+Based on the detected artifact type, use these criteria:
+
+**Plan**: Clarity (80%+ claims cite file/line refs), Testability (90%+ criteria testable), Verification (file refs exist), Specificity (no vague terms without metrics)
+
+**Intent**: Problem clarity, Scope boundaries defined, Measurable success criteria, Constraint completeness, Exclusions defined, Persona coverage
+
+**User Stories**: INVEST compliance, Acceptance criteria testability, Persona coverage, No orphaned stories
+
+**Unit Decomposition**: Unit independence, Story coverage completeness, Dependency validity, No circular deps
+
+**Bolt Plan**: Scope fits single bolt, Feasibility, Test plan present, Risk identification, Consistency with unit spec
+
+**Design Docs**: Consistency with intent, Component completeness, Interface definitions, Dependency accuracy
+
+**Audit Trail**: Completeness (all decisions recorded), Traceability to requirements, Gate decisions documented
+
+**Generic**: Structure, Completeness, Internal consistency, Actionability
+
+## Dispatch to Momus
+
+**IMMEDIATELY** use the Task tool:
 
 \`\`\`
 Task(
   subagent_type="momus",
-  description="Critical plan review",
+  description="Artifact review",
   prompt="""
 $ARGUMENTS
 
-Please critically review the specified plan (or the most recent plan in \`.olympus/plans/\` if no path provided).
-
-Evaluation Criteria:
-- **Clarity**: 80%+ of claims must cite specific file/line references
-- **Testability**: 90%+ of acceptance criteria must be concrete and testable
-- **Verification**: All file references must be verified to exist
-- **Specificity**: No vague terms like "improve", "optimize" without metrics
+Detect the artifact type from the file path and apply the appropriate evaluation criteria listed above.
+If no path is provided, review the most recent plan in \`.olympus/plans/\`.
 
 Provide one of these verdicts:
-- **APPROVED** - Plan meets all criteria, ready for execution
-- **REVISE** - Plan has issues (provide specific feedback)
-- **REJECT** - Fundamental problems requiring replanning
+- **APPROVED** - Artifact meets all criteria
+- **REVISE** - Issues found (provide specific feedback)
+- **REJECT** - Fundamental problems
+
+After your review, save the review output as a sibling file:
+- Name it \`{artifact-name}-review.md\` in the same directory as the reviewed file
+- Include metadata at the top: reviewer (momus), trigger (manual), trust level (from .olympus/trust-state.json), verdict
+- Example: reviewing \`intent.md\` → save review to \`intent-review.md\`
   """
 )
 \`\`\`
 
-**DO NOT** attempt to review the plan yourself - you must spawn the Momus agent.`,
+**DO NOT** attempt to review the artifact yourself - you must spawn the Momus agent.`,
 
   'prometheus/skill.md': `---
 description: Start strategic planning with Prometheus
@@ -2481,19 +2591,63 @@ When an active workflow is detected, switch to BOLT dispatch mode:
 1. Read the BOLT spec from \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/{bolt-id}.md\`
 2. Read the parent UNIT spec at \`aidlc-docs/{workflowId}/construction/{parent-unit-id}/spec.md\` for context
 3. Update checkpoint \`active_bolt_id\` to the BOLT being executed
-4. Dispatch to the appropriate agent:
+4. **Dispatch with Plan-Verify-Generate Protocol**:
+
+   The agent dispatched MUST follow Plan-Verify-Generate discipline:
+
+   Include this in the agent prompt:
+   \`\`\`
+   ## Execution Protocol (Plan-Verify-Generate)
+   BEFORE implementing, you MUST:
+   1. Create an execution plan as a markdown file with checkboxes for each step
+   2. Save the plan to: aidlc-docs/{workflowId}/construction/{parent-unit-id}/{bolt-id}-plan.md
+   3. STOP and report: "BOLT plan ready for review at {path}"
+   4. After approval, execute the plan step by step, checking off each item
+
+   Do NOT begin implementation until the plan is approved.
+   \`\`\`
+
+   Dispatch to the appropriate agent:
    - Code/backend BOLTs → \`olympian\` agent
    - UI/component/styling BOLTs → \`frontend-engineer\` agent
    - Investigation/debugging BOLTs → \`oracle\` agent
-5. After agent completes:
+
+5. **Trust-based plan approval**:
+
+   After the agent produces a BOLT plan file:
+   - Read \`.olympus/trust-state.json\` to get the current trust level
+   - **Trust 0-1**: Present the plan to the user: "**BOLT plan ready for review.** {display plan contents} Approve? [Y/n]"
+   - **Trust 2**: Auto-approve with notification: "BOLT plan auto-approved (Trust Level 2). Proceeding with execution..."
+   - **Trust 3**: Auto-approve silently (no notification)
+   - Record the approval in checkpoint: set \`bolt_plan_path\` to the plan file path
+
+6. **Update checkpoint status transitions**:
+   - Before BOLT dispatch: set status to \`in_progress\`
+   - After BOLT produces plan: set status to \`awaiting_bolt_plan_approval\`
+   - After plan approved: set status to \`executing_bolt_plan\`
+   - After BOLT completes: set status to \`in_progress\` (ready for next BOLT)
+
+7. **Record gate audit entry** after each BOLT plan approval:
+   Append to the manifest's \`gate_audit\` array:
+   \`\`\`json
+   {
+     "phase": "construction",
+     "timestamp": "{ISO-8601}",
+     "action": "approved",
+     "actor": "{human|trust}",
+     "reason": "BOLT plan approved for {boltId}"
+   }
+   \`\`\`
+
+8. After agent completes execution:
    a. **Gate 4**: Present the code changes to the developer for review
    b. If approved: mark BOLT as fulfilled in \`aidlc-docs/{workflowId}/manifest.json\`, update checkpoint
    c. If rejected: re-execute the BOLT with the developer's feedback
-6. **Track progress** after each BOLT completes:
+9. **Track progress** after each BOLT completes:
    a. Update the BOLT's \`.md\` file: set \`status: complete\` in frontmatter, record completion timestamp
    b. Update \`aidlc-docs/{workflowId}/checkpoint.json\`: increment \`bolts_completed\`, set \`active_bolt_id\` to the next pending BOLT, update \`updated\` timestamp
    c. When ALL BOLTs in a UNIT are complete, update that UNIT's \`spec.md\` status to \`complete\` and increment \`units_completed\` in checkpoint
-7. Continue to the next pending BOLT
+10. Continue to the next pending BOLT
 
 **Execution order**: BOLTs are ordered by UNIT ID then BOLT ID within each unit (e.g., UNIT-001/BOLT-001, UNIT-001/BOLT-002, UNIT-002/BOLT-001).
 

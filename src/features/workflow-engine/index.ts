@@ -399,3 +399,37 @@ export { populateDiscoveryModels } from './discovery.js';
 
 // Engine
 export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
+
+// Audit Generator
+export type {
+  AuditDocument,
+  AuditTimelineEntry,
+  TraceabilityEntry,
+  TrustChange,
+  CascadeEvent,
+} from './audit-generator.js';
+export {
+  generateAuditDocument,
+  renderAuditMarkdown,
+  writeAuditArtifact,
+  appendToAudit,
+} from './audit-generator.js';
+
+// PRFAQ Generator
+export type { PRFAQResult, PRFAQOptions } from './prfaq-generator.js';
+export {
+  buildPRFAQPrompt,
+  parsePRFAQResponse,
+  writePRFAQArtifact,
+  attemptPRFAQGeneration,
+  PRFAQ_FORMAT_INSTRUCTIONS,
+} from './prfaq-generator.js';
+
+// Ceremony
+export type { CeremonyConfig } from './phase-types.js';
+export {
+  getDefaultCeremonyConfig,
+  loadCeremonyConfig,
+  formatForCeremony,
+  getCeremonyArtifactTemplates,
+} from './ceremony.js';
