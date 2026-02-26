@@ -410,7 +410,7 @@ function scorePreferences(sections: IntentSections): number {
 }
 
 /**
- * Derive risk factors from IDEA content
+ * Derive risk factors from INTENT content
  */
 function deriveRiskFactorsFromIntent(content: string, sections: IntentSections): RiskFactors {
   const lowerContent = content.toLowerCase();

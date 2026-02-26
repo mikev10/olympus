@@ -2,7 +2,7 @@
  * Workflow Transition Messages Hook Tests
  *
  * Tests all 5 transition message points:
- * 1. IDEA approved → correct message with depth/risk/trust info
+ * 1. INTENT approved → correct message with depth/risk/trust info
  * 2. INTENT locked → correct message with unit/bolt counts
  * 3. UNITs created → correct message with unit names
  * 4. BOLT completion → correct message with progress (n/total)

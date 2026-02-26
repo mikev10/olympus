@@ -180,8 +180,8 @@ describe('Gate Discovery Bridge - Integration', () => {
     const events: GateEvent[] = [
       {
         gateNumber: 1,
-        artifactId: 'IDEA-001',
-        artifactType: 'idea',
+        artifactId: 'INTENT-001',
+        artifactType: 'intent',
         action: 'rejected',
         reason: 'Not aligned with business goals',
         previouslyRejected: false,
@@ -214,7 +214,7 @@ describe('Gate Discovery Bridge - Integration', () => {
 
     // Verify each discovery is parseable and has correct data
     const discoveries = lines.map(line => JSON.parse(line) as AgentDiscovery);
-    expect(discoveries[0].summary).toContain('IDEA-001');
+    expect(discoveries[0].summary).toContain('INTENT-001');
     expect(discoveries[1].summary).toContain('INTENT-002');
     expect(discoveries[2].summary).toContain('BOLT-015');
 

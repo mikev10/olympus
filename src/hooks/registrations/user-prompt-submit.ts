@@ -124,7 +124,7 @@ export function registerUserPromptSubmitHooks(): void {
           const workflowPrompt = buildStructuredWorkflowPrompt(featureName, checkpoint);
 
           // Inject workflow context hint
-          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'idea'}]`;
+          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'intent'}]`;
           let additionalContext = `${contextHint}\n\n${workflowPrompt}`;
 
           // Add depth override if specified
@@ -179,7 +179,7 @@ export function registerUserPromptSubmitHooks(): void {
           const resumptionPrompt = buildWorkflowResumptionPrompt(checkpoint.feature_name, checkpoint);
 
           // Inject workflow context hint
-          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'idea'}]`;
+          const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'intent'}]`;
           const additionalContext = `${contextHint}\n\n${resumptionPrompt}`;
 
           return {

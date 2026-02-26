@@ -1967,10 +1967,10 @@ describe('Quality Gate Hooks', () => {
       });
       vi.mocked(shouldAutoAdvance).mockReturnValue(false);
       vi.mocked(getGate3TrustBehavior).mockReturnValue(trustBehavior);
-      vi.mocked(readFileSync).mockReturnValue('# IDEA content');
+      vi.mocked(readFileSync).mockReturnValue('# INTENT content');
       vi.mocked(runDualValidation).mockReturnValue({
         parentCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'UNIT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },
@@ -1978,7 +1978,7 @@ describe('Quality Gate Hooks', () => {
           checked_at: '2025-01-01T00:00:00.000Z',
         },
         rootCheck: {
-          source_artifact_id: 'idea',
+          source_artifact_id: 'intent',
           target_artifact_id: 'UNIT-001',
           verification: { conformance_score: 80, coverage_percentage: 85, missing_items: [], passed: true },
           validation: { alignment_score: 75, alignment_questions: [], passed: true },

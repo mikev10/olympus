@@ -50,10 +50,10 @@ describe('bolt-dispatcher', () => {
     mkdirSync(unit002Dir, { recursive: true });
     mkdirSync(inceptionDir, { recursive: true });
 
-    // Create idea.md
+    // Create intent source file
     writeFileSync(
-      join(inceptionDir, 'idea.md'),
-      `# IDEA: Test Feature
+      join(inceptionDir, 'intent.md'),
+      `# INTENT: Test Feature
 
 ## Problem Statement
 Users need a new feature to solve problem X.
@@ -555,7 +555,7 @@ Debug and investigate the authentication failure.
 
       mkdirSync(unit999Dir, { recursive: true });
 
-      // Create a minimal BOLT without unit spec, intent, or idea
+      // Create a minimal BOLT without unit spec or intent
       writeFileSync(
         join(unit999Dir, 'BOLT-999.md'),
         `# BOLT-999: Minimal test

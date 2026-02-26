@@ -50,7 +50,7 @@ function getStageTaskDescription(stage: WorkflowStage): string {
  * // Returns:
  * // You are beginning a structured workflow for feature: user-auth
  * //
- * // Current stage: idea
+ * // Current stage: intent
  * // Status: in_progress
  * //
  * // Next step: capture the problem statement, personas, success metrics, and constraints
@@ -197,7 +197,7 @@ export function buildWorkflowTransitionPrompt(
 function getValidationType(stage: WorkflowStage): string | null {
   switch (stage) {
     case 'intent':
-      return 'INTENT completeness and alignment with IDEA';
+      return 'INTENT completeness and alignment with INTENT';
     case 'unit':
       return 'UNIT decomposition coverage and interface contracts';
     case 'bolt':

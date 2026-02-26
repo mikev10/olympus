@@ -79,10 +79,10 @@ describe('Operations Templates', () => {
       const artifacts: ManifestArtifact[] = [
         {
           id: 'VIS-001',
-          type: 'IDEA',
+          type: 'INTENT',
           phase: 'inception',
           stage: 'discover',
-          path: '/path/to/idea.md',
+          path: '/path/to/intent.md',
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
           validation_passed: true,
@@ -436,10 +436,10 @@ describe('Operations Templates', () => {
       const artifacts: ManifestArtifact[] = [
         {
           id: 'VIS-001',
-          type: 'IDEA',
+          type: 'INTENT',
           phase: 'inception',
           stage: 'discover',
-          path: '/path/to/idea.md',
+          path: '/path/to/intent.md',
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
           validation_passed: true,
@@ -479,10 +479,10 @@ describe('Operations Templates', () => {
       const artifacts: ManifestArtifact[] = [
         {
           id: 'VIS-001',
-          type: 'IDEA',
+          type: 'INTENT',
           phase: 'inception',
           stage: 'discover',
-          path: '/path/to/idea.md',
+          path: '/path/to/intent.md',
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
           validation_passed: true,

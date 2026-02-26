@@ -34,10 +34,10 @@ describe('rejection-dispatcher', () => {
     const workflowId = 'test-workflow';
 
     describe('prompt construction', () => {
-      it('gate 1 prompt includes "Revise the IDEA"', async () => {
+      it('gate 1 prompt includes "Revise the INTENT"', async () => {
         const context: RejectionContext = {
           gateNumber: 1,
-          artifactId: 'IDEA-001',
+          artifactId: 'INTENT-001',
           rejectionReason: 'Too vague',
           rejectedBy: 'human',
           attemptNumber: 1,
@@ -45,7 +45,7 @@ describe('rejection-dispatcher', () => {
 
         const result = await dispatchRejection(projectPath, workflowId, context);
 
-        expect(result.prompt).toContain('Revise the IDEA based on this feedback: Too vague');
+        expect(result.prompt).toContain('Revise the INTENT based on this feedback: Too vague');
       });
 
       it('gate 2 prompt includes "Update the INTENT"', async () => {
@@ -275,7 +275,7 @@ describe('rejection-dispatcher', () => {
       it('gate 1 returns prometheus agent', async () => {
         const context: RejectionContext = {
           gateNumber: 1,
-          artifactId: 'IDEA-001',
+          artifactId: 'INTENT-001',
           rejectionReason: 'Too vague',
           rejectedBy: 'human',
           attemptNumber: 1,

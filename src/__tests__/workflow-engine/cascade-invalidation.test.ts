@@ -35,32 +35,32 @@ describe('Cascade Invalidation System', () => {
 
   describe('cascadeInvalidation', () => {
     it('marks downstream artifacts as stale when parent changes', async () => {
-      // Setup: Create manifest with IDEA -> INTENT -> UNIT -> BOLT chain
+      // Setup: Create manifest with INTENT -> UNIT -> BOLT chain
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
       const manifest = loadManifest(manifestPath);
       expect(manifest).toBeTruthy();
 
       // Create artifacts
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const unitPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'spec.md');
       const boltPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'BOLT-001.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
+      await fs.ensureDir(path.dirname(intentSourcePath));
       await fs.ensureDir(path.dirname(unitPath));
-      await fs.writeFile(ideaPath, '# IDEA\nSolve problem X', 'utf-8');
+      await fs.writeFile(intentSourcePath, '# INTENT\nSolve problem X', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nImplement solution Y', 'utf-8');
       await fs.writeFile(unitPath, '# UNIT\nBuild module Z', 'utf-8');
       await fs.writeFile(boltPath, '# BOLT\nCreate component A', 'utf-8');
 
       // Register artifacts
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -95,9 +95,9 @@ describe('Cascade Invalidation System', () => {
         write_complete: true,
       });
 
-      // Link artifacts: IDEA -> INTENT -> UNIT -> BOLT
+      // Link artifacts: INTENT -> UNIT -> BOLT
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -121,12 +121,12 @@ describe('Cascade Invalidation System', () => {
       });
       saveManifest(manifestPath, manifestBefore);
 
-      // Act: Trigger cascade from IDEA
-      cascadeInvalidation(manifestPath, 'idea-001');
+      // Act: Trigger cascade from INTENT
+      cascadeInvalidation(manifestPath, 'intent-source-001');
 
       // Assert: All downstream artifacts should be stale
       const manifestAfter = loadManifest(manifestPath)!;
-      const ideaArtifact = manifestAfter.artifacts.find((a) => a.id === 'idea-001');
+      const ideaArtifact = manifestAfter.artifacts.find((a) => a.id === 'intent-source-001');
       const intentArtifact = manifestAfter.artifacts.find((a) => a.id === 'intent-001');
       const unitArtifact = manifestAfter.artifacts.find((a) => a.id === 'unit-001');
       const boltArtifact = manifestAfter.artifacts.find((a) => a.id === 'bolt-001');
@@ -143,23 +143,23 @@ describe('Cascade Invalidation System', () => {
     });
 
     it('handles fulfilled artifacts during cascade (marks them stale)', async () => {
-      // Setup: Create manifest with IDEA -> INTENT chain
+      // Setup: Create manifest with INTENT artifact chain
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
-      await fs.writeFile(ideaPath, '# IDEA\nSolve problem X', 'utf-8');
+      await fs.ensureDir(path.dirname(intentSourcePath));
+      await fs.writeFile(intentSourcePath, '# INTENT\nSolve problem X', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nImplement solution Y', 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -175,19 +175,19 @@ describe('Cascade Invalidation System', () => {
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
 
       // Set INTENT to fulfilled status (this is normally not allowed to transition to stale)
       const manifest = loadManifest(manifestPath)!;
-      manifest.artifacts.find((a) => a.id === 'idea-001')!.contract_status = 'active';
+      manifest.artifacts.find((a) => a.id === 'intent-source-001')!.contract_status = 'active';
       manifest.artifacts.find((a) => a.id === 'intent-001')!.contract_status = 'fulfilled';
       saveManifest(manifestPath, manifest);
 
-      // Act: Trigger cascade from IDEA
-      cascadeInvalidation(manifestPath, 'idea-001');
+      // Act: Trigger cascade from INTENT
+      cascadeInvalidation(manifestPath, 'intent-source-001');
 
       // Assert: INTENT should be marked stale even though it was fulfilled
       const manifestAfter = loadManifest(manifestPath)!;
@@ -202,19 +202,19 @@ describe('Cascade Invalidation System', () => {
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
-      await fs.writeFile(ideaPath, '# IDEA\nSolve problem X', 'utf-8');
+      await fs.ensureDir(path.dirname(intentSourcePath));
+      await fs.writeFile(intentSourcePath, '# INTENT\nSolve problem X', 'utf-8');
       await fs.writeFile(intentPath, '# INTENT\nImplement solution Y', 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -230,21 +230,21 @@ describe('Cascade Invalidation System', () => {
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
 
       // Set INTENT to already stale
       const manifest = loadManifest(manifestPath)!;
-      manifest.artifacts.find((a) => a.id === 'idea-001')!.contract_status = 'active';
+      manifest.artifacts.find((a) => a.id === 'intent-source-001')!.contract_status = 'active';
       const intentArtifact = manifest.artifacts.find((a) => a.id === 'intent-001')!;
       intentArtifact.contract_status = 'stale';
       intentArtifact.stale_reason = 'Already stale before cascade';
       saveManifest(manifestPath, manifest);
 
-      // Act: Trigger cascade from IDEA
-      cascadeInvalidation(manifestPath, 'idea-001');
+      // Act: Trigger cascade from INTENT
+      cascadeInvalidation(manifestPath, 'intent-source-001');
 
       // Assert: INTENT should still be stale with original reason
       const manifestAfter = loadManifest(manifestPath)!;
@@ -257,30 +257,30 @@ describe('Cascade Invalidation System', () => {
 
   describe('revalidateStaleArtifacts', () => {
     it('runs revalidation and processes stale artifacts', async () => {
-      // Setup: Create manifest with IDEA -> INTENT
+      // Setup: Create manifest with INTENT artifacts
       // Note: This test verifies the revalidation mechanism runs correctly.
       // Whether artifacts pass validation depends on the alignment engine's scoring,
       // which is tested separately in alignment.test.ts
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
+      await fs.ensureDir(path.dirname(intentSourcePath));
 
-      const ideaContent = `# IDEA\n\n## Problem Statement\nSolve problem X\n\n## Success Metrics\n- Metric 1\n- Metric 2`;
+      const intentSourceContent = `# INTENT\n\n## Problem Statement\nSolve problem X\n\n## Success Metrics\n- Metric 1\n- Metric 2`;
       const intentContent = `# INTENT\n\nSolution for problem X with metric 1 and metric 2`;
 
-      await fs.writeFile(ideaPath, ideaContent, 'utf-8');
+      await fs.writeFile(intentSourcePath, intentSourceContent, 'utf-8');
       await fs.writeFile(intentPath, intentContent, 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -296,7 +296,7 @@ describe('Cascade Invalidation System', () => {
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -319,17 +319,17 @@ describe('Cascade Invalidation System', () => {
     });
 
     it('keeps non-conforming artifacts stale', async () => {
-      // Setup: Create manifest with IDEA -> INTENT (intentionally misaligned)
+      // Setup: Create manifest with INTENT artifacts (intentionally misaligned)
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
+      await fs.ensureDir(path.dirname(intentSourcePath));
 
-      // Create IDEA and INTENT with minimal alignment
-      const ideaContent = `# IDEA
+      // Create INTENT source and INTENT with minimal alignment
+      const intentSourceContent = `# INTENT
 
 ## Problem Statement
 Users need a better authentication system with OAuth and SSO support.
@@ -347,15 +347,15 @@ Users need a better authentication system with OAuth and SSO support.
 
 This is a totally different feature about data visualization.`;
 
-      await fs.writeFile(ideaPath, ideaContent, 'utf-8');
+      await fs.writeFile(intentSourcePath, intentSourceContent, 'utf-8');
       await fs.writeFile(intentPath, intentContent, 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -371,7 +371,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -432,16 +432,16 @@ This is a totally different feature about data visualization.`;
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       // Register artifacts but don't create files
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -457,7 +457,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -475,28 +475,28 @@ This is a totally different feature about data visualization.`;
   });
 
   describe('Integration: modify artifact -> cascade -> revalidate', () => {
-    it('full workflow: edit IDEA, downstream goes stale, revalidate processes artifacts', async () => {
+    it('full workflow: edit INTENT, downstream goes stale, revalidate processes artifacts', async () => {
       // Setup
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      const ideaPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'idea.md');
+      const intentSourcePath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
-      await fs.ensureDir(path.dirname(ideaPath));
+      await fs.ensureDir(path.dirname(intentSourcePath));
 
-      const ideaV1 = `# IDEA\n\n## Problem Statement\nAuth problem\n\n## Success Metrics\n- 99% uptime`;
+      const intentV1 = `# INTENT\n\n## Problem Statement\nAuth problem\n\n## Success Metrics\n- 99% uptime`;
       const intentContent = `# INTENT\n\nSolve auth problem with 99% uptime`;
 
-      await fs.writeFile(ideaPath, ideaV1, 'utf-8');
+      await fs.writeFile(intentSourcePath, intentV1, 'utf-8');
       await fs.writeFile(intentPath, intentContent, 'utf-8');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
-        path: ideaPath,
+        path: intentSourcePath,
         validation_passed: true,
         write_complete: true,
       });
@@ -512,7 +512,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -523,13 +523,13 @@ This is a totally different feature about data visualization.`;
       });
       saveManifest(manifestPath, manifest);
 
-      // Act 1: Modify IDEA (simulate manual edit)
-      const ideaV2 = `# IDEA\n\n## Problem Statement\nAuth problem v2\n\n## Success Metrics\n- 99% uptime\n- OAuth`;
+      // Act 1: Modify INTENT (simulate manual edit)
+      const intentV2 = `# INTENT\n\n## Problem Statement\nAuth problem v2\n\n## Success Metrics\n- 99% uptime\n- OAuth`;
 
-      await fs.writeFile(ideaPath, ideaV2, 'utf-8');
+      await fs.writeFile(intentSourcePath, intentV2, 'utf-8');
 
       // Trigger cascade manually (in real system, writeArtifact would do this)
-      cascadeInvalidation(manifestPath, 'idea-001');
+      cascadeInvalidation(manifestPath, 'intent-source-001');
 
       // Assert: INTENT should be stale
       const manifestAfterCascade = loadManifest(manifestPath)!;
@@ -541,7 +541,7 @@ This is a totally different feature about data visualization.`;
 
       // Assert: Revalidation completed
       expect(result.errors).toHaveLength(0);
-      expect(result.restored.length + result.stillStale.length).toBe(2); // Both IDEA and INTENT processed
+      expect(result.restored.length + result.stillStale.length).toBe(2); // Both INTENT artifacts processed
 
       // Verify manifest was updated (artifacts either restored or remain stale)
       const manifestFinal = loadManifest(manifestPath)!;
@@ -566,7 +566,7 @@ This is a totally different feature about data visualization.`;
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',
@@ -586,7 +586,7 @@ This is a totally different feature about data visualization.`;
       });
 
       linkArtifacts(manifestPath, {
-        source_id: 'idea-001',
+        source_id: 'intent-source-001',
         target_id: 'intent-001',
         link_type: 'derives',
       });
@@ -620,7 +620,7 @@ This is a totally different feature about data visualization.`;
       // Register after write
       const intentPath2 = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
       registerArtifact(manifestPath, {
-        id: 'idea-001',
+        id: 'intent-source-001',
         type: '.md',
         phase: 'inception',
         stage: 'intent',

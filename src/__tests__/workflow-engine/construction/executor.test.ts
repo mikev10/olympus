@@ -135,9 +135,6 @@ Follow best practices
     );
   }
 
-  /**
-   * Helper: create idea.md for dual validation
-   */
   async function createIdeaFile(): Promise<void> {
     const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
     await fs.ensureDir(intentDir);

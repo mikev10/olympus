@@ -7,7 +7,7 @@ import {
 } from '../../features/workflow-engine/requirements.js';
 
 // Test Fixtures
-const IDEA_WITH_STAKEHOLDERS = `---
+const INTENT_WITH_STAKEHOLDERS = `---
 risk_tier: medium
 ---
 
@@ -38,7 +38,7 @@ Our users need better visibility into their data.
 - Dashboard loads in < 2s
 `;
 
-const IDEA_WITHOUT_STAKEHOLDERS = `---
+const INTENT_WITHOUT_STAKEHOLDERS = `---
 risk_tier: low
 ---
 
@@ -62,7 +62,7 @@ Internal tool for the team, used by customers occasionally.
 - Logs captured successfully
 `;
 
-const IDEA_WITH_COMPLIANCE = `---
+const INTENT_WITH_COMPLIANCE = `---
 risk_tier: high
 ---
 
@@ -106,7 +106,7 @@ As a user, I want to export reports. Budget consideration for third-party servic
 
 ## Requirement Coverage
 
-All IDEA constraints are addressed.
+All INTENT constraints are addressed.
 `;
 
 const SPEC_CONTENT = `---
@@ -143,7 +143,7 @@ estimated_effort: 4
 
 describe('buildStakeholderMap', () => {
   it('parses explicit stakeholders from Stakeholders section (3 stakeholders)', () => {
-    const result = buildStakeholderMap(IDEA_WITH_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITH_STAKEHOLDERS);
 
     expect(result.stakeholders).toHaveLength(3);
     expect(result.stakeholders.map(s => s.name)).toContain('Product Owner');
@@ -152,7 +152,7 @@ describe('buildStakeholderMap', () => {
   });
 
   it('parsed stakeholders have correct interest/influence levels', () => {
-    const result = buildStakeholderMap(IDEA_WITH_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITH_STAKEHOLDERS);
 
     const productOwner = result.stakeholders.find(s => s.name === 'Product Owner');
     expect(productOwner?.interest).toBe('high');
@@ -168,38 +168,38 @@ describe('buildStakeholderMap', () => {
   });
 
   it('parsed stakeholders have concerns', () => {
-    const result = buildStakeholderMap(IDEA_WITH_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITH_STAKEHOLDERS);
 
     const productOwner = result.stakeholders.find(s => s.name === 'Product Owner');
     expect(productOwner?.concerns).toContain('Responsible for feature prioritization');
   });
 
   it('without Stakeholders section: includes "Development Team" by default', () => {
-    const result = buildStakeholderMap(IDEA_WITHOUT_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITHOUT_STAKEHOLDERS);
 
     expect(result.stakeholders.some(s => s.name === 'Development Team')).toBe(true);
   });
 
   it('without Stakeholders section: includes "End Users" when Business Context mentions "customers" or "users"', () => {
-    const result = buildStakeholderMap(IDEA_WITHOUT_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITHOUT_STAKEHOLDERS);
 
     expect(result.stakeholders.some(s => s.name === 'End Users')).toBe(true);
   });
 
   it('without Stakeholders section: includes "Compliance Team" when Constraints mentions "compliance"', () => {
-    const result = buildStakeholderMap(IDEA_WITH_COMPLIANCE);
+    const result = buildStakeholderMap(INTENT_WITH_COMPLIANCE);
 
     expect(result.stakeholders.some(s => s.name === 'Compliance Team')).toBe(true);
   });
 
   it('without Stakeholders section: includes "Finance" when Constraints mentions "budget"', () => {
-    const result = buildStakeholderMap(IDEA_WITHOUT_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITHOUT_STAKEHOLDERS);
 
     expect(result.stakeholders.some(s => s.name === 'Finance')).toBe(true);
   });
 
   it('returns created_at timestamp', () => {
-    const result = buildStakeholderMap(IDEA_WITH_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITH_STAKEHOLDERS);
 
     expect(result.created_at).toBeDefined();
     expect(typeof result.created_at).toBe('string');
@@ -214,7 +214,7 @@ describe('buildStakeholderMap', () => {
   });
 
   it('handles content with frontmatter correctly', () => {
-    const result = buildStakeholderMap(IDEA_WITH_STAKEHOLDERS);
+    const result = buildStakeholderMap(INTENT_WITH_STAKEHOLDERS);
 
     // Should parse stakeholders despite frontmatter
     expect(result.stakeholders).toHaveLength(3);
@@ -223,7 +223,7 @@ describe('buildStakeholderMap', () => {
 
 describe('classifyConstraints', () => {
   it('classifies technical constraints (integrate, API, database, schema)', () => {
-    const result = classifyConstraints(IDEA_WITHOUT_STAKEHOLDERS);
+    const result = classifyConstraints(INTENT_WITHOUT_STAKEHOLDERS);
 
     const technicalConstraints = result.constraints.filter(c => c.category === 'technical');
     expect(technicalConstraints.length).toBeGreaterThan(0);
@@ -244,7 +244,7 @@ describe('classifyConstraints', () => {
   });
 
   it('classifies budget constraints (budget, $, cost)', () => {
-    const result = classifyConstraints(IDEA_WITHOUT_STAKEHOLDERS);
+    const result = classifyConstraints(INTENT_WITHOUT_STAKEHOLDERS);
 
     const budgetConstraints = result.constraints.filter(c => c.category === 'budget');
     expect(budgetConstraints.length).toBeGreaterThan(0);
@@ -265,7 +265,7 @@ describe('classifyConstraints', () => {
   });
 
   it('classifies regulatory constraints (GDPR, compliance, regulatory)', () => {
-    const result = classifyConstraints(IDEA_WITH_COMPLIANCE);
+    const result = classifyConstraints(INTENT_WITH_COMPLIANCE);
 
     const regulatoryConstraints = result.constraints.filter(c => c.category === 'regulatory');
     expect(regulatoryConstraints.length).toBeGreaterThan(0);
@@ -286,7 +286,7 @@ describe('classifyConstraints', () => {
   });
 
   it('determines hard severity (must, required, mandatory, cannot)', () => {
-    const result = classifyConstraints(IDEA_WITH_STAKEHOLDERS);
+    const result = classifyConstraints(INTENT_WITH_STAKEHOLDERS);
 
     const hardConstraints = result.constraints.filter(c => c.severity === 'hard');
     expect(hardConstraints.length).toBeGreaterThan(0);
@@ -307,7 +307,7 @@ describe('classifyConstraints', () => {
   });
 
   it('returns correct summary counts per category', () => {
-    const result = classifyConstraints(IDEA_WITH_STAKEHOLDERS);
+    const result = classifyConstraints(INTENT_WITH_STAKEHOLDERS);
 
     expect(result.summary).toBeDefined();
     expect(result.summary.technical).toBeDefined();
@@ -326,7 +326,7 @@ describe('classifyConstraints', () => {
   });
 
   it('returns created_at timestamp', () => {
-    const result = classifyConstraints(IDEA_WITH_STAKEHOLDERS);
+    const result = classifyConstraints(INTENT_WITH_STAKEHOLDERS);
 
     expect(result.created_at).toBeDefined();
     expect(typeof result.created_at).toBe('string');
@@ -335,36 +335,36 @@ describe('classifyConstraints', () => {
 });
 
 describe('buildRequirementsTrace', () => {
-  it('IDEA-only (no PRD/SPEC/intents) returns empty links and no coverage keys', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, null, null, null);
+  it('INTENT-only (no PRD/SPEC/intents) returns empty links and no coverage keys', () => {
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, null, null, null);
 
     expect(result.links).toEqual([]);
     expect(Object.keys(result.coverage).length).toBe(0);
   });
 
-  it('IDEA + PRD: creates "derives" links from constraints to user stories', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
+  it('INTENT + PRD: creates "derives" links from constraints to user stories', () => {
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
 
     const derivesLinks = result.links.filter(link => link.link_type === 'derives');
     expect(derivesLinks.length).toBeGreaterThan(0);
   });
 
-  it('IDEA + PRD: calculates idea->prd coverage percentage', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
+  it('INTENT + PRD: calculates intent->prd coverage percentage', () => {
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
 
-    expect(result.coverage['idea->prd']).toBeGreaterThan(0);
-    expect(result.coverage['idea->prd']).toBeLessThanOrEqual(100);
+    expect(result.coverage['intent->prd']).toBeGreaterThan(0);
+    expect(result.coverage['intent->prd']).toBeLessThanOrEqual(100);
   });
 
-  it('IDEA + PRD + SPEC: creates "implements" links from stories to components', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
+  it('INTENT + PRD + SPEC: creates "implements" links from stories to components', () => {
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
 
     const implementsLinks = result.links.filter(link => link.link_type === 'implements');
     expect(implementsLinks.length).toBeGreaterThan(0);
   });
 
-  it('IDEA + PRD + SPEC: calculates prd->spec coverage percentage', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
+  it('INTENT + PRD + SPEC: calculates prd->spec coverage percentage', () => {
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
 
     expect(result.coverage['prd->spec']).toBeGreaterThan(0);
     expect(result.coverage['prd->spec']).toBeLessThanOrEqual(100);
@@ -372,7 +372,7 @@ describe('buildRequirementsTrace', () => {
 
   it('full trace (all 4 stages): creates all link types', () => {
     const result = buildRequirementsTrace(
-      IDEA_WITH_STAKEHOLDERS,
+      INTENT_WITH_STAKEHOLDERS,
       PRD_CONTENT,
       SPEC_CONTENT,
       [INTENT_CONTENT_1, INTENT_CONTENT_2]
@@ -385,7 +385,7 @@ describe('buildRequirementsTrace', () => {
 
   it('full trace: calculates spec->intents coverage', () => {
     const result = buildRequirementsTrace(
-      IDEA_WITH_STAKEHOLDERS,
+      INTENT_WITH_STAKEHOLDERS,
       PRD_CONTENT,
       SPEC_CONTENT,
       [INTENT_CONTENT_1, INTENT_CONTENT_2]
@@ -404,13 +404,13 @@ type: prd
 
 No user stories here.
 `;
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, emptyPRD, null, null);
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, emptyPRD, null, null);
 
-    expect(result.coverage['idea->prd']).toBe(0);
+    expect(result.coverage['intent->prd']).toBe(0);
   });
 
   it('returns created_at timestamp', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, null, null, null);
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, null, null, null);
 
     expect(result.created_at).toBeDefined();
     expect(typeof result.created_at).toBe('string');
@@ -418,7 +418,7 @@ No user stories here.
   });
 
   it('handles null PRD/SPEC/intents gracefully', () => {
-    const result = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, null, null, null);
+    const result = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, null, null, null);
 
     expect(result.links).toEqual([]);
     expect(Object.keys(result.coverage).length).toBe(0);
@@ -427,22 +427,22 @@ No user stories here.
 
 describe('getTraceabilitySummary', () => {
   it('returns "Requirements Traceability:" header', () => {
-    const trace = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, null, null, null);
+    const trace = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, null, null, null);
     const summary = getTraceabilitySummary(trace);
 
     expect(summary).toContain('Requirements Traceability:');
   });
 
-  it('shows IDEA → PRD coverage when present', () => {
-    const trace = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
+  it('shows INTENT → PRD coverage when present', () => {
+    const trace = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, null, null);
     const summary = getTraceabilitySummary(trace);
 
-    expect(summary).toContain('IDEA → PRD:');
+    expect(summary).toContain('INTENT → PRD:');
     expect(summary).toMatch(/\d+%/); // Should contain a percentage
   });
 
   it('shows PRD → SPEC coverage when present', () => {
-    const trace = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
+    const trace = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, PRD_CONTENT, SPEC_CONTENT, null);
     const summary = getTraceabilitySummary(trace);
 
     expect(summary).toContain('PRD → SPEC:');
@@ -450,7 +450,7 @@ describe('getTraceabilitySummary', () => {
 
   it('shows SPEC → INTENTS coverage when present', () => {
     const trace = buildRequirementsTrace(
-      IDEA_WITH_STAKEHOLDERS,
+      INTENT_WITH_STAKEHOLDERS,
       PRD_CONTENT,
       SPEC_CONTENT,
       [INTENT_CONTENT_1, INTENT_CONTENT_2]
@@ -461,11 +461,11 @@ describe('getTraceabilitySummary', () => {
   });
 
   it('handles empty trace (only header shown)', () => {
-    const trace = buildRequirementsTrace(IDEA_WITH_STAKEHOLDERS, null, null, null);
+    const trace = buildRequirementsTrace(INTENT_WITH_STAKEHOLDERS, null, null, null);
     const summary = getTraceabilitySummary(trace);
 
     expect(summary).toContain('Requirements Traceability:');
-    expect(summary).not.toContain('IDEA → PRD:');
+    expect(summary).not.toContain('INTENT → PRD:');
     expect(summary).not.toContain('PRD → SPEC:');
     expect(summary).not.toContain('SPEC → INTENTS:');
   });

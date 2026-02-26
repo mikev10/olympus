@@ -99,7 +99,7 @@ describe('manifest-updater', () => {
             id: 'TEST-001',
             type: 'TEST',
             phase: 'inception' as const,
-            stage: 'idea' as const,
+            stage: 'intent' as const,
             path: 'test/path.md',
             created_at: '2024-01-01T00:00:00Z',
             updated_at: '2024-01-01T00:00:00Z',

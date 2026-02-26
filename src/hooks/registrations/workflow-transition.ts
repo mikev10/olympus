@@ -6,7 +6,7 @@
  * additionalContext (3-5 lines max to minimize token impact).
  *
  * Transition points:
- * 1. After IDEA approved
+ * 1. After INTENT approved
  * 2. After INTENT locked
  * 3. After UNITs created
  * 4. During BOLT execution (per-BOLT completion)

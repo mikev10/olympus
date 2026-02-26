@@ -39,14 +39,14 @@ export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked
  *
  * @example
  * {
- *   id: "IDEA-001",
- *   path: ".olympus/workflows/user-auth/idea.md",
+ *   id: "INTENT-001",
+ *   path: ".olympus/workflows/user-auth/intent.md",
  *   created_at: "2024-01-15T10:30:00Z",
  *   validation_passed: true
  * }
  */
 export interface ArtifactReference {
-  /** Unique artifact identifier (e.g., "IDEA-001", "PRD-001") */
+  /** Unique artifact identifier (e.g., "INTENT-001", "PRD-001") */
   id: string;
 
   /** Relative path to the artifact file from project root */
@@ -91,12 +91,12 @@ export interface ValidationResult {
 
 /**
  * Mapping between requirements across workflow stages.
- * Ensures traceability from initial idea through to implementation.
+ * Ensures traceability from initial intent through to implementation.
  *
  * @example
  * {
  *   requirement_id: "REQ-001",
- *   source_artifact: "IDEA-001",
+ *   source_artifact: "INTENT-001",
  *   target_artifact: "PRD-001",
  *   covered: true,
  *   notes: "Authentication requirement fully specified in PRD section 3.2"
@@ -106,7 +106,7 @@ export interface RequirementMapping {
   /** Unique requirement identifier */
   requirement_id: string;
 
-  /** Source artifact ID (e.g., "IDEA-001") */
+  /** Source artifact ID (e.g., "INTENT-001") */
   source_artifact: string;
 
   /** Target artifact ID that should cover this requirement (e.g., "PRD-001") */

@@ -1,8 +1,8 @@
 /**
- * IDEA Artifact Validation
+ * Artifact Validation
  *
- * Validates completeness of IDEA stage artifacts against required criteria.
- * An IDEA artifact must contain all essential sections for progression to PRD stage.
+ * Validates completeness of INTENT stage artifacts against required criteria.
+ * An INTENT artifact must contain all essential sections for progression to PRD stage.
  *
  * Performance optimizations:
  * - Parallel validation where possible
@@ -41,7 +41,7 @@ export function clearFileCache(): void {
 }
 
 /**
- * Required sections for a valid IDEA artifact
+ * Required sections for a valid INTENT artifact
  */
 const REQUIRED_SECTIONS = [
   'Problem Statement',
@@ -50,153 +50,6 @@ const REQUIRED_SECTIONS = [
   'Business Constraints',
   'Out of Scope',
 ] as const;
-
-/**
- * Validates an IDEA artifact for completeness.
- *
- * Checks 6 criteria:
- * 1. Problem statement present (non-empty ## Problem Statement section)
- * 2. User Personas present (non-empty ## User Personas section)
- * 3. At least 2 success metrics (check ## Success Metrics section has 2+ bullet points)
- * 4. Business Constraints documented (## Business Constraints section present with content)
- * 5. Risk tier assessed (YAML frontmatter has risk_tier field)
- * 6. All required sections present (all 5 sections exist in document)
- *
- * @param artifactPath - Absolute path to the IDEA artifact file
- * @returns ValidationResult with pass/fail status, coverage percentage, and any blocking issues
- *
- * @example
- * const result = await validateIdea('.olympus/workflows/feature-x/idea.md');
- * if (result.passed) {
- *   console.log('IDEA artifact is complete!');
- * } else {
- *   console.log('Issues found:', result.blocking_issues);
- * }
- */
-export async function validateIdea(artifactPath: string): Promise<ValidationResult> {
-  const timestamp = new Date().toISOString();
-  const blockingIssues: string[] = [];
-
-  // Read artifact file with caching
-  let content: string;
-  try {
-    content = readFileWithCache(artifactPath);
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-
-    if (err.code === 'ENOENT') {
-      console.error(`[Validation] IDEA artifact not found: ${artifactPath}`);
-      return {
-        passed: false,
-        coverage_percentage: 0,
-        blocking_issues: ['Artifact file not found'],
-        timestamp,
-      };
-    }
-
-    if (err.code === 'EACCES' || err.code === 'EPERM') {
-      console.error(`[Validation] Permission denied reading IDEA artifact: ${artifactPath}`);
-      return {
-        passed: false,
-        coverage_percentage: 0,
-        blocking_issues: ['Permission denied reading artifact file'],
-        timestamp,
-      };
-    }
-
-    console.error(`[Validation] Failed to read IDEA artifact: ${err.message}`);
-    console.error(`[Validation] Path: ${artifactPath}`);
-    return {
-      passed: false,
-      coverage_percentage: 0,
-      blocking_issues: [`Failed to read artifact: ${err.message}`],
-      timestamp,
-    };
-  }
-
-  // Parse YAML frontmatter
-  const frontmatter = parseFrontmatter(content);
-  if (!frontmatter || !frontmatter.risk_tier) {
-    blockingIssues.push('Risk tier not specified in frontmatter');
-  }
-
-  // Remove frontmatter from content for section parsing
-  const markdownContent = removeFrontmatter(content);
-
-  // Parse markdown sections (single pass optimization)
-  const sections = parseSections(markdownContent);
-
-  // Run all validations in parallel (independent checks)
-  const validationChecks = [
-    // Check criterion 1: Problem statement present and non-empty
-    () => {
-      const problemStatement = sections.get('Problem Statement');
-      if (!problemStatement || problemStatement.trim().length === 0) {
-        return 'Missing problem statement section';
-      }
-      return null;
-    },
-    // Check criterion 2: User Personas present and non-empty
-    () => {
-      const userPersonas = sections.get('User Personas');
-      if (!userPersonas || userPersonas.trim().length === 0) {
-        return 'User Personas section is empty';
-      }
-      return null;
-    },
-    // Check criterion 3: At least 2 success metrics
-    () => {
-      const successMetrics = sections.get('Success Metrics');
-      if (successMetrics) {
-        const metricCount = countBulletPoints(successMetrics);
-        if (metricCount < 2) {
-          return `Only ${metricCount} success metric found, need at least 2`;
-        }
-      } else {
-        return 'Missing success metrics section';
-      }
-      return null;
-    },
-    // Check criterion 4: Business Constraints documented
-    () => {
-      const constraints = sections.get('Business Constraints');
-      if (!constraints || constraints.trim().length === 0) {
-        return 'Business Constraints section missing';
-      }
-      return null;
-    },
-    // Check criterion 6: All required sections present
-    () => {
-      const missing: string[] = [];
-      for (const section of REQUIRED_SECTIONS) {
-        if (!sections.has(section)) {
-          missing.push(`Missing required section: ${section}`);
-        }
-      }
-      return missing.length > 0 ? missing.join('; ') : null;
-    },
-  ];
-
-  // Execute all checks (can be optimized to parallel execution if needed)
-  for (const check of validationChecks) {
-    const issue = check();
-    if (issue) {
-      blockingIssues.push(issue);
-    }
-  }
-
-  // Calculate coverage (6 total criteria)
-  const totalCriteria = 6;
-  const passedCriteria = totalCriteria - blockingIssues.length;
-  const coveragePercentage = Math.round((passedCriteria / totalCriteria) * 100);
-
-  return {
-    passed: blockingIssues.length === 0,
-    coverage_percentage: coveragePercentage,
-    blocking_issues: blockingIssues,
-    timestamp,
-  };
-}
 
 /**
  * Parses YAML frontmatter from markdown content.

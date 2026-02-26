@@ -2,7 +2,7 @@
  * Workflow Engine Module
  *
  * Provides structured workflow system for plan execution with:
- * - IDEA → PRD → SPEC → INTENTS stage progression
+ * - INTENT → PRD → SPEC → INTENTS stage progression
  * - Checkpoint persistence and resume capability
  * - Validation gates (Momus, Metis reviews)
  * - Artifact generation and management
@@ -118,7 +118,7 @@ export {
 } from './execution.js';
 
 // Validation
-export { validateIdea, validateIntent, clearFileCache } from './validation.js';
+export { validateIntent, clearFileCache } from './validation.js';
 
 // Depth Assessment
 export type { DepthFactors, RiskFactors } from './depth-assessment.js';

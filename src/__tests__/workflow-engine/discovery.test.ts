@@ -61,7 +61,7 @@ describe('discovery', () => {
       workflow_id: 'test-wf',
       feature_name: 'Test Feature',
       current_phase: 'discovery',
-      current_stage: 'idea',
+      current_stage: 'intent',
       status: 'in_progress',
       phases: {
         discovery: {

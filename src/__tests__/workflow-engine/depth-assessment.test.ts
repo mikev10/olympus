@@ -412,7 +412,7 @@ describe('classifyRiskTier', () => {
 });
 
 describe('assessDepthFromIntent', () => {
-  const SIMPLE_IDEA = `
+  const SIMPLE_INTENT = `
 # Feature: Add Logging
 
 ## Problem Statement
@@ -436,7 +436,7 @@ Internal developers.
 External logging services.
 `;
 
-  const COMPLEX_IDEA = `---
+  const COMPLEX_INTENT = `---
 risk_tier: high
 ---
 
@@ -479,23 +479,23 @@ Users currently cannot securely access their accounts. We need a robust authenti
 This is a system-wide infrastructure change affecting multiple services across all users of the platform.
 `;
 
-  it('should return low depth for simple IDEA', () => {
-    const result = assessDepthFromIntent(SIMPLE_IDEA);
+  it('should return low depth for simple INTENT', () => {
+    const result = assessDepthFromIntent(SIMPLE_INTENT);
 
-    // Simple IDEA: short content scores high on context/clarity (less info = needs more)
+    // Simple INTENT: short content scores high on context/clarity (less info = needs more)
     // So total_score lands in standard range, not minimal
     expect(result.total_score).toBeLessThanOrEqual(20);
     expect(['minimal', 'standard']).toContain(result.recommended_depth);
   });
 
-  it('should return comprehensive depth for complex IDEA', () => {
-    const result = assessDepthFromIntent(COMPLEX_IDEA);
+  it('should return comprehensive depth for complex INTENT', () => {
+    const result = assessDepthFromIntent(COMPLEX_INTENT);
 
     expect(result.total_score).toBeGreaterThanOrEqual(21);
     expect(result.recommended_depth).toBe('comprehensive');
   });
 
-  it('should return standard depth for moderate IDEA', () => {
+  it('should return standard depth for moderate INTENT', () => {
     const moderateIdea = `
 # Feature: User Profile Page
 
@@ -531,7 +531,7 @@ Requested by 50% of users in feedback surveys. Core feature for user engagement.
     expect(result.recommended_depth).toBe('standard');
   });
 
-  it('should derive reversibility=difficult for IDEA with migration', () => {
+  it('should derive reversibility=difficult for INTENT with migration', () => {
     const migrationIdea = `
 # Feature: Database Schema Migration
 
@@ -550,7 +550,7 @@ Need to migrate user data to new schema.
     expect(result.risk_tier.factors.reversibility).toBe('difficult');
   });
 
-  it('should derive blast_radius=system-wide for IDEA with "all users"', () => {
+  it('should derive blast_radius=system-wide for INTENT with "all users"', () => {
     const systemWideIdea = `
 # Feature: Global Rate Limiting
 
@@ -568,7 +568,7 @@ Apply rate limits across all API endpoints.
     expect(result.risk_tier.factors.blast_radius).toBe('system-wide');
   });
 
-  it('should derive data_sensitivity=user-facing for IDEA with PII', () => {
+  it('should derive data_sensitivity=user-facing for INTENT with PII', () => {
     const piiIdea = `
 # Feature: Customer Data Export
 
@@ -586,7 +586,7 @@ Users need to export their PII data for compliance.
     expect(result.risk_tier.factors.data_sensitivity).toBe('user-facing');
   });
 
-  it('should derive data_sensitivity=user-facing for IDEA with authentication', () => {
+  it('should derive data_sensitivity=user-facing for INTENT with authentication', () => {
     const authIdea = `
 # Feature: Two-Factor Authentication
 
@@ -600,7 +600,7 @@ Add authentication token management.
     expect(result.risk_tier.factors.data_sensitivity).toBe('user-facing');
   });
 
-  it('should derive compliance_impact=major for IDEA with GDPR', () => {
+  it('should derive compliance_impact=major for INTENT with GDPR', () => {
     const gdprIdea = `
 # Feature: Data Retention Policy
 
@@ -614,7 +614,7 @@ Add authentication token management.
     expect(result.risk_tier.factors.compliance_impact).toBe('major');
   });
 
-  it('should derive compliance_impact=major for IDEA with compliance keywords', () => {
+  it('should derive compliance_impact=major for INTENT with compliance keywords', () => {
     const complianceIdea = `
 # Feature: Audit Logging
 

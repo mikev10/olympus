@@ -108,7 +108,7 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
  *
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
- * @param artifactType - Type of artifact (idea, intent, unit, bolt, etc.)
+ * @param artifactType - Type of artifact (intent, unit, bolt, etc.)
  * @param artifactId - Optional ID for unit/bolt/validation-report artifacts (required for certain types)
  * @param unitId - Optional unit ID (required for 'bolt' artifacts to determine parent unit directory)
  * @throws Error if artifactType is 'complete' (no artifact for complete stage)
@@ -670,7 +670,7 @@ export async function migrateLayout(projectPath: string, workflowId: string): Pr
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
  * @param phase - Workflow phase ('discovery', 'inception', 'construction', or 'operations')
- * @param stage - Stage within the phase (e.g., 'idea', 'design', 'deploy')
+ * @param stage - Stage within the phase (e.g., 'intent', 'design', 'deploy')
  * @param filename - Name of the file
  * @returns Absolute path to the artifact file
  *

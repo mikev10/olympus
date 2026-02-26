@@ -784,7 +784,7 @@ describe('Scenario 6: Gate-to-Discovery-to-Injection Lifecycle', () => {
       const event: GateEvent = {
         gateNumber: 1,
         artifactId: 'BOLT-050',
-        artifactType: 'idea',
+        artifactType: 'intent',
         action: 'approved',
         reason: 'Looks good',
         previouslyRejected: false,
@@ -835,7 +835,7 @@ describe('Scenario 6: Gate-to-Discovery-to-Injection Lifecycle', () => {
       expect(boltGate3[0].details).toContain('Type errors');
 
       // Query for non-existent combination
-      const noResults = queryPreviousGateRejections(allDiscoveries, 'idea', 5);
+      const noResults = queryPreviousGateRejections(allDiscoveries, 'intent', 5);
       expect(noResults).toHaveLength(0);
     });
 

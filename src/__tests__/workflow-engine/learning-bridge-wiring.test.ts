@@ -43,7 +43,7 @@ describe('Learning Bridge Wiring Integration', () => {
       type: 'gate_rejection',
       phase: 'inception',
       stage: 'intent',
-      details: 'INTENT does not address IDEA constraints',
+      details: 'INTENT does not address INTENT constraints',
     };
 
     const discovery = captureWorkflowDiscovery(event, {
@@ -63,7 +63,7 @@ describe('Learning Bridge Wiring Integration', () => {
     const summary = readDiscoveries(TEST_DIR);
     expect(summary.total_discoveries).toBeGreaterThanOrEqual(1);
     const found = [...summary.project_discoveries, ...summary.global_discoveries].find(
-      d => d.details.includes('INTENT does not address IDEA constraints')
+      d => d.details.includes('INTENT does not address INTENT constraints')
     );
     expect(found).toBeDefined();
   });

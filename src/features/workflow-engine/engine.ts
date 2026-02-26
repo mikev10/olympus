@@ -773,7 +773,7 @@ export class WorkflowEngine {
   // ============================================================================
 
   /**
-   * Execute the INTENT stage (merged IDEA + INTENT)
+   * Execute the INTENT stage
    *
    * Generates all Inception content in a single pass:
    * 1. inception/intent.md - Problem statement, personas, success metrics, constraints,

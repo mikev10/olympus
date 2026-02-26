@@ -383,7 +383,7 @@ describe('WorkflowEngine', () => {
   });
 
   describe('Integration: workflow progresses through stages', () => {
-    it('progresses from idea to prd correctly', async () => {
+    it('progresses from intent to prd correctly', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Full Workflow Test');
       await engine.start('Build a complete feature');
 
@@ -401,7 +401,7 @@ describe('WorkflowEngine', () => {
       expect(checkpoint?.current_stage).toBe('unit');
     });
 
-    it.skip('completes full workflow from idea to complete', async () => {
+    it.skip('completes full workflow from intent to complete', async () => {
       const engine = new WorkflowEngine(tmpDir, 'Full Workflow Test');
       await engine.start('Build a complete feature');
 

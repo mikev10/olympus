@@ -26,7 +26,6 @@ vi.mock('../../features/workflow-engine/checkpoint.js', () => ({
 
 // Mock validation module
 vi.mock('../../features/workflow-engine/validation.js', () => ({
-  validateIdea: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
   validateIntent: vi.fn().mockResolvedValue({ passed: true, coverage_percentage: 100, blocking_issues: [], timestamp: '2025-01-01' }),
 }));
 
@@ -61,7 +60,7 @@ vi.mock('fs', () => ({
 import { registerWorkflowArtifactGateHook } from '../../hooks/registrations/workflow-artifact-gate.js';
 import { loadSessionState } from '../../learning/session-state.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
-import { validateIdea, validateIntent } from '../../features/workflow-engine/validation.js';
+import { validateIntent } from '../../features/workflow-engine/validation.js';
 import { assessDepthFromIntent } from '../../features/workflow-engine/depth-assessment.js';
 import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import { existsSync, readFileSync } from 'fs';

@@ -33,11 +33,11 @@ import { existsSync, readFileSync } from 'fs';
 
 /**
  * Maps Inception stage agent names to their phase.
- * Prometheus handles both idea and intent stages; the actual artifact type
+ * Prometheus handles the intent stage; the actual artifact type
  * is determined by checkpoint.current_stage at runtime.
  */
 const INCEPTION_STAGE_AGENT_MAP: Record<string, string> = {
-  'prometheus': 'inception', // Prometheus handles both idea and intent stages
+  'prometheus': 'inception', // Prometheus handles intent stage
 };
 
 /**
@@ -90,7 +90,7 @@ async function findActiveWorkflow(
  * The workflowDir is already under aidlc-docs/<workflowId>/.
  *
  * @param workflowDir - Absolute path to workflow directory (e.g., <project>/aidlc-docs/<workflowId>)
- * @param artifactType - Type of artifact (idea, intent)
+ * @param artifactType - Type of artifact (intent)
  * @returns Object containing all necessary artifact paths for validation
  */
 function getArtifactPaths(
@@ -120,7 +120,7 @@ function getArtifactPaths(
 /**
  * Runs the appropriate validation function based on artifact type.
  *
- * @param artifactType - Type of artifact (idea, intent)
+ * @param artifactType - Type of artifact (intent)
  * @param artifactPath - Path to the artifact to validate
  * @param referencePaths - Paths to reference artifacts needed for validation
  * @returns Validation result or null if validation type not supported
@@ -276,7 +276,7 @@ async function workflowArtifactGateHandler(ctx: HookContext): Promise<HookResult
                           depthAssessment.recommended_depth === 'standard' ? 'MEDIUM' : 'DEEP';
         message += `\n\n[Depth Assessment] Score: ${depthAssessment.total_score}/30 → ${depthLabel} | Risk Tier: ${depthAssessment.risk_tier.tier}`;
       } catch (error) {
-        console.error('[Olympus Artifact Gate] Failed to assess depth after IDEA validation:', error);
+        console.error('[Olympus Artifact Gate] Failed to assess depth after INTENT validation:', error);
       }
     }
 

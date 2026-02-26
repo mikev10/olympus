@@ -3,7 +3,7 @@
  *
  * Provides stakeholder mapping, constraint classification, and requirements
  * traceability for the ODLC Inception phase. Links requirements across stages:
- * IDEA → PRD → SPEC → INTENTS.
+ * INTENT → PRD → SPEC → INTENTS.
  */
 
 /**
@@ -184,25 +184,25 @@ function extractBulletItems(content: string): string[] {
 }
 
 /**
- * Builds a stakeholder map from IDEA artifact content.
+ * Builds a stakeholder map from INTENT artifact content.
  *
  * Parses the Stakeholders section if present, or generates default stakeholders
  * based on content analysis if not found.
  *
- * @param ideaContent - Full IDEA artifact markdown content
+ * @param intentContent - Full INTENT artifact markdown content
  * @returns StakeholderMap with identified stakeholders and timestamp
  *
  * @example
- * const map = buildStakeholderMap(ideaContent);
+ * const map = buildStakeholderMap(intentContent);
  * console.log(`Found ${map.stakeholders.length} stakeholders`);
  * map.stakeholders.forEach(s => console.log(`- ${s.name} (${s.role})`));
  */
-export function buildStakeholderMap(ideaContent: string): StakeholderMap {
+export function buildStakeholderMap(intentContent: string): StakeholderMap {
   const timestamp = new Date().toISOString();
   const stakeholders: Stakeholder[] = [];
 
   try {
-    const markdown = removeFrontmatter(ideaContent);
+    const markdown = removeFrontmatter(intentContent);
     const sections = parseSections(markdown);
     const stakeholdersSection = sections.get('Stakeholders');
 
@@ -305,21 +305,21 @@ function normalizeLevel(level: string): 'high' | 'medium' | 'low' {
 }
 
 /**
- * Classifies constraints from IDEA artifact into categories.
+ * Classifies constraints from INTENT artifact into categories.
  *
  * Parses the Constraints section and classifies each constraint by:
  * - Category (technical, timeline, budget, resource, policy, regulatory)
  * - Severity (hard or soft)
  *
- * @param ideaContent - Full IDEA artifact markdown content
+ * @param intentContent - Full INTENT artifact markdown content
  * @returns ConstraintClassification with categorized constraints and summary
  *
  * @example
- * const classification = classifyConstraints(ideaContent);
+ * const classification = classifyConstraints(intentContent);
  * console.log(`Technical constraints: ${classification.summary.technical}`);
  * console.log(`Hard constraints: ${classification.constraints.filter(c => c.severity === 'hard').length}`);
  */
-export function classifyConstraints(ideaContent: string): ConstraintClassification {
+export function classifyConstraints(intentContent: string): ConstraintClassification {
   const timestamp = new Date().toISOString();
   const constraints: ClassifiedConstraint[] = [];
   const summary: Record<ConstraintCategory, number> = {
@@ -332,7 +332,7 @@ export function classifyConstraints(ideaContent: string): ConstraintClassificati
   };
 
   try {
-    const markdown = removeFrontmatter(ideaContent);
+    const markdown = removeFrontmatter(intentContent);
     const sections = parseSections(markdown);
     const constraintsSection = sections.get('Constraints');
 
@@ -479,22 +479,22 @@ function determineSeverity(text: string): 'hard' | 'soft' {
 /**
  * Builds a requirements traceability matrix across ODLC stages.
  *
- * Links requirements from IDEA → PRD → SPEC → INTENTS and calculates
+ * Links requirements from INTENT → PRD → SPEC → INTENTS and calculates
  * coverage percentages at each stage transition.
  *
- * @param ideaContent - IDEA artifact markdown content
+ * @param intentContent - INTENT artifact markdown content
  * @param prdContent - PRD artifact markdown content (optional)
  * @param specContent - SPEC artifact markdown content (optional)
  * @param intentsContent - Array of INTENT file contents (optional)
  * @returns RequirementsTrace with links and coverage metrics
  *
  * @example
- * const trace = buildRequirementsTrace(idea, prd, spec, intents);
- * console.log(`IDEA → PRD coverage: ${trace.coverage['idea->prd']}%`);
+ * const trace = buildRequirementsTrace(intent, prd, spec, intents);
+ * console.log(`INTENT → PRD coverage: ${trace.coverage['intent->prd']}%`);
  * console.log(`Total links: ${trace.links.length}`);
  */
 export function buildRequirementsTrace(
-  ideaContent: string,
+  intentContent: string,
   prdContent: string | null,
   specContent: string | null,
   intentsContent: string[] | null
@@ -504,23 +504,23 @@ export function buildRequirementsTrace(
   const coverage: Record<string, number> = {};
 
   try {
-    // Parse IDEA constraints as source requirements
-    const ideaMarkdown = removeFrontmatter(ideaContent);
-    const ideaSections = parseSections(ideaMarkdown);
-    const constraintsSection = ideaSections.get('Constraints');
-    const ideaConstraints: Array<{ id: string; text: string }> = [];
+    // Parse INTENT constraints as source requirements
+    const intentMarkdown = removeFrontmatter(intentContent);
+    const intentSections = parseSections(intentMarkdown);
+    const constraintsSection = intentSections.get('Constraints');
+    const intentConstraints: Array<{ id: string; text: string }> = [];
 
     if (constraintsSection) {
       const items = extractBulletItems(constraintsSection);
       items.forEach((text, index) => {
-        ideaConstraints.push({
-          id: `IDEA-C-${String(index + 1).padStart(3, '0')}`,
+        intentConstraints.push({
+          id: `INTENT-C-${String(index + 1).padStart(3, '0')}`,
           text,
         });
       });
     }
 
-    // Link IDEA → PRD
+    // Link INTENT → PRD
     if (prdContent) {
       const prdMarkdown = removeFrontmatter(prdContent);
       const userStories: Array<{ id: string; content: string }> = [];
@@ -546,15 +546,15 @@ export function buildRequirementsTrace(
         userStories.push(currentStory);
       }
 
-      // Link user stories to IDEA constraints
+      // Link user stories to INTENT constraints
       const linkedConstraints = new Set<string>();
       for (const story of userStories) {
-        for (const constraint of ideaConstraints) {
+        for (const constraint of intentConstraints) {
           // Case-insensitive substring matching
           if (story.content.toLowerCase().includes(constraint.text.toLowerCase().substring(0, 30))) {
             links.push({
               source_id: constraint.id,
-              source_stage: 'IDEA',
+              source_stage: 'INTENT',
               target_id: story.id,
               target_stage: 'PRD',
               link_type: 'derives',
@@ -565,11 +565,11 @@ export function buildRequirementsTrace(
         }
       }
 
-      // Calculate IDEA → PRD coverage
-      const ideaToPrdCoverage = ideaConstraints.length > 0
-        ? Math.round((linkedConstraints.size / ideaConstraints.length) * 100)
+      // Calculate INTENT → PRD coverage
+      const intentToPrdCoverage = intentConstraints.length > 0
+        ? Math.round((linkedConstraints.size / intentConstraints.length) * 100)
         : 0;
-      coverage['idea->prd'] = ideaToPrdCoverage;
+      coverage['intent->prd'] = intentToPrdCoverage;
 
       // Link PRD → SPEC
       if (specContent) {
@@ -698,7 +698,7 @@ export function buildRequirementsTrace(
  * console.log(summary);
  * // Output:
  * // Requirements Traceability:
- * //   IDEA → PRD: 85% coverage (17/20 constraints traced)
+ * //   INTENT → PRD: 85% coverage (17/20 constraints traced)
  * //   PRD → SPEC: 90% coverage (9/10 user stories traced)
  * //   SPEC → INTENTS: 100% coverage (5/5 components traced)
  */
@@ -706,8 +706,8 @@ export function getTraceabilitySummary(trace: RequirementsTrace): string {
   const lines: string[] = ['Requirements Traceability:'];
 
   // Calculate link counts per stage transition
-  const ideaToPrdLinks = trace.links.filter(
-    l => l.source_stage === 'IDEA' && l.target_stage === 'PRD'
+  const intentToPrdLinks = trace.links.filter(
+    l => l.source_stage === 'INTENT' && l.target_stage === 'PRD'
   );
   const prdToSpecLinks = trace.links.filter(
     l => l.source_stage === 'PRD' && l.target_stage === 'SPEC'
@@ -716,12 +716,12 @@ export function getTraceabilitySummary(trace: RequirementsTrace): string {
     l => l.source_stage === 'SPEC' && l.target_stage === 'INTENTS'
   );
 
-  // IDEA → PRD
-  if (trace.coverage['idea->prd'] !== undefined) {
-    const sourceCount = new Set(ideaToPrdLinks.map(l => l.source_id)).size;
-    const coverage = trace.coverage['idea->prd'];
+  // INTENT → PRD
+  if (trace.coverage['intent->prd'] !== undefined) {
+    const sourceCount = new Set(intentToPrdLinks.map(l => l.source_id)).size;
+    const coverage = trace.coverage['intent->prd'];
     const totalCount = Math.round((sourceCount / coverage) * 100);
-    lines.push(`  IDEA → PRD: ${coverage}% coverage (${sourceCount}/${totalCount} constraints traced)`);
+    lines.push(`  INTENT → PRD: ${coverage}% coverage (${sourceCount}/${totalCount} constraints traced)`);
   }
 
   // PRD → SPEC

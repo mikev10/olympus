@@ -552,8 +552,8 @@ describe('Checkpoint Persistence', () => {
         schema_version: '3.0.0',
         workflow_id: 'full-delete-test',
       });
-      await fs.writeFile(join(workflowDir, 'idea.md'), 'test idea');
       await fs.writeFile(join(workflowDir, 'intent.md'), 'test intent');
+      await fs.writeFile(join(workflowDir, 'intent-spec.md'), 'test intent spec');
 
       const existsBefore = await fs.pathExists(workflowDir);
       expect(existsBefore).toBe(true);
@@ -606,7 +606,7 @@ describe('Checkpoint Persistence', () => {
       const workflowDir = join(tmpDir, '.olympus/workflow/archive-test');
       await fs.ensureDir(workflowDir);
       await fs.writeFile(join(workflowDir, 'checkpoint.json'), 'test');
-      await fs.writeFile(join(workflowDir, 'idea.md'), 'test idea');
+      await fs.writeFile(join(workflowDir, 'intent.md'), 'test intent');
 
       const existsBefore = await fs.pathExists(workflowDir);
       expect(existsBefore).toBe(true);
@@ -621,9 +621,9 @@ describe('Checkpoint Persistence', () => {
       expect(existsArchive).toBe(true);
 
       const checkpointExists = await fs.pathExists(join(archiveDir, 'checkpoint.json'));
-      const ideaExists = await fs.pathExists(join(archiveDir, 'idea.md'));
+      const intentExists = await fs.pathExists(join(archiveDir, 'intent.md'));
       expect(checkpointExists).toBe(true);
-      expect(ideaExists).toBe(true);
+      expect(intentExists).toBe(true);
     });
 
     it('creates archive directory if it does not exist', async () => {

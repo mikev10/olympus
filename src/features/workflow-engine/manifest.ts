@@ -861,7 +861,7 @@ export interface RevalidationResult {
 }
 
 /**
- * Revalidates all stale artifacts against their parent and root IDEA artifacts.
+ * Revalidates all stale artifacts against their parent and root INTENT artifacts.
  * Runs dual validation (parent + root checks) for each stale artifact.
  * If both checks pass, the artifact is restored to 'active' status.
  * If either check fails, the artifact remains 'stale'.

@@ -306,7 +306,7 @@ stage: deploy
 Implementation of ${featureName} following the Olympus Development Life Cycle (ODLC) methodology.
 
 ### Inception Phase (${inceptionArtifacts.length} artifacts)
-- IDEA: Problem definition and depth assessment
+- INTENT: Problem definition and depth assessment
 - PRD: Product requirements with user stories
 - SPEC: Technical specification and architecture
 - INTENTS: Implementation task breakdown

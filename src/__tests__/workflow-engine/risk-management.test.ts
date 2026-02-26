@@ -17,7 +17,7 @@ import {
 
 const TEST_DIR = join(process.cwd(), '.test-risk-management');
 
-const FORMAT1_IDEA = `---
+const FORMAT1_INTENT = `---
 risk_tier: medium
 ---
 
@@ -34,7 +34,7 @@ Need to migrate API.
 - Performance degradation under load (low likelihood, medium impact) - Mitigation: Load testing before deployment
 `;
 
-const FORMAT2_IDEA = `---
+const FORMAT2_INTENT = `---
 risk_tier: high
 ---
 
@@ -61,7 +61,7 @@ Need payment system.
 - Status: mitigated
 `;
 
-const NO_RISK_IDEA = `---
+const NO_RISK_INTENT = `---
 risk_tier: low
 ---
 
@@ -76,7 +76,7 @@ Need a button.
 - Must be blue
 `;
 
-const PARTIAL_FORMAT1_IDEA = `---
+const PARTIAL_FORMAT1_INTENT = `---
 risk_tier: medium
 ---
 
@@ -90,7 +90,7 @@ risk_tier: medium
 
 describe('extractRisks', () => {
   it('Format 1: extracts risks with correct likelihood/impact from inline format', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
 
     expect(risks).toHaveLength(3);
     expect(risks[0].likelihood).toBe('high');
@@ -102,7 +102,7 @@ describe('extractRisks', () => {
   });
 
   it('Format 1: extracts mitigation text', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
 
     expect(risks[0].mitigation).toBe('Run during maintenance window');
     expect(risks[1].mitigation).toBe('Abstract behind adapter');
@@ -110,7 +110,7 @@ describe('extractRisks', () => {
   });
 
   it('Format 1: auto-assigns RISK-NNN IDs sequentially', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
 
     expect(risks[0].id).toBe('RISK-001');
     expect(risks[1].id).toBe('RISK-002');
@@ -118,7 +118,7 @@ describe('extractRisks', () => {
   });
 
   it('Format 1: defaults to open status and Unassigned owner', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
 
     expect(risks[0].status).toBe('open');
     expect(risks[0].owner).toBe('Unassigned');
@@ -127,7 +127,7 @@ describe('extractRisks', () => {
   });
 
   it('Format 2: extracts structured risks with all fields', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
 
     expect(risks).toHaveLength(2);
     expect(risks[0].description).toBe('Payment Processing Failure');
@@ -138,34 +138,34 @@ describe('extractRisks', () => {
   });
 
   it('Format 2: preserves RISK-NNN IDs from headings', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
 
     expect(risks[0].id).toBe('RISK-001');
     expect(risks[1].id).toBe('RISK-002');
   });
 
   it('Format 2: parses status field correctly', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
 
     expect(risks[0].status).toBe('open');
     expect(risks[1].status).toBe('mitigated');
   });
 
   it('Format 2: parses owner field correctly', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
 
     expect(risks[0].owner).toBe('Payments Team');
     expect(risks[1].owner).toBe('Security Team');
   });
 
   it('No Risk section: returns empty array', () => {
-    const risks = extractRisks(NO_RISK_IDEA);
+    const risks = extractRisks(NO_RISK_INTENT);
 
     expect(risks).toEqual([]);
   });
 
   it('Partial format (no likelihood/impact in parens): defaults to medium/medium', () => {
-    const risks = extractRisks(PARTIAL_FORMAT1_IDEA);
+    const risks = extractRisks(PARTIAL_FORMAT1_INTENT);
 
     expect(risks).toHaveLength(2);
     expect(risks[0].likelihood).toBe('medium');
@@ -175,7 +175,7 @@ describe('extractRisks', () => {
   });
 
   it('Partial format (no mitigation): defaults to "Not yet defined"', () => {
-    const risks = extractRisks(PARTIAL_FORMAT1_IDEA);
+    const risks = extractRisks(PARTIAL_FORMAT1_INTENT);
 
     expect(risks[0].mitigation).toBe('Not yet defined');
     expect(risks[1].mitigation).toBe('Not yet defined');
@@ -184,7 +184,7 @@ describe('extractRisks', () => {
 
 describe('createRiskRegister', () => {
   it('Creates register with given risks', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
 
     expect(register.risks).toEqual(risks);
@@ -227,7 +227,7 @@ describe('loadRiskRegister', () => {
   });
 
   it('Loads valid JSON risk register', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const registerPath = join(TEST_DIR, 'risk-register.json');
 
@@ -278,7 +278,7 @@ describe('saveRiskRegister', () => {
   });
 
   it('Saves register to disk', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const registerPath = join(TEST_DIR, 'risk-register.json');
 
@@ -288,7 +288,7 @@ describe('saveRiskRegister', () => {
   });
 
   it('Creates parent directories if needed', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const registerPath = join(TEST_DIR, 'nested', 'dir', 'risk-register.json');
 
@@ -298,7 +298,7 @@ describe('saveRiskRegister', () => {
   });
 
   it('Updates updated_at timestamp', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const originalUpdatedAt = register.updated_at;
     const registerPath = join(TEST_DIR, 'risk-register.json');
@@ -317,7 +317,7 @@ describe('saveRiskRegister', () => {
   });
 
   it('Saved file is valid JSON', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const registerPath = join(TEST_DIR, 'risk-register.json');
 
@@ -328,7 +328,7 @@ describe('saveRiskRegister', () => {
   });
 
   it('Saved file can be loaded back', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const registerPath = join(TEST_DIR, 'risk-register.json');
 
@@ -359,7 +359,7 @@ describe('addRisk', () => {
   });
 
   it('Increments ID from existing risks (RISK-003 after RISK-001, RISK-002)', () => {
-    const risks = extractRisks(FORMAT2_IDEA); // Has RISK-001, RISK-002
+    const risks = extractRisks(FORMAT2_INTENT); // Has RISK-001, RISK-002
     const register = createRiskRegister(risks);
     const newRisk = {
       description: 'New Risk',
@@ -414,7 +414,7 @@ describe('addRisk', () => {
 
 describe('updateRisk', () => {
   it('Updates risk fields by ID', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = updateRisk(register, 'RISK-001', {
@@ -428,7 +428,7 @@ describe('updateRisk', () => {
   });
 
   it('Returns unchanged register if ID not found', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = updateRisk(register, 'RISK-999', { status: 'mitigated' as const });
@@ -437,7 +437,7 @@ describe('updateRisk', () => {
   });
 
   it('Preserves other fields when partially updating', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const originalRisk = register.risks.find(r => r.id === 'RISK-001');
 
@@ -455,7 +455,7 @@ describe('updateRisk', () => {
   });
 
   it('Returns new register (immutable)', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = updateRisk(register, 'RISK-001', { status: 'mitigated' as const });
@@ -464,7 +464,7 @@ describe('updateRisk', () => {
   });
 
   it('Original register is not mutated', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const originalStatus = register.risks.find(r => r.id === 'RISK-001')?.status;
 
@@ -476,7 +476,7 @@ describe('updateRisk', () => {
 
 describe('removeRisk', () => {
   it('Removes risk by ID', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = removeRisk(register, 'RISK-001');
@@ -486,7 +486,7 @@ describe('removeRisk', () => {
   });
 
   it('Returns unchanged register if ID not found', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = removeRisk(register, 'RISK-999');
@@ -495,7 +495,7 @@ describe('removeRisk', () => {
   });
 
   it('Returns new register (immutable)', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
 
     const updated = removeRisk(register, 'RISK-001');
@@ -504,7 +504,7 @@ describe('removeRisk', () => {
   });
 
   it('Original register not mutated', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const originalLength = register.risks.length;
 
@@ -602,7 +602,7 @@ describe('getRiskPriorityScore', () => {
 
 describe('getRiskSummary', () => {
   it('Counts by status correctly', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const summary = getRiskSummary(register);
 
@@ -611,7 +611,7 @@ describe('getRiskSummary', () => {
   });
 
   it('Counts by likelihood correctly', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const summary = getRiskSummary(register);
 
@@ -621,7 +621,7 @@ describe('getRiskSummary', () => {
   });
 
   it('Counts by impact correctly', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const summary = getRiskSummary(register);
 
@@ -631,7 +631,7 @@ describe('getRiskSummary', () => {
   });
 
   it('Identifies high_priority (high likelihood AND high impact)', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const summary = getRiskSummary(register);
 
@@ -651,7 +651,7 @@ describe('getRiskSummary', () => {
   });
 
   it('Returns correct total count', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const summary = getRiskSummary(register);
 
@@ -668,7 +668,7 @@ describe('getNextRiskId', () => {
   });
 
   it('Returns RISK-004 when highest is RISK-003', () => {
-    const risks = extractRisks(FORMAT1_IDEA); // Has RISK-001, RISK-002, RISK-003
+    const risks = extractRisks(FORMAT1_INTENT); // Has RISK-001, RISK-002, RISK-003
     const register = createRiskRegister(risks);
     const nextId = getNextRiskId(register);
 
@@ -711,7 +711,7 @@ describe('getNextRiskId', () => {
 
 describe('formatRiskReport', () => {
   it('Header includes total count', () => {
-    const risks = extractRisks(FORMAT1_IDEA);
+    const risks = extractRisks(FORMAT1_INTENT);
     const register = createRiskRegister(risks);
     const report = formatRiskReport(register);
 
@@ -720,7 +720,7 @@ describe('formatRiskReport', () => {
   });
 
   it('Groups risks by status', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const report = formatRiskReport(register);
 
@@ -729,7 +729,7 @@ describe('formatRiskReport', () => {
   });
 
   it('Shows likelihood and impact in uppercase', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const report = formatRiskReport(register);
 
@@ -737,7 +737,7 @@ describe('formatRiskReport', () => {
   });
 
   it('Shows mitigation and owner', () => {
-    const risks = extractRisks(FORMAT2_IDEA);
+    const risks = extractRisks(FORMAT2_INTENT);
     const register = createRiskRegister(risks);
     const report = formatRiskReport(register);
 

@@ -283,15 +283,15 @@ describe('session-start resume detection hook', () => {
       workflowId: 'wf-001',
       featureName: 'Test Feature',
       currentPhase: 'inception' as const,
-      currentStage: 'idea' as const,
+      currentStage: 'intent' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-15T10:00:00Z',
       isLegacy: false,
       status: 'in_progress',
       interviewProgress: {
-        stage: 'idea' as const,
+        stage: 'intent' as const,
         questions_asked: 5,
-        draft_artifact_path: 'aidlc-docs/discovery/idea-draft.md',
+        draft_artifact_path: 'aidlc-docs/discovery/intent-draft.md',
       },
     };
 
@@ -311,7 +311,7 @@ describe('session-start resume detection hook', () => {
 
     const result = await resumeHook!.handler(ctx);
 
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Interview in progress: idea stage');
+    expect(result.hookSpecificOutput?.additionalContext).toContain('Interview in progress: intent stage');
     expect(result.hookSpecificOutput?.additionalContext).toContain('5 questions asked');
     expect(result.hookSpecificOutput?.additionalContext).toContain('Draft artifact exists');
   });
@@ -350,13 +350,13 @@ describe('session-start resume detection hook', () => {
       workflowId: 'legacy-wf',
       featureName: 'Legacy Feature',
       currentPhase: 'inception' as const,
-      currentStage: 'idea' as const,
+      currentStage: 'intent' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-10T10:00:00Z',
       isLegacy: true,
       status: 'in_progress',
       interviewProgress: {
-        stage: 'idea' as const,
+        stage: 'intent' as const,
         questions_asked: 5,
       },
     };

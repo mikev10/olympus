@@ -16,7 +16,7 @@ import {
   loadCheckpoint,
   clearCache,
 } from '../../features/workflow-engine/checkpoint.js';
-import { validateIdea, validateIntent, clearFileCache } from '../../features/workflow-engine/validation.js';
+import { validateIntent, clearFileCache } from '../../features/workflow-engine/validation.js';
 import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
 import type { WorkflowStatus } from '../../features/workflow-engine/types.js';
 
@@ -200,9 +200,9 @@ describe('Workflow Engine Performance', () => {
       await fs.ensureDir(workflowDir);
     });
 
-    it('validates IDEA artifact in < 100ms', async () => {
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
-      const ideaContent = `---
+    it('validates INTENT artifact in < 100ms (problem statement format)', async () => {
+      const intentPath = join(tmpDir, 'aidlc-docs', 'inception', 'intent.md');
+      const intentContent = `---
 risk_tier: medium
 ---
 
@@ -224,28 +224,16 @@ Business context with relevant information about the feature.
 ## Solution Approach
 High-level approach to solving the problem.
 `;
-      await fs.writeFile(ideaPath, ideaContent);
+      await fs.writeFile(intentPath, intentContent);
 
-      const { duration } = await measureTime(() => validateIdea(ideaPath));
+      const { duration } = await measureTime(() => validateIntent(intentPath));
 
-      console.log(`[PERF] IDEA validation: ${duration.toFixed(2)}ms`);
+      console.log(`[PERF] INTENT validation: ${duration.toFixed(2)}ms`);
       expect(duration).toBeLessThan(100);
     });
 
-    it('validates INTENT artifact in < 100ms', async () => {
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
+    it('validates INTENT artifact in < 100ms (user stories format)', async () => {
       const intentPath = join(tmpDir, 'aidlc-docs', 'inception', 'intent.md');
-
-      const ideaContent = `---
-risk_tier: medium
----
-
-## Constraints
-- Constraint 1
-- Constraint 2
-- Constraint 3
-`;
-      await fs.writeFile(ideaPath, ideaContent);
 
       const intentContent = `## User Stories
 
@@ -274,8 +262,8 @@ Description of third story
     });
 
     it('caches file reads during validation', async () => {
-      const ideaPath = join(tmpDir, 'aidlc-docs', 'inception', 'idea.md');
-      const ideaContent = `---
+      const intentPath = join(tmpDir, 'aidlc-docs', 'inception', 'intent.md');
+      const intentContent = `---
 risk_tier: medium
 ---
 
@@ -295,15 +283,15 @@ Test content
 ## Solution Approach
 Test content
 `;
-      await fs.writeFile(ideaPath, ideaContent);
+      await fs.writeFile(intentPath, intentContent);
 
       // First validation (cold cache)
-      const { duration: duration1 } = await measureTime(() => validateIdea(ideaPath));
+      const { duration: duration1 } = await measureTime(() => validateIntent(intentPath));
 
       // Second validation (warm cache)
-      const { duration: duration2 } = await measureTime(() => validateIdea(ideaPath));
+      const { duration: duration2 } = await measureTime(() => validateIntent(intentPath));
 
-      console.log(`[PERF] IDEA validation cold: ${duration1.toFixed(2)}ms, warm: ${duration2.toFixed(2)}ms`);
+      console.log(`[PERF] INTENT validation cold: ${duration1.toFixed(2)}ms, warm: ${duration2.toFixed(2)}ms`);
       expect(duration2).toBeLessThan(duration1); // Warm should be faster
       expect(duration2).toBeLessThan(50); // Warm should be very fast
     });

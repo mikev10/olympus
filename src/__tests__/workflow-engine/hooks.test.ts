@@ -171,10 +171,10 @@ describe('Workflow Hooks', () => {
 
   describe('buildWorkflowTransitionPrompt', () => {
     it('shows completed stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
-      expect(prompt).toContain('Stage idea complete!');
+      expect(prompt).toContain('Stage intent complete!');
       expect(prompt).toContain('✓');
     });
 
@@ -187,53 +187,50 @@ describe('Workflow Hooks', () => {
 
     it('lists artifacts when available', () => {
       const checkpoint = createTestCheckpoint({
-        current_stage: 'idea',
+        current_stage: 'intent',
         artifacts: {
-          idea: {
-            id: 'IDEA-001',
-            path: '.olympus/workflows/user-auth/idea.md',
+          intent: {
+            id: 'INTENT-001',
+            path: '.olympus/workflows/user-auth/intent.md',
             created_at: '2024-01-15T10:00:00Z',
             validation_passed: true,
           },
-          intent: null,
           unit: null,
           bolt: null,
           complete: null,
         },
         validation_results: {
-          idea: {
+          intent: {
             passed: true,
             coverage_percentage: 95,
             blocking_issues: [],
             timestamp: '2024-01-15T10:30:00Z',
           },
-          intent: null,
           unit: null,
           bolt: null,
           complete: null,
         },
       });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
       expect(prompt).toContain('Completed artifacts:');
-      expect(prompt).toContain('IDEA-001');
-      expect(prompt).toContain('.olympus/workflows/user-auth/idea.md');
+      expect(prompt).toContain('INTENT-001');
+      expect(prompt).toContain('.olympus/workflows/user-auth/intent.md');
       expect(prompt).toContain('validated: true');
     });
 
     it('handles missing artifacts gracefully', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
       expect(prompt).toContain('Completed artifacts:');
-      expect(prompt).toContain('No artifacts recorded for idea stage');
+      expect(prompt).toContain('No artifacts recorded for intent stage');
     });
 
     it('shows validation failed status', () => {
       const checkpoint = createTestCheckpoint({
         current_stage: 'intent',
         artifacts: {
-          idea: null,
           intent: {
             id: 'INTENT-001',
             path: '.olympus/workflows/user-auth/intent.md',
@@ -245,7 +242,6 @@ describe('Workflow Hooks', () => {
           complete: null,
         },
         validation_results: {
-          idea: null,
           intent: {
             passed: false,
             coverage_percentage: 60,
@@ -263,11 +259,11 @@ describe('Workflow Hooks', () => {
     });
 
     it('includes validation type for next stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'idea' });
-      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'intent');
+      const checkpoint = createTestCheckpoint({ current_stage: 'intent' });
+      const prompt = buildWorkflowTransitionPrompt(checkpoint, 'unit');
 
       expect(prompt).toContain('Validation required:');
-      expect(prompt).toContain('INTENT completeness and alignment with IDEA');
+      expect(prompt).toContain('UNIT decomposition coverage and interface contracts');
     });
 
     it('handles next stage without agent', () => {
@@ -300,7 +296,7 @@ describe('Workflow Hooks', () => {
 
   describe('all prompt functions', () => {
     it('return non-empty strings for all stages', () => {
-      const stages: WorkflowStage[] = ['idea', 'intent', 'unit', 'bolt', 'complete'];
+      const stages: WorkflowStage[] = ['intent', 'unit', 'bolt', 'complete'];
 
       stages.forEach((stage) => {
         const checkpoint = createTestCheckpoint({ current_stage: stage });

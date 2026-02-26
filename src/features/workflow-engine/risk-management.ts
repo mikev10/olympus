@@ -1,7 +1,7 @@
 /**
  * Risk Management
  *
- * Extracts risks from IDEA artifacts and provides CRUD operations for
+ * Extracts risks from INTENT artifacts and provides CRUD operations for
  * risk-register.json. Risks use RISK-NNN sequential IDs and track
  * likelihood, impact, mitigation strategies, and ownership.
  */
@@ -180,16 +180,16 @@ function parseFormat2Risks(content: string): RiskEntry[] {
 }
 
 /**
- * Extracts risks from an IDEA artifact markdown file.
+ * Extracts risks from an INTENT artifact markdown file.
  * Supports two formats:
  * - Format 1: Bullet list with inline fields
  * - Format 2: Structured entries with headings
  *
- * @param ideaContent - The markdown content of the IDEA artifact
+ * @param intentContent - The markdown content of the INTENT artifact
  * @returns Array of extracted risks
  */
-export function extractRisks(ideaContent: string): RiskEntry[] {
-  const sections = parseSections(ideaContent);
+export function extractRisks(intentContent: string): RiskEntry[] {
+  const sections = parseSections(intentContent);
 
   // Look for Risk Assessment or Risks section
   const riskSection = sections.get('Risk Assessment') || sections.get('Risks');

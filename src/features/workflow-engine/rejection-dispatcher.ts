@@ -29,7 +29,7 @@ export interface RejectionDispatchResult {
  */
 export function getAgentForGate(gateNumber: number): string {
   switch (gateNumber) {
-    case 1: // IDEA rejected
+    case 1: // INTENT rejected
       return 'prometheus';
     case 2: // INTENT rejected
       return 'prometheus';
@@ -66,7 +66,7 @@ export async function dispatchRejection(
     let basePrompt: string;
     switch (context.gateNumber) {
       case 1:
-        basePrompt = `Revise the IDEA based on this feedback: ${context.rejectionReason}`;
+        basePrompt = `Revise the INTENT based on this feedback: ${context.rejectionReason}`;
         break;
       case 2:
         basePrompt = `Update the INTENT based on this feedback: ${context.rejectionReason}`;

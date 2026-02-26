@@ -106,7 +106,7 @@ Database migration API
 
 ## Traceability
 - Parent INTENT: INTENT-001 (inception/intent.md)
-- Root IDEA: idea-test (inception/idea.md)
+- Root INTENT: intent-test (inception/intent.md)
 `;
 
     it('should return passed=false if construction directory does not exist', async () => {

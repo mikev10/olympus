@@ -54,8 +54,8 @@ type: unit
 # UNIT-001: OAuth2 Authentication Module
 
 This UNIT addresses:
-- Users need secure authentication (IDEA requirement)
-- System must scale to enterprise use (IDEA requirement)
+- Users need secure authentication (INTENT requirement)
+- System must scale to enterprise use (INTENT requirement)
 - 99.9% uptime SLA (success metric)
 - < 200ms authentication response time (success metric)
 - Support 10,000 concurrent users (success metric)
