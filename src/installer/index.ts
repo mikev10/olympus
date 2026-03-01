@@ -2980,90 +2980,88 @@ $ARGUMENTS
 
 You are the Olympus Doctor - diagnose and fix installation issues.
 
-### Step 1: Check Plugin Version
+### Step 1: Check Installation
+
+Read \`~/.claude/.olympus-version.json\` to determine the installed version.
 
 \`\`\`bash
-# Get installed version
-INSTALLED=$(ls ~/.claude/plugins/cache/olympus/olympus/ 2>/dev/null | sort -V | tail -1)
-echo "Installed: $INSTALLED"
-
-# Get latest from npm
-LATEST=$(npm view olympus version 2>/dev/null)
-echo "Latest: $LATEST"
+cat ~/.claude/.olympus-version.json 2>/dev/null || echo "FILE_NOT_FOUND"
 \`\`\`
 
 **Diagnosis**:
-- If no version installed: CRITICAL - plugin not installed
-- If INSTALLED != LATEST: WARN - outdated plugin
-- If multiple versions exist: WARN - stale cache
+- If file not found: CRITICAL — Olympus not properly installed (run \`npm install -g olympus-ai && olympus-ai install\`)
+- If present: show version, installMethod, and installedAt fields
+- Then check latest available version:
 
-### Step 2: Check for Legacy Hooks in settings.json
+\`\`\`bash
+LATEST=$(npm view olympus-ai version 2>/dev/null)
+echo "Latest: $LATEST"
+\`\`\`
 
-Read \`~/.claude/settings.json\` and check if there's a \`"hooks"\` key with entries like:
-- \`bash $HOME/.claude/hooks/keyword-detector.sh\`
-- \`bash $HOME/.claude/hooks/persistent-mode.sh\`
-- \`bash $HOME/.claude/hooks/session-start.sh\`
+- If installed version < latest: WARN — update available
+
+### Step 2: Check Hooks Configuration
+
+Read \`~/.claude/settings.json\` and inspect the \`"hooks"\` section.
+
+\`\`\`bash
+cat ~/.claude/settings.json 2>/dev/null || echo "FILE_NOT_FOUND"
+\`\`\`
 
 **Diagnosis**:
-- If found: CRITICAL - legacy hooks causing duplicates
+- If no \`"hooks"\` key at all: CRITICAL — hooks not configured (Olympus will not function correctly)
+- If hooks reference \`olympus-hooks.cjs\`: OK — current bundled hook format
+- If hooks reference individual \`.sh\` scripts (e.g. \`keyword-detector.sh\`, \`persistent-mode.sh\`, \`session-start.sh\`): WARN — legacy hook format, run \`olympus-ai install\` to migrate to bundled hooks
 
 ### Step 3: Check for Legacy Bash Hook Scripts
 
 \`\`\`bash
-ls -la ~/.claude/hooks/*.sh 2>/dev/null
+ls -la ~/.claude/hooks/*.sh 2>/dev/null || echo "NONE_FOUND"
 \`\`\`
 
 **Diagnosis**:
-- If \`keyword-detector.sh\`, \`persistent-mode.sh\`, \`session-start.sh\`, or \`stop-continuation.sh\` exist: WARN - legacy scripts (can cause confusion)
+- If any of \`keyword-detector.sh\`, \`persistent-mode.sh\`, \`session-start.sh\`, or \`stop-continuation.sh\` exist: WARN — legacy scripts present (can conflict with bundled hooks)
+- \`olympus-hooks.cjs\` is the current hook bundle — do NOT flag it as legacy
 
 ### Step 4: Check CLAUDE.md
 
 \`\`\`bash
-# Check if CLAUDE.md exists
-ls -la ~/.claude/CLAUDE.md 2>/dev/null
-
-# Check for Olympus marker
+ls -la ~/.claude/CLAUDE.md 2>/dev/null || echo "FILE_NOT_FOUND"
 grep -q "Olympus Multi-Agent System" ~/.claude/CLAUDE.md 2>/dev/null && echo "Has Olympus config" || echo "Missing Olympus config"
 \`\`\`
 
 **Diagnosis**:
-- If missing: CRITICAL - CLAUDE.md not configured
-- If missing Olympus marker: WARN - outdated CLAUDE.md
+- If missing: CRITICAL — CLAUDE.md not configured
+- If present but missing Olympus marker: WARN — outdated CLAUDE.md
 
-### Step 5: Check for Stale Plugin Cache
-
-\`\`\`bash
-# Count versions in cache
-ls ~/.claude/plugins/cache/olympus/olympus/ 2>/dev/null | wc -l
-\`\`\`
-
-**Diagnosis**:
-- If > 1 version: WARN - multiple cached versions (cleanup recommended)
-
-### Step 6: Check for Legacy Curl-Installed Content
-
-Check for legacy agents, commands, and skills installed via curl (before plugin system):
+### Step 5: Verify Core Files
 
 \`\`\`bash
-# Check for legacy agents directory
-ls -la ~/.claude/agents/ 2>/dev/null
+# Check agents directory
+ls ~/.claude/agents/*.md 2>/dev/null | wc -l
 
-# Check for legacy commands directory
-ls -la ~/.claude/commands/ 2>/dev/null
+# Check commands directory
+ls ~/.claude/commands/*.md 2>/dev/null | wc -l
 
-# Check for legacy skills directory
-ls -la ~/.claude/skills/ 2>/dev/null
+# Check bundled hook exists
+ls -la ~/.claude/hooks/olympus-hooks.cjs 2>/dev/null || echo "HOOK_BUNDLE_MISSING"
 \`\`\`
 
-**Diagnosis**:
-- If \`~/.claude/agents/\` exists with olympus-related files: WARN - legacy agents (now provided by plugin)
-- If \`~/.claude/commands/\` exists with olympus-related files: WARN - legacy commands (now provided by plugin)
-- If \`~/.claude/skills/\` exists with olympus-related files: WARN - legacy skills (now provided by plugin)
+Expected agent files include: \`oracle.md\`, \`librarian.md\`, \`explore.md\`, \`olympian.md\`, \`prometheus.md\`, \`frontend-engineer.md\`
+Expected command files include: \`ultrawork.md\`, \`deepsearch.md\`, \`plan.md\`, \`ascent.md\`
 
-Look for files like:
-- \`oracle.md\`, \`librarian.md\`, \`explore.md\`, \`olympian.md\`, etc. in agents/
-- \`ultrawork.md\`, \`olympus-default.md\`, \`deepsearch.md\`, etc. in commands/
-- Any olympus-related \`.md\` files in skills/
+**Diagnosis**:
+- If \`~/.claude/agents/\` is missing or empty: WARN — incomplete installation, run \`olympus-ai install\`
+- If \`~/.claude/commands/\` is missing or empty: WARN — incomplete installation, run \`olympus-ai install\`
+- If \`olympus-hooks.cjs\` is missing: CRITICAL — hook bundle missing, run \`olympus-ai install\`
+
+### Step 6: Check Install Method Consistency
+
+Using the data already read from \`~/.claude/.olympus-version.json\`:
+
+**Diagnosis**:
+- If \`installMethod\` is \`"npm"\` or \`"npm-local"\` and agents/commands directories exist: OK — expected layout for npm install
+- If \`~/.claude/.olympus-version.json\` is missing but agents/commands exist: WARN — unknown install method (possibly curl-installed without registration), recommend running \`npm install -g olympus-ai && olympus-ai install\` to register properly
 
 ---
 
@@ -3075,20 +3073,24 @@ After running all checks, output a report:
 ## Olympus Doctor Report
 
 ### Summary
-[HEALTHY / ISSUES FOUND]
+[HEALTHY / ISSUES FOUND — N critical, N warnings]
+
+### Installation Info
+- Version: X.Y.Z
+- Install Method: npm
+- Installed At: YYYY-MM-DD
+- Latest Available: X.Y.Z
 
 ### Checks
 
 | Check | Status | Details |
 |-------|--------|---------|
-| Plugin Version | OK/WARN/CRITICAL | ... |
-| Legacy Hooks (settings.json) | OK/CRITICAL | ... |
+| Installation | OK/WARN/CRITICAL | ... |
+| Hooks (settings.json) | OK/WARN/CRITICAL | ... |
 | Legacy Scripts (~/.claude/hooks/) | OK/WARN | ... |
 | CLAUDE.md | OK/WARN/CRITICAL | ... |
-| Plugin Cache | OK/WARN | ... |
-| Legacy Agents (~/.claude/agents/) | OK/WARN | ... |
-| Legacy Commands (~/.claude/commands/) | OK/WARN | ... |
-| Legacy Skills (~/.claude/skills/) | OK/WARN | ... |
+| Core Files | OK/WARN/CRITICAL | ... |
+| Install Consistency | OK/WARN | ... |
 
 ### Issues Found
 1. [Issue description]
@@ -3104,10 +3106,16 @@ After running all checks, output a report:
 
 If issues found, ask user: "Would you like me to fix these issues automatically?"
 
-If yes, apply fixes:
+If yes, apply only the relevant fixes:
+
+### Fix: Outdated Version
+\`\`\`bash
+npm install -g olympus-ai
+olympus-ai install
+\`\`\`
 
 ### Fix: Legacy Hooks in settings.json
-Remove the \`"hooks"\` section from \`~/.claude/settings.json\` (keep other settings intact)
+Run \`olympus-ai install\` to rewrite the hooks section to use the bundled \`olympus-hooks.cjs\` format. Do not manually remove the hooks section — Olympus must configure it correctly.
 
 ### Fix: Legacy Bash Scripts
 \`\`\`bash
@@ -3116,43 +3124,23 @@ rm -f ~/.claude/hooks/persistent-mode.sh
 rm -f ~/.claude/hooks/session-start.sh
 rm -f ~/.claude/hooks/stop-continuation.sh
 \`\`\`
-
-### Fix: Outdated Plugin
-\`\`\`bash
-rm -rf ~/.claude/plugins/cache/olympus
-echo "Plugin cache cleared. Restart Claude Code to fetch latest version."
-\`\`\`
-
-### Fix: Stale Cache (multiple versions)
-\`\`\`bash
-# Keep only latest version
-cd ~/.claude/plugins/cache/olympus/olympus/
-ls | sort -V | head -n -1 | xargs rm -rf
-\`\`\`
+Do NOT remove \`olympus-hooks.cjs\` — that is the current hook bundle.
 
 ### Fix: Missing/Outdated CLAUDE.md
-Fetch latest from GitHub and write to \`~/.claude/CLAUDE.md\`:
-\`\`\`
-WebFetch(url: "https://raw.githubusercontent.com/mikev10/olympus/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
-\`\`\`
-
-### Fix: Legacy Curl-Installed Content
-
-Remove legacy agents, commands, and skills directories (now provided by plugin):
-
 \`\`\`bash
-# Backup first (optional - ask user)
-# mv ~/.claude/agents ~/.claude/agents.bak
-# mv ~/.claude/commands ~/.claude/commands.bak
-# mv ~/.claude/skills ~/.claude/skills.bak
-
-# Or remove directly
-rm -rf ~/.claude/agents
-rm -rf ~/.claude/commands
-rm -rf ~/.claude/skills
+olympus-ai install
 \`\`\`
 
-**Note**: Only remove if these contain olympus-related files. If user has custom agents/commands/skills, warn them and ask before removing.
+### Fix: Incomplete Installation (missing agents, commands, or hook bundle)
+\`\`\`bash
+olympus-ai install
+\`\`\`
+
+### Fix: Unknown Install Method
+\`\`\`bash
+npm install -g olympus-ai
+olympus-ai install
+\`\`\`
 
 ---
 
