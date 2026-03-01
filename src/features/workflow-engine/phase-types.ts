@@ -17,6 +17,26 @@ import type { WorkflowStage, WorkflowStatus, ArtifactReference, ValidationResult
 
 export type WorkflowPhase = 'discovery' | 'inception' | 'construction' | 'operations';
 
+export type InceptionStage =
+  | 'workspace-detection'      // greenfield/brownfield auto-detect
+  | 'reverse-engineering'      // brownfield only — 6 artifacts
+  | 'requirements-analysis'    // structured Q&A -> requirements.md
+  | 'user-stories'             // conditional — personas.md + stories.md
+  | 'workflow-planning'        // execution plan with Mermaid diagram
+  | 'application-design'       // conditional — 4 design artifacts
+  | 'units-generation';        // conditional — unit-of-work artifacts
+
+export interface InceptionStageState {
+  stage: InceptionStage;
+  status: 'not_started' | 'in_progress' | 'completed' | 'skipped';
+  started_at: string | null;
+  completed_at: string | null;
+  skip_reason: string | null;
+  artifacts_generated: string[];
+  questions_file: string | null;
+  answers_received: boolean;
+}
+
 /**
  * Maps each workflow stage to its parent phase.
  * Used for phase progression tracking and gate routing.
@@ -271,29 +291,31 @@ export interface WorkflowCheckpointV3 {
   resume_context?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-  level1_plan_path?: string;
+  workflow_routing_path?: string;
   pathway_type?: PathwayType;
   skipped_phases?: WorkflowPhase[];
   bolt_plan_path?: string;
   plan_steps_total?: number;
   plan_steps_completed?: number;
+  inception_stages?: Record<InceptionStage, InceptionStageState>;
+  current_inception_stage?: InceptionStage;
 }
 
 export type PathwayType = 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization';
 
-export interface Level1PlanStage {
+export interface WorkflowRoutingStage {
   phase: WorkflowPhase;
   stage: string;
   included: boolean;
   rationale: string;
 }
 
-export interface Level1Plan {
+export interface WorkflowRoutingPlan {
   pathway: PathwayType;
   risk_assessment: 'LOW' | 'MEDIUM' | 'HIGH';
   risk_tier: RiskTier;
   phases: Record<WorkflowPhase, { included: boolean; rationale: string }>;
-  stages: Level1PlanStage[];
+  stages: WorkflowRoutingStage[];
   estimated_bolts: number;
   estimated_depth: 'minimal' | 'standard' | 'comprehensive';
   generated_at: string;

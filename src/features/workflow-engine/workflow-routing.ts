@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
 import { detectBrownfield } from './discovery.js';
 import { registerArtifact } from './manifest.js';
-import type { PathwayType, Level1Plan, Level1PlanStage, WorkflowPhase, RiskTier } from './phase-types.js';
+import type { PathwayType, WorkflowRoutingPlan, WorkflowRoutingStage, WorkflowPhase, RiskTier } from './phase-types.js';
 import type { DepthAssessment } from './phase-types.js';
 
 const PATHWAY_KEYWORDS: Array<{ pathway: PathwayType; keywords: string[] }> = [
@@ -45,7 +45,7 @@ export async function detectPathway(projectPath: string, intentText: string): Pr
   return 'brownfield-enhancement';
 }
 
-export interface Level1PlanOptions {
+export interface WorkflowRoutingOptions {
   projectPath: string;
   workflowId: string;
   intentText: string;
@@ -135,7 +135,7 @@ function getStageRationale(phase: WorkflowPhase, stage: string, _pathway: Pathwa
   return rationales[`${phase}:${stage}`] ?? 'Standard stage for this phase';
 }
 
-export async function generateLevel1Plan(options: Level1PlanOptions): Promise<Level1Plan> {
+export async function generateWorkflowRouting(options: WorkflowRoutingOptions): Promise<WorkflowRoutingPlan> {
   const { pathwayType, depthAssessment, sourceFileCount } = options;
   const { recommended_depth, total_score, risk_tier } = depthAssessment;
 
@@ -160,7 +160,7 @@ export async function generateLevel1Plan(options: Level1PlanOptions): Promise<Le
   };
 
   const allPhases: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
-  const stages: Level1PlanStage[] = [];
+  const stages: WorkflowRoutingStage[] = [];
 
   for (const phase of allPhases) {
     if (!phaseConfig[phase]) continue;
@@ -211,7 +211,7 @@ export async function generateLevel1Plan(options: Level1PlanOptions): Promise<Le
   };
 }
 
-function renderPlanMarkdown(workflowId: string, plan: Level1Plan): string {
+function renderPlanMarkdown(workflowId: string, plan: WorkflowRoutingPlan): string {
   const phaseOrder: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
 
   const phaseRows = phaseOrder
@@ -249,14 +249,14 @@ ${stageRows}
 `;
 }
 
-export async function writeLevel1PlanArtifact(
+export async function writeWorkflowRoutingArtifact(
   projectPath: string,
   workflowId: string,
-  plan: Level1Plan
+  plan: WorkflowRoutingPlan
 ): Promise<string> {
-  const artifactDir = path.join(projectPath, 'aidlc-docs', workflowId);
-  const artifactPath = path.join(artifactDir, 'level1-plan.md');
-  const relativePath = path.posix.join('aidlc-docs', workflowId, 'level1-plan.md');
+  const artifactDir = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'plans');
+  const artifactPath = path.join(artifactDir, 'workflow-routing.md');
+  const relativePath = path.posix.join('aidlc-docs', workflowId, 'inception', 'plans', 'workflow-routing.md');
 
   try {
     await fs.mkdir(artifactDir, { recursive: true });
@@ -265,14 +265,14 @@ export async function writeLevel1PlanArtifact(
     const fullContent = markdown + '\n## Execution Plan Visualization\n\n' + visualization + '\n';
     await fs.writeFile(artifactPath, fullContent, 'utf-8');
   } catch (error) {
-    console.error('[Level1Plan] Failed to write artifact:', error);
+    console.error('[WorkflowRouting] Failed to write artifact:', error);
     throw error;
   }
 
   const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   registerArtifact(manifestPath, {
     id: `L1PLAN-${workflowId}`,
-    type: 'LEVEL1_PLAN',
+    type: 'WORKFLOW_ROUTING',
     phase: 'inception',
     stage: 'intent',
     path: relativePath,
@@ -301,8 +301,8 @@ function parsePhaseOverviewTable(content: string): Record<string, { included: bo
   return result;
 }
 
-function parseStageDetailsTable(content: string): Level1PlanStage[] {
-  const stages: Level1PlanStage[] = [];
+function parseStageDetailsTable(content: string): WorkflowRoutingStage[] {
+  const stages: WorkflowRoutingStage[] = [];
 
   const tableMatch = content.match(/## Stage Details[\s\S]*?\n\|[-| ]+\|\n([\s\S]*?)(?=\n## |\n# |$)/);
   if (!tableMatch) return stages;
@@ -323,8 +323,8 @@ function parseStageDetailsTable(content: string): Level1PlanStage[] {
   return stages;
 }
 
-export function loadLevel1Plan(projectPath: string, workflowId: string): Level1Plan | null {
-  const artifactPath = path.join(projectPath, 'aidlc-docs', workflowId, 'level1-plan.md');
+export function loadWorkflowRouting(projectPath: string, workflowId: string): WorkflowRoutingPlan | null {
+  const artifactPath = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'plans', 'workflow-routing.md');
 
   if (!existsSync(artifactPath)) {
     return null;
@@ -334,7 +334,7 @@ export function loadLevel1Plan(projectPath: string, workflowId: string): Level1P
   try {
     content = readFileSync(artifactPath, 'utf-8');
   } catch (error) {
-    console.error('[Level1Plan] Failed to read artifact:', error);
+    console.error('[WorkflowRouting] Failed to read artifact:', error);
     return null;
   }
 
@@ -348,7 +348,7 @@ export function loadLevel1Plan(projectPath: string, workflowId: string): Level1P
     const approvedAtMatch = content.match(/\*\*Approved:\*\*\s*(.+)/);
 
     if (!pathwayMatch || !riskAssessmentMatch || !riskTierMatch || !estimatedBoltsMatch || !estimatedDepthMatch || !generatedAtMatch) {
-      console.error('[Level1Plan] Missing required header fields');
+      console.error('[WorkflowRouting] Missing required header fields');
       return null;
     }
 
@@ -373,21 +373,21 @@ export function loadLevel1Plan(projectPath: string, workflowId: string): Level1P
       stages: parseStageDetailsTable(content),
     };
   } catch (error) {
-    console.error('[Level1Plan] Failed to parse artifact:', error);
+    console.error('[WorkflowRouting] Failed to parse artifact:', error);
     return null;
   }
 }
 
-export function isPhaseIncluded(plan: Level1Plan, phase: WorkflowPhase): boolean {
+export function isPhaseIncluded(plan: WorkflowRoutingPlan, phase: WorkflowPhase): boolean {
   return plan.phases[phase]?.included ?? true;
 }
 
-export function isStageIncluded(plan: Level1Plan, phase: WorkflowPhase, stage: string): boolean {
+export function isStageIncluded(plan: WorkflowRoutingPlan, phase: WorkflowPhase, stage: string): boolean {
   const stageEntry = plan.stages.find((s) => s.phase === phase && s.stage === stage);
   return stageEntry?.included ?? true;
 }
 
-export const LEVEL1_PLAN_FORMAT_INSTRUCTIONS = `A Level 1 Plan document must contain:
+export const WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS = `A Level 1 Plan document must contain:
 1. A header block with: Pathway, Risk Assessment, Risk Tier, Estimated Bolts, Estimated Depth, Generated date, Approved date
 2. A "Phase Overview" table with columns: Phase | Included | Rationale — one row per phase (discovery, inception, construction, operations)
 3. A "Stage Details" table with columns: # | Phase | Stage | Included | Rationale — one row per workflow stage
@@ -395,7 +395,7 @@ Pathway values: greenfield | brownfield-enhancement | brownfield-refactor | bugf
 Risk Assessment values: LOW | MEDIUM | HIGH
 Estimated Depth values: minimal | standard | comprehensive`;
 
-export function generatePlanVisualization(plan: Level1Plan): string {
+export function generatePlanVisualization(plan: WorkflowRoutingPlan): string {
   const lines: string[] = [];
   lines.push('```mermaid');
   lines.push('flowchart TD');

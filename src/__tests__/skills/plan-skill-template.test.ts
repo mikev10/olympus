@@ -6,9 +6,9 @@ import {
   parseDynamicModelResponse,
 } from '../../features/workflow-engine/brownfield-analysis.js';
 import {
-  loadLevel1Plan,
+  loadWorkflowRouting,
   isPhaseIncluded,
-} from '../../features/workflow-engine/level1-plan.js';
+} from '../../features/workflow-engine/workflow-routing.js';
 
 const installerPath = join(process.cwd(), 'src', 'installer', 'index.ts');
 const testDir = join(process.cwd(), '.test-skill-templates');
@@ -52,7 +52,7 @@ describe('/plan template content validation', () => {
   });
 
   it('checkpoint saves include L1 Plan fields', () => {
-    expect(installerSource).toContain('level1_plan_path');
+    expect(installerSource).toContain('workflow_routing_path');
     expect(installerSource).toContain('pathway_type');
     expect(installerSource).toContain('skipped_phases');
   });
@@ -178,9 +178,9 @@ Global error boundary catches unhandled exceptions.
     expect(result.useCases[0].steps).toHaveLength(3);
   });
 
-  it('sample L1 Plan round-trips through loadLevel1Plan and isPhaseIncluded', () => {
+  it('sample L1 Plan round-trips through loadWorkflowRouting and isPhaseIncluded', () => {
     const workflowId = 'test-wf';
-    const planDir = join(testDir, 'aidlc-docs', workflowId);
+    const planDir = join(testDir, 'aidlc-docs', workflowId, 'inception', 'plans');
     fs.ensureDirSync(planDir);
 
     const planContent = `# Level 1 Plan
@@ -212,9 +212,9 @@ Global error boundary catches unhandled exceptions.
 | 4 | operations | deployment | no | Deferred |
 `;
 
-    fs.writeFileSync(join(planDir, 'level1-plan.md'), planContent, 'utf-8');
+    fs.writeFileSync(join(planDir, 'workflow-routing.md'), planContent, 'utf-8');
 
-    const plan = loadLevel1Plan(testDir, workflowId);
+    const plan = loadWorkflowRouting(testDir, workflowId);
     expect(plan).not.toBeNull();
     expect(plan!.pathway).toBe('brownfield-enhancement');
     expect(plan!.risk_assessment).toBe('MEDIUM');

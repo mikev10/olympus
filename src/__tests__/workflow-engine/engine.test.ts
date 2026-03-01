@@ -9,7 +9,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
 import { loadCheckpoint, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
-import { loadLevel1Plan } from '../../features/workflow-engine/level1-plan.js';
+import { loadWorkflowRouting } from '../../features/workflow-engine/workflow-routing.js';
 import { createManifest, loadManifest } from '../../features/workflow-engine/manifest.js';
 import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
 import type { WorkflowStatus, WorkflowStage } from '../../features/workflow-engine/types.js';
@@ -577,12 +577,12 @@ describe('WorkflowEngine', () => {
 
       const checkpoint = await loadCheckpoint(tmpDir, 'l1-plan-feature') as WorkflowCheckpointV3;
       expect(checkpoint).not.toBeNull();
-      expect(checkpoint.level1_plan_path).toBeDefined();
+      expect(checkpoint.workflow_routing_path).toBeDefined();
       expect(checkpoint.pathway_type).toBeDefined();
       expect(checkpoint.skipped_phases).toBeDefined();
       expect(Array.isArray(checkpoint.skipped_phases)).toBe(true);
 
-      const plan = loadLevel1Plan(tmpDir, 'l1-plan-feature');
+      const plan = loadWorkflowRouting(tmpDir, 'l1-plan-feature');
       expect(plan).not.toBeNull();
       expect(plan!.pathway).toBeDefined();
       expect(plan!.risk_assessment).toMatch(/^(LOW|MEDIUM|HIGH)$/);
@@ -601,7 +601,7 @@ describe('WorkflowEngine', () => {
       expect(checkpoint.pathway_type).toBe('greenfield');
       expect(checkpoint.skipped_phases).toContain('discovery');
 
-      const plan = loadLevel1Plan(tmpDir, 'greenfield-app');
+      const plan = loadWorkflowRouting(tmpDir, 'greenfield-app');
       expect(plan).not.toBeNull();
       expect(plan!.pathway).toBe('greenfield');
       expect(plan!.phases.discovery.included).toBe(false);
@@ -639,7 +639,7 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'No Plan Test');
       await engine.start('Build a test feature');
 
-      const planPath = join(tmpDir, 'aidlc-docs', 'no-plan-test', 'level1-plan.md');
+      const planPath = join(tmpDir, 'aidlc-docs', 'no-plan-test', 'inception', 'plans', 'workflow-routing.md');
       await fs.remove(planPath);
 
       await expect(engine.executePhase('inception')).resolves.toBeUndefined();
@@ -668,26 +668,26 @@ describe('WorkflowEngine', () => {
       expect(bypassEntry!.reason).toContain('Level 1 Plan');
     });
 
-    it('approveLevel1Plan() stamps approved_at and approved_by on the artifact', async () => {
+    it('approveWorkflowRouting() stamps approved_at and approved_by on the artifact', async () => {
       createManifest('approval-test', 'Approval Test', tmpDir);
       const engine = new WorkflowEngine(tmpDir, 'Approval Test');
       await engine.start('Build a brand new approval workflow');
 
-      const planBefore = loadLevel1Plan(tmpDir, 'approval-test');
+      const planBefore = loadWorkflowRouting(tmpDir, 'approval-test');
       expect(planBefore).not.toBeNull();
       expect(planBefore!.approved_at).toBeNull();
       expect(planBefore!.approved_by).toBeNull();
 
-      await engine.approveLevel1Plan('Looks good to me');
+      await engine.approveWorkflowRouting('Looks good to me');
 
-      const planAfter = loadLevel1Plan(tmpDir, 'approval-test');
+      const planAfter = loadWorkflowRouting(tmpDir, 'approval-test');
       expect(planAfter).not.toBeNull();
       expect(planAfter!.approved_at).not.toBeNull();
     });
 
-    it('approveLevel1Plan() throws when no plan exists', async () => {
+    it('approveWorkflowRouting() throws when no plan exists', async () => {
       const engine = new WorkflowEngine(tmpDir, 'No Plan Approval');
-      await expect(engine.approveLevel1Plan()).rejects.toThrow('No Level 1 Plan found');
+      await expect(engine.approveWorkflowRouting()).rejects.toThrow('No Level 1 Plan found');
     });
   });
 });

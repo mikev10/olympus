@@ -3,16 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   detectPathway,
-  generateLevel1Plan,
-  writeLevel1PlanArtifact,
-  loadLevel1Plan,
+  generateWorkflowRouting,
+  writeWorkflowRoutingArtifact,
+  loadWorkflowRouting,
   isPhaseIncluded,
   isStageIncluded,
-  LEVEL1_PLAN_FORMAT_INSTRUCTIONS,
-} from '../../features/workflow-engine/level1-plan.js';
+  WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS,
+} from '../../features/workflow-engine/workflow-routing.js';
 import { adjustDepthForPathway } from '../../features/workflow-engine/depth-assessment.js';
 import type { DepthAssessment } from '../../features/workflow-engine/phase-types.js';
-import type { PathwayType, Level1Plan } from '../../features/workflow-engine/phase-types.js';
+import type { PathwayType, WorkflowRoutingPlan } from '../../features/workflow-engine/phase-types.js';
 
 vi.mock('../../features/workflow-engine/discovery.js', () => ({
   detectBrownfield: vi.fn(),
@@ -58,8 +58,8 @@ async function buildPlan(
   depthOverrides: Partial<DepthAssessment> = {},
   sourceFileCount = 0,
   intentText = 'implement new feature',
-): Promise<Level1Plan> {
-  return generateLevel1Plan({
+): Promise<WorkflowRoutingPlan> {
+  return generateWorkflowRouting({
     projectPath: '/fake',
     workflowId: 'wf-test',
     intentText,
@@ -126,7 +126,7 @@ describe('detectPathway', () => {
   });
 });
 
-describe('generateLevel1Plan', () => {
+describe('generateWorkflowRouting', () => {
   describe('greenfield pathway', () => {
     it('excludes discovery, includes inception/construction/operations', async () => {
       const plan = await buildPlan('greenfield');
@@ -306,11 +306,11 @@ describe('generateLevel1Plan', () => {
   });
 });
 
-describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
+describe('writeWorkflowRoutingArtifact + loadWorkflowRouting', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(process.cwd(), `.test-level1-plan-${Date.now()}`);
+    tmpDir = path.join(process.cwd(), `.test-workflow-routing-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -320,9 +320,9 @@ describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
 
   it('round-trip: write then load preserves pathway, risk_assessment, and phase inclusion', async () => {
     const plan = await buildPlan('brownfield-enhancement', { total_score: 15 });
-    await writeLevel1PlanArtifact(tmpDir, 'wf-roundtrip', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-roundtrip', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-roundtrip');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-roundtrip');
     expect(loaded).not.toBeNull();
     expect(loaded!.pathway).toBe('brownfield-enhancement');
     expect(loaded!.risk_assessment).toBe(plan.risk_assessment);
@@ -334,34 +334,34 @@ describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
 
   it('round-trip: loaded stage count matches original', async () => {
     const plan = await buildPlan('brownfield-refactor', { total_score: 15 });
-    await writeLevel1PlanArtifact(tmpDir, 'wf-stages', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-stages', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-stages');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-stages');
     expect(loaded).not.toBeNull();
     expect(loaded!.stages.length).toBe(plan.stages.length);
   });
 
   it('written markdown contains required section headers', async () => {
     const plan = await buildPlan('greenfield');
-    await writeLevel1PlanArtifact(tmpDir, 'wf-md', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-md', plan);
 
-    const filePath = path.join(tmpDir, 'aidlc-docs', 'wf-md', 'level1-plan.md');
+    const filePath = path.join(tmpDir, 'aidlc-docs', 'wf-md', 'inception', 'plans', 'workflow-routing.md');
     const content = fs.readFileSync(filePath, 'utf-8');
     expect(content).toContain('# Level 1 Plan:');
     expect(content).toContain('## Phase Overview');
     expect(content).toContain('## Stage Details');
   });
 
-  it('write creates file at expected path: aidlc-docs/{workflowId}/level1-plan.md', async () => {
+  it('write creates file at expected path: aidlc-docs/{workflowId}/inception/plans/workflow-routing.md', async () => {
     const plan = await buildPlan('greenfield');
-    await writeLevel1PlanArtifact(tmpDir, 'wf-path-check', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-path-check', plan);
 
-    const expectedPath = path.join(tmpDir, 'aidlc-docs', 'wf-path-check', 'level1-plan.md');
+    const expectedPath = path.join(tmpDir, 'aidlc-docs', 'wf-path-check', 'inception', 'plans', 'workflow-routing.md');
     expect(fs.existsSync(expectedPath)).toBe(true);
   });
 
-  it('loadLevel1Plan returns null when file does not exist', () => {
-    const result = loadLevel1Plan(tmpDir, 'nonexistent-workflow');
+  it('loadWorkflowRouting returns null when file does not exist', () => {
+    const result = loadWorkflowRouting(tmpDir, 'nonexistent-workflow');
     expect(result).toBeNull();
   });
 
@@ -370,9 +370,9 @@ describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
       'bugfix',
       { total_score: 8, recommended_depth: 'minimal', skip_units: true },
     );
-    await writeLevel1PlanArtifact(tmpDir, 'wf-headers', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-headers', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-headers');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-headers');
     expect(loaded).not.toBeNull();
     expect(loaded!.pathway).toBe('bugfix');
     expect(loaded!.risk_assessment).toBe('LOW');
@@ -386,18 +386,18 @@ describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
       { total_score: 15, recommended_depth: 'standard' },
       100,
     );
-    await writeLevel1PlanArtifact(tmpDir, 'wf-bolts', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-bolts', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-bolts');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-bolts');
     expect(loaded).not.toBeNull();
     expect(loaded!.estimated_bolts).toBe(2);
   });
 
   it('approved_at is null when pending', async () => {
     const plan = await buildPlan('greenfield');
-    await writeLevel1PlanArtifact(tmpDir, 'wf-approved', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-approved', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-approved');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-approved');
     expect(loaded).not.toBeNull();
     expect(loaded!.approved_at).toBeNull();
   });
@@ -406,16 +406,16 @@ describe('writeLevel1PlanArtifact + loadLevel1Plan', () => {
     mockRegisterArtifact.mockClear();
     const plan = await buildPlan('greenfield');
     const workflowId = 'wf-register';
-    await writeLevel1PlanArtifact(tmpDir, workflowId, plan);
+    await writeWorkflowRoutingArtifact(tmpDir, workflowId, plan);
 
     expect(mockRegisterArtifact).toHaveBeenCalledOnce();
     const [calledManifestPath, calledArtifact] = mockRegisterArtifact.mock.calls[0];
     expect(calledManifestPath.replace(/\\/g, '/')).toContain(`aidlc-docs/${workflowId}/manifest.json`);
     expect(calledArtifact.id).toBe(`L1PLAN-${workflowId}`);
-    expect(calledArtifact.type).toBe('LEVEL1_PLAN');
+    expect(calledArtifact.type).toBe('WORKFLOW_ROUTING');
     expect(calledArtifact.phase).toBe('inception');
     expect(calledArtifact.stage).toBe('intent');
-    expect(calledArtifact.path).toBe(`aidlc-docs/${workflowId}/level1-plan.md`);
+    expect(calledArtifact.path).toBe(`aidlc-docs/${workflowId}/inception/plans/workflow-routing.md`);
     expect(calledArtifact.validation_passed).toBe(true);
     expect(calledArtifact.write_complete).toBe(true);
   });
@@ -440,11 +440,11 @@ describe('isPhaseIncluded', () => {
   });
 
   it('defaults to true when phase is not present in plan.phases (defensive)', () => {
-    const emptyPlan: Level1Plan = {
+    const emptyPlan: WorkflowRoutingPlan = {
       pathway: 'greenfield',
       risk_assessment: 'LOW',
       risk_tier: 1,
-      phases: {} as Level1Plan['phases'],
+      phases: {} as WorkflowRoutingPlan['phases'],
       stages: [],
       estimated_bolts: 1,
       estimated_depth: 'minimal',
@@ -471,7 +471,7 @@ describe('isStageIncluded', () => {
   });
 
   it('defaults to true when stage is not found in plan.stages', () => {
-    const emptyPlan: Level1Plan = {
+    const emptyPlan: WorkflowRoutingPlan = {
       pathway: 'greenfield',
       risk_assessment: 'LOW',
       risk_tier: 1,
@@ -572,45 +572,45 @@ describe('adjustDepthForPathway', () => {
   });
 });
 
-describe('LEVEL1_PLAN_FORMAT_INSTRUCTIONS', () => {
+describe('WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS', () => {
   it('is a non-empty string', () => {
-    expect(typeof LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toBe('string');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS.length).toBeGreaterThan(0);
+    expect(typeof WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toBe('string');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS.length).toBeGreaterThan(0);
   });
 
   it('contains "Phase Overview"', () => {
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('Phase Overview');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('Phase Overview');
   });
 
   it('contains "Stage Details"', () => {
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('Stage Details');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('Stage Details');
   });
 
   it('contains valid pathway values', () => {
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('greenfield');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('brownfield-enhancement');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('bugfix');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('optimization');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('greenfield');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('brownfield-enhancement');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('bugfix');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('optimization');
   });
 
   it('mentions Risk Assessment values', () => {
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('LOW');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('MEDIUM');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('HIGH');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('LOW');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('MEDIUM');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('HIGH');
   });
 
   it('mentions Estimated Depth values', () => {
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('minimal');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('standard');
-    expect(LEVEL1_PLAN_FORMAT_INSTRUCTIONS).toContain('comprehensive');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('minimal');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('standard');
+    expect(WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS).toContain('comprehensive');
   });
 });
 
-describe('Engine Integration (isPhaseIncluded / loadLevel1Plan boundary)', () => {
+describe('Engine Integration (isPhaseIncluded / loadWorkflowRouting boundary)', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(process.cwd(), `.test-level1-plan-engine-${Date.now()}`);
+    tmpDir = path.join(process.cwd(), `.test-workflow-routing-engine-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -628,23 +628,23 @@ describe('Engine Integration (isPhaseIncluded / loadLevel1Plan boundary)', () =>
     expect(isPhaseIncluded(plan, 'inception')).toBe(false);
   });
 
-  it('loadLevel1Plan returns null when no artifact exists (backward compat)', () => {
-    const result = loadLevel1Plan(tmpDir, 'no-such-workflow');
+  it('loadWorkflowRouting returns null when no artifact exists (backward compat)', () => {
+    const result = loadWorkflowRouting(tmpDir, 'no-such-workflow');
     expect(result).toBeNull();
   });
 
   it('backward compat: null plan means no phase skipping (caller should handle null gracefully)', async () => {
-    const result = loadLevel1Plan(tmpDir, 'no-such-workflow');
+    const result = loadWorkflowRouting(tmpDir, 'no-such-workflow');
     expect(result).toBeNull();
-    const shouldProceed = !result || isPhaseIncluded(result as unknown as Level1Plan, 'discovery');
+    const shouldProceed = !result || isPhaseIncluded(result as unknown as WorkflowRoutingPlan, 'discovery');
     expect(shouldProceed).toBe(true);
   });
 
   it('persisted plan round-trip preserves phase exclusion after write/load', async () => {
     const plan = await buildPlan('bugfix');
-    await writeLevel1PlanArtifact(tmpDir, 'wf-integration', plan);
+    await writeWorkflowRoutingArtifact(tmpDir, 'wf-integration', plan);
 
-    const loaded = loadLevel1Plan(tmpDir, 'wf-integration');
+    const loaded = loadWorkflowRouting(tmpDir, 'wf-integration');
     expect(loaded).not.toBeNull();
     expect(isPhaseIncluded(loaded!, 'discovery')).toBe(false);
     expect(isPhaseIncluded(loaded!, 'inception')).toBe(false);

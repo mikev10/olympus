@@ -26,7 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 import { STATIC_MODEL_FORMAT_INSTRUCTIONS, DYNAMIC_MODEL_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/brownfield-analysis.js';
-import { LEVEL1_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/level1-plan.js';
+import { WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/workflow-routing.js';
 import { WORKSPACE_SCAN_SCHEMA } from '../features/workflow-engine/brownfield-scanner.js';
 import { BOLT_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/bolt-dispatcher.js';
 import { PRFAQ_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/prfaq-generator.js';
@@ -2130,9 +2130,9 @@ Based on the depth assessment and brownfield detection, generate a Level 1 Plan:
    - bugfix: Skip Discovery. Minimal Inception (no PRFAQ, no Momus). Shallow Construction (single BOLT).
    - optimization: Include all phases. Full Operations (monitoring focus).
 
-3. Write the Level 1 Plan artifact to \`aidlc-docs/{workflowId}/level1-plan.md\`:
+3. Write the Workflow Routing artifact to \`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md\`:
 
-${LEVEL1_PLAN_FORMAT_INSTRUCTIONS}
+${WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS}
 
 4. Present the L1 Plan summary alongside the INTENT document at Gate 1.
 
@@ -2167,7 +2167,7 @@ After INTENT approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "depthScore": {3-30},
   "riskTier": {1-3},
   "gatesCompleted": ["intent"],
-  "level1_plan_path": "aidlc-docs/{workflowId}/level1-plan.md",
+  "workflow_routing_path": "aidlc-docs/{workflowId}/inception/plans/workflow-routing.md",
   "pathway_type": "{pathway_type}",
   "skipped_phases": ["{phases excluded by L1 Plan}"]
 }
@@ -2366,7 +2366,7 @@ After all INTENT gates pass, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
   "status": "in_progress",
   "updated": "{ISO-8601}",
   "gatesCompleted": ["intent", "intent_business", "momus_review"],
-  "level1_plan_path": "aidlc-docs/{workflowId}/level1-plan.md",
+  "workflow_routing_path": "aidlc-docs/{workflowId}/inception/plans/workflow-routing.md",
   "pathway_type": "{pathway_type}",
   "skipped_phases": ["{phases excluded by L1 Plan}"]
 }

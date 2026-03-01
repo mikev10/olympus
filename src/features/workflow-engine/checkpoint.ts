@@ -265,6 +265,9 @@ export async function loadCheckpoint(
       checkpoint.current_stage = 'intent';
     }
 
+    // inception_stages: left as undefined for legacy checkpoints.
+    // The inception orchestrator initializes it when first needed.
+
     // Update cache with fresh data
     checkpointCache.set(cacheKey, {
       checkpoint: structuredClone(checkpoint),

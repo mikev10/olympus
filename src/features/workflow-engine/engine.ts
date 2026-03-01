@@ -27,7 +27,7 @@ import { captureWorkflowDiscovery } from './learning-bridge.js';
 import type { WorkflowEvent, WorkflowContext } from './learning-bridge.js';
 import { recordDiscovery } from '../../learning/discovery.js';
 import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
-import { detectPathway, generateLevel1Plan, writeLevel1PlanArtifact, loadLevel1Plan, isPhaseIncluded } from './level1-plan.js';
+import { detectPathway, generateWorkflowRouting, writeWorkflowRoutingArtifact, loadWorkflowRouting, isPhaseIncluded } from './workflow-routing.js';
 import { assessDepthFromIntent } from './depth-assessment.js';
 import { addGateAuditEntry } from './manifest.js';
 
@@ -193,7 +193,7 @@ export class WorkflowEngine {
       const pathwayType = await detectPathway(this.projectPath, initialPrompt);
       const depthAssessment = assessDepthFromIntent(initialPrompt);
 
-      const plan = await generateLevel1Plan({
+      const plan = await generateWorkflowRouting({
         projectPath: this.projectPath,
         workflowId: this.workflowId,
         intentText: initialPrompt,
@@ -202,11 +202,11 @@ export class WorkflowEngine {
         sourceFileCount,
       });
 
-      const planPath = await writeLevel1PlanArtifact(this.projectPath, this.workflowId, plan);
+      const planPath = await writeWorkflowRoutingArtifact(this.projectPath, this.workflowId, plan);
 
       const updatedCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
       if (updatedCheckpoint) {
-        (updatedCheckpoint as WorkflowCheckpointV3).level1_plan_path = planPath;
+        (updatedCheckpoint as WorkflowCheckpointV3).workflow_routing_path = planPath;
         (updatedCheckpoint as WorkflowCheckpointV3).pathway_type = pathwayType;
         const allPhases: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
         (updatedCheckpoint as WorkflowCheckpointV3).skipped_phases = allPhases.filter(p => !isPhaseIncluded(plan, p));
@@ -447,7 +447,7 @@ export class WorkflowEngine {
    * @param phase - The phase to execute ('discovery' | 'inception' | 'construction' | 'operations')
    */
   async executePhase(phase: WorkflowPhase): Promise<void> {
-    const plan = loadLevel1Plan(this.projectPath, this.workflowId);
+    const plan = loadWorkflowRouting(this.projectPath, this.workflowId);
     if (plan && !isPhaseIncluded(plan, phase)) {
       console.log(`[WorkflowEngine] Skipping ${phase} phase (excluded by Level 1 Plan: ${plan.phases[phase]?.rationale || 'no rationale'})`);
 
@@ -691,8 +691,8 @@ export class WorkflowEngine {
     }
   }
 
-  async approveLevel1Plan(feedback?: string): Promise<void> {
-    const plan = loadLevel1Plan(this.projectPath, this.workflowId);
+  async approveWorkflowRouting(feedback?: string): Promise<void> {
+    const plan = loadWorkflowRouting(this.projectPath, this.workflowId);
     if (!plan) {
       throw new Error(`No Level 1 Plan found for workflow: ${this.workflowId}`);
     }
@@ -700,7 +700,7 @@ export class WorkflowEngine {
     plan.approved_at = new Date().toISOString();
     plan.approved_by = 'human';
 
-    await writeLevel1PlanArtifact(this.projectPath, this.workflowId, plan);
+    await writeWorkflowRoutingArtifact(this.projectPath, this.workflowId, plan);
 
     const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
     try {

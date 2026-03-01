@@ -24,7 +24,15 @@ export type ArtifactType =
   | 'change-impact'
   | 'static-model'
   | 'dynamic-model'
-  | 'LEVEL1_PLAN';
+  | 'WORKFLOW_ROUTING'
+  | 'requirements-qa'
+  | 'requirements'
+  | 'personas'
+  | 'user-stories'
+  | 'execution-plan'
+  | 'units-generation'
+  | 'unit-dependency'
+  | 'unit-story-map';
 
 /**
  * Ensures the workflow directory structure exists.
@@ -177,8 +185,24 @@ export function getArtifactPath(
       return path.join(workflowDir, 'discovery', 'static-model.md');
     case 'dynamic-model':
       return path.join(workflowDir, 'discovery', 'dynamic-model.md');
-    case 'LEVEL1_PLAN':
-      return path.join(workflowDir, 'level1-plan.md');
+    case 'WORKFLOW_ROUTING':
+      return path.join(workflowDir, 'inception', 'plans', 'workflow-routing.md');
+    case 'requirements-qa':
+      return path.join(workflowDir, 'inception', 'requirements-questions.md');
+    case 'requirements':
+      return path.join(workflowDir, 'inception', 'requirements.md');
+    case 'personas':
+      return path.join(workflowDir, 'inception', 'personas.md');
+    case 'user-stories':
+      return path.join(workflowDir, 'inception', 'stories.md');
+    case 'execution-plan':
+      return path.join(workflowDir, 'inception', 'plans', 'execution-plan.md');
+    case 'units-generation':
+      return path.join(workflowDir, 'inception', 'unit-of-work.md');
+    case 'unit-dependency':
+      return path.join(workflowDir, 'inception', 'unit-of-work-dependency.md');
+    case 'unit-story-map':
+      return path.join(workflowDir, 'inception', 'unit-of-work-story-map.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }

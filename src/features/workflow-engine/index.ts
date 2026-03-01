@@ -46,8 +46,8 @@ export type {
   WorkflowCheckpointV2,
   WorkflowCheckpointV3,
   PathwayType,
-  Level1PlanStage,
-  Level1Plan,
+  WorkflowRoutingStage,
+  WorkflowRoutingPlan,
 } from './phase-types.js';
 
 export { STAGE_PHASE_MAP } from './phase-types.js';
@@ -340,16 +340,16 @@ export type {
   RetroResult,
 } from './retro.js';
 
-export type { Level1PlanOptions } from './level1-plan.js';
+export type { WorkflowRoutingOptions } from './workflow-routing.js';
 export {
   detectPathway,
-  generateLevel1Plan,
-  writeLevel1PlanArtifact,
-  loadLevel1Plan,
+  generateWorkflowRouting,
+  writeWorkflowRoutingArtifact,
+  loadWorkflowRouting,
   isPhaseIncluded,
   isStageIncluded,
-  LEVEL1_PLAN_FORMAT_INSTRUCTIONS,
-} from './level1-plan.js';
+  WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS,
+} from './workflow-routing.js';
 
 // Brownfield Scanner
 export type {
@@ -555,7 +555,7 @@ export {
 } from './state-file.js';
 
 // Phase 4: Execution Plan Visualization
-export { generatePlanVisualization } from './level1-plan.js';
+export { generatePlanVisualization } from './workflow-routing.js';
 
 // Phase 4: Error Recovery
 export type { ErrorSeverity, WorkflowError, RecoveryResult } from './error-recovery.js';
