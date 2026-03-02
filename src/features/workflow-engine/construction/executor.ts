@@ -164,7 +164,7 @@ export class ConstructionExecutor {
     // MEDIUM / DEEP: full decomposition pipeline
     // Phase 1: Decomposition (units + bolts)
     this.currentStage = 'unit';
-    const decompResult = await this.executeDecompositionPhase(max_units, max_bolts_per_unit, max_total_bolts);
+    const decompResult = await this.executeDecompositionPhase(max_units, max_bolts_per_unit, max_total_bolts, depth);
     if (!decompResult.passed) {
       console.error('[ConstructionExecutor] Decomposition phase failed');
       return decompResult;
@@ -460,7 +460,8 @@ export class ConstructionExecutor {
   private async executeDecompositionPhase(
     maxUnits: number,
     maxBoltsPerUnit: number,
-    maxTotalBolts: number
+    maxTotalBolts: number,
+    depth: 'SHALLOW' | 'MEDIUM' | 'DEEP' = 'MEDIUM'
   ): Promise<ValidationResult> {
     const intentDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception');
     const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
@@ -490,7 +491,8 @@ export class ConstructionExecutor {
         maxUnits,
         maxBoltsPerUnit,
         maxTotalBolts,
-        intentContent
+        intentContent,
+        depth
       );
     }
 
@@ -517,7 +519,8 @@ export class ConstructionExecutor {
     maxUnits: number,
     maxBoltsPerUnit: number,
     maxTotalBolts: number,
-    rootIntentContent: string
+    rootIntentContent: string,
+    depth: 'SHALLOW' | 'MEDIUM' | 'DEEP' = 'MEDIUM'
   ): Promise<ValidationResult> {
     const intentContent = parsed.content;
     const titleMatch = intentContent.match(/^title:\s*(.+)$/m);
@@ -610,6 +613,15 @@ Generated from inception/intent.md
       this.linkConstructionArtifacts(intentId, unit.id, 'derives');
 
       this.runUnitValidation(unitContent, intentContent, rootIntentContent, intentNode.id, unit.id);
+
+      // Per-unit design stages (AWS AI-DLC alignment)
+      try {
+        const { UnitStageRunner } = await import('./unit-stage-runner.js');
+        const stageRunner = new UnitStageRunner(this.projectPath, this.workflowId);
+        await stageRunner.executeForUnit(unit.id, depth, rootIntentContent);
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Unit stage runner failed for ${unit.id}:`, err);
+      }
 
       // Parse proposed BOLTs from the unit description or create default
       const matchingProposed = parsed.proposedUnits.find(

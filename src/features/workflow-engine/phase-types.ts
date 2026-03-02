@@ -299,6 +299,7 @@ export interface WorkflowCheckpointV3 {
   plan_steps_completed?: number;
   inception_stages?: Record<InceptionStage, InceptionStageState>;
   current_inception_stage?: InceptionStage;
+  construction_units?: Record<string, ConstructionUnitProgress>;
 }
 
 export type PathwayType = 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization';
@@ -332,12 +333,15 @@ export interface CeremonyConfig {
 
 export type ConstructionDesignStage = 'domain-design' | 'functional-design' | 'nfr-requirements' | 'nfr-design' | 'infrastructure-design' | 'code-generation';
 
-export interface UnitDesignState {
+export interface ConstructionUnitProgress {
   unitId: string;
-  unitName: string;
-  completedStages: ConstructionDesignStage[];
-  currentStage: ConstructionDesignStage | null;
-  artifacts: Partial<Record<ConstructionDesignStage, string[]>>;
+  stages: Record<ConstructionDesignStage, {
+    status: 'not_started' | 'in_progress' | 'completed' | 'skipped';
+    artifact_path: string | null;
+    completed_at: string | null;
+  }>;
+  bolts_planned: number;
+  bolts_completed: number;
 }
 
 export interface UserStory {

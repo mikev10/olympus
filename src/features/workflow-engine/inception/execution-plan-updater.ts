@@ -44,6 +44,11 @@ function stageKeyToDisplayName(key: string): string {
     'units-generation': 'Units Generation',
     'code-generation': 'Code Generation',
     'build-and-test': 'Build and Test',
+    'domain-design': 'Domain Design',
+    'functional-design': 'Functional Design',
+    'nfr-requirements': 'NFR Requirements',
+    'nfr-design': 'NFR Design',
+    'infrastructure-design': 'Infrastructure Design',
   };
   return map[key] ?? key;
 }

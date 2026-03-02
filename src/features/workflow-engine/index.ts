@@ -455,7 +455,7 @@ export {
 } from './audit-generator.js';
 
 // Phase 4: Construction Design Stages
-export type { ConstructionDesignStage, UnitDesignState, UserStory, UnitDefinition } from './phase-types.js';
+export type { ConstructionDesignStage, ConstructionUnitProgress, UserStory, UnitDefinition } from './phase-types.js';
 export type { DomainDesignArtifact } from './construction/domain-design.js';
 export {
   buildDomainDesignPrompt,
