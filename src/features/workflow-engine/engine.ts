@@ -12,6 +12,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   WorkflowCheckpoint,
   WorkflowStage,
@@ -30,6 +31,7 @@ import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
 import { detectPathway, generateWorkflowRouting, writeWorkflowRoutingArtifact, loadWorkflowRouting, isPhaseIncluded } from './workflow-routing.js';
 import { assessDepthFromIntent } from './depth-assessment.js';
 import { addGateAuditEntry } from './manifest.js';
+import { mergeAidlcRules, removeAidlcRules, getAidlcRulesContent } from './claude-md-merger.js';
 
 /**
  * Ordered list of workflow stages for progression validation
@@ -224,9 +226,21 @@ export class WorkflowEngine {
       console.warn('[WorkflowEngine] Workflow will proceed without adaptive phase selection');
     }
 
-    // Note: start() only initializes checkpoint and directory structure.
-    // Stage execution (INTENT interview, artifact generation) is driven by the
-    // /plan skill template interactively, not by the engine programmatically.
+    try {
+      const currentCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+      const pathwayType = (currentCheckpoint as WorkflowCheckpointV3)?.pathway_type ?? 'greenfield';
+      const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
+      const existingContent = fs.existsSync(claudeMdPath)
+        ? fs.readFileSync(claudeMdPath, 'utf-8')
+        : '';
+      const rules = getAidlcRulesContent(this.workflowId, pathwayType);
+      const merged = mergeAidlcRules(existingContent, rules);
+      fs.mkdirSync(path.join(this.projectPath, '.claude'), { recursive: true });
+      fs.writeFileSync(claudeMdPath, merged, 'utf-8');
+      console.log('[WorkflowEngine] Injected AI-DLC rules into .claude/CLAUDE.md');
+    } catch (error) {
+      console.error('[WorkflowEngine] Failed to inject AI-DLC rules into CLAUDE.md:', error);
+    }
   }
 
   /**
@@ -393,6 +407,17 @@ export class WorkflowEngine {
 
     if (nextStage === 'complete') {
       checkpoint.status = 'complete';
+      try {
+        const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
+        if (fs.existsSync(claudeMdPath)) {
+          const content = fs.readFileSync(claudeMdPath, 'utf-8');
+          const cleaned = removeAidlcRules(content);
+          fs.writeFileSync(claudeMdPath, cleaned, 'utf-8');
+          console.log('[WorkflowEngine] Removed AI-DLC rules from .claude/CLAUDE.md (workflow complete)');
+        }
+      } catch (error) {
+        console.error('[WorkflowEngine] Failed to remove AI-DLC rules from CLAUDE.md:', error);
+      }
     }
 
     // Save updated checkpoint

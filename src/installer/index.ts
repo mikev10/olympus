@@ -16,7 +16,7 @@
  * - OLYMPUS_USE_BASH_HOOKS=1: Force Bash hooks (Unix only)
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, unlinkSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -30,6 +30,7 @@ import { WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS } from '../features/workflow-engin
 import { WORKSPACE_SCAN_SCHEMA } from '../features/workflow-engine/brownfield-scanner.js';
 import { BOLT_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/bolt-dispatcher.js';
 import { PRFAQ_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/prfaq-generator.js';
+import { mergeAidlcRules, getAidlcRulesContent } from '../features/workflow-engine/claude-md-merger.js';
 
 import {
   HOOK_SCRIPTS,
@@ -3948,6 +3949,56 @@ export function install(options: InstallOptions = {}): InstallResult {
     } else {
       const location = options.local ? './.claude/CLAUDE.md' : '~/.claude/CLAUDE.md';
       log(`${location} already exists (use --force to update)`);
+    }
+
+    try {
+      const aidlcDocsPath = join(process.cwd(), 'aidlc-docs');
+      if (existsSync(aidlcDocsPath)) {
+        const projectClaudeMdPath = join(process.cwd(), '.claude', 'CLAUDE.md');
+        const workflowCheckpointPath = (() => {
+          try {
+            const entries = readdirSync(aidlcDocsPath, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory()) {
+                const cpPath = join(aidlcDocsPath, entry.name, 'checkpoint.json');
+                if (existsSync(cpPath)) {
+                  return { workflowId: entry.name, cpPath };
+                }
+              }
+            }
+            return null;
+          } catch {
+            return null;
+          }
+        })();
+
+        if (workflowCheckpointPath) {
+          const { workflowId, cpPath } = workflowCheckpointPath;
+          let pathwayType: 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization' = 'greenfield';
+          try {
+            const cp = JSON.parse(readFileSync(cpPath, 'utf-8'));
+            if (cp.pathway_type) {
+              pathwayType = cp.pathway_type;
+            }
+          } catch {
+          }
+
+          const existingContent = existsSync(projectClaudeMdPath)
+            ? readFileSync(projectClaudeMdPath, 'utf-8')
+            : '';
+          const rules = getAidlcRulesContent(workflowId, pathwayType);
+          const merged = mergeAidlcRules(existingContent, rules);
+
+          const projectClaudeDir = join(process.cwd(), '.claude');
+          if (!existsSync(projectClaudeDir)) {
+            mkdirSync(projectClaudeDir, { recursive: true });
+          }
+          writeFileSync(projectClaudeMdPath, merged, 'utf-8');
+          log(`  Injected AI-DLC rules into .claude/CLAUDE.md (workflow: ${workflowId})`);
+        }
+      }
+    } catch (error) {
+      log(`  Warning: Could not inject AI-DLC rules into project CLAUDE.md (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
     }
 
     // Install hook scripts (platform-aware) - only for global install
