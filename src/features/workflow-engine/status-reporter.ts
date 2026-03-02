@@ -20,6 +20,8 @@ import type {
   GateAuditEntry,
   RiskEntry,
   WorkflowCheckpointV3,
+  InceptionStage,
+  InceptionStageState,
 } from './phase-types.js';
 
 export interface WorkflowReport {
@@ -63,6 +65,7 @@ const TRUST_LEVEL_NAMES: Record<number, string> = {
 export function generateWorkflowReport(
   manifest: ManifestSchema,
   trustState: TrustState | null = null,
+  checkpoint: WorkflowCheckpointV3 | null = null,
 ): WorkflowReport {
   const phaseProgress = computePhaseProgress(manifest);
   const artifactTree = buildArtifactTree(manifest);
@@ -77,6 +80,10 @@ export function generateWorkflowReport(
 
   const boltProgress = buildBoltProgress(manifest);
 
+  const inceptionSubStages = checkpoint?.inception_stages
+    ? buildInceptionSubStageProgress(checkpoint.inception_stages, checkpoint.current_inception_stage)
+    : null;
+
   const fullReport = [
     `# Workflow Status: ${manifest.feature_name}`,
     `ID: ${manifest.workflow_id}`,
@@ -86,6 +93,7 @@ export function generateWorkflowReport(
     '## Phase Progress',
     ...phaseProgress.map(p => formatPhaseProgressBar(p)),
     '',
+    ...(inceptionSubStages ? [inceptionSubStages, ''] : []),
     boltProgress,
     depthDisplay,
     riskTierDisplay,
@@ -330,9 +338,70 @@ function buildSummaryLine(manifest: ManifestSchema, progress: PhaseProgressEntry
   return `${completePhases.length}/${PHASE_ORDER.length} phases complete | ${totalArtifacts} artifacts total`;
 }
 
-/**
- * Generate a welcome message displayed once at workflow start
- */
+const INCEPTION_STAGE_ORDER: InceptionStage[] = [
+  'workspace-detection',
+  'reverse-engineering',
+  'requirements-analysis',
+  'user-stories',
+  'workflow-planning',
+  'application-design',
+  'units-generation',
+];
+
+const INCEPTION_STAGE_LABELS: Record<InceptionStage, string> = {
+  'workspace-detection': 'Workspace Detection',
+  'reverse-engineering': 'Reverse Engineering',
+  'requirements-analysis': 'Requirements Analysis',
+  'user-stories': 'User Stories',
+  'workflow-planning': 'Workflow Planning',
+  'application-design': 'Application Design',
+  'units-generation': 'Units Generation',
+};
+
+export function buildInceptionSubStageProgress(
+  inceptionStages: Record<InceptionStage, InceptionStageState>,
+  currentInceptionStage: InceptionStage | undefined,
+): string {
+  const total = INCEPTION_STAGE_ORDER.length;
+  const completed = INCEPTION_STAGE_ORDER.filter(
+    s => inceptionStages[s]?.status === 'completed'
+  ).length;
+  const percentage = Math.round((completed / total) * 100);
+
+  const barWidth = 10;
+  const filled = Math.round((percentage / 100) * barWidth);
+  const barStr = filled >= barWidth
+    ? '='.repeat(barWidth)
+    : '='.repeat(filled) + '>' + '-'.repeat(barWidth - filled - 1);
+
+  const lines: string[] = [
+    `Inception [${barStr}] ${percentage}%  (${completed}/${total} stages)`,
+  ];
+
+  for (const stage of INCEPTION_STAGE_ORDER) {
+    const state = inceptionStages[stage];
+    const label = INCEPTION_STAGE_LABELS[stage];
+
+    if (!state) {
+      lines.push(`  [ ] ${label}`);
+      continue;
+    }
+
+    if (state.status === 'completed') {
+      lines.push(`  [x] ${label}`);
+    } else if (state.status === 'skipped') {
+      const reason = state.skip_reason ? ` (${state.skip_reason})` : ' (skipped)';
+      lines.push(`  [-] ${label}${reason}`);
+    } else if (state.status === 'in_progress' || stage === currentInceptionStage) {
+      lines.push(`  [ ] ${label}        <- current`);
+    } else {
+      lines.push(`  [ ] ${label}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function generateWelcomeMessage(): string {
   return `## Welcome to AIDLC Adaptive Workflow
 

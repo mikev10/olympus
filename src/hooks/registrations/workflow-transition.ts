@@ -121,6 +121,20 @@ export function registerWorkflowTransitionHooks(): void {
           message = `✓ INTENT locked — '${manifest.feature_name}'\nTech spec: ${intentPath} | Risk: Tier ${riskTier}\n${unitArtifacts.length} UNITs decomposed | ${boltArtifacts.length} BOLTs queued\n→ Ready: /ascent, /olympus, or /ultrawork to begin Construction${devNotice}`;
         }
 
+        if (!message && checkpoint.inception_stages && checkpoint.current_inception_stage) {
+          const inceptionStages = checkpoint.inception_stages;
+          const currentStage = checkpoint.current_inception_stage;
+          const stageState = inceptionStages[currentStage];
+
+          if (stageState?.status === 'completed') {
+            const totalStages = 7;
+            const completedCount = Object.values(inceptionStages).filter(
+              (s: { status: string }) => s.status === 'completed'
+            ).length;
+            message = `Inception stage '${currentStage}' complete (${completedCount}/${totalStages})\n→ Next: continue inception pipeline`;
+          }
+        }
+
         if (message) {
           return {
             continue: true,

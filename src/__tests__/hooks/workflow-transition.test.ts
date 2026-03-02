@@ -577,6 +577,68 @@ describe('workflow-transition hook', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('should emit inception sub-stage transition message when stage just completed', async () => {
+    registerWorkflowTransitionHooks();
+
+    const manifest = createMockManifest();
+    mockLoadManifest.mockReturnValue(manifest);
+    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({
+      current_phase: 'inception',
+      current_stage: 'intent',
+      inception_stages: {
+        'workspace-detection': { stage: 'workspace-detection', status: 'completed', started_at: '2024-01-01T00:00:00Z', completed_at: '2024-01-01T00:01:00Z', skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'reverse-engineering': { stage: 'reverse-engineering', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'requirements-analysis': { stage: 'requirements-analysis', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'user-stories': { stage: 'user-stories', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'workflow-planning': { stage: 'workflow-planning', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'application-design': { stage: 'application-design', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'units-generation': { stage: 'units-generation', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+      },
+      current_inception_stage: 'workspace-detection',
+    }));
+
+    const ctx: HookContext = {
+      directory: '/test',
+      hookEvent: 'PostToolUse',
+      toolName: 'Write',
+      toolInput: {},
+    };
+
+    const hooks = (await import('../../hooks/registry.js')).getHooksForEvent('PostToolUse');
+    const hook = hooks.find(h => h.name === 'workflowTransitionMessages');
+
+    const result = await hook!.handler(ctx);
+    expect(result.continue).toBe(true);
+    expect(result.hookSpecificOutput).toBeDefined();
+    expect(result.hookSpecificOutput?.additionalContext).toContain('workspace-detection');
+    expect(result.hookSpecificOutput?.additionalContext).toContain('complete');
+  });
+
+  it('should not emit inception sub-stage message when no inception_stages on checkpoint', async () => {
+    registerWorkflowTransitionHooks();
+
+    const manifest = createMockManifest();
+    mockLoadManifest.mockReturnValue(manifest);
+    mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({
+      current_phase: 'inception',
+      current_stage: 'intent',
+    }));
+
+    const ctx: HookContext = {
+      directory: '/test',
+      hookEvent: 'PostToolUse',
+      toolName: 'Write',
+      toolInput: {},
+    };
+
+    const hooks = (await import('../../hooks/registry.js')).getHooksForEvent('PostToolUse');
+    const hook = hooks.find(h => h.name === 'workflowTransitionMessages');
+
+    const result = await hook!.handler(ctx);
+    expect(result.continue).toBe(true);
+    expect(result.hookSpecificOutput).toBeUndefined();
+  });
+
   it('should work with Task tool as well as Write tool', async () => {
     registerWorkflowTransitionHooks();
 

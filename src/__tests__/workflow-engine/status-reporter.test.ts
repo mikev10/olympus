@@ -10,6 +10,7 @@ import {
   buildAlignmentSummary,
   buildDepthDisplay,
   buildRiskTierDisplay,
+  buildInceptionSubStageProgress,
 } from '../../features/workflow-engine/status-reporter.js';
 import type {
   ManifestSchema,
@@ -22,6 +23,9 @@ import type {
   RiskTierClassification,
   PhaseState,
   WorkflowPhase,
+  InceptionStage,
+  InceptionStageState,
+  WorkflowCheckpointV3,
 } from '../../features/workflow-engine/phase-types.js';
 
 // Test data helpers
@@ -1244,5 +1248,184 @@ describe('generateWorkflowReport', () => {
     expect(report.fullReport).toContain('[PASS] v1 -> f1');
     expect(report.fullReport).toContain('[OPEN] r1: Test risk');
     expect(report.fullReport).toContain('[APPROVED] Inception by human');
+  });
+});
+
+function makeStageState(status: InceptionStageState['status'], skipReason: string | null = null): InceptionStageState {
+  return {
+    stage: 'workspace-detection',
+    status,
+    started_at: status !== 'not_started' ? '2024-01-01T00:00:00Z' : null,
+    completed_at: status === 'completed' || status === 'skipped' ? '2024-01-01T01:00:00Z' : null,
+    skip_reason: skipReason,
+    artifacts_generated: [],
+    questions_file: null,
+    answers_received: false,
+  };
+}
+
+function makeAllStages(
+  overrides: Partial<Record<InceptionStage, InceptionStageState>> = {}
+): Record<InceptionStage, InceptionStageState> {
+  const defaults: Record<InceptionStage, InceptionStageState> = {
+    'workspace-detection': makeStageState('not_started'),
+    'reverse-engineering': makeStageState('not_started'),
+    'requirements-analysis': makeStageState('not_started'),
+    'user-stories': makeStageState('not_started'),
+    'workflow-planning': makeStageState('not_started'),
+    'application-design': makeStageState('not_started'),
+    'units-generation': makeStageState('not_started'),
+  };
+  return { ...defaults, ...overrides };
+}
+
+describe('buildInceptionSubStageProgress', () => {
+  it('shows 0% when no stages completed', () => {
+    const stages = makeAllStages();
+    const result = buildInceptionSubStageProgress(stages, 'workspace-detection');
+    expect(result).toContain('0%');
+    expect(result).toContain('(0/7 stages)');
+  });
+
+  it('shows correct percentage for 4 of 7 stages complete', () => {
+    const stages = makeAllStages({
+      'workspace-detection': makeStageState('completed'),
+      'reverse-engineering': makeStageState('completed'),
+      'requirements-analysis': makeStageState('completed'),
+      'user-stories': makeStageState('completed'),
+    });
+    const result = buildInceptionSubStageProgress(stages, 'workflow-planning');
+    expect(result).toContain('57%');
+    expect(result).toContain('(4/7 stages)');
+  });
+
+  it('shows 100% when all stages complete', () => {
+    const stages = makeAllStages({
+      'workspace-detection': makeStageState('completed'),
+      'reverse-engineering': makeStageState('completed'),
+      'requirements-analysis': makeStageState('completed'),
+      'user-stories': makeStageState('completed'),
+      'workflow-planning': makeStageState('completed'),
+      'application-design': makeStageState('completed'),
+      'units-generation': makeStageState('completed'),
+    });
+    const result = buildInceptionSubStageProgress(stages, undefined);
+    expect(result).toContain('100%');
+    expect(result).toContain('(7/7 stages)');
+  });
+
+  it('marks completed stages with [x]', () => {
+    const stages = makeAllStages({
+      'workspace-detection': makeStageState('completed'),
+    });
+    const result = buildInceptionSubStageProgress(stages, 'reverse-engineering');
+    expect(result).toContain('[x] Workspace Detection');
+  });
+
+  it('marks skipped stages with [-] and reason', () => {
+    const stages = makeAllStages({
+      'reverse-engineering': makeStageState('skipped', 'Greenfield project'),
+    });
+    const result = buildInceptionSubStageProgress(stages, 'requirements-analysis');
+    expect(result).toContain('[-] Reverse Engineering');
+    expect(result).toContain('Greenfield project');
+  });
+
+  it('marks skipped stages with [-] when no skip reason', () => {
+    const stages = makeAllStages({
+      'user-stories': makeStageState('skipped'),
+    });
+    const result = buildInceptionSubStageProgress(stages, 'workflow-planning');
+    expect(result).toContain('[-] User Stories');
+    expect(result).toContain('(skipped)');
+  });
+
+  it('marks current stage with <- current indicator', () => {
+    const stages = makeAllStages({
+      'workspace-detection': makeStageState('completed'),
+    });
+    const result = buildInceptionSubStageProgress(stages, 'reverse-engineering');
+    expect(result).toContain('<- current');
+    expect(result).toContain('Reverse Engineering');
+  });
+
+  it('marks in_progress stage as current even when not currentInceptionStage', () => {
+    const stages = makeAllStages({
+      'requirements-analysis': makeStageState('in_progress'),
+    });
+    const result = buildInceptionSubStageProgress(stages, undefined);
+    const line = result.split('\n').find(l => l.includes('Requirements Analysis'));
+    expect(line).toContain('<- current');
+  });
+
+  it('shows all 7 stage names', () => {
+    const stages = makeAllStages();
+    const result = buildInceptionSubStageProgress(stages, undefined);
+    expect(result).toContain('Workspace Detection');
+    expect(result).toContain('Reverse Engineering');
+    expect(result).toContain('Requirements Analysis');
+    expect(result).toContain('User Stories');
+    expect(result).toContain('Workflow Planning');
+    expect(result).toContain('Application Design');
+    expect(result).toContain('Units Generation');
+  });
+
+  it('shows Inception header line', () => {
+    const stages = makeAllStages();
+    const result = buildInceptionSubStageProgress(stages, undefined);
+    expect(result).toMatch(/^Inception \[/);
+  });
+
+  it('falls back gracefully when stage is missing from record', () => {
+    const stages = {} as Record<InceptionStage, InceptionStageState>;
+    const result = buildInceptionSubStageProgress(stages, undefined);
+    expect(result).toContain('[ ] Workspace Detection');
+  });
+});
+
+describe('generateWorkflowReport with inception sub-stages', () => {
+  it('includes inception sub-stage progress when checkpoint has inception_stages', () => {
+    const manifest = createTestManifest();
+    const checkpoint = {
+      schema_version: '3.0.0',
+      workflow_id: 'test-wf',
+      feature_name: 'Test',
+      current_phase: 'inception',
+      current_stage: 'intent',
+      status: 'in_progress',
+      phases: {
+        discovery: createTestPhaseState(),
+        inception: createTestPhaseState({ status: 'in_progress' }),
+        construction: createTestPhaseState(),
+        operations: createTestPhaseState(),
+      },
+      manifest_path: '',
+      trust_state_path: '',
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+      inception_stages: makeAllStages({
+        'workspace-detection': makeStageState('completed'),
+        'reverse-engineering': makeStageState('completed'),
+      }),
+      current_inception_stage: 'requirements-analysis' as InceptionStage,
+    } as WorkflowCheckpointV3;
+
+    const report = generateWorkflowReport(manifest, null, checkpoint);
+    expect(report.fullReport).toContain('Inception [');
+    expect(report.fullReport).toContain('[x] Workspace Detection');
+    expect(report.fullReport).toContain('<- current');
+  });
+
+  it('omits inception sub-stages when checkpoint has no inception_stages', () => {
+    const manifest = createTestManifest();
+    const report = generateWorkflowReport(manifest, null, null);
+    expect(report.fullReport).not.toContain('[x] Workspace Detection');
+  });
+
+  it('backward compatible when no checkpoint passed', () => {
+    const manifest = createTestManifest();
+    const report = generateWorkflowReport(manifest);
+    expect(report).toHaveProperty('fullReport');
+    expect(report.fullReport).toContain('# Workflow Status');
   });
 });
