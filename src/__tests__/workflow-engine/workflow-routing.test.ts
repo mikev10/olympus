@@ -497,6 +497,137 @@ describe('isStageIncluded', () => {
   });
 });
 
+describe('inception sub-stages', () => {
+  it('inception phase contains all 7 sub-stages for greenfield', async () => {
+    const plan = await buildPlan('greenfield');
+    const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
+    const stageNames = inceptionStages.map((s) => s.stage);
+    expect(stageNames).toEqual([
+      'workspace-detection',
+      'reverse-engineering',
+      'requirements-analysis',
+      'user-stories',
+      'workflow-planning',
+      'application-design',
+      'units-generation',
+    ]);
+  });
+
+  it('workspace-detection is the first inception stage', async () => {
+    const plan = await buildPlan('greenfield');
+    const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
+    expect(inceptionStages[0].stage).toBe('workspace-detection');
+  });
+
+  it('units-generation is the last inception stage', async () => {
+    const plan = await buildPlan('greenfield');
+    const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
+    expect(inceptionStages[inceptionStages.length - 1].stage).toBe('units-generation');
+  });
+
+  it('getStageRationale: workspace-detection has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'workspace-detection');
+    expect(stage?.rationale).toBe('Auto-detect greenfield/brownfield and determine pathway type');
+  });
+
+  it('getStageRationale: reverse-engineering has correct rationale', async () => {
+    const plan = await buildPlan('brownfield-enhancement');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'reverse-engineering');
+    expect(stage?.rationale).toBe('Reverse-engineer existing codebase architecture (brownfield only)');
+  });
+
+  it('getStageRationale: requirements-analysis has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'requirements-analysis');
+    expect(stage?.rationale).toBe('Structured Q&A to capture functional and non-functional requirements');
+  });
+
+  it('getStageRationale: user-stories has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'user-stories');
+    expect(stage?.rationale).toBe('Generate user personas and stories with Given/When/Then acceptance criteria');
+  });
+
+  it('getStageRationale: workflow-planning has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'workflow-planning');
+    expect(stage?.rationale).toBe('Generate execution plan with Mermaid visualization and live checkboxes');
+  });
+
+  it('getStageRationale: application-design has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'application-design');
+    expect(stage?.rationale).toBe('High-level component identification, service boundaries, and dependencies');
+  });
+
+  it('getStageRationale: units-generation has correct rationale', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'units-generation');
+    expect(stage?.rationale).toBe('Define units of work with inter-unit dependencies and story mapping');
+  });
+
+  it('reverse-engineering is excluded for greenfield', async () => {
+    const plan = await buildPlan('greenfield');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'reverse-engineering');
+    expect(stage).toBeDefined();
+    expect(stage!.included).toBe(false);
+  });
+
+  it('reverse-engineering is included for brownfield-enhancement', async () => {
+    const plan = await buildPlan('brownfield-enhancement');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'reverse-engineering');
+    expect(stage).toBeDefined();
+    expect(stage!.included).toBe(true);
+  });
+
+  it('bugfix skips inception phase entirely so no inception stages are generated', async () => {
+    const plan = await buildPlan('bugfix');
+    const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
+    expect(inceptionStages).toHaveLength(0);
+  });
+
+  it('user-stories is excluded for optimization', async () => {
+    const plan = await buildPlan('optimization');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'user-stories');
+    expect(stage).toBeDefined();
+    expect(stage!.included).toBe(false);
+  });
+
+  it('application-design is excluded for optimization', async () => {
+    const plan = await buildPlan('optimization');
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'application-design');
+    expect(stage).toBeDefined();
+    expect(stage!.included).toBe(false);
+  });
+
+  it('units-generation is excluded for minimal depth', async () => {
+    const plan = await buildPlan('greenfield', { recommended_depth: 'minimal', total_score: 8, skip_units: true });
+    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'units-generation');
+    expect(stage).toBeDefined();
+    expect(stage!.included).toBe(false);
+  });
+
+  it('all inception stages included for standard brownfield-enhancement', async () => {
+    const plan = await buildPlan('brownfield-enhancement', { recommended_depth: 'standard' });
+    const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
+    expect(inceptionStages).toHaveLength(7);
+    for (const stage of inceptionStages) {
+      expect(stage.included).toBe(true);
+    }
+  });
+
+  it('backward compat: legacy rationale keys still resolve (inception:intent)', async () => {
+    const plan = await buildPlan('brownfield-enhancement');
+    expect(isStageIncluded(plan, 'inception', 'intent')).toBe(true);
+  });
+
+  it('backward compat: legacy rationale keys still resolve (inception:depth-assessment)', async () => {
+    const plan = await buildPlan('brownfield-enhancement');
+    expect(isStageIncluded(plan, 'inception', 'depth-assessment')).toBe(true);
+  });
+});
+
 describe('adjustDepthForPathway', () => {
   it('bugfix forces minimal depth regardless of original depth', () => {
     const assessment = mockDepthAssessment({ total_score: 25, recommended_depth: 'comprehensive' });

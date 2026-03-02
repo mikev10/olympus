@@ -516,16 +516,38 @@ export class WorkflowEngine {
       }
 
       case 'inception': {
-        // Delegate to existing stage-based pipeline - INTENT is the only inception stage
+        const { InceptionOrchestrator } = await import('./inception/orchestrator.js');
+        const orchestrator = new InceptionOrchestrator();
+
         const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
         if (!checkpoint) {
           throw new Error(`No checkpoint found for workflow: ${this.workflowId}`);
         }
 
-        if (checkpoint.current_stage === 'intent') {
-          await this.executeStage('intent');
+        // Backward compat: if checkpoint is past intent stage, skip inception orchestrator
+        if (checkpoint.current_stage !== 'intent') {
+          console.log(`[WorkflowEngine] Skipping inception orchestrator — checkpoint already at stage '${checkpoint.current_stage}'`);
+          break;
         }
-        console.log('[WorkflowEngine] Decomposition pending — will run when Construction pipeline is implemented in Phase 3');
+
+        if (!checkpoint.inception_stages) {
+          const plan = loadWorkflowRouting(this.projectPath, this.workflowId);
+          const v3 = checkpoint as WorkflowCheckpointV3;
+          await orchestrator.initialize(
+            this.projectPath,
+            this.workflowId,
+            v3.pathway_type || 'greenfield',
+            plan
+          );
+        }
+
+        while (!(await orchestrator.isComplete(this.projectPath, this.workflowId))) {
+          const result = await orchestrator.executeNextStage(this.projectPath, this.workflowId);
+          if (result.status === 'awaiting_answers' || result.status === 'review_required') {
+            // Yield control — the /plan skill template handles presenting to user
+            break;
+          }
+        }
 
         // CCR-3: Capture inception phase completion
         try {
@@ -701,6 +723,19 @@ export class WorkflowEngine {
     plan.approved_by = 'human';
 
     await writeWorkflowRoutingArtifact(this.projectPath, this.workflowId, plan);
+
+    const approvalCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    if (approvalCheckpoint) {
+      const v3 = approvalCheckpoint as WorkflowCheckpointV3;
+      if (v3.inception_stages?.['workflow-planning']) {
+        const wpState = v3.inception_stages['workflow-planning'];
+        if (wpState.status !== 'completed' && wpState.status !== 'skipped') {
+          wpState.status = 'completed';
+          wpState.completed_at = new Date().toISOString();
+          await saveCheckpoint(this.projectPath, approvalCheckpoint);
+        }
+      }
+    }
 
     const manifestPath = `${this.projectPath}/aidlc-docs/${this.workflowId}/manifest.json`;
     try {

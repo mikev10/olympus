@@ -106,7 +106,15 @@ function buildDefaultStagesForPhase(phase: WorkflowPhase, pathway: PathwayType):
     case 'discovery':
       return ['brownfield-scan', 'analysis'];
     case 'inception':
-      return ['intent', 'depth-assessment', 'requirements'];
+      return [
+        'workspace-detection',
+        'reverse-engineering',
+        'requirements-analysis',
+        'user-stories',
+        'workflow-planning',
+        'application-design',
+        'units-generation',
+      ];
     case 'construction':
       if (pathway === 'bugfix') {
         return ['bolt-execution'];
@@ -127,6 +135,13 @@ function getStageRationale(phase: WorkflowPhase, stage: string, _pathway: Pathwa
     'inception:intent': 'Capture structured problem statement and success criteria',
     'inception:depth-assessment': 'Score 6 factors to determine workflow depth',
     'inception:requirements': 'Classify non-functional requirements and constraints',
+    'inception:workspace-detection': 'Auto-detect greenfield/brownfield and determine pathway type',
+    'inception:reverse-engineering': 'Reverse-engineer existing codebase architecture (brownfield only)',
+    'inception:requirements-analysis': 'Structured Q&A to capture functional and non-functional requirements',
+    'inception:user-stories': 'Generate user personas and stories with Given/When/Then acceptance criteria',
+    'inception:workflow-planning': 'Generate execution plan with Mermaid visualization and live checkboxes',
+    'inception:application-design': 'High-level component identification, service boundaries, and dependencies',
+    'inception:units-generation': 'Define units of work with inter-unit dependencies and story mapping',
     'construction:unit-decomposition': 'Break intent into implementable units',
     'construction:bolt-execution': 'Execute implementation bolts with validation gates',
     'operations:deployment': 'Generate deployment guide and release notes',
@@ -167,7 +182,25 @@ export async function generateWorkflowRouting(options: WorkflowRoutingOptions): 
 
     for (const stage of buildDefaultStagesForPhase(phase, pathwayType)) {
       const isUnitDecomposition = phase === 'construction' && stage === 'unit-decomposition';
-      const included = !(isUnitDecomposition && recommended_depth === 'minimal');
+      const isReverseEngineering = phase === 'inception' && stage === 'reverse-engineering';
+      const isUserStories = phase === 'inception' && stage === 'user-stories';
+      const isAppDesign = phase === 'inception' && stage === 'application-design';
+      const isUnitsGeneration = phase === 'inception' && stage === 'units-generation';
+
+      let included = true;
+      if (isUnitDecomposition && recommended_depth === 'minimal') {
+        included = false;
+      }
+      if (isReverseEngineering && pathwayType === 'greenfield') {
+        included = false;
+      }
+      if ((isUserStories || isAppDesign) && (pathwayType === 'bugfix' || pathwayType === 'optimization')) {
+        included = false;
+      }
+      if (isUnitsGeneration && recommended_depth === 'minimal') {
+        included = false;
+      }
+
       stages.push({
         phase,
         stage,

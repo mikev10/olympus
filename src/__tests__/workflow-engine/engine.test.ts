@@ -644,8 +644,8 @@ describe('WorkflowEngine', () => {
 
       await expect(engine.executePhase('inception')).resolves.toBeUndefined();
 
-      const intentPath = join(tmpDir, 'aidlc-docs', 'no-plan-test', 'inception', 'intent.md');
-      expect(await fs.pathExists(intentPath)).toBe(true);
+      const checkpoint = await loadCheckpoint(tmpDir, 'no-plan-test') as WorkflowCheckpointV3;
+      expect(checkpoint.inception_stages).toBeDefined();
     });
 
     it('skipped phases have gate_audit entries in manifest', async () => {
@@ -688,6 +688,90 @@ describe('WorkflowEngine', () => {
     it('approveWorkflowRouting() throws when no plan exists', async () => {
       const engine = new WorkflowEngine(tmpDir, 'No Plan Approval');
       await expect(engine.approveWorkflowRouting()).rejects.toThrow('No Level 1 Plan found');
+    });
+
+    it('executePhase("inception") uses orchestrator when checkpoint has inception_stages', async () => {
+      createManifest('inception-orch-test', 'Inception Orch Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Inception Orch Test');
+      await engine.start('Build a new greenfield application');
+
+      const cp = await loadCheckpoint(tmpDir, 'inception-orch-test') as WorkflowCheckpointV3;
+      cp.inception_stages = {
+        'workspace-detection': { stage: 'workspace-detection', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'reverse-engineering': { stage: 'reverse-engineering', status: 'skipped', started_at: null, completed_at: null, skip_reason: 'greenfield', artifacts_generated: [], questions_file: null, answers_received: false },
+        'requirements-analysis': { stage: 'requirements-analysis', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'user-stories': { stage: 'user-stories', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'workflow-planning': { stage: 'workflow-planning', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'application-design': { stage: 'application-design', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'units-generation': { stage: 'units-generation', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+      };
+      await saveCheckpoint(tmpDir, cp);
+
+      await expect(engine.executePhase('inception')).resolves.toBeUndefined();
+    });
+
+    it('executePhase("inception") skips orchestrator when current_stage is past intent', async () => {
+      createManifest('inception-skip-test', 'Inception Skip Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Inception Skip Test');
+      await engine.start('Build a new greenfield application');
+
+      const cp = await loadCheckpoint(tmpDir, 'inception-skip-test') as WorkflowCheckpointV3;
+      cp.current_stage = 'unit';
+      await saveCheckpoint(tmpDir, cp);
+
+      await expect(engine.executePhase('inception')).resolves.toBeUndefined();
+    });
+
+    it('executePhase("inception") initializes inception_stages when not present', async () => {
+      createManifest('inception-init-test', 'Inception Init Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Inception Init Test');
+      await engine.start('Build a new greenfield application');
+
+      const cpBefore = await loadCheckpoint(tmpDir, 'inception-init-test') as WorkflowCheckpointV3;
+      expect(cpBefore.inception_stages).toBeUndefined();
+
+      await engine.executePhase('inception');
+
+      const cpAfter = await loadCheckpoint(tmpDir, 'inception-init-test') as WorkflowCheckpointV3;
+      expect(cpAfter.inception_stages).toBeDefined();
+    });
+
+    it('approveWorkflowRouting() updates inception_stages workflow-planning when present', async () => {
+      createManifest('approve-stages-test', 'Approve Stages Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Approve Stages Test');
+      await engine.start('Build a brand new greenfield system');
+
+      const cp = await loadCheckpoint(tmpDir, 'approve-stages-test') as WorkflowCheckpointV3;
+      cp.inception_stages = {
+        'workspace-detection': { stage: 'workspace-detection', status: 'completed', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'reverse-engineering': { stage: 'reverse-engineering', status: 'skipped', started_at: null, completed_at: null, skip_reason: 'greenfield', artifacts_generated: [], questions_file: null, answers_received: false },
+        'requirements-analysis': { stage: 'requirements-analysis', status: 'completed', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'user-stories': { stage: 'user-stories', status: 'skipped', started_at: null, completed_at: null, skip_reason: 'not required', artifacts_generated: [], questions_file: null, answers_received: false },
+        'workflow-planning': { stage: 'workflow-planning', status: 'in_progress', started_at: new Date().toISOString(), completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'application-design': { stage: 'application-design', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'units-generation': { stage: 'units-generation', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+      };
+      await saveCheckpoint(tmpDir, cp);
+
+      await engine.approveWorkflowRouting('Looks good');
+
+      const cpAfter = await loadCheckpoint(tmpDir, 'approve-stages-test') as WorkflowCheckpointV3;
+      expect(cpAfter.inception_stages!['workflow-planning'].status).toBe('completed');
+      expect(cpAfter.inception_stages!['workflow-planning'].completed_at).not.toBeNull();
+    });
+
+    it('approveWorkflowRouting() leaves legacy checkpoints without inception_stages unchanged', async () => {
+      createManifest('approve-legacy-test', 'Approve Legacy Test', tmpDir);
+      const engine = new WorkflowEngine(tmpDir, 'Approve Legacy Test');
+      await engine.start('Build a brand new greenfield system');
+
+      const cpBefore = await loadCheckpoint(tmpDir, 'approve-legacy-test') as WorkflowCheckpointV3;
+      expect(cpBefore.inception_stages).toBeUndefined();
+
+      await engine.approveWorkflowRouting('Approved');
+
+      const cpAfter = await loadCheckpoint(tmpDir, 'approve-legacy-test') as WorkflowCheckpointV3;
+      expect(cpAfter.inception_stages).toBeUndefined();
     });
   });
 });
