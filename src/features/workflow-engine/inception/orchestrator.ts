@@ -171,7 +171,111 @@ function allStagesTerminal(stages: Record<InceptionStage, InceptionStageState>):
   });
 }
 
+function isDiscoveryComplete(checkpoint: WorkflowCheckpointV3): boolean {
+  const discoveryPhase = checkpoint.phases?.discovery;
+  if (!discoveryPhase) return false;
+  const status = (discoveryPhase as { status?: string }).status;
+  return status === 'complete' || status === 'completed';
+}
+
+function buildCompletedStageState(stage: InceptionStage, skipReason: string | null = null): InceptionStageState {
+  const isSkipped = skipReason !== null;
+  const now = new Date().toISOString();
+  return {
+    stage,
+    status: isSkipped ? 'skipped' : 'completed',
+    started_at: isSkipped ? null : now,
+    completed_at: now,
+    skip_reason: skipReason,
+    artifacts_generated: [],
+    questions_file: null,
+    answers_received: false,
+  };
+}
+
 export class InceptionOrchestrator {
+  /**
+   * Migrates a legacy checkpoint that lacks `inception_stages`.
+   *
+   * Case 1 — Already past inception (current_stage !== 'intent'):
+   *   Mark all inception stages as completed retroactively and clear
+   *   current_inception_stage so the workflow resumes normally.
+   *
+   * Case 2 — Paused at intent (current_stage === 'intent'):
+   *   Initialize inception_stages, auto-complete workspace-detection and
+   *   (if discovery is done) reverse-engineering, then set
+   *   current_inception_stage to requirements-analysis.
+   *
+   * If inception_stages already exists, the method is a no-op (idempotent).
+   */
+  async migrateCheckpoint(
+    projectPath: string,
+    workflowId: string
+  ): Promise<{ migrated: boolean; case: 'already_past_inception' | 'paused_at_intent' | 'no_migration_needed' }> {
+    const checkpoint = await loadCheckpoint(projectPath, workflowId);
+    if (!checkpoint) {
+      throw new Error(`[InceptionOrchestrator] Checkpoint not found for workflow ${workflowId}`);
+    }
+
+    if (checkpoint.inception_stages) {
+      return { migrated: false, case: 'no_migration_needed' };
+    }
+
+    const pathwayType = checkpoint.pathway_type ?? 'brownfield-enhancement';
+
+    if (checkpoint.current_stage !== 'intent') {
+      // Case 1: Workflow is already past the inception phase.
+      // Retroactively mark all inception stages as completed (or skipped for stages
+      // that would have been skipped given the pathway type).
+      const inception_stages = {} as Record<InceptionStage, InceptionStageState>;
+      for (const stage of INCEPTION_STAGE_ORDER) {
+        const { skipReason } = determineInitialStatus(stage, pathwayType, null);
+        inception_stages[stage] = buildCompletedStageState(stage, skipReason);
+      }
+
+      checkpoint.inception_stages = inception_stages;
+      checkpoint.current_inception_stage = undefined;
+
+      await saveCheckpoint(projectPath, checkpoint);
+      invalidateCache(projectPath, workflowId);
+
+      return { migrated: true, case: 'already_past_inception' };
+    }
+
+    // Case 2: Workflow is paused at the 'intent' stage (beginning of inception).
+    // Initialize stages, auto-complete workspace-detection and optionally
+    // reverse-engineering (if discovery is already done), then begin from
+    // requirements-analysis.
+    const inception_stages = {} as Record<InceptionStage, InceptionStageState>;
+    for (const stage of INCEPTION_STAGE_ORDER) {
+      const { status, skipReason } = determineInitialStatus(stage, pathwayType, null);
+      inception_stages[stage] = buildInitialStageState(stage, status, skipReason);
+    }
+
+    // Auto-complete workspace-detection from existing pathway_type
+    if (inception_stages['workspace-detection'].status !== 'skipped') {
+      inception_stages['workspace-detection'] = buildCompletedStageState('workspace-detection');
+    }
+
+    // Auto-complete reverse-engineering if discovery phase is done
+    if (
+      inception_stages['reverse-engineering'].status !== 'skipped' &&
+      isDiscoveryComplete(checkpoint)
+    ) {
+      inception_stages['reverse-engineering'] = buildCompletedStageState('reverse-engineering');
+    }
+
+    checkpoint.inception_stages = inception_stages;
+
+    const firstPending = firstPendingStage(inception_stages);
+    checkpoint.current_inception_stage = firstPending ?? undefined;
+
+    await saveCheckpoint(projectPath, checkpoint);
+    invalidateCache(projectPath, workflowId);
+
+    return { migrated: true, case: 'paused_at_intent' };
+  }
+
   async initialize(
     projectPath: string,
     workflowId: string,

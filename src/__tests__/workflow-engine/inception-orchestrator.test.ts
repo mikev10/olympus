@@ -465,6 +465,160 @@ describe('InceptionOrchestrator', () => {
     });
   });
 
+  describe('migrateCheckpoint()', () => {
+    it('returns no_migration_needed when inception_stages already present', async () => {
+      const cp = createCheckpointWithStages({ 'workspace-detection': 'completed' });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      const result = await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      expect(result.migrated).toBe(false);
+      expect(result.case).toBe('no_migration_needed');
+      expect(mockSaveCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it('case already_past_inception: marks all stages completed when current_stage is not intent', async () => {
+      const cp = createMockCheckpoint({ current_stage: 'requirements', pathway_type: 'brownfield-enhancement' });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      const result = await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      expect(result.migrated).toBe(true);
+      expect(result.case).toBe('already_past_inception');
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.inception_stages).toBeDefined();
+      expect(saved.current_inception_stage).toBeUndefined();
+      for (const stage of ALL_STAGES) {
+        const s = saved.inception_stages![stage];
+        expect(['completed', 'skipped']).toContain(s.status);
+      }
+    });
+
+    it('case already_past_inception: skips reverse-engineering for greenfield pathway', async () => {
+      const cp = createMockCheckpoint({ current_stage: 'requirements', pathway_type: 'greenfield' });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.inception_stages!['reverse-engineering'].status).toBe('skipped');
+      expect(saved.inception_stages!['workspace-detection'].status).toBe('completed');
+    });
+
+    it('case already_past_inception: calls saveCheckpoint and invalidateCache', async () => {
+      const cp = createMockCheckpoint({ current_stage: 'construction', pathway_type: 'brownfield-enhancement' });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      expect(mockSaveCheckpoint).toHaveBeenCalledOnce();
+      expect(mockInvalidateCache).toHaveBeenCalledWith(projectPath, workflowId);
+    });
+
+    it('case paused_at_intent: auto-completes workspace-detection and sets current_inception_stage', async () => {
+      const cp = createMockCheckpoint({
+        current_stage: 'intent',
+        pathway_type: 'brownfield-enhancement',
+        phases: {
+          discovery: { status: 'not_started' } as any,
+          inception: makePhaseState('in_progress') as any,
+          construction: makePhaseState() as any,
+          operations: makePhaseState() as any,
+        },
+      });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      const result = await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      expect(result.migrated).toBe(true);
+      expect(result.case).toBe('paused_at_intent');
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.inception_stages!['workspace-detection'].status).toBe('completed');
+      expect(saved.current_inception_stage).toBe('reverse-engineering');
+    });
+
+    it('case paused_at_intent: auto-completes reverse-engineering when discovery is done', async () => {
+      const cp = createMockCheckpoint({
+        current_stage: 'intent',
+        pathway_type: 'brownfield-enhancement',
+        phases: {
+          discovery: { status: 'complete' } as any,
+          inception: makePhaseState('in_progress') as any,
+          construction: makePhaseState() as any,
+          operations: makePhaseState() as any,
+        },
+      });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.inception_stages!['workspace-detection'].status).toBe('completed');
+      expect(saved.inception_stages!['reverse-engineering'].status).toBe('completed');
+      expect(saved.current_inception_stage).toBe('requirements-analysis');
+    });
+
+    it('case paused_at_intent: does not auto-complete reverse-engineering for greenfield', async () => {
+      const cp = createMockCheckpoint({
+        current_stage: 'intent',
+        pathway_type: 'greenfield',
+        phases: {
+          discovery: { status: 'complete' } as any,
+          inception: makePhaseState('in_progress') as any,
+          construction: makePhaseState() as any,
+          operations: makePhaseState() as any,
+        },
+      });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.inception_stages!['reverse-engineering'].status).toBe('skipped');
+      expect(saved.current_inception_stage).toBe('requirements-analysis');
+    });
+
+    it('case paused_at_intent: preserves all other checkpoint fields (no data loss)', async () => {
+      const cp = createMockCheckpoint({
+        current_stage: 'intent',
+        pathway_type: 'brownfield-enhancement',
+        feature_name: 'my-feature',
+        workflow_id: workflowId,
+        depth_score: 5,
+      });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      const saved = mockSaveCheckpoint.mock.calls[0][1] as WorkflowCheckpointV3;
+      expect(saved.feature_name).toBe('my-feature');
+      expect(saved.workflow_id).toBe(workflowId);
+      expect(saved.depth_score).toBe(5);
+      expect(saved.pathway_type).toBe('brownfield-enhancement');
+    });
+
+    it('throws when checkpoint not found', async () => {
+      mockLoadCheckpoint.mockResolvedValueOnce(null);
+
+      await expect(
+        orchestrator.migrateCheckpoint(projectPath, workflowId)
+      ).rejects.toThrow('Checkpoint not found');
+    });
+
+    it('existing inception_stages are not modified on second call (idempotent)', async () => {
+      const cp = createCheckpointWithStages({
+        'workspace-detection': 'completed',
+        'reverse-engineering': 'in_progress',
+      });
+      mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
+
+      await orchestrator.migrateCheckpoint(projectPath, workflowId);
+
+      expect(mockSaveCheckpoint).not.toHaveBeenCalled();
+      expect(mockInvalidateCache).not.toHaveBeenCalled();
+    });
+  });
+
   describe('registerStageHandler()', () => {
     it('registers and uses custom handler', async () => {
       const cp = createCheckpointWithStages({ 'workspace-detection': 'not_started' }, 'workspace-detection');
