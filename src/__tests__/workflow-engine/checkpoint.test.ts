@@ -12,8 +12,6 @@ import {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
-  isLegacyCheckpoint,
-  archiveLegacyWorkflow,
 } from '../../features/workflow-engine/checkpoint.js';
 import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
 
@@ -565,100 +563,5 @@ describe('Checkpoint Persistence', () => {
     });
   });
 
-  describe('isLegacyCheckpoint', () => {
-    it('returns true for v1 checkpoints', () => {
-      const v1Checkpoint = {
-        schema_version: '1.0.0',
-        workflow_id: 'test',
-      };
-
-      expect(isLegacyCheckpoint(v1Checkpoint)).toBe(true);
-    });
-
-    it('returns true for v2 checkpoints', () => {
-      const v2Checkpoint = {
-        schema_version: '2.0.0',
-        workflow_id: 'test',
-      };
-
-      expect(isLegacyCheckpoint(v2Checkpoint)).toBe(true);
-    });
-
-    it('returns false for v3 checkpoints', () => {
-      const v3Checkpoint = {
-        schema_version: '3.0.0',
-        workflow_id: 'test',
-      };
-
-      expect(isLegacyCheckpoint(v3Checkpoint)).toBe(false);
-    });
-
-    it('returns false for invalid data', () => {
-      expect(isLegacyCheckpoint(null)).toBe(false);
-      expect(isLegacyCheckpoint(undefined)).toBe(false);
-      expect(isLegacyCheckpoint({})).toBe(false);
-      expect(isLegacyCheckpoint({ workflow_id: 'test' })).toBe(false);
-    });
-  });
-
-  describe('archiveLegacyWorkflow', () => {
-    it('moves workflow to archive directory', async () => {
-      const workflowDir = join(tmpDir, '.olympus/workflow/archive-test');
-      await fs.ensureDir(workflowDir);
-      await fs.writeFile(join(workflowDir, 'checkpoint.json'), 'test');
-      await fs.writeFile(join(workflowDir, 'intent.md'), 'test intent');
-
-      const existsBefore = await fs.pathExists(workflowDir);
-      expect(existsBefore).toBe(true);
-
-      await archiveLegacyWorkflow(tmpDir, 'archive-test');
-
-      const existsAfter = await fs.pathExists(workflowDir);
-      expect(existsAfter).toBe(false);
-
-      const archiveDir = join(tmpDir, '.olympus/archive/archive-test');
-      const existsArchive = await fs.pathExists(archiveDir);
-      expect(existsArchive).toBe(true);
-
-      const checkpointExists = await fs.pathExists(join(archiveDir, 'checkpoint.json'));
-      const intentExists = await fs.pathExists(join(archiveDir, 'intent.md'));
-      expect(checkpointExists).toBe(true);
-      expect(intentExists).toBe(true);
-    });
-
-    it('creates archive directory if it does not exist', async () => {
-      const workflowDir = join(tmpDir, '.olympus/workflow/new-archive-test');
-      await fs.ensureDir(workflowDir);
-      await fs.writeFile(join(workflowDir, 'checkpoint.json'), 'test');
-
-      const archiveParent = join(tmpDir, '.olympus/archive');
-      const existsBefore = await fs.pathExists(archiveParent);
-      expect(existsBefore).toBe(false);
-
-      await archiveLegacyWorkflow(tmpDir, 'new-archive-test');
-
-      const existsAfter = await fs.pathExists(archiveParent);
-      expect(existsAfter).toBe(true);
-    });
-
-    it('is idempotent - no error if workflow does not exist', async () => {
-      // Should not throw
-      await expect(archiveLegacyWorkflow(tmpDir, 'nonexistent-workflow')).resolves.not.toThrow();
-    });
-
-    it('overwrites existing archive if present', async () => {
-      const workflowDir = join(tmpDir, '.olympus/workflow/overwrite-test');
-      await fs.ensureDir(workflowDir);
-      await fs.writeFile(join(workflowDir, 'checkpoint.json'), 'new content');
-
-      const archiveDir = join(tmpDir, '.olympus/archive/overwrite-test');
-      await fs.ensureDir(archiveDir);
-      await fs.writeFile(join(archiveDir, 'checkpoint.json'), 'old content');
-
-      await archiveLegacyWorkflow(tmpDir, 'overwrite-test');
-
-      const content = await fs.readFile(join(archiveDir, 'checkpoint.json'), 'utf-8');
-      expect(content).toBe('new content');
-    });
-  });
 });
+

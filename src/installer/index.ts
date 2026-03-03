@@ -31,6 +31,7 @@ import { WORKSPACE_SCAN_SCHEMA } from '../features/workflow-engine/brownfield-sc
 import { BOLT_PLAN_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/bolt-dispatcher.js';
 import { PRFAQ_FORMAT_INSTRUCTIONS } from '../features/workflow-engine/prfaq-generator.js';
 import { mergeAidlcRules, getAidlcRulesContent } from '../features/workflow-engine/claude-md-merger.js';
+import { COMMON_RULES, INCEPTION_RULES, CONSTRUCTION_RULES, OPERATIONS_RULES } from './rule-content.js';
 
 import {
   HOOK_SCRIPTS,
@@ -1846,13 +1847,26 @@ $ARGUMENTS
 
 ---
 
+## MANDATORY: Load Common Rules
+
+**CRITICAL**: Before executing ANY step, you MUST read and apply the relevant rule detail files. These files contain detailed behavioral instructions for each workflow stage.
+
+**Rule files location**: \`~/.claude/olympus/rules/\` (installed by olympus-ai)
+
+**Common rules** — ALWAYS load these at workflow start (first time only, not on resume):
+- Read \`~/.claude/olympus/rules/common-rules.md\` — workflow overview, session continuity, content validation, question formatting
+
+Reference these rules throughout the workflow execution. Do NOT re-load on every stage — load once, apply always.
+
+---
+
 ## Step 0: Parse Flags and Feature Description
 
 Extract flags from the input above:
 
-- \`--depth shallow|medium|deep\` — Override automatic depth assessment. If not provided, depth will be assessed automatically after the INTENT stage.
-- \`--brownfield\` — Force Discovery phase even if the repository appears empty.
-- \`--greenfield\` — Skip Discovery phase even if the repository has existing source code.
+- \`--depth shallow|medium|deep\` — Override automatic depth assessment. If not provided, depth will be assessed automatically during Stage 5 (Workflow Planning).
+- \`--brownfield\` — Force brownfield pathway even if the repository appears empty.
+- \`--greenfield\` — Force greenfield pathway even if the repository has existing source code.
 - \`--abort\` — Abort the current active workflow (archive it).
 
 Everything remaining after flag extraction is the **feature description**. Store it for use throughout the pipeline.
@@ -1863,6 +1877,7 @@ Read \`.olympus/config.json\` for a \`ceremony\` key. If \`ceremony_mode: true\`
 - Add explicit "--- TEAM REVIEW POINT ---" markers before each gate
 - Add "TEAM: Please review the above and provide feedback before we proceed." prompts
 - Use section separators for screen-share readability
+
 If absent or false, proceed with standard formatting.
 
 ---
@@ -1883,30 +1898,31 @@ If the \`--abort\` flag is present:
 
 Scan the \`aidlc-docs/\` directory for workflow subdirectories. Each subdirectory that contains a \`checkpoint.json\` represents a workflow. Read each checkpoint to determine its status.
 
-- **If checkpoint exists with \`status: 'awaiting_mode_selection'\`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 7) and stop — do not restart the pipeline.
-- **If checkpoint exists at \`stage: 'intent'\` with \`status: 'in_progress'\`**: This is a freshly initialized workflow (the hook created the checkpoint). Before proceeding, **determine and confirm the workflow name**:
+- **If checkpoint exists with \`status: 'awaiting_mode_selection'\`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 12) and stop — do not restart the pipeline.
 
-  1. Determine the input type. The \`/plan\` argument can be:
-     - A **file path** (e.g., \`prd.md\`, \`proposal.txt\`, \`design-spec.md\`, \`requirements.docx\`, \`notes.md\`) → read the file content
-     - A **description string** (e.g., "Add user authentication", "Build a marketplace for AI tools") → use the text directly
-     - A **URL** or reference → fetch/read the content if possible
-     Users may provide a PRD, a rough concept, a spec, meeting notes, or just a sentence. Handle all cases.
-  2. From the CONTENT (never the filename or raw argument), derive a concise **1-3 word** name that captures the core product or feature being built. Examples: "ai-native-marketplace", "user-auth", "payment-system", "chat-widget".
-  3. Slugify the name: lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim.
-  4. Show the user: "Workflow name: \`{derivedName}\`. OK, or would you like a different name?"
-  5. If the user provides a different name, slugify that instead.
-  6. If the derived name differs from the current \`workflowId\` on disk, rename the directory: move \`aidlc-docs/{oldWorkflowId}/\` to \`aidlc-docs/{newWorkflowId}/\`, update the checkpoint's \`workflow_id\` and \`feature_name\` fields, and save.
+- **If checkpoint exists at \`current_phase: 'inception'\` with \`status: 'in_progress'\`**:
 
-  Then go to Step 2 (trust state) and then Step 3 (Discovery) or Step 4 (INTENT interview). Do NOT ask "Resume?" — this is a new workflow, not a resumption. Skip Step 4a (directory/checkpoint creation) since the hook already handled it.
-- **If checkpoint exists at any other stage and is active** (not terminal): This is a previously started workflow. Display "Found workflow: '{name}' ({phase} → {stage}). Resume? [Y/n]" and wait for user response. If they confirm, resume from the saved stage. If they decline, ask if they want to abort (\`--abort\`) or start fresh.
-- **If checkpoint has \`interview_progress\`** (mid-interview resume): The system injects interview progress info at session start. When resuming, Prometheus MUST: (1) read the draft artifact at the path indicated in the context, (2) skip questions already covered in the draft, (3) continue from the next unanswered question. If no \`interview_progress\` exists but a draft artifact path is found, restart the interview but preserve the existing draft as context.
+  **Migration check**: If the checkpoint lacks an \`inception_stages\` field, migrate it:
+  - If \`current_stage !== 'intent'\`: The workflow is past inception — retroactively mark all inception stages as \`completed\` (or \`skipped\` based on pathway_type). Clear \`current_inception_stage\`. Resume normally.
+  - If \`current_stage === 'intent'\`: Initialize \`inception_stages\` with \`not_started\` status. Auto-complete \`workspace-detection\` from existing \`pathway_type\`. Auto-complete \`reverse-engineering\` if discovery phase has \`status: complete\`. Set \`current_inception_stage\` to \`requirements-analysis\`. Resume from there.
+
+  **Resume with \`inception_stages\`**: Check \`inception_stages\` for the first stage that is \`not_started\` or \`in_progress\`. Resume from that stage. If a stage is \`in_progress\` with \`questions_file\` set, resume Q&A (do not regenerate the questions file).
+
+  **Freshly initialized (hook-created checkpoint)**: Determine and confirm the workflow name (see name derivation rules below), then go to Step 2 and Step 3.
+
+- **If checkpoint exists at any other active stage**: Display "Found workflow: '{name}' ({phase} → {stage}). Resume? [Y/n]" and wait for user response. If confirmed, resume. If declined, ask whether to abort (\`--abort\`) or start fresh.
+
 - **If no checkpoint exists**: Proceed to Step 1c.
 
-### 1c. Check for legacy checkpoints
+**Workflow name derivation** (for freshly initialized checkpoints):
+1. The \`/plan\` argument can be: a file path (read the file), a description string (use directly), or a URL (fetch if possible). Users may provide a PRD, rough concept, spec, meeting notes, or just a sentence.
+2. From the CONTENT (never the filename or raw argument), derive a concise 1-3 word name capturing the core product or feature. Examples: "ai-native-marketplace", "user-auth", "payment-system".
+3. Slugify: lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim.
+4. Show user: "Workflow name: \`{derivedName}\`. OK, or would you like a different name?"
+5. If user provides a different name, slugify that instead.
+6. If derived name differs from current workflowId on disk, rename the directory and update checkpoint fields.
 
-Check if \`.olympus/workflow/\` exists and contains checkpoint files. If found, offer to archive them: "Found legacy workflow data in \`.olympus/workflow/\`. Archive it to \`.olympus/archive/\`? [Y/n]". Archive if confirmed, then proceed.
-
-### 1d. Validate feature description
+### 1c. Validate feature description
 
 If there is no active workflow AND no feature description was provided in the input, ask the user: "What would you like to build?" Wait for their response before proceeding.
 
@@ -1914,163 +1930,133 @@ If there is no active workflow AND no feature description was provided in the in
 
 ## Step 2: Read Trust State
 
-Read \`.olympus/trust-state.json\` at workflow start. Determine the trust level (0-3). This affects how many interview questions you ask in the INTENT stage:
+Read \`.olympus/trust-state.json\` at workflow start. Determine the trust level (0-3). Trust affects question quantity in Q&A stages and gate formality throughout the pipeline:
 
-| Trust Level | INTENT Interview Questions |
-|-------------|----------------------------|
-| 0 (new)     | 5 or more questions        |
-| 1 (low)     | 3-4 questions              |
-| 2 (medium)  | 2-3 questions              |
-| 3 (high)    | 1-2 questions              |
+| Trust Level | Q&A Questions (per stage) | Gate Behavior |
+|-------------|---------------------------|---------------|
+| 0 (new)     | 5+ questions               | All gates blocking, Momus mandatory |
+| 1 (low)     | 3-4 questions              | All gates blocking, Momus automatic |
+| 2 (medium)  | 2-3 questions              | Gates blocking, Momus optional |
+| 3 (high)    | 1-2 questions (or 0 if comprehensive input) | Light gates, workspace-detection ungated |
 
 If the trust state file does not exist, assume Trust Level 0.
 
 ---
 
-## Step 3: Discovery Phase (Brownfield Only)
+## Step 3: Initial Interview via Q&A File
 
-### Auto-detection
+This step replaces direct in-chat questioning. ALL questions go into a structured file. NEVER ask questions in chat output.
 
-Determine whether this is a brownfield (existing codebase) or greenfield (new project):
-- **Brownfield**: The project contains 3 or more source files (TypeScript, JavaScript, Python, etc. — not counting config files like \`package.json\`, \`tsconfig.json\`, \`.gitignore\`, etc.).
-- **Greenfield**: Fewer than 3 source files.
+### 3a. Analyze the feature description
 
-### Flag overrides
-- \`--brownfield\` forces Discovery regardless of auto-detection.
-- \`--greenfield\` skips Discovery regardless of auto-detection.
-- If depth is SHALLOW (either from \`--depth shallow\` or from later assessment), skip Discovery entirely.
+Before generating questions, analyze the \`/plan\` input and extract what is already known:
+- Infer the problem being solved
+- Identify any mentioned personas or user types
+- Note any explicit constraints or success criteria
+- Determine what is genuinely unclear or missing
 
-### If Discovery is skipped
-Proceed directly to Step 4 (INTENT stage).
+### 3b. Generate intent-questions.md
 
-### If Discovery runs
+Create \`aidlc-docs/{workflowId}/inception/intent-questions.md\` with this structure:
 
-Dispatch agents to analyze the existing codebase using structured output formats:
+\`\`\`markdown
+# Intent — Verification Questions
 
-**First**, generate a workspace scan artifact by walking the project:
-- Use \`Glob\` and \`Read\` to survey the project structure
-- Write \`aidlc-docs/{workflowId}/discovery/workspace-scan.json\` conforming to the WorkspaceScanResult schema:
-${WORKSPACE_SCAN_SCHEMA}
+## Context Extracted from Your Input
 
-**Then**, dispatch two agents in parallel for deeper analysis:
+Based on your description, I've inferred the following. Please correct anything that is wrong:
 
-1. \`Task(subagent_type="explore-medium", description="Discovery: Static code model", prompt="Analyze the project at {projectPath} and produce a **Static Model** in markdown. ${STATIC_MODEL_FORMAT_INSTRUCTIONS}")\`
-
-2. \`Task(subagent_type="oracle-medium", description="Discovery: Dynamic behavior model", prompt="Analyze the project at {projectPath} and produce a **Dynamic Model** in markdown. ${DYNAMIC_MODEL_FORMAT_INSTRUCTIONS}")\`
-
-Using the combined results, generate these 6 artifacts in \`aidlc-docs/{workflowId}/discovery/\`:
-
-1. **analysis-plan.md** — What was analyzed and why, methodology used.
-2. **current-state-analysis.md** — Current architecture, key modules, tech stack, dependency map.
-3. **regression-baseline.md** — Existing tests, coverage areas, known fragile areas, baseline behavior to preserve.
-4. **change-impact.md** — Areas likely affected by the proposed feature, ripple effects, integration points.
-5. **static-model.md** — Write the explore-medium agent's output (StaticModel format) to this file.
-6. **dynamic-model.md** — Write the oracle-medium agent's output (DynamicModel format) to this file.
-
-### Discovery Gate
-
-After generating all 6 artifacts, present a summary of key findings to the user:
-
-"**Discovery complete.** Here are the key findings:
-- [2-3 most important architectural insights]
-- [Key risks or constraints discovered]
-- [Integration points that will be affected]
-
-Approve Discovery findings to proceed to INTENT stage? [Y/n]"
-
-Wait for user approval before proceeding. If they have concerns, discuss and update artifacts as needed.
+- **Problem**: {inferred problem statement}
+- **Primary users**: {inferred personas}
+- **Scope**: {inferred scope}
+- **Success criteria**: {inferred if present, else "unclear"}
 
 ---
 
-## Step 4: INTENT Stage
+Please answer each question below by filling in the [Answer]: tag.
+When finished, say "done" or "answers ready".
 
-### 4a. Create workflow directory and manifest
+---
 
-Generate the workflowId by slugifying the feature name:
-- Strip file extensions (.md, .txt, .json, etc.)
-- Convert to lowercase
-- Replace underscores and spaces with hyphens
-- Remove characters that aren't a-z, 0-9, or hyphens
-- Collapse multiple consecutive hyphens into one
-- Trim leading/trailing hyphens
-- Examples: "User Authentication System" → "user-authentication-system", "ai_native_marketplace_prd.md" → "ai-native-marketplace-prd"
+## Q1: {question text}
+A) {option description}
+B) {option description}
+C) {option description}
+{D, E, etc. as needed}
+Z) Other: please specify
 
-Create the directory structure at \`aidlc-docs/{workflowId}/\`:
-- \`aidlc-docs/{workflowId}/inception/\`
-- \`aidlc-docs/{workflowId}/construction/\`
-- \`aidlc-docs/{workflowId}/construction/design/\`
-- \`aidlc-docs/{workflowId}/operations/\`
+[Answer]:
 
-Save an initial checkpoint to \`aidlc-docs/{workflowId}/checkpoint.json\`:
-\`\`\`json
-{
-  "workflowId": "{workflowId}",
-  "name": "{feature title}",
-  "stage": "intent",
-  "status": "in_progress",
-  "created": "{ISO-8601}",
-  "updated": "{ISO-8601}",
-  "depth": null,
-  "trustLevel": {0-3}
-}
+---
+
+## Q2: {question text}
+...
 \`\`\`
 
-### 4b. Interview the user
+**Question count based on trust level:**
+- Trust 0: 5+ questions (Problem, Personas, Success Metrics, Constraints, Priorities)
+- Trust 1: 3-4 questions (Problem, Personas, Success Metrics, and one more if needed)
+- Trust 2: 2-3 questions (Problem + Success Metrics, omit if clearly answered in input)
+- Trust 3: 1-2 questions, or 0 if the feature description is comprehensive
 
-Ask the user about:
-- **Problem**: What problem does this solve? Who is affected? Why now?
-- **Personas**: Who are the users/consumers of this feature?
-- **Success metrics**: How will we know this succeeded?
+**Question format rules:**
+- Each question must offer multiple-choice options (A/B/C/D...)
+- "Other: please specify" is ALWAYS the last option (use next available letter)
+- Each question ends with \`[Answer]:\` tag on its own line (user fills in below it)
 
-Adjust the number of questions based on the trust level determined in Step 2. At Trust 3, you may combine these into 1-2 targeted questions. At Trust 0, break them into 5+ specific questions to ensure thorough understanding.
+### 3c. Inform the user
 
-**CRITICAL**: Ask questions DIRECTLY in your message output. They must be visible to the user immediately. Do not delegate question-asking to agents.
+Tell the user: "I've created \`aidlc-docs/{workflowId}/inception/intent-questions.md\` with {N} questions. Please fill in the \`[Answer]:\` tags and say 'done' when finished."
 
-After receiving the user's answers, save the raw interview exchange to \`aidlc-docs/{workflowId}/inception/interview-log.md\`:
+Wait for the user to respond with "done", "finished", or "ready".
+
+### 3d. Read and validate answers
+
+Read the questions file. For each \`[Answer]:\` tag, extract the text that follows it.
+
+**Validate**:
+- Check that all \`[Answer]:\` tags have non-empty text below them. If any are empty, list the unanswered questions and ask the user to complete them.
+- Detect contradictions: scope-small answers conflicting with scope-large answers; low-risk answers conflicting with high-impact answers; quick-timeline answers conflicting with large-scope answers.
+- Detect ambiguities: answers containing trigger phrases "depends", "maybe", "not sure", "mix of", "somewhere between", "probably", "standard", "typical".
+
+**If issues found**: Create \`aidlc-docs/{workflowId}/inception/intent-clarification-questions.md\` using the same Q&A format with clarification questions for each contradiction/ambiguity. Inform the user. Loop back to waiting for "done".
+
+### 3e. Save interview log
+
+Write all extracted Q&A pairs to \`aidlc-docs/{workflowId}/inception/interview-log.md\`:
 
 \`\`\`markdown
 # Interview Log: {Title}
 
-Date: {ISO-8601 date}
+Date: {ISO-8601}
 Trust Level: {0-3}
-Depth: {SHALLOW|MEDIUM|DEEP or "pending"}
 
 ## Questions & Answers
 
-### Q1: {The exact question you asked}
-**Answer**: {The user's verbatim response}
+### Q1: {question text}
+**Answer**: {user's answer}
 
-### Q2: {The exact question you asked}
-**Answer**: {The user's verbatim response}
+### Q2: {question text}
+**Answer**: {user's answer}
 
-{...repeat for all questions asked}
+{repeat for all questions}
 \`\`\`
 
-This file preserves the raw user input for traceability and audit purposes. Update it incrementally — append each Q&A pair as answers come in so progress is saved even if the session is interrupted.
+---
 
-### 4c. Consult Metis for blind spots
+## Step 4: Generate intent.md and Initialize Pipeline
 
-After receiving the user's answers:
+### 4a. Write intent.md
 
-\`\`\`
-Task(
-  subagent_type="metis",
-  description="INTENT blind spot analysis",
-  prompt="Review this feature proposal and identify blind spots, unstated assumptions, and missing considerations. Feature: {summarize the feature and user's answers}. Discovery findings: {summarize if Discovery ran, otherwise 'greenfield project'}."
-)
-\`\`\`
-
-### 4d. Generate INTENT artifact
-
-Create \`aidlc-docs/{workflowId}/inception/intent.md\` using this template:
+Create \`aidlc-docs/{workflowId}/inception/intent.md\`:
 
 \`\`\`markdown
 ---
 id: intent-{workflow-id}
 title: "{title}"
 status: draft
-created: "{ISO-8601 date}"
-author: "{user or prometheus}"
+created: "{ISO-8601}"
+author: "prometheus"
 ---
 
 # INTENT: {Title}
@@ -2091,177 +2077,326 @@ author: "{user or prometheus}"
 - {Explicit exclusion 1}
 \`\`\`
 
-Fill in all sections based on user responses and Metis feedback. Include multiple personas, metrics, constraints, and exclusions as appropriate — the template shows minimums.
+Fill all sections from interview answers. Include multiple personas, metrics, constraints, and exclusions as appropriate.
 
-### 4e. Depth assessment
+### 4b. Initialize checkpoint with inception_stages
 
-If the user did not provide \`--depth\`, assess depth automatically by scoring three dimensions (each 1-10):
+Create or update \`aidlc-docs/{workflowId}/checkpoint.json\` with the full inception_stages record:
 
-- **Scope**: How many files/modules/systems are affected? (1 = single file, 10 = entire codebase)
-- **Complexity**: How architecturally complex is this? (1 = simple change, 10 = new subsystem)
-- **Risk**: What is the blast radius if something goes wrong? (1 = isolated, 10 = system-wide)
-
-Total score (3-30) maps to depth:
-- **SHALLOW** (3-10): Small, well-understood changes. Single BOLT, minimal ceremony.
-- **MEDIUM** (11-20): Multi-module changes with moderate risk. Multiple UNITs, standard gates.
-- **DEEP** (21-30): Large architectural changes with high risk. Full decomposition, all gates mandatory.
-
-Derive a risk tier from the score:
-- **Risk Tier 1** (score 3-10): Low risk
-- **Risk Tier 2** (score 11-20): Moderate risk
-- **Risk Tier 3** (score 21-30): High risk
-
-Update the checkpoint with the depth and risk information.
-
-### 4e.5. Generate Level 1 Plan
-
-Based on the depth assessment and brownfield detection, generate a Level 1 Plan:
-
-1. Classify the pathway type:
-   - **greenfield**: No existing source files (or <3 source files)
-   - **brownfield-enhancement**: Existing codebase + intent mentions "add", "new", "feature", "implement"
-   - **brownfield-refactor**: Existing codebase + intent mentions "refactor", "restructure", "migrate", "rewrite"
-   - **bugfix**: Intent mentions "fix", "bug", "broken", "regression", "error"
-   - **optimization**: Intent mentions "optimize", "performance", "speed", "cache", "reduce"
-
-2. Determine which phases and stages are included based on pathway:
-   - greenfield: Skip Discovery. Include Inception + Construction + Operations.
-   - brownfield-enhancement: Include all phases.
-   - brownfield-refactor: Include all phases. Skip PRFAQ in Inception.
-   - bugfix: Skip Discovery. Minimal Inception (no PRFAQ, no Momus). Shallow Construction (single BOLT).
-   - optimization: Include all phases. Full Operations (monitoring focus).
-
-3. Write the Workflow Routing artifact to \`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md\`:
-
-${WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS}
-
-4. Present the L1 Plan summary alongside the INTENT document at Gate 1.
-
-The L1 Plan controls subsequent behavior: if Discovery was skipped by L1 Plan, Step 3 is skipped. If PRFAQ is excluded, PRFAQ generation is skipped. The L1 Plan is the **authoritative source** for which stages execute.
-
-### 4f. Gate 1: INTENT Approval (ALWAYS BLOCKING)
-
-Present the INTENT document to the user (the PM):
-
-"**INTENT document ready for review.**
-
-{Display the full INTENT document contents}
-
-**Depth assessment**: {SHALLOW|MEDIUM|DEEP} (score: {N}/30)
-- Scope: {N}/10 — {brief rationale}
-- Complexity: {N}/10 — {brief rationale}
-- Risk: {N}/10 — {brief rationale}
-
-Approve INTENT to proceed? [Y/n]"
-
-This gate is ALWAYS blocking. Wait for explicit approval before proceeding. If the user requests changes, update the INTENT document and present again.
-
-### 4g. Save checkpoint (CCR-1)
-
-After INTENT approval, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
 \`\`\`json
 {
-  "stage": "intent",
+  "schema_version": "3.0.0",
+  "workflow_id": "{workflowId}",
+  "feature_name": "{title}",
+  "current_phase": "inception",
+  "current_stage": "intent",
   "status": "in_progress",
+  "created": "{ISO-8601}",
   "updated": "{ISO-8601}",
-  "depth": "{SHALLOW|MEDIUM|DEEP}",
-  "depthScore": {3-30},
-  "riskTier": {1-3},
-  "gatesCompleted": ["intent"],
-  "workflow_routing_path": "aidlc-docs/{workflowId}/inception/plans/workflow-routing.md",
-  "pathway_type": "{pathway_type}",
-  "skipped_phases": ["{phases excluded by L1 Plan}"]
+  "pathway_type": null,
+  "depth_score": null,
+  "risk_tier": null,
+  "trust_level": {0-3},
+  "inception_stages": {
+    "workspace-detection": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "reverse-engineering": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "requirements-analysis": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [], "questions_file": null, "answers_received": false },
+    "user-stories": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "workflow-planning": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "application-design": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "units-generation": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] }
+  },
+  "current_inception_stage": "workspace-detection"
 }
 \`\`\`
 
+### 4c. Write initial state and audit files
+
+Write \`aidlc-docs/{workflowId}/aidlc-state.md\`:
+
+\`\`\`markdown
+# AIDLC State: {title}
+
+Workflow ID: {workflowId}
+Phase: inception
+Current Stage: workspace-detection
+Status: in_progress
+Updated: {ISO-8601}
+
+## Inception Stage Progress
+| Stage | Status |
+|-------|--------|
+| Workspace Detection | not_started |
+| Reverse Engineering | not_started |
+| Requirements Analysis | not_started |
+| User Stories | not_started |
+| Workflow Planning | not_started |
+| Application Design | not_started |
+| Units Generation | not_started |
+\`\`\`
+
+Write \`aidlc-docs/{workflowId}/audit.md\`:
+
+\`\`\`markdown
+# Audit Log: {title}
+
+Workflow ID: {workflowId}
+Created: {ISO-8601}
+
+## Timeline
+
+| Timestamp | Phase | Action | Actor |
+|-----------|-------|--------|-------|
+| {ISO-8601} | inception | Pipeline initialized | ai |
+| {ISO-8601} | inception | intent.md generated | ai |
+\`\`\`
+
 ---
 
-## Step 5: INTENT Stage (After Gate 1 Passes)
+## Step 5: Stage 1 — Workspace Detection
 
-### 5a. Interview the user about business requirements
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Workspace Detection) before executing this stage.
 
-Ask the user about:
-- **Business requirements**: What specific capabilities must this deliver?
-- **Constraints**: Technical constraints, compatibility requirements, timeline?
-- **Priorities**: What is most important? What can be deferred?
+**Resume check**: If \`inception_stages["workspace-detection"].status\` is \`completed\` or \`skipped\`, skip to Step 6.
 
-Keep questions focused and informed by the INTENT document and any Discovery findings.
+Mark \`inception_stages["workspace-detection"].status = "in_progress"\`. Update checkpoint.
 
-### 5b. AI-driven research (silent, parallel)
+### 5a. Auto-detect project type
 
-While waiting for or after receiving user answers, dispatch research agents silently:
+Determine whether this is brownfield or greenfield:
+- **Brownfield**: The project contains 3 or more source files (TypeScript, JavaScript, Python, Go, Rust, Java, etc. — not counting config files like \`package.json\`, \`tsconfig.json\`, \`.gitignore\`, \`*.lock\`, etc.).
+- **Greenfield**: Fewer than 3 source files.
+
+**Flag overrides**: \`--brownfield\` forces brownfield; \`--greenfield\` forces greenfield.
+
+### 5b. Classify pathway type
+
+Choose from:
+- **greenfield**: No significant existing source files
+- **brownfield-enhancement**: Existing codebase + intent mentions "add", "new", "feature", "implement"
+- **brownfield-refactor**: Existing codebase + intent mentions "refactor", "restructure", "migrate", "rewrite"
+- **bugfix**: Intent mentions "fix", "bug", "broken", "regression", "error"
+- **optimization**: Intent mentions "optimize", "performance", "speed", "cache", "reduce"
+
+### 5c. Apply stage skip rules based on pathway
+
+Update \`inception_stages\` in checkpoint with \`status: "skipped"\` and \`skip_reason\` for stages excluded by pathway:
+
+| Pathway | Stages Skipped |
+|---------|----------------|
+| greenfield | reverse-engineering |
+| bugfix | user-stories, application-design |
+| optimization | user-stories, application-design |
+
+### 5d. Update state (triple write)
+
+After completing workspace detection:
+1. Update \`inception_stages["workspace-detection"]\`: \`status: "completed"\`, \`completed_at: {ISO-8601}\`, \`artifacts_generated: []\`
+2. Update \`pathway_type\` and \`current_inception_stage: "reverse-engineering"\` in checkpoint.json
+3. Update \`aidlc-state.md\` — set Workspace Detection row to \`completed\`
+4. Append to \`audit.md\` timeline: \`Stage 'workspace-detection' completed | ai\`
+
+### 5e. Output REVIEW REQUIRED
 
 \`\`\`
-Task(subagent_type="explore-medium", description="Codebase research for INTENT", prompt="Research the codebase for: {relevant patterns, existing implementations, integration points related to the feature}")
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Workspace Detection**: Detected project type and pathway (greenfield/brownfield) and set up workspace configuration
+
+### Artifacts generated
+- _(no artifacts generated)_
+
+### What needs your review
+- [ ] Pathway type is correct: {pathway_type}
+- [ ] Greenfield/brownfield classification matches your intent
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Reverse Engineering**
+- Analyzes your existing codebase to understand current architecture and components
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 6: Stage 2 — Reverse Engineering
+
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Reverse Engineering) before executing this stage.
+
+**Resume check**: If \`inception_stages["reverse-engineering"].status\` is \`completed\` or \`skipped\`, skip to Step 7.
+
+If pathway is \`greenfield\`, mark \`inception_stages["reverse-engineering"]\` as \`skipped\` (skip_reason: "Greenfield project — no existing codebase to reverse-engineer") and skip to Step 7.
+
+Mark \`inception_stages["reverse-engineering"].status = "in_progress"\`. Update checkpoint.
+
+### 6a. Generate workspace scan artifact
+
+Walk the project structure using Glob and Read. Write \`aidlc-docs/{workflowId}/discovery/workspace-scan.json\`:
+
+\`\`\`json
+{
+  "totalFiles": 0,
+  "sourceFiles": 0,
+  "directoryTree": [],
+  "languageDistribution": {},
+  "importGraph": [],
+  "entryPoints": [],
+  "largestFilesByDirectory": {},
+  "configFiles": []
+}
+\`\`\`
+
+### 6b. Dispatch agents in parallel (silent — do not announce to user)
+
+\`\`\`
+Task(subagent_type="explore-medium", description="Discovery: Static code model", prompt="Analyze the project at {projectPath} and produce a Static Model in markdown with sections: ## Modules (table: Name | Path | Responsibility | Public Interface), ## Dependency Graph (one edge per line: ModuleA -> ModuleB), ## Data Models (table: Name | Fields | Location), ## Configuration Summary (paragraph)")
 \`\`\`
 
 \`\`\`
-Task(subagent_type="librarian", description="Pattern research for INTENT", prompt="Research best practices and patterns for: {the technical approach being considered}")
+Task(subagent_type="oracle-medium", description="Discovery: Dynamic behavior model", prompt="Analyze the project at {projectPath} and produce a Dynamic Model in markdown with sections: ## Use Cases (named subsections with numbered steps), ## Event Patterns (table: Event | Publisher | Subscribers), ## State Management (paragraph), ## Error Handling (paragraph)")
 \`\`\`
 
-Do NOT tell the user you are running these — they are background research to inform the INTENT document.
+### 6c. Generate 6 discovery artifacts in \`aidlc-docs/{workflowId}/discovery/\`
 
-### 5c. Consult Metis for risk analysis
+1. **analysis-plan.md** — What was analyzed and why, methodology used.
+2. **current-state-analysis.md** — Current architecture, key modules, tech stack, dependency map.
+3. **regression-baseline.md** — Existing tests, coverage areas, known fragile areas, baseline behavior to preserve.
+4. **change-impact.md** — Areas likely affected by the proposed feature, ripple effects, integration points.
+5. **static-model.md** — Write the explore-medium agent's Static Model output.
+6. **dynamic-model.md** — Write the oracle-medium agent's Dynamic Model output.
+
+### 6d. Update state (triple write)
+
+1. Update \`inception_stages["reverse-engineering"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated: [list of 6 artifact paths]\`
+2. Update \`current_inception_stage: "requirements-analysis"\` in checkpoint.json
+3. Update \`aidlc-state.md\` — set Reverse Engineering row to \`completed\`
+4. Append to \`audit.md\` timeline
+
+### 6e. Output REVIEW REQUIRED
 
 \`\`\`
-Task(
-  subagent_type="metis",
-  description="INTENT risk analysis",
-  prompt="Analyze risks for this implementation plan. Feature: {summarize}. Technical approach: {summarize research findings}. Identify: (1) technical risks, (2) integration risks, (3) security concerns, (4) performance implications."
-)
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Reverse Engineering**: Analyzed existing codebase structure, components, and technology stack
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/discovery/workspace-scan.json\`
+- \`aidlc-docs/{workflowId}/discovery/analysis-plan.md\`
+- \`aidlc-docs/{workflowId}/discovery/current-state-analysis.md\`
+- \`aidlc-docs/{workflowId}/discovery/regression-baseline.md\`
+- \`aidlc-docs/{workflowId}/discovery/change-impact.md\`
+- \`aidlc-docs/{workflowId}/discovery/static-model.md\`
+- \`aidlc-docs/{workflowId}/discovery/dynamic-model.md\`
+
+### What needs your review
+- [ ] Architecture summary accurately describes the current system
+- [ ] Key risks and integration points are correctly identified
+- [ ] Regression baseline captures fragile areas
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Requirements Analysis**
+- Captures structured requirements from Q&A interaction with you
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
 \`\`\`
 
-### 5d. Generate INTENT artifact
+Wait for user approval before proceeding (unless Trust Level 3).
 
-Create \`aidlc-docs/{workflowId}/inception/intent.md\` using this template:
+---
+
+## Step 7: Stage 3 — Requirements Analysis
+
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Requirements Analysis) before executing this stage.
+
+**Resume check**: If \`inception_stages["requirements-analysis"].status\` is \`completed\` or \`skipped\`, skip to Step 8.
+
+Mark \`inception_stages["requirements-analysis"].status = "in_progress"\`. Update checkpoint.
+
+### Phase A: Generate requirements-analysis-questions.md
+
+If \`inception_stages["requirements-analysis"].questions_file\` is already set (resume case), skip to Phase B.
+
+Create \`aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md\` using the file-only Q&A format (same structure as Step 3b):
+
+Generate 4 questions (scale up/down based on trust level):
+1. **Functional Requirements**: What specific capabilities must this feature deliver? (options: A. {list option}, B. {another}, etc.)
+2. **Non-Functional Requirements**: What performance, security, or reliability constraints apply? (options: A. High availability required, B. Security-sensitive data, C. Performance-critical path, D. Standard requirements, E. Other)
+3. **Constraints**: What technical or business constraints must the implementation respect? (options around timeline, compatibility, team skills, platform, budget, etc.)
+4. **Success Metrics**: How will we measure that this feature succeeded? (options around quantitative metrics, qualitative goals, user adoption, etc.)
+
+Update checkpoint: \`inception_stages["requirements-analysis"].questions_file = "aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md"\`
+
+### Phase B: Inform user and wait
+
+Tell the user: "I've created \`aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md\` with {N} questions about requirements. Please fill in the \`[Answer]:\` tags and say 'done' when finished."
+
+Wait for "done", "finished", or "ready".
+
+### Phase C: Read and extract answers
+
+Read \`requirements-analysis-questions.md\`. Extract text below each \`[Answer]:\` tag.
+
+Update checkpoint: \`inception_stages["requirements-analysis"].answers_received = true\`
+
+### Phase D: Validate answers
+
+- Check all \`[Answer]:\` tags are non-empty.
+- Detect contradictions (scope-small vs scope-large, low-risk vs high-impact, quick-timeline vs large-scope).
+- Detect ambiguities (trigger phrases: "depends", "maybe", "not sure", "mix of", "somewhere between", "probably", "standard", "typical").
+
+### Phase E: Handle issues (if any)
+
+If contradictions or ambiguities are found: create \`aidlc-docs/{workflowId}/inception/requirements-analysis-clarification-questions.md\` with targeted clarification questions (same Q&A format). Inform the user. Loop back to Phase B.
+
+### Phase F: Synthesize requirements artifacts
+
+**\`aidlc-docs/{workflowId}/inception/requirements.md\`**:
 
 \`\`\`markdown
 ---
-id: intent-{workflow-id}
-title: "{title}"
+id: requirements-{workflow-id}
+parent: "intent-{workflow-id}"
 status: draft
-created: "{ISO-8601 date}"
-depth_score: {1-30}
-risk_tier: {1-3}
+created: "{ISO-8601}"
 ---
 
-# INTENT: {Title}
+# Functional Requirements: {Title}
 
-## Business Requirements
-### User Stories
+## Core Capabilities
+- **FR-001**: {requirement from answers}
+
+## User Stories
 - **US-001**: As a {persona}, I want {action} so that {benefit}
   - Acceptance: {testable criterion}
 
-### Business Rules
+## Business Rules
 - **BR-001**: {rule}
-
-## Technical Specification
-### Architecture Overview
-### API Design
-### Data Model
-### Integration Points
-### Security Considerations
-
-## Implementation Plan
-### Proposed UNITs
-- **UNIT-001**: {module name} — {one-sentence scope description}
-
-### Cross-UNIT Dependencies
-### Risk Assessment
 \`\`\`
 
-Fill in all sections thoroughly based on user input, research findings, and Metis analysis. Include multiple user stories, business rules, and UNITs as appropriate.
-
-### 5e. Generate NFR artifact
-
-Create \`aidlc-docs/{workflowId}/inception/nfr.md\` using this template:
+**\`aidlc-docs/{workflowId}/inception/nfr.md\`**:
 
 \`\`\`markdown
 ---
 id: nfr-{workflow-id}
 parent: "intent-{workflow-id}"
 status: draft
-created: "{ISO-8601 date}"
+created: "{ISO-8601}"
 ---
 
 # Non-Functional Requirements
@@ -2282,156 +2417,647 @@ created: "{ISO-8601 date}"
 - **A11Y-001**: {requirement} — Type: design-time | Gate-blocking: yes
 \`\`\`
 
-**NFR classification rules:**
-- **Design-time NFRs** (security, compliance, accessibility) are gate-blocking — they participate in dual validation and must be satisfied before proceeding.
-- **Runtime NFRs** (performance, availability) are tracked in the manifest but are NOT gate-blocking.
+**NFR classification**: Design-time NFRs (security, compliance, accessibility) are gate-blocking. Runtime NFRs (performance, availability) are tracked but not gate-blocking.
 
-### 5e.5. PRFAQ Generation (if included in L1 Plan)
+### Phase G: Dispatch Metis for blind spot analysis (silent)
 
-Check the Level 1 Plan: if the PRFAQ stage is included (not bugfix or brownfield-refactor pathways):
-
-1. Build a PRFAQ prompt using the Amazon PRFAQ format:
-${PRFAQ_FORMAT_INSTRUCTIONS}
-
-2. Dispatch an agent to generate the PRFAQ:
-   \`\`\`
-   Task(subagent_type="olympian", description="Generate PRFAQ", prompt="Generate an Amazon-style PRFAQ for: {feature name}. Context: {INTENT document summary}. {PRFAQ format instructions}")
-   \`\`\`
-3. Write the result to \`aidlc-docs/{workflowId}/inception/prfaq.md\`
-4. If generation fails, log a warning and continue — PRFAQ is non-blocking.
-
-If the L1 Plan excludes PRFAQ (bugfix/brownfield-refactor pathways), skip this step entirely.
-
-### 5f. Self-consistency validation
-
-Verify that the INTENT document is internally consistent:
-- Every persona has at least one user story.
-- Every success metric maps to an acceptance criterion or NFR.
-- The "Out of Scope" section has no contradictions with stated user stories.
-- Design-time NFRs are addressed in the Technical Specification.
-
-If inconsistencies are found, flag them and resolve before proceeding to the gate.
-
-### 5g. Gate 2: INTENT Business Approval (ALWAYS BLOCKING)
-
-Present the BUSINESS sections of the INTENT document to the user (the PM):
-
-"**INTENT document ready for business review.**
-
-{Display: Business Requirements section — user stories, business rules}
-{Display: NFR summary — list gate-blocking NFRs}
-
-Does the business scope accurately capture your requirements? Approve to proceed? [Y/n]"
-
-This gate is ALWAYS blocking. Wait for explicit approval.
-
-### 5h. Gate 2b: Momus Review
-
-The Momus review requirement depends on trust and risk:
-
-- **Trust 0-1**: Momus review is AUTOMATIC. Invoke Momus via Task tool:
-  \`\`\`
-  Task(
-    subagent_type="momus",
-    description="INTENT review",
-    prompt="Critically review this INTENT document for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks. INTENT: {full intent document}."
-  )
-  \`\`\`
-  After Momus returns, save the review output to \`aidlc-docs/{workflowId}/inception/intent-review.md\` with metadata: reviewer (momus), trigger (automatic), trust level at time of review, and verdict.
-  Present Momus feedback to the user. Address any critical issues before proceeding.
-
-- **Trust 2+**: Momus review is on-demand. Tell the user: "Optional: Run \`/review\` for Momus feedback on the INTENT document."
-
-- **Risk Tier 3**: Momus review is MANDATORY regardless of trust level. Always invoke Momus.
-
-### 5i. Dev notification
-
-Share the Technical Specification section with the user (as a developer notification):
-
-"**Technical spec for your awareness:**
-
-{Display: Technical Specification section — architecture, API, data model, integration points, security}
-
-{Display: Implementation Plan section — proposed UNITs, dependencies, risk assessment}"
-
-This notification is:
-- **Non-blocking** at Risk Tier 1 and 2 — proceed after displaying.
-- **Blocking at Risk Tier 3** — ask "Acknowledge technical specification? [Y/n]" and wait.
-
-### 5j. Save checkpoint (CCR-1)
-
-After all INTENT gates pass, update \`aidlc-docs/{workflowId}/checkpoint.json\`:
-\`\`\`json
-{
-  "stage": "construction_prep",
-  "status": "in_progress",
-  "updated": "{ISO-8601}",
-  "gatesCompleted": ["intent", "intent_business", "momus_review"],
-  "workflow_routing_path": "aidlc-docs/{workflowId}/inception/plans/workflow-routing.md",
-  "pathway_type": "{pathway_type}",
-  "skipped_phases": ["{phases excluded by L1 Plan}"]
-}
 \`\`\`
+Task(
+  subagent_type="metis",
+  description="Requirements blind spot analysis",
+  prompt="Review this feature's requirements and identify blind spots, unstated assumptions, and missing considerations. Feature: {summarize intent.md}. Requirements: {summarize requirements.md}. Discovery findings: {summarize if reverse-engineering ran, otherwise 'greenfield project'}."
+)
+\`\`\`
+
+Do not announce this dispatch. Surface findings by incorporating them into requirements.md where relevant.
+
+### 7d. Update state (triple write)
+
+1. Update \`inception_stages["requirements-analysis"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated\`
+2. Update \`current_inception_stage: "user-stories"\` in checkpoint.json
+3. Update \`aidlc-state.md\`
+4. Append to \`audit.md\`
+
+### 7e. Output REVIEW REQUIRED
+
+\`\`\`
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Requirements Analysis**: Captured structured requirements from Q&A interaction
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md\`
+- \`aidlc-docs/{workflowId}/inception/requirements.md\`
+- \`aidlc-docs/{workflowId}/inception/nfr.md\`
+
+### What needs your review
+- [ ] Functional requirements accurately capture what must be built
+- [ ] Non-functional requirements and gate-blocking designations are correct
+- [ ] No significant requirements are missing
 
 ---
 
-## Step 6: Construction Preparation (After Gate 2 Passes)
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **User Stories**
+- Generates user personas and user stories with acceptance criteria from requirements
 
-### 6a. Decomposition status
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
 
-Based on the assessed depth:
+Wait for user approval before proceeding (unless Trust Level 3).
 
-- **SHALLOW**: A single BOLT will be generated directly from the INTENT document. No UNIT decomposition needed. Note this in the checkpoint.
-- **MEDIUM or DEEP**: UNIT decomposition is pending. The proposed UNITs in the INTENT document serve as the starting point.
+---
 
-Display this message:
+## Step 8: Stage 4 — User Stories
 
-"**Inception complete.** INTENT document approved.
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: User Stories) before executing this stage.
 
-Depth: {SHALLOW|MEDIUM|DEEP} | Risk Tier: {1|2|3}
+**Resume check**: If \`inception_stages["user-stories"].status\` is \`completed\` or \`skipped\`, skip to Step 9.
 
-Decomposition pending — will run when Construction pipeline is implemented in Phase 3.
+If pathway is \`bugfix\` or \`optimization\`, mark \`inception_stages["user-stories"]\` as \`skipped\` (skip_reason: "{pathway} pathway does not require user-stories") and skip to Step 9.
 
-Artifacts created:
-{List all files in aidlc-docs/{workflowId}/ with relative paths}"
+Mark \`inception_stages["user-stories"].status = "in_progress"\`. Update checkpoint.
 
-### 6b. Present execution mode choice
+### 8a. Generate personas and stories
+
+Read \`intent.md\` and \`requirements.md\` for context.
+
+**\`aidlc-docs/{workflowId}/inception/personas.md\`**:
+
+\`\`\`markdown
+# User Personas: {Title}
+
+## {Persona Name}
+- **Role**: {job title / type of user}
+- **Goals**: {what they want to achieve}
+- **Pain Points**: {current frustrations}
+- **Technical Level**: {novice | intermediate | expert}
+- **Key User Stories**: US-001, US-002, ...
+\`\`\`
+
+**\`aidlc-docs/{workflowId}/inception/stories.md\`** (Gherkin format):
+
+\`\`\`markdown
+# User Stories: {Title}
+
+## US-001: {Short title}
+**As a** {persona}, **I want** {action} **so that** {benefit}.
+
+### Acceptance Criteria
+
+**Scenario**: {scenario name}
+\`\`\`
+Given {initial context}
+When {action taken}
+Then {expected outcome}
+\`\`\`
+
+**Priority**: Must Have | Should Have | Nice to Have
+**Persona**: {persona name}
+**Dependencies**: {US-00X or none}
+\`\`\`
+
+### 8b. Update state (triple write)
+
+1. Update \`inception_stages["user-stories"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated\`
+2. Update \`current_inception_stage: "workflow-planning"\` in checkpoint.json
+3. Update \`aidlc-state.md\`
+4. Append to \`audit.md\`
+
+### 8c. Output REVIEW REQUIRED
+
+\`\`\`
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **User Stories**: Generated user personas and user stories with acceptance criteria
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/inception/personas.md\`
+- \`aidlc-docs/{workflowId}/inception/stories.md\`
+
+### What needs your review
+- [ ] Personas accurately represent the intended users
+- [ ] User stories cover all key capabilities
+- [ ] Acceptance criteria are testable and complete
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Workflow Planning**
+- Creates an execution plan with workflow diagram showing stage dependencies
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 9: Stage 5 — Workflow Planning
+
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Workflow Planning) before executing this stage.
+
+**Resume check**: If \`inception_stages["workflow-planning"].status\` is \`completed\` or \`skipped\`, skip to Step 10.
+
+Mark \`inception_stages["workflow-planning"].status = "in_progress"\`. Update checkpoint.
+
+### 9a. Depth assessment (if not set by --depth flag)
+
+If depth is not already set, score three dimensions (each 1-10):
+
+- **Scope**: How many files/modules/systems are affected? (1 = single file, 10 = entire codebase)
+- **Complexity**: How architecturally complex is this? (1 = simple change, 10 = new subsystem)
+- **Risk**: What is the blast radius if something goes wrong? (1 = isolated, 10 = system-wide)
+
+Total score (3-30) maps to depth:
+- **SHALLOW** (3-10): Small, well-understood changes. Single BOLT, minimal ceremony.
+- **MEDIUM** (11-20): Multi-module changes with moderate risk. Multiple UNITs, standard gates.
+- **DEEP** (21-30): Large architectural changes with high risk. Full decomposition, all gates mandatory.
+
+Risk tier:
+- **Risk Tier 1** (score 3-10): Low risk
+- **Risk Tier 2** (score 11-20): Moderate risk
+- **Risk Tier 3** (score 21-30): High risk
+
+Update checkpoint with \`depth_score\` and \`risk_tier\`.
+
+### 9b. Generate execution-plan.md
+
+**\`aidlc-docs/{workflowId}/inception/plans/execution-plan.md\`**:
+
+\`\`\`markdown
+# Execution Plan: {Title}
+
+Pathway: {pathway_type}
+Depth: {SHALLOW|MEDIUM|DEEP} (score: {N}/30)
+Risk Tier: {1|2|3}
+Generated: {ISO-8601}
+
+## Workflow Diagram
+
+\`\`\`mermaid
+graph TD
+    A[Requirements Analysis] --> B[User Stories]
+    B --> C[Workflow Planning]
+    C --> D[Application Design]
+    D --> E[Units Generation]
+    E --> F[Construction]
+\`\`\`
+
+## Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| {risk} | High/Med/Low | High/Med/Low | {mitigation} |
+
+## Implementation Checklist
+
+### Pre-Construction
+- [ ] All inception artifacts reviewed and approved
+- [ ] Design-time NFRs addressed in application design
+
+### Construction
+- [ ] UNIT-001: {description}
+
+### Post-Construction
+- [ ] Integration tests pass
+- [ ] NFR validation complete
+\`\`\`
+
+### 9c. Generate workflow-routing.md (L1 Plan)
+
+**\`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md\`**:
+
+\`\`\`markdown
+# Workflow Routing: {Title}
+
+Pathway: {pathway_type}
+Risk Assessment: {LOW|MEDIUM|HIGH}
+Risk Tier: {1|2|3}
+Estimated Depth: {minimal|standard|comprehensive}
+Estimated Bolts: {N}
+Generated: {ISO-8601}
+Approved: —
+
+## Phase Overview
+
+| Phase | Included | Rationale |
+|-------|----------|-----------|
+| Discovery | Yes/No | {rationale} |
+| Inception | Yes | Always included |
+| Construction | Yes | {rationale} |
+| Operations | Yes/No | {rationale} |
+
+## Stage Details
+
+| # | Phase | Stage | Included | Rationale |
+|---|-------|-------|----------|-----------|
+| 1 | inception | workspace-detection | Yes | Always |
+| 2 | inception | reverse-engineering | Yes/No | {rationale} |
+| 3 | inception | requirements-analysis | Yes | Always |
+| 4 | inception | user-stories | Yes/No | {rationale} |
+| 5 | inception | workflow-planning | Yes | Always |
+| 6 | inception | application-design | Yes/No | {rationale} |
+| 7 | inception | units-generation | Yes/No | {rationale} |
+\`\`\`
+
+### 9d. Optional PRFAQ (not for bugfix or brownfield-refactor pathways)
+
+If pathway is not \`bugfix\` or \`brownfield-refactor\`:
+
+\`\`\`
+Task(subagent_type="olympian", description="Generate PRFAQ", prompt="Generate an Amazon-style PRFAQ for: {feature name}. Context: {intent.md summary}. Include: Press Release (Headline, Subheadline, Problem Statement, Solution, Leadership Quote, How It Works, Customer Quote, Call to Action), Customer FAQs (5-7 questions from end users), Internal FAQs (3-5 business/technical questions).")
+\`\`\`
+
+Write result to \`aidlc-docs/{workflowId}/inception/prfaq.md\`. If generation fails, log a warning and continue — PRFAQ is non-blocking.
+
+### 9e. Momus review
+
+- **Trust 0-1 or Risk Tier 3**: Momus review is AUTOMATIC:
+  \`\`\`
+  Task(
+    subagent_type="momus",
+    description="Workflow planning review",
+    prompt="Critically review this inception plan for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks, (5) incorrect depth/risk assessment. Intent: {intent.md}. Requirements: {requirements.md}. Execution plan: {execution-plan.md}."
+  )
+  \`\`\`
+  Save output to \`aidlc-docs/{workflowId}/inception/intent-review.md\` with metadata (reviewer: momus, trigger: automatic, trust level, verdict). Present Momus feedback to the user. Address critical issues.
+
+- **Trust 2+** (and not Risk Tier 3): Tell the user: "Optional: Run \`/review\` for Momus feedback on the inception plan."
+
+### 9f. Update state (triple write)
+
+1. Update \`inception_stages["workflow-planning"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated\`
+2. Update \`current_inception_stage: "application-design"\`, \`depth_score\`, \`risk_tier\` in checkpoint.json
+3. Update \`aidlc-state.md\`
+4. Append to \`audit.md\`
+
+### 9g. Output REVIEW REQUIRED
+
+\`\`\`
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Workflow Planning**: Created execution plan with Mermaid workflow diagram
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/inception/plans/execution-plan.md\`
+- \`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md\`
+- \`aidlc-docs/{workflowId}/inception/prfaq.md\` (if generated)
+- \`aidlc-docs/{workflowId}/inception/intent-review.md\` (if Momus ran)
+
+### What needs your review
+- [ ] Depth assessment ({SHALLOW|MEDIUM|DEEP}, score {N}/30) is appropriate
+- [ ] Risk tier ({1|2|3}) correctly reflects implementation risk
+- [ ] Execution plan covers all required phases and stages
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Application Design**
+- Designs the component architecture, services, and dependency relationships
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 10: Stage 6 — Application Design
+
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Application Design) before executing this stage.
+
+**Resume check**: If \`inception_stages["application-design"].status\` is \`completed\` or \`skipped\`, skip to Step 11.
+
+If pathway is \`bugfix\` or \`optimization\`, mark \`inception_stages["application-design"]\` as \`skipped\` (skip_reason: "{pathway} pathway does not require application-design") and skip to Step 11.
+
+Mark \`inception_stages["application-design"].status = "in_progress"\`. Update checkpoint.
+
+### 10a. Generate application design artifacts
+
+Create directory \`aidlc-docs/{workflowId}/inception/application-design/\`.
+
+**\`application-design/components.md\`**:
+
+\`\`\`markdown
+# Component Design: {Title}
+
+## Components
+
+| Name | Type | Responsibility | Interfaces |
+|------|------|----------------|-----------|
+| {component} | {service|module|UI|data} | {what it does} | {APIs it exposes} |
+
+## Component Diagram
+
+\`\`\`mermaid
+graph LR
+    A[{Component A}] --> B[{Component B}]
+    B --> C[{Component C}]
+\`\`\`
+\`\`\`
+
+**\`application-design/services.md\`**:
+
+\`\`\`markdown
+# Service Design: {Title}
+
+## Services
+
+### {Service Name}
+- **Purpose**: {what this service does}
+- **Inputs**: {data/events it receives}
+- **Outputs**: {data/events it produces}
+- **Dependencies**: {other services or systems}
+- **NFR considerations**: {relevant security, performance, availability constraints}
+\`\`\`
+
+**\`application-design/dependencies.md\`**:
+
+\`\`\`markdown
+# Dependency Graph: {Title}
+
+## Internal Dependencies
+- {Module A} depends on {Module B}: {reason}
+
+## External Dependencies
+| Dependency | Version | Purpose | Risk |
+|-----------|---------|---------|------|
+| {library} | {version} | {purpose} | {Low|Med|High} |
+
+## Dependency Diagram
+
+\`\`\`mermaid
+graph TD
+    A[{Internal Module}] --> B[{External Library}]
+\`\`\`
+\`\`\`
+
+### 10b. Update state (triple write)
+
+1. Update \`inception_stages["application-design"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated\`
+2. Update \`current_inception_stage: "units-generation"\` in checkpoint.json
+3. Update \`aidlc-state.md\`
+4. Append to \`audit.md\`
+
+### 10c. Output REVIEW REQUIRED
+
+\`\`\`
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Application Design**: Designed component architecture, services, and dependency graph
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/inception/application-design/components.md\`
+- \`aidlc-docs/{workflowId}/inception/application-design/services.md\`
+- \`aidlc-docs/{workflowId}/inception/application-design/dependencies.md\`
+
+### What needs your review
+- [ ] Component boundaries are correct and responsibilities are clear
+- [ ] Service interfaces are well-defined
+- [ ] External dependencies are identified and risks assessed
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Units Generation**
+- Decomposes requirements into implementation units (UNITs) with dependency mapping
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 11: Stage 7 — Units Generation
+
+> **Rule file**: Read \`~/.claude/olympus/rules/inception-rules.md\` (section: Units Generation) before executing this stage.
+
+**Resume check**: If \`inception_stages["units-generation"].status\` is \`completed\` or \`skipped\`, skip to Step 12.
+
+If \`depth_score\` is set and \`depth_score <= 12\` (SHALLOW), mark \`inception_stages["units-generation"]\` as \`skipped\` (skip_reason: "depth_score <= 12 — shallow pathway uses single BOLT directly") and skip to Step 12.
+
+Mark \`inception_stages["units-generation"].status = "in_progress"\`. Update checkpoint.
+
+### 11a. Generate unit artifacts
+
+Read \`requirements.md\`, \`stories.md\`, and \`application-design/components.md\` for context.
+
+**\`aidlc-docs/{workflowId}/inception/unit-of-work.md\`**:
+
+\`\`\`markdown
+# Units of Work: {Title}
+
+## UNIT-001: {Module Name}
+- **Scope**: {one-sentence scope description}
+- **Phase**: construction
+- **Estimated Bolts**: {N}
+- **User Stories**: US-001, US-002
+- **NFRs**: SEC-001, PERF-001
+- **Components**: {component names}
+
+## UNIT-002: {Module Name}
+...
+\`\`\`
+
+**\`aidlc-docs/{workflowId}/inception/unit-of-work-dependency.md\`**:
+
+\`\`\`markdown
+# Unit Dependency Map: {Title}
+
+## Dependency Matrix
+
+| UNIT | Depends On | Blocks |
+|------|-----------|--------|
+| UNIT-001 | — | UNIT-002, UNIT-003 |
+| UNIT-002 | UNIT-001 | UNIT-004 |
+
+## Dependency Diagram
+
+\`\`\`mermaid
+graph TD
+    U1[UNIT-001: {name}] --> U2[UNIT-002: {name}]
+    U1 --> U3[UNIT-003: {name}]
+    U2 --> U4[UNIT-004: {name}]
+\`\`\`
+\`\`\`
+
+**\`aidlc-docs/{workflowId}/inception/unit-of-work-story-map.md\`**:
+
+\`\`\`markdown
+# Story Map: {Title}
+
+## Story → Unit Mapping
+
+| User Story | UNIT | Priority | Notes |
+|-----------|------|---------|-------|
+| US-001 | UNIT-001 | Must Have | |
+| US-002 | UNIT-001 | Should Have | |
+| US-003 | UNIT-002 | Must Have | |
+\`\`\`
+
+### 11b. Update state (triple write)
+
+1. Update \`inception_stages["units-generation"]\`: \`status: "completed"\`, \`completed_at\`, \`artifacts_generated\`
+2. Update checkpoint.json: \`current_inception_stage\` cleared (or set to null), \`status: "awaiting_mode_selection"\` after step 12
+3. Update \`aidlc-state.md\` — all stages complete
+4. Append to \`audit.md\`
+
+### 11c. Output REVIEW REQUIRED
+
+\`\`\`
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Units Generation**: Decomposed requirements into implementation units with dependency mapping
+
+### Artifacts generated
+- \`aidlc-docs/{workflowId}/inception/unit-of-work.md\`
+- \`aidlc-docs/{workflowId}/inception/unit-of-work-dependency.md\`
+- \`aidlc-docs/{workflowId}/inception/unit-of-work-story-map.md\`
+
+### What needs your review
+- [ ] Units correctly partition the work into manageable implementation chunks
+- [ ] Unit dependencies are accurate and there are no circular dependencies
+- [ ] Story-to-unit mapping covers all user stories
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Inception Complete**
+- All inception stages have been executed and artifacts are ready for construction
+
+To proceed: \`continue\` or \`approve\`
+To request changes: \`revise [specific feedback]\`
+---
+\`\`\`
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 12: Inception Complete — Final Audit and Mode Choice
+
+### 12a. Generate final audit document
+
+Compile all audit timeline entries from \`audit.md\` into a final summary. Write \`aidlc-docs/{workflowId}/inception/audit-final.md\`:
+
+\`\`\`markdown
+# Inception Audit: {Title}
+
+Workflow ID: {workflowId}
+Completed: {ISO-8601}
+Pathway: {pathway_type}
+Depth: {SHALLOW|MEDIUM|DEEP} (score: {N}/30)
+Risk Tier: {1|2|3}
+Trust Level: {0-3}
+
+## Stages Completed
+
+| Stage | Status | Started | Completed | Artifacts |
+|-------|--------|---------|-----------|----------|
+| Workspace Detection | completed/skipped | {time} | {time} | {count} |
+| Reverse Engineering | completed/skipped | {time} | {time} | {count} |
+| Requirements Analysis | completed | {time} | {time} | {count} |
+| User Stories | completed/skipped | {time} | {time} | {count} |
+| Workflow Planning | completed | {time} | {time} | {count} |
+| Application Design | completed/skipped | {time} | {time} | {count} |
+| Units Generation | completed/skipped | {time} | {time} | {count} |
+
+## Total Artifacts Generated
+{N} artifacts in \`aidlc-docs/{workflowId}/\`
+\`\`\`
+
+### 12b. Present completion summary
+
+"**Inception phase complete.** {N} artifacts generated across {M} stages.
+
+Key artifacts:
+- \`aidlc-docs/{workflowId}/inception/intent.md\`
+- \`aidlc-docs/{workflowId}/inception/requirements.md\`
+- \`aidlc-docs/{workflowId}/inception/plans/execution-plan.md\`
+- \`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md\`
+{list additional artifacts}"
+
+### 12c. Present execution mode choice
 
 "**Choose execution mode for implementation:**
 
 1. **\`/ascent\`** — Persistent execution loop. Will not stop until all tasks are verified complete.
 2. **\`/olympus\`** — Standard orchestration mode. Delegates to specialized agents with your oversight.
 3. **\`/ultrawork\`** — Maximum parallelism. Runs everything concurrently for speed.
-4. **Manual** — You drive implementation yourself using the INTENT document as your guide.
+4. **Manual** — You drive implementation yourself using the inception artifacts as your guide.
 
 Which mode would you like to use?"
 
-### 6c. Save final checkpoint
+### 12d. Save final checkpoint
 
 Update \`aidlc-docs/{workflowId}/checkpoint.json\`:
+
 \`\`\`json
 {
-  "stage": "construction_prep",
+  "schema_version": "3.0.0",
+  "workflow_id": "{workflowId}",
+  "feature_name": "{title}",
+  "current_phase": "inception",
+  "current_stage": "complete",
   "status": "awaiting_mode_selection",
   "updated": "{ISO-8601}",
-  "gatesCompleted": ["intent", "intent_business", "momus_review", "construction_prep"]
+  "pathway_type": "{pathway_type}",
+  "depth_score": {N},
+  "risk_tier": {1|2|3},
+  "workflow_routing_path": "aidlc-docs/{workflowId}/inception/plans/workflow-routing.md",
+  "inception_stages": {
+    "workspace-detection": { "status": "completed", ... },
+    "reverse-engineering": { "status": "completed|skipped", ... },
+    "requirements-analysis": { "status": "completed", ... },
+    "user-stories": { "status": "completed|skipped", ... },
+    "workflow-planning": { "status": "completed", ... },
+    "application-design": { "status": "completed|skipped", ... },
+    "units-generation": { "status": "completed|skipped", ... }
+  }
 }
 \`\`\`
 
 ---
 
-## Important Behavioral Rules
+## Behavioral Rules
 
-1. **ASK QUESTIONS DIRECTLY**: All questions to the user must appear in your message output. Never delegate question-asking to agents.
-2. **GATES ARE SACRED**: Never skip a blocking gate. Never proceed without explicit user approval at gate checkpoints.
-3. **ARTIFACTS ARE STRUCTURED**: Always use the exact templates provided above. Fill in all sections — do not leave template placeholders.
-4. **CHECKPOINTS ARE MANDATORY**: Save checkpoint state after every stage transition. This enables resume on interruption.
-5. **TRUST ADJUSTS CEREMONY**: Higher trust means fewer questions and lighter gates. Lower trust means more thorough validation.
-6. **DISCOVERY IS OPTIONAL**: Only runs for brownfield projects at non-SHALLOW depth. Greenfield projects skip straight to INTENT.
-7. **SELF-CONSISTENCY VALIDATION**: Check the INTENT document for internal consistency before proceeding to gates.
-8. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian) should happen without announcing them to the user. Only surface findings in the artifacts.
+1. **FILE-ONLY Q&A**: NEVER ask questions in chat. ALL questions go in dedicated question files with \`[Answer]:\` tags. Inform the user where the file is and wait for "done".
+2. **GATES ARE SACRED**: Never skip a blocking gate. Never proceed without explicit user approval at REVIEW REQUIRED checkpoints.
+3. **ARTIFACTS ARE STRUCTURED**: Always use the exact templates provided. Fill in all sections — do not leave template placeholders.
+4. **CHECKPOINTS ARE MANDATORY**: Save checkpoint state after every stage transition (update inception_stages, current_inception_stage, state file, audit). This enables resume on interruption.
+5. **TRUST ADJUSTS CEREMONY**: Higher trust = fewer questions + lighter gates. Lower trust = more thorough validation.
+6. **REVIEW REQUIRED AFTER EVERY STAGE**: Use the exact REVIEW REQUIRED / WHAT'S NEXT format after each stage completes.
+7. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian, metis) happen without announcing them to the user. Only surface findings in the artifacts.
+8. **STATE TRACKING IS TRIPLE**: Every stage update must write to checkpoint.json + aidlc-state.md + audit.md.
+9. **RESUME IS IDEMPOTENT**: Each stage checks its \`inception_stages\` entry before executing. \`completed\` or \`skipped\` → skip to next. \`in_progress\` with \`questions_file\` set → resume Q&A without regenerating.
 
-Begin by parsing the input, checking for active workflows, and starting the appropriate pipeline stage.`,
+Begin by parsing the input, checking for active workflows, and starting the appropriate pipeline stage.
+`,
 
   'review/skill.md': `---
 description: Review a plan with Momus
@@ -3198,13 +3824,13 @@ You are running an end-to-end test of the Olympus structured workflow engine.
 ### Complete Pipeline
 
 \`\`\`
-INTENT → PRD → SPEC → UNITS → DESIGN → BUILD
+INCEPTION (7 stages) → CONSTRUCTION (per-unit design + bolts) → OPERATIONS
 \`\`\`
 
 ### What This Does
 
-1. Creates a test workflow \`smoke-test-hello-world\` in \`.olympus/workflow/\`
-2. Walks through all 6 stages: INTENT, PRD, SPEC, UNITS, DESIGN, BUILD
+1. Creates a test workflow \`smoke-test-hello-world\` in \`aidlc-docs/\`
+2. Walks through inception stages (workspace-detection, requirements-analysis, etc.) and construction
 3. Creates minimal test artifacts at each stage in the correct directory structure
 4. Updates checkpoint.json after each stage to verify state transitions
 5. Verifies all 13 artifacts are created in the correct locations
@@ -3212,22 +3838,22 @@ INTENT → PRD → SPEC → UNITS → DESIGN → BUILD
 
 ### Quick Protocol
 
-1. **Setup**: Delete leftover \`.olympus/workflow/smoke-test-hello-world/\`, create fresh directory structure
+1. **Setup**: Delete leftover \`aidlc-docs/smoke-test-hello-world/\`, create fresh directory structure
 2. **Create checkpoint.json** with schema v2.0.0, initial state: inception/intent
 3. **Inception phase**: Write intent.md → prd.md → spec.md → UNIT-*.md (update checkpoint after each)
 4. **Construction phase**: Write UNIT-*.md → design docs (interfaces.md, data-flow.md, components.md) → BUILD stage creates BOLT-*.md (update checkpoint after each)
 5. **BUILD verification**: Read final checkpoint, verify all stages complete, count all 13 artifacts
-6. **Cleanup**: Delete \`.olympus/workflow/smoke-test-hello-world/\` entirely, verify deletion
+6. **Cleanup**: Delete \`aidlc-docs/smoke-test-hello-world/\` entirely, verify deletion
 7. **Report**: Print PASS/FAIL table for each of the 6 stages
 
 ### Arguments
 - No args: Full test (all 6 stages)
-- \`inception\`: Inception phase only (INTENT/PRD/SPEC)
-- \`construction\`: Construction phase only (UNITS/DESIGN/BUILD)
+- \`inception\`: Inception phase only (7 inception stages)
+- \`construction\`: Construction phase only (per-unit design + bolt execution)
 - \`cleanup\`: Delete leftover test artifacts
 
 ### Rules
-- ALL files go in \`.olympus/workflow/smoke-test-hello-world/\` only
+- ALL files go in \`aidlc-docs/smoke-test-hello-world/\` only
 - NEVER modify source code (\`src/\`, \`dist/\`, etc.)
 - ALWAYS clean up — if cleanup fails, report as FAILURE
 - Report results to stdout, do not create report files
@@ -3937,6 +4563,15 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // NOTE: SKILL_DEFINITIONS removed - skills now only installed via COMMAND_DEFINITIONS
     // to avoid duplicate entries in Claude Code's available skills list
+
+    // Write AI-DLC rule files
+    const rulesDir = join(CLAUDE_CONFIG_DIR, 'olympus', 'rules');
+    mkdirSync(rulesDir, { recursive: true });
+    writeFileSync(join(rulesDir, 'common-rules.md'), COMMON_RULES);
+    writeFileSync(join(rulesDir, 'inception-rules.md'), INCEPTION_RULES);
+    writeFileSync(join(rulesDir, 'construction-rules.md'), CONSTRUCTION_RULES);
+    writeFileSync(join(rulesDir, 'operations-rules.md'), OPERATIONS_RULES);
+    log('Installed AI-DLC rule files to ' + rulesDir);
 
     // Install CLAUDE.md to ~/.claude/CLAUDE.md
     // This works alongside any existing ~/CLAUDE.md - Claude Code loads both

@@ -289,7 +289,7 @@ export function isWorkflowExecution(baseDir: string, arg: string): boolean {
     return false;
   }
 
-  const checkpointPath = join(baseDir, '.olympus', 'workflow', arg, 'checkpoint.json');
+  const checkpointPath = join(baseDir, 'aidlc-docs', arg, 'checkpoint.json');
   return existsSync(checkpointPath);
 }
 
@@ -306,7 +306,7 @@ export async function readIntentFile(
   workflowId: string,
   taskId: string
 ): Promise<string | null> {
-  const intentPath = join(baseDir, '.olympus', 'workflow', workflowId, 'intents', `${taskId}.md`);
+  const intentPath = join(baseDir, 'aidlc-docs', workflowId, 'inception', `${taskId}.md`);
 
   if (!existsSync(intentPath)) {
     return null;
@@ -346,7 +346,7 @@ export async function getWorkflowTaskPrompt(
 Intent file not found for task: ${taskId}
 
 This workflow may be corrupted. Check the workflow directory:
-.olympus/workflow/${workflowId}/intents/
+aidlc-docs/${workflowId}/inception/
 
 </workflow-task-error>
 

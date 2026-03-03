@@ -143,7 +143,7 @@ export function buildWorkflowResumptionPrompt(
  * // Stage intent complete! ✓
  * //
  * // Completed artifacts:
- * // - INTENT-001: .olympus/workflows/user-auth/intent.md (validated: true)
+ * // - INTENT-001: aidlc-docs/user-auth/inception/intent.md (validated: true)
  * //
  * // Next stage: unit
  * // Validation required: UNIT decomposition coverage and interface contracts

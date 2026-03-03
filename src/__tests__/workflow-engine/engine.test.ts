@@ -569,8 +569,8 @@ describe('WorkflowEngine', () => {
     });
   });
 
-  describe('Level 1 Plan integration', () => {
-    it('start() generates Level 1 Plan and updates checkpoint', async () => {
+  describe('Workflow Routing integration', () => {
+    it('start() generates Workflow Routing and updates checkpoint', async () => {
       createManifest('l1-plan-feature', 'L1 Plan Feature', tmpDir);
       const engine = new WorkflowEngine(tmpDir, 'L1 Plan Feature');
       await engine.start('Build a brand new greenfield application');
@@ -617,7 +617,7 @@ describe('WorkflowEngine', () => {
       const checkpoint = await loadCheckpoint(tmpDir, 'skip-phase-test') as WorkflowCheckpointV3;
       expect(checkpoint.phases.discovery.status).toBe('complete');
       expect(checkpoint.phases.discovery.gate_bypassed).toBe(true);
-      expect(checkpoint.phases.discovery.bypass_reason).toContain('Level 1 Plan');
+      expect(checkpoint.phases.discovery.bypass_reason).toContain('Workflow Routing');
     });
 
     it('executePhase() skipped phase has completed_at timestamp', async () => {
@@ -665,7 +665,7 @@ describe('WorkflowEngine', () => {
       );
       expect(bypassEntry).toBeDefined();
       expect(bypassEntry!.actor).toBe('config');
-      expect(bypassEntry!.reason).toContain('Level 1 Plan');
+      expect(bypassEntry!.reason).toContain('Workflow Routing');
     });
 
     it('approveWorkflowRouting() stamps approved_at and approved_by on the artifact', async () => {
@@ -687,7 +687,7 @@ describe('WorkflowEngine', () => {
 
     it('approveWorkflowRouting() throws when no plan exists', async () => {
       const engine = new WorkflowEngine(tmpDir, 'No Plan Approval');
-      await expect(engine.approveWorkflowRouting()).rejects.toThrow('No Level 1 Plan found');
+      await expect(engine.approveWorkflowRouting()).rejects.toThrow('No Workflow Routing found');
     });
 
     it('executePhase("inception") uses orchestrator when checkpoint has inception_stages', async () => {

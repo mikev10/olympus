@@ -258,7 +258,7 @@ function renderPlanMarkdown(workflowId: string, plan: WorkflowRoutingPlan): stri
     .map((s, i) => `| ${i + 1} | ${s.phase} | ${s.stage} | ${s.included ? 'yes' : 'no'} | ${s.rationale} |`)
     .join('\n');
 
-  return `# Level 1 Plan: ${workflowId}
+  return `# Workflow Routing: ${workflowId}
 
 **Pathway:** ${plan.pathway}
 **Risk Assessment:** ${plan.risk_assessment}
@@ -304,7 +304,7 @@ export async function writeWorkflowRoutingArtifact(
 
   const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   registerArtifact(manifestPath, {
-    id: `L1PLAN-${workflowId}`,
+    id: `WORKFLOW-ROUTING-${workflowId}`,
     type: 'WORKFLOW_ROUTING',
     phase: 'inception',
     stage: 'intent',
@@ -420,7 +420,7 @@ export function isStageIncluded(plan: WorkflowRoutingPlan, phase: WorkflowPhase,
   return stageEntry?.included ?? true;
 }
 
-export const WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS = `A Level 1 Plan document must contain:
+export const WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS = `A Workflow Routing document must contain:
 1. A header block with: Pathway, Risk Assessment, Risk Tier, Estimated Bolts, Estimated Depth, Generated date, Approved date
 2. A "Phase Overview" table with columns: Phase | Included | Rationale — one row per phase (discovery, inception, construction, operations)
 3. A "Stage Details" table with columns: # | Phase | Stage | Included | Rationale — one row per workflow stage

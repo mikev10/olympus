@@ -215,14 +215,14 @@ export class WorkflowEngine {
         await saveCheckpoint(this.projectPath, updatedCheckpoint);
       }
 
-      console.log(`[WorkflowEngine] Generated Level 1 Plan: pathway=${pathwayType}, depth=${plan.estimated_depth}, bolts=${plan.estimated_bolts}`);
+      console.log(`[WorkflowEngine] Generated Workflow Routing: pathway=${pathwayType}, depth=${plan.estimated_depth}, bolts=${plan.estimated_bolts}`);
       if (plan.stages.some(s => !s.included)) {
         const skippedStages = plan.stages.filter(s => !s.included).map(s => `${s.phase}/${s.stage}`);
         console.log(`[WorkflowEngine] Stages excluded by plan: ${skippedStages.join(', ')}`);
       }
     } catch (error) {
       // L1 Plan generation is non-blocking - workflow can proceed without it
-      console.warn(`[WorkflowEngine] Failed to generate Level 1 Plan: ${(error as Error).message}`);
+      console.warn(`[WorkflowEngine] Failed to generate Workflow Routing: ${(error as Error).message}`);
       console.warn('[WorkflowEngine] Workflow will proceed without adaptive phase selection');
     }
 
@@ -474,7 +474,7 @@ export class WorkflowEngine {
   async executePhase(phase: WorkflowPhase): Promise<void> {
     const plan = loadWorkflowRouting(this.projectPath, this.workflowId);
     if (plan && !isPhaseIncluded(plan, phase)) {
-      console.log(`[WorkflowEngine] Skipping ${phase} phase (excluded by Level 1 Plan: ${plan.phases[phase]?.rationale || 'no rationale'})`);
+      console.log(`[WorkflowEngine] Skipping ${phase} phase (excluded by Workflow Routing: ${plan.phases[phase]?.rationale || 'no rationale'})`);
 
       const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
       if (checkpoint) {
@@ -483,7 +483,7 @@ export class WorkflowEngine {
           v3.phases[phase].status = 'complete';
           v3.phases[phase].completed_at = new Date().toISOString();
           v3.phases[phase].gate_bypassed = true;
-          v3.phases[phase].bypass_reason = 'Excluded by Level 1 Plan';
+          v3.phases[phase].bypass_reason = 'Excluded by Workflow Routing';
         }
         await saveCheckpoint(this.projectPath, checkpoint);
       }
@@ -494,7 +494,7 @@ export class WorkflowEngine {
           phase,
           action: 'bypassed',
           actor: 'config',
-          reason: `Excluded by Level 1 Plan (pathway: ${plan.pathway})`,
+          reason: `Excluded by Workflow Routing (pathway: ${plan.pathway})`,
         });
       } catch {
         // Manifest may not exist yet - non-fatal
@@ -741,7 +741,7 @@ export class WorkflowEngine {
   async approveWorkflowRouting(feedback?: string): Promise<void> {
     const plan = loadWorkflowRouting(this.projectPath, this.workflowId);
     if (!plan) {
-      throw new Error(`No Level 1 Plan found for workflow: ${this.workflowId}`);
+      throw new Error(`No Workflow Routing found for workflow: ${this.workflowId}`);
     }
 
     plan.approved_at = new Date().toISOString();
@@ -768,13 +768,13 @@ export class WorkflowEngine {
         phase: 'inception',
         action: 'approved',
         actor: 'human',
-        reason: feedback || 'Level 1 Plan approved',
+        reason: feedback || 'Workflow Routing approved',
       });
     } catch {
       // Manifest may not exist - non-fatal
     }
 
-    console.log('[WorkflowEngine] Level 1 Plan approved');
+    console.log('[WorkflowEngine] Workflow Routing approved');
   }
 
   // ============================================================================

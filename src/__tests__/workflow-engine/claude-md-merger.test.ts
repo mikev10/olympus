@@ -215,8 +215,8 @@ describe('getAidlcRulesContent — greenfield', () => {
     expect(content).not.toContain('Reverse Engineering');
   });
 
-  it('references .aidlc-rule-details/ on-demand loading', () => {
-    expect(content).toContain('.aidlc-rule-details/');
+  it('references ~/.claude/olympus/rules/ on-demand loading', () => {
+    expect(content).toContain('~/.claude/olympus/rules/');
   });
 });
 

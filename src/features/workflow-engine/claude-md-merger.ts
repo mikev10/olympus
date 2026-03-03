@@ -89,8 +89,8 @@ export function removeAidlcRules(existingContent: string): string {
  * Generate the AI-DLC rules block adapted for Olympus.
  *
  * The content references Olympus-native agents for every workflow activity
- * and preserves the `.aidlc-rule-details/` on-demand loading pattern from
- * the original AWS AI-DLC rules.
+ * and enforces mandatory loading of rule detail files from
+ * `~/.claude/olympus/rules/ (installed by olympus-ai)` following the AWS AI-DLC pattern.
  *
  * @param workflowId - Active workflow identifier (slug).
  * @param pathwayType - Whether the project is greenfield or brownfield.
@@ -135,29 +135,24 @@ Task(subagent_type="explore", description="Map codebase structure", prompt="..."
 
 ## Rule Detail Files (On-Demand Loading)
 
-Load stage-specific rules when executing each phase. Rule files live in:
-\`aidlc-docs/${workflowId}/.aidlc-rule-details/\` (project-local) or
-\`docs/aidlc-rules/aws-aidlc-rule-details/\` (global Olympus repo).
+**CRITICAL**: When executing any stage, you MUST read the corresponding rule detail file BEFORE starting that stage's work. Rule files are located at:
+\`~/.claude/olympus/rules/\` (installed by olympus-ai)
 
-**Common rules** — always load at workflow start:
-- \`common/process-overview.md\` — workflow overview
-- \`common/session-continuity.md\` — resumption guidance
-- \`common/content-validation.md\` — content validation requirements
-- \`common/question-format-guide.md\` — question formatting rules
+**Common rules** — MUST load at workflow start (MANDATORY):
+- \`~/.claude/olympus/rules/common-rules.md\` — workflow overview, session continuity, content validation, question formatting
 
-**Per-stage rules** — load only when executing that stage:
-- \`inception/workspace-detection.md\`
-- \`inception/reverse-engineering.md\` (brownfield only)
-- \`inception/requirements-analysis.md\`
-- \`inception/user-stories.md\`
-- \`inception/workflow-planning.md\`
-- \`inception/application-design.md\`
-- \`inception/units-generation.md\`
-- \`construction/functional-design.md\`
-- \`construction/nfr-requirements.md\`
-- \`construction/nfr-design.md\`
-- \`construction/infrastructure-design.md\`
-- \`construction/code-generation.md\`
+**Per-stage rules** — MUST load before executing each stage (MANDATORY):
+- \`~/.claude/olympus/rules/inception-rules.md\` (section: Workspace Detection)
+${isGreenfield ? '' : '- `~/.claude/olympus/rules/inception-rules.md` (section: Reverse Engineering) — brownfield only\n'}- \`~/.claude/olympus/rules/inception-rules.md\` (section: Requirements Analysis)
+- \`~/.claude/olympus/rules/inception-rules.md\` (section: User Stories)
+- \`~/.claude/olympus/rules/inception-rules.md\` (section: Workflow Planning)
+- \`~/.claude/olympus/rules/inception-rules.md\` (section: Application Design)
+- \`~/.claude/olympus/rules/inception-rules.md\` (section: Units Generation)
+- \`~/.claude/olympus/rules/construction-rules.md\` (section: Functional Design)
+- \`~/.claude/olympus/rules/construction-rules.md\` (section: NFR Requirements)
+- \`~/.claude/olympus/rules/construction-rules.md\` (section: NFR Design)
+- \`~/.claude/olympus/rules/construction-rules.md\` (section: Infrastructure Design)
+- \`~/.claude/olympus/rules/construction-rules.md\` (section: Code Generation)
 
 ## Directory Layout
 

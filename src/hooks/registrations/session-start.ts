@@ -84,9 +84,7 @@ export function registerSessionStartHooks(): void {
         const messages: string[] = [];
 
         for (const wf of workflows) {
-          if (wf.isLegacy) {
-            messages.push(`[Found legacy workflow: '${wf.featureName}'. Run /plan to archive and start fresh.]`);
-          } else if (wf.status === 'awaiting_mode_selection') {
+          if (wf.status === 'awaiting_mode_selection') {
             messages.push(`[Active workflow: '${wf.featureName}' — awaiting execution mode selection.\nChoose: /ascent, /olympus, or /ultrawork to begin Construction]`);
           } else if (wf.status === 'awaiting_dev_review') {
             messages.push(`[Active workflow: '${wf.featureName}' — awaiting developer review (Risk Tier 3).\nReview the INTENT technical specification before proceeding to Construction.]`);
@@ -114,7 +112,7 @@ export function registerSessionStartHooks(): void {
 
         // Handle mid-interview resume info
         for (const wf of workflows) {
-          if (wf.interviewProgress && !wf.isLegacy) {
+          if (wf.interviewProgress) {
             messages.push(`[Interview in progress: ${wf.interviewProgress.stage} stage, ${wf.interviewProgress.questions_asked} questions asked${wf.interviewProgress.draft_artifact_path ? '. Draft artifact exists.' : ''}]`);
           }
         }

@@ -347,7 +347,7 @@ describe('writeWorkflowRoutingArtifact + loadWorkflowRouting', () => {
 
     const filePath = path.join(tmpDir, 'aidlc-docs', 'wf-md', 'inception', 'plans', 'workflow-routing.md');
     const content = fs.readFileSync(filePath, 'utf-8');
-    expect(content).toContain('# Level 1 Plan:');
+    expect(content).toContain('# Workflow Routing:');
     expect(content).toContain('## Phase Overview');
     expect(content).toContain('## Stage Details');
   });
@@ -411,7 +411,7 @@ describe('writeWorkflowRoutingArtifact + loadWorkflowRouting', () => {
     expect(mockRegisterArtifact).toHaveBeenCalledOnce();
     const [calledManifestPath, calledArtifact] = mockRegisterArtifact.mock.calls[0];
     expect(calledManifestPath.replace(/\\/g, '/')).toContain(`aidlc-docs/${workflowId}/manifest.json`);
-    expect(calledArtifact.id).toBe(`L1PLAN-${workflowId}`);
+    expect(calledArtifact.id).toBe(`WORKFLOW-ROUTING-${workflowId}`);
     expect(calledArtifact.type).toBe('WORKFLOW_ROUTING');
     expect(calledArtifact.phase).toBe('inception');
     expect(calledArtifact.stage).toBe('intent');

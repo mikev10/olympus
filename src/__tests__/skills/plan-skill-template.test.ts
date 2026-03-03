@@ -37,13 +37,13 @@ describe('/plan template content validation', () => {
     expect(installerSource).toContain('DYNAMIC_MODEL_FORMAT_INSTRUCTIONS');
   });
 
-  it('contains L1 Plan generation step', () => {
-    expect(installerSource).toContain('Generate Level 1 Plan');
+  it('contains inception stages tracking', () => {
+    expect(installerSource).toContain('inception_stages');
   });
 
-  it('contains PRFAQ generation step gated by L1 Plan', () => {
-    expect(installerSource).toContain('PRFAQ Generation');
-    expect(installerSource).toContain('included in L1 Plan');
+  it('contains PRFAQ generation step gated by pathway type', () => {
+    expect(installerSource).toContain('Generate PRFAQ');
+    expect(installerSource).toContain('Optional PRFAQ');
   });
 
   it('contains ceremony mode check', () => {
@@ -51,18 +51,18 @@ describe('/plan template content validation', () => {
     expect(installerSource).toContain('ceremony_mode');
   });
 
-  it('checkpoint saves include L1 Plan fields', () => {
+  it('checkpoint saves include inception stage fields', () => {
     expect(installerSource).toContain('workflow_routing_path');
     expect(installerSource).toContain('pathway_type');
-    expect(installerSource).toContain('skipped_phases');
+    expect(installerSource).toContain('skip_reason');
   });
 
   it('uses post-Task-0 step numbering (no IDEA step)', () => {
     expect(installerSource).not.toContain('## Step 4: IDEA');
   });
 
-  it('PRFAQ references INTENT document', () => {
-    expect(installerSource).toContain('INTENT document summary');
+  it('PRFAQ references intent.md summary', () => {
+    expect(installerSource).toContain('intent.md summary');
   });
 });
 
@@ -183,7 +183,7 @@ Global error boundary catches unhandled exceptions.
     const planDir = join(testDir, 'aidlc-docs', workflowId, 'inception', 'plans');
     fs.ensureDirSync(planDir);
 
-    const planContent = `# Level 1 Plan
+    const planContent = `# Workflow Routing
 
 **Pathway:** brownfield-enhancement
 **Risk Assessment:** MEDIUM

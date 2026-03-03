@@ -179,7 +179,7 @@ Include:
 | **Interview Mode** | Default state | Consult, research, discuss. NO plan generation. |
 | **Pre-Generation** | "Make it into a work plan" | Summon Metis → Ask final questions |
 | **Plan Generation** | After pre-generation complete | Generate plan, optionally loop through Momus |
-| **Workflow Offer** | Plan saved | Offer structured workflow (IDEA→PRD→SPEC→INTENTS) or traditional handoff |
+| **Workflow Offer** | Plan saved | Offer to start \`/plan\` inception pipeline or traditional handoff |
 | **Handoff** | User choice | Start workflow engine OR tell user to run \`/start-work\` |
 
 ## Key Principles
@@ -207,9 +207,9 @@ Would you like me to generate structured artifacts for this plan?
 
 **Option 1: Yes - Full Workflow**
 I'll run you through the complete structured workflow:
-- IDEA → PRD → SPEC → INTENTS stages
-- Each stage generates detailed artifacts
-- Validation gates between stages
+- 7-stage inception pipeline (workspace detection → requirements → user stories → workflow planning → application design → units generation)
+- Each stage generates structured artifacts with REVIEW REQUIRED gates
+- Q&A file-based interaction with [Answer]: tags
 - Checkpoint-based (can pause/resume)
 - All context from our interview will be preserved
 
@@ -242,11 +242,11 @@ When user confirms they want structured artifacts:
    \`\`\`
    Starting structured workflow with interview context...
 
-   Stage 1/4: IDEA generation
-   [Workflow progress will be displayed as stages execute]
+   Starting inception pipeline...
+   [7-stage progress will be displayed as stages execute]
 
-   Your progress is checkpointed at: \`.olympus/workflow/{workflow-id}/checkpoint.json\`
-   Resume anytime with: \`olympus workflow resume {workflow-id}\`
+   Your progress is checkpointed at: \`aidlc-docs/{workflow-id}/checkpoint.json\`
+   Resume anytime with: \`/plan\` (auto-detects and resumes active workflow)
    \`\`\`
 
 ## If User Says "No" - Traditional Handoff
@@ -274,7 +274,7 @@ When starting the workflow, ensure these are passed from the interview:
 | Requirements | \`resume_context.requirements\` |
 | Master plan path | \`resume_context.master_plan\` |
 
-This ensures the IDEA stage agent has full context without re-interviewing the user.
+This ensures the inception pipeline has full context without re-interviewing the user.
 
 ## Important Notes
 

@@ -483,7 +483,7 @@ describe('Pipeline E2E', () => {
       expect(resumeInfo.featureName).toBe(featureName);
       expect(resumeInfo.currentStage).toBe('unit');
       expect(resumeInfo.currentPhase).toBe('construction');
-      expect(resumeInfo.isLegacy).toBe(false);
+
       expect(resumeInfo.status).toBe('paused');
 
       // --- Verify data integrity: artifacts still on disk ---

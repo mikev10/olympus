@@ -7,15 +7,12 @@
  *
  * Checks:
  * 1. aidlc-docs/ for v3 checkpoints (current format)
- * 2. .olympus/workflow/ for legacy v1/v2 checkpoints
  */
 
 import * as path from 'path';
-import * as fs from 'fs-extra';
-import { loadCheckpoint, listWorkflows, isLegacyCheckpoint } from './checkpoint.js';
+import { loadCheckpoint, listWorkflows } from './checkpoint.js';
 import { loadManifest } from './manifest.js';
 import { getWorkflowProgress } from './workflow-bridge.js';
-import { STAGE_PHASE_MAP } from './phase-types.js';
 import type { WorkflowPhase, ManifestSchema } from './phase-types.js';
 import type { WorkflowStage } from './types.js';
 
@@ -26,7 +23,6 @@ export interface ResumeInfo {
   currentStage: WorkflowStage;
   progress: { completed: number; total: number };
   lastActivity: string; // ISO date
-  isLegacy: boolean; // v1/v2 checkpoint
   status?: string;
   interviewProgress?: {
     stage: 'idea' | 'intent';
@@ -37,7 +33,7 @@ export interface ResumeInfo {
 
 /**
  * Detect all resumable workflows in the given project path.
- * Checks both aidlc-docs/ (v3) and .olympus/workflow/ (legacy).
+ * Checks aidlc-docs/ for v3 checkpoints.
  *
  * @param projectPath - Absolute path to the project root
  * @returns Array of ResumeInfo for all detected workflows
@@ -70,57 +66,12 @@ export async function detectResumableWorkflows(projectPath: string): Promise<Res
         currentStage: checkpoint.current_stage,
         progress,
         lastActivity: checkpoint.updated_at,
-        isLegacy: false,
         status: checkpoint.status,
         interviewProgress: checkpoint.interview_progress,
       });
     }
   } catch (error) {
     console.error('[ResumeDetector] Error checking aidlc-docs:', error);
-  }
-
-  // 2. Check for legacy workflows in .olympus/workflow/
-  try {
-    const legacyDir = path.join(projectPath, '.olympus', 'workflow');
-    if (await fs.pathExists(legacyDir)) {
-      const entries = await fs.readdir(legacyDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const checkpointPath = path.join(legacyDir, entry.name, 'checkpoint.json');
-        if (!(await fs.pathExists(checkpointPath))) continue;
-
-        try {
-          const data = await fs.readJson(checkpointPath);
-          if (!isLegacyCheckpoint(data)) continue;
-
-          // Map old stage names to new ones
-          const stageMap: Record<string, WorkflowStage> = {
-            'idea': 'intent',
-            'prd': 'intent',
-            'spec': 'unit',
-            'intents': 'bolt',
-            'complete': 'complete',
-          };
-          const stage = stageMap[data.current_stage] || 'intent';
-          const phase = (STAGE_PHASE_MAP[stage] === 'complete' ? 'operations' : STAGE_PHASE_MAP[stage]) as WorkflowPhase;
-
-          results.push({
-            workflowId: data.workflow_id || entry.name,
-            featureName: data.feature_name || entry.name,
-            currentPhase: phase,
-            currentStage: stage,
-            progress: { completed: 0, total: 0 },
-            lastActivity: data.updated_at || new Date().toISOString(),
-            isLegacy: true,
-            status: data.status,
-          });
-        } catch {
-          // Skip unparseable checkpoint files
-        }
-      }
-    }
-  } catch (error) {
-    console.error('[ResumeDetector] Error checking legacy workflows:', error);
   }
 
   return results;

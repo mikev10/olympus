@@ -191,7 +191,7 @@ describe('Workflow Hooks', () => {
         artifacts: {
           intent: {
             id: 'INTENT-001',
-            path: '.olympus/workflows/user-auth/intent.md',
+            path: 'aidlc-docs/user-auth/inception/intent.md',
             created_at: '2024-01-15T10:00:00Z',
             validation_passed: true,
           },
@@ -215,7 +215,7 @@ describe('Workflow Hooks', () => {
 
       expect(prompt).toContain('Completed artifacts:');
       expect(prompt).toContain('INTENT-001');
-      expect(prompt).toContain('.olympus/workflows/user-auth/intent.md');
+      expect(prompt).toContain('aidlc-docs/user-auth/inception/intent.md');
       expect(prompt).toContain('validated: true');
     });
 
@@ -233,7 +233,7 @@ describe('Workflow Hooks', () => {
         artifacts: {
           intent: {
             id: 'INTENT-001',
-            path: '.olympus/workflows/user-auth/intent.md',
+            path: 'aidlc-docs/user-auth/inception/intent.md',
             created_at: '2024-01-15T11:00:00Z',
             validation_passed: false,
           },

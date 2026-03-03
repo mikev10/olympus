@@ -16,7 +16,7 @@ vi.mock('../../features/workflow-engine/engine.js', () => {
     WorkflowEngine: vi.fn(function(this: any, projectPath: string, featureName: string) {
       this.start = vi.fn().mockResolvedValue(undefined);
       this.resume = vi.fn().mockResolvedValue('Resumed workflow');
-      this.pause = vi.fn().mockResolvedValue('.olympus/workflow/test/checkpoint.json');
+      this.pause = vi.fn().mockResolvedValue('aidlc-docs/test/checkpoint.json');
       this.executeStage = vi.fn().mockResolvedValue(undefined);
       this.getStatus = vi.fn().mockResolvedValue({
         workflow_id: 'test',

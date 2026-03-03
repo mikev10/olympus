@@ -12,8 +12,6 @@ import type { Question, AnsweredQuestion } from '../../question-manager.js';
 import {
   buildStakeholderMap,
   classifyConstraints,
-  buildRequirementsTrace,
-  getTraceabilitySummary,
 } from '../../requirements.js';
 import { registerStageHandler } from '../orchestrator.js';
 import type { InceptionStageResult } from '../orchestrator.js';
@@ -172,23 +170,15 @@ export async function synthesizeRequirements(
 
   const stakeholderMap = buildStakeholderMap(combinedContext);
   const constraintClassification = classifyConstraints(combinedContext);
-  const trace = buildRequirementsTrace(combinedContext, null, null, null);
-  const traceabilitySummary = getTraceabilitySummary(trace);
 
   const requirementsContent = buildRequirementsMarkdown(
     answers,
     stakeholderMap,
-    constraintClassification,
-    traceabilitySummary
+    constraintClassification
   );
   const requirementsPath = join(inceptionDir, 'requirements.md');
   await fs.writeFile(requirementsPath, requirementsContent, 'utf-8');
   artifactPaths.push(requirementsPath);
-
-  if (intentContent) {
-    const enrichedIntent = `${intentContent}\n\n## Requirements Summary\n\n${traceabilitySummary}\n`;
-    await fs.writeFile(intentPath, enrichedIntent, 'utf-8');
-  }
 
   return artifactPaths;
 }
@@ -196,8 +186,7 @@ export async function synthesizeRequirements(
 function buildRequirementsMarkdown(
   answers: AnsweredQuestion[],
   stakeholderMap: ReturnType<typeof buildStakeholderMap>,
-  constraints: ReturnType<typeof classifyConstraints>,
-  traceability: string
+  constraints: ReturnType<typeof classifyConstraints>
 ): string {
   const lines: string[] = [];
   lines.push('# Requirements Analysis\n');
@@ -252,10 +241,6 @@ function buildRequirementsMarkdown(
   } else {
     lines.push('(none identified)');
   }
-  lines.push('');
-
-  lines.push('## Traceability\n');
-  lines.push(traceability);
   lines.push('');
 
   return lines.join('\n');

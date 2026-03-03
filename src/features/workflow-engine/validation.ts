@@ -162,7 +162,7 @@ function countBulletPoints(content: string): number {
  * @returns ValidationResult with pass/fail status, coverage percentage, and any blocking issues
  *
  * @example
- * const result = await validateIntent('.olympus/workflows/feature-x/intent-auth.md');
+ * const result = await validateIntent('aidlc-docs/feature-x/inception/intent.md');
  * if (result.passed) {
  *   console.log('INTENT artifact is complete!');
  * } else {

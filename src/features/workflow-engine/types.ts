@@ -40,7 +40,7 @@ export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked
  * @example
  * {
  *   id: "INTENT-001",
- *   path: ".olympus/workflows/user-auth/intent.md",
+ *   path: "aidlc-docs/user-auth/inception/intent.md",
  *   created_at: "2024-01-15T10:30:00Z",
  *   validation_passed: true
  * }

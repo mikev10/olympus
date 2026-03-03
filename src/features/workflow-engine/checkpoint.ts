@@ -62,51 +62,6 @@ export function invalidateCache(projectPath: string, workflowId: string): void {
 }
 
 /**
- * Check if a checkpoint is using a legacy schema (v1 or v2).
- *
- * @param data - Checkpoint data to check
- * @returns true if checkpoint is v1 or v2, false otherwise
- */
-export function isLegacyCheckpoint(data: any): boolean {
-  if (!data || typeof data !== 'object' || !data.schema_version) {
-    return false;
-  }
-  return data.schema_version === '1.0.0' || data.schema_version === '2.0.0';
-}
-
-/**
- * Archive a legacy workflow by moving its directory to .olympus/archive/.
- * This preserves the workflow data while marking it as legacy/inactive.
- * Uses the old .olympus/workflow path since it's specifically for archiving legacy workflows.
- *
- * @param projectPath - Root path of the project
- * @param workflowId - ID of the workflow to archive
- */
-export async function archiveLegacyWorkflow(projectPath: string, workflowId: string): Promise<void> {
-  const workflowDir = join(projectPath, '.olympus', 'workflow', workflowId);
-  const archiveDir = join(projectPath, '.olympus/archive', workflowId);
-
-  try {
-    // Check if source exists
-    const exists = await fs.pathExists(workflowDir);
-    if (!exists) {
-      return; // No-op if workflow doesn't exist
-    }
-
-    // Ensure archive directory parent exists
-    await fs.ensureDir(join(projectPath, '.olympus/archive'));
-
-    // Move workflow to archive
-    await fs.move(workflowDir, archiveDir, { overwrite: true });
-
-    console.log(`[Checkpoint] Archived legacy workflow ${workflowId} to ${archiveDir}`);
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    console.error(`[Checkpoint] Failed to archive workflow ${workflowId}: ${err.message}`);
-  }
-}
-
-/**
  * Save a workflow checkpoint to disk.
  * Creates directory structure if it doesn't exist.
  * Updates the checkpoint's updated_at timestamp before saving.
@@ -241,14 +196,6 @@ export async function loadCheckpoint(
       console.warn(`[Checkpoint] Checkpoint ${workflowId} missing schema_version, treating as invalid`);
       console.warn(`[Checkpoint] Checkpoint may be corrupt or from an older version`);
       console.warn(`[Checkpoint] Consider deleting: ${checkpointPath}`);
-      return null;
-    }
-
-    // Check if legacy checkpoint (v1 or v2)
-    if (isLegacyCheckpoint(checkpoint)) {
-      console.warn(`[Checkpoint] Legacy checkpoint detected (${checkpoint.schema_version}): ${workflowId}`);
-      console.warn(`[Checkpoint] Legacy checkpoints are no longer supported. Please archive or recreate this workflow.`);
-      console.warn(`[Checkpoint] Path: ${checkpointPath}`);
       return null;
     }
 

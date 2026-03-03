@@ -65,7 +65,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'bolt' as const,
       progress: { completed: 2, total: 5 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'in_progress',
     };
 
@@ -116,39 +116,6 @@ describe('session-start resume detection hook', () => {
     expect(result.hookSpecificOutput).toBeUndefined();
   });
 
-  it('should show migration hint for legacy workflows', async () => {
-    const mockWorkflow = {
-      workflowId: 'legacy-wf',
-      featureName: 'Legacy Feature',
-      currentPhase: 'inception' as const,
-      currentStage: 'intent' as const,
-      progress: { completed: 0, total: 0 },
-      lastActivity: '2024-01-10T10:00:00Z',
-      isLegacy: true,
-      status: 'in_progress',
-    };
-
-    vi.mocked(detectResumableWorkflows).mockResolvedValue([mockWorkflow]);
-    vi.mocked(loadTrustState).mockReturnValue({ current_level: 0 } as any);
-
-    registerSessionStartHooks();
-
-    const hooks = getHooksForEvent('SessionStart');
-    const resumeHook = hooks.find((h: any) => h.name === 'workflowResumeDetection');
-
-    const ctx: HookContext = {
-      event: 'SessionStart',
-      directory: testDir,
-      sessionId: 'test-session',
-    };
-
-    const result = await resumeHook!.handler(ctx);
-
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Found legacy workflow');
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Legacy Feature');
-    expect(result.hookSpecificOutput?.additionalContext).toContain('Run /plan to archive and start fresh');
-  });
-
   it('should show mode selection prompt for awaiting_mode_selection', async () => {
     const mockWorkflow = {
       workflowId: 'wf-001',
@@ -157,7 +124,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'intent' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'awaiting_mode_selection',
     };
 
@@ -189,7 +156,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'intent' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'awaiting_dev_review',
     };
 
@@ -221,7 +188,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'bolt' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'in_progress',
     };
 
@@ -252,7 +219,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'bolt' as const,
       progress: { completed: 1, total: 3 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'in_progress',
     };
 
@@ -286,7 +253,7 @@ describe('session-start resume detection hook', () => {
       currentStage: 'intent' as const,
       progress: { completed: 0, total: 0 },
       lastActivity: '2024-01-15T10:00:00Z',
-      isLegacy: false,
+
       status: 'in_progress',
       interviewProgress: {
         stage: 'intent' as const,
@@ -345,38 +312,5 @@ describe('session-start resume detection hook', () => {
     expect(resumeHook!.priority).toBe(8);
   });
 
-  it('should not inject interview progress for legacy workflows', async () => {
-    const mockWorkflow = {
-      workflowId: 'legacy-wf',
-      featureName: 'Legacy Feature',
-      currentPhase: 'inception' as const,
-      currentStage: 'intent' as const,
-      progress: { completed: 0, total: 0 },
-      lastActivity: '2024-01-10T10:00:00Z',
-      isLegacy: true,
-      status: 'in_progress',
-      interviewProgress: {
-        stage: 'intent' as const,
-        questions_asked: 5,
-      },
-    };
-
-    vi.mocked(detectResumableWorkflows).mockResolvedValue([mockWorkflow]);
-    vi.mocked(loadTrustState).mockReturnValue({ current_level: 0 } as any);
-
-    registerSessionStartHooks();
-
-    const hooks = getHooksForEvent('SessionStart');
-    const resumeHook = hooks.find((h: any) => h.name === 'workflowResumeDetection');
-
-    const ctx: HookContext = {
-      event: 'SessionStart',
-      directory: testDir,
-      sessionId: 'test-session',
-    };
-
-    const result = await resumeHook!.handler(ctx);
-
-    expect(result.hookSpecificOutput?.additionalContext).not.toContain('Interview in progress');
-  });
 });
+

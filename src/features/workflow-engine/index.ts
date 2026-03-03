@@ -2,7 +2,7 @@
  * Workflow Engine Module
  *
  * Provides structured workflow system for plan execution with:
- * - INTENT → PRD → SPEC → INTENTS stage progression
+ * - 7-stage inception pipeline with adaptive depth
  * - Checkpoint persistence and resume capability
  * - Validation gates (Momus, Metis reviews)
  * - Artifact generation and management
@@ -58,8 +58,6 @@ export {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
-  isLegacyCheckpoint,
-  archiveLegacyWorkflow,
 } from './checkpoint.js';
 
 // Artifact management
@@ -71,8 +69,6 @@ export {
   readArtifact,
   linkMasterPlan,
   ensurePhaseWorkflowDir,
-  isLegacyLayout,
-  migrateLayout,
   getPhaseArtifactPath,
 } from './artifacts.js';
 
@@ -138,14 +134,10 @@ export type {
   ConstraintCategory,
   ClassifiedConstraint,
   ConstraintClassification,
-  TraceabilityLink,
-  RequirementsTrace,
 } from './requirements.js';
 export {
   buildStakeholderMap,
   classifyConstraints,
-  buildRequirementsTrace,
-  getTraceabilitySummary,
 } from './requirements.js';
 
 // Risk Management
