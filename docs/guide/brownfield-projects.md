@@ -75,11 +75,10 @@ For complex brownfield projects, explicitly create comprehensive documentation:
    - Configuration details
 
 2. **Project Patterns** (`patterns.json`)
-   - Import styles (named vs default)
-   - Test patterns and locations
-   - Error handling conventions
-   - Code formatting preferences
-   - Technology stack
+   - Technology stack (derived from file extensions and config files)
+   - Project conventions (inferred from directory structure)
+   - Learned rules (accumulated from workflow experience)
+   - Common mistakes (patterns Claude has gotten wrong)
 
 3. **Agent Efficiency** (`feedback-log.jsonl`)
    - Which agents work best for this codebase
@@ -112,6 +111,21 @@ Session 2+ (Return to project):
   → Efficient agents selected automatically
   → NO re-exploration needed for known areas
 ```
+
+#### c) AI-DLC Structured Discovery (Brownfield Workflow)
+
+When using `/plan` on a brownfield project, Olympus's **AI-DLC workflow** automatically runs a structured discovery phase:
+
+1. **Brownfield Detection** — Projects with 3+ source files are classified as brownfield
+2. **Pathway Classification** — Categorized as `brownfield-enhancement`, `brownfield-refactor`, `bugfix`, or `optimization`
+3. **Discovery Phase** — Automated workspace scan produces:
+   - Static and dynamic architecture models
+   - Business overview and component inventory
+   - Technology stack and dependency analysis
+4. **Pattern Persistence** — Scanner results persist to `.olympus/learning/patterns.json`, feeding the learning system for future sessions
+5. **Discovery Gate** — Human approval required before proceeding to inception stages
+
+This structured approach ensures thorough understanding of existing codebases before any changes are proposed.
 
 **What gets injected into future sessions:**
 
@@ -166,7 +180,7 @@ You **cannot** make multi-file changes directly - you **must** delegate to an ag
 
 ### 4. Pattern Detection and Respect
 
-When delegating to `olympian` or using `/git-master` for changes, Olympus automatically detects and follows existing patterns:
+When delegating to `olympian` or when `/git-master` auto-activates on multi-file git changes, Olympus automatically detects and follows existing patterns:
 
 - **Commit message style** - Conventional commits, semantic versioning, custom formats
 - **Code formatting** - Discovered via prettier/eslint configs
@@ -208,6 +222,10 @@ The `/git-master` skill is especially effective at maintaining consistency:
 # Ensures all tests pass, no regressions introduced
 ```
 
+> **Note:** When using `/plan` on brownfield projects, the AI-DLC workflow automatically handles exploration through structured stages:
+> `workspace-detection → reverse-engineering (gate) → requirements-analysis → workflow-planning → construction`
+> Each stage requires explicit approval before proceeding to the next.
+
 ## Advantages in Brownfield Projects
 
 | Brownfield Challenge | How Olympus Helps |
@@ -220,7 +238,7 @@ The `/git-master` skill is especially effective at maintaining consistency:
 | **"Need to make safe changes fast"** | Parallel delegation + mandatory exploration = speed + safety |
 | **"Legacy code with no docs"** | Agents reverse-engineer patterns, learning system remembers them |
 | **"Don't want to re-learn codebase"** | Learning system accumulates knowledge automatically across sessions |
-| **"Token costs too high on large codebase"** | Efficiency improves 70%+ as learning system caches patterns |
+| **"Token costs too high on large codebase"** | Efficiency improves significantly as learning system caches patterns |
 
 ## Automatic Knowledge Accumulation (No Re-Exploration)
 
@@ -275,7 +293,6 @@ User: "Migrate from passport to custom JWT auth"
 | **Gotchas** | Bugs fixed, issues found | Warning future agents about pitfalls |
 | **Architecture insights** | System exploration | Understanding design decisions |
 | **Efficient agents** | Task completion tracking | Routing to best agent for task type |
-| **Hot paths** | File access patterns | Prioritizing frequently-changed code |
 | **Dependencies** | Import analysis | Understanding module relationships |
 
 ### Token Efficiency Through Learning
@@ -293,7 +310,7 @@ Week 2: Established codebase knowledge
   Session 5: 15k tokens (optimal agent routing)
   Session 6: 12k tokens (targeted changes only)
 
-→ 73% token reduction through accumulated knowledge
+→ Significant token reduction through accumulated knowledge
 → Faster execution (less exploration overhead)
 → Better results (agents understand codebase)
 ```
