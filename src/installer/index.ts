@@ -49,7 +49,6 @@ import {
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
-export const COMMANDS_DIR = join(CLAUDE_CONFIG_DIR, 'commands');
 export const SKILLS_DIR = join(CLAUDE_CONFIG_DIR, 'skills');
 export const HOOKS_DIR = join(CLAUDE_CONFIG_DIR, 'hooks');
 export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
@@ -63,7 +62,6 @@ export interface InstallResult {
   success: boolean;
   message: string;
   installedAgents: string[];
-  installedCommands: string[];
   installedSkills: string[];
   hooksConfigured: boolean;
   errors: string[];
@@ -143,7 +141,8 @@ function cleanupLegacyCommands(commandsDir: string, log: (msg: string) => void):
     'workflow-advance/skill.md',
     'workflow-reset/skill.md',
     'deploy/skill.md',
-    'git-master/skill.md'
+    'git-master/skill.md',
+    'retro/skill.md'
   ];
 
   let removedCount = 0;
@@ -164,7 +163,7 @@ function cleanupLegacyCommands(commandsDir: string, log: (msg: string) => void):
     'ascent', 'ultrawork', 'olympus', 'deepsearch', 'analyze',
     'review', 'prometheus', 'complete-plan', 'cancel-ascent',
     'update', 'workflow-status', 'workflow-start', 'workflow-approve',
-    'workflow-advance', 'workflow-reset', 'deploy', 'git-master'
+    'workflow-advance', 'workflow-reset', 'deploy', 'git-master', 'retro'
   ];
   for (const subdir of subdirs) {
     const subdirPath = join(commandsDir, subdir);
@@ -199,7 +198,15 @@ function cleanupLegacyCommands(commandsDir: string, log: (msg: string) => void):
     'prd.md',
     'spec.md',
     'intents.md',
-    'olympus-next.md'
+    'olympus-next.md',
+    'cancel-ascent.md',
+    'complete-plan.md',
+    'deepinit.md',
+    'doctor.md',
+    'olympus-default.md',
+    'smoke-test.md',
+    'update.md',
+    'workflow-test.md'
   ];
   for (const legacyFile of legacyStandaloneFiles) {
     const legacyPath = join(commandsDir, legacyFile);
@@ -210,6 +217,18 @@ function cleanupLegacyCommands(commandsDir: string, log: (msg: string) => void):
       } catch {
         // Silent on errors
       }
+    }
+  }
+
+  if (existsSync(commandsDir)) {
+    try {
+      const remaining = readdirSync(commandsDir);
+      if (remaining.length === 0) {
+        rmSync(commandsDir, { recursive: true, force: true });
+        log('  Removed empty commands/ directory');
+      }
+    } catch {
+      // Silent on errors
     }
   }
 }
@@ -447,7 +466,6 @@ export function install(options: InstallOptions = {}): InstallResult {
     success: false,
     message: '',
     installedAgents: [],
-    installedCommands: [],
     installedSkills: [],
     hooksConfigured: false,
     errors: []
@@ -509,9 +527,6 @@ export function install(options: InstallOptions = {}): InstallResult {
     if (!existsSync(agentsDir)) {
       mkdirSync(agentsDir, { recursive: true });
     }
-    if (!existsSync(commandsDir)) {
-      mkdirSync(commandsDir, { recursive: true });
-    }
     if (!existsSync(skillsDir)) {
       mkdirSync(skillsDir, { recursive: true });
     }
@@ -525,7 +540,6 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Clean up legacy skill directories from even older versions
     const legacySkillDirs = [
-      'deepinit',
       'frontend-ui-ux'
     ];
     for (const legacySkill of legacySkillDirs) {
@@ -880,7 +894,7 @@ export function install(options: InstallOptions = {}): InstallResult {
  * Check if Olympus is already installed
  */
 export function isInstalled(): boolean {
-  return existsSync(VERSION_FILE) && existsSync(AGENTS_DIR) && existsSync(COMMANDS_DIR);
+  return existsSync(VERSION_FILE) && existsSync(AGENTS_DIR);
 }
 
 /**

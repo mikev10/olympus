@@ -3,7 +3,6 @@ import {
   VERSION,
   CLAUDE_CONFIG_DIR,
   AGENTS_DIR,
-  COMMANDS_DIR,
   SKILLS_DIR,
   HOOKS_DIR,
 } from '../installer/index.js';
@@ -11,7 +10,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-const CONTENT_DIR = join(process.cwd(), 'content');
+const CONTENT_DIR = join(process.cwd(), 'resources');
 
 function readContent(relPath: string): string {
   return readFileSync(join(CONTENT_DIR, relPath), 'utf-8').replace(/\r\n/g, '\n');
@@ -314,13 +313,12 @@ describe('Installer Constants', () => {
 
       expect(CLAUDE_CONFIG_DIR).toBe(expectedBase);
       expect(AGENTS_DIR).toBe(join(expectedBase, 'agents'));
-      expect(COMMANDS_DIR).toBe(join(expectedBase, 'commands'));
       expect(SKILLS_DIR).toBe(join(expectedBase, 'skills'));
       expect(HOOKS_DIR).toBe(join(expectedBase, 'hooks'));
     });
 
     it('should use absolute paths', () => {
-      const paths = [CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR];
+      const paths = [CLAUDE_CONFIG_DIR, AGENTS_DIR, SKILLS_DIR, HOOKS_DIR];
 
       for (const p of paths) {
         const isAbsolute = /^[/~]/.test(p) || /^[A-Za-z]:[\\/]/.test(p);
