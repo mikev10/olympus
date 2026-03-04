@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  AGENT_DEFINITIONS,
-  COMMAND_DEFINITIONS,
-  CLAUDE_MD_CONTENT,
   VERSION,
   CLAUDE_CONFIG_DIR,
   AGENTS_DIR,
@@ -10,11 +7,43 @@ import {
   SKILLS_DIR,
   HOOKS_DIR,
 } from '../installer/index.js';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
+const CONTENT_DIR = join(process.cwd(), 'content');
+
+function readContent(relPath: string): string {
+  return readFileSync(join(CONTENT_DIR, relPath), 'utf-8').replace(/\r\n/g, '\n');
+}
+
+const agentFiles = readdirSync(join(CONTENT_DIR, 'agents')).filter(f => f.endsWith('.md'));
+const AGENTS: Record<string, string> = {};
+for (const file of agentFiles) {
+  AGENTS[file] = readContent(`agents/${file}`);
+}
+
+const skillDirs = readdirSync(join(CONTENT_DIR, 'skills')).filter(entry => {
+  try {
+    readdirSync(join(CONTENT_DIR, 'skills', entry));
+    return true;
+  } catch {
+    return false;
+  }
+});
+const SKILLS: Record<string, string> = {};
+for (const dir of skillDirs) {
+  try {
+    SKILLS[dir] = readContent(`skills/${dir}/SKILL.md`);
+  } catch (_) {
+    void _;
+  }
+}
+
+const claudeMdContent = readContent('claude-md.md');
+
 describe('Installer Constants', () => {
-  describe('AGENT_DEFINITIONS', () => {
+  describe('Agent Content', () => {
     it('should contain expected core agents', () => {
       const expectedAgents = [
         'oracle.md',
@@ -31,9 +60,9 @@ describe('Installer Constants', () => {
       ];
 
       for (const agent of expectedAgents) {
-        expect(AGENT_DEFINITIONS).toHaveProperty(agent);
-        expect(typeof AGENT_DEFINITIONS[agent]).toBe('string');
-        expect(AGENT_DEFINITIONS[agent].length).toBeGreaterThan(0);
+        expect(AGENTS).toHaveProperty(agent);
+        expect(typeof AGENTS[agent]).toBe('string');
+        expect(AGENTS[agent].length).toBeGreaterThan(0);
       }
     });
 
@@ -50,24 +79,21 @@ describe('Installer Constants', () => {
       ];
 
       for (const agent of tieredAgents) {
-        expect(AGENT_DEFINITIONS).toHaveProperty(agent);
-        expect(typeof AGENT_DEFINITIONS[agent]).toBe('string');
+        expect(AGENTS).toHaveProperty(agent);
+        expect(typeof AGENTS[agent]).toBe('string');
       }
     });
 
     it('should have valid frontmatter for each agent', () => {
-      for (const [_filename, content] of Object.entries(AGENT_DEFINITIONS)) {
-        // Check for frontmatter delimiters
+      for (const [_filename, content] of Object.entries(AGENTS)) {
         expect(content).toMatch(/^---\n/);
         expect(content).toMatch(/\n---\n/);
 
-        // Extract frontmatter
         const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
         expect(frontmatterMatch).toBeTruthy();
 
         const frontmatter = frontmatterMatch![1];
 
-        // Check required fields
         expect(frontmatter).toMatch(/^name:\s+\S+/m);
         expect(frontmatter).toMatch(/^description:\s+.+/m);
         expect(frontmatter).toMatch(/^tools:\s+.+/m);
@@ -78,7 +104,7 @@ describe('Installer Constants', () => {
     it('should have unique agent names', () => {
       const names = new Set<string>();
 
-      for (const content of Object.values(AGENT_DEFINITIONS)) {
+      for (const content of Object.values(AGENTS)) {
         const nameMatch = content.match(/^name:\s+(\S+)/m);
         expect(nameMatch).toBeTruthy();
 
@@ -112,91 +138,97 @@ describe('Installer Constants', () => {
       };
 
       for (const [filename, expectedModel] of Object.entries(modelExpectations)) {
-        const content = AGENT_DEFINITIONS[filename];
+        const content = AGENTS[filename];
         expect(content).toBeTruthy();
         expect(content).toMatch(new RegExp(`^model:\\s+${expectedModel}`, 'm'));
       }
     });
 
     it('should not contain duplicate file names', () => {
-      const filenames = Object.keys(AGENT_DEFINITIONS);
+      const filenames = Object.keys(AGENTS);
       const uniqueFilenames = new Set(filenames);
       expect(filenames.length).toBe(uniqueFilenames.size);
     });
   });
 
-  describe('COMMAND_DEFINITIONS', () => {
-    it('should contain expected commands', () => {
-      const expectedCommands = [
-        'ultrawork/skill.md',
-        'deepsearch/skill.md',
-        'analyze/skill.md',
-        'olympus/skill.md',
-        'olympus-default.md',
-        'plan.md',
-        'review/skill.md',
-        'prometheus/skill.md',
-        'ascent/skill.md',
-        'cancel-ascent.md',
-        'update.md',
+  describe('Skills Content', () => {
+    it('should contain expected skills', () => {
+      const expectedSkills = [
+        'ultrawork',
+        'deepsearch',
+        'analyze',
+        'olympus',
+        'olympus-default',
+        'plan',
+        'review',
+        'prometheus',
+        'ascent',
+        'cancel-ascent',
+        'update',
       ];
 
-      for (const command of expectedCommands) {
-        expect(COMMAND_DEFINITIONS).toHaveProperty(command);
-        expect(typeof COMMAND_DEFINITIONS[command]).toBe('string');
-        expect(COMMAND_DEFINITIONS[command].length).toBeGreaterThan(0);
+      for (const skill of expectedSkills) {
+        expect(SKILLS).toHaveProperty(skill);
+        expect(typeof SKILLS[skill]).toBe('string');
+        expect(SKILLS[skill].length).toBeGreaterThan(0);
       }
     });
 
-    it('should have valid frontmatter for each command', () => {
-      for (const [_filename, content] of Object.entries(COMMAND_DEFINITIONS)) {
-        // Check for frontmatter delimiters
+    it('should have valid frontmatter for each skill', () => {
+      for (const [_skillName, content] of Object.entries(SKILLS)) {
         expect(content).toMatch(/^---\n/);
         expect(content).toMatch(/\n---\n/);
 
-        // Extract frontmatter
         const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
         expect(frontmatterMatch).toBeTruthy();
 
         const frontmatter = frontmatterMatch![1];
 
-        // Check required field
         expect(frontmatter).toMatch(/^description:\s+.+/m);
       }
     });
 
-    it('should not contain duplicate command names', () => {
-      const commandNames = Object.keys(COMMAND_DEFINITIONS);
-      const uniqueNames = new Set(commandNames);
-      expect(commandNames.length).toBe(uniqueNames.size);
+    it('should not contain duplicate skill names', () => {
+      const skillNames = Object.keys(SKILLS);
+      const uniqueNames = new Set(skillNames);
+      expect(skillNames.length).toBe(uniqueNames.size);
     });
 
-    it('should contain $ARGUMENTS placeholder in commands that need it', () => {
-      const commandsWithArgs = [
-        'ultrawork/skill.md',
-        'deepsearch/skill.md',
-        'analyze/skill.md',
-        'olympus/skill.md',
-        'olympus-default.md',
-        'plan.md',
-        'review/skill.md',
-        'prometheus/skill.md',
-        'ascent/skill.md',
-        'update.md',
+    it('should contain $ARGUMENTS placeholder in skills that need it', () => {
+      const skillsWithArgs = [
+        'ultrawork',
+        'deepsearch',
+        'analyze',
+        'olympus',
+        'olympus-default',
+        'plan',
+        'review',
+        'prometheus',
+        'ascent',
+        'update',
       ];
 
-      for (const command of commandsWithArgs) {
-        const content = COMMAND_DEFINITIONS[command];
+      for (const skill of skillsWithArgs) {
+        const content = SKILLS[skill];
         expect(content).toContain('$ARGUMENTS');
+      }
+    });
+
+    it('should have action skills with disable-model-invocation: true', () => {
+      const actionSkills = ['ultrawork', 'ascent', 'cancel-ascent', 'plan'];
+
+      for (const skill of actionSkills) {
+        const content = SKILLS[skill];
+        expect(content).toContain('disable-model-invocation: true');
       }
     });
   });
 
   describe('CLAUDE_MD_CONTENT', () => {
     it('should be valid markdown', () => {
-      expect(typeof CLAUDE_MD_CONTENT).toBe('string');
-      expect(CLAUDE_MD_CONTENT.length).toBeGreaterThan(100);
-      expect(CLAUDE_MD_CONTENT).toMatch(/^#\s+/m); // Has headers
+      expect(typeof claudeMdContent).toBe('string');
+      expect(claudeMdContent.length).toBeGreaterThan(100);
+      expect(claudeMdContent).toMatch(/^#\s+/m);
     });
 
     it('should contain essential sections', () => {
@@ -209,7 +241,7 @@ describe('Installer Constants', () => {
       ];
 
       for (const section of essentialSections) {
-        expect(CLAUDE_MD_CONTENT).toContain(section);
+        expect(claudeMdContent).toContain(section);
       }
     });
 
@@ -229,16 +261,16 @@ describe('Installer Constants', () => {
       ];
 
       for (const agent of coreAgents) {
-        expect(CLAUDE_MD_CONTENT).toMatch(new RegExp(`\`${agent}\``));
+        expect(claudeMdContent).toMatch(new RegExp(`\`${agent}\``));
       }
     });
 
     it('should include tiered agent routing table', () => {
-      expect(CLAUDE_MD_CONTENT).toContain('Smart Model Routing');
-      expect(CLAUDE_MD_CONTENT).toContain('oracle-low');
-      expect(CLAUDE_MD_CONTENT).toContain('oracle-medium');
-      expect(CLAUDE_MD_CONTENT).toContain('olympian-low');
-      expect(CLAUDE_MD_CONTENT).toContain('olympian-high');
+      expect(claudeMdContent).toContain('Smart Model Routing');
+      expect(claudeMdContent).toContain('oracle-low');
+      expect(claudeMdContent).toContain('oracle-medium');
+      expect(claudeMdContent).toContain('olympian-low');
+      expect(claudeMdContent).toContain('olympian-high');
     });
 
     it('should document all slash commands', () => {
@@ -255,26 +287,23 @@ describe('Installer Constants', () => {
       ];
 
       for (const command of commands) {
-        expect(CLAUDE_MD_CONTENT).toContain(command);
+        expect(claudeMdContent).toContain(command);
       }
     });
 
     it('should contain markdown tables', () => {
-      // Check for table structure
-      expect(CLAUDE_MD_CONTENT).toMatch(/\|[^\n]+\|/); // Contains pipes
-      expect(CLAUDE_MD_CONTENT).toMatch(/\|[-\s]+\|/); // Contains separator row
+      expect(claudeMdContent).toMatch(/\|[^\n]+\|/);
+      expect(claudeMdContent).toMatch(/\|[-\s]+\|/);
     });
   });
 
   describe('VERSION', () => {
     it('should be properly formatted', () => {
       expect(typeof VERSION).toBe('string');
-      // Semantic versioning pattern (with optional beta suffix)
       expect(VERSION).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
     });
 
     it('should match package.json version', () => {
-      // This is a runtime check - VERSION should match the package.json
       expect(VERSION).toBe('3.7.1');
     });
   });
@@ -291,42 +320,57 @@ describe('Installer Constants', () => {
     });
 
     it('should use absolute paths', () => {
-      const paths = [
-        CLAUDE_CONFIG_DIR,
-        AGENTS_DIR,
-        COMMANDS_DIR,
-        SKILLS_DIR,
-        HOOKS_DIR,
-      ];
+      const paths = [CLAUDE_CONFIG_DIR, AGENTS_DIR, COMMANDS_DIR, SKILLS_DIR, HOOKS_DIR];
 
-      for (const path of paths) {
-        // Cross-platform: Unix starts with / or ~, Windows starts with drive letter (C:\)
-        const isAbsolute = /^[/~]/.test(path) || /^[A-Za-z]:[\\/]/.test(path);
+      for (const p of paths) {
+        const isAbsolute = /^[/~]/.test(p) || /^[A-Za-z]:[\\/]/.test(p);
         expect(isAbsolute).toBe(true);
       }
     });
   });
 
+  describe('Content Directory', () => {
+    it('should have readable agent files', () => {
+      expect(Object.keys(AGENTS).length).toBeGreaterThan(0);
+      for (const [filename, content] of Object.entries(AGENTS)) {
+        expect(typeof content).toBe('string');
+        expect(content.length).toBeGreaterThan(0);
+        expect(filename).toMatch(/\.md$/);
+      }
+    });
+
+    it('should have readable skill files', () => {
+      expect(Object.keys(SKILLS).length).toBeGreaterThan(0);
+      for (const [skillName, content] of Object.entries(SKILLS)) {
+        expect(typeof content).toBe('string');
+        expect(content.length).toBeGreaterThan(0);
+        expect(skillName).toBeTruthy();
+      }
+    });
+
+    it('should have readable claude-md.md', () => {
+      expect(typeof claudeMdContent).toBe('string');
+      expect(claudeMdContent.length).toBeGreaterThan(0);
+    });
+  });
+
   describe('Content Consistency', () => {
-    it('should not have duplicate agent/command definitions', () => {
-      const allKeys = [
-        ...Object.keys(AGENT_DEFINITIONS),
-        ...Object.keys(COMMAND_DEFINITIONS),
-      ];
+    it('should not have duplicate agent/skill definitions', () => {
+      const agentKeys = Object.keys(AGENTS).map(k => `agents/${k}`);
+      const skillKeys = Object.keys(SKILLS).map(k => `skills/${k}`);
+      const allKeys = [...agentKeys, ...skillKeys];
 
       const uniqueKeys = new Set(allKeys);
       expect(allKeys.length).toBe(uniqueKeys.size);
     });
 
-    it('should have agents referenced in CLAUDE.md exist in AGENT_DEFINITIONS', () => {
-      const agentMatches = CLAUDE_MD_CONTENT.matchAll(/\`([a-z-]+)\`\s*\|\s*(Opus|Sonnet|Haiku)/g);
+    it('should have agents referenced in CLAUDE.md exist in agent files', () => {
+      const agentMatches = claudeMdContent.matchAll(/\`([a-z-]+)\`\s*\|\s*(Opus|Sonnet|Haiku)/g);
 
       for (const match of agentMatches) {
         const agentName = match[1];
-
-        // Find corresponding agent file
-        const agentFile = Object.keys(AGENT_DEFINITIONS).find(key => {
-          const content = AGENT_DEFINITIONS[key];
+        const agentFile = Object.keys(AGENTS).find(key => {
+          const content = AGENTS[key];
           const nameMatch = content.match(/^name:\s+(\S+)/m);
           return nameMatch && nameMatch[1] === agentName;
         });
@@ -336,11 +380,8 @@ describe('Installer Constants', () => {
     });
 
     it('should have all agent definitions contain role descriptions', () => {
-      for (const [filename, content] of Object.entries(AGENT_DEFINITIONS)) {
-        // Most agents should have role definitions (either <Role> tags or clear role descriptions)
-        // Some agents like 'explore.md' and 'multimodal-looker.md' use different formatting
+      for (const [filename, content] of Object.entries(AGENTS)) {
         if (!filename.includes('-low') && !filename.includes('-medium') && !filename.includes('-high')) {
-          // Check for either <Role> tags or role description in various forms
           const hasRoleSection = content.includes('<Role>') ||
                                  content.includes('You are a') ||
                                  content.includes('You are an') ||
@@ -355,7 +396,7 @@ describe('Installer Constants', () => {
       const readOnlyAgents = ['oracle.md', 'oracle-medium.md', 'oracle-low.md', 'momus.md', 'metis.md'];
 
       for (const agent of readOnlyAgents) {
-        const content = AGENT_DEFINITIONS[agent];
+        const content = AGENTS[agent];
         const toolsMatch = content.match(/^tools:\s+(.+)/m);
         expect(toolsMatch).toBeTruthy();
 
@@ -375,7 +416,7 @@ describe('Installer Constants', () => {
       ];
 
       for (const agent of implementationAgents) {
-        const content = AGENT_DEFINITIONS[agent];
+        const content = AGENTS[agent];
         const toolsMatch = content.match(/^tools:\s+(.+)/m);
         expect(toolsMatch).toBeTruthy();
 
@@ -388,13 +429,11 @@ describe('Installer Constants', () => {
   describe('Content Quality', () => {
     it('should not contain unintended placeholder text', () => {
       const allContent = [
-        ...Object.values(AGENT_DEFINITIONS),
-        ...Object.values(COMMAND_DEFINITIONS),
-        CLAUDE_MD_CONTENT,
+        ...Object.values(AGENTS),
+        ...Object.values(SKILLS),
+        claudeMdContent,
       ];
 
-      // Note: "TODO" appears intentionally in "Todo_Discipline", "TodoWrite" tool, and "TODO OBSESSION"
-      // These are legitimate uses, not placeholder text to be filled in later
       const placeholders = ['FIXME', 'XXX', '[placeholder]', 'TBD'];
 
       for (const content of allContent) {
@@ -402,36 +441,29 @@ describe('Installer Constants', () => {
           expect(content).not.toContain(placeholder);
         }
 
-        // Check for standalone TODO that looks like a placeholder
-        // (e.g., "TODO: implement this" but not "TODO LIST" or "TODO OBSESSION")
-        // Exclude code blocks (content between ```) as they may contain example todos
         const contentWithoutCodeBlocks = content.replace(/```[\s\S]*?```/g, '');
-        const todoPlaceholderPattern = /TODO:\s+[a-z]/i;
-        const hasTodoPlaceholder = todoPlaceholderPattern.test(contentWithoutCodeBlocks);
+        const hasTodoPlaceholder = /TODO:\s+[a-z]/i.test(contentWithoutCodeBlocks);
         expect(hasTodoPlaceholder).toBe(false);
       }
     });
 
     it('should not contain excessive blank lines', () => {
       const allContent = [
-        ...Object.values(AGENT_DEFINITIONS),
-        ...Object.values(COMMAND_DEFINITIONS),
+        ...Object.values(AGENTS),
+        ...Object.values(SKILLS),
       ];
 
       for (const content of allContent) {
-        // No more than 3 consecutive blank lines
         expect(content).not.toMatch(/\n\n\n\n+/);
       }
     });
 
     it('should have proper markdown formatting in frontmatter', () => {
-      for (const content of Object.values(AGENT_DEFINITIONS)) {
+      for (const content of Object.values(AGENTS)) {
         const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
         expect(frontmatterMatch).toBeTruthy();
 
         const frontmatter = frontmatterMatch![1];
-
-        // Each line should be key: value format
         const lines = frontmatter.split('\n').filter(line => line.trim());
         for (const line of lines) {
           expect(line).toMatch(/^[a-z]+:\s+.+/);

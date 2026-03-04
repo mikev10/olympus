@@ -306,9 +306,9 @@ describe('workflow-transition hook', () => {
       { id: 'unit-002', stage: 'unit' },
     ]);
     mockGetBoltArtifacts.mockReturnValue([
-      { id: 'bolt-001', stage: 'bolt' },
-      { id: 'bolt-002', stage: 'bolt' },
-      { id: 'bolt-003', stage: 'bolt' },
+      { id: 'bolt-001', stage: 'code-generation' },
+      { id: 'bolt-002', stage: 'code-generation' },
+      { id: 'bolt-003', stage: 'code-generation' },
     ]);
 
     const ctx: HookContext = {
@@ -473,15 +473,15 @@ describe('workflow-transition hook', () => {
     });
 
     const allBolts = [
-      { id: 'bolt-001', stage: 'bolt', contract_status: 'fulfilled' },
-      { id: 'bolt-002', stage: 'bolt', contract_status: 'active' },
-      { id: 'bolt-003', stage: 'bolt', contract_status: 'draft' },
+      { id: 'bolt-001', stage: 'code-generation', contract_status: 'fulfilled' },
+      { id: 'bolt-002', stage: 'code-generation', contract_status: 'active' },
+      { id: 'bolt-003', stage: 'code-generation', contract_status: 'draft' },
     ];
 
     mockLoadManifest.mockReturnValue(manifest);
     mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({
       current_phase: 'construction',
-      current_stage: 'bolt',
+      current_stage: 'code-generation',
     }));
     mockGetBoltArtifacts.mockReturnValue(allBolts);
 
@@ -517,14 +517,14 @@ describe('workflow-transition hook', () => {
     });
 
     const allBolts = [
-      { id: 'bolt-001', stage: 'bolt', contract_status: 'fulfilled' },
-      { id: 'bolt-002', stage: 'bolt', contract_status: 'fulfilled' },
+      { id: 'bolt-001', stage: 'code-generation', contract_status: 'fulfilled' },
+      { id: 'bolt-002', stage: 'code-generation', contract_status: 'fulfilled' },
     ];
 
     mockLoadManifest.mockReturnValue(manifest);
     mockLoadCheckpoint.mockResolvedValue(createMockCheckpoint({
       current_phase: 'construction',
-      current_stage: 'bolt',
+      current_stage: 'code-generation',
     }));
     mockGetBoltArtifacts.mockReturnValue(allBolts);
 

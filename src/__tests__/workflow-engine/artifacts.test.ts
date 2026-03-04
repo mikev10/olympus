@@ -104,20 +104,20 @@ describe('artifacts', () => {
       );
     });
 
-    it('should return correct path for bolt artifact with ID and unitId', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'UNIT-001', 'BOLT-001.md');
-      expect(getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001')).toBe(expected);
+    it('should return correct path for code-generation artifact with ID and unitId', () => {
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'auth-service', 'code-plan.md');
+      expect(getArtifactPath(projectPath, workflowId, 'code-generation', 'code-plan', 'auth-service')).toBe(expected);
     });
 
-    it('should throw error for bolt artifact without ID', () => {
-      expect(() => getArtifactPath(projectPath, workflowId, 'bolt')).toThrow(
-        'artifactId is required for bolt artifacts'
+    it('should throw error for code-generation artifact without ID', () => {
+      expect(() => getArtifactPath(projectPath, workflowId, 'code-generation')).toThrow(
+        'artifactId is required for code-generation artifacts'
       );
     });
 
-    it('should throw error for bolt artifact without unitId', () => {
-      expect(() => getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001')).toThrow(
-        'unitId is required for bolt artifacts'
+    it('should throw error for code-generation artifact without unitId', () => {
+      expect(() => getArtifactPath(projectPath, workflowId, 'code-generation', 'code-plan')).toThrow(
+        'unitId is required for code-generation artifacts'
       );
     });
 
@@ -222,12 +222,12 @@ describe('artifacts', () => {
       expect(savedContent).toBe(content);
     });
 
-    it('should write bolt artifact with ID and unitId', async () => {
-      const content = '# Bolt BOLT-001\n\nBolt execution plan.';
+    it('should write code-generation artifact with ID and unitId', async () => {
+      const content = '# Code Plan\n\nCode generation plan.';
 
-      await writeArtifact(projectPath, workflowId, 'bolt', content, 'BOLT-001', 'UNIT-001');
+      await writeArtifact(projectPath, workflowId, 'code-generation', content, 'code-plan', 'auth-service');
 
-      const artifactPath = getArtifactPath(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001');
+      const artifactPath = getArtifactPath(projectPath, workflowId, 'code-generation', 'code-plan', 'auth-service');
       const savedContent = await fs.readFile(artifactPath, 'utf-8');
 
       expect(savedContent).toBe(content);
@@ -302,11 +302,11 @@ describe('artifacts', () => {
       expect(readContent).toBe(content);
     });
 
-    it('should read bolt artifact with ID and unitId', async () => {
-      const content = '# Bolt BOLT-001\n\nBolt details.';
-      await writeArtifact(projectPath, workflowId, 'bolt', content, 'BOLT-001', 'UNIT-001');
+    it('should read code-generation artifact with ID and unitId', async () => {
+      const content = '# Code Plan\n\nCode generation details.';
+      await writeArtifact(projectPath, workflowId, 'code-generation', content, 'code-plan', 'auth-service');
 
-      const readContent = await readArtifact(projectPath, workflowId, 'bolt', 'BOLT-001', 'UNIT-001');
+      const readContent = await readArtifact(projectPath, workflowId, 'code-generation', 'code-plan', 'auth-service');
       expect(readContent).toBe(content);
     });
 

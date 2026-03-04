@@ -74,7 +74,7 @@ function createTestCheckpoint(overrides?: Partial<WorkflowCheckpointV3>): Workfl
     workflow_id: 'test-wf-001',
     feature_name: 'Test Feature',
     current_phase: 'construction',
-    current_stage: 'bolt',
+    current_stage: 'code-generation',
     status: 'in_progress',
     phases: {
       discovery: { ...defaultPhaseState },
@@ -99,7 +99,7 @@ function createBoltArtifact(
     id,
     type: 'bolt-spec',
     phase: 'construction',
-    stage: 'bolt',
+    stage: 'code-generation',
     path: artifactPath ?? `aidlc-docs/test-wf-001/construction/${id}.md`,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -261,7 +261,7 @@ describe('Workflow Bridge', () => {
       expect(result!.workflowId).toBe('test-wf-001');
       expect(result!.featureName).toBe('Test Feature');
       expect(result!.currentPhase).toBe('construction');
-      expect(result!.currentStage).toBe('bolt');
+      expect(result!.currentStage).toBe('code-generation');
       expect(result!.trustLevel).toBe(1);
       expect(result!.executionMode).toBe('olympus');
       expect(result!.pendingBolts).toEqual(['BOLT-002']);
@@ -459,14 +459,14 @@ describe('Workflow Bridge', () => {
   // --------------------------------------------------------------------------
 
   describe('markBoltComplete', () => {
-    it('transitions BOLT to fulfilled and updates checkpoint active_bolt_id to next pending', async () => {
+    it('transitions BOLT to fulfilled and updates checkpoint active_code_plan_path to next pending', async () => {
       const manifest = createTestManifest({
         artifacts: [
           createBoltArtifact('BOLT-001', 'active'),
           createBoltArtifact('BOLT-002', 'active'),
         ],
       });
-      const checkpoint = createTestCheckpoint({ active_bolt_id: 'BOLT-001' });
+      const checkpoint = createTestCheckpoint({ active_code_plan_path: 'BOLT-001' });
       setupWorkflowFiles(testDir, manifest, checkpoint);
 
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', createGateResult());
@@ -484,14 +484,14 @@ describe('Workflow Bridge', () => {
       const updatedCheckpoint = JSON.parse(
         fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
-      expect(updatedCheckpoint.active_bolt_id).toBe('BOLT-002');
+      expect(updatedCheckpoint.active_code_plan_path).toBe('BOLT-002');
     });
 
-    it('clears active_bolt_id when no more pending BOLTs', async () => {
+    it('clears active_code_plan_path when no more pending BOLTs', async () => {
       const manifest = createTestManifest({
         artifacts: [createBoltArtifact('BOLT-001', 'active')],
       });
-      const checkpoint = createTestCheckpoint({ active_bolt_id: 'BOLT-001' });
+      const checkpoint = createTestCheckpoint({ active_code_plan_path: 'BOLT-001' });
       setupWorkflowFiles(testDir, manifest, checkpoint);
 
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', createGateResult());
@@ -499,14 +499,14 @@ describe('Workflow Bridge', () => {
       const updatedCheckpoint = JSON.parse(
         fs.readFileSync(path.join(testDir, 'aidlc-docs', 'test-wf-001', 'checkpoint.json'), 'utf-8')
       ) as WorkflowCheckpointV3;
-      expect(updatedCheckpoint.active_bolt_id).toBeUndefined();
+      expect(updatedCheckpoint.active_code_plan_path).toBeUndefined();
     });
 
     it('handles draft -> active -> fulfilled transition', async () => {
       const manifest = createTestManifest({
         artifacts: [createBoltArtifact('BOLT-001', 'draft')],
       });
-      const checkpoint = createTestCheckpoint({ active_bolt_id: 'BOLT-001' });
+      const checkpoint = createTestCheckpoint({ active_code_plan_path: 'BOLT-001' });
       setupWorkflowFiles(testDir, manifest, checkpoint);
 
       await markBoltComplete(testDir, 'test-wf-001', 'BOLT-001', createGateResult());
@@ -775,7 +775,7 @@ describe('Workflow Bridge', () => {
 
       expect(result).toContain('## Active Workflow');
       expect(result).toContain('Workflow: Test Feature (test-wf-001)');
-      expect(result).toContain('Phase: construction | Stage: bolt');
+      expect(result).toContain('Phase: construction | Stage: code-generation');
       expect(result).toContain('Trust: Level 1');
       expect(result).toContain('Risk: Tier 2');
       expect(result).toContain('Mode: ascent');
@@ -912,7 +912,7 @@ describe('Workflow Bridge', () => {
       });
       const checkpoint = createTestCheckpoint({
         execution_mode: 'olympus',
-        active_bolt_id: 'BOLT-001',
+        active_code_plan_path: 'BOLT-001',
       });
       setupWorkflowFiles(testDir, manifest, checkpoint);
 

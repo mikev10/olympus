@@ -210,19 +210,19 @@ export async function generateWorkflowRouting(options: WorkflowRoutingOptions): 
     }
   }
 
-  let estimated_bolts: number;
+  let estimated_code_generations: number;
   if (pathwayType === 'bugfix') {
-    estimated_bolts = 1;
+    estimated_code_generations = 1;
   } else {
     switch (recommended_depth) {
       case 'minimal':
-        estimated_bolts = 1;
+        estimated_code_generations = 1;
         break;
       case 'standard':
-        estimated_bolts = Math.min(10, Math.max(1, Math.ceil(sourceFileCount / 50)));
+        estimated_code_generations = Math.min(10, Math.max(1, Math.ceil(sourceFileCount / 50)));
         break;
       case 'comprehensive':
-        estimated_bolts = Math.min(20, Math.max(2, Math.ceil(sourceFileCount / 25)));
+        estimated_code_generations = Math.min(20, Math.max(2, Math.ceil(sourceFileCount / 25)));
         break;
     }
   }
@@ -236,7 +236,7 @@ export async function generateWorkflowRouting(options: WorkflowRoutingOptions): 
     risk_tier: risk_tier.tier,
     phases,
     stages,
-    estimated_bolts,
+    estimated_code_generations,
     estimated_depth: recommended_depth,
     generated_at: new Date().toISOString(),
     approved_at: null,
@@ -263,7 +263,7 @@ function renderPlanMarkdown(workflowId: string, plan: WorkflowRoutingPlan): stri
 **Pathway:** ${plan.pathway}
 **Risk Assessment:** ${plan.risk_assessment}
 **Risk Tier:** ${plan.risk_tier}
-**Estimated Bolts:** ${plan.estimated_bolts}
+**Estimated Code Generations:** ${plan.estimated_code_generations}
 **Estimated Depth:** ${plan.estimated_depth}
 **Generated:** ${plan.generated_at}
 **Approved:** ${plan.approved_at ?? 'Pending'}
@@ -375,7 +375,7 @@ export function loadWorkflowRouting(projectPath: string, workflowId: string): Wo
     const pathwayMatch = content.match(/\*\*Pathway:\*\*\s*(.+)/);
     const riskAssessmentMatch = content.match(/\*\*Risk Assessment:\*\*\s*(.+)/);
     const riskTierMatch = content.match(/\*\*Risk Tier:\*\*\s*(.+)/);
-    const estimatedBoltsMatch = content.match(/\*\*Estimated Bolts:\*\*\s*(\d+)/);
+    const estimatedBoltsMatch = content.match(/\*\*Estimated Code Generations:\*\*\s*(\d+)/);
     const estimatedDepthMatch = content.match(/\*\*Estimated Depth:\*\*\s*(.+)/);
     const generatedAtMatch = content.match(/\*\*Generated:\*\*\s*(.+)/);
     const approvedAtMatch = content.match(/\*\*Approved:\*\*\s*(.+)/);
@@ -392,7 +392,7 @@ export function loadWorkflowRouting(projectPath: string, workflowId: string): Wo
       pathway: pathwayMatch[1].trim() as PathwayType,
       risk_assessment: riskAssessmentMatch[1].trim() as 'LOW' | 'MEDIUM' | 'HIGH',
       risk_tier: parseInt(riskTierMatch[1].trim(), 10) as RiskTier,
-      estimated_bolts: parseInt(estimatedBoltsMatch[1].trim(), 10),
+      estimated_code_generations: parseInt(estimatedBoltsMatch[1].trim(), 10),
       estimated_depth: estimatedDepthMatch[1].trim() as 'minimal' | 'standard' | 'comprehensive',
       generated_at: generatedAtMatch[1].trim(),
       approved_at: approvedAtRaw === 'Pending' ? null : approvedAtRaw,
@@ -421,7 +421,7 @@ export function isStageIncluded(plan: WorkflowRoutingPlan, phase: WorkflowPhase,
 }
 
 export const WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS = `A Workflow Routing document must contain:
-1. A header block with: Pathway, Risk Assessment, Risk Tier, Estimated Bolts, Estimated Depth, Generated date, Approved date
+1. A header block with: Pathway, Risk Assessment, Risk Tier, Estimated Code Generations, Estimated Depth, Generated date, Approved date
 2. A "Phase Overview" table with columns: Phase | Included | Rationale — one row per phase (discovery, inception, construction, operations)
 3. A "Stage Details" table with columns: # | Phase | Stage | Included | Rationale — one row per workflow stage
 Pathway values: greenfield | brownfield-enhancement | brownfield-refactor | bugfix | optimization

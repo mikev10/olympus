@@ -315,7 +315,7 @@ export function buildRiskTierDisplay(riskTier: RiskTierClassification | null): s
  * Build bolt progress display
  */
 export function buildBoltProgress(manifest: ManifestSchema): string {
-  const boltArtifacts = manifest.artifacts.filter(a => a.stage === 'bolt');
+  const boltArtifacts = manifest.artifacts.filter(a => a.stage === 'code-generation');
   const total = boltArtifacts.length;
 
   if (total === 0) return 'Bolts: 0/0';
@@ -447,7 +447,7 @@ export function getContextLoadingRecommendation(stage: string): string[] {
   const earlyStages = ['intent', 'discovery'];
   const requirementsStages = ['requirements', 'stories'];
   const designStages = ['architecture', 'design', 'domain-design', 'logical-design'];
-  const codeStages = ['code', 'bolt', 'implementation'];
+  const codeStages = ['code', 'code-generation', 'implementation'];
 
   if (earlyStages.includes(stage)) {
     return ['workspace-scan'];

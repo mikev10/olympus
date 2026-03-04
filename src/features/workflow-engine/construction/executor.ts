@@ -18,17 +18,15 @@ import path from 'path';
 import type { HierarchicalNode } from '../phase-types.js';
 import type { ValidationResult } from '../types.js';
 
-type ConstructionStage = 'unit' | 'bolt' | 'design';
+type ConstructionStage = 'unit' | 'code-generation' | 'design';
 
 import {
   parseIntentsFromDisk,
   parseIntentFromFile,
   decomposeIntentToUnits,
-  decomposeUnitToBolts,
-  enforceGlobalBoltLimit,
   buildDecompositionTree,
 } from './decomposition.js';
-import type { DecompositionTree, UnitSpec, BoltSpec } from './decomposition.js';
+import type { DecompositionTree, UnitSpec } from './decomposition.js';
 import {
   generateInterfaceContracts,
   generateDataFlowDiagram,
@@ -36,7 +34,7 @@ import {
   validateDesign,
   writeDesignArtifacts,
 } from './design.js';
-import { validateUnits, validateBolt } from './validation.js';
+import { validateUnits } from './validation.js';
 import { runDualValidation } from '../alignment.js';
 import { registerArtifact, linkArtifacts } from '../manifest.js';
 import type { ArtifactLink } from '../phase-types.js';
@@ -47,7 +45,7 @@ import type { ArtifactLink } from '../phase-types.js';
  */
 export const CONSTRUCTION_STAGE_AGENT_MAP: Record<ConstructionStage, string> = {
   unit: 'olympian',
-  bolt: 'olympian',
+  'code-generation': 'olympian',
   design: 'olympian',
 };
 
@@ -60,10 +58,10 @@ export interface ConstructionOptions {
   depth?: 'SHALLOW' | 'MEDIUM' | 'DEEP';
   /** Maximum number of UNITs to generate (default 10) */
   max_units?: number;
-  /** Maximum BOLTs per UNIT (default 8) */
-  max_bolts_per_unit?: number;
-  /** Maximum total BOLTs across all UNITs (default 50) */
-  max_total_bolts?: number;
+  /** Maximum code generation tasks per UNIT (default 8) */
+  max_code_gen_per_unit?: number;
+  /** Maximum total code generation tasks across all UNITs (default 50) */
+  max_total_code_gen?: number;
   /** Current checkpoint status - blocks if 'awaiting_dev_review' */
   checkpointStatus?: string;
   /** Optional callback invoked after successful decomposition for checkpoint persistence */
@@ -77,8 +75,8 @@ export interface ConstructionProgress {
   current_stage: ConstructionStage;
   units_total: number;
   units_complete: number;
-  bolts_total: number;
-  bolts_complete: number;
+  code_gen_total: number;
+  code_gen_complete: number;
   design_complete: boolean;
   overall_percentage: number;
 }
@@ -108,7 +106,7 @@ export class ConstructionExecutor {
   private tree: DecompositionTree | null = null;
   private currentStage: ConstructionStage = 'unit';
   private totalUnits = 0;
-  private totalBolts = 0;
+  private totalCodeGenerations = 0;
   private totalEffort = 0;
 
   constructor(projectPath: string, workflowId: string) {
@@ -135,8 +133,8 @@ export class ConstructionExecutor {
     const {
       depth = 'MEDIUM',
       max_units = 10,
-      max_bolts_per_unit = 8,
-      max_total_bolts = 50,
+      max_code_gen_per_unit = 8,
+      max_total_code_gen = 50,
       checkpointStatus,
       onCheckpointSave,
     } = options;
@@ -164,7 +162,7 @@ export class ConstructionExecutor {
     // MEDIUM / DEEP: full decomposition pipeline
     // Phase 1: Decomposition (units + bolts)
     this.currentStage = 'unit';
-    const decompResult = await this.executeDecompositionPhase(max_units, max_bolts_per_unit, max_total_bolts, depth);
+    const decompResult = await this.executeDecompositionPhase(max_units, max_code_gen_per_unit, max_total_code_gen, depth);
     if (!decompResult.passed) {
       console.error('[ConstructionExecutor] Decomposition phase failed');
       return decompResult;
@@ -205,8 +203,6 @@ export class ConstructionExecutor {
   getProgress(): ConstructionProgress {
     let unitsTotal = 0;
     let unitsComplete = 0;
-    let boltsTotal = 0;
-    let boltsComplete = 0;
 
     if (this.tree) {
       for (const node of this.tree.nodes.values()) {
@@ -215,31 +211,28 @@ export class ConstructionExecutor {
           if (node.status === 'complete') {
             unitsComplete++;
           }
-        } else if (node.type === 'bolt') {
-          boltsTotal++;
-          if (node.status === 'complete') {
-            boltsComplete++;
-          }
         }
       }
     }
 
-    // Calculate overall percentage based on stage
+    const codeGenTotal = this.totalCodeGenerations;
+    const codeGenComplete = 0;
+
     let overallPercentage = 0;
     if (this.currentStage === 'unit') {
       overallPercentage = unitsTotal > 0 ? Math.round((unitsComplete / unitsTotal) * 50) : 0;
-    } else if (this.currentStage === 'bolt') {
-      overallPercentage = 50 + (boltsTotal > 0 ? Math.round((boltsComplete / boltsTotal) * 25) : 0);
+    } else if (this.currentStage === 'code-generation') {
+      overallPercentage = 50 + (codeGenTotal > 0 ? Math.round((codeGenComplete / codeGenTotal) * 25) : 0);
     } else if (this.currentStage === 'design') {
-      overallPercentage = 75 + 25; // Decomposition complete + design done
+      overallPercentage = 75 + 25;
     }
 
     return {
       current_stage: this.currentStage,
       units_total: unitsTotal,
       units_complete: unitsComplete,
-      bolts_total: boltsTotal,
-      bolts_complete: boltsComplete,
+      code_gen_total: codeGenTotal,
+      code_gen_complete: codeGenComplete,
       design_complete: this.currentStage === 'design',
       overall_percentage: overallPercentage,
     };
@@ -248,55 +241,52 @@ export class ConstructionExecutor {
   /**
    * Returns a summary of the decomposition state.
    */
-  getDecompositionSummary(): { units: number; bolts: number; totalEffort: number } {
+  getDecompositionSummary(): { units: number; codeGenerations: number; totalEffort: number } {
     return {
       units: this.totalUnits,
-      bolts: this.totalBolts,
+      codeGenerations: this.totalCodeGenerations,
       totalEffort: this.totalEffort,
     };
   }
 
-  async executeBoltWithPlanApproval(
-    boltId: string,
-    unitId: string,
+  async executeCodeGenerationWithPlanApproval(
+    unitName: string,
     options: { projectPath?: string; workflowId?: string } = {}
-  ): Promise<{ status: 'awaiting_bolt_plan_approval'; boltPlanPath: string; prompt: string }> {
+  ): Promise<{ status: 'awaiting_code_plan_approval'; codePlanPath: string; prompt: string }> {
     const projectPath = options.projectPath || this.projectPath;
     const workflowId = options.workflowId || this.workflowId;
 
-    const { buildBoltPlanPath, dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
+    const { buildCodePlanPath, dispatchCodeGeneration, buildCodeGenerationPrompt } = await import('../code-generation-executor.js');
 
-    const boltPlanPath = buildBoltPlanPath(projectPath, workflowId, unitId, boltId);
-    const dispatch = await dispatchBolt(projectPath, workflowId, boltId);
+    const codePlanPath = buildCodePlanPath(projectPath, workflowId, unitName);
+    const dispatch = await dispatchCodeGeneration(projectPath, workflowId, unitName);
 
-    const prompt = buildBoltPrompt(
+    const prompt = buildCodeGenerationPrompt(
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
       dispatch.context.unitSpec,
-      dispatch.context.boltSpec,
-      boltPlanPath
+      codePlanPath
     );
 
     return {
-      status: 'awaiting_bolt_plan_approval',
-      boltPlanPath,
+      status: 'awaiting_code_plan_approval',
+      codePlanPath,
       prompt,
     };
   }
 
-  async approveBoltPlan(
-    boltId: string,
-    unitId: string,
+  async approveCodePlan(
+    unitName: string,
     feedback?: string
-  ): Promise<{ status: 'executing_bolt_plan'; prompt: string }> {
-    const { buildBoltPlanPath, dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
+  ): Promise<{ status: 'executing_code_plan'; prompt: string }> {
+    const { buildCodePlanPath, dispatchCodeGeneration, buildCodeGenerationPrompt } = await import('../code-generation-executor.js');
     const { addGateAuditEntry } = await import('../manifest.js');
 
-    const boltPlanPath = buildBoltPlanPath(this.projectPath, this.workflowId, unitId, boltId);
+    const codePlanPath = buildCodePlanPath(this.projectPath, this.workflowId, unitName);
 
-    const planExists = await fs.pathExists(boltPlanPath);
+    const planExists = await fs.pathExists(codePlanPath);
     if (!planExists) {
-      throw new Error(`BOLT plan file not found at ${boltPlanPath}. The agent must create the plan before it can be approved.`);
+      throw new Error(`Code plan file not found at ${codePlanPath}. The agent must create the plan before it can be approved.`);
     }
 
     const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
@@ -305,31 +295,29 @@ export class ConstructionExecutor {
         phase: 'construction',
         action: 'approved',
         actor: 'human',
-        reason: feedback || `BOLT plan ${boltId} approved by developer`,
+        reason: feedback || `Code plan for ${unitName} approved by developer`,
       });
     } catch (err) {
-      console.error(`[ConstructionExecutor] Failed to record gate audit for ${boltId}:`, err);
+      console.error(`[ConstructionExecutor] Failed to record gate audit for ${unitName}:`, err);
     }
 
-    const dispatch = await dispatchBolt(this.projectPath, this.workflowId, boltId);
-    const prompt = buildBoltPrompt(
+    const dispatch = await dispatchCodeGeneration(this.projectPath, this.workflowId, unitName);
+    const prompt = buildCodeGenerationPrompt(
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
-      dispatch.context.unitSpec,
-      dispatch.context.boltSpec
+      dispatch.context.unitSpec
     );
 
     return {
-      status: 'executing_bolt_plan',
+      status: 'executing_code_plan',
       prompt,
     };
   }
 
-  async autoApproveBoltPlan(
-    boltId: string,
-    unitId: string,
+  async autoApproveCodePlan(
+    unitName: string,
     trustLevel: number
-  ): Promise<{ status: 'executing_bolt_plan'; prompt: string }> {
+  ): Promise<{ status: 'executing_code_plan'; prompt: string }> {
     const { addGateAuditEntry } = await import('../manifest.js');
 
     const manifestPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
@@ -341,28 +329,27 @@ export class ConstructionExecutor {
         action: 'approved',
         actor: 'trust',
         reason: isSilent
-          ? `BOLT plan ${boltId} auto-approved silently (trust level ${trustLevel})`
-          : `BOLT plan ${boltId} auto-approved with notification (trust level ${trustLevel})`,
+          ? `Code plan for ${unitName} auto-approved silently (trust level ${trustLevel})`
+          : `Code plan for ${unitName} auto-approved with notification (trust level ${trustLevel})`,
       });
     } catch (err) {
-      console.error(`[ConstructionExecutor] Failed to record gate audit for ${boltId}:`, err);
+      console.error(`[ConstructionExecutor] Failed to record gate audit for ${unitName}:`, err);
     }
 
     if (!isSilent) {
-      console.log(`[ConstructionExecutor] BOLT plan ${boltId} auto-approved (trust level ${trustLevel})`);
+      console.log(`[ConstructionExecutor] Code plan for ${unitName} auto-approved (trust level ${trustLevel})`);
     }
 
-    const { dispatchBolt, buildBoltPrompt } = await import('../bolt-dispatcher.js');
-    const dispatch = await dispatchBolt(this.projectPath, this.workflowId, boltId);
-    const prompt = buildBoltPrompt(
+    const { dispatchCodeGeneration, buildCodeGenerationPrompt } = await import('../code-generation-executor.js');
+    const dispatch = await dispatchCodeGeneration(this.projectPath, this.workflowId, unitName);
+    const prompt = buildCodeGenerationPrompt(
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
-      dispatch.context.unitSpec,
-      dispatch.context.boltSpec
+      dispatch.context.unitSpec
     );
 
     return {
-      status: 'executing_bolt_plan',
+      status: 'executing_code_plan',
       prompt,
     };
   }
@@ -411,15 +398,16 @@ export class ConstructionExecutor {
       intentEffort = intents[0].estimated_effort;
     }
 
-    // Create a single BOLT directly
     await fs.ensureDir(constructionDir);
-    const boltId = 'BOLT-001';
+    const unitName = 'shallow-impl';
+    const unitDir = path.join(constructionDir, unitName);
+    await fs.ensureDir(unitDir);
     const now = new Date().toISOString();
 
-    const boltContent = this.formatBoltMarkdown(
+    const unitContent = this.formatUnitMarkdown(
       {
-        id: boltId,
-        type: 'bolt',
+        id: unitName,
+        type: 'unit',
         title: intentTitle,
         parent_id: null,
         children_ids: [],
@@ -431,15 +419,14 @@ export class ConstructionExecutor {
       intentContent
     );
 
-    await fs.writeFile(path.join(constructionDir, `${boltId}.md`), boltContent, 'utf-8');
+    await fs.writeFile(path.join(unitDir, 'spec.md'), unitContent, 'utf-8');
 
-    // Register BOLT in manifest (no parent unit in SHALLOW mode)
-    this.registerConstructionArtifact(boltId, 'bolt', 'bolt', path.join(constructionDir, `${boltId}.md`));
+    this.registerConstructionArtifact(unitName, 'unit', 'unit', path.join(unitDir, 'spec.md'));
 
-    this.totalBolts = 1;
+    this.totalCodeGenerations = 1;
     this.totalEffort = intentEffort;
 
-    console.log('[ConstructionExecutor] SHALLOW mode: created single BOLT from INTENT');
+    console.log('[ConstructionExecutor] SHALLOW mode: created single unit for code generation from INTENT');
 
     return {
       passed: true,
@@ -459,8 +446,8 @@ export class ConstructionExecutor {
    */
   private async executeDecompositionPhase(
     maxUnits: number,
-    maxBoltsPerUnit: number,
-    maxTotalBolts: number,
+    maxCodeGenPerUnit: number,
+    maxTotalCodeGen: number,
     depth: 'SHALLOW' | 'MEDIUM' | 'DEEP' = 'MEDIUM'
   ): Promise<ValidationResult> {
     const intentDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception');
@@ -489,8 +476,8 @@ export class ConstructionExecutor {
         intentDir,
         constructionDir,
         maxUnits,
-        maxBoltsPerUnit,
-        maxTotalBolts,
+        maxCodeGenPerUnit,
+        maxTotalCodeGen,
         intentContent,
         depth
       );
@@ -501,8 +488,8 @@ export class ConstructionExecutor {
       intentDir,
       constructionDir,
       maxUnits,
-      maxBoltsPerUnit,
-      maxTotalBolts,
+      maxCodeGenPerUnit,
+      maxTotalCodeGen,
       intentContent
     );
   }
@@ -517,8 +504,8 @@ export class ConstructionExecutor {
     intentDir: string,
     constructionDir: string,
     maxUnits: number,
-    maxBoltsPerUnit: number,
-    maxTotalBolts: number,
+    _maxCodeGenPerUnit: number,
+    _maxTotalCodeGen: number,
     rootIntentContent: string,
     depth: 'SHALLOW' | 'MEDIUM' | 'DEEP' = 'MEDIUM'
   ): Promise<ValidationResult> {
@@ -594,8 +581,6 @@ Generated from inception/intent.md
     // Decompose intent to units with limit
     const allUnits = decomposeIntentToUnits(intentNode, unitSpecs, maxUnits);
 
-    // Write UNIT files and create per-unit directories
-    const allBolts: HierarchicalNode[] = [];
     const blockingIssues: string[] = [];
 
     for (const unit of allUnits) {
@@ -623,64 +608,19 @@ Generated from inception/intent.md
         console.error(`[ConstructionExecutor] Unit stage runner failed for ${unit.id}:`, err);
       }
 
-      // Parse proposed BOLTs from the unit description or create default
-      const matchingProposed = parsed.proposedUnits.find(
-        pu => pu.title === unit.title || pu.id === unit.id
-      );
-      const boltSpecs: BoltSpec[] = [];
-
-      // Check if the intent content has a "### Proposed BOLTs" section for this unit
-      // For now, generate one bolt per unit (same as v1 default behavior)
-      boltSpecs.push({
-        title: unit.title,
-        estimated_effort: unit.estimated_effort,
-        description: matchingProposed?.description || `Implementation bolt for ${unit.title}`,
-      });
-
-      // Decompose unit to bolts with limit
-      this.currentStage = 'bolt';
-      const bolts = decomposeUnitToBolts(unit, boltSpecs, maxBoltsPerUnit);
-      allBolts.push(...bolts);
-
-      // Write bolt files inside per-unit directory
-      for (const bolt of bolts) {
-        const boltFilePath = path.join(unitDir, `${bolt.id}.md`);
-        const boltContent = this.formatBoltMarkdown(bolt, unit.id);
-        await fs.writeFile(boltFilePath, boltContent, 'utf-8');
-
-        // Register BOLT in manifest with parent-child link to unit
-        this.registerConstructionArtifact(bolt.id, 'bolt', 'bolt', boltFilePath);
-        this.linkConstructionArtifacts(unit.id, bolt.id, 'derives');
-
-        this.runBoltValidation(boltContent, unitContent, rootIntentContent, unit.id, bolt.id);
-
-        // Validate bolt structure
-        const boltResult = await validateBolt(boltFilePath);
-        if (!boltResult.passed) {
-          blockingIssues.push(`${bolt.id}: ${boltResult.blocking_issues.join(', ')}`);
-        }
-      }
     }
 
-    // Enforce global bolt limit
-    const cappedBolts = enforceGlobalBoltLimit(allBolts, maxTotalBolts);
-
-    // Build tree
     this.tree = buildDecompositionTree([intentNode]);
     for (const unit of allUnits) {
       this.tree.nodes.set(unit.id, unit);
     }
-    for (const bolt of cappedBolts) {
-      this.tree.nodes.set(bolt.id, bolt);
-    }
 
-    // Track summary
     this.totalUnits = allUnits.length;
-    this.totalBolts = cappedBolts.length;
+    this.totalCodeGenerations = allUnits.length;
     this.totalEffort = allUnits.reduce((sum, u) => sum + u.estimated_effort, 0);
 
     console.log(
-      `[ConstructionExecutor] Created ${allUnits.length} units, ${cappedBolts.length} bolts`
+      `[ConstructionExecutor] Created ${allUnits.length} units for code generation`
     );
 
     // Validate units against intents
@@ -717,8 +657,8 @@ Generated from inception/intent.md
     intentDir: string,
     constructionDir: string,
     maxUnits: number,
-    maxBoltsPerUnit: number,
-    maxTotalBolts: number,
+    _maxCodeGenPerUnit: number,
+    _maxTotalCodeGen: number,
     rootIntentContent: string
   ): Promise<ValidationResult> {
     const intents = await parseIntentsFromDisk(intentDir);
@@ -734,7 +674,6 @@ Generated from inception/intent.md
 
     console.log(`[ConstructionExecutor] Found ${intents.length} intents to decompose (legacy mode)`);
 
-    // Read legacy intent content for validation
     let intentFileContent = '';
     try {
       const intentFiles = await fs.readdir(intentDir);
@@ -746,13 +685,10 @@ Generated from inception/intent.md
       // Best effort
     }
 
-    // Decompose each intent into units
     const allUnits: HierarchicalNode[] = [];
-    const allBolts: HierarchicalNode[] = [];
     const blockingIssues: string[] = [];
 
     for (const intent of intents) {
-      // v1: Auto-generate one unit per intent
       const unitSpecs: UnitSpec[] = [
         {
           title: intent.title,
@@ -764,76 +700,33 @@ Generated from inception/intent.md
       const units = decomposeIntentToUnits(intent, unitSpecs, maxUnits);
       allUnits.push(...units);
 
-      // Write unit files
       for (const unit of units) {
         const unitFilePath = path.join(constructionDir, `${unit.id}.md`);
         const unitContent = this.formatUnitMarkdown(unit, intent.id);
         await fs.writeFile(unitFilePath, unitContent, 'utf-8');
 
-        // Create per-unit directory and write spec + bolts
         const unitDir = path.join(constructionDir, unit.id);
         await fs.ensureDir(unitDir);
         await fs.writeFile(path.join(unitDir, 'spec.md'), unitContent, 'utf-8');
 
-        // Register UNIT in manifest with parent-child link to intent
         this.registerConstructionArtifact(unit.id, 'unit', 'unit', path.join(unitDir, 'spec.md'));
         this.linkConstructionArtifacts(intent.id, unit.id, 'derives');
 
         this.runUnitValidation(unitContent, intentFileContent, rootIntentContent, intent.id, unit.id);
-
-        // Generate bolts per unit
-        this.currentStage = 'bolt';
-        const boltSpecs: BoltSpec[] = [
-          {
-            title: unit.title,
-            estimated_effort: unit.estimated_effort,
-            description: `Implementation bolt for ${unit.title}`,
-          },
-        ];
-
-        const bolts = decomposeUnitToBolts(unit, boltSpecs, maxBoltsPerUnit);
-        allBolts.push(...bolts);
-
-        // Write bolt files inside per-unit directory
-        for (const bolt of bolts) {
-          const boltFilePath = path.join(unitDir, `${bolt.id}.md`);
-          const boltContent = this.formatBoltMarkdown(bolt, unit.id);
-          await fs.writeFile(boltFilePath, boltContent, 'utf-8');
-
-          // Register BOLT in manifest with parent-child link to unit
-          this.registerConstructionArtifact(bolt.id, 'bolt', 'bolt', boltFilePath);
-          this.linkConstructionArtifacts(unit.id, bolt.id, 'derives');
-
-          this.runBoltValidation(boltContent, unitContent, rootIntentContent, unit.id, bolt.id);
-
-          // Validate bolt
-          const boltResult = await validateBolt(boltFilePath);
-          if (!boltResult.passed) {
-            blockingIssues.push(`${bolt.id}: ${boltResult.blocking_issues.join(', ')}`);
-          }
-        }
       }
     }
 
-    // Enforce global bolt limit
-    const cappedBolts = enforceGlobalBoltLimit(allBolts, maxTotalBolts);
-
     console.log(
-      `[ConstructionExecutor] Created ${allUnits.length} units, ${cappedBolts.length} bolts`
+      `[ConstructionExecutor] Created ${allUnits.length} units for code generation`
     );
 
-    // Build decomposition tree
     this.tree = buildDecompositionTree(intents);
     for (const unit of allUnits) {
       this.tree.nodes.set(unit.id, unit);
     }
-    for (const bolt of cappedBolts) {
-      this.tree.nodes.set(bolt.id, bolt);
-    }
 
-    // Track summary
     this.totalUnits = allUnits.length;
-    this.totalBolts = cappedBolts.length;
+    this.totalCodeGenerations = allUnits.length;
     this.totalEffort = allUnits.reduce((sum, u) => sum + u.estimated_effort, 0);
 
     // Validate units
@@ -876,20 +769,26 @@ Generated from inception/intent.md
   private async executeDesignStage(specContent?: string): Promise<ValidationResult> {
     const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
 
-    // Read units from disk
-    const unitFiles = await fs.readdir(constructionDir);
+    const unitEntries = await fs.readdir(constructionDir, { withFileTypes: true });
     const units: HierarchicalNode[] = [];
 
-    for (const file of unitFiles) {
-      if (!file.startsWith('UNIT-') || !file.endsWith('.md')) {
-        continue;
-      }
-
-      const filePath = path.join(constructionDir, file);
-      const content = await fs.readFile(filePath, 'utf-8');
-      const unit = this.parseUnitFromMarkdown(content, file.replace('.md', ''));
-      if (unit) {
-        units.push(unit);
+    for (const entry of unitEntries) {
+      if (entry.isDirectory() && entry.name !== 'design') {
+        const specPath = path.join(constructionDir, entry.name, 'spec.md');
+        if (await fs.pathExists(specPath)) {
+          const content = await fs.readFile(specPath, 'utf-8');
+          const unit = this.parseUnitFromMarkdown(content, entry.name);
+          if (unit) {
+            units.push(unit);
+          }
+        }
+      } else if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'design') {
+        const filePath = path.join(constructionDir, entry.name);
+        const content = await fs.readFile(filePath, 'utf-8');
+        const unit = this.parseUnitFromMarkdown(content, entry.name.replace('.md', ''));
+        if (unit) {
+          units.push(unit);
+        }
       }
     }
 
@@ -979,38 +878,6 @@ Generated from inception/intent.md
     }
   }
 
-  private runBoltValidation(
-    boltContent: string,
-    unitContent: string,
-    rootIntentContent: string,
-    unitId: string,
-    boltId: string
-  ): void {
-    if (!unitContent || !rootIntentContent) {
-      return;
-    }
-
-    try {
-      const result = runDualValidation(
-        boltContent,
-        unitContent,
-        rootIntentContent,
-        'unit-to-bolt',
-        'bolt-to-intent',
-        unitId,
-        boltId,
-        `intent-${this.workflowId}`
-      );
-
-      if (!result.passed) {
-        console.warn(
-          `[ConstructionExecutor] Dual validation warning for ${boltId}: parent=${result.parentCheck.alignment_passed}, root=${result.rootCheck.alignment_passed}`
-        );
-      }
-    } catch (err) {
-      console.error(`[ConstructionExecutor] Dual validation error for ${boltId}:`, err);
-    }
-  }
 
   /**
    * Register a construction artifact in the manifest with proper metadata.
@@ -1021,7 +888,7 @@ Generated from inception/intent.md
   private registerConstructionArtifact(
     artifactId: string,
     artifactType: string,
-    stage: 'unit' | 'bolt',
+    stage: 'unit' | 'code-generation',
     artifactPath: string
   ): void {
     try {
@@ -1112,7 +979,7 @@ To be defined during design phase
 - **External**: None identified
 
 ## Target Files
-- [ ] To be identified during bolt decomposition
+- [ ] To be identified during code generation
 
 ## Design Artifacts
 See construction/design/ for generated artifacts
@@ -1125,75 +992,12 @@ See construction/design/ for generated artifacts
 
 Implementation details for ${unit.title}.
 
-## Proposed BOLTs
-- **BOLT-001**: Implementation bolt for ${unit.title}
-
 ## Traceability
 - Parent INTENT: ${parentIntentId} (inception/intent.md)
 - Root INTENT: intent-${this.workflowId} (inception/intent.md)
 `;
   }
 
-  /**
-   * Format a bolt as a markdown file with the new BOLT template format.
-   *
-   * @private
-   */
-  private formatBoltMarkdown(
-    bolt: HierarchicalNode,
-    parentUnitId: string,
-    domainContext?: string
-  ): string {
-    const now = new Date().toISOString();
-    return `---
-id: ${bolt.id}
-title: ${bolt.title}
-parent_unit: ${parentUnitId}
-status: ${bolt.status}
-estimated_effort: ${bolt.estimated_effort}
-created: ${now}
----
-
-# ${bolt.id}: ${bolt.title}
-
-## Goal
-
-${bolt.title}
-
-## Domain Design
-${domainContext ? 'See parent intent for business context' : 'Business context for ' + bolt.title}
-
-## Logical Design
-Technical approach for implementing ${bolt.title}
-
-## Target Files
-- [ ] To be identified during implementation
-
-## Implementation Steps
-- Implement ${bolt.title}
-- Write tests
-- Verify acceptance criteria
-
-## Test Requirements
-- [ ] Unit tests for core functionality
-- [ ] Integration tests where applicable
-
-## Acceptance Criteria
-- [ ] Implementation complete
-- [ ] Tests passing
-
-## Audit Trail
-- Created: ${now}
-- Status: ${bolt.status}
-- Executed by: pending
-- Reviewed by: pending
-- Gate 4 result: pending
-
-## Traceability
-- Parent UNIT: ${parentUnitId} (construction/${parentUnitId}/spec.md)
-- Root INTENT: intent-${this.workflowId} (inception/intent.md)
-`;
-  }
 
   /**
    * Parse a unit from markdown content.

@@ -9,7 +9,7 @@ import { readFileSync } from 'fs';
  * CI Review Pipeline Hook (PostToolUse, priority 79)
  *
  * Runs automated CI checks after BOLT execution and before Gate 4 review.
- * Fires when construction phase with bolt stage and active_bolt_id detected.
+ * Fires when construction phase with code-generation stage and active_code_plan_path detected.
  * Injects CI check results into additionalContext for Gate 4 to see.
  * If any check fails, blocks Gate 4 with failure details.
  */
@@ -42,14 +42,14 @@ async function ciReviewPipeline(ctx: HookContext): Promise<HookResult> {
 
     if (!checkpoint) return { continue: true };
 
-    // Only fire for construction phase, bolt stage with active bolt
+    // Only fire for construction phase, code-generation stage with active code plan
     if (checkpoint.current_phase !== 'construction' ||
-        checkpoint.current_stage !== 'bolt' ||
-        !checkpoint.active_bolt_id) {
+        checkpoint.current_stage !== 'code-generation' ||
+        !checkpoint.active_code_plan_path) {
       return { continue: true };
     }
 
-    const boltId = checkpoint.active_bolt_id;
+    const boltId = checkpoint.active_code_plan_path;
 
     // Load manifest
     const manifest = loadManifest(manifestPath);

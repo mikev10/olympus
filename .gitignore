@@ -10,6 +10,9 @@ coverage/
 .olympus/
 .olympus-test/
 
+# AI-DLC workflow documentation (local workflow state)
+aidlc-docs/
+
 # Claude Code - ignore everything except project-specific CLAUDE.md
 .claude/*
 !.claude/CLAUDE.md

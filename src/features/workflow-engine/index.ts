@@ -184,18 +184,15 @@ export {
 // Construction Phase
 export type {
   UnitSpec,
-  BoltSpec,
   DecompositionTree,
 } from './construction/decomposition.js';
 export {
   parseIntentsFromDisk,
   parseIntentFromFile,
   decomposeIntentToUnits,
-  decomposeUnitToBolts,
-  enforceGlobalBoltLimit,
   buildDecompositionTree,
-  getLeafBolts,
-  getExecutableOrder,
+  slugifyUnitName,
+  getUnits,
 } from './construction/decomposition.js';
 export type {
   InterfaceContract,

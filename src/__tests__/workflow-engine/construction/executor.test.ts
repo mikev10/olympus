@@ -26,14 +26,14 @@ describe('CONSTRUCTION_STAGE_AGENT_MAP', () => {
   it('should map all stages to olympian agent', () => {
     expect(CONSTRUCTION_STAGE_AGENT_MAP).toEqual({
       unit: 'olympian',
-      bolt: 'olympian',
+      'code-generation': 'olympian',
       design: 'olympian',
     });
   });
 
   it('should have entries for all construction stages', () => {
     expect(CONSTRUCTION_STAGE_AGENT_MAP).toHaveProperty('unit');
-    expect(CONSTRUCTION_STAGE_AGENT_MAP).toHaveProperty('bolt');
+    expect(CONSTRUCTION_STAGE_AGENT_MAP).toHaveProperty('code-generation');
     expect(CONSTRUCTION_STAGE_AGENT_MAP).toHaveProperty('design');
   });
 
@@ -172,34 +172,26 @@ Test problem
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute();
 
-      // Debug: show blocking issues if any
       if (!result.passed) {
         console.log('[TEST DEBUG] blocking_issues:', JSON.stringify(result.blocking_issues));
       }
 
-      // Should pass overall
       expect(result.passed).toBe(true);
       expect(result.coverage_percentage).toBe(100);
       expect(result.blocking_issues).toHaveLength(0);
       expect(result.reviewer).toBe('construction-executor');
 
-      // Verify construction directory
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       expect(await fs.pathExists(constructionDir)).toBe(true);
 
-      // Verify UNIT directory was created
-      const unit001Dir = path.join(constructionDir, 'UNIT-001');
-      expect(await fs.pathExists(unit001Dir)).toBe(true);
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
+      expect(unitDirs.length).toBeGreaterThan(0);
 
-      // Verify spec.md in UNIT dir
-      expect(await fs.pathExists(path.join(unit001Dir, 'spec.md'))).toBe(true);
+      for (const unitDir of unitDirs) {
+        expect(await fs.pathExists(path.join(constructionDir, unitDir.name, 'spec.md'))).toBe(true);
+      }
 
-      // Verify bolt files in UNIT dir
-      const unit001Files = await fs.readdir(unit001Dir);
-      const boltFiles = unit001Files.filter(f => f.startsWith('BOLT-') && f.endsWith('.md'));
-      expect(boltFiles.length).toBeGreaterThan(0);
-
-      // Verify design artifacts
       const designDir = path.join(constructionDir, 'design');
       expect(await fs.pathExists(designDir)).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'interfaces.json'))).toBe(true);
@@ -219,18 +211,18 @@ Test problem
 
       expect(result.passed).toBe(true);
 
-      // Should have 3 unit directories
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      for (const unitId of ['UNIT-001', 'UNIT-002', 'UNIT-003']) {
-        const unitDir = path.join(constructionDir, unitId);
-        expect(await fs.pathExists(unitDir)).toBe(true);
-        expect(await fs.pathExists(path.join(unitDir, 'spec.md'))).toBe(true);
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
+      expect(unitDirs.length).toBe(3);
+
+      for (const unitDir of unitDirs) {
+        expect(await fs.pathExists(path.join(constructionDir, unitDir.name, 'spec.md'))).toBe(true);
       }
 
-      // Verify decomposition summary
       const summary = executor.getDecompositionSummary();
       expect(summary.units).toBe(3);
-      expect(summary.bolts).toBe(3);
+      expect(summary.codeGenerations).toBe(3);
     });
   });
 
@@ -265,26 +257,23 @@ Test problem
       expect(result.coverage_percentage).toBe(100);
       expect(result.blocking_issues).toHaveLength(0);
 
-      // Verify units directory and files were created
+      // Verify construction directory exists
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
       expect(await fs.pathExists(constructionDir)).toBe(true);
 
-      const entries = await fs.readdir(constructionDir);
-      const unitDirs = entries.filter(f => f.startsWith('UNIT-') && !f.endsWith('.md'));
+      // Verify at least one unit directory with spec.md was created
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
       expect(unitDirs.length).toBeGreaterThan(0);
+
+      for (const unitDir of unitDirs) {
+        expect(await fs.pathExists(path.join(constructionDir, unitDir.name, 'spec.md'))).toBe(true);
+      }
 
       // Verify design artifacts
       const designDir = path.join(constructionDir, 'design');
       expect(await fs.pathExists(designDir)).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'interfaces.json'))).toBe(true);
-
-      // Verify bolt files in unit dir
-      const unit001Dir = path.join(constructionDir, 'UNIT-001');
-      expect(await fs.pathExists(unit001Dir)).toBe(true);
-      const boltFiles = (await fs.readdir(unit001Dir)).filter(
-        f => f.startsWith('BOLT-') && f.endsWith('.md')
-      );
-      expect(boltFiles.length).toBeGreaterThan(0);
     });
 
     it('should create UNIT markdown with proper frontmatter', async () => {
@@ -294,19 +283,19 @@ Test problem
       await executor.execute();
 
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      const unitFiles = (await fs.readdir(constructionDir)).filter(
-        f => f.startsWith('UNIT-') && f.endsWith('.md')
-      );
-      expect(unitFiles.length).toBeGreaterThan(0);
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
+      expect(unitDirs.length).toBeGreaterThan(0);
 
-      const unitContent = await fs.readFile(path.join(constructionDir, unitFiles[0]), 'utf-8');
+      const unitContent = await fs.readFile(
+        path.join(constructionDir, unitDirs[0].name, 'spec.md'),
+        'utf-8'
+      );
       expect(unitContent).toMatch(/^---/);
-      expect(unitContent).toContain('id: UNIT-');
       expect(unitContent).toContain('title: User Authentication');
       expect(unitContent).toContain('parent_intent: INTENT-001');
       expect(unitContent).toContain('status: pending');
       expect(unitContent).toContain('estimated_effort: 8');
-      // New template sections
       expect(unitContent).toContain('## Scope & Responsibility');
       expect(unitContent).toContain('## Traceability');
     });
@@ -337,31 +326,26 @@ Test problem
       expect(components).toBeDefined();
     });
 
-    it('should create BOLT files inside per-unit directories', async () => {
+    it('should create unit directories with spec.md (no separate BOLT files)', async () => {
       await createLegacyIntentFile('Database Migration', 2);
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
       await executor.execute();
 
-      const unit001Dir = path.join(testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-001');
-      expect(await fs.pathExists(unit001Dir)).toBe(true);
+      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
+      expect(unitDirs.length).toBeGreaterThan(0);
 
-      const boltFiles = (await fs.readdir(unit001Dir)).filter(
-        f => f.startsWith('BOLT-') && f.endsWith('.md')
+      const specContent = await fs.readFile(
+        path.join(constructionDir, unitDirs[0].name, 'spec.md'),
+        'utf-8'
       );
-      expect(boltFiles.length).toBeGreaterThan(0);
-
-      // Verify BOLT file content
-      const boltContent = await fs.readFile(path.join(unit001Dir, boltFiles[0]), 'utf-8');
-      expect(boltContent).toMatch(/^---/);
-      expect(boltContent).toContain('id: BOLT-');
-      expect(boltContent).toContain('title: Database Migration');
-      expect(boltContent).toContain('parent_unit: UNIT-001');
-      expect(boltContent).toContain('status: pending');
-      // New template sections
-      expect(boltContent).toContain('## Domain Design');
-      expect(boltContent).toContain('## Audit Trail');
-      expect(boltContent).toContain('## Traceability');
+      expect(specContent).toMatch(/^---/);
+      expect(specContent).toContain('title: Database Migration');
+      expect(specContent).toContain('status: pending');
+      expect(specContent).toContain('## Scope & Responsibility');
+      expect(specContent).toContain('## Traceability');
     });
 
     it('should return ValidationResult with reviewer=construction-executor on success', async () => {
@@ -392,7 +376,7 @@ Test problem
   });
 
   describe('SHALLOW depth', () => {
-    it('should create a single BOLT without UNITs when depth is SHALLOW', async () => {
+    it('should create a single unit (shallow-impl) with spec.md when depth is SHALLOW', async () => {
       await createIntentFile('Quick Fix', 2);
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
@@ -401,16 +385,9 @@ Test problem
       expect(result.passed).toBe(true);
       expect(result.reviewer).toBe('construction-executor');
 
-      // Should have BOLT-001.md directly in construction dir
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      expect(await fs.pathExists(path.join(constructionDir, 'BOLT-001.md'))).toBe(true);
+      expect(await fs.pathExists(path.join(constructionDir, 'shallow-impl', 'spec.md'))).toBe(true);
 
-      // Should NOT have UNIT directories
-      const entries = await fs.readdir(constructionDir);
-      const unitDirs = entries.filter(f => f.startsWith('UNIT-'));
-      expect(unitDirs).toHaveLength(0);
-
-      // Should NOT have design directory
       expect(await fs.pathExists(path.join(constructionDir, 'design'))).toBe(false);
     });
 
@@ -423,11 +400,11 @@ Test problem
       expect(result.passed).toBe(true);
 
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      const boltContent = await fs.readFile(
-        path.join(constructionDir, 'BOLT-001.md'),
+      const specContent = await fs.readFile(
+        path.join(constructionDir, 'shallow-impl', 'spec.md'),
         'utf-8'
       );
-      expect(boltContent).toContain('Legacy Quick Fix');
+      expect(specContent).toContain('Legacy Quick Fix');
     });
 
     it('should fail in SHALLOW mode if no intent found', async () => {
@@ -529,8 +506,8 @@ Test problem
         current_stage: 'unit',
         units_total: 0,
         units_complete: 0,
-        bolts_total: 0,
-        bolts_complete: 0,
+        code_gen_total: 0,
+        code_gen_complete: 0,
         design_complete: false,
         overall_percentage: 0,
       });
@@ -547,7 +524,7 @@ Test problem
       // After full execution, should be in design stage
       expect(progress.current_stage).toBe('design');
       expect(progress.units_total).toBeGreaterThan(0);
-      expect(progress.bolts_total).toBeGreaterThan(0);
+      expect(progress.code_gen_total).toBeGreaterThan(0);
       expect(progress.design_complete).toBe(true);
       expect(progress.overall_percentage).toBeGreaterThan(0);
     });
@@ -577,7 +554,7 @@ Test problem
 
       expect(summary).toEqual({
         units: 0,
-        bolts: 0,
+        codeGenerations: 0,
         totalEffort: 0,
       });
     });
@@ -590,13 +567,13 @@ Test problem
 
       const summary = executor.getDecompositionSummary();
       expect(summary.units).toBe(1);
-      expect(summary.bolts).toBe(1);
+      expect(summary.codeGenerations).toBe(1);
       expect(summary.totalEffort).toBe(8);
     });
   });
 
   describe('manifest artifact registration', () => {
-    it('should register UNIT and BOLT artifacts in manifest during new-style execution', async () => {
+    it('should register UNIT and design artifacts in manifest during new-style execution', async () => {
       await createIntentFile('Manifest Test', 4);
       await createIdeaFile();
       const manifestPath = await createTestManifest();
@@ -606,34 +583,24 @@ Test problem
 
       expect(result.passed).toBe(true);
 
-      // Load manifest and check artifacts
       const manifest = loadManifest(manifestPath);
       expect(manifest).not.toBeNull();
 
-      // Should have registered UNIT artifact(s)
       const unitArtifacts = manifest!.artifacts.filter(a => a.type === 'unit');
       expect(unitArtifacts.length).toBeGreaterThan(0);
       expect(unitArtifacts[0].phase).toBe('construction');
       expect(unitArtifacts[0].stage).toBe('unit');
       expect(unitArtifacts[0].write_complete).toBe(true);
 
-      // Should have registered BOLT artifact(s)
-      const boltArtifacts = manifest!.artifacts.filter(a => a.type === 'bolt');
-      expect(boltArtifacts.length).toBeGreaterThan(0);
-      expect(boltArtifacts[0].phase).toBe('construction');
-      expect(boltArtifacts[0].stage).toBe('bolt');
-
-      // Should have registered design artifacts
       const designArtifacts = manifest!.artifacts.filter(a => a.type.startsWith('interface') || a.type.startsWith('data-flow') || a.type.startsWith('component'));
       expect(designArtifacts.length).toBe(3);
     });
 
-    it('should create parent-child links between INTENT->UNIT and UNIT->BOLT', async () => {
+    it('should create INTENT->UNIT derive links', async () => {
       await createIntentFile('Link Test', 4);
       await createIdeaFile();
       const manifestPath = await createTestManifest();
 
-      // Register the INTENT artifact first so linkArtifacts can find it
       const { registerArtifact: regArt } = await import('../../../features/workflow-engine/manifest.js');
       regArt(manifestPath, {
         id: 'INTENT-001',
@@ -654,20 +621,13 @@ Test problem
       const manifest = loadManifest(manifestPath);
       expect(manifest).not.toBeNull();
 
-      // Should have INTENT->UNIT derive link
       const intentToUnitLinks = manifest!.links.filter(
         l => l.source_id === 'INTENT-001' && l.link_type === 'derives'
       );
       expect(intentToUnitLinks.length).toBeGreaterThan(0);
-
-      // Should have UNIT->BOLT derive link
-      const unitToBoltLinks = manifest!.links.filter(
-        l => l.source_id.startsWith('UNIT-') && l.link_type === 'derives'
-      );
-      expect(unitToBoltLinks.length).toBeGreaterThan(0);
     });
 
-    it('should register BOLT in manifest during SHALLOW mode', async () => {
+    it('should register unit artifact in manifest during SHALLOW mode', async () => {
       await createIntentFile('Shallow Manifest Test', 2);
       const manifestPath = await createTestManifest();
 
@@ -679,18 +639,16 @@ Test problem
       const manifest = loadManifest(manifestPath);
       expect(manifest).not.toBeNull();
 
-      // Should have registered BOLT-001
-      const boltArtifacts = manifest!.artifacts.filter(a => a.id === 'BOLT-001');
-      expect(boltArtifacts.length).toBe(1);
-      expect(boltArtifacts[0].phase).toBe('construction');
-      expect(boltArtifacts[0].stage).toBe('bolt');
+      const unitArtifacts = manifest!.artifacts.filter(a => a.id === 'shallow-impl');
+      expect(unitArtifacts.length).toBe(1);
+      expect(unitArtifacts[0].phase).toBe('construction');
+      expect(unitArtifacts[0].stage).toBe('unit');
     });
 
     it('should register artifacts during legacy intent execution', async () => {
       await createLegacyIntentFile('Legacy Manifest Test', 4);
       const manifestPath = await createTestManifest();
 
-      // Register the INTENT artifact so links can be created
       const { registerArtifact: regArt } = await import('../../../features/workflow-engine/manifest.js');
       regArt(manifestPath, {
         id: 'INTENT-001',
@@ -711,14 +669,9 @@ Test problem
       const manifest = loadManifest(manifestPath);
       expect(manifest).not.toBeNull();
 
-      // Should have unit and bolt artifacts
       const unitArtifacts = manifest!.artifacts.filter(a => a.type === 'unit');
       expect(unitArtifacts.length).toBeGreaterThan(0);
 
-      const boltArtifacts = manifest!.artifacts.filter(a => a.type === 'bolt');
-      expect(boltArtifacts.length).toBeGreaterThan(0);
-
-      // Should have links
       expect(manifest!.links.length).toBeGreaterThan(0);
     });
 
@@ -737,67 +690,43 @@ Test problem
 
   describe('Integration flow', () => {
     it('should complete full pipeline: create intent.md -> execute -> verify outputs', async () => {
-      // Step 1: Create intent file (new-style)
       await createIntentFile('User Authentication System', 8);
       await createIdeaFile();
 
-      // Step 2: Execute construction
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute();
 
-      // Step 3: Verify execution succeeded
       expect(result.passed).toBe(true);
       expect(result.coverage_percentage).toBe(100);
       expect(result.reviewer).toBe('construction-executor');
 
-      // Step 4: Verify unit directories
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      const constructionEntries = await fs.readdir(constructionDir);
-      const unitDirs = constructionEntries.filter(
-        f => f.startsWith('UNIT-') && !f.endsWith('.md')
-      );
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
       expect(unitDirs.length).toBe(1);
 
-      // Verify UNIT-001/spec.md content
-      const unit1SpecPath = path.join(constructionDir, 'UNIT-001', 'spec.md');
-      expect(await fs.pathExists(unit1SpecPath)).toBe(true);
-      const unit1Content = await fs.readFile(unit1SpecPath, 'utf-8');
-      expect(unit1Content).toContain('id: UNIT-001');
-      expect(unit1Content).toContain('title: User Authentication System');
-      expect(unit1Content).toContain('parent_intent: INTENT-001');
-      expect(unit1Content).toContain('estimated_effort: 8');
+      const specPath = path.join(constructionDir, unitDirs[0].name, 'spec.md');
+      expect(await fs.pathExists(specPath)).toBe(true);
+      const specContent = await fs.readFile(specPath, 'utf-8');
+      expect(specContent).toContain('title: User Authentication System');
+      expect(specContent).toContain('parent_intent: INTENT-001');
+      expect(specContent).toContain('estimated_effort: 8');
 
-      // Step 5: Verify design artifacts
       const designDir = path.join(constructionDir, 'design');
       expect(await fs.pathExists(path.join(designDir, 'interfaces.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'data-flow.json'))).toBe(true);
       expect(await fs.pathExists(path.join(designDir, 'components.json'))).toBe(true);
 
-      // Step 6: Verify bolt files
-      const unit001Dir = path.join(constructionDir, 'UNIT-001');
-      const boltFiles = (await fs.readdir(unit001Dir)).filter(
-        f => f.startsWith('BOLT-') && f.endsWith('.md')
-      );
-      expect(boltFiles.length).toBe(1);
-
-      // Verify BOLT-001.md content
-      const bolt1Content = await fs.readFile(path.join(unit001Dir, 'BOLT-001.md'), 'utf-8');
-      expect(bolt1Content).toContain('id: BOLT-001');
-      expect(bolt1Content).toContain('title: User Authentication System');
-      expect(bolt1Content).toContain('parent_unit: UNIT-001');
-
-      // Step 7: Verify progress tracking
       const progress = executor.getProgress();
       expect(progress.current_stage).toBe('design');
       expect(progress.units_total).toBe(1);
-      expect(progress.bolts_total).toBe(1);
+      expect(progress.code_gen_total).toBe(1);
       expect(progress.design_complete).toBe(true);
       expect(progress.overall_percentage).toBeGreaterThan(0);
 
-      // Step 8: Verify decomposition summary
       const summary = executor.getDecompositionSummary();
       expect(summary.units).toBe(1);
-      expect(summary.bolts).toBe(1);
+      expect(summary.codeGenerations).toBe(1);
       expect(summary.totalEffort).toBe(8);
     });
 
@@ -811,19 +740,15 @@ Test problem
       expect(result.coverage_percentage).toBe(100);
 
       const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      const unit001Dir = path.join(constructionDir, 'UNIT-001');
-      expect(await fs.pathExists(unit001Dir)).toBe(true);
+      const entries = await fs.readdir(constructionDir, { withFileTypes: true });
+      const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
+      expect(unitDirs.length).toBeGreaterThan(0);
 
-      // Verify UNIT spec
-      const specContent = await fs.readFile(path.join(unit001Dir, 'spec.md'), 'utf-8');
-      expect(specContent).toContain('UNIT-001');
-      expect(specContent).toContain('User Authentication System');
-
-      // Verify bolt
-      const boltFiles = (await fs.readdir(unit001Dir)).filter(
-        f => f.startsWith('BOLT-') && f.endsWith('.md')
+      const specContent = await fs.readFile(
+        path.join(constructionDir, unitDirs[0].name, 'spec.md'),
+        'utf-8'
       );
-      expect(boltFiles.length).toBe(1);
+      expect(specContent).toContain('User Authentication System');
     });
   });
 });

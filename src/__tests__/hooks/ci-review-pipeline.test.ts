@@ -61,9 +61,9 @@ function createMockCheckpoint(overrides: Record<string, any> = {}) {
       construction: { status: 'in_progress', started_at: '2025-01-01T00:20:00.000Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
       operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
     },
-    current_stage: 'bolt',
+    current_stage: 'code-generation',
     status: 'in_progress',
-    active_bolt_id: 'BOLT-001',
+    active_code_plan_path: 'BOLT-001',
     artifacts: { prd: null, spec: null, intent: null, complete: null },
     validation_results: { prd: null, spec: null, intent: null, complete: null },
     manifest_path: '/test/project/aidlc-docs/test-feature/manifest.json',
@@ -91,7 +91,7 @@ function createMockManifest(overrides: Record<string, any> = {}) {
       {
         id: 'BOLT-001',
         type: 'bolt',
-        path: '/test/project/aidlc-docs/test-feature/construction/UNIT-001/BOLT-001.md',
+        path: '/test/project/aidlc-docs/test-feature/construction/auth-service/code-plan.md',
         created_at: '2025-01-01T00:30:00.000Z',
         updated_at: '2025-01-01T00:30:00.000Z',
         status: 'active',
@@ -185,7 +185,7 @@ describe('CI Review Pipeline Hook', () => {
 
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_phase: 'inception', current_stage: 'prd', active_bolt_id: null })
+        createMockCheckpoint({ current_phase: 'inception', current_stage: 'prd', active_code_plan_path: null })
       );
 
       const ctx = createPostToolUseCtx('Task');
@@ -195,14 +195,14 @@ describe('CI Review Pipeline Hook', () => {
       expect(result.hookSpecificOutput).toBeUndefined();
     });
 
-    it('should skip when not in bolt stage', async () => {
+    it('should skip when not in code-generation stage', async () => {
       registerCIReviewPipelineHook();
       const hooks = getHooksForEvent('PostToolUse');
       const ciHook = hooks.find(h => h.name === 'ciReviewPipeline');
 
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_phase: 'construction', current_stage: 'unit', active_bolt_id: null })
+        createMockCheckpoint({ current_phase: 'construction', current_stage: 'unit', active_code_plan_path: null })
       );
 
       const ctx = createPostToolUseCtx('Task');
@@ -212,14 +212,14 @@ describe('CI Review Pipeline Hook', () => {
       expect(result.hookSpecificOutput).toBeUndefined();
     });
 
-    it('should skip when no active_bolt_id', async () => {
+    it('should skip when no active_code_plan_path', async () => {
       registerCIReviewPipelineHook();
       const hooks = getHooksForEvent('PostToolUse');
       const ciHook = hooks.find(h => h.name === 'ciReviewPipeline');
 
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
-        createMockCheckpoint({ current_phase: 'construction', current_stage: 'bolt', active_bolt_id: null })
+        createMockCheckpoint({ current_phase: 'construction', current_stage: 'code-generation', active_code_plan_path: null })
       );
 
       const ctx = createPostToolUseCtx('Task');
@@ -231,7 +231,7 @@ describe('CI Review Pipeline Hook', () => {
   });
 
   describe('CI check execution', () => {
-    it('should fire for construction + bolt + active_bolt_id', async () => {
+    it('should fire for construction + code-generation + active_code_plan_path', async () => {
       registerCIReviewPipelineHook();
       const hooks = getHooksForEvent('PostToolUse');
       const ciHook = hooks.find(h => h.name === 'ciReviewPipeline');

@@ -34,15 +34,15 @@ export class UnitStageRunner {
     const unitDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction', unitId);
 
     const allStages: ConstructionDesignStage[] = [
-      'domain-design', 'functional-design', 'nfr-requirements',
+      'functional-design', 'nfr-requirements',
       'nfr-design', 'infrastructure-design', 'code-generation'
     ];
 
     const progress: ConstructionUnitProgress = {
       unitId,
       stages: {} as Record<ConstructionDesignStage, { status: 'not_started' | 'in_progress' | 'completed' | 'skipped'; artifact_path: string | null; completed_at: string | null }>,
-      bolts_planned: 0,
-      bolts_completed: 0,
+      code_plan_path: null,
+      code_generation_status: 'not_started',
     };
 
     for (const stage of allStages) {

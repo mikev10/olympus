@@ -1,13 +1,13 @@
 /**
  * Construction Phase Validation
  *
- * Validates structural completeness of Construction stage artifacts (units, design, bolts).
+ * Validates structural completeness of Construction stage artifacts (units, design, code generation).
  * These are structural checks only - NOT V&V alignment checks.
  *
  * Validates:
- * - Unit files in construction/UNIT-NNN/spec.md (new) or construction/UNIT-NNN.md (legacy)
+ * - Unit files in construction/{unit-name}/spec.md (new) or construction/UNIT-NNN.md (legacy)
  * - Design artifacts (interfaces, components, data flows) in construction/design/
- * - Bolt files (BOLT-*.md) in construction/UNIT-NNN/ directories or construction/bolts/ (legacy)
+ * - Code generation files (BOLT-*.md legacy naming) in construction/{unit-name}/ directories
  * - Overall Construction phase structural integrity
  */
 
@@ -180,7 +180,7 @@ function validateUnitContent(
 
   // Check required sections - support both new and old template formats
   // NEW template sections
-  const newRequiredSections = ['Scope & Responsibility', 'Interface Contracts', 'Dependencies', 'Acceptance Criteria', 'Proposed BOLTs'];
+  const newRequiredSections = ['Scope & Responsibility', 'Interface Contracts', 'Dependencies', 'Acceptance Criteria'];
   // OLD template sections (backward compat)
   const oldRequiredSections = ['Goal', 'Acceptance Criteria', 'Implementation Notes'];
 
@@ -214,8 +214,8 @@ function validateUnitContent(
  * Validates UNIT artifacts in the construction directory.
  *
  * Supports two directory layouts:
- * - NEW: construction/UNIT-NNN/spec.md (subdirectory per unit)
- * - OLD: construction/UNIT-NNN.md (flat files, backward compatible)
+ * - NEW: construction/{unit-name}/spec.md (subdirectory per unit)
+ * - OLD: construction/{unit-name}.md (flat files, backward compatible)
  *
  * Checks structural completeness:
  * - Each unit file has frontmatter (id, title, parent_intent, status, estimated_effort)
@@ -269,11 +269,11 @@ export async function validateUnits(
     };
   }
 
-  // Step 1: Look for UNIT-NNN subdirectories with spec.md (new style)
-  const unitDirs = entries.filter(e => e.isDirectory() && /^UNIT-\d{3}$/.test(e.name));
+  // Step 1: Look for unit subdirectories with spec.md (named slugs or UNIT-NNN)
+  const unitDirs = entries.filter(e => e.isDirectory() && e.name !== 'design');
 
-  // Step 2: Look for top-level UNIT-NNN.md files (old style / backward compat)
-  const topLevelUnits = entries.filter(e => e.isFile() && /^UNIT-\d{3}\.md$/.test(e.name));
+  // Step 2: Look for top-level unit .md files (backward compat: UNIT-NNN.md or named slugs)
+  const topLevelUnits = entries.filter(e => e.isFile() && e.name.endsWith('.md') && e.name !== 'design.md');
 
   // Track which unit IDs we've discovered
   const discoveredUnitIds = new Set<string>();
@@ -552,7 +552,7 @@ export async function validateDesignArtifacts(designDir: string): Promise<Valida
 }
 
 /**
- * Validates a single BOLT-*.md file.
+ * Validates a single code generation spec file (BOLT-*.md legacy naming).
  *
  * Checks structural completeness:
  * - Frontmatter has id, title, parent_unit, status, estimated_effort
@@ -564,12 +564,12 @@ export async function validateDesignArtifacts(designDir: string): Promise<Valida
  * - References a valid parent unit (UNIT-NNN) or "none" for SHALLOW mode
  * - Effort estimate is valid (1, 2, 4, 8, or 16 hours)
  *
- * @param boltPath - Absolute path to the BOLT-*.md file
+ * @param boltPath - Absolute path to the code generation spec file
  * @returns ValidationResult with coverage percentage and blocking issues
  *
  * @example
  * const result = await validateBolt(
- *   'C:\\path\\to\\.olympus\\workflows\\feature-x\\construction\\UNIT-001\\BOLT-001.md'
+ *   'C:\\path\\to\\aidlc-docs\\feature-x\\construction\\auth-service\\code-plan.md'
  * );
  * if (result.passed) {
  *   console.log('Bolt is structurally complete');
@@ -723,8 +723,8 @@ export async function validateBolt(boltPath: string): Promise<ValidationResult> 
  * Returns aggregate ValidationResult.
  *
  * Supports both new and legacy directory layouts:
- * - NEW: construction/UNIT-NNN/spec.md, construction/UNIT-NNN/BOLT-NNN.md
- * - OLD: construction/units/UNIT-NNN.md, construction/bolts/BOLT-NNN.md
+ * - NEW: construction/{unit-name}/spec.md, construction/{unit-name}/code-plan.md
+ * - LEGACY: construction/UNIT-NNN/BOLT-NNN.md, construction/bolts/BOLT-NNN.md
  *
  * @param projectPath - Absolute path to the project root
  * @param workflowId - Workflow ID for the feature
@@ -792,7 +792,7 @@ export async function validateConstructionPhase(
     blockingIssues.push('Design directory not found');
   }
 
-  // Validate bolts - scan UNIT-NNN directories for BOLT-*.md files
+  // Validate code generation specs - scan unit directories for BOLT-*.md files (legacy naming)
   let boltsResult: ValidationResult | null = null;
   let totalBolts = 0;
   let validBolts = 0;
@@ -824,7 +824,7 @@ export async function validateConstructionPhase(
       }
     }
 
-    // Also check for top-level BOLT-*.md files in construction/ (SHALLOW mode)
+    // Also check for top-level code generation spec files in construction/ (SHALLOW mode)
     const topLevelBolts = entries.filter(e => e.isFile() && e.name.startsWith('BOLT-') && e.name.endsWith('.md'));
     for (const boltEntry of topLevelBolts) {
       totalBolts++;

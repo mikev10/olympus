@@ -137,7 +137,7 @@ describe('audit-generator', () => {
         id: 'bolt-1',
         type: 'BOLT',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         path: join(workflowDir, 'bolt.md'),
         validation_passed: null,
         write_complete: true,
@@ -162,7 +162,7 @@ describe('audit-generator', () => {
       const entry = result.traceabilityMatrix[0];
       expect(entry.intentId).toBe('intent-1');
       expect(entry.unitIds).toContain('unit-1');
-      expect(entry.boltIds).toContain('bolt-1');
+      expect(entry.codeGenerationIds).toContain('bolt-1');
     });
 
     it('empty manifest produces valid but sparse audit document', () => {
@@ -198,7 +198,7 @@ describe('audit-generator', () => {
           {
             intentId: 'intent-1',
             unitIds: ['unit-1'],
-            boltIds: ['bolt-1'],
+            codeGenerationIds: ['bolt-1'],
             codeFiles: [],
           },
         ],

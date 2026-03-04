@@ -100,15 +100,15 @@ async function detectBoltExecution(
       return null;
     }
 
-    // If checkpoint has active_bolt_id, use that
-    if (checkpoint.active_bolt_id) {
+    // If checkpoint has active_code_plan_path, use that
+    if (checkpoint.active_code_plan_path) {
       return {
-        boltId: checkpoint.active_bolt_id,
+        boltId: checkpoint.active_code_plan_path,
         workflowId: checkpoint.workflow_id,
       };
     }
 
-    // If we found BOLT ID in prompt but no active_bolt_id in checkpoint,
+    // If we found BOLT ID in prompt but no active_code_plan_path in checkpoint,
     // and prompt has signature, this is likely a BOLT execution
     if (boltIdMatch && hasBoltSignature) {
       return {
@@ -394,7 +394,7 @@ export function registerAgentTrackingHook(): void {
           const boltEvent: WorkflowEvent = {
             type: 'bolt_execution_complete',
             phase: 'construction',
-            stage: 'bolt',
+            stage: 'code-generation',
             details: `BOLT ${bolt_id} executed by ${agent_used}`,
             artifactId: bolt_id,
             agentName: agent_used,

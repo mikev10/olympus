@@ -85,7 +85,7 @@ export function generateExecutionPlan(
     lines.push(`- Risk Assessment: ${routingPlan.risk_assessment}`);
     lines.push(`- Risk Tier: ${routingPlan.risk_tier}`);
     lines.push(`- Estimated Depth: ${routingPlan.estimated_depth}`);
-    lines.push(`- Estimated Bolts: ${routingPlan.estimated_bolts}`);
+    lines.push(`- Estimated Code Generations: ${routingPlan.estimated_code_generations}`);
   } else {
     lines.push('- Risk Assessment: MEDIUM (default)');
     lines.push('- Estimated Depth: standard');
@@ -209,7 +209,7 @@ export function generateRoutingDocument(plan: WorkflowRoutingPlan): string {
   lines.push(`Pathway: ${plan.pathway}`);
   lines.push(`Risk: ${plan.risk_assessment} (Tier ${plan.risk_tier})`);
   lines.push(`Depth: ${plan.estimated_depth}`);
-  lines.push(`Bolts: ${plan.estimated_bolts}\n`);
+  lines.push(`Code Generations: ${plan.estimated_code_generations}\n`);
 
   lines.push('## Stages\n');
   for (const stage of plan.stages) {

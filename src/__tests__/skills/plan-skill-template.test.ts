@@ -10,111 +10,14 @@ import {
   isPhaseIncluded,
 } from '../../features/workflow-engine/workflow-routing.js';
 
-const installerPath = join(process.cwd(), 'src', 'installer', 'index.ts');
 const testDir = join(process.cwd(), '.test-skill-templates');
 
-let installerSource: string;
-
 beforeEach(() => {
-  installerSource = fs.readFileSync(installerPath, 'utf-8');
   fs.ensureDirSync(testDir);
 });
 
 afterEach(() => {
   fs.rmSync(testDir, { recursive: true, force: true });
-});
-
-describe('/plan template content validation', () => {
-  it('contains workspace-scan.json reference', () => {
-    expect(installerSource).toContain('workspace-scan.json');
-  });
-
-  it('contains StaticModel format instructions', () => {
-    expect(installerSource).toContain('STATIC_MODEL_FORMAT_INSTRUCTIONS');
-  });
-
-  it('contains DynamicModel format instructions', () => {
-    expect(installerSource).toContain('DYNAMIC_MODEL_FORMAT_INSTRUCTIONS');
-  });
-
-  it('contains inception stages tracking', () => {
-    expect(installerSource).toContain('inception_stages');
-  });
-
-  it('contains PRFAQ generation step gated by pathway type', () => {
-    expect(installerSource).toContain('Generate PRFAQ');
-    expect(installerSource).toContain('Optional PRFAQ');
-  });
-
-  it('contains ceremony mode check', () => {
-    expect(installerSource).toContain('Ceremony Config');
-    expect(installerSource).toContain('ceremony_mode');
-  });
-
-  it('checkpoint saves include inception stage fields', () => {
-    expect(installerSource).toContain('workflow_routing_path');
-    expect(installerSource).toContain('pathway_type');
-    expect(installerSource).toContain('skip_reason');
-  });
-
-  it('uses post-Task-0 step numbering (no IDEA step)', () => {
-    expect(installerSource).not.toContain('## Step 4: IDEA');
-  });
-
-  it('PRFAQ references intent.md summary', () => {
-    expect(installerSource).toContain('intent.md summary');
-  });
-});
-
-describe('/ascent template content validation', () => {
-  it('contains plan-first execution protocol', () => {
-    expect(installerSource).toContain('Plan-Verify-Generate');
-  });
-
-  it('contains trust-based auto-approval', () => {
-    expect(installerSource).toContain('trust-state.json');
-    expect(installerSource).toContain('auto-approved');
-  });
-
-  it('contains awaiting_bolt_plan_approval status', () => {
-    expect(installerSource).toContain('awaiting_bolt_plan_approval');
-  });
-
-  it('contains executing_bolt_plan status', () => {
-    expect(installerSource).toContain('executing_bolt_plan');
-  });
-
-  it('contains gate audit entry instructions', () => {
-    const hasGateAudit = installerSource.includes('gate_audit');
-    const hasBoltPlanApproved = installerSource.includes('BOLT plan approved');
-    expect(hasGateAudit || hasBoltPlanApproved).toBe(true);
-  });
-});
-
-describe('/review template content validation', () => {
-  it('contains artifact type detection', () => {
-    expect(installerSource).toContain('Artifact Type Detection');
-  });
-
-  it('contains per-artifact evaluation criteria', () => {
-    expect(installerSource).toContain('Per-Artifact Evaluation Criteria');
-  });
-
-  it('contains intent-specific criteria', () => {
-    expect(installerSource).toContain('Problem clarity');
-  });
-
-  it('contains INVEST criteria for user stories', () => {
-    expect(installerSource).toContain('INVEST');
-  });
-
-  it('contains review file persistence', () => {
-    expect(installerSource).toContain('artifact-name}-review.md');
-  });
-
-  it('falls back to plan review when no path', () => {
-    expect(installerSource).toContain('.olympus/plans/');
-  });
 });
 
 describe('Format compatibility (round-trip tests)', () => {
@@ -188,7 +91,7 @@ Global error boundary catches unhandled exceptions.
 **Pathway:** brownfield-enhancement
 **Risk Assessment:** MEDIUM
 **Risk Tier:** 2
-**Estimated Bolts:** 3
+**Estimated Code Generations:** 3
 **Estimated Depth:** standard
 **Generated:** 2026-01-15T00:00:00.000Z
 **Approved:** Pending

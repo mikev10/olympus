@@ -44,7 +44,7 @@ export interface InceptionStageState {
 export const STAGE_PHASE_MAP: Record<WorkflowStage, WorkflowPhase | 'complete'> = {
   intent: 'inception',
   unit: 'construction',
-  bolt: 'construction',
+  'code-generation': 'construction',
   complete: 'complete',
 };
 
@@ -64,7 +64,7 @@ export interface TrustState {
   incident_count: number;
   last_level_change: string | null;
   level_history: TrustLevelChange[];
-  // Per-BOLT tracking fields
+  // Per-code-generation tracking fields
   consecutive_rejections: number;
   transition_history: Array<{
     success: boolean;
@@ -167,7 +167,7 @@ export interface RiskEntry {
 
 export interface HierarchicalNode {
   id: string;
-  type: 'intent' | 'unit' | 'bolt';
+  type: 'intent' | 'unit' | 'code-generation';
   title: string;
   parent_id: string | null;
   children_ids: string[];
@@ -208,7 +208,7 @@ export interface ManifestArtifact {
   contract_status: 'draft' | 'active' | 'fulfilled' | 'violated' | 'stale';
   contract_version: number;
   stale_reason: string | null;
-  // BOLT audit trail fields
+  // Code generation audit trail fields
   executedBy?: string | null;
   reviewedBy?: string | null;
   statusHistory?: Array<{ status: string; timestamp: string }>;
@@ -281,7 +281,7 @@ export interface WorkflowCheckpointV3 {
   depth_score?: number;
   risk_tier?: number;
   active_unit_id?: string;
-  active_bolt_id?: string;
+  active_code_plan_path?: string;
   execution_mode?: 'ascent' | 'olympus' | 'ultrawork' | 'manual';
   interview_progress?: {
     stage: 'intent';
@@ -294,7 +294,7 @@ export interface WorkflowCheckpointV3 {
   workflow_routing_path?: string;
   pathway_type?: PathwayType;
   skipped_phases?: WorkflowPhase[];
-  bolt_plan_path?: string;
+  code_plan_path?: string;
   plan_steps_total?: number;
   plan_steps_completed?: number;
   inception_stages?: Record<InceptionStage, InceptionStageState>;
@@ -317,7 +317,7 @@ export interface WorkflowRoutingPlan {
   risk_tier: RiskTier;
   phases: Record<WorkflowPhase, { included: boolean; rationale: string }>;
   stages: WorkflowRoutingStage[];
-  estimated_bolts: number;
+  estimated_code_generations: number;
   estimated_depth: 'minimal' | 'standard' | 'comprehensive';
   generated_at: string;
   approved_at: string | null;
@@ -331,7 +331,7 @@ export interface CeremonyConfig {
   review_prompt_style: 'inline' | 'explicit';
 }
 
-export type ConstructionDesignStage = 'domain-design' | 'functional-design' | 'nfr-requirements' | 'nfr-design' | 'infrastructure-design' | 'code-generation';
+export type ConstructionDesignStage = 'functional-design' | 'nfr-requirements' | 'nfr-design' | 'infrastructure-design' | 'code-generation';
 
 export interface ConstructionUnitProgress {
   unitId: string;
@@ -340,8 +340,8 @@ export interface ConstructionUnitProgress {
     artifact_path: string | null;
     completed_at: string | null;
   }>;
-  bolts_planned: number;
-  bolts_completed: number;
+  code_plan_path: string | null;
+  code_generation_status: 'not_started' | 'planning' | 'awaiting_approval' | 'generating' | 'completed';
 }
 
 export interface UserStory {

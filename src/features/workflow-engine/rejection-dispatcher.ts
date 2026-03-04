@@ -11,7 +11,7 @@ import type { ManifestSchema } from './phase-types.js';
 
 export interface RejectionContext {
   gateNumber: number; // 1-5
-  artifactId: string; // e.g., "BOLT-003"
+  artifactId: string;
   rejectionReason: string;
   rejectedBy: string; // 'human' | 'auto' | 'trust'
   attemptNumber: number; // Current attempt count

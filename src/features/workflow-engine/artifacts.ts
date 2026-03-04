@@ -7,7 +7,7 @@ export type ArtifactType =
   | 'intent'
   | 'nfr'
   | 'unit'
-  | 'bolt'
+  | 'code-generation'
   | 'validation-report'
   | 'interfaces'
   | 'data-flow'
@@ -118,7 +118,7 @@ export async function ensureWorkflowDir(projectPath: string, workflowId: string)
  * @param workflowId - Unique workflow identifier
  * @param artifactType - Type of artifact (intent, unit, bolt, etc.)
  * @param artifactId - Optional ID for unit/bolt/validation-report artifacts (required for certain types)
- * @param unitId - Optional unit ID (required for 'bolt' artifacts to determine parent unit directory)
+ * @param unitId - Optional unit ID (required for 'code-generation' artifacts to determine parent unit directory)
  * @throws Error if artifactType is 'complete' (no artifact for complete stage)
  * @throws Error if required parameters are missing for specific artifact types
  */
@@ -131,7 +131,6 @@ export function getArtifactPath(
 ): string {
   const workflowDir = path.join(projectPath, 'aidlc-docs', workflowId);
 
-  // Mapping for artifact types to paths
   switch (artifactType) {
     case 'intent':
       return path.join(workflowDir, 'inception', 'intent.md');
@@ -142,12 +141,12 @@ export function getArtifactPath(
         throw new Error('artifactId is required for unit artifacts');
       }
       return path.join(workflowDir, 'construction', artifactId, 'spec.md');
-    case 'bolt':
+    case 'code-generation':
       if (!artifactId) {
-        throw new Error('artifactId is required for bolt artifacts');
+        throw new Error('artifactId is required for code-generation artifacts');
       }
       if (!unitId) {
-        throw new Error('unitId is required for bolt artifacts');
+        throw new Error('unitId is required for code-generation artifacts');
       }
       return path.join(workflowDir, 'construction', unitId, `${artifactId}.md`);
     case 'validation-report':
@@ -217,8 +216,8 @@ export function getArtifactPath(
  * @param workflowId - Unique workflow identifier
  * @param artifactType - Type of artifact to write
  * @param content - Content to write
- * @param artifactId - Optional ID for unit/bolt/validation-report artifacts
- * @param unitId - Optional unit ID (required for 'bolt' artifacts)
+ * @param artifactId - Optional ID for unit/code-generation/validation-report artifacts
+ * @param unitId - Optional unit ID (required for 'code-generation' artifacts)
  * @throws Error if disk is full or permissions are denied
  */
 export async function writeArtifact(
@@ -317,8 +316,8 @@ export async function writeArtifact(
  * @param projectPath - Root path of the project
  * @param workflowId - Unique workflow identifier
  * @param artifactType - Type of artifact to read
- * @param artifactId - Optional ID for unit/bolt/validation-report artifacts
- * @param unitId - Optional unit ID (required for 'bolt' artifacts)
+ * @param artifactId - Optional ID for unit/code-generation/validation-report artifacts
+ * @param unitId - Optional unit ID (required for 'code-generation' artifacts)
  * @returns Content of the artifact, or null if the file doesn't exist
  * @throws Error if permissions are denied or file is corrupt
  */

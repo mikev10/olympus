@@ -181,7 +181,7 @@ export function getExecutionOrder(manifest: ManifestSchema): string[] {
 /**
  * Marks a BOLT as complete (fulfilled) and updates checkpoint state.
  * Transitions the BOLT artifact to 'fulfilled', sets executedBy/reviewedBy,
- * and advances active_bolt_id to the next pending BOLT.
+ * and advances active_code_plan_path to the next pending BOLT.
  *
  * @param projectPath - Absolute path to the project root
  * @param workflowId - The workflow ID
@@ -229,14 +229,14 @@ export async function markBoltComplete(
   artifact.reviewedBy = gateResult.approved_by ?? null;
   saveManifest(manifestPath, manifest);
 
-  // Update checkpoint: advance active_bolt_id to next pending bolt
+  // Update checkpoint: advance active_code_plan_path to next pending bolt
   const checkpoint = await loadCheckpoint(projectPath, workflowId);
   if (checkpoint) {
     const pending = getPendingBolts(manifest);
     const executionOrder = getExecutionOrder(manifest);
     // Find the first pending bolt in execution order
     const nextBolt = executionOrder.find((id) => pending.includes(id));
-    checkpoint.active_bolt_id = nextBolt ?? undefined;
+    checkpoint.active_code_plan_path = nextBolt ?? undefined;
     await saveCheckpoint(projectPath, checkpoint);
   }
 }

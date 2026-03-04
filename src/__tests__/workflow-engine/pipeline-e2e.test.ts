@@ -227,7 +227,7 @@ describe('Pipeline E2E', () => {
         id: 'BOLT-001',
         type: 'BOLT',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         path: bolt001Path,
         validation_passed: true,
         write_complete: true,
@@ -237,7 +237,7 @@ describe('Pipeline E2E', () => {
         id: 'BOLT-002',
         type: 'BOLT',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         path: bolt002Path,
         validation_passed: true,
         write_complete: true,
@@ -292,7 +292,7 @@ describe('Pipeline E2E', () => {
       expect(await fs.pathExists(join(opsDir, 'monitoring.json'))).toBe(true);
       expect(await fs.pathExists(join(opsDir, 'release-notes.md'))).toBe(true);
 
-      // The engine registers OPS artifacts with stage: 'bolt' and contract_status: 'draft'.
+      // The engine registers OPS artifacts with stage: 'code-generation' and contract_status: 'draft'.
       // Transition them through draft -> active -> fulfilled to match the real pipeline flow.
       const postOpsManifest = loadManifest(manifestPath)!;
       const opsArtifacts = postOpsManifest.artifacts.filter(a => a.phase === 'operations');
@@ -320,7 +320,7 @@ describe('Pipeline E2E', () => {
       const finalManifest = loadManifest(manifestPath)!;
 
       // Verify construction BOLTs are fulfilled
-      const constructionBolts = finalManifest.artifacts.filter(a => a.stage === 'bolt' && a.phase === 'construction');
+      const constructionBolts = finalManifest.artifacts.filter(a => a.stage === 'code-generation' && a.phase === 'construction');
       expect(constructionBolts.length).toBe(2);
       expect(constructionBolts.every(b => b.contract_status === 'fulfilled')).toBe(true);
 
@@ -395,7 +395,7 @@ describe('Pipeline E2E', () => {
         id: 'BOLT-001',
         type: 'BOLT',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         path: boltFilePath,
         validation_passed: true,
         write_complete: true,
@@ -515,7 +515,7 @@ describe('Pipeline E2E', () => {
       // Setup checkpoint
       const checkpoint = makeCheckpoint(workflowId, featureName, {
         current_phase: 'construction',
-        current_stage: 'bolt',
+        current_stage: 'code-generation',
       });
       await saveCheckpoint(tmpDir, checkpoint);
 
@@ -536,7 +536,7 @@ describe('Pipeline E2E', () => {
 
       const boltPath = await writeArtifactFile(tmpDir, `aidlc-docs/${workflowId}/construction/UNIT-001/BOLT-001.md`, '# BOLT-001\n\nFirst attempt (has bugs).');
       registerArtifact(manifestPath, {
-        id: 'BOLT-001', type: 'BOLT', phase: 'construction', stage: 'bolt',
+        id: 'BOLT-001', type: 'BOLT', phase: 'construction', stage: 'code-generation',
         path: boltPath, validation_passed: true, write_complete: true, checksum: null,
       });
       updateContractStatus(manifestPath, 'BOLT-001', 'active');
@@ -583,7 +583,7 @@ describe('Pipeline E2E', () => {
       const rejectionEvent: WorkflowEvent = {
         type: 'gate_rejection',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         details: 'Missing error handling in auth module',
         artifactId: 'BOLT-001',
       };
@@ -602,7 +602,7 @@ describe('Pipeline E2E', () => {
       const approvalEvent: WorkflowEvent = {
         type: 'gate_approval_after_rejection',
         phase: 'construction',
-        stage: 'bolt',
+        stage: 'code-generation',
         details: 'BOLT-001 approved after revision',
         artifactId: 'BOLT-001',
       };
@@ -628,7 +628,7 @@ describe('Pipeline E2E', () => {
       // Setup checkpoint in olympus mode
       const checkpoint = makeCheckpoint(workflowId, featureName, {
         current_phase: 'construction',
-        current_stage: 'bolt',
+        current_stage: 'code-generation',
         execution_mode: 'olympus',
       });
       await saveCheckpoint(tmpDir, checkpoint);
@@ -653,7 +653,7 @@ describe('Pipeline E2E', () => {
           `# ${bId}\n\nTask ${i} implementation.`,
         );
         registerArtifact(manifestPath, {
-          id: bId, type: 'BOLT', phase: 'construction', stage: 'bolt',
+          id: bId, type: 'BOLT', phase: 'construction', stage: 'code-generation',
           path: bPath, validation_passed: true, write_complete: true, checksum: null,
         });
         // Link to UNIT
@@ -797,7 +797,7 @@ Implement cascade invalidation logic.
       updateContractStatus(manifestPath, 'UNIT-001', 'active');
 
       registerArtifact(manifestPath, {
-        id: 'BOLT-001', type: 'BOLT', phase: 'construction', stage: 'bolt',
+        id: 'BOLT-001', type: 'BOLT', phase: 'construction', stage: 'code-generation',
         path: boltFilePath, validation_passed: true, write_complete: true, checksum: null,
       });
       updateContractStatus(manifestPath, 'BOLT-001', 'active');

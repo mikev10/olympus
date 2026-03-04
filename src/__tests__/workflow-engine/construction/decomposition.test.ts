@@ -2,17 +2,15 @@
  * Tests for Construction Phase: Hierarchical Decomposition
  *
  * Tests the core decomposition logic that transforms INTENTs into
- * hierarchical execution units (INTENT -> UNIT -> BOLT).
+ * named construction units (INTENT -> UNIT -> code generation).
  *
  * Includes tests for:
  * - Legacy parseIntentsFromDisk
  * - New parseIntentFromFile
+ * - slugifyUnitName
  * - decomposeIntentToUnits with limits
- * - decomposeUnitToBolts with limits
- * - enforceGlobalBoltLimit
  * - buildDecompositionTree
- * - getLeafBolts
- * - getExecutableOrder
+ * - getUnits
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -22,13 +20,10 @@ import {
   parseIntentsFromDisk,
   parseIntentFromFile,
   decomposeIntentToUnits,
-  decomposeUnitToBolts,
-  enforceGlobalBoltLimit,
+  slugifyUnitName,
   buildDecompositionTree,
-  getLeafBolts,
-  getExecutableOrder,
+  getUnits,
   type UnitSpec,
-  type BoltSpec,
 } from '../../../features/workflow-engine/construction/decomposition.js';
 import type { HierarchicalNode } from '../../../features/workflow-engine/phase-types.js';
 
@@ -278,17 +273,17 @@ Build multiple components
     expect(result).not.toBeNull();
     expect(result!.proposedUnits).toHaveLength(3);
     expect(result!.proposedUnits[0]).toEqual({
-      id: 'UNIT-001',
+      id: 'database-layer',
       title: 'Database Layer',
       description: 'Handle data persistence and migrations',
     });
     expect(result!.proposedUnits[1]).toEqual({
-      id: 'UNIT-002',
+      id: 'api-layer',
       title: 'API Layer',
       description: 'REST endpoint implementation',
     });
     expect(result!.proposedUnits[2]).toEqual({
-      id: 'UNIT-003',
+      id: 'ui-layer',
       title: 'UI Layer',
       description: 'Frontend components and pages',
     });
@@ -312,8 +307,8 @@ title: "Explicit IDs"
     const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
 
     expect(result!.proposedUnits).toHaveLength(2);
-    expect(result!.proposedUnits[0].id).toBe('UNIT-001');
-    expect(result!.proposedUnits[1].id).toBe('UNIT-002');
+    expect(result!.proposedUnits[0].id).toBe('unit-001');
+    expect(result!.proposedUnits[1].id).toBe('unit-002');
   });
 
   it('should handle empty proposed UNITs section', async () => {
@@ -380,9 +375,9 @@ describe('decomposeIntentToUnits', () => {
     const units = decomposeIntentToUnits(intent, unitSpecs);
 
     expect(units).toHaveLength(3);
-    expect(units[0].id).toBe('UNIT-001');
-    expect(units[1].id).toBe('UNIT-002');
-    expect(units[2].id).toBe('UNIT-003');
+    expect(units[0].id).toBe('unit-one');
+    expect(units[1].id).toBe('unit-two');
+    expect(units[2].id).toBe('unit-three');
   });
 
   it('should set parent_id to intent ID', () => {
@@ -425,7 +420,7 @@ describe('decomposeIntentToUnits', () => {
 
     decomposeIntentToUnits(intent, unitSpecs);
 
-    expect(intent.children_ids).toEqual(['UNIT-001', 'UNIT-002']);
+    expect(intent.children_ids).toEqual(['unit-one', 'unit-two']);
   });
 
   it('should create units with correct properties', () => {
@@ -447,7 +442,7 @@ describe('decomposeIntentToUnits', () => {
     const units = decomposeIntentToUnits(intent, unitSpecs);
 
     expect(units[0]).toMatchObject({
-      id: 'UNIT-001',
+      id: 'database-setup',
       type: 'unit',
       title: 'Database Setup',
       parent_id: 'INTENT-001',
@@ -494,7 +489,7 @@ describe('decomposeIntentToUnits', () => {
 
     decomposeIntentToUnits(intent, unitSpecs);
 
-    expect(intent.children_ids).toEqual(['EXISTING-UNIT', 'UNIT-001']);
+    expect(intent.children_ids).toEqual(['EXISTING-UNIT', 'new-unit']);
   });
 
   describe('limit enforcement', () => {
@@ -584,302 +579,29 @@ describe('decomposeIntentToUnits', () => {
   });
 });
 
-describe('decomposeUnitToBolts', () => {
-  it('should create BOLT nodes with correct IDs', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const boltSpecs: BoltSpec[] = [
-      { title: 'Bolt One', estimated_effort: 2 },
-      { title: 'Bolt Two', estimated_effort: 3 },
-      { title: 'Bolt Three', estimated_effort: 2 },
-      { title: 'Bolt Four', estimated_effort: 3 },
-    ];
-
-    const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-    expect(bolts).toHaveLength(4);
-    expect(bolts[0].id).toBe('BOLT-001');
-    expect(bolts[1].id).toBe('BOLT-002');
-    expect(bolts[2].id).toBe('BOLT-003');
-    expect(bolts[3].id).toBe('BOLT-004');
+describe('slugifyUnitName', () => {
+  it('should convert titles to lowercase hyphenated slugs', () => {
+    expect(slugifyUnitName('Auth Service', 0)).toBe('auth-service');
+    expect(slugifyUnitName('API Gateway', 0)).toBe('api-gateway');
+    expect(slugifyUnitName('User Onboarding', 0)).toBe('user-onboarding');
   });
 
-  it('should set parent_id to unit ID', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-042',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const boltSpecs: BoltSpec[] = [
-      { title: 'Bolt Alpha', estimated_effort: 2 },
-    ];
-
-    const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-    expect(bolts[0].parent_id).toBe('UNIT-042');
+  it('should return fallback for empty titles', () => {
+    expect(slugifyUnitName('', 0)).toBe('unit-0');
+    expect(slugifyUnitName('  ', 2)).toBe('unit-2');
   });
 
-  it('should update unit.children_ids', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const boltSpecs: BoltSpec[] = [
-      { title: 'Bolt One', estimated_effort: 2 },
-      { title: 'Bolt Two', estimated_effort: 3 },
-    ];
-
-    decomposeUnitToBolts(unit, boltSpecs);
-
-    expect(unit.children_ids).toEqual(['BOLT-001', 'BOLT-002']);
+  it('should strip non-alphanumeric characters', () => {
+    expect(slugifyUnitName('Hello World!@#', 0)).toBe('hello-world');
   });
 
-  it('should create bolts with correct properties', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const boltSpecs: BoltSpec[] = [
-      { title: 'Create table migration', estimated_effort: 2 },
-    ];
-
-    const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-    expect(bolts[0]).toMatchObject({
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Create table migration',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 2,
-    });
-  });
-
-  it('should handle empty boltSpecs array', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const bolts = decomposeUnitToBolts(unit, []);
-
-    expect(bolts).toEqual([]);
-    expect(unit.children_ids).toEqual([]);
-  });
-
-  it('should create bolts with empty children_ids (leaf nodes)', () => {
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Test Unit',
-      parent_id: 'INTENT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const boltSpecs: BoltSpec[] = [
-      { title: 'Task A', estimated_effort: 1 },
-      { title: 'Task B', estimated_effort: 1 },
-    ];
-
-    const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-    expect(bolts[0].children_ids).toEqual([]);
-    expect(bolts[1].children_ids).toEqual([]);
-  });
-
-  describe('limit enforcement', () => {
-    it('should truncate bolts when exceeding maxBolts default (8)', () => {
-      const unit: HierarchicalNode = {
-        id: 'UNIT-001',
-        type: 'unit',
-        title: 'Big Unit',
-        parent_id: 'INTENT-001',
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: 40,
-      };
-
-      // 10 specs exceeds default limit of 8
-      const boltSpecs: BoltSpec[] = Array.from({ length: 10 }, (_, i) => ({
-        title: `Bolt ${i + 1}`,
-        estimated_effort: 4,
-      }));
-
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-      const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-      expect(bolts).toHaveLength(8);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Bolt specs (10) exceed maxBolts limit (8)')
-      );
-
-      warnSpy.mockRestore();
-    });
-
-    it('should respect custom maxBolts', () => {
-      const unit: HierarchicalNode = {
-        id: 'UNIT-001',
-        type: 'unit',
-        title: 'Custom Limit Unit',
-        parent_id: 'INTENT-001',
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: 20,
-      };
-
-      const boltSpecs: BoltSpec[] = Array.from({ length: 6 }, (_, i) => ({
-        title: `Bolt ${i + 1}`,
-        estimated_effort: 3,
-      }));
-
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-      const bolts = decomposeUnitToBolts(unit, boltSpecs, 4);
-
-      expect(bolts).toHaveLength(4);
-      expect(warnSpy).toHaveBeenCalled();
-
-      warnSpy.mockRestore();
-    });
-
-    it('should not truncate when under limit', () => {
-      const unit: HierarchicalNode = {
-        id: 'UNIT-001',
-        type: 'unit',
-        title: 'Small Unit',
-        parent_id: 'INTENT-001',
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: 6,
-      };
-
-      const boltSpecs: BoltSpec[] = [
-        { title: 'Bolt One', estimated_effort: 3 },
-        { title: 'Bolt Two', estimated_effort: 3 },
-      ];
-
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-      const bolts = decomposeUnitToBolts(unit, boltSpecs);
-
-      expect(bolts).toHaveLength(2);
-      expect(warnSpy).not.toHaveBeenCalled();
-
-      warnSpy.mockRestore();
-    });
+  it('should truncate slugs longer than 60 characters', () => {
+    const longTitle = 'a'.repeat(80);
+    const result = slugifyUnitName(longTitle, 0);
+    expect(result.length).toBeLessThanOrEqual(60);
   });
 });
 
-describe('enforceGlobalBoltLimit', () => {
-  function makeBolt(id: string): HierarchicalNode {
-    return {
-      id,
-      type: 'bolt',
-      title: `Bolt ${id}`,
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 2,
-    };
-  }
-
-  it('should return same array when under limit', () => {
-    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002')];
-    const result = enforceGlobalBoltLimit(bolts, 50);
-
-    expect(result).toBe(bolts); // same reference
-    expect(result).toHaveLength(2);
-  });
-
-  it('should return same array when exactly at limit', () => {
-    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002'), makeBolt('BOLT-003')];
-    const result = enforceGlobalBoltLimit(bolts, 3);
-
-    expect(result).toBe(bolts);
-    expect(result).toHaveLength(3);
-  });
-
-  it('should truncate when over limit', () => {
-    const bolts = Array.from({ length: 10 }, (_, i) =>
-      makeBolt(`BOLT-${String(i + 1).padStart(3, '0')}`)
-    );
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const result = enforceGlobalBoltLimit(bolts, 5);
-
-    expect(result).toHaveLength(5);
-    expect(result[0].id).toBe('BOLT-001');
-    expect(result[4].id).toBe('BOLT-005');
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Total bolts (10) exceed global limit (5)')
-    );
-
-    warnSpy.mockRestore();
-  });
-
-  it('should handle empty array', () => {
-    const result = enforceGlobalBoltLimit([], 50);
-    expect(result).toHaveLength(0);
-  });
-
-  it('should truncate to 1 when maxTotal is 1', () => {
-    const bolts = [makeBolt('BOLT-001'), makeBolt('BOLT-002')];
-
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const result = enforceGlobalBoltLimit(bolts, 1);
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('BOLT-001');
-
-    warnSpy.mockRestore();
-  });
-});
 
 describe('buildDecompositionTree', () => {
   it('should create tree with intents as roots', () => {
@@ -972,64 +694,41 @@ describe('buildDecompositionTree', () => {
   });
 });
 
-describe('getLeafBolts', () => {
-  it('should return only bolt nodes with no children', () => {
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Bolt One',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 1,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Bolt Two',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 1,
-    };
-
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001', 'BOLT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 2,
-    };
-
+describe('getUnits', () => {
+  it('should return only unit nodes from tree', () => {
     const intent: HierarchicalNode = {
       id: 'INTENT-001',
       type: 'intent',
       title: 'Intent One',
       parent_id: null,
-      children_ids: ['UNIT-001'],
+      children_ids: ['unit-alpha'],
       status: 'pending',
       assigned_agent: null,
-      estimated_effort: 2,
+      estimated_effort: 5,
+    };
+
+    const unit: HierarchicalNode = {
+      id: 'unit-alpha',
+      type: 'unit',
+      title: 'Unit Alpha',
+      parent_id: 'INTENT-001',
+      children_ids: [],
+      status: 'pending',
+      assigned_agent: null,
+      estimated_effort: 5,
     };
 
     const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit);
-    tree.nodes.set('BOLT-001', bolt1);
-    tree.nodes.set('BOLT-002', bolt2);
+    tree.nodes.set('unit-alpha', unit);
 
-    const leafBolts = getLeafBolts(tree);
+    const units = getUnits(tree);
 
-    expect(leafBolts).toHaveLength(2);
-    expect(leafBolts.map(b => b.id)).toEqual(['BOLT-001', 'BOLT-002']);
+    expect(units).toHaveLength(1);
+    expect(units[0].id).toBe('unit-alpha');
+    expect(units[0].type).toBe('unit');
   });
 
-  it('should return empty array if no bolts', () => {
+  it('should return empty array if no units', () => {
     const intent: HierarchicalNode = {
       id: 'INTENT-001',
       type: 'intent',
@@ -1043,527 +742,14 @@ describe('getLeafBolts', () => {
 
     const tree = buildDecompositionTree([intent]);
 
-    const leafBolts = getLeafBolts(tree);
+    const units = getUnits(tree);
 
-    expect(leafBolts).toEqual([]);
+    expect(units).toEqual([]);
   });
 
-  it('should handle tree with only intents (no decomposition)', () => {
-    const intents: HierarchicalNode[] = [
-      {
-        id: 'INTENT-001',
-        type: 'intent',
-        title: 'Intent One',
-        parent_id: null,
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: 5,
-      },
-      {
-        id: 'INTENT-002',
-        type: 'intent',
-        title: 'Intent Two',
-        parent_id: null,
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: 3,
-      },
-    ];
-
-    const tree = buildDecompositionTree(intents);
-
-    const leafBolts = getLeafBolts(tree);
-
-    expect(leafBolts).toEqual([]);
-  });
-
-  it('should not return units, only bolts', () => {
-    const bolt: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Bolt One',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 1,
-    };
-
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 1,
-    };
-
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent One',
-      parent_id: null,
-      children_ids: ['UNIT-001'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 1,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit);
-    tree.nodes.set('BOLT-001', bolt);
-
-    const leafBolts = getLeafBolts(tree);
-
-    expect(leafBolts).toHaveLength(1);
-    expect(leafBolts[0].type).toBe('bolt');
-    expect(leafBolts[0].id).toBe('BOLT-001');
-  });
-
-  it('should handle multiple units with bolts', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: ['UNIT-001', 'UNIT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const unit1: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001', 'BOLT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const unit2: HierarchicalNode = {
-      id: 'UNIT-002',
-      type: 'unit',
-      title: 'Unit Two',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-003'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Bolt One',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 2,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Bolt Two',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 3,
-    };
-
-    const bolt3: HierarchicalNode = {
-      id: 'BOLT-003',
-      type: 'bolt',
-      title: 'Bolt Three',
-      parent_id: 'UNIT-002',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit1);
-    tree.nodes.set('UNIT-002', unit2);
-    tree.nodes.set('BOLT-001', bolt1);
-    tree.nodes.set('BOLT-002', bolt2);
-    tree.nodes.set('BOLT-003', bolt3);
-
-    const leafBolts = getLeafBolts(tree);
-
-    expect(leafBolts).toHaveLength(3);
-    expect(leafBolts.map(b => b.id).sort()).toEqual(['BOLT-001', 'BOLT-002', 'BOLT-003']);
-  });
-});
-
-describe('getExecutableOrder', () => {
-  it('should place non-blocked bolts before blocked ones', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: ['UNIT-001', 'UNIT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const unit1: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const unit2: HierarchicalNode = {
-      id: 'UNIT-002',
-      type: 'unit',
-      title: 'Unit Two',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-002'],
-      status: 'blocked',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Executable Bolt',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Blocked Bolt',
-      parent_id: 'UNIT-002',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit1);
-    tree.nodes.set('UNIT-002', unit2);
-    tree.nodes.set('BOLT-001', bolt1);
-    tree.nodes.set('BOLT-002', bolt2);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order).toHaveLength(2);
-    expect(order[0].id).toBe('BOLT-001');
-    expect(order[1].id).toBe('BOLT-002');
-  });
-
-  it('should sort bolts by ID within same status', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: ['UNIT-001'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const unit: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-003', 'BOLT-001', 'BOLT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-003',
-      type: 'bolt',
-      title: 'Bolt Three',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 3,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Bolt One',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 3,
-    };
-
-    const bolt3: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Bolt Two',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 4,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit);
-    tree.nodes.set('BOLT-001', bolt2);
-    tree.nodes.set('BOLT-002', bolt3);
-    tree.nodes.set('BOLT-003', bolt1);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order.map(b => b.id)).toEqual(['BOLT-001', 'BOLT-002', 'BOLT-003']);
-  });
-
-  it('should handle empty tree', () => {
+  it('should return empty array for empty tree', () => {
     const tree = buildDecompositionTree([]);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order).toEqual([]);
-  });
-
-  it('should handle tree with no bolts', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order).toEqual([]);
-  });
-
-  it('should handle all bolts being blocked', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: ['UNIT-001', 'UNIT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 10,
-    };
-
-    const unit1: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001'],
-      status: 'blocked',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const unit2: HierarchicalNode = {
-      id: 'UNIT-002',
-      type: 'unit',
-      title: 'Unit Two',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-002'],
-      status: 'blocked',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Blocked Bolt One',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Blocked Bolt Two',
-      parent_id: 'UNIT-002',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit1);
-    tree.nodes.set('UNIT-002', unit2);
-    tree.nodes.set('BOLT-001', bolt1);
-    tree.nodes.set('BOLT-002', bolt2);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order).toHaveLength(2);
-    expect(order.map(b => b.id)).toEqual(['BOLT-001', 'BOLT-002']);
-  });
-
-  it('should handle bolts without parent unit', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    // Orphan bolt with parent_id that doesn't exist in tree
-    const orphanBolt: HierarchicalNode = {
-      id: 'BOLT-ORPHAN',
-      type: 'bolt',
-      title: 'Orphan Bolt',
-      parent_id: 'UNIT-MISSING',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 2,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('BOLT-ORPHAN', orphanBolt);
-
-    const order = getExecutableOrder(tree);
-
-    // Orphan bolt should be treated as blocked
-    expect(order).toHaveLength(1);
-    expect(order[0].id).toBe('BOLT-ORPHAN');
-  });
-
-  it('should maintain sort order for mixed blocked and non-blocked bolts', () => {
-    const intent: HierarchicalNode = {
-      id: 'INTENT-001',
-      type: 'intent',
-      title: 'Intent',
-      parent_id: null,
-      children_ids: ['UNIT-001', 'UNIT-002', 'UNIT-003'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 15,
-    };
-
-    const unit1: HierarchicalNode = {
-      id: 'UNIT-001',
-      type: 'unit',
-      title: 'Unit One',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-003'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const unit2: HierarchicalNode = {
-      id: 'UNIT-002',
-      type: 'unit',
-      title: 'Unit Two',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-001'],
-      status: 'blocked',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const unit3: HierarchicalNode = {
-      id: 'UNIT-003',
-      type: 'unit',
-      title: 'Unit Three',
-      parent_id: 'INTENT-001',
-      children_ids: ['BOLT-002'],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt1: HierarchicalNode = {
-      id: 'BOLT-003',
-      type: 'bolt',
-      title: 'Bolt Three',
-      parent_id: 'UNIT-001',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt2: HierarchicalNode = {
-      id: 'BOLT-001',
-      type: 'bolt',
-      title: 'Blocked Bolt',
-      parent_id: 'UNIT-002',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const bolt3: HierarchicalNode = {
-      id: 'BOLT-002',
-      type: 'bolt',
-      title: 'Bolt Two',
-      parent_id: 'UNIT-003',
-      children_ids: [],
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: 5,
-    };
-
-    const tree = buildDecompositionTree([intent]);
-    tree.nodes.set('UNIT-001', unit1);
-    tree.nodes.set('UNIT-002', unit2);
-    tree.nodes.set('UNIT-003', unit3);
-    tree.nodes.set('BOLT-001', bolt2);
-    tree.nodes.set('BOLT-002', bolt3);
-    tree.nodes.set('BOLT-003', bolt1);
-
-    const order = getExecutableOrder(tree);
-
-    expect(order).toHaveLength(3);
-    // Non-blocked bolts first (sorted by ID)
-    expect(order[0].id).toBe('BOLT-002');
-    expect(order[1].id).toBe('BOLT-003');
-    // Blocked bolt last
-    expect(order[2].id).toBe('BOLT-001');
+    const units = getUnits(tree);
+    expect(units).toEqual([]);
   });
 });

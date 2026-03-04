@@ -158,10 +158,10 @@ describe('getCeremonyArtifactTemplates', () => {
     expect(templates.risk).toContain('Impact');
   });
 
-  it('unit template contains Bolt section', () => {
+  it('unit template contains Code Generation Plan section', () => {
     const templates = getCeremonyArtifactTemplates();
-    const hasBolt =
-      templates.unit.includes('Proposed Bolts') || templates.unit.includes('Bolt');
-    expect(hasBolt).toBe(true);
+    const hasCodeGen =
+      templates.unit.includes('Code Generation Plan') || templates.unit.includes('Code Generation');
+    expect(hasCodeGen).toBe(true);
   });
 });

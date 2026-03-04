@@ -129,7 +129,7 @@ export function presentGate4Batch(
 
 export function presentGate5(manifest: ManifestSchema, trustLevel: number): GatePresentation {
   const totalArtifacts = manifest.artifacts.length;
-  const boltArtifacts = manifest.artifacts.filter(a => a.stage === 'bolt');
+  const boltArtifacts = manifest.artifacts.filter(a => a.stage === 'code-generation');
 
   const approvals = manifest.gate_audit.filter(g => g.action === 'approved').length;
   const rejections = manifest.gate_audit.filter(g => g.action === 'rejected').length;

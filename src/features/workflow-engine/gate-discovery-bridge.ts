@@ -16,8 +16,8 @@ import type { AgentDiscovery } from '../../learning/types.js';
 
 export interface GateEvent {
   gateNumber: number;       // 1-5
-  artifactId: string;       // e.g., "BOLT-003"
-  artifactType: string;     // e.g., "bolt", "intent", "unit"
+  artifactId: string;       // e.g., "code-gen-003"
+  artifactType: string;     // e.g., "code-generation", "intent", "unit"
   action: 'approved' | 'rejected';
   reason: string;
   previouslyRejected: boolean;  // true if this artifact was rejected before

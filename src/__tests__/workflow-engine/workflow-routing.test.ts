@@ -192,7 +192,7 @@ describe('generateWorkflowRouting', () => {
       expect(typeof plan.risk_tier).toBe('number');
       expect(plan.phases).toBeDefined();
       expect(Array.isArray(plan.stages)).toBe(true);
-      expect(typeof plan.estimated_bolts).toBe('number');
+      expect(typeof plan.estimated_code_generations).toBe('number');
       expect(typeof plan.estimated_depth).toBe('string');
       expect(typeof plan.generated_at).toBe('string');
       expect(plan.approved_at).toBeNull();
@@ -200,23 +200,23 @@ describe('generateWorkflowRouting', () => {
     });
   });
 
-  describe('estimated_bolts calculation', () => {
-    it('minimal depth → estimated_bolts = 1', async () => {
+  describe('estimated_code_generations calculation', () => {
+    it('minimal depth → estimated_code_generations = 1', async () => {
       const plan = await buildPlan(
         'greenfield',
         { total_score: 8, recommended_depth: 'minimal', skip_units: true },
         500,
       );
-      expect(plan.estimated_bolts).toBe(1);
+      expect(plan.estimated_code_generations).toBe(1);
     });
 
-    it('standard depth with 100 source files → estimated_bolts = 2', async () => {
+    it('standard depth with 100 source files → estimated_code_generations = 2', async () => {
       const plan = await buildPlan(
         'greenfield',
         { total_score: 15, recommended_depth: 'standard', skip_units: false },
         100,
       );
-      expect(plan.estimated_bolts).toBe(2);
+      expect(plan.estimated_code_generations).toBe(2);
     });
 
     it('comprehensive depth with 50 source files → at least 2', async () => {
@@ -225,7 +225,7 @@ describe('generateWorkflowRouting', () => {
         { total_score: 25, recommended_depth: 'comprehensive', skip_units: false },
         50,
       );
-      expect(plan.estimated_bolts).toBe(2);
+      expect(plan.estimated_code_generations).toBe(2);
     });
 
     it('comprehensive depth bolt count capped at 20', async () => {
@@ -234,7 +234,7 @@ describe('generateWorkflowRouting', () => {
         { total_score: 25, recommended_depth: 'comprehensive', skip_units: false },
         600,
       );
-      expect(plan.estimated_bolts).toBe(20);
+      expect(plan.estimated_code_generations).toBe(20);
     });
 
     it('bugfix always produces 1 bolt regardless of depth', async () => {
@@ -243,7 +243,7 @@ describe('generateWorkflowRouting', () => {
         { total_score: 25, recommended_depth: 'comprehensive', skip_units: false },
         600,
       );
-      expect(plan.estimated_bolts).toBe(1);
+      expect(plan.estimated_code_generations).toBe(1);
     });
   });
 
@@ -376,11 +376,11 @@ describe('writeWorkflowRoutingArtifact + loadWorkflowRouting', () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.pathway).toBe('bugfix');
     expect(loaded!.risk_assessment).toBe('LOW');
-    expect(loaded!.estimated_bolts).toBe(1);
+    expect(loaded!.estimated_code_generations).toBe(1);
     expect(loaded!.estimated_depth).toBe('minimal');
   });
 
-  it('load preserves estimated_bolts for standard depth', async () => {
+  it('load preserves estimated_code_generations for standard depth', async () => {
     const plan = await buildPlan(
       'greenfield',
       { total_score: 15, recommended_depth: 'standard' },
@@ -390,7 +390,7 @@ describe('writeWorkflowRoutingArtifact + loadWorkflowRouting', () => {
 
     const loaded = loadWorkflowRouting(tmpDir, 'wf-bolts');
     expect(loaded).not.toBeNull();
-    expect(loaded!.estimated_bolts).toBe(2);
+    expect(loaded!.estimated_code_generations).toBe(2);
   });
 
   it('approved_at is null when pending', async () => {
@@ -446,7 +446,7 @@ describe('isPhaseIncluded', () => {
       risk_tier: 1,
       phases: {} as WorkflowRoutingPlan['phases'],
       stages: [],
-      estimated_bolts: 1,
+      estimated_code_generations: 1,
       estimated_depth: 'minimal',
       generated_at: new Date().toISOString(),
       approved_at: null,
@@ -482,7 +482,7 @@ describe('isStageIncluded', () => {
         operations: { included: true, rationale: '' },
       },
       stages: [],
-      estimated_bolts: 1,
+      estimated_code_generations: 1,
       estimated_depth: 'minimal',
       generated_at: new Date().toISOString(),
       approved_at: null,

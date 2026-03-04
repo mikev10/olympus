@@ -2,7 +2,7 @@
  * Workflow Engine Type Definitions
  *
  * Comprehensive types for the ODLC 3-stage pipeline:
- * intent → unit → bolt → complete
+ * intent -> unit -> code-generation -> complete
  */
 
 /**
@@ -11,10 +11,10 @@
  *
  * - intent: Problem statement, personas, success metrics, constraints, business requirements, technical spec, proposed UNITs
  * - unit: Module scope, interface contracts, acceptance criteria
- * - bolt: Smallest execution unit — domain design, logical design, implementation steps
+ * - code-generation: Two-part execution rhythm (PART 1: AI creates plan, human approves; PART 2: AI generates code)
  * - complete: All stages finished and validated
  */
-export type WorkflowStage = 'intent' | 'unit' | 'bolt' | 'complete';
+export type WorkflowStage = 'intent' | 'unit' | 'code-generation' | 'complete';
 
 /**
  * Current status of a workflow or workflow stage.
@@ -28,10 +28,10 @@ export type WorkflowStage = 'intent' | 'unit' | 'bolt' | 'complete';
  * - awaiting_dev_review: Waiting for developer review (Risk Tier 3)
  * - deferred: Workflow paused with intent to return
  * - archived: Workflow archived (legacy or completed)
- * - awaiting_bolt_plan_approval: Bolt plan has been generated and is awaiting developer approval
- * - executing_bolt_plan: Approved bolt plan is being executed
+ * - awaiting_code_plan_approval: Code plan has been generated and is awaiting developer approval
+ * - executing_code_plan: Approved code plan is being executed
  */
-export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked' | 'complete' | 'awaiting_mode_selection' | 'awaiting_dev_review' | 'deferred' | 'archived' | 'awaiting_bolt_plan_approval' | 'executing_bolt_plan';
+export type WorkflowStatus = 'not_started' | 'in_progress' | 'paused' | 'blocked' | 'complete' | 'awaiting_mode_selection' | 'awaiting_dev_review' | 'deferred' | 'archived' | 'awaiting_code_plan_approval' | 'executing_code_plan';
 
 /**
  * Reference to a workflow artifact (file produced by a stage).

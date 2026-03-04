@@ -273,7 +273,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -304,7 +304,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -314,7 +314,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-2',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-2.md',
             contract_status: 'draft',
@@ -375,7 +375,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -401,7 +401,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -423,7 +423,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -445,7 +445,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -467,7 +467,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -489,7 +489,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -518,7 +518,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -541,7 +541,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -551,7 +551,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-2',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-2.md',
             contract_status: 'active',
@@ -584,7 +584,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -608,7 +608,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -631,7 +631,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -682,7 +682,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -692,7 +692,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-2',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-2.md',
             contract_status: 'active',
@@ -731,7 +731,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -741,7 +741,7 @@ describe('gate-presenter', () => {
           },
           {
             id: 'bolt-2',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-2.md',
             contract_status: 'fulfilled',
@@ -827,7 +827,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',
@@ -848,7 +848,7 @@ describe('gate-presenter', () => {
         artifacts: [
           {
             id: 'bolt-1',
-            stage: 'bolt',
+            stage: 'code-generation',
             type: 'bolt-spec',
             path: 'aidlc-docs/construction/bolt-1.md',
             contract_status: 'active',

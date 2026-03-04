@@ -2,18 +2,16 @@ import * as fs from 'fs-extra';
 import { join, dirname } from 'path';
 
 /**
- * Data structure for BOLT validation results that will be recorded in the validation report.
+ * Data structure for code generation validation results recorded in the validation report.
  */
 export interface BoltValidationData {
-  /** Unique BOLT identifier (e.g., 'BOLT-001') */
   boltId: string;
-  /** Human-readable BOLT title or description */
   boltTitle: string;
-  /** Commands executed during BOLT implementation */
+  /** Commands executed during code generation */
   commandsExecuted: Array<{ command: string; exitCode: number; result: string }>;
   /** Test suite results */
   testResults: Array<{ suite: string; pass: number; fail: number; skip: number }>;
-  /** Files changed during BOLT implementation */
+  /** Files changed during code generation */
   filesChanged: Array<{ path: string; action: 'created' | 'modified' | 'deleted' }>;
   /** How the gate was approved: 'human' or 'auto-approved' */
   gateApprovedBy: string;
@@ -47,7 +45,7 @@ export interface BoltValidationData {
  *   '/path/to/aidlc-docs/construction/UNIT-001/validation-report.md',
  *   'UNIT-001',
  *   {
- *     boltId: 'BOLT-001',
+ *     boltId: 'auth-service-code-plan',
  *     boltTitle: 'Implement user authentication',
  *     commandsExecuted: [{ command: 'npm test', exitCode: 0, result: 'passed' }],
  *     testResults: [{ suite: 'auth', pass: 15, fail: 0, skip: 0 }],

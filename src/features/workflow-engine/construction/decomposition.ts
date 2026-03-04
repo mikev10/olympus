@@ -1,8 +1,8 @@
 /**
  * Construction Phase: Hierarchical Decomposition
  *
- * Decomposes high-level INTENTs from the Inception phase into hierarchical execution units:
- * - INTENT (from Inception phase) -> UNIT (architectural components) -> BOLT (atomic tasks)
+ * Decomposes high-level INTENTs from the Inception phase into named construction units:
+ * - INTENT (from Inception phase) -> UNIT (named architectural components) -> code generation
  *
  * This module provides the core decomposition logic for the Construction phase of ODLC,
  * transforming strategic intents into executable work items.
@@ -19,12 +19,6 @@ export interface UnitSpec {
   description?: string;
 }
 
-export interface BoltSpec {
-  title: string;
-  estimated_effort: number;
-  description?: string;
-}
-
 export interface DecompositionTree {
   roots: HierarchicalNode[];  // intent-level nodes
   nodes: Map<string, HierarchicalNode>;  // all nodes by ID
@@ -33,8 +27,42 @@ export interface DecompositionTree {
 /** Default limit for units per intent */
 const DEFAULT_MAX_UNITS = 10;
 
-/** Default limit for bolts per unit */
-const DEFAULT_MAX_BOLTS = 8;
+/**
+ * Converts a unit title into a human-readable slug suitable for directory names.
+ *
+ * Examples:
+ *   "Auth Service"       -> "auth-service"
+ *   "API Gateway"        -> "api-gateway"
+ *   "User Onboarding"    -> "user-onboarding"
+ *   ""                   -> "unit-0" (fallback with index)
+ *
+ * @param title - The human-readable unit title
+ * @param index - Zero-based index used as fallback when title is empty
+ * @returns A lowercase, hyphen-separated slug
+ */
+export function slugifyUnitName(title: string, index: number): string {
+  if (!title || !title.trim()) {
+    return `unit-${index}`;
+  }
+
+  const slug = title
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (!slug) {
+    return `unit-${index}`;
+  }
+
+  // Truncate overly long slugs
+  if (slug.length > 60) {
+    return slug.substring(0, 60).replace(/-$/, '');
+  }
+
+  return slug;
+}
 
 /**
  * Parses INTENT-*.md files from disk and returns HierarchicalNode array.
@@ -145,16 +173,13 @@ export async function parseIntentFromFile(intentPath: string): Promise<{
     const unitsMatch = content.match(/### Proposed UNITs\s*\n([\s\S]*?)(?=\n##[^#]|\n---|\Z|$)/);
     if (unitsMatch) {
       const unitsSection = unitsMatch[1];
-      // Parse bullet points: - **BOLT-NNN**: description  OR  - **UNIT-NNN**: description
-      // Also handles: - **title**: description
       const bulletRegex = /^-\s+\*\*([^*]+)\*\*:\s*(.+)$/gm;
       let bulletMatch;
-      let index = 1;
+      let index = 0;
       while ((bulletMatch = bulletRegex.exec(unitsSection)) !== null) {
         const rawTitle = bulletMatch[1].trim();
         const description = bulletMatch[2].trim();
-        // If the title already looks like UNIT-NNN, use it; otherwise generate an ID
-        const id = rawTitle.match(/^UNIT-\d+$/i) ? rawTitle.toUpperCase() : `UNIT-${String(index).padStart(3, '0')}`;
+        const id = slugifyUnitName(rawTitle, index);
         proposedUnits.push({
           id,
           title: rawTitle,
@@ -175,18 +200,12 @@ export async function parseIntentFromFile(intentPath: string): Promise<{
 }
 
 /**
- * Decomposes an INTENT node into UNIT nodes.
+ * Decomposes an INTENT node into named UNIT nodes.
  *
- * Creates child UNIT nodes under the given intent, auto-generating IDs
- * in the format UNIT-001, UNIT-002, etc.
+ * Creates child UNIT nodes under the given intent with human-readable slugified IDs
+ * derived from each unit's title (e.g., "auth-service", "api-gateway").
  *
- * If more unit specs are provided than maxUnits allows, the list is truncated
- * and a warning is logged.
- *
- * @param intent - The parent intent node
- * @param unitSpecs - Specifications for the units to create
- * @param maxUnits - Maximum number of units to create (default 10)
- * @returns Array of created unit nodes
+ * If more unit specs are provided than maxUnits allows, the list is truncated.
  */
 export function decomposeIntentToUnits(
   intent: HierarchicalNode,
@@ -205,7 +224,7 @@ export function decomposeIntentToUnits(
 
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i];
-    const unitId = `UNIT-${String(i + 1).padStart(3, '0')}`;
+    const unitId = slugifyUnitName(spec.title, i);
 
     const unit: HierarchicalNode = {
       id: unitId,
@@ -226,88 +245,11 @@ export function decomposeIntentToUnits(
 }
 
 /**
- * Decomposes a UNIT node into BOLT nodes.
- *
- * Creates child BOLT nodes under the given unit, auto-generating IDs
- * in the format BOLT-001, BOLT-002, etc.
- *
- * If more bolt specs are provided than maxBolts allows, the list is truncated
- * and a warning is logged.
- *
- * @param unit - The parent unit node
- * @param boltSpecs - Specifications for the bolts to create
- * @param maxBolts - Maximum number of bolts to create (default 8)
- * @returns Array of created bolt nodes
- */
-export function decomposeUnitToBolts(
-  unit: HierarchicalNode,
-  boltSpecs: BoltSpec[],
-  maxBolts: number = DEFAULT_MAX_BOLTS
-): HierarchicalNode[] {
-  let specs = boltSpecs;
-  if (specs.length > maxBolts) {
-    console.warn(
-      `[decomposition] Bolt specs (${specs.length}) exceed maxBolts limit (${maxBolts}) for ${unit.id}. Truncating to ${maxBolts}.`
-    );
-    specs = specs.slice(0, maxBolts);
-  }
-
-  const bolts: HierarchicalNode[] = [];
-
-  for (let i = 0; i < specs.length; i++) {
-    const spec = specs[i];
-    const boltId = `BOLT-${String(i + 1).padStart(3, '0')}`;
-
-    const bolt: HierarchicalNode = {
-      id: boltId,
-      type: 'bolt',
-      title: spec.title,
-      parent_id: unit.id,
-      children_ids: [],  // Bolts are leaf nodes
-      status: 'pending',
-      assigned_agent: null,
-      estimated_effort: spec.estimated_effort,
-    };
-
-    bolts.push(bolt);
-    unit.children_ids.push(boltId);
-  }
-
-  return bolts;
-}
-
-/**
- * Enforces a global bolt limit across all units.
- *
- * If the total number of bolts exceeds maxTotal, truncates the list and logs a warning.
- *
- * @param allBolts - All bolts from all units
- * @param maxTotal - Maximum total bolts allowed (default 50)
- * @returns Truncated bolt list if over limit, otherwise original list
- */
-export function enforceGlobalBoltLimit(
-  allBolts: HierarchicalNode[],
-  maxTotal: number
-): HierarchicalNode[] {
-  if (allBolts.length <= maxTotal) {
-    return allBolts;
-  }
-
-  console.warn(
-    `[decomposition] Total bolts (${allBolts.length}) exceed global limit (${maxTotal}). Truncating to ${maxTotal}.`
-  );
-  return allBolts.slice(0, maxTotal);
-}
-
-/**
  * Builds a complete decomposition tree from intent nodes.
  *
  * Takes an array of intent nodes (which should already have their children
- * populated via decomposeIntentToUnits and decomposeUnitToBolts) and creates
- * a tree structure with lookup capabilities.
- *
- * @param intents - Array of intent nodes with their decomposed children
- * @returns DecompositionTree with roots and node map
+ * populated via decomposeIntentToUnits) and creates a tree structure with
+ * lookup capabilities.
  */
 export function buildDecompositionTree(intents: HierarchicalNode[]): DecompositionTree {
   const nodes = new Map<string, HierarchicalNode>();
@@ -338,57 +280,19 @@ export function buildDecompositionTree(intents: HierarchicalNode[]): Decompositi
 }
 
 /**
- * Retrieves all leaf-level BOLT nodes from the tree.
- *
- * Leaf bolts are nodes with type='bolt' and no children.
- * These represent the atomic, executable work items.
+ * Returns all unit nodes from the decomposition tree.
  *
  * @param tree - The decomposition tree
- * @returns Array of leaf bolt nodes
+ * @returns Array of unit nodes
  */
-export function getLeafBolts(tree: DecompositionTree): HierarchicalNode[] {
-  const leafBolts: HierarchicalNode[] = [];
+export function getUnits(tree: DecompositionTree): HierarchicalNode[] {
+  const units: HierarchicalNode[] = [];
 
   for (const node of tree.nodes.values()) {
-    if (node.type === 'bolt' && node.children_ids.length === 0) {
-      leafBolts.push(node);
+    if (node.type === 'unit') {
+      units.push(node);
     }
   }
 
-  return leafBolts;
-}
-
-/**
- * Returns bolts in executable order, respecting dependencies and parent status.
- *
- * Bolts are ordered such that:
- * 1. Bolts whose parent units are not blocked come first
- * 2. Bolts within the same unit maintain their creation order
- * 3. Blocked bolts come last
- *
- * @param tree - The decomposition tree
- * @returns Array of bolt nodes in topological execution order
- */
-export function getExecutableOrder(tree: DecompositionTree): HierarchicalNode[] {
-  const leafBolts = getLeafBolts(tree);
-
-  // Separate bolts by their parent unit status
-  const executableBolts: HierarchicalNode[] = [];
-  const blockedBolts: HierarchicalNode[] = [];
-
-  for (const bolt of leafBolts) {
-    const parentUnit = tree.nodes.get(bolt.parent_id || '');
-
-    if (!parentUnit || parentUnit.status === 'blocked') {
-      blockedBolts.push(bolt);
-    } else {
-      executableBolts.push(bolt);
-    }
-  }
-
-  // Sort executable bolts by ID to maintain creation order
-  executableBolts.sort((a, b) => a.id.localeCompare(b.id));
-  blockedBolts.sort((a, b) => a.id.localeCompare(b.id));
-
-  return [...executableBolts, ...blockedBolts];
+  return units;
 }

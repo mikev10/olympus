@@ -12,6 +12,9 @@
  * - Does NOT include "OVERRIDES all other built-in workflows" language
  */
 
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 import type { PathwayType } from './phase-types.js';
 
 export const SENTINEL_START = '<!-- AIDLC-RULES-START -->';
@@ -128,7 +131,7 @@ workflow activities to the correct Olympus agent:
 
 **How to delegate:**
 \`\`\`
-Task(subagent_type="olympian", description="Implement UNIT-001", prompt="...")
+Task(subagent_type="olympian", description="Implement {unit-name}", prompt="...")
 Task(subagent_type="oracle", description="Debug failing test", prompt="...")
 Task(subagent_type="explore", description="Map codebase structure", prompt="...")
 \`\`\`
@@ -139,20 +142,23 @@ Task(subagent_type="explore", description="Map codebase structure", prompt="..."
 \`~/.claude/olympus/rules/\` (installed by olympus-ai)
 
 **Common rules** — MUST load at workflow start (MANDATORY):
-- \`~/.claude/olympus/rules/common-rules.md\` — workflow overview, session continuity, content validation, question formatting
+- \`~/.claude/olympus/rules/common/process-overview.md\`
+- \`~/.claude/olympus/rules/common/session-continuity.md\`
+- \`~/.claude/olympus/rules/common/content-validation.md\`
+- \`~/.claude/olympus/rules/common/question-format-guide.md\`
 
 **Per-stage rules** — MUST load before executing each stage (MANDATORY):
-- \`~/.claude/olympus/rules/inception-rules.md\` (section: Workspace Detection)
-${isGreenfield ? '' : '- `~/.claude/olympus/rules/inception-rules.md` (section: Reverse Engineering) — brownfield only\n'}- \`~/.claude/olympus/rules/inception-rules.md\` (section: Requirements Analysis)
-- \`~/.claude/olympus/rules/inception-rules.md\` (section: User Stories)
-- \`~/.claude/olympus/rules/inception-rules.md\` (section: Workflow Planning)
-- \`~/.claude/olympus/rules/inception-rules.md\` (section: Application Design)
-- \`~/.claude/olympus/rules/inception-rules.md\` (section: Units Generation)
-- \`~/.claude/olympus/rules/construction-rules.md\` (section: Functional Design)
-- \`~/.claude/olympus/rules/construction-rules.md\` (section: NFR Requirements)
-- \`~/.claude/olympus/rules/construction-rules.md\` (section: NFR Design)
-- \`~/.claude/olympus/rules/construction-rules.md\` (section: Infrastructure Design)
-- \`~/.claude/olympus/rules/construction-rules.md\` (section: Code Generation)
+- \`~/.claude/olympus/rules/inception/workspace-detection.md\`
+${isGreenfield ? '' : '- `~/.claude/olympus/rules/inception/reverse-engineering.md` — brownfield only\n'}- \`~/.claude/olympus/rules/inception/requirements-analysis.md\`
+- \`~/.claude/olympus/rules/inception/user-stories.md\`
+- \`~/.claude/olympus/rules/inception/workflow-planning.md\`
+- \`~/.claude/olympus/rules/inception/application-design.md\`
+- \`~/.claude/olympus/rules/inception/units-generation.md\`
+- \`~/.claude/olympus/rules/construction/functional-design.md\`
+- \`~/.claude/olympus/rules/construction/nfr-requirements.md\`
+- \`~/.claude/olympus/rules/construction/nfr-design.md\`
+- \`~/.claude/olympus/rules/construction/infrastructure-design.md\`
+- \`~/.claude/olympus/rules/construction/code-generation.md\`
 
 ## Directory Layout
 
@@ -175,10 +181,10 @@ aidlc-docs/${workflowId}/          # ALL documentation here
       workflow-routing.md
       execution-plan.md
   construction/
-    UNIT-001/
+    {unit-name}/
       spec.md
       functional-design.md
-      BOLT-001.md
+      code-generation.md
   operations/
     deploy-guide.md
     runbook.md
@@ -223,7 +229,7 @@ Each stage:
 - Complete each unit fully (design → code) before moving to the next unit
 - Delegate code generation to \`olympian\` (or \`olympian-high\` for complex units)
 - Use \`oracle\` for debugging failures, not re-running the same olympian prompt
-- Mark BOLTs fulfilled in \`manifest.json\` after human approval
+- Mark code generation units fulfilled in \`manifest.json\` after human approval
 - Run \`npm run build:all && npm test\` after each unit completes
 
 ## Must NOT Do
@@ -233,4 +239,17 @@ Each stage:
 - Implement multi-file changes without delegating to an Olympus agent
 - Auto-advance past review gates without explicit human confirmation
 - Write application code inside \`aidlc-docs/\``;
+}
+
+/**
+ * Read and return the core-workflow.md content installed by olympus-ai.
+ * Returns the content if found, or null if the file does not exist.
+ * This will be wired into the install pipeline by the core-workflow unit.
+ */
+export function getNativeAidlcRulesContent(): string | null {
+  const coreWorkflowPath = join(homedir(), '.claude', 'olympus', 'rules', 'core-workflow.md');
+  if (!existsSync(coreWorkflowPath)) {
+    return null;
+  }
+  return readFileSync(coreWorkflowPath, 'utf-8');
 }

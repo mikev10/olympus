@@ -11,10 +11,10 @@ import type { WorkflowCheckpoint, WorkflowStage } from './types.js';
  * Map workflow stages to their corresponding agent types.
  */
 const STAGE_AGENT_MAP: Record<WorkflowStage, string | null> = {
-  intent: null,    // INTENT stage handled by /plan entry point
-  unit: null,      // UNIT decomposition handled by ConstructionExecutor
-  bolt: null,      // BOLT execution handled by ConstructionExecutor
-  complete: null,  // No agent needed for complete stage
+  intent: null,
+  unit: null,
+  'code-generation': null,
+  complete: null,
 };
 
 /**
@@ -26,8 +26,8 @@ function getStageTaskDescription(stage: WorkflowStage): string {
       return 'capture the problem statement, personas, success metrics, constraints, and define business requirements, technical approach, and proposed UNITs';
     case 'unit':
       return 'decompose into module-scoped UNITs with interface contracts';
-    case 'bolt':
-      return 'execute the smallest implementation unit with domain and logical design';
+    case 'code-generation':
+      return 'generate code from the approved code plan';
     case 'complete':
       return 'finalize and validate all workflow artifacts';
     default:
@@ -200,8 +200,8 @@ function getValidationType(stage: WorkflowStage): string | null {
       return 'INTENT completeness and alignment with INTENT';
     case 'unit':
       return 'UNIT decomposition coverage and interface contracts';
-    case 'bolt':
-      return 'BOLT implementation alignment with parent UNIT';
+    case 'code-generation':
+      return 'Code generation alignment with parent UNIT';
     case 'complete':
       return 'Final workflow validation';
     default:

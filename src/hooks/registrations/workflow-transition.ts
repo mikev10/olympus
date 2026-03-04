@@ -81,7 +81,7 @@ export function registerWorkflowTransitionHooks(): void {
 
         // All BOLTs complete
         if (boltArtifacts.length > 0 && completedBolts.length === boltArtifacts.length &&
-            checkpoint.current_stage === 'bolt' && manifest.phases.construction.status === 'complete') {
+            checkpoint.current_stage === 'code-generation' && manifest.phases.construction.status === 'complete') {
           message = `✓ All ${boltArtifacts.length} BOLTs executed and reviewed\n→ Next: Operations phase. Generating deployment guide and release notes...`;
         }
         // BOLT just completed (check if last gate was for construction)

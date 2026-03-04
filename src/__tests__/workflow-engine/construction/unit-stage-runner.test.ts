@@ -68,15 +68,15 @@ describe('UnitStageRunner', () => {
       expect(existsNfr).toBe(false);
     });
 
-    it('returns bolts_planned and bolts_completed as 0', async () => {
+    it('returns code_plan_path as null and code_generation_status as not_started', async () => {
       const unitId = 'UNIT-003';
       await createUnitSpec(unitId);
       const runner = new UnitStageRunner(testDir, workflowId);
 
       const progress = await runner.executeForUnit(unitId, 'SHALLOW', 'Intent content');
 
-      expect(progress.bolts_planned).toBe(0);
-      expect(progress.bolts_completed).toBe(0);
+      expect(progress.code_plan_path).toBeNull();
+      expect(progress.code_generation_status).toBe('not_started');
     });
 
     it('returns progress with correct unitId', async () => {
@@ -236,14 +236,13 @@ describe('UnitStageRunner', () => {
       expect(progress.stages['infrastructure-design'].status).toBe('completed');
     });
 
-    it('marks domain-design and code-generation as skipped', async () => {
+    it('marks code-generation as skipped', async () => {
       const unitId = 'UNIT-025';
       await createUnitSpec(unitId);
       const runner = new UnitStageRunner(testDir, workflowId);
 
       const progress = await runner.executeForUnit(unitId, 'DEEP', 'Full intent content');
 
-      expect(progress.stages['domain-design'].status).toBe('skipped');
       expect(progress.stages['code-generation'].status).toBe('skipped');
     });
   });
@@ -295,7 +294,6 @@ describe('UnitStageRunner', () => {
 
       expect(progress.stages['nfr-design'].artifact_path).toBeNull();
       expect(progress.stages['infrastructure-design'].artifact_path).toBeNull();
-      expect(progress.stages['domain-design'].artifact_path).toBeNull();
     });
 
     it('returns correct ConstructionUnitProgress shape with all 6 stage keys', async () => {
@@ -305,7 +303,7 @@ describe('UnitStageRunner', () => {
 
       const progress = await runner.executeForUnit(unitId, 'SHALLOW', 'Intent');
 
-      const expectedStages = ['domain-design', 'functional-design', 'nfr-requirements', 'nfr-design', 'infrastructure-design', 'code-generation'];
+      const expectedStages = ['functional-design', 'nfr-requirements', 'nfr-design', 'infrastructure-design', 'code-generation'];
       for (const stage of expectedStages) {
         expect(progress.stages).toHaveProperty(stage);
         expect(progress.stages[stage as keyof typeof progress.stages]).toHaveProperty('status');

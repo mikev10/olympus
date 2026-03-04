@@ -26,13 +26,13 @@ function createTestCheckpoint(overrides?: Partial<WorkflowCheckpoint>): Workflow
     artifacts: {
       intent: null,
       unit: null,
-      bolt: null,
+      'code-generation': null,
       complete: null,
     },
     validation_results: {
       intent: null,
       unit: null,
-      bolt: null,
+      'code-generation': null,
       complete: null,
     },
     ...overrides,
@@ -81,12 +81,12 @@ describe('Workflow Hooks', () => {
       expect(prompt).not.toContain('Task(subagent_type=');
     });
 
-    it('handles bolt stage without agent', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'bolt' });
+    it('handles code-generation stage without agent', () => {
+      const checkpoint = createTestCheckpoint({ current_stage: 'code-generation' });
       const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint);
 
-      expect(prompt).toContain('bolt');
-      expect(prompt).toContain('execute the smallest implementation unit with domain and logical design');
+      expect(prompt).toContain('code-generation');
+      expect(prompt).toContain('generate code from the approved code plan');
       expect(prompt).not.toContain('Task(subagent_type=');
     });
 
@@ -196,7 +196,7 @@ describe('Workflow Hooks', () => {
             validation_passed: true,
           },
           unit: null,
-          bolt: null,
+          'code-generation': null,
           complete: null,
         },
         validation_results: {
@@ -207,7 +207,7 @@ describe('Workflow Hooks', () => {
             timestamp: '2024-01-15T10:30:00Z',
           },
           unit: null,
-          bolt: null,
+          'code-generation': null,
           complete: null,
         },
       });
@@ -238,7 +238,7 @@ describe('Workflow Hooks', () => {
             validation_passed: false,
           },
           unit: null,
-          bolt: null,
+          'code-generation': null,
           complete: null,
         },
         validation_results: {
@@ -249,7 +249,7 @@ describe('Workflow Hooks', () => {
             timestamp: '2024-01-15T11:30:00Z',
           },
           unit: null,
-          bolt: null,
+          'code-generation': null,
           complete: null,
         },
       });
@@ -276,10 +276,10 @@ describe('Workflow Hooks', () => {
     });
 
     it('handles transition to complete stage', () => {
-      const checkpoint = createTestCheckpoint({ current_stage: 'bolt' });
+      const checkpoint = createTestCheckpoint({ current_stage: 'code-generation' });
       const prompt = buildWorkflowTransitionPrompt(checkpoint, 'complete');
 
-      expect(prompt).toContain('Stage bolt complete!');
+      expect(prompt).toContain('Stage code-generation complete!');
       expect(prompt).toContain('Next stage: complete');
       expect(prompt).toContain('Final workflow validation');
       expect(prompt).not.toContain('Task(subagent_type=');
@@ -296,7 +296,7 @@ describe('Workflow Hooks', () => {
 
   describe('all prompt functions', () => {
     it('return non-empty strings for all stages', () => {
-      const stages: WorkflowStage[] = ['intent', 'unit', 'bolt', 'complete'];
+      const stages: WorkflowStage[] = ['intent', 'unit', 'code-generation', 'complete'];
 
       stages.forEach((stage) => {
         const checkpoint = createTestCheckpoint({ current_stage: stage });

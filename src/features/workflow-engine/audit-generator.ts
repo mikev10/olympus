@@ -17,7 +17,7 @@ export interface AuditTimelineEntry {
 export interface TraceabilityEntry {
   intentId: string;
   unitIds: string[];
-  boltIds: string[];
+  codeGenerationIds: string[];
   codeFiles: string[];
 }
 
@@ -77,34 +77,34 @@ function buildTraceabilityMatrix(manifest: ManifestSchema): TraceabilityEntry[] 
       .map((l) => l.target_id)
       .filter((id) => artifacts.some((a) => a.id === id && a.stage === 'unit'));
 
-    // Trace BOLT artifacts that derive/implement from any of the resolved UNITs
-    const boltIds: string[] = [];
+    // Trace code-generation artifacts that derive/implement from any of the resolved UNITs
+    const codeGenIds: string[] = [];
     for (const unitId of unitIds) {
-      const boltIdsForUnit = links
+      const codeGenIdsForUnit = links
         .filter(
           (l) =>
             l.source_id === unitId &&
             (l.link_type === 'derives' || l.link_type === 'implements')
         )
         .map((l) => l.target_id)
-        .filter((id) => artifacts.some((a) => a.id === id && a.stage === 'bolt'));
-      boltIds.push(...boltIdsForUnit);
+        .filter((id) => artifacts.some((a) => a.id === id && a.stage === 'code-generation'));
+      codeGenIds.push(...codeGenIdsForUnit);
     }
 
-    // Collect non-markdown, non-json paths from bolt artifacts as code file references
+    // Collect non-markdown, non-json paths from code-generation artifacts as code file references
     const codeFiles = [...new Set(
-      boltIds.flatMap((boltId) => {
-        const boltArtifact = artifacts.find((a) => a.id === boltId);
-        if (!boltArtifact) return [];
-        const ext = path.extname(boltArtifact.path).toLowerCase();
-        return ext && ext !== '.md' && ext !== '.json' ? [boltArtifact.path] : [];
+      codeGenIds.flatMap((codeGenId) => {
+        const codeGenArtifact = artifacts.find((a) => a.id === codeGenId);
+        if (!codeGenArtifact) return [];
+        const ext = path.extname(codeGenArtifact.path).toLowerCase();
+        return ext && ext !== '.md' && ext !== '.json' ? [codeGenArtifact.path] : [];
       })
     )];
 
     return {
       intentId: intent.id,
       unitIds,
-      boltIds: [...new Set(boltIds)],
+      codeGenerationIds: [...new Set(codeGenIds)],
       codeFiles,
     };
   });
@@ -225,13 +225,13 @@ export function renderAuditMarkdown(audit: AuditDocument): string {
   if (audit.traceabilityMatrix.length === 0) {
     lines.push('_No traceability data available._');
   } else {
-    lines.push('| Intent | Units | Bolts | Code Files |');
-    lines.push('|--------|-------|-------|------------|');
+    lines.push('| Intent | Units | Code Generation | Code Files |');
+    lines.push('|--------|-------|-----------------|------------|');
     for (const entry of audit.traceabilityMatrix) {
       const units = entry.unitIds.length > 0 ? entry.unitIds.join(', ') : '—';
-      const bolts = entry.boltIds.length > 0 ? entry.boltIds.join(', ') : '—';
+      const codeGens = entry.codeGenerationIds.length > 0 ? entry.codeGenerationIds.join(', ') : '—';
       const files = entry.codeFiles.length > 0 ? entry.codeFiles.join(', ') : '—';
-      lines.push(`| ${entry.intentId} | ${units} | ${bolts} | ${files} |`);
+      lines.push(`| ${entry.intentId} | ${units} | ${codeGens} | ${files} |`);
     }
   }
   lines.push('');

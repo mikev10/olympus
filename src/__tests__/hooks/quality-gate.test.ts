@@ -148,8 +148,8 @@ function createMockCheckpoint(overrides: Record<string, any> = {}) {
     },
     current_stage: 'intent',
     status: 'in_progress',
-    artifacts: { intent: null, unit: null, bolt: null, complete: null },
-    validation_results: { intent: null, unit: null, bolt: null, complete: null },
+    artifacts: { intent: null, unit: null, 'code-generation': null, complete: null },
+    validation_results: { intent: null, unit: null, 'code-generation': null, complete: null },
     manifest_path: '/test/project/aidlc-docs/test-feature/manifest.json',
     trust_state_path: null,
     risk_tier: null,
@@ -2136,8 +2136,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
           risk_tier: { tier: riskTier, score: 45, rationale: 'Test' },
         })
       );
@@ -2151,7 +2151,7 @@ describe('Quality Gate Hooks', () => {
           },
           artifacts: [
             { id: 'UNIT-001', type: 'unit', phase: 'construction', stage: 'unit', path: 'construction/UNIT-001/spec.md', contract_status: 'active' },
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
           links: [
             { source_id: 'UNIT-001', target_id: 'BOLT-001', link_type: 'derives' },
@@ -2191,7 +2191,7 @@ describe('Quality Gate Hooks', () => {
       });
     }
 
-    it('fires when construction phase + bolt stage + active_bolt_id', async () => {
+    it('fires when construction phase + bolt stage + active_code_plan_path', async () => {
       setupGate4Mocks();
 
       const hooks = getHooksForEvent('PostToolUse');
@@ -2322,8 +2322,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2338,7 +2338,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
         })
       );
@@ -2375,8 +2375,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2391,7 +2391,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
         })
       );
@@ -2420,8 +2420,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2436,7 +2436,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
         })
       );
@@ -2502,13 +2502,13 @@ describe('Quality Gate Hooks', () => {
       );
     });
 
-    it('does not fire Gate 4 without active_bolt_id (falls through to generic construction gate)', async () => {
+    it('does not fire Gate 4 without active_code_plan_path (falls through to generic construction gate)', async () => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          // No active_bolt_id
+          current_stage: 'code-generation',
+          // No active_code_plan_path
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2530,7 +2530,7 @@ describe('Quality Gate Hooks', () => {
       const result = await blocker!.handler(ctx);
 
       expect(result.continue).toBe(true);
-      // Without active_bolt_id, Gate 4 doesn't fire specifically,
+      // Without active_code_plan_path, Gate 4 doesn't fire specifically,
       // but the generic construction transition detection may still trigger.
       // The key assertion is that it doesn't mention "Gate 4" or BOLT-specific content.
       if (result.hookSpecificOutput?.additionalContext) {
@@ -2642,8 +2642,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2658,7 +2658,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
         })
       );
@@ -2738,8 +2738,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
         })
       );
       vi.mocked(loadManifest).mockReturnValue(
@@ -2754,7 +2754,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
         })
       );
@@ -2784,8 +2784,8 @@ describe('Quality Gate Hooks', () => {
       vi.mocked(loadCheckpoint).mockResolvedValue(
         createMockCheckpoint({
           current_phase: 'construction',
-          current_stage: 'bolt',
-          active_bolt_id: 'BOLT-001',
+          current_stage: 'code-generation',
+          active_code_plan_path: 'BOLT-001',
           risk_tier: { tier: 1, score: 10, rationale: 'Low' },
         })
       );
@@ -2798,7 +2798,7 @@ describe('Quality Gate Hooks', () => {
             operations: { status: 'not_started', gate_result: null },
           },
           artifacts: [
-            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'bolt', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
+            { id: 'BOLT-001', type: 'bolt', phase: 'construction', stage: 'code-generation', path: 'construction/UNIT-001/BOLT-001.md', contract_status: 'active' },
           ],
           links: [],
         })

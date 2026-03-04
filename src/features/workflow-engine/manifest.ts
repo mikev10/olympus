@@ -622,51 +622,50 @@ export function getUnitArtifacts(manifest: ManifestSchema): ManifestArtifact[] {
 }
 
 /**
- * Returns all BOLT artifacts, optionally filtered by parent UNIT.
+ * Returns all code-generation artifacts, optionally filtered by parent UNIT.
  *
  * @param manifest - Manifest schema
  * @param unitId - Optional UNIT ID to filter by
- * @returns Array of BOLT-stage artifacts
+ * @returns Array of code-generation-stage artifacts
  */
 export function getBoltArtifacts(manifest: ManifestSchema, unitId?: string): ManifestArtifact[] {
-  const bolts = manifest.artifacts.filter((a) => a.stage === 'bolt');
+  const codeGenArtifacts = manifest.artifacts.filter((a) => a.stage === 'code-generation');
   if (unitId) {
-    // Filter by parent link: check manifest.links for link from unitId to bolt
-    const boltIdsForUnit = new Set(
+    const codeGenIdsForUnit = new Set(
       manifest.links
         .filter((l) => l.source_id === unitId && (l.link_type === 'derives' || l.link_type === 'implements'))
         .map((l) => l.target_id)
     );
-    return bolts.filter((b) => boltIdsForUnit.has(b.id));
+    return codeGenArtifacts.filter((b) => codeGenIdsForUnit.has(b.id));
   }
-  return bolts;
+  return codeGenArtifacts;
 }
 
 /**
- * Returns BOLTs filtered by contract status.
+ * Returns code-generation artifacts filtered by contract status.
  *
  * @param manifest - Manifest schema
  * @param status - Contract status to filter by
- * @returns Array of BOLT artifacts with matching status
+ * @returns Array of code-generation artifacts with matching status
  */
 export function getBoltsByStatus(
   manifest: ManifestSchema,
   status: ManifestArtifact['contract_status']
 ): ManifestArtifact[] {
-  return manifest.artifacts.filter((a) => a.stage === 'bolt' && a.contract_status === status);
+  return manifest.artifacts.filter((a) => a.stage === 'code-generation' && a.contract_status === status);
 }
 
 /**
- * Returns true when ALL BOLT contracts have status 'fulfilled'.
- * Returns false if no BOLTs exist.
+ * Returns true when ALL code-generation contracts have status 'fulfilled'.
+ * Returns false if no code-generation artifacts exist.
  *
  * @param manifest - Manifest schema
- * @returns true if all BOLTs are fulfilled, false otherwise
+ * @returns true if all code-generation artifacts are fulfilled, false otherwise
  */
 export function isWorkflowComplete(manifest: ManifestSchema): boolean {
-  const bolts = manifest.artifacts.filter((a) => a.stage === 'bolt');
-  if (bolts.length === 0) return false;
-  return bolts.every((b) => b.contract_status === 'fulfilled');
+  const codeGenArtifacts = manifest.artifacts.filter((a) => a.stage === 'code-generation');
+  if (codeGenArtifacts.length === 0) return false;
+  return codeGenArtifacts.every((b) => b.contract_status === 'fulfilled');
 }
 
 /**
@@ -932,7 +931,7 @@ export async function revalidateStaleArtifacts(
       if (artifact.stage === 'unit') {
         transition = 'intent-to-unit';
         rootTransition = 'unit-to-intent';
-      } else if (artifact.stage === 'bolt') {
+      } else if (artifact.stage === 'code-generation') {
         transition = 'unit-to-bolt';
         rootTransition = 'bolt-to-intent';
       } else {

@@ -356,7 +356,7 @@ export function generateCostAnalysis(context: OperationsContext): string {
   const { featureName, workflowId, manifest } = context;
   const timestamp = new Date().toISOString();
   const artifacts = manifest?.artifacts ?? [];
-  const bolts = artifacts.filter(a => a.stage === 'bolt');
+  const codeGenArtifacts = artifacts.filter(a => a.stage === 'code-generation');
   const units = artifacts.filter(a => a.stage === 'unit');
   const gateAudit = manifest?.gate_audit ?? [];
   const rejections = gateAudit.filter(g => g.action === 'rejected');
@@ -376,7 +376,7 @@ phase: operations
 | Metric | Value |
 |--------|-------|
 | Total UNITs | ${units.length} |
-| Total BOLTs | ${bolts.length} |
+| Total Code Generations | ${codeGenArtifacts.length} |
 | Gate Rejections | ${rejections.length} |
 | Total Artifacts | ${artifacts.length} |
 
@@ -403,7 +403,7 @@ Estimated rework overhead: ${rejections.length} rejection cycle(s)
 
 ## Recommendations
 
-${bolts.length > 10 ? '- Consider breaking future features into smaller INTENTs to reduce BOLT count' : '- BOLT count is within recommended range'}
+${codeGenArtifacts.length > 10 ? '- Consider breaking future features into smaller INTENTs to reduce code generation count' : '- Code generation count is within recommended range'}
 ${rejections.length > 2 ? '- High rejection rate suggests specification clarity could be improved' : '- Rejection rate is acceptable'}
 
 ---

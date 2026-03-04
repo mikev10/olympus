@@ -289,22 +289,22 @@ describe('WorkflowEngine', () => {
       expect(files.length).toBeGreaterThan(0);
     });
 
-    it.skip("creates bolt files for 'bolt' stage", async () => {
+    it.skip("creates code-generation files for 'code-generation' stage", async () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute all stages up to bolt
+      // Execute all stages up to code-generation
       await engine.executeStage('intent');
       await engine.executeStage('unit');
-      await engine.executeStage('bolt');
+      await engine.executeStage('code-generation');
 
-      // Bolts are created within unit directories in construction/
+      // Code generation artifacts are created within unit directories in construction/
       const constructionDir = join(tmpDir, 'aidlc-docs', 'test-feature', 'construction');
 
       // Check that construction directory exists
       expect(await fs.pathExists(constructionDir)).toBe(true);
 
-      // Check that files exist in construction (units and bolts)
+      // Check that files exist in construction (units and code plans)
       const files = await fs.readdir(constructionDir);
       expect(files.length).toBeGreaterThan(0);
     });
@@ -370,15 +370,13 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Test Feature');
       await engine.start('Build a test feature');
 
-      // Execute all stages
       await engine.executeStage('intent');
       await engine.executeStage('unit');
-      await engine.executeStage('bolt');
+      await engine.executeStage('code-generation');
 
       const status = await engine.getStatus();
       expect(status.current_stage).toBe('complete');
       expect(status.status).toBe('complete');
-      // Artifacts are tracked in manifest, not in status response
     });
   });
 
@@ -405,16 +403,13 @@ describe('WorkflowEngine', () => {
       const engine = new WorkflowEngine(tmpDir, 'Full Workflow Test');
       await engine.start('Build a complete feature');
 
-      // Execute remaining stages
       await engine.executeStage('intent');
       await engine.executeStage('unit');
-      await engine.executeStage('bolt');
+      await engine.executeStage('code-generation');
 
       const checkpoint = await loadCheckpoint(tmpDir, 'full-workflow-test');
       expect(checkpoint?.current_stage).toBe('complete');
       expect(checkpoint?.status).toBe('complete');
-
-      // V3 checkpoint doesn't have artifacts field - artifacts are in manifest
     });
 
     it('can pause and resume workflow', async () => {
@@ -586,7 +581,7 @@ describe('WorkflowEngine', () => {
       expect(plan).not.toBeNull();
       expect(plan!.pathway).toBeDefined();
       expect(plan!.risk_assessment).toMatch(/^(LOW|MEDIUM|HIGH)$/);
-      expect(typeof plan!.estimated_bolts).toBe('number');
+      expect(typeof plan!.estimated_code_generations).toBe('number');
       expect(['minimal', 'standard', 'comprehensive']).toContain(plan!.estimated_depth);
       expect(plan!.phases).toBeDefined();
       expect(Array.isArray(plan!.stages)).toBe(true);

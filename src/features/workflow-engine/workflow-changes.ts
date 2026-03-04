@@ -127,7 +127,7 @@ export function assessChangeImpact(changeType: ChangeType, currentState: Workflo
 
     case 'change_architecture': {
       const constructionStages = [...completedStages, currentStage].filter(
-        (s) => s === 'unit' || s === 'bolt' || s === 'intent'
+        (s) => s === 'unit' || s === 'code-generation' || s === 'intent'
       );
       return {
         changeType,
@@ -143,10 +143,10 @@ export function assessChangeImpact(changeType: ChangeType, currentState: Workflo
     case 'add_remove_units': {
       return {
         changeType,
-        affectedStages: ['unit', 'bolt'],
-        affectedArtifacts: ['unit-of-work', 'unit-artifacts', 'bolt-artifacts'],
+        affectedStages: ['unit', 'code-generation'],
+        affectedArtifacts: ['unit-of-work', 'unit-artifacts', 'code-generation-artifacts'],
         cascadeRequired: true,
-        cascadeDescription: 'Adding or removing units cascades to all dependent bolt stages',
+        cascadeDescription: 'Adding or removing units cascades to all dependent code generation stages',
         riskLevel: 'medium',
         recommendation: 'Update unit-of-work.md, reset affected units',
       };

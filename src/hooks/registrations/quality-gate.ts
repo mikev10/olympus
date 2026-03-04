@@ -249,8 +249,8 @@ function detectPhaseTransition(
     return 'construction';
   }
 
-  // Gate 4: Construction phase, bolt stage with active bolt - fires after BOLT execution
-  if (currentPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+  // Gate 4: Construction phase, code-generation stage with active code plan
+  if (currentPhase === 'construction' && checkpoint.current_stage === 'code-generation' && checkpoint.active_code_plan_path) {
     return 'construction';
   }
 
@@ -310,7 +310,7 @@ function getGateNumber(pendingPhase: WorkflowPhase, currentStage: string): numbe
     return currentStage === 'intent' ? 2 : 1;
   }
   if (pendingPhase === 'construction') {
-    return currentStage === 'bolt' ? 4 : 3;
+    return currentStage === 'code-generation' ? 4 : 3;
   }
   if (pendingPhase === 'operations') {
     return 5;
@@ -583,9 +583,9 @@ Type "approve" to proceed or "reject <reason>" to block.
       };
     }
 
-    // --- Gate 4: Construction phase, bolt stage ---
-    if (transitioningPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
-      const boltId = checkpoint.active_bolt_id;
+    // --- Gate 4: Construction phase, code-generation stage ---
+    if (transitioningPhase === 'construction' && checkpoint.current_stage === 'code-generation' && checkpoint.active_code_plan_path) {
+      const boltId = checkpoint.active_code_plan_path;
       const gate4Behavior = getGate4TrustBehavior(trustState.current_level, riskTier);
 
       // Run V&V dual validation for bolt-to-intent
@@ -691,7 +691,7 @@ Type "approve" to proceed or "reject <reason>" to block.
           const gateEvent: WorkflowEvent = {
             type: 'gate_approval',
             phase: 'construction',
-            stage: 'bolt',
+            stage: 'code-generation',
             details: `Gate 4 notification-only for BOLT ${boltId} at Trust Level ${trustState.current_level}`,
             artifactId: boltId,
           };
@@ -715,7 +715,7 @@ Type "approve" to proceed or "reject <reason>" to block.
           const refreshedManifest = loadManifest(manifestPath);
           if (refreshedManifest && isWorkflowComplete(refreshedManifest)) {
             checkpoint.current_phase = 'operations' as WorkflowPhase;
-            checkpoint.current_stage = 'bolt'; // Per Decision 12: stage stays 'bolt' during Operations
+            checkpoint.current_stage = 'code-generation'; // Per Decision 12: stage stays 'code-generation' during Operations
             updatePhaseStatus(manifestPath, 'construction', 'complete');
             updatePhaseStatus(manifestPath, 'operations', 'in_progress');
             await saveCheckpoint(ctx.directory, checkpoint);
@@ -1092,9 +1092,9 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
 
       // Construction gate-specific approval handling
       if (pendingPhase === 'construction') {
-        if (checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+        if (checkpoint.current_stage === 'code-generation' && checkpoint.active_code_plan_path) {
           // Gate 4 approval: mark BOLT as fulfilled, set reviewedBy
-          const boltId = checkpoint.active_bolt_id;
+          const boltId = checkpoint.active_code_plan_path;
           updateContractStatus(manifestPath, boltId, 'fulfilled');
 
           // Set reviewedBy on the BOLT artifact
@@ -1137,7 +1137,7 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
             if (refreshedManifest && isWorkflowComplete(refreshedManifest)) {
               // All BOLTs fulfilled — transition to Operations phase
               checkpoint.current_phase = 'operations' as WorkflowPhase;
-              checkpoint.current_stage = 'bolt'; // Per Decision 12: stage stays 'bolt' during Operations
+              checkpoint.current_stage = 'code-generation'; // Per Decision 12: stage stays 'code-generation' during Operations
               updatePhaseStatus(manifestPath, 'construction', 'complete');
               updatePhaseStatus(manifestPath, 'operations', 'in_progress');
               await saveCheckpoint(ctx.directory, checkpoint);
@@ -1260,9 +1260,9 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
       // Construction gate-specific rejection handling
       let rejectionFeedback = '';
       if (pendingPhase === 'construction') {
-        if (checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id) {
+        if (checkpoint.current_stage === 'code-generation' && checkpoint.active_code_plan_path) {
           // Gate 4 rejection: mark BOLT as violated
-          const boltId = checkpoint.active_bolt_id;
+          const boltId = checkpoint.active_code_plan_path;
           updateContractStatus(manifestPath, boltId, 'violated', reason);
           rejectionFeedback = `The reviewer rejected ${boltId}: ${reason}. Revise and re-submit.`;
         } else if (checkpoint.current_stage === 'unit') {
@@ -1330,8 +1330,8 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
 
       // Dispatch rejection for structured re-invocation
       const gateNumber = getGateNumber(pendingPhase, checkpoint.current_stage);
-      const artifactId = pendingPhase === 'construction' && checkpoint.current_stage === 'bolt' && checkpoint.active_bolt_id
-        ? checkpoint.active_bolt_id
+      const artifactId = pendingPhase === 'construction' && checkpoint.current_stage === 'code-generation' && checkpoint.active_code_plan_path
+        ? checkpoint.active_code_plan_path
         : manifest.artifacts.find(a => a.phase === pendingPhase)?.id ?? `${pendingPhase}-artifact`;
       const previousRejections = manifest.gate_audit.filter(
         e => e.phase === pendingPhase && e.action === 'rejected'

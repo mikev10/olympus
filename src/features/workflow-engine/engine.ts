@@ -2,7 +2,7 @@
  * WorkflowEngine - Core orchestrator for the multi-stage workflow system
  *
  * Manages the progression of features through stages:
- * INTENT → UNIT → BOLT → COMPLETE
+ * INTENT → UNIT → CODE-GENERATION → COMPLETE
  *
  * Features:
  * - Checkpoint-based persistence for resumable workflows
@@ -36,7 +36,7 @@ import { mergeAidlcRules, removeAidlcRules, getAidlcRulesContent } from './claud
 /**
  * Ordered list of workflow stages for progression validation
  */
-const STAGE_ORDER: WorkflowStage[] = ['intent', 'unit', 'bolt', 'complete'];
+const STAGE_ORDER: WorkflowStage[] = ['intent', 'unit', 'code-generation', 'complete'];
 
 /**
  * Get the next stage in the workflow progression
@@ -215,7 +215,7 @@ export class WorkflowEngine {
         await saveCheckpoint(this.projectPath, updatedCheckpoint);
       }
 
-      console.log(`[WorkflowEngine] Generated Workflow Routing: pathway=${pathwayType}, depth=${plan.estimated_depth}, bolts=${plan.estimated_bolts}`);
+      console.log(`[WorkflowEngine] Generated Workflow Routing: pathway=${pathwayType}, depth=${plan.estimated_depth}, code-generations=${plan.estimated_code_generations}`);
       if (plan.stages.some(s => !s.included)) {
         const skippedStages = plan.stages.filter(s => !s.included).map(s => `${s.phase}/${s.stage}`);
         console.log(`[WorkflowEngine] Stages excluded by plan: ${skippedStages.join(', ')}`);
@@ -393,8 +393,8 @@ export class WorkflowEngine {
       case 'unit':
         await this.executeUnitStage(checkpoint);
         break;
-      case 'bolt':
-        await this.executeBoltStage(checkpoint);
+      case 'code-generation':
+        await this.executeCodeGenerationStage(checkpoint);
         break;
     }
 
@@ -694,7 +694,7 @@ export class WorkflowEngine {
               id: `OPS-${artifactType}`,
               type: artifactType,
               phase: 'operations',
-              stage: 'bolt',
+              stage: 'code-generation',
               path: artifactPath,
               validation_passed: true,
               write_complete: true,
@@ -1101,15 +1101,9 @@ created: ${timestamp}
     throw new Error('UNIT stage execution not yet implemented');
   }
 
-  /**
-   * Execute the BOLT stage
-   *
-   * Generates the BOLT artifacts for the feature.
-   */
-  private async executeBoltStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing BOLT stage for feature: ${this.featureName}`);
-    // TODO: Implement BOLT stage execution
-    throw new Error('BOLT stage execution not yet implemented');
+  private async executeCodeGenerationStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] Executing CODE-GENERATION stage for feature: ${this.featureName}`);
+    throw new Error('Code generation stage execution not yet implemented');
   }
 
 }

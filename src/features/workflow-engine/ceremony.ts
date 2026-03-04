@@ -143,7 +143,7 @@ export function getCeremonyArtifactTemplates(): Record<string, string> {
 
     unit: `# Unit Suggestion
 
-**Unit ID:** UNIT-[NNN]
+**Unit ID:** {unit-name}
 **Title:** [Short descriptive title]
 **Scope:** [What this unit covers — bounded context, capability, or domain slice]
 
@@ -152,13 +152,13 @@ export function getCeremonyArtifactTemplates(): Record<string, string> {
 - [ ] [Criterion 2]
 - [ ] [Criterion 3]
 
-**Proposed Bolts:**
+**Code Generation Plan:**
 
-| Bolt ID | Title | Estimated Effort |
-|---------|-------|-----------------|
-| BOLT-[NNN]-1 | [Bolt title] | [S / M / L] |
-| BOLT-[NNN]-2 | [Bolt title] | [S / M / L] |
-| BOLT-[NNN]-3 | [Bolt title] | [S / M / L] |
+| Step | Title | Estimated Effort |
+|------|-------|-----------------|
+| 1 | [Implementation step title] | [S / M / L] |
+| 2 | [Implementation step title] | [S / M / L] |
+| 3 | [Implementation step title] | [S / M / L] |
 `,
   };
 }
