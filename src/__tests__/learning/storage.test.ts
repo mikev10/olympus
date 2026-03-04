@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { appendFeedback, readFeedbackLog, getLearningDir } from '../../learning/storage.js';
+import { appendFeedback, readFeedbackLog, getLearningDir, updateAgentPerformance } from '../../learning/storage.js';
 import type { FeedbackEntry } from '../../learning/types.js';
 
 const TEST_DIR = join(process.cwd(), '.test-learning');
@@ -107,5 +107,110 @@ describe('Storage with Rotation', () => {
 
     const log = readFeedbackLog();
     expect(log.length).toBe(5);
+  });
+});
+
+function mockFeedbackEntry(overrides: Partial<FeedbackEntry>): FeedbackEntry {
+  return {
+    id: 'test-id',
+    timestamp: new Date().toISOString(),
+    session_id: 'test-session',
+    project_path: '/test',
+    event_type: 'success',
+    user_message: 'test message',
+    feedback_category: 'praise',
+    confidence: 0.9,
+    ...overrides,
+  };
+}
+
+describe('updateAgentPerformance derived fields', () => {
+  it('90% success rate populates strong_areas and leaves weak_areas empty', () => {
+    const entries: FeedbackEntry[] = [
+      ...Array.from({ length: 9 }, (_, i) =>
+        mockFeedbackEntry({ id: `s-${i}`, agent_used: 'olympian', event_type: 'success' })
+      ),
+      mockFeedbackEntry({ id: 'r-0', agent_used: 'olympian', event_type: 'revision' }),
+    ];
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    expect(result!.strong_areas).toContain('high success rate');
+    expect(result!.weak_areas).toHaveLength(0);
+  });
+
+  it('40% success rate populates weak_areas and leaves strong_areas empty', () => {
+    const entries: FeedbackEntry[] = [
+      ...Array.from({ length: 2 }, (_, i) =>
+        mockFeedbackEntry({ id: `s-${i}`, agent_used: 'olympian', event_type: 'success' })
+      ),
+      ...Array.from({ length: 3 }, (_, i) =>
+        mockFeedbackEntry({ id: `r-${i}`, agent_used: 'olympian', event_type: 'revision' })
+      ),
+    ];
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    expect(result!.weak_areas).toContain('low success rate');
+    expect(result!.strong_areas).toHaveLength(0);
+  });
+
+  it('3+ revisions with same extracted_lesson produces failure_patterns entry', () => {
+    const entries: FeedbackEntry[] = Array.from({ length: 3 }, (_, i) =>
+      mockFeedbackEntry({
+        id: `r-${i}`,
+        agent_used: 'olympian',
+        event_type: 'revision',
+        extracted_lesson: 'missing-types',
+        user_message: `revision message ${i}`,
+      })
+    );
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    const pattern = result!.failure_patterns.find(p => p.pattern === 'missing-types');
+    expect(pattern).toBeDefined();
+    expect(pattern!.count).toBe(3);
+  });
+
+  it('single-occurrence failures produce no failure_patterns (threshold = 2)', () => {
+    const entries: FeedbackEntry[] = [
+      mockFeedbackEntry({
+        id: 'r-0',
+        agent_used: 'olympian',
+        event_type: 'revision',
+        extracted_lesson: 'unique-lesson',
+      }),
+    ];
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    expect(result!.failure_patterns).toHaveLength(0);
+  });
+
+  it('examples capped at 3 and user_message truncated to 100 chars', () => {
+    const longMessage = 'x'.repeat(200);
+    const entries: FeedbackEntry[] = Array.from({ length: 5 }, (_, i) =>
+      mockFeedbackEntry({
+        id: `r-${i}`,
+        agent_used: 'olympian',
+        event_type: 'revision',
+        extracted_lesson: 'overflow-lesson',
+        user_message: longMessage,
+      })
+    );
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    const pattern = result!.failure_patterns.find(p => p.pattern === 'overflow-lesson');
+    expect(pattern).toBeDefined();
+    expect(pattern!.examples.length).toBeLessThanOrEqual(3);
+    for (const ex of pattern!.examples) {
+      expect(ex.length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('cancellation_count > 2 adds "frequently cancelled" to weak_areas', () => {
+    const entries: FeedbackEntry[] = Array.from({ length: 3 }, (_, i) =>
+      mockFeedbackEntry({ id: `c-${i}`, agent_used: 'olympian', event_type: 'cancellation' })
+    );
+    const result = updateAgentPerformance('olympian', entries);
+    expect(result).not.toBeNull();
+    expect(result!.weak_areas).toContain('frequently cancelled');
   });
 });

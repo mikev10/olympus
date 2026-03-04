@@ -31,7 +31,7 @@ export function generateLearnedContext(projectPath: string): string {
   }
 
   // Project conventions
-  if (projectPatterns && projectPatterns.conventions.length > 0) {
+  if (projectPatterns && (projectPatterns.conventions.length > 0 || projectPatterns.tech_stack.length > 0 || (projectPatterns.learned_rules && projectPatterns.learned_rules.length > 0) || (projectPatterns.common_mistakes && projectPatterns.common_mistakes.length > 0))) {
     sections.push(formatProjectPatterns(projectPatterns));
   }
 
@@ -110,6 +110,18 @@ function formatProjectPatterns(patterns: ProjectPatterns): string {
 
   if (patterns.tech_stack.length > 0) {
     lines.push(`- Tech: ${patterns.tech_stack.join(', ')}`);
+  }
+
+  if (patterns.learned_rules && patterns.learned_rules.length > 0) {
+    for (const rule of patterns.learned_rules.slice(0, 3)) {
+      lines.push(`- Rule: ${rule}`);
+    }
+  }
+
+  if (patterns.common_mistakes && patterns.common_mistakes.length > 0) {
+    for (const mistake of patterns.common_mistakes.slice(0, 3)) {
+      lines.push(`- Watch out: ${mistake}`);
+    }
   }
 
   return lines.join('\n');

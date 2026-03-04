@@ -161,10 +161,56 @@ export function loadFeedback(): FeedbackEntry[] {
   return readFeedbackLog();
 }
 
-/**
- * Update agent performance metrics with token efficiency
- * Recalculates token_efficiency based on feedback entries with token usage
- */
+function deriveFailurePatterns(entries: FeedbackEntry[]): Array<{ pattern: string; count: number; examples: string[] }> {
+  const failureEntries = entries.filter(
+    e => e.event_type === 'revision' || e.event_type === 'cancellation'
+  );
+
+  const clusters = new Map<string, { count: number; examples: string[] }>();
+  for (const entry of failureEntries) {
+    const key = entry.extracted_lesson || entry.feedback_category || 'unknown';
+    const existing = clusters.get(key);
+    if (existing) {
+      existing.count++;
+      if (existing.examples.length < 3) {
+        existing.examples.push(entry.user_message.substring(0, 100));
+      }
+    } else {
+      clusters.set(key, {
+        count: 1,
+        examples: [entry.user_message.substring(0, 100)],
+      });
+    }
+  }
+
+  const patterns: Array<{ pattern: string; count: number; examples: string[] }> = [];
+  for (const [pattern, data] of clusters) {
+    if (data.count >= 2) {
+      patterns.push({ pattern, count: data.count, examples: data.examples });
+    }
+  }
+  return patterns;
+}
+
+function deriveStrongAreas(successRate: number): string[] {
+  const areas: string[] = [];
+  if (successRate >= 0.85) {
+    areas.push('high success rate');
+  }
+  return areas;
+}
+
+function deriveWeakAreas(successRate: number, cancellationCount: number): string[] {
+  const areas: string[] = [];
+  if (successRate < 0.6) {
+    areas.push('low success rate');
+  }
+  if (cancellationCount > 2) {
+    areas.push('frequently cancelled');
+  }
+  return areas;
+}
+
 export function updateAgentPerformance(
   agentName: string,
   feedbackEntries: FeedbackEntry[]
@@ -238,9 +284,9 @@ export function updateAgentPerformance(
     revision_count: revisionCount,
     cancellation_count: cancellationCount,
     success_rate: successRate,
-    failure_patterns: [],
-    strong_areas: [],
-    weak_areas: [],
+    failure_patterns: deriveFailurePatterns(agentEntries),
+    strong_areas: deriveStrongAreas(successRate),
+    weak_areas: deriveWeakAreas(successRate, cancellationCount),
     last_updated: new Date().toISOString(),
     token_efficiency: tokenEfficiency
   };

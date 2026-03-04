@@ -113,6 +113,24 @@ export function updatePreferences(
     }
   }
 
+  // 30-day decay: remove stale recurring corrections
+  const now = Date.now();
+  updated.recurring_corrections = updated.recurring_corrections.filter(c => {
+    if (!c.last_seen) return true; // Keep entries without last_seen
+    const lastSeenMs = Date.parse(c.last_seen);
+    if (isNaN(lastSeenMs)) return true; // Keep malformed entries (don't crash)
+    return (now - lastSeenMs) <= DECAY_DAYS * 86400000;
+  });
+
+  // Prune inferred_preferences not backed by current patterns (only when patterns non-empty)
+  if (extractedPatterns.length > 0) {
+    const currentPatternTexts = new Set(extractedPatterns.map(p => p.pattern));
+    updated.inferred_preferences = updated.inferred_preferences.filter(
+      pref => currentPatternTexts.has(pref)
+    );
+  }
+  // Note: explicit_rules are NEVER decayed (user-declared "always/never" statements)
+
   updated.last_updated = new Date().toISOString();
   return updated;
 }

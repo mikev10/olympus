@@ -7,6 +7,7 @@ import type { WorkflowPhase } from './phase-types.js';
 import type { WorkflowStage } from './types.js';
 import { scanWorkspace, selectKeyFiles, selectIntentRelevantFiles, generateComponentInventory, generateTechnologyStack, generateDependencies } from './brownfield-scanner.js';
 import type { WorkspaceScanResult } from './brownfield-scanner.js';
+import { writeProjectPatterns } from '../../learning/project-patterns.js';
 import { buildStaticModelPrompt, writeModelsToArtifacts } from './brownfield-analysis.js';
 
 /**
@@ -376,6 +377,7 @@ export async function executeDiscoveryPhase(
     if (isBrownfield) {
       try {
         const scanResult = await scanWorkspace(projectPath);
+        writeProjectPatterns(projectPath, scanResult);
 
         // Select key files (Tier 2)
         let keyFiles = selectKeyFiles(scanResult);
