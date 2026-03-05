@@ -1,0 +1,10 @@
+{
+  "default": true,
+  "frontMatter": "^---\\s*$[\\s\\S]*?^---\\s*$",
+  "MD013": false,
+  "MD024": {
+    "siblings_only": true
+  },
+  "MD033": false,
+  "MD041": false
+}
