@@ -229,7 +229,12 @@ export class WorkflowEngine {
 
     try {
       const currentCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
-      const pathwayType = (currentCheckpoint as WorkflowCheckpointV3)?.pathway_type ?? 'greenfield';
+      let pathwayType = (currentCheckpoint as WorkflowCheckpointV3)?.pathway_type;
+      if (!pathwayType) {
+        // Pathway wasn't saved (workflow routing may have failed) — detect it directly
+        const { isBrownfield } = await detectBrownfield(this.projectPath);
+        pathwayType = isBrownfield ? 'brownfield-enhancement' : 'greenfield';
+      }
       const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
       const existingContent = fs.existsSync(claudeMdPath)
         ? fs.readFileSync(claudeMdPath, 'utf-8')

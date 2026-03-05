@@ -163,7 +163,7 @@ ${isGreenfield ? '' : '- `~/.claude/olympus/rules/inception/reverse-engineering.
 ## Directory Layout
 
 \`\`\`
-aidlc-docs/${workflowId}/          # ALL documentation here
+aidlc-docs/{workflow-id}/          # ALL documentation here
   checkpoint.json                  # Machine-readable state (V3)
   aidlc-state.md                   # Human-readable state
   audit.md                         # Append-only interaction log

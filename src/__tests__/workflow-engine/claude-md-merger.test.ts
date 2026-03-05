@@ -243,8 +243,8 @@ describe('getAidlcRulesContent — brownfield', () => {
 describe('getAidlcRulesContent — directory layout', () => {
   const content = getAidlcRulesContent('test-wf-id', 'greenfield');
 
-  it('includes aidlc-docs directory layout', () => {
-    expect(content).toContain('aidlc-docs/test-wf-id/');
+  it('uses generic placeholder in directory layout tree', () => {
+    expect(content).toContain('aidlc-docs/{workflow-id}/');
   });
 
   it('mentions inception/ subdirectory', () => {
