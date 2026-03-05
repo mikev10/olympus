@@ -146,18 +146,20 @@ When finished, say "done" or "answers ready".
 
 ---
 
-## Q1: {question text}
+## Q1: {question text} (select one | select all that apply)
 A) {option description}
 B) {option description}
 C) {option description}
 {D, E, etc. as needed}
 Z) Other: please specify
 
+[Recommendation]: {letter(s)} — {brief reasoning for this recommendation}
+
 [Answer]:
 
 ---
 
-## Q2: {question text}
+## Q2: {question text} (select one | select all that apply)
 ...
 ```
 
@@ -169,12 +171,15 @@ Z) Other: please specify
 
 **Question format rules:**
 - Each question must offer multiple-choice options (A/B/C/D...)
+- Each question must include `(select one)` or `(select all that apply)` after the question text
+- Each question must include `[Recommendation]:` with letter(s) and brief reasoning after the options
 - "Other: please specify" is ALWAYS the last option (use next available letter)
 - Each question ends with `[Answer]:` tag on its own line (user fills in below it)
+- For multi-select, users provide comma-separated letters (e.g., A, B, E)
 
 ### 3c. Inform the user
 
-Tell the user: "I've created `aidlc-docs/{workflowId}/inception/intent-questions.md` with {N} questions. Please fill in the `[Answer]:` tags and say 'done' when finished."
+Tell the user: "I've created `aidlc-docs/{workflowId}/inception/intent-questions.md` with {N} questions. Each question includes an AI recommendation to help guide your decision. For multi-select questions, provide comma-separated letters (e.g., A, B, E). Please fill in the `[Answer]:` tags and say 'done' when finished."
 
 Wait for the user to respond with "done", "finished", or "ready".
 
@@ -319,6 +324,40 @@ Created: {ISO-8601}
 | {ISO-8601} | inception | intent.md generated | ai |
 ```
 
+### 4d. Present intent for review
+
+**MANDATORY**: Do NOT proceed to workflow stages until the user reviews intent.md.
+
+Present the following review message:
+
+```
+---
+
+## REVIEW REQUIRED — Intent Document
+
+### Artifacts generated
+- `aidlc-docs/{workflowId}/inception/intent.md` — **Please review this file**
+- `aidlc-docs/{workflowId}/inception/interview-log.md` — Interview Q&A record
+
+### What to verify in intent.md
+- [ ] Problem statement accurately captures your goals
+- [ ] User personas are correct
+- [ ] Success metrics match your expectations
+- [ ] Business constraints are complete
+- [ ] Out of scope items are correct (nothing missing, nothing wrong)
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Workspace Detection** → **Reverse Engineering** (if brownfield)
+
+To proceed: `approve`
+To request changes: `revise [specific feedback]`
+---
+```
+
+Wait for user approval. If user requests changes, update intent.md accordingly and re-present for review.
+
 ---
 
 ## Step 5: Stage 1 — Workspace Detection
@@ -364,35 +403,25 @@ After completing workspace detection:
 3. Update `aidlc-state.md` — set Workspace Detection row to `completed`
 4. Append to `audit.md` timeline: `Stage 'workspace-detection' completed | ai`
 
-### 5e. Output REVIEW REQUIRED
+### 5e. Output workspace summary and auto-proceed
+
+**This is an informational stage — NO user approval required.** Auto-proceed to the next stage.
+
+Display a brief summary and immediately continue:
 
 ```
----
+Workspace Detection Complete
 
-## REVIEW REQUIRED
+- **Project Type**: {Greenfield/Brownfield}
+- **Pathway**: {pathway_type}
+- **Languages**: {detected languages}
+- **Framework**: {detected framework, if any}
+- **Stages skipped**: {list any skipped stages and why, or "none"}
 
-### What was completed
-- **Workspace Detection**: Detected project type and pathway (greenfield/brownfield) and set up workspace configuration
-
-### Artifacts generated
-- _(no artifacts generated)_
-
-### What needs your review
-- [ ] Pathway type is correct: {pathway_type}
-- [ ] Greenfield/brownfield classification matches your intent
-
----
-
-## WHAT'S NEXT
-After your review, the workflow will proceed to: **Reverse Engineering**
-- Analyzes your existing codebase to understand current architecture and components
-
-To proceed: `continue` or `approve`
-To request changes: `revise [specific feedback]`
----
+Proceeding to {next stage name}...
 ```
 
-Wait for user approval before proceeding (unless Trust Level 3).
+Do NOT display "REVIEW REQUIRED" or wait for approval. Immediately proceed to the next stage.
 
 ---
 

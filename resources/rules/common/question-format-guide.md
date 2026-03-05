@@ -20,20 +20,39 @@ Every question must include meaningful options plus "Other" as the last option:
 
 ```markdown
 ## Question [Number]
-[Clear, specific question text]
+[Clear, specific question text] (select one | select all that apply)
 
 A) [First meaningful option]
 B) [Second meaningful option]
 [...additional options as needed...]
 X) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: [Letter(s)] — [Brief reasoning for this recommendation]
+
+[Answer]:
 ```
 
-**CRITICAL**: 
+**CRITICAL**:
 - "Other" is MANDATORY as the LAST option for every question
 - Only include meaningful options - don't make up options to fill slots
 - Use as many or as few options as make sense (minimum 2 + Other)
+
+#### Selection Type Indicator
+Every question MUST include a selection type in parentheses after the question text:
+- `(select one)` — Only one answer is valid
+- `(select all that apply)` — Multiple answers can be selected
+
+**Guidelines for choosing selection type:**
+- Use `(select one)` when options are mutually exclusive (e.g., "greenfield vs brownfield")
+- Use `(select all that apply)` when multiple options can coexist (e.g., motivations, features, concerns)
+
+#### AI Recommendation
+Every question MUST include a `[Recommendation]:` tag after the options and before `[Answer]:`:
+- Provide the recommended letter(s) followed by a dash and brief reasoning
+- For multi-select questions, list all recommended letters separated by commas
+- Base recommendations on industry best practices, common patterns, and context from the user's input
+- Keep reasoning to 1-2 sentences
+- The recommendation helps the user make informed decisions but does NOT replace their choice
 
 ### Complete Example
 
@@ -41,9 +60,10 @@ X) Other (please describe after [Answer]: tag below)
 # Requirements Clarification Questions
 
 Please answer the following questions to help clarify the requirements.
+For multi-select questions, provide comma-separated letters (e.g., A, B, E).
 
 ## Question 1
-What is the primary user authentication method?
+What authentication methods should be supported? (select all that apply)
 
 A) Username and password
 B) Social media login (Google, Facebook)
@@ -51,42 +71,50 @@ C) Single Sign-On (SSO)
 D) Multi-factor authentication
 E) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: A, D — Username/password is the baseline expectation, and MFA is increasingly required for production applications.
+
+[Answer]:
 
 ## Question 2
-Will this be a web or mobile application?
+Will this be a web or mobile application? (select one)
 
 A) Web application
 B) Mobile application
 C) Both web and mobile
 D) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: A — Starting with web reduces initial complexity; mobile can be added later.
+
+[Answer]:
 
 ## Question 3
-Is this a new project or existing codebase?
+Is this a new project or existing codebase? (select one)
 
 A) New project (greenfield)
 B) Existing codebase (brownfield)
 C) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: No recommendation — this is a factual question about your current state.
+
+[Answer]:
 ```
 
 ### User Response Format
-Users will answer by filling in the letter choice after [Answer]: tag:
+Users will answer by filling in the letter choice after [Answer]: tag.
+For `(select all that apply)` questions, users provide comma-separated letters:
 
 ```markdown
-## Question 1
-What is the primary user authentication method?
-
-A) Username and password
-B) Social media login (Google, Facebook)
-C) Single Sign-On (SSO)
-D) Multi-factor authentication
-
+## Question 1 (select one)
 [Answer]: C
+
+## Question 2 (select all that apply)
+[Answer]: A, B, E
+
+## Question 3 (select all that apply — with context)
+[Answer]: A, D — We need password auth as baseline plus MFA for admin users
 ```
+
+Users may also add context after their letter choices. This is encouraged and should be preserved.
 
 ### Reading User Responses
 After user confirms completion:
@@ -104,7 +132,8 @@ After user confirms completion:
 - **CRITICAL**: Don't make up options just to fill slots - only include meaningful choices
 
 #### Option Quality
-- Make options mutually exclusive
+- For `(select one)`: Make options mutually exclusive
+- For `(select all that apply)`: Options may overlap or coexist
 - Cover the most common scenarios
 - Only include meaningful, realistic options
 - **ALWAYS include "Other" as the LAST option** (MANDATORY)
@@ -114,7 +143,7 @@ After user confirms completion:
 #### Good Example:
 ```markdown
 ## Question 5
-What database technology will be used?
+What database technology will be used? (select one)
 
 A) Relational (PostgreSQL, MySQL)
 B) NoSQL Document (MongoDB, DynamoDB)
@@ -122,7 +151,9 @@ C) NoSQL Key-Value (Redis, Memcached)
 D) Graph Database (Neo4j, Neptune)
 E) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: A — Relational databases are the most versatile default; PostgreSQL specifically offers strong JSON support if NoSQL-like flexibility is needed later.
+
+[Answer]:
 ```
 
 #### Bad Example (Avoid):
@@ -146,8 +177,9 @@ Create aidlc-docs/{phase-name}-questions.md with all questions
 
 #### Step 2: Inform User
 ```
-"I've created {phase-name}-questions.md with [X] questions. 
-Please answer each question by filling in the letter choice after the [Answer]: tag. 
+"I've created {phase-name}-questions.md with [X] questions.
+Please answer each question by filling in the letter choice after the [Answer]: tag.
+For multi-select questions, provide comma-separated letters (e.g., A, B, E). Each question includes an AI recommendation to help guide your decision.
 If none of the options match your needs, choose the last option (Other) and describe your preference. Let me know when you're done."
 ```
 
@@ -174,8 +206,9 @@ for all questions before proceeding."
 #### Invalid Answers
 If answer is not a valid letter choice:
 ```
-"Question [X] has an invalid answer '[answer]'. 
-Please use only the letter choices provided in the question."
+"Question [X] has an invalid answer '[answer]'.
+Please use only the letter choices provided in the question.
+For multi-select questions, use comma-separated letters (e.g., A, B, E)."
 ```
 
 #### Ambiguous Answers
@@ -274,53 +307,62 @@ Please answer these clarifying questions before I can proceed with classificatio
 
 ### Phase-Specific Examples
 
-#### Example with 2 meaningful options:
+#### Example: select one (2 meaningful options)
 ```markdown
 ## Question 1
-Is this a new project or existing codebase?
+Is this a new project or existing codebase? (select one)
 
 A) New project (greenfield)
 B) Existing codebase (brownfield)
 C) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: No recommendation — this is a factual question about your current state.
+
+[Answer]:
 ```
 
-#### Example with 3 meaningful options:
+#### Example: select one (3 meaningful options)
 ```markdown
 ## Question 2
-What is the deployment target?
+What is the deployment target? (select one)
 
 A) Cloud (AWS, Azure, GCP)
 B) On-premises servers
 C) Hybrid (both cloud and on-premises)
 D) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: A — Cloud deployments offer the fastest path to production with managed scaling and infrastructure.
+
+[Answer]:
 ```
 
-#### Example with 4 meaningful options:
+#### Example: select all that apply (4 meaningful options)
 ```markdown
 ## Question 3
-What architectural pattern should be used?
+What are your primary concerns for this project? (select all that apply)
 
-A) Monolithic architecture
-B) Microservices architecture
-C) Serverless architecture
-D) Event-driven architecture
+A) Performance and scalability
+B) Security and compliance
+C) Developer experience and maintainability
+D) Cost optimization
 E) Other (please describe after [Answer]: tag below)
 
-[Answer]: 
+[Recommendation]: A, B, C — These three concerns form the foundation of a production-quality system. Cost optimization is important but shouldn't drive architectural decisions early on.
+
+[Answer]:
 ```
 
 ## Summary
 
-**Remember**: 
+**Remember**:
 - ✅ Always create question files
 - ✅ Always use multiple choice format
 - ✅ **Always include "Other" as the LAST option (MANDATORY)**
+- ✅ **Always include `(select one)` or `(select all that apply)` after the question text**
+- ✅ **Always include `[Recommendation]:` with reasoning before `[Answer]:`**
 - ✅ Only include meaningful options - don't make up options to fill slots
 - ✅ Always use [Answer]: tags
+- ✅ Accept comma-separated letters for multi-select answers (e.g., A, B, E)
 - ✅ Always wait for user completion
 - ✅ Always validate responses for contradictions
 - ✅ Always create clarification files if needed
@@ -330,3 +372,4 @@ E) Other (please describe after [Answer]: tag below)
 - ❌ Never proceed without answers
 - ❌ Never proceed with unresolved contradictions
 - ❌ Never make assumptions about ambiguous responses
+- ❌ Never omit the selection type indicator or AI recommendation

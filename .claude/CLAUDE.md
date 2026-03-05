@@ -602,7 +602,7 @@ Task(subagent_type="explore", description="Map codebase structure", prompt="..."
 ## Directory Layout
 
 ```
-aidlc-docs/installer-content-extraction/          # ALL documentation here
+aidlc-docs/{workflow-id}/          # ALL documentation here
   checkpoint.json                  # Machine-readable state (V3)
   aidlc-state.md                   # Human-readable state
   audit.md                         # Append-only interaction log
