@@ -107,8 +107,37 @@ Analyze whatever the user has provided:
 DO NOT proceed to Step 7 until all questions in requirement-verification-questions.md are answered and validated.
 Present the question file to the user and STOP.
 
+### Step 6b: Review Supplementary Analysis (if applicable)
+
+**IF a Metis blind spot analysis (or any supplementary agent analysis) was run during the question-answering phase:**
+
+1. Present a summary of the agent's findings to the user — clearly separated from the user's own answers
+2. Format as a numbered list of findings, each with a brief explanation of why it was flagged
+3. Ask the user to review and indicate which findings to incorporate:
+
+```markdown
+> **🔎 Metis Blind Spot Analysis Findings**
+>
+> The following potential gaps or risks were identified during requirements analysis:
+>
+> 1. [Finding description]
+> 2. [Finding description]
+> ...
+>
+> **Please review these findings.** You may:
+> - ✅ **Approve All** — Incorporate all findings into requirements
+> - ✏️ **Select Specific** — Indicate which findings to include (e.g., "include 1, 3, skip 2")
+> - ❌ **Skip All** — Proceed without incorporating supplementary findings
+```
+
+4. **MANDATORY**: Do NOT proceed to Step 7 until the user has reviewed and responded
+5. **MANDATORY**: Only incorporate findings the user explicitly approved
+6. Log the user's response in `audit.md` with complete raw input
+
+**IF no supplementary analysis was run**: Skip directly to Step 7.
+
 ### Step 7: Generate Requirements Document
-   - **PREREQUISITE**: Step 6 gate must be passed — all answers received and analyzed
+   - **PREREQUISITE**: Step 6 gate must be passed — all answers received and analyzed. If Step 6b applied, supplementary findings must also be reviewed.
    - Create `aidlc-docs/inception/requirements/requirements.md`
    - Include intent analysis summary at the top:
      - User request
