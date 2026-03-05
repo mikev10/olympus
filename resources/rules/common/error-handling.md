@@ -364,6 +364,63 @@
 ---
 ```
 
+## Agent Task Failure Recovery
+
+### When a Delegated Task Fails or Is Lost
+
+**Scenario**: A task delegated via the Task tool returns "No task found with ID", empty output, or an error.
+
+**MANDATORY Rules**:
+1. **NEVER silently do the work yourself** — if you delegated to an agent, the recovery must also use delegation
+2. **NEVER claim the lost agent's work was sufficient** — if you cannot retrieve output, the work is lost
+3. **Retry the delegation** — re-launch the same agent with the same (or refined) prompt
+4. **Maximum 2 retries** — if the agent fails 3 times total, escalate to the user
+5. **Log all failures** — record the task ID, error, and retry attempts in `audit.md`
+
+**Recovery Steps**:
+1. Log the failure: task ID, error message, which agent was used
+2. Re-launch the agent with `run_in_background: false` (foreground) to ensure visibility
+3. If retry fails: try a different agent tier (e.g., escalate from `explore` to `explore-medium`)
+4. If all retries fail: inform the user and ask how to proceed
+5. Document the resolution in `audit.md`
+
+**Error Logging Format**:
+```markdown
+## Agent Task Failure
+**Timestamp**: [ISO timestamp]
+**Task ID**: [lost task ID]
+**Agent**: [agent type]
+**Error**: [error message]
+**Recovery**: [retry attempt or escalation]
+
+---
+```
+
+### Background vs Foreground Task Execution
+
+**Default**: Run delegated tasks in the **foreground** (`run_in_background: false`).
+
+Foreground execution provides:
+- Full visibility into agent work (tool calls, progress, decisions)
+- Immediate error detection and recovery
+- Better user experience — the user can see what's happening
+
+**Background execution** (`run_in_background: true`) should ONLY be used for:
+- Non-agent operations: `npm install`, `npm test`, `docker build`, etc.
+- Operations where output is not needed until completion
+
+**NEVER run agent tasks (Task tool with subagent_type) in the background** unless the user explicitly requests it. The risk of silent task loss outweighs the parallelism benefit.
+
+### Parallel Foreground Execution
+
+To run multiple agents in parallel WITHOUT background mode:
+- Launch all agent tasks in the **same response** (multiple Task calls)
+- Do NOT set `run_in_background: true`
+- The system will execute them concurrently while maintaining visibility
+- Wait for all results before proceeding
+
+This gives you parallelism benefits with full transparency.
+
 ## Prevention Best Practices
 
 1. **Validate Early**: Check inputs and dependencies before starting work

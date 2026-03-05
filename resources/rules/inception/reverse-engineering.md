@@ -8,6 +8,23 @@
 
 **Rerun behavior**: Always rerun when brownfield project detected, even if artifacts exist. This ensures artifacts reflect current code state
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate codebase analysis to specialized agents. Do NOT analyze the codebase directly.
+
+**Execution mode**: Foreground parallel — launch multiple agents in the same response, but do NOT use `run_in_background: true`. This ensures:
+- The user can see what each agent is doing
+- Failed tasks are detected immediately (not silently lost)
+- Results are available inline without polling via TaskOutput
+
+**Recommended split**:
+- **Agent 1** (`explore-medium`): Static code model — modules, data models, dependencies, file inventory, technology stack
+- **Agent 2** (`explore-medium`): Dynamic behavior model — user flows, auth patterns, state management, API interactions, error handling
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After both agents complete**: Compile their findings into the artifact files defined in the steps below.
+
 ## Step 1: Multi-Package Discovery
 
 ### 1.1 Scan Workspace
@@ -308,4 +325,5 @@ Update `aidlc-docs/aidlc-state.md`:
 ## Step 12: Wait for User Approval
 
 - **MANDATORY**: Do not proceed until user explicitly approves
+- **MANDATORY**: This approval gate is **unconditional** — it must fire regardless of how the analysis was completed (by agents, retries, manual recovery, or any combination). Never skip this gate.
 - **MANDATORY**: Log user's response in audit.md with complete raw input
