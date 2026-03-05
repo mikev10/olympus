@@ -324,4 +324,46 @@ describe('workspace-detection stage', () => {
       expect(result.whats_next).toContain('reverse-engineering');
     });
   });
+
+  describe('origin field transition', () => {
+    it('transitions origin from hook-init to ai-initialized', async () => {
+      mockDetectBrownfield.mockResolvedValue({ isBrownfield: false, sourceFileCount: 0 });
+      const checkpoint = createMockCheckpoint();
+      const freshCheckpoint = createMockCheckpoint({ origin: 'hook-init' });
+      mockLoadCheckpoint.mockResolvedValue(freshCheckpoint);
+
+      const { executeWorkspaceDetection } = await import('../../features/workflow-engine/inception/stages/workspace-detection.js');
+      await executeWorkspaceDetection('/project', 'test-wf', checkpoint);
+
+      // saveCheckpoint should be called twice: once for pathway, once for origin transition
+      expect(mockSaveCheckpoint).toHaveBeenCalledTimes(2);
+      const secondSave = mockSaveCheckpoint.mock.calls[1]?.[1] as WorkflowCheckpointV3;
+      expect(secondSave.origin).toBe('ai-initialized');
+    });
+
+    it('does not re-save when origin is already ai-initialized', async () => {
+      mockDetectBrownfield.mockResolvedValue({ isBrownfield: false, sourceFileCount: 0 });
+      const checkpoint = createMockCheckpoint();
+      const freshCheckpoint = createMockCheckpoint({ origin: 'ai-initialized' });
+      mockLoadCheckpoint.mockResolvedValue(freshCheckpoint);
+
+      const { executeWorkspaceDetection } = await import('../../features/workflow-engine/inception/stages/workspace-detection.js');
+      await executeWorkspaceDetection('/project', 'test-wf', checkpoint);
+
+      // Only one save for the pathway update
+      expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not re-save when origin is undefined', async () => {
+      mockDetectBrownfield.mockResolvedValue({ isBrownfield: false, sourceFileCount: 0 });
+      const checkpoint = createMockCheckpoint();
+      const freshCheckpoint = createMockCheckpoint();
+      mockLoadCheckpoint.mockResolvedValue(freshCheckpoint);
+
+      const { executeWorkspaceDetection } = await import('../../features/workflow-engine/inception/stages/workspace-detection.js');
+      await executeWorkspaceDetection('/project', 'test-wf', checkpoint);
+
+      expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1);
+    });
+  });
 });

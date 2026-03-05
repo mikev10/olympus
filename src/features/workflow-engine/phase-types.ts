@@ -294,6 +294,7 @@ export interface WorkflowCheckpointV3 {
   workflow_routing_path?: string;
   pathway_type?: PathwayType;
   skipped_phases?: WorkflowPhase[];
+  origin?: 'hook-init' | 'ai-initialized' | 'manual';
   code_plan_path?: string;
   plan_steps_total?: number;
   plan_steps_completed?: number;

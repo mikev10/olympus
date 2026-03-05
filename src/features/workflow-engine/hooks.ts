@@ -57,7 +57,8 @@ function getStageTaskDescription(stage: WorkflowStage): string {
  */
 export function buildStructuredWorkflowPrompt(
   featureName: string,
-  checkpoint: any
+  checkpoint: any,
+  isNewWorkflow: boolean = false
 ): string {
   const currentStage = checkpoint.current_stage as WorkflowStage;
   const agent = STAGE_AGENT_MAP[currentStage];
@@ -72,6 +73,12 @@ export function buildStructuredWorkflowPrompt(
     prompt += `Use: Task(subagent_type="${agent}", prompt="...")\n`;
   } else {
     prompt += `Next step: ${taskDescription}\n`;
+  }
+
+  if (isNewWorkflow) {
+    prompt += `\nIMPORTANT: This is a BRAND NEW workflow just initialized. `;
+    prompt += `Do NOT treat this as a resumed or existing workflow. `;
+    prompt += `Proceed with workspace detection as the first step.\n`;
   }
 
   return prompt;

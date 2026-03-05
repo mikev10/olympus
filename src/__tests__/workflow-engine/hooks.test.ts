@@ -106,6 +106,21 @@ describe('Workflow Hooks', () => {
       expect(prompt).toBeTruthy();
       expect(prompt.length).toBeGreaterThan(0);
     });
+
+    it('includes new workflow text when isNewWorkflow is true', () => {
+      const checkpoint = createTestCheckpoint();
+      const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint, true);
+
+      expect(prompt).toContain('BRAND NEW workflow');
+      expect(prompt).toContain('workspace detection');
+    });
+
+    it('omits new workflow text when isNewWorkflow is false', () => {
+      const checkpoint = createTestCheckpoint();
+      const prompt = buildStructuredWorkflowPrompt('test-feature', checkpoint, false);
+
+      expect(prompt).not.toContain('BRAND NEW workflow');
+    });
   });
 
   describe('buildWorkflowResumptionPrompt', () => {

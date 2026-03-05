@@ -121,7 +121,7 @@ export function registerUserPromptSubmitHooks(): void {
           }
 
           // Build the structured workflow prompt
-          const workflowPrompt = buildStructuredWorkflowPrompt(featureName, checkpoint);
+          const workflowPrompt = buildStructuredWorkflowPrompt(featureName, checkpoint, true);
 
           // Inject workflow context hint
           const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'intent'}]`;

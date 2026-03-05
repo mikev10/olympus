@@ -81,6 +81,12 @@ export async function executeWorkspaceDetection(
 
     await saveCheckpoint(projectPath, freshCheckpoint);
     invalidateCache(projectPath, workflowId);
+
+    if (freshCheckpoint.origin === 'hook-init') {
+      freshCheckpoint.origin = 'ai-initialized';
+      await saveCheckpoint(projectPath, freshCheckpoint);
+      invalidateCache(projectPath, workflowId);
+    }
   }
 
   const detectionMethod = checkpoint.pathway_type

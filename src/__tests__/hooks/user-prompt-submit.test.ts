@@ -766,7 +766,7 @@ describe('Structured Workflow Hook', () => {
 
       await workflowHook.handler(ctx);
 
-      expect(buildStructuredWorkflowPrompt).toHaveBeenCalledWith('myfeature', mockCheckpoint);
+      expect(buildStructuredWorkflowPrompt).toHaveBeenCalledWith('myfeature', mockCheckpoint, true);
     });
 
     it('returns additionalContext with workflow prompt', async () => {

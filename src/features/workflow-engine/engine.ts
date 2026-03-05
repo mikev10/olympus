@@ -126,6 +126,7 @@ export class WorkflowEngine {
       current_phase: 'inception',
       current_stage: 'intent',
       status: 'in_progress',
+      origin: 'hook-init',
       phases: {
         discovery: {
           status: 'not_started',
