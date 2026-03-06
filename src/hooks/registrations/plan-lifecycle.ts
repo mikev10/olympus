@@ -19,6 +19,7 @@ import { getDiscoveriesForInjection } from '../../learning/discovery.js';
 import { loadDiscoveryConfig } from '../../learning/config.js';
 import { loadManifest, saveManifest } from '../../features/workflow-engine/manifest.js';
 import { loadCheckpoint, saveCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
+import { generateStateFile } from '../../features/workflow-engine/state-file.js';
 import * as path from 'path';
 import type { HookContext, HookResult } from '../types.js';
 
@@ -363,6 +364,8 @@ export function registerPlanLifecycleHooks(): void {
           // Save manifest
           saveManifest(manifestPath, manifest);
 
+          generateStateFile(directory, activeWorkflowId, checkpoint);
+
           // Check if workflow is complete (Operations -> complete)
           if (checkpoint.status === 'complete' || checkpoint.current_stage === 'complete') {
             manifest.phases.operations.status = 'complete';
@@ -410,6 +413,7 @@ export function registerPlanLifecycleHooks(): void {
           manifest.phases.operations.status = 'complete';
           manifest.phases.operations.completed_at = now;
           saveManifest(manifestPath, manifest);
+          generateStateFile(directory, activeWorkflowId, checkpoint);
 
           return {
             continue: true,

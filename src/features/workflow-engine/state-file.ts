@@ -24,6 +24,14 @@ function toTitleCase(kebab: string): string {
     .join(' ');
 }
 
+function deriveTitle(featureName: string): string {
+  const title = featureName
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+  return title.length > 80 ? title.substring(0, 77) + '...' : title;
+}
+
 function buildInceptionSubStages(checkpoint: WorkflowCheckpointV3): string[] {
   const { inception_stages, current_inception_stage } = checkpoint;
   if (!inception_stages) return [];
@@ -60,7 +68,7 @@ function buildInceptionSubStages(checkpoint: WorkflowCheckpointV3): string[] {
 }
 
 function buildPhaseProgress(checkpoint: WorkflowCheckpointV3): string {
-  const lines: string[] = ['## Phase Progress'];
+  const lines: string[] = ['## Progress'];
 
   for (const phase of PHASES) {
     const phaseState = checkpoint.phases[phase];
@@ -90,6 +98,50 @@ function buildPhaseProgress(checkpoint: WorkflowCheckpointV3): string {
   return lines.join('\n');
 }
 
+function buildUnitsSection(checkpoint: WorkflowCheckpointV3): string {
+  const lines: string[] = ['## Units of Work'];
+
+  if (!checkpoint.construction_units || Object.keys(checkpoint.construction_units).length === 0) {
+    lines.push('');
+    lines.push('_No units defined yet. Populated during Units Generation._');
+    return lines.join('\n');
+  }
+
+  lines.push('');
+  lines.push('| Unit | Status |');
+  lines.push('|------|--------|');
+  for (const [key, unit] of Object.entries(checkpoint.construction_units)) {
+    lines.push(`| ${key} | ${unit.code_generation_status} |`);
+  }
+  return lines.join('\n');
+}
+
+function buildArtifactsSection(
+  projectPath: string,
+  workflowId: string
+): string {
+  const lines: string[] = ['## Key Artifacts', ''];
+  lines.push('| Artifact | Path | Status |');
+  lines.push('|----------|------|--------|');
+
+  const workflowDir = path.join(projectPath, WORKFLOW_DIR, workflowId);
+  const artifacts = [
+    { name: 'Intent Analysis', path: 'inception/intent.md' },
+    { name: 'Requirements', path: 'inception/requirements.md' },
+    { name: 'User Stories', path: 'inception/stories.md' },
+    { name: 'Workflow Plan', path: 'inception/workflow-plan.md' },
+    { name: 'Unit Definitions', path: 'inception/application-design/unit-of-work.md' },
+    { name: 'Dependency Matrix', path: 'inception/application-design/unit-of-work-dependency.md' },
+  ];
+
+  for (const artifact of artifacts) {
+    const exists = fs.existsSync(path.join(workflowDir, artifact.path));
+    lines.push(`| ${artifact.name} | ${artifact.path} | ${exists ? 'created' : 'pending'} |`);
+  }
+
+  return lines.join('\n');
+}
+
 export function generateStateFile(
   projectPath: string,
   workflowId: string,
@@ -98,19 +150,35 @@ export function generateStateFile(
   const filePath = path.join(projectPath, WORKFLOW_DIR, workflowId, STATE_FILENAME);
 
   try {
+    const title = deriveTitle(checkpoint.feature_name);
     const phaseProgress = buildPhaseProgress(checkpoint);
+    const unitsSection = buildUnitsSection(checkpoint);
+    const artifactsSection = buildArtifactsSection(projectPath, workflowId);
 
-    const content = `# AIDLC Workflow State
-**Project**: ${checkpoint.feature_name}
-**Workflow ID**: ${workflowId}
-**Current Phase**: ${checkpoint.current_phase}
-**Current Stage**: ${checkpoint.current_stage}
-**Pathway**: ${checkpoint.pathway_type ?? 'unknown'}
-**Last Updated**: ${new Date().toISOString()}
+    const content = `# ${title}
+
+| Field | Value |
+|-------|-------|
+| **Workflow ID** | ${workflowId} |
+| **Status** | ${checkpoint.status} |
+| **Phase** | ${checkpoint.current_phase} |
+| **Stage** | ${checkpoint.current_stage} |
+| **Pathway** | ${checkpoint.pathway_type ?? 'unknown'} |
+| **Created** | ${checkpoint.created_at ?? new Date().toISOString()} |
+| **Last Updated** | ${new Date().toISOString()} |
+
+## Summary
+
+${checkpoint.feature_name}
 
 ${phaseProgress}
 
+${unitsSection}
+
+${artifactsSection}
+
 ## Code Location
+
 Application Code: ${projectPath} (NEVER in aidlc-docs/)
 Documentation: ${WORKFLOW_DIR}/${workflowId}/
 `;
@@ -155,10 +223,15 @@ export function updateStateFile(
       });
     }
 
-    updated = updated.replace(
-      /^\*\*Last Updated\*\*: .+$/m,
-      `**Last Updated**: ${new Date().toISOString()}`
-    );
+    // Update Last Updated - handle both table format and plain format
+    const tableLastUpdated = /\| \*\*Last Updated\*\* \| .+? \|/;
+    const plainLastUpdated = /^\*\*Last Updated\*\*: .+$/m;
+
+    if (tableLastUpdated.test(updated)) {
+      updated = updated.replace(tableLastUpdated, `| **Last Updated** | ${new Date().toISOString()} |`);
+    } else {
+      updated = updated.replace(plainLastUpdated, `**Last Updated**: ${new Date().toISOString()}`);
+    }
 
     fs.writeFileSync(filePath, updated, 'utf-8');
   } catch (error) {

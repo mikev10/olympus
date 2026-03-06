@@ -103,11 +103,11 @@ describe('generateStateFile', () => {
     expect(content).toContain('unknown');
   });
 
-  it('written content includes "## Phase Progress" section', () => {
+  it('written content includes "## Progress" section', () => {
     const checkpoint = makeCheckpoint();
     const filePath = generateStateFile(tmpDir, 'wf-section', checkpoint);
     const content = fs.readFileSync(filePath, 'utf-8');
-    expect(content).toContain('## Phase Progress');
+    expect(content).toContain('## Progress');
   });
 
   it('written content includes "## Code Location" section', () => {
@@ -124,11 +124,11 @@ describe('generateStateFile', () => {
     expect(content).toContain('NEVER in aidlc-docs/');
   });
 
-  it('written content has "**Last Updated**:" field', () => {
+  it('written content has "**Last Updated**" field', () => {
     const checkpoint = makeCheckpoint();
     const filePath = generateStateFile(tmpDir, 'wf-updated', checkpoint);
     const content = fs.readFileSync(filePath, 'utf-8');
-    expect(content).toContain('**Last Updated**:');
+    expect(content).toContain('**Last Updated**');
   });
 
   it('creates intermediate directories that do not exist', () => {
@@ -136,6 +136,111 @@ describe('generateStateFile', () => {
     const nestedTmp = path.join(tmpDir, 'sub', 'dir');
     const filePath = generateStateFile(nestedTmp, 'wf-mkdir', checkpoint);
     expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  it('uses derived title as heading instead of "AIDLC Workflow State"', () => {
+    const checkpoint = makeCheckpoint({ feature_name: 'add user authentication' });
+    const filePath = generateStateFile(tmpDir, 'wf-title', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('# Add User Authentication');
+    expect(content).not.toContain('# AIDLC Workflow State');
+  });
+
+  it('truncates long titles to 80 characters', () => {
+    const longName = 'a '.repeat(50).trim();
+    const checkpoint = makeCheckpoint({ feature_name: longName });
+    const filePath = generateStateFile(tmpDir, 'wf-long-title', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const firstLine = content.split('\n')[0];
+    expect(firstLine.length).toBeLessThanOrEqual(82);
+    expect(firstLine).toContain('...');
+  });
+
+  it('includes metadata table with all fields', () => {
+    const checkpoint = makeCheckpoint({
+      feature_name: 'Test Feature',
+      status: 'in_progress',
+      current_phase: 'inception',
+      current_stage: 'requirements-analysis',
+      pathway_type: 'brownfield-refactor',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-meta', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| **Workflow ID** | wf-meta |');
+    expect(content).toContain('| **Status** | in_progress |');
+    expect(content).toContain('| **Phase** | inception |');
+    expect(content).toContain('| **Stage** | requirements-analysis |');
+    expect(content).toContain('| **Pathway** | brownfield-refactor |');
+    expect(content).toContain('| **Created** | 2024-01-01T00:00:00.000Z |');
+    expect(content).toContain('| **Last Updated** |');
+  });
+
+  it('includes Summary section with feature_name', () => {
+    const checkpoint = makeCheckpoint({ feature_name: 'My Great Feature' });
+    const filePath = generateStateFile(tmpDir, 'wf-summary', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('## Summary');
+    expect(content).toContain('My Great Feature');
+  });
+
+  it('shows "No units defined yet" when no construction_units', () => {
+    const checkpoint = makeCheckpoint();
+    const filePath = generateStateFile(tmpDir, 'wf-no-units', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('## Units of Work');
+    expect(content).toContain('_No units defined yet. Populated during Units Generation._');
+  });
+
+  it('shows units table when construction_units present', () => {
+    const checkpoint = makeCheckpoint({
+      construction_units: {
+        'content-extraction': {
+          unitId: 'content-extraction',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'completed',
+        },
+        'engine-alignment': {
+          unitId: 'engine-alignment',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'not_started',
+        },
+      },
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-with-units', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| content-extraction | completed |');
+    expect(content).toContain('| engine-alignment | not_started |');
+  });
+
+  it('includes Key Artifacts table', () => {
+    const checkpoint = makeCheckpoint();
+    const filePath = generateStateFile(tmpDir, 'wf-artifacts', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('## Key Artifacts');
+    expect(content).toContain('| Intent Analysis |');
+    expect(content).toContain('| Requirements |');
+    expect(content).toContain('| pending |');
+  });
+
+  it('marks artifacts as "created" when files exist on disk', () => {
+    const checkpoint = makeCheckpoint();
+    const artifactDir = path.join(tmpDir, 'aidlc-docs', 'wf-art-exist', 'inception');
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, 'intent.md'), '# Intent', 'utf-8');
+
+    const filePath = generateStateFile(tmpDir, 'wf-art-exist', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| Intent Analysis | inception/intent.md | created |');
+  });
+
+  it('marks artifacts as "pending" when files do not exist', () => {
+    const checkpoint = makeCheckpoint();
+    const filePath = generateStateFile(tmpDir, 'wf-art-pending', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| Intent Analysis | inception/intent.md | pending |');
   });
 });
 
@@ -243,10 +348,12 @@ describe('updateStateFile', () => {
     const dir = path.join(tmpDir, 'aidlc-docs', workflowId);
     fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, 'aidlc-state.md');
-    const content = `# AIDLC Workflow State
-**Last Updated**: 2024-01-01T00:00:00.000Z
+    const content = `# Test Feature
+| Field | Value |
+|-------|-------|
+| **Last Updated** | 2024-01-01T00:00:00.000Z |
 
-## Phase Progress
+## Progress
 - [ ] Discovery
 - [ ] Inception (in progress)
 - [ ] Construction
@@ -285,13 +392,32 @@ ${extraLines}
     updateStateFile(tmpDir, 'wf-upd-timestamp', 'Inception', 'completed');
     const content = fs.readFileSync(filePath, 'utf-8');
     expect(content).not.toContain(before);
-    expect(content).toContain('**Last Updated**:');
+    expect(content).toContain('**Last Updated**');
   });
 
   it('does not throw when file does not exist (silent error handling)', () => {
     expect(() => {
       updateStateFile(tmpDir, 'wf-nonexistent', 'Inception', 'completed');
     }).not.toThrow();
+  });
+
+  it('regex updates work against new enhanced template format', () => {
+    const checkpoint = makeCheckpoint({ current_phase: 'inception', feature_name: 'Test Feature' });
+    generateStateFile(tmpDir, 'wf-regex-compat', checkpoint);
+    updateStateFile(tmpDir, 'wf-regex-compat', 'Inception', 'completed');
+    const filePath = path.join(tmpDir, 'aidlc-docs', 'wf-regex-compat', 'aidlc-state.md');
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('[x] Inception');
+    expect(content).not.toContain('(in progress)');
+  });
+
+  it('updates Last Updated in metadata table format', () => {
+    const checkpoint = makeCheckpoint({ feature_name: 'Test Feature' });
+    generateStateFile(tmpDir, 'wf-meta-update', checkpoint);
+    updateStateFile(tmpDir, 'wf-meta-update', 'Inception', 'completed');
+    const filePath = path.join(tmpDir, 'aidlc-docs', 'wf-meta-update', 'aidlc-state.md');
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('**Last Updated**');
   });
 
   it('completed status removes existing (in progress) suffix', () => {
@@ -307,7 +433,7 @@ ${extraLines}
     const filePath = path.join(dir, 'aidlc-state.md');
     fs.writeFileSync(
       filePath,
-      `# AIDLC Workflow State\n**Last Updated**: 2024-01-01T00:00:00.000Z\n\n- [ ] Construction (in progress)\n`,
+      `# Test Feature\n| **Last Updated** | 2024-01-01T00:00:00.000Z |\n\n- [ ] Construction (in progress)\n`,
       'utf-8',
     );
     updateStateFile(tmpDir, 'wf-upd-strip2', 'Construction', 'in_progress');
@@ -340,11 +466,11 @@ describe('Integration: generateStateFile round-trip', () => {
     const filePath = generateStateFile(tmpDir, 'wf-integration', checkpoint);
     const content = fs.readFileSync(filePath, 'utf-8');
 
-    expect(content).toContain('# AIDLC Workflow State');
+    expect(content).toContain('# Integration Feature');
     expect(content).toContain('Integration Feature');
     expect(content).toContain('wf-integration');
     expect(content).toContain('brownfield-enhancement');
-    expect(content).toContain('## Phase Progress');
+    expect(content).toContain('## Progress');
     expect(content).toContain('## Code Location');
   });
 
