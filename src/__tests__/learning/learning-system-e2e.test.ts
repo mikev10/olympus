@@ -2,7 +2,7 @@
  * Learning System E2E Tests
  *
  * Comprehensive end-to-end tests verifying the learning system integration
- * with the ODLC workflow pipeline. Uses real file I/O in temp directories.
+ * with the AIDLC workflow pipeline. Uses real file I/O in temp directories.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'fs';

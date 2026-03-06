@@ -1,7 +1,7 @@
 /**
  * Quality Gate Hooks Registration
  *
- * Implements quality gates and governance for the ODLC workflow engine.
+ * Implements quality gates and governance for the AIDLC workflow engine.
  * Provides two critical hooks:
  * 1. qualityGateBlocker (PostToolUse): Detects phase transitions and blocks for approval
  * 2. qualityGateApprover (UserPromptSubmit): Processes approve/reject commands

@@ -4,7 +4,7 @@
  * Glue layer connecting execution modes (/ascent, /olympus, /ultrawork)
  * to the manifest/checkpoint system. Provides context detection, bolt/unit
  * lifecycle management, progress tracking, and execution plan generation
- * for the ODLC 4-stage pipeline (intent -> unit -> bolt -> complete).
+ * for the AIDLC 4-stage pipeline (intent -> unit -> bolt -> complete).
  */
 
 import * as path from 'path';

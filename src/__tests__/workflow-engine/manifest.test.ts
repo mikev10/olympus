@@ -1,5 +1,5 @@
 /**
- * Comprehensive tests for ODLC Artifact Manifest System
+ * Comprehensive tests for AIDLC Artifact Manifest System
  *
  * Tests all exported functions from manifest.ts with 90%+ coverage.
  * Validates artifact tracking, versioning, checksums, links, and recovery.

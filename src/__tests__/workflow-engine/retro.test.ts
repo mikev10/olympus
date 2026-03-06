@@ -108,7 +108,7 @@ describe('retro', () => {
             reason: 'Incomplete requirements',
           },
           {
-            phase: 'forge',
+            phase: 'construction',
             timestamp: '2026-02-14T11:00:00Z',
             action: 'approved',
             actor: 'trust',
@@ -172,7 +172,7 @@ describe('retro', () => {
           {
             id: 'artifact-2',
             type: 'code',
-            phase: 'forge',
+            phase: 'construction',
             stage: 'draft',
             path: '/path/to/code.ts',
             created_at: '2026-02-14T09:30:00Z',
@@ -363,7 +363,7 @@ Test 2: FAILURE detected
         featureName: 'Feature A',
         gateRejections: [
           { phase: 'vision', timestamp: '2026-02-14T10:00:00Z', reason: 'Incomplete requirements', actor: 'human' },
-          { phase: 'forge', timestamp: '2026-02-14T11:00:00Z', reason: 'Incomplete requirements', actor: 'human' },
+          { phase: 'construction', timestamp: '2026-02-14T11:00:00Z', reason: 'Incomplete requirements', actor: 'human' },
           { phase: 'summit', timestamp: '2026-02-14T12:00:00Z', reason: 'Incomplete requirements', actor: 'human' },
         ],
         cascadeEvents: [],
@@ -387,7 +387,7 @@ Test 2: FAILURE detected
         featureName: 'Feature A',
         gateRejections: [
           { phase: 'vision', timestamp: '2026-02-14T10:00:00Z', reason: 'Failed tests', actor: 'human' },
-          { phase: 'forge', timestamp: '2026-02-14T11:00:00Z', reason: 'Failed tests', actor: 'human' },
+          { phase: 'construction', timestamp: '2026-02-14T11:00:00Z', reason: 'Failed tests', actor: 'human' },
           { phase: 'summit', timestamp: '2026-02-14T12:00:00Z', reason: 'Missing documentation', actor: 'human' },
         ],
         cascadeEvents: [],
@@ -411,7 +411,7 @@ Test 2: FAILURE detected
         featureName: 'Feature A',
         gateRejections: [
           { phase: 'vision', timestamp: '2026-02-14T10:00:00Z', reason: 'Reason A', actor: 'human' },
-          { phase: 'forge', timestamp: '2026-02-14T11:00:00Z', reason: 'Reason B', actor: 'human' },
+          { phase: 'construction', timestamp: '2026-02-14T11:00:00Z', reason: 'Reason B', actor: 'human' },
           { phase: 'summit', timestamp: '2026-02-14T12:00:00Z', reason: 'Reason C', actor: 'human' },
         ],
         cascadeEvents: [],
@@ -479,7 +479,7 @@ Test 2: FAILURE detected
       featureName: 'Feature A',
       gateRejections: [
         { phase: 'vision', timestamp: '2026-02-14T10:00:00Z', reason: 'Incomplete', actor: 'human' },
-        { phase: 'forge', timestamp: '2026-02-14T11:00:00Z', reason: 'Incomplete', actor: 'human' },
+        { phase: 'construction', timestamp: '2026-02-14T11:00:00Z', reason: 'Incomplete', actor: 'human' },
       ],
       cascadeEvents: [],
       trustDecreases: [],
@@ -653,7 +653,7 @@ Test 2: FAILURE detected
         feature_name: 'Feature A',
         gate_audit: [
           { phase: 'vision', timestamp: '2026-02-14T10:00:00Z', action: 'rejected', actor: 'human', reason: 'Issue A' },
-          { phase: 'forge', timestamp: '2026-02-14T11:00:00Z', action: 'rejected', actor: 'human', reason: 'Issue A' },
+          { phase: 'construction', timestamp: '2026-02-14T11:00:00Z', action: 'rejected', actor: 'human', reason: 'Issue A' },
         ],
         artifacts: [],
       });

@@ -1,7 +1,7 @@
 /**
  * Workflow-Learning Bridge
  *
- * Integration between the ODLC workflow engine and the learning system.
+ * Integration between the AIDLC workflow engine and the learning system.
  * Maps workflow events to existing discovery categories for capture and query.
  * Feeds agent performance data into the agent evaluator.
  */

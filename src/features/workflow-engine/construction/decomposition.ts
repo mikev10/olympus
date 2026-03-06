@@ -4,7 +4,7 @@
  * Decomposes high-level INTENTs from the Inception phase into named construction units:
  * - INTENT (from Inception phase) -> UNIT (named architectural components) -> code generation
  *
- * This module provides the core decomposition logic for the Construction phase of ODLC,
+ * This module provides the core decomposition logic for the Construction phase of AIDLC,
  * transforming strategic intents into executable work items.
  */
 

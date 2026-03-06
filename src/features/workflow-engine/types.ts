@@ -1,12 +1,12 @@
 /**
  * Workflow Engine Type Definitions
  *
- * Comprehensive types for the ODLC 3-stage pipeline:
+ * Comprehensive types for the AIDLC 3-stage pipeline:
  * intent -> unit -> code-generation -> complete
  */
 
 /**
- * Workflow stages representing the ODLC pipeline.
+ * Workflow stages representing the AIDLC pipeline.
  * Each stage produces artifacts that feed into the next stage.
  *
  * - intent: Problem statement, personas, success metrics, constraints, business requirements, technical spec, proposed UNITs

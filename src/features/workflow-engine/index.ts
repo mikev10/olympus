@@ -21,7 +21,7 @@ export type {
   DependencyGraph,
 } from './types.js';
 
-// ODLC Phase Types
+// AIDLC Phase Types
 export type {
   WorkflowPhase,
   TrustLevel,

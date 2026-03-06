@@ -1,7 +1,7 @@
 /**
  * Construction Phase Module
  *
- * Hierarchical decomposition and design system for the ODLC Construction phase.
+ * Hierarchical decomposition and design system for the AIDLC Construction phase.
  * Transforms Inception phase INTENTs into executable UNITs and BOLTs.
  */
 

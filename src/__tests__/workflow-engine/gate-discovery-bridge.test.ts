@@ -33,7 +33,7 @@ describe('Gate Discovery Bridge', () => {
       featureName: 'User Authentication',
       projectPath: '/test/project',
       sessionId: 'test-session-001',
-      phase: 'forge',
+      phase: 'construction',
       riskTier: {
         tier: 'medium',
         reasoning: 'Moderate complexity, existing patterns',
@@ -82,7 +82,7 @@ describe('Gate Discovery Bridge', () => {
       expect(discovery.details).toContain('Artifact ID: BOLT-005');
       expect(discovery.details).toContain('Artifact Type: bolt');
       expect(discovery.details).toContain('Workflow: test-workflow-001');
-      expect(discovery.details).toContain('Phase: forge');
+      expect(discovery.details).toContain('Phase: construction');
     });
 
     it('should truncate summary to max 100 chars', () => {
@@ -354,7 +354,7 @@ describe('Gate Discovery Bridge', () => {
       expect(discovery.details).toContain('Artifact ID: BOLT-020');
       expect(discovery.details).toContain('Artifact Type: bolt');
       expect(discovery.details).toContain('Workflow: test-workflow-001');
-      expect(discovery.details).toContain('Phase: forge');
+      expect(discovery.details).toContain('Phase: construction');
       expect(discovery.details).toContain('Risk Tier: medium');
       expect(discovery.details).toContain('Depth Score: 6');
       expect(discovery.category).toBe('workflow_gate');

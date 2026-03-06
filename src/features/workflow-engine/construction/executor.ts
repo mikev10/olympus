@@ -5,7 +5,7 @@
  * 1. Decomposition phase: Parse intent.md, generate UNIT specs, generate BOLT specs per UNIT
  * 2. Design phase: Generate design artifacts (interfaces.json, data-flow.json, components.json)
  *
- * This is the main entry point for the Construction stage of the ODLC methodology.
+ * This is the main entry point for the Construction stage of the AIDLC methodology.
  *
  * Supports three depth modes:
  * - SHALLOW: Single BOLT directly from INTENT, no UNITs or design
@@ -83,7 +83,7 @@ export interface ConstructionProgress {
 
 
 /**
- * ConstructionExecutor orchestrates the full Construction phase of ODLC.
+ * ConstructionExecutor orchestrates the full Construction phase of AIDLC.
  *
  * The Construction phase takes the INTENT from the Inception phase and decomposes it into
  * executable work units:

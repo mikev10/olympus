@@ -1,7 +1,7 @@
 /**
- * ODLC Phase Type System
+ * AIDLC Phase Type System
  *
- * Type definitions for the Olympus Development Life Cycle (ODLC) phase-based workflow.
+ * Type definitions for the AI-Driven Development Life Cycle (AIDLC) phase-based workflow.
  * This system extends the existing stage-based workflow with four primary phases:
  * - Discovery: Initial exploration and scoping
  * - Inception: Requirements gathering and depth assessment
@@ -261,7 +261,7 @@ export interface WorkflowCheckpointV2 {
   // Preserved from v1
   resume_context?: any;
 
-  // ODLC extensions
+  // AIDLC extensions
   manifest_path: string | null;
   trust_state_path: string | null;
   risk_tier: RiskTierClassification | null;

@@ -1,7 +1,7 @@
 /**
  * Operations Phase Module
  *
- * Template-based artifact generation for the Operations phase of ODLC.
+ * Template-based artifact generation for the Operations phase of AIDLC.
  * v1: Documentation generation only, no actual deployment.
  */
 export {

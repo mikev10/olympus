@@ -685,12 +685,12 @@ describe('Operations Templates', () => {
       expect(notes).toMatch(/\*\*Date\*\*: \d{4}-\d{2}-\d{2}/);
     });
 
-    it('should include ODLC methodology reference', () => {
+    it('should include AIDLC methodology reference', () => {
       const context = createTestContext();
       const notes = generateReleaseNotes(context);
 
-      expect(notes).toContain('ODLC (Inception → Construction → Operations)');
-      expect(notes).toContain('Olympus Development Life Cycle (ODLC) methodology');
+      expect(notes).toContain('AIDLC (Inception → Construction → Operations)');
+      expect(notes).toContain('AI-Driven Development Life Cycle (AIDLC) methodology');
     });
   });
 

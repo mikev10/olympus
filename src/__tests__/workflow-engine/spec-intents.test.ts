@@ -1,7 +1,7 @@
 /**
  * Tests for Master Plan Linking
  *
- * NOTE: Legacy SPEC/INTENTS validation tests have been removed as part of the ODLC V3 migration.
+ * NOTE: Legacy SPEC/INTENTS validation tests have been removed as part of the AIDLC V3 migration.
  * Functions validateSpec, validateTasks, generateDependencyGraph, validateDependencyGraph, and
  * getExecutionOrder were removed. The V3 system uses ConstructionExecutor for decomposition.
  */
@@ -19,13 +19,13 @@ const TEST_DIR = join(tmpdir(), `spec-intents-test-${Date.now()}`);
 /**
  * LEGACY TESTS REMOVED
  *
- * The following test suites have been removed as part of the ODLC V3 migration:
+ * The following test suites have been removed as part of the AIDLC V3 migration:
  *
  * - SPEC Stage Validation (validateSpec) - Function removed, replaced by validateIntent
  * - INTENTS Stage Validation (validateTasks) - Function removed, no replacement
  * - Dependency Graph (generateDependencyGraph, validateDependencyGraph, getExecutionOrder) - Functions removed
  *
- * These functions were part of the legacy ODLC workflow system. The V3 system handles
+ * These functions were part of the legacy AIDLC workflow system. The V3 system handles
  * decomposition and validation through the ConstructionExecutor and new validation system.
  */
 

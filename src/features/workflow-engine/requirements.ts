@@ -2,7 +2,7 @@
  * Structured Requirements Engineering
  *
  * Provides stakeholder mapping and constraint classification for the
- * ODLC Inception phase requirements analysis stage.
+ * AIDLC Inception phase requirements analysis stage.
  */
 
 /**

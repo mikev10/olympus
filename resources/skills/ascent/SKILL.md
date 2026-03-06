@@ -9,7 +9,7 @@ $ARGUMENTS
 
 ## WORKFLOW AWARENESS
 
-Before starting the persistence loop, check for an active ODLC workflow:
+Before starting the persistence loop, check for an active AIDLC workflow:
 
 ### Step 1: Detect Active Workflow
 1. Scan `aidlc-docs/` subdirectories for active workflows. Look for `checkpoint.json` files with status 'in_progress'. Use that workflow's manifest at `aidlc-docs/{workflowId}/manifest.json`.
@@ -231,7 +231,7 @@ Task(subagent_type="oracle", prompt="VERIFY COMPLETION:
 Original task: [describe the task]
 What I implemented: [list changes]
 Tests run: [test results]
-If ODLC workflow is active: verify ALL units in aidlc-docs/{workflowId}/manifest.json have contract_status 'fulfilled'.
+If AIDLC workflow is active: verify ALL units in aidlc-docs/{workflowId}/manifest.json have contract_status 'fulfilled'.
 Please verify this is truly complete and production-ready.")
 ```
 

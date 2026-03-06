@@ -1,7 +1,7 @@
 /**
  * Methodology Metrics
  *
- * Tracks timing, quality, and methodology metrics for ODLC workflows.
+ * Tracks timing, quality, and methodology metrics for AIDLC workflows.
  * Records phase durations, validation rates, gate statistics, and rework counts.
  */
 

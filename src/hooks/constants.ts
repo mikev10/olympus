@@ -1,5 +1,5 @@
 /**
- * Enforcement constants for ODLC hooks.
+ * Enforcement constants for AIDLC hooks.
  *
  * Provides read-only agent detection, bash write pattern matching,
  * and build-check default configuration.

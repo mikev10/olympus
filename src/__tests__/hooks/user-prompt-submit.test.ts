@@ -590,7 +590,7 @@ describe('Structured Workflow Hook', () => {
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
         current_stage: 'intent',
-        current_phase: 'forge',
+        current_phase: 'construction',
         status: 'paused',
         artifacts: {
           prd: null,
@@ -610,7 +610,7 @@ describe('Structured Workflow Hook', () => {
       const result = await workflowHook.handler(ctx);
 
       expect(result.continue).toBe(true);
-      expect(result.hookSpecificOutput?.additionalContext).toContain('[Workflow: my-workflow | Phase: forge | Stage: intent]');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('[Workflow: my-workflow | Phase: construction | Stage: intent]');
     });
   });
 

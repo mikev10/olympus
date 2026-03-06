@@ -2,7 +2,7 @@
  * Dependency Graph Tests
  *
  * NOTE: generateDependencyGraph, validateDependencyGraph, and getExecutionOrder
- * have been removed as part of the ODLC V3 migration. The dependency graph
+ * have been removed as part of the AIDLC V3 migration. The dependency graph
  * functionality is now handled by the ConstructionExecutor decomposition system.
  */
 

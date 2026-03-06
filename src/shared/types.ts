@@ -206,9 +206,9 @@ export interface PluginConfig {
       resume?: number;
     };
 
-    // ODLC extensions
+    // AIDLC extensions
     qualityGates?: { enabled?: boolean; autoAdvanceEnabled?: boolean };
-    forgeExecution?: { enabled?: boolean; maxConcurrentBolts?: number };
+    constructionExecution?: { enabled?: boolean; maxConcurrentBolts?: number };
     trust?: { enabled?: boolean; persistPath?: string };
     riskTier?: { enabled?: boolean; defaultTier?: 1 | 2 | 3 };
   };

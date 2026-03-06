@@ -9,7 +9,7 @@ $ARGUMENTS
 
 ## WORKFLOW AWARENESS — MAXIMUM PARALLEL EXECUTION
 
-Before activating ultrawork, check for an active ODLC workflow:
+Before activating ultrawork, check for an active AIDLC workflow:
 
 ### Step 1: Detect Active Workflow
 1. Scan `aidlc-docs/` subdirectories for active workflows. Look for `checkpoint.json` files with status 'in_progress'. Use that workflow's manifest at `aidlc-docs/{workflowId}/manifest.json`.

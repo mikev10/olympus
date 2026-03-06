@@ -1,8 +1,8 @@
 /**
- * ODLC Alignment Engine
+ * AIDLC Alignment Engine
  *
- * Verification & Validation (V&V) for phase transitions in the Olympus Development
- * Life Cycle (ODLC) workflow engine.
+ * Verification & Validation (V&V) for phase transitions in the AI-Driven Development
+ * Life Cycle (AIDLC) workflow engine.
  *
  * Verification: Confirms target artifact conforms to source artifact requirements.
  * Validation: Confirms target artifact achieves intended purpose and delivers value.
@@ -25,7 +25,7 @@ import type {
 import { loadManifest, saveManifest } from './manifest.js';
 
 /**
- * Supported transition types between ODLC phases.
+ * Supported transition types between AIDLC phases.
  */
 export type TransitionType = 'intent-to-unit' | 'unit-to-bolt';
 

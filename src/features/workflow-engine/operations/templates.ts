@@ -303,7 +303,7 @@ stage: deploy
 
 ## What's New
 
-Implementation of ${featureName} following the Olympus Development Life Cycle (ODLC) methodology.
+Implementation of ${featureName} following the AI-Driven Development Life Cycle (AIDLC) methodology.
 
 ### Inception Phase (${inceptionArtifacts.length} artifacts)
 - INTENT: Problem definition and depth assessment
@@ -331,7 +331,7 @@ ${openRisks.length > 0 ? '### Open Risks\n' + openRisks.map(r => `- **${r.id}**:
 ## Quality Assurance
 
 - **Gates Passed**: ${approvedGates.length}
-- **Methodology**: ODLC (Inception → Construction → Operations)
+- **Methodology**: AIDLC (Inception → Construction → Operations)
 - **Risk Tier**: ${manifest?.risk_tier?.tier ?? 'Not assessed'}
 
 ## Known Issues

@@ -617,24 +617,24 @@ describe('End-to-End Workflow Tests', () => {
   });
 
   // ============================================================================
-  // Scenario 6: ODLC Full Lifecycle Integration
+  // Scenario 6: AIDLC Full Lifecycle Integration
   // ============================================================================
 
-  describe('Scenario 6: ODLC Full Lifecycle Integration', () => {
-    it('completes full ODLC lifecycle: Inception → Construction → Operations with manifest tracking', async () => {
-      const workflowId = 'odlc-lifecycle-test';
-      const featureName = 'ODLC Lifecycle Test';
+  describe('Scenario 6: AIDLC Full Lifecycle Integration', () => {
+    it('completes full AIDLC lifecycle: Inception → Construction → Operations with manifest tracking', async () => {
+      const workflowId = 'aidlc-lifecycle-test';
+      const featureName = 'AIDLC Lifecycle Test';
 
       // 1. Start workflow (Inception phase)
       const engine = new WorkflowEngine(tmpDir, featureName);
-      await engine.start('Test full ODLC lifecycle');
+      await engine.start('Test full AIDLC lifecycle');
 
       let checkpoint = await loadCheckpoint(tmpDir, workflowId);
       expect(checkpoint).not.toBeNull();
       expect(checkpoint?.current_stage).toBe('intent');
       expect(checkpoint?.current_phase).toBe('inception');
 
-      // 2. Create manifest to track ODLC artifacts
+      // 2. Create manifest to track AIDLC artifacts
       const manifestPath = createManifest(workflowId, featureName, tmpDir);
       expect(manifestPath).toBeTruthy();
 

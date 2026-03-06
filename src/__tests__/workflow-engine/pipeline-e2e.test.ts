@@ -1,7 +1,7 @@
 /**
  * Pipeline E2E Integration Tests
  *
- * Comprehensive end-to-end tests for the ODLC pipeline exercising REAL functions
+ * Comprehensive end-to-end tests for the AIDLC pipeline exercising REAL functions
  * with REAL file I/O in temp directories. Agent responses are mocked but all
  * pipeline functions (manifest, checkpoint, alignment, depth, trust, etc.) are real.
  *
@@ -139,7 +139,7 @@ describe('Pipeline E2E', () => {
   // Scenario 1: Full Pipeline
   // =========================================================================
   describe('Scenario 1: Full Pipeline (INTENT -> UNIT -> BOLT -> Operations -> DONE)', () => {
-    it('runs a complete ODLC pipeline with all gates and phases', async () => {
+    it('runs a complete AIDLC pipeline with all gates and phases', async () => {
       const workflowId = 'test-feature';
       const featureName = 'Test Feature';
       const manifestPath = join(tmpDir, 'aidlc-docs', workflowId, 'manifest.json');

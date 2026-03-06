@@ -1,8 +1,8 @@
 /**
- * ODLC Artifact Manifest System
+ * AIDLC Artifact Manifest System
  *
  * Formal artifact tracking, versioning, and alignment verification for the
- * Olympus Development Life Cycle (ODLC) workflow engine.
+ * AI-Driven Development Life Cycle (AIDLC) workflow engine.
  *
  * Key responsibilities:
  * - Create and manage manifest.json files

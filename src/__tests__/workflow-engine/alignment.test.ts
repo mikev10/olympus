@@ -16,7 +16,7 @@ vi.mock('../../features/workflow-engine/manifest.js', () => ({
   saveManifest: vi.fn(),
 }));
 
-// Test fixtures for the 4-stage ODLC pipeline
+// Test fixtures for the 4-stage AIDLC pipeline
 
 const INTENT_CONTENT = `---
 type: intent

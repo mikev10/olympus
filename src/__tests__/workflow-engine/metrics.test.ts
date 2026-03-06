@@ -104,7 +104,7 @@ function createTestDepthAssessment(recommended: 'minimal' | 'standard' | 'compre
     preferences: 6,
     total_score: 36,
     recommended_depth: recommended,
-    skip_forge: false,
+    skip_construction: false,
     risk_tier: riskTier,
   };
 }

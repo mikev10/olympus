@@ -1,5 +1,5 @@
 ---
-description: Run a guardrail retrospective on the current ODLC workflow
+description: Run a guardrail retrospective on the current AIDLC workflow
 ---
 
 [GUARDRAIL RETRO - ADVISORY ANALYSIS ONLY]
@@ -8,7 +8,7 @@ $ARGUMENTS
 
 ## What This Does
 
-The /retro command analyzes your ODLC workflow's guardrail events (gate rejections, trust changes, cascade invalidations, CI failures) and generates advisory suggestions for improving future workflows.
+The /retro command analyzes your AIDLC workflow's guardrail events (gate rejections, trust changes, cascade invalidations, CI failures) and generates advisory suggestions for improving future workflows.
 
 **IMPORTANT: This is advisory only. No changes are ever auto-applied.**
 

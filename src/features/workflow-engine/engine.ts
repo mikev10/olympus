@@ -468,7 +468,7 @@ export class WorkflowEngine {
   }
 
   /**
-   * Execute a phase of the ODLC methodology.
+   * Execute a phase of the AIDLC methodology.
    *
    * This is a NEW method that coexists with executeStage().
    * - executePhase('inception') delegates to existing executeStage() pipeline

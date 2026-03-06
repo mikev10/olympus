@@ -452,7 +452,7 @@ ${TODO_CONTINUATION_PROMPT}
 }
 
 /**
- * Check for active ODLC workflow and inject progress info / block stop
+ * Check for active AIDLC workflow and inject progress info / block stop
  */
 async function checkWorkflowProgress(
   sessionId?: string,
