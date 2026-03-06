@@ -148,9 +148,10 @@ Present the question file to the user and STOP.
    - Incorporate user's answers to clarifying questions
    - Provide brief summary of key requirements
 
-### Step 8: Update State Tracking
+### Step 8: MANDATORY: Update State Tracking
 
-Update `aidlc-docs/aidlc-state.md`:
+**MANDATORY**: Update BOTH state files in the SAME interaction:
+1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
 
 ```markdown
 ## Stage Progress

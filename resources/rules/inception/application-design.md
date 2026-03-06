@@ -155,7 +155,8 @@ If the analysis in Step 5 reveals ANY ambiguous answers, you MUST:
 - Include the exact user response text
 - Mark the approval status clearly
 
-### 16. Update Progress
-- Mark Application Design stage complete in `aidlc-docs/aidlc-state.md`
-- Update the "Current Status" section
-- Prepare for transition to next stage
+### 16. MANDATORY: Update State Tracking
+- **MANDATORY**: Update BOTH state files in the SAME interaction:
+  1. Mark Application Design stage complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set application-design status to "completed" with completed_at timestamp, update current_inception_stage to next stage
+- **Do NOT proceed to the next stage without completing this step**

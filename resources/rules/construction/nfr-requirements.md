@@ -93,7 +93,10 @@ Determine non-functional requirements for the unit and make tech stack choices.
 - Approval must be clear and unambiguous
 - If user requests changes, update the requirements and repeat the approval process
 
-### Step 9: Record Approval and Update Progress
+### Step 9: Record Approval and MANDATORY State Update
 - Log approval in audit.md with timestamp
 - Record the user's approval response with timestamp
-- Mark NFR Requirements stage complete in aidlc-state.md
+- **MANDATORY**: Update BOTH state files in the SAME interaction:
+  1. Mark NFR Requirements stage complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set nfr-requirements status to "completed" with completed_at timestamp
+- **Do NOT proceed to the next stage without completing state updates**

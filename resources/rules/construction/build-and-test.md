@@ -296,11 +296,14 @@ Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:
 
 ---
 
-## Step 8: Update State Tracking
+## Step 8: MANDATORY: Update State Tracking
 
-Update `aidlc-docs/aidlc-state.md`:
-- Mark Build and Test stage as complete
-- Update current status
+**MANDATORY**: Update BOTH state files in the SAME interaction:
+1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
+   - Mark Build and Test stage as complete
+   - Update current status
+2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set build-and-test status to "completed" with completed_at timestamp
+- **Do NOT proceed to the next stage without completing this step**
 
 ---
 

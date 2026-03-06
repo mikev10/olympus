@@ -294,15 +294,19 @@ Create `aidlc-docs/inception/reverse-engineering/reverse-engineering-timestamp.m
 - [x] code-quality-assessment.md
 ```
 
-## Step 10: Update State Tracking
+## Step 10: MANDATORY: Update State Tracking
 
-Update `aidlc-docs/aidlc-state.md`:
+**MANDATORY**: Update BOTH state files in the SAME interaction:
+1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
 
 ```markdown
 ## Reverse Engineering Status
 - [x] Reverse Engineering - Completed on [timestamp]
 - **Artifacts Location**: aidlc-docs/inception/reverse-engineering/
 ```
+
+2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set reverse-engineering status to "completed" with completed_at timestamp, update current_inception_stage to next stage
+- **Do NOT proceed to the next stage without completing this step**
 
 ## Step 11: Present Completion Message to User
 

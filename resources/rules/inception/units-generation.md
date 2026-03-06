@@ -91,10 +91,11 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 - Use ISO 8601 timestamp format
 - Include complete approval prompt text
 
-## Step 11: Update Progress
-- Mark Units Planning complete in aidlc-state.md
-- Update the "Current Status" section
-- Prepare for transition to Units Generation
+## Step 11: MANDATORY: Update Progress
+- **MANDATORY**: Update BOTH state files:
+  1. Mark Units Planning complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
+- **Do NOT proceed without completing state updates**
 
 ---
 
@@ -111,10 +112,12 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 - [ ] Follow the approved decomposition approach from Planning
 - [ ] Use the criteria and boundaries specified in the plan
 
-## Step 14: Update Progress
+## Step 14: MANDATORY: Update Progress
 - [ ] Mark the completed step as [x] in the unit of work plan
-- [ ] Update `aidlc-docs/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
 - [ ] Save all generated artifacts
+- **Do NOT proceed without completing state updates**
 
 ## Step 15: Continue or Complete
 - [ ] If more steps remain, return to Step 12
@@ -149,10 +152,11 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 - Include the exact user response text
 - Mark the approval status clearly
 
-## Step 19: Update Progress
-- Mark Units Generation stage complete in `aidlc-docs/aidlc-state.md`
-- Update the "Current Status" section
-- Prepare for transition to CONSTRUCTION PHASE
+## Step 19: MANDATORY: Update State Tracking
+- **MANDATORY**: Update BOTH state files in the SAME interaction:
+  1. Mark Units Generation stage complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set units-generation status to "completed" with completed_at timestamp
+- **Do NOT proceed to the next stage without completing this step**
 
 ---
 

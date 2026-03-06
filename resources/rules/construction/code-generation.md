@@ -86,10 +86,11 @@ This stage generates code for each unit of work through two integrated parts:
 - [ ] Include the exact user response text
 - [ ] Mark the approval status clearly
 
-## Step 9: Update Progress
-- [ ] Mark Code Planning complete in `aidlc-state.md`
-- [ ] Update the "Current Status" section
+## Step 9: MANDATORY: Update Progress
+- [ ] **MANDATORY**: Mark Code Planning complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
 - [ ] Prepare for transition to Code Generation
+- **Do NOT proceed without completing state updates**
 
 ---
 
@@ -113,10 +114,12 @@ This stage generates code for each unit of work through two integrated parts:
 - [ ] Follow unit story requirements
 - [ ] Respect dependencies and interfaces
 
-## Step 12: Update Progress
+## Step 12: MANDATORY: Update Progress
 - [ ] Mark the completed step as [x] in the unit code generation plan
 - [ ] Mark associated unit stories as [x] when their generation is finished
-- [ ] Update `aidlc-docs/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
+- **Do NOT proceed without completing state updates**
 - [ ] **Brownfield only**: Verify no duplicate files created (e.g., no `ClassName_modified.java` alongside `ClassName.java`)
 - [ ] Save all generated artifacts
 
@@ -162,10 +165,13 @@ This stage generates code for each unit of work through two integrated parts:
 - Approval must be clear and unambiguous
 - If user requests changes, update the code and repeat the approval process
 
-## Step 16: Record Approval and Update Progress
+## Step 16: Record Approval and MANDATORY State Update
 - Log approval in audit.md with timestamp
 - Record the user's approval response with timestamp
-- Mark Code Generation stage as complete for this unit in aidlc-state.md
+- **MANDATORY**: Update BOTH state files in the SAME interaction:
+  1. Mark Code Generation stage as complete for this unit in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set code-generation status to "completed" for this unit with completed_at timestamp
+- **Do NOT proceed to the next stage without completing state updates**
 
 ---
 

@@ -346,9 +346,10 @@ flowchart TD
 - **Operational Readiness**: Monitoring, logging, alerting working
 ```
 
-## Step 8: Initialize State Tracking
+## Step 8: MANDATORY: Initialize State Tracking
 
-Update `aidlc-docs/aidlc-state.md`:
+**MANDATORY**: Update BOTH state files in the SAME interaction:
+1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
 
 ```markdown
 # AI-DLC State Tracking
@@ -393,6 +394,9 @@ Update `aidlc-docs/aidlc-state.md`:
 - **Next Stage**: [Next stage to execute]
 - **Status**: Ready to proceed
 ```
+
+2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — initialize workflow state with all stage statuses, current_inception_stage set to next stage after Workflow Planning
+- **Do NOT proceed to the next stage without completing this step**
 
 ## Step 9: Present Plan to User
 

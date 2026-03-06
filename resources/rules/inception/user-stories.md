@@ -238,10 +238,12 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
 - [ ] Follow the approved methodology and format from Planning
 - [ ] Use the story breakdown approach specified in the plan
 
-## Step 17: Update Progress
+## Step 17: MANDATORY: Update Progress
 - [ ] Mark the completed step as [x] in the story generation plan
-- [ ] Update `aidlc-docs/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/aidlc-state.md` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
 - [ ] Save all generated artifacts
+- **Do NOT proceed without completing state updates**
 
 ## Step 18: Continue or Complete Generation
 - [ ] If more steps remain, return to Step 14
@@ -296,10 +298,11 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
 - Include the exact user response text
 - Mark the approval status clearly
 
-## Step 23: Update Progress
-- Mark User Stories stage complete in `aidlc-state.md`
-- Update the "Current Status" section
-- Prepare for transition to next stage
+## Step 23: MANDATORY: Update State Tracking
+- **MANDATORY**: Update BOTH state files in the SAME interaction:
+  1. Mark User Stories stage complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set user-stories status to "completed" with completed_at timestamp, update current_inception_stage to next stage
+- **Do NOT proceed to the next stage without completing this step**
 
 ---
 
