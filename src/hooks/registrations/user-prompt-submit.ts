@@ -180,7 +180,8 @@ export function registerUserPromptSubmitHooks(): void {
 
           // Inject workflow context hint
           const contextHint = `[Workflow: ${workflowId} | Phase: ${checkpoint.current_phase || 'inception'} | Stage: ${checkpoint.current_stage || 'intent'}]`;
-          const additionalContext = `${contextHint}\n\n${resumptionPrompt}`;
+          const continueTip = '[TIP: For full AIDLC resume with behavioral rules, use /continue instead of /plan continue]';
+          const additionalContext = `${continueTip}\n\n${contextHint}\n\n${resumptionPrompt}`;
 
           return {
             continue: true,

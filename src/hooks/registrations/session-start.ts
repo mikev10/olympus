@@ -90,7 +90,7 @@ export function registerSessionStartHooks(): void {
             messages.push(`[Active workflow: '${wf.featureName}' — awaiting developer review (Risk Tier 3).\nReview the INTENT technical specification before proceeding to Construction.]`);
           } else {
             const boltProgress = wf.progress.total > 0 ? `, ${wf.progress.completed}/${wf.progress.total} BOLTs complete` : '';
-            messages.push(`[Active workflow: '${wf.featureName}' — ${wf.currentPhase} phase${boltProgress}.\nResume with /plan or check status with /workflow-status]`);
+            messages.push(`[Active workflow: '${wf.featureName}' — ${wf.currentPhase} phase${boltProgress}.\nResume with /continue or check status with /workflow-status]`);
           }
         }
 

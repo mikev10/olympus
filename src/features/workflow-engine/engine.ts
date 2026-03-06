@@ -317,7 +317,7 @@ export class WorkflowEngine {
             failed_stage: currentStage,
           };
           await saveCheckpoint(this.projectPath, updatedCheckpoint);
-          console.log('[WorkflowEngine] Workflow saved as paused. Fix the issue and resume with `/plan continue`');
+          console.log('[WorkflowEngine] Workflow saved as paused. Fix the issue and resume with `/continue`');
         }
       } catch (saveError) {
         console.warn('[WorkflowEngine] Failed to save error checkpoint:', (saveError as Error).message);
@@ -810,7 +810,7 @@ export class WorkflowEngine {
           };
 
           await saveCheckpoint(this.projectPath, checkpoint);
-          console.log('[WorkflowEngine] Checkpoint saved. Resume with `/plan continue`');
+          console.log('[WorkflowEngine] Checkpoint saved. Resume with `/continue`');
         }
       } catch (error) {
         console.error('[WorkflowEngine] Failed to save checkpoint on interrupt:', error);

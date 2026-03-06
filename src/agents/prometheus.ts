@@ -246,7 +246,7 @@ When user confirms they want structured artifacts:
    [7-stage progress will be displayed as stages execute]
 
    Your progress is checkpointed at: \`aidlc-docs/{workflow-id}/checkpoint.json\`
-   Resume anytime with: \`/plan\` (auto-detects and resumes active workflow)
+   Resume anytime with: \`/continue\` (auto-detects and resumes active workflow)
    \`\`\`
 
 ## If User Says "No" - Traditional Handoff
