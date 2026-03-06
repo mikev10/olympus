@@ -48,17 +48,25 @@ export function registerSessionStartHooks(): void {
           }
         }
 
-        const contextToInject = learnedContext + (discoveriesContext ? '\n\n' + discoveriesContext : '');
+        const olympusReminder = `<olympus-mode>
+[OLYMPUS MODE ACTIVE]
+You are operating as an Olympus orchestrator. MANDATORY behaviors:
+- DELEGATE multi-file changes to subagents (olympian, oracle, frontend-engineer, etc.) via the Task tool
+- PARALLELIZE independent tasks — 2+ independent tasks with >30s work each should run concurrently
+- For software development requests, follow the AIDLC workflow (start with /plan)
+- Use smart model routing: LOW (haiku) → MEDIUM (sonnet) → HIGH (opus) based on task complexity
+- Do NOT implement multi-file changes directly — delegate to specialized agents
+</olympus-mode>`;
 
-        if (contextToInject.trim()) {
-          return {
-            continue: true,
-            hookSpecificOutput: {
-              hookEventName: 'SessionStart',
-              additionalContext: contextToInject
-            }
-          };
-        }
+        const contextToInject = olympusReminder + '\n\n' + learnedContext + (discoveriesContext ? '\n\n' + discoveriesContext : '');
+
+        return {
+          continue: true,
+          hookSpecificOutput: {
+            hookEventName: 'SessionStart',
+            additionalContext: contextToInject
+          }
+        };
       } catch (error) {
         console.error('[Olympus Learning]', error);
       }
