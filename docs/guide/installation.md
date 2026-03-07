@@ -31,7 +31,7 @@ For most users, this is all you need:
 # 1. Install Olympus CLI
 npm install -g olympus-ai
 
-# 2. Install agents, commands, and hooks
+# 2. Install agents, skills, rules, and hooks
 olympus-ai install
 
 # 3. Start Claude Code
@@ -77,9 +77,9 @@ olympus-ai --version
 node --version  # Should be v20.0.0 or higher
 ```
 
-### Step 3: Install Olympus Agents & Commands
+### Step 3: Install Olympus Agents & Skills
 
-Run the installer to copy agents, commands, and hooks to your Claude Code configuration:
+Run the installer to copy agents, skills, rules, and hooks to your Claude Code configuration:
 
 ```bash
 olympus-ai install
@@ -89,7 +89,7 @@ olympus-ai install
 
 ```
 ~/.claude/
-├── agents/                  # 20+ agent definitions
+├── agents/                  # 19 agent definitions
 │   ├── oracle.md
 │   ├── prometheus.md
 │   ├── olympian.md
@@ -102,27 +102,31 @@ olympus-ai install
 │   ├── momus.md
 │   ├── metis.md
 │   └── ... (+ tiered variants)
-├── commands/                # 13+ slash commands
-│   ├── olympus/skill.md
-│   ├── ultrawork/skill.md
-│   ├── plan.md
-│   ├── prometheus/skill.md
-│   ├── ascent/skill.md
-│   ├── review.md
-│   ├── deepsearch.md
-│   ├── analyze.md
-│   ├── complete-plan.md
-│   ├── doctor.md
-│   ├── deepinit/skill.md
-│   ├── update.md
-│   └── ...
-├── hooks/                   # Event handlers
-│   ├── keyword-detector.mjs
-│   ├── persistent-mode.mjs
-│   ├── context-injection.mjs
-│   └── ...
-├── CLAUDE.md               # Olympus system prompt
-└── olympus.jsonc           # Configuration (auto-generated)
+├── commands/                # 19 slash command skills
+│   ├── olympus/SKILL.md
+│   ├── ultrawork/SKILL.md
+│   ├── plan/SKILL.md
+│   ├── continue/SKILL.md
+│   ├── prometheus/SKILL.md
+│   ├── ascent/SKILL.md
+│   ├── review/SKILL.md
+│   ├── deepsearch/SKILL.md
+│   ├── analyze/SKILL.md
+│   ├── complete-plan/SKILL.md
+│   ├── doctor/SKILL.md
+│   ├── retro/SKILL.md
+│   └── ... (+ more)
+├── hooks/                   # Bundled event handler
+│   └── olympus-hooks.cjs
+├── olympus/
+│   ├── rules/               # 26 AIDLC workflow rule files
+│   │   ├── core-workflow.md
+│   │   ├── common/          # Shared rules (terminology, validation, etc.)
+│   │   ├── inception/       # Inception phase rules
+│   │   └── construction/    # Construction phase rules
+│   ├── learning/            # Learning system data
+│   └── config.json          # Global configuration
+└── CLAUDE.md               # Olympus system prompt
 ```
 
 ### Step 4: Verify Installation
@@ -178,25 +182,23 @@ olympus-ai install --local
 - Project-specific agent configurations
 - When you want project-isolated learning data
 
-### Minimal Installation
+### Installation Flags
 
-For users who want only specific features:
+The `install` command supports these options:
 
 ```bash
-# Install agents only (no commands or hooks)
-olympus-ai install --agents-only
+# Overwrite existing files (useful for updates)
+olympus-ai install --force
 
-# Install commands only
-olympus-ai install --commands-only
+# Suppress output except errors
+olympus-ai install --quiet
 
-# Install without hooks
-olympus-ai install --no-hooks
+# Install to current project instead of global
+olympus-ai install --local
 
-# Install without learning system
-olympus-ai install --no-learning
+# Skip checking if Claude Code is installed
+olympus-ai install --skip-claude-check
 ```
-
-**Note:** Most users should use the default full installation.
 
 ---
 
@@ -255,14 +257,14 @@ Edit `~/.claude/olympus.jsonc` (created automatically by `olympus-ai init`):
   // Agent model configurations
   "agents": {
     "oracle": {
-      "model": "claude-opus-4-5-20251101",  // Override to specific model
+      "model": "claude-opus-4-6-20250625",  // Override to specific model
       "enabled": true                        // Enable/disable agent
     },
     "olympian": {
-      "model": "claude-sonnet-4-5-20250514"
+      "model": "claude-sonnet-4-6-20250514"
     },
     "explore": {
-      "model": "claude-3-5-haiku-20241022"
+      "model": "claude-haiku-4-5-20251001"
     }
   },
 
@@ -298,7 +300,7 @@ Edit `~/.claude/olympus.jsonc` (created automatically by `olympus-ai init`):
 // Always use Opus for Oracle (expensive but powerful)
 "agents": {
   "oracle": {
-    "model": "claude-opus-4-5-20251101"
+    "model": "claude-opus-4-6-20250625"
   }
 }
 
@@ -402,11 +404,11 @@ olympus-ai install --force
 **Solution:**
 
 ```bash
-# Verify commands directory
+# Verify skills directory
 ls ~/.claude/commands/
 
-# Reinstall commands
-olympus-ai install --commands-only --force
+# Reinstall with force
+olympus-ai install --force
 
 # Restart Claude Code
 claude
@@ -416,15 +418,13 @@ claude
 
 **Solution:**
 
-Check that hooks are installed:
+Check that the hook bundle is installed:
 
 ```bash
 ls ~/.claude/hooks/
 
 # Should see:
-# - keyword-detector.mjs
-# - persistent-mode.mjs
-# - context-injection.mjs
+# - olympus-hooks.cjs
 
 # If missing:
 olympus-ai install --force
@@ -484,7 +484,7 @@ claude
 # Update the npm package
 npm update -g olympus-ai
 
-# Reinstall agents and commands
+# Reinstall agents and skills
 olympus-ai install --force
 ```
 
@@ -496,8 +496,8 @@ If the learning data format changes between versions:
 # Backup existing data
 cp -r ~/.claude/olympus/learning ~/.claude/olympus/learning.backup
 
-# Migrate data (if migration tool available)
-olympus-ai learn --migrate
+# Analyze and re-process existing data
+olympus-ai learn --analyze
 
 # Or start fresh
 olympus-ai learn --forget
@@ -513,12 +513,12 @@ olympus-ai learn --forget
 # 1. Remove npm package
 npm uninstall -g olympus-ai
 
-# 2. Remove agents, commands, and hooks
+# 2. Remove agents, skills, hooks, and rules
 rm -rf ~/.claude/agents
 rm -rf ~/.claude/commands
 rm -rf ~/.claude/hooks
+rm -rf ~/.claude/olympus/rules
 rm ~/.claude/CLAUDE.md
-rm ~/.claude/olympus.jsonc
 
 # 3. Remove learning data (optional)
 rm -rf ~/.claude/olympus/
@@ -537,8 +537,8 @@ If you want to keep your learned preferences for future reinstallation:
 rm -rf ~/.claude/agents
 rm -rf ~/.claude/commands
 rm -rf ~/.claude/hooks
+rm -rf ~/.claude/olympus/rules
 rm ~/.claude/CLAUDE.md
-rm ~/.claude/olympus.jsonc
 
 # Keep: ~/.claude/olympus/learning/
 ```
@@ -562,7 +562,7 @@ cd olympus
 npm install
 
 # Build from source
-npm run build
+npm run build:all
 
 # Install locally
 node dist/cli/index.js install --local
@@ -592,14 +592,14 @@ cp my-custom-agent.md ~/.claude/agents/custom/
 For CI/CD or automated environments:
 
 ```bash
-# Non-interactive installation
-OLYMPUS_AUTO_INSTALL=true olympus-ai install --yes
+# Silent installation (no interactive prompts)
+olympus-ai install --quiet --force
 
-# Minimal installation (no learning, no hooks)
-olympus-ai install --agents-only --commands-only --no-hooks --no-learning
+# Skip Claude Code check (useful in CI)
+olympus-ai install --skip-claude-check --force
 
-# Specific location
-olympus-ai install --target /opt/claude/olympus
+# Local project installation for CI
+olympus-ai install --local --force --quiet
 ```
 
 ---
@@ -609,10 +609,7 @@ olympus-ai install --target /opt/claude/olympus
 ### macOS
 
 ```bash
-# Install via Homebrew (if available)
-brew install olympus-ai
-
-# Or npm
+# Install via npm
 npm install -g olympus-ai
 ```
 
@@ -659,7 +656,7 @@ olympus-ai install
 Olympus is a **plugin system** for Claude Code that adds:
 
 1. **Agents** - Specialized sub-agents Claude can spawn via the `Task` tool
-2. **Commands** - Slash commands like `/olympus`, `/ultrawork`, `/plan`
+2. **Skills** - Slash commands like `/olympus`, `/ultrawork`, `/plan`
 3. **Hooks** - Event handlers that enhance Claude's behavior (keyword detection, learning, persistence)
 4. **Learning System** - Automatic preference capture and context injection
 

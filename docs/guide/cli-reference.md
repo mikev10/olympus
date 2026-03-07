@@ -21,11 +21,9 @@ The `olympus-ai` command-line tool is your interface to manage the Olympus multi
 | `olympus-ai update` | Install latest version | `olympus-ai update` |
 | `olympus-ai version` | Show version information | `olympus-ai version` |
 | `olympus-ai test-prompt` | Preview prompt enhancement | `olympus-ai test-prompt "my prompt"` |
-| `olympus-ai idea <feature>` | Generate IDEA artifact for a feature | `olympus-ai idea "user-auth"` |
-| `olympus-ai prd <feature>` | Generate PRD artifact for a feature | `olympus-ai prd "user-auth"` |
-| `olympus-ai spec <feature>` | Generate SPEC artifact for a feature | `olympus-ai spec "user-auth"` |
-| `olympus-ai intents <feature>` | Generate INTENTS artifact for a feature | `olympus-ai intents "user-auth"` |
-| `olympus-ai workflow-status` | View all active workflows and status | `olympus-ai workflow-status` |
+| `olympus-ai learn --sessions` | Show recent session history | `olympus-ai learn --sessions 5` |
+| `olympus-ai learn --last-session` | Show last session summary | `olympus-ai learn --last-session` |
+| `olympus-ai metrics` | (Deprecated) Redirects to learn | `olympus-ai metrics show` |
 
 ## Installation & Setup
 
@@ -35,7 +33,7 @@ The `olympus-ai` command-line tool is your interface to manage the Olympus multi
 olympus-ai install
 ```
 
-Installs Olympus agents, commands, and hooks to your Claude Code configuration (`~/.claude/`).
+Installs Olympus agents, skills, rules, and hooks to your Claude Code configuration (`~/.claude/`).
 
 **Options:**
 - `--force` - Overwrite existing files
@@ -145,8 +143,8 @@ Displays detailed version information including package version, installation me
 
 **Example:**
 ```
-Package version:   3.2.3
-Installed version: 3.2.3
+Package version:   3.7.1
+Installed version: 3.7.1
 Install method:    npm global
 Installed at:      2025-01-15T10:30:00Z
 Commit hash:       a1b2c3d4e5f6...
@@ -294,6 +292,31 @@ olympus-ai learn --export > backup-learnings.json
 olympus-ai learn --import backup-learnings.json
 ```
 
+### View Session History
+
+```bash
+olympus-ai learn --sessions
+```
+
+Shows the last 10 sessions with token usage, duration, and agent activity.
+
+**Options:**
+- `--sessions [n]` - Show last N sessions (default: 10)
+
+**Example:**
+```bash
+# Show last 5 sessions
+olympus-ai learn --sessions 5
+```
+
+### View Last Session Summary
+
+```bash
+olympus-ai learn --last-session
+```
+
+Shows a detailed summary of the most recent session including agents used, tokens consumed, and outcomes.
+
 ### Clean Up Old Learning Data
 
 ```bash
@@ -428,124 +451,6 @@ Historical comparison:
 - **ELEVATED**: Above baseline but below threshold
 - **WARNING**: Exceeds warning threshold (typically 150% of baseline)
 
-## Structured Workflow Commands
-
-NEW (v3.5.0): Generate structured artifacts for complex features using the IDEA → PRD → SPEC → INTENTS pipeline.
-
-### Manual IDEA Generation
-
-```bash
-olympus-ai idea <feature-name>
-```
-
-Manually generate an IDEA artifact for a feature without running the full workflow.
-
-**Example:**
-```bash
-olympus-ai idea "user-authentication"
-
-# Creates: .olympus/workflows/user-authentication/IDEA.md
-```
-
-**Artifact includes:**
-- Problem statement and business context
-- Success metrics and constraints
-- Risk tier assessment
-- Assumptions and dependencies
-
-### Manual PRD Generation
-
-```bash
-olympus-ai prd <feature-name>
-```
-
-Manually generate a PRD (Product Requirements Document) artifact for a feature.
-
-**Example:**
-```bash
-olympus-ai prd "user-authentication"
-
-# Creates: .olympus/workflows/user-authentication/PRD.md
-```
-
-**Artifact includes:**
-- User stories with acceptance criteria
-- Requirement coverage (mapped to IDEA constraints)
-- Functional and non-functional requirements
-- API/interface specifications
-
-### Manual SPEC Generation
-
-```bash
-olympus-ai spec <feature-name>
-```
-
-Manually generate a SPEC (technical specification) artifact for a feature.
-
-**Example:**
-```bash
-olympus-ai spec "user-authentication"
-
-# Creates: .olympus/workflows/user-authentication/SPEC.md
-```
-
-**Artifact includes:**
-- Technical architecture and design
-- Data models and schemas
-- Algorithm specifications
-- Integration points and dependencies
-
-### Manual INTENTS Generation
-
-```bash
-olympus-ai intents <feature-name>
-```
-
-Manually generate INTENTS artifact breaking down the feature into actionable tasks.
-
-**Example:**
-```bash
-olympus-ai intents "user-authentication"
-
-# Creates: .olympus/workflows/user-authentication/INTENTS.md
-```
-
-**Artifact includes:**
-- Execution order based on dependencies
-- Concrete implementation tasks
-- Blocking relationships
-- Effort and complexity estimates
-
-### View Workflow Status
-
-```bash
-olympus-ai workflow-status
-```
-
-View all active structured workflows and their current status.
-
-**Output includes:**
-- Workflow name and feature
-- Current stage (IDEA, PRD, SPEC, INTENTS, IN_PROGRESS, COMPLETED)
-- Progress percentage
-- Last updated timestamp
-
-**Example output:**
-```
-Active Workflows
-================
-
-1. user-authentication
-   Stage: SPEC (67% complete)
-   Last updated: 2026-02-04T10:30:00Z
-   Artifacts: IDEA.md, PRD.md, SPEC.md
-
-2. real-time-chat
-   Stage: PRD (33% complete)
-   Last updated: 2026-02-04T09:15:00Z
-   Artifacts: IDEA.md, PRD.md
-```
-
 ## Managing Discoveries
 
 Discoveries help you capture project insights so agents can learn about your codebase.
@@ -661,11 +566,11 @@ Checks if a newer version is available without installing.
 ```
 Olympus Update
 
-Current version: 3.2.3
+Current version: 3.7.1
 Install method: npm global
 
 Checking for updates...
-✓ You are running the latest version (3.2.3)
+✓ You are running the latest version (3.7.1)
 ```
 
 ### Install Updates
@@ -735,6 +640,21 @@ Enhanced prompt:
 - Testing custom prompts before use
 - Understanding magic keyword detection
 - Debugging enhancement pipeline
+
+## Deprecated: Metrics Command
+
+```bash
+olympus-ai metrics
+```
+
+The `metrics` command is deprecated. All metrics functionality has been consolidated into `olympus-ai learn`:
+
+| Old Command | New Equivalent |
+|-------------|---------------|
+| `olympus-ai metrics show` | `olympus-ai learn --efficiency` |
+| `olympus-ai metrics export` | `olympus-ai learn --export` |
+| `olympus-ai metrics analyze` | `olympus-ai learn --show-costs` |
+| `olympus-ai metrics clean` | `olympus-ai learn --cleanup` |
 
 ## One-Time Utilities
 
@@ -890,14 +810,14 @@ The configuration file (`olympus.json`) controls agent models, feature toggles, 
 {
   "agents": {
     "oracle": {
-      "model": "claude-opus-4-5-20251101",
+      "model": "claude-opus-4-6-20250625",
       "enabled": true
     },
     "librarian": {
-      "model": "claude-sonnet-4-5-20250514"
+      "model": "claude-sonnet-4-6-20250514"
     },
     "explore": {
-      "model": "claude-3-5-haiku-20241022"
+      "model": "claude-haiku-4-5-20251001"
     }
   },
   "features": {
@@ -985,4 +905,4 @@ olympus-ai learn --export            # Backup your learnings
 
 ---
 
-**Version:** 3.5.0 | **Last Updated:** February 2026
+**Version:** 3.7.1 | **Last Updated:** March 2026

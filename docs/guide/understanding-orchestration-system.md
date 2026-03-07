@@ -18,9 +18,9 @@ Olympus solves these problems through **skill composition, specialization, and l
 
 ---
 
-## The Architecture: Skills, Not Roles
+## The Architecture: Three Layers of Customization
 
-Unlike traditional orchestration systems with fixed roles (planner → orchestrator → executor), Olympus uses **composable skills** that layer onto a single master agent.
+Olympus leverages Claude Code's full customization surface through a **three-layer architecture**: a fixed underlying model, a deeply customized orchestrator, and fully swappable specialized sub-agents.
 
 ```mermaid
 flowchart TB
@@ -28,19 +28,19 @@ flowchart TB
         Human[("👤 User")]
     end
 
-    subgraph Master["Master Agent Layer"]
-        Claude["🧠 Claude Master Agent<br/>(Fixed - Cannot Swap)"]
+    subgraph Orchestrator["Customizable Orchestrator Layer"]
+        Claude["🧠 Claude Orchestrator<br/>(Fixed Model, Custom Behavior)"]
 
-        subgraph Skills["Active Skills (Stacked)"]
-            Guarantee["🔒 Guarantee Layer<br/>ascent"]
-            Enhancement["⚡ Enhancement Layer<br/>ultrawork + git-master"]
-            Execution["🎯 Execution Layer<br/>olympus/prometheus"]
+        subgraph Customization["Customization Mechanisms"]
+            CLAUDE_MD["📋 CLAUDE.md<br/>Project instructions"]
+            Skills["⚡ Skills<br/>Composable behaviors"]
+            Hooks["🔧 Hooks<br/>Enforcement & learning"]
         end
 
-        Claude -->|"Skill injection"| Skills
+        Claude -->|"Configured by"| Customization
     end
 
-    subgraph Workers["Specialized Sub-Agents"]
+    subgraph Workers["Swappable Sub-Agents"]
         Oracle["🧠 Oracle<br/>(Architecture)<br/>Claude Opus"]
         Olympian["⚡ Olympian<br/>(Execution)<br/>Claude Sonnet"]
         Explore["🔍 Explore<br/>(Search)<br/>Claude Haiku"]
@@ -55,11 +55,11 @@ flowchart TB
     end
 
     Human -->|"Task description"| Claude
-    Skills -->|"Task tool"| Oracle
-    Skills -->|"Task tool"| Olympian
-    Skills -->|"Task tool"| Explore
-    Skills -->|"Task tool"| Librarian
-    Skills -->|"Task tool"| Frontend
+    Customization -->|"Task tool"| Oracle
+    Customization -->|"Task tool"| Olympian
+    Customization -->|"Task tool"| Explore
+    Customization -->|"Task tool"| Librarian
+    Customization -->|"Task tool"| Frontend
 
     Oracle -->|"Results"| Claude
     Olympian -->|"Results"| Claude
@@ -81,13 +81,13 @@ flowchart TB
 
 ### What Are Skills?
 
-Skills are **behavior injections** that modify Claude's context and instructions. Each skill is a markdown file in `.claude/commands/` that layers onto the master agent, enhancing its capabilities in specific ways.
+Skills are **behavior injections** that modify Claude's context and instructions. Each skill is a markdown file (`SKILL.md`) in `.claude/commands/{skill-name}/` that layers onto the master agent, enhancing its capabilities in specific ways.
 
 **How Skills Work:**
 ```
 User types: /olympus refactor auth
      ↓
-Slash command handler loads: .claude/commands/olympus/skill.md
+Slash command handler loads: .claude/commands/olympus/SKILL.md
      ↓
 Claude receives skill prompt injected into system context
      ↓
@@ -96,11 +96,12 @@ Claude operates under skill instructions until session ends
 
 ### Skill Categories
 
-| Category | Skills | Purpose | Composable? |
-|----------|--------|---------|------------|
-| **Orchestration** | `olympus`, `prometheus` | Primary work modes | Yes - can layer with enhancements |
-| **Enhancement** | `ultrawork`, `git-master`, `frontend-ui-ux` | Special behaviors | Yes - stack with orchestration |
-| **Persistence** | `ascent` | Enforce completion | Yes - chain with others |
+| Category | Skills | Purpose | Activation |
+|----------|--------|---------|-----------|
+| **Orchestration** | `olympus`, `prometheus`, `plan` | Primary work modes | Slash command or magic keyword |
+| **Enhancement** | `ultrawork`, `ascent` | Special behaviors | Slash command or magic keyword |
+| **Workflow** | `continue`, `complete-plan`, `retro` | AIDLC workflow management | Slash command |
+| **Utility** | `deepsearch`, `analyze`, `review`, `doctor` | Targeted operations | Slash command or magic keyword |
 
 **Important:** Skills are **additive behavior modifiers**. Multiple skills can be active simultaneously, with each contributing its specific behaviors to the master agent's context.
 
@@ -109,20 +110,19 @@ Claude operates under skill instructions until session ends
 ```bash
 # Orchestration mode
 /olympus add user authentication
-# Loads: .claude/commands/olympus/skill.md
+# Loads: .claude/commands/olympus/SKILL.md
 
-# Planning mode (different workflow)
+# Planning mode (triggers AIDLC workflow)
 /plan build authentication system
-# Loads: .claude/commands/plan/skill.md → prometheus agent
+# Loads: .claude/commands/plan/SKILL.md → AIDLC pipeline
 
-# Multiple skills active simultaneously
-/git-master
-/olympus refactor API layer
-# Both git-master AND olympus skills are active, layered together
+# Workflow resumption
+/continue
+# Resumes an in-progress AIDLC workflow from last checkpoint
 
 # Persistence guarantee (stacks with other skills)
 /ascent fix all failing tests
-# Loads: .claude/commands/ascent/skill.md (can combine with olympus, ultrawork, etc.)
+# Loads: .claude/commands/ascent/SKILL.md (can combine with olympus, ultrawork, etc.)
 ```
 
 ### Skill Activation Methods
@@ -131,44 +131,65 @@ Skills can be activated in two ways: **manual activation** (slash commands) or *
 
 **Automatic Activation (Magic Keywords):**
 
-| Keyword | Auto-Activated Behavior | Implementation |
-|---------|------------------------|----------------|
-| `ultrawork`, `ulw`, `uw` | Maximum performance mode | `src/features/magic-keywords.ts` |
-| `search`, `deepsearch` | Thorough codebase search | `src/features/magic-keywords.ts` |
-| `analyze` | Deep analysis mode | `src/features/magic-keywords.ts` |
-| `ultrathink` | Extended reasoning | `src/features/magic-keywords.ts` |
+| Keyword | Patterns | Effect |
+|---------|----------|--------|
+| `ultrawork` | `ultrawork`, `ulw` | Persistent maximum performance mode |
+| `olympus` | `olympus`, `orchestrate`, `coordinate`, `multi-agent`, `conductor` | Persistent orchestration mode |
+| `search` | `search`, `find`, `locate`, `lookup`, `explore`, `discover`, `scan`, `grep` + more | Context injection for thorough search |
+| `analyze` | `analyze`, `investigate`, `examine`, `research`, `debug`, `diagnose` + more | Context injection for deep analysis |
+| `ultrathink` | `ultrathink`, `think` | Extended reasoning mode |
+
+**Note:** Only `ultrawork` and `olympus` create persistent state (survives across messages). The others are one-shot context injections.
 
 **Manual Activation (Slash Commands):**
 
-- `/git-master` - Git expertise and atomic commits
-- `/frontend-ui-ux` - UI/UX design focus
-- `/ascent` - Persistence guarantee
 - `/olympus` - Orchestration mode
-- `/prometheus` or `/plan` - Strategic planning
+- `/ultrawork` - Maximum performance mode
+- `/prometheus` or `/plan` - Strategic planning / AIDLC workflow
+- `/ascent` - Persistence guarantee
+- `/continue` - Resume AIDLC workflow
+- `/review` - Critical plan evaluation
+- `/deepsearch` - Thorough codebase search
+- `/analyze` - Deep analysis mode
+- `/doctor` - Installation diagnostics
+- `/retro` - Workflow retrospective
 
 **Example:**
 ```bash
 # Automatic activation via magic keyword
 > ultrawork implement auth system
-# Automatically activates ultrawork skill (behavior injection)
+# Automatically activates ultrawork skill (persistent state)
+
+# Automatic activation via olympus keyword
+> orchestrate the API refactoring
+# Detects "orchestrate" keyword, activates olympus mode
 
 # Manual activation via slash command
-> /git-master
-> /olympus refactor API layer
-# Both skills active simultaneously, behaviors layered together
+> /ascent fix all failing tests
+# Explicitly activates ascent persistence loop
 ```
 
 ---
 
-## Layer 2: The Master Agent (Claude)
+## Layer 2: The Orchestrator (Customized Claude)
 
-### Fixed Master with Skill Enhancement
+### Fixed Model, Customizable Agent
 
-Claude Code provides a **fixed master agent** - you can't swap it out, but you can dramatically modify its behavior through skills.
+The underlying Claude model is fixed — you can't swap it for a different LLM. But the **agent built on top of that model** is deeply customizable through three mechanisms that Olympus fully leverages:
+
+1. **CLAUDE.md** — Project and global instructions that define orchestrator behavior
+2. **Skills** — Composable behavior injections loaded via slash commands or magic keywords
+3. **Hooks** — TypeScript handlers that enforce patterns, capture learning, and inject context
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    CLAUDE MASTER AGENT                   │
+│              CUSTOMIZABLE ORCHESTRATOR                    │
+│         (Fixed Claude Model + Custom Behavior)           │
+│                                                          │
+│  ┌──────────────────┐  ┌──────────────────────────┐     │
+│  │   CLAUDE.md       │  │     HOOKS                 │     │
+│  │   Instructions    │  │     Enforcement & context │     │
+│  └──────────────────┘  └──────────────────────────┘     │
 │                                                          │
 │  ┌────────────────────────────────────────────────┐     │
 │  │           ACTIVE SKILL STACK                   │     │
@@ -272,7 +293,7 @@ Master Agent: [Must delegate to sub-agent to proceed]
 
 #### 2. Skill Prompt Instructions (Guidance)
 
-The olympus skill (.claude/commands/olympus/skill.md) contains explicit rules:
+The olympus skill (`.claude/commands/olympus/SKILL.md`) contains explicit rules:
 
 ```markdown
 **FUNDAMENTAL RULE: You NEVER work alone when specialists are available.**
@@ -300,11 +321,11 @@ Delegates to Sub-Agents:
 
 ---
 
-## Layer 3: Sub-Agents (Specialists)
+## Layer 3: Sub-Agents (Swappable Specialists)
 
 ### The Specialized Workforce
 
-Sub-agents are **single-purpose experts** spawned via the `Task` tool. They operate independently but report back to the master agent.
+Sub-agents are **fully custom, swappable specialists** defined as Markdown files with YAML frontmatter in `~/.claude/agents/`. Olympus installs 20+ agents, but you can add, modify, or remove them at any time. Each agent is spawned via the `Task` tool, operates independently, and reports back to the orchestrator.
 
 | Agent | Model | Purpose | When to Use |
 |-------|-------|---------|-------------|
@@ -641,14 +662,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User
-    participant Master as Claude Master<br/>(olympus + ultrawork<br/>+ git-master)
+    participant Master as Claude Master<br/>(olympus + ultrawork)
     participant Oracle
     participant Olympian1 as Olympian #1
     participant Olympian2 as Olympian #2
     participant Explore
 
     User->>Master: "/ultrawork refactor auth module"
-    Master->>Master: Skills active: [olympus, ultrawork, git-master]
+    Master->>Master: Skills active: [olympus, ultrawork]
     Master->>Master: Create todos: [1. Analyze, 2-4. Implement, 5. Commit]
 
     Note over Master: Todo #1: Architecture analysis
@@ -670,7 +691,7 @@ sequenceDiagram
 
     Master->>Master: Verify all changes (lsp_diagnostics)
 
-    Note over Master: Todo #5: Atomic commit (git-master)
+    Note over Master: Todo #5: Atomic commit
     Master->>Master: git add (relevant files only)
     Master->>Master: git commit with detailed message
     Master->>Master: git status verification
@@ -680,69 +701,80 @@ sequenceDiagram
 
 ---
 
-## Planning Workflow (Prometheus Skill)
+## Planning & AIDLC Workflow
 
-For complex or multi-phase projects, activate the `prometheus` skill to create a strategic plan before execution.
+For complex or multi-phase projects, the `/plan` command activates the **AIDLC (AI-Driven Development Life Cycle)** workflow — a structured pipeline that guides features from requirements through implementation.
 
-```mermaid
-stateDiagram-v2
-    [*] --> PrometheusPlan: /plan <description>
-    PrometheusPlan --> Interview: Start interview
-    Interview --> Research: Launch explore/librarian agents
-    Research --> Interview: Gather codebase context
-    Interview --> ClarificationCheck: After each response
+### AIDLC Pipeline Overview
 
-    ClarificationCheck --> Interview: Unclear requirements
-    ClarificationCheck --> CreatePlan: All clear
-
-    CreatePlan --> PlanFile: Write to .olympus/plans/*.md
-    PlanFile --> OptionalReview: User can review
-    OptionalReview --> MomusReview: /review [plan-path]
-    OptionalReview --> Execution: User approves
-
-    MomusReview --> Revise: Critical issues found
-    Revise --> CreatePlan: Fix issues
-    MomusReview --> Execution: Plan approved
-
-    Execution --> OlympusSkill: Transition to olympus skill
-    OlympusSkill --> Implementation: Execute plan tasks
-    Implementation --> [*]: Complete
 ```
+INCEPTION PHASE (What & Why)          CONSTRUCTION PHASE (How)           OPERATIONS (Future)
+├── Workspace Detection (always)      ├── Per-Unit Loop:                 └── Placeholder
+├── Reverse Engineering (brownfield)  │   ├── Functional Design
+├── Requirements Analysis (always)    │   ├── NFR Requirements
+├── User Stories (conditional)        │   ├── NFR Design
+├── Workflow Planning (always)        │   ├── Infrastructure Design
+├── Application Design (conditional)  │   └── Code Generation (always)
+└── Units Generation (conditional)    └── Build & Test (always)
+```
+
+### How It Works
+
+1. **`/plan <description>`** — Starts the AIDLC pipeline
+2. **Workspace Detection** — Scans for existing code (greenfield vs brownfield)
+3. **Requirements** — Gathers and documents requirements (adaptive depth)
+4. **Workflow Planning** — Determines which stages to execute, at what depth
+5. **Construction** — Delegates code generation to `olympian` agents per unit
+6. **Build & Test** — Verifies everything compiles and passes tests
+
+Each stage requires **explicit user approval** before proceeding. Progress is tracked in `aidlc-state.md` and `checkpoint.json`.
+
+### Workflow Artifacts
+
+```
+aidlc-docs/{workflow-id}/
+├── aidlc-state.md          # Human-readable progress tracker
+├── checkpoint.json          # Machine-readable state (V3)
+├── audit.md                 # Append-only interaction log
+├── manifest.json            # Artifact registry
+├── inception/               # Requirements, stories, design docs
+│   ├── intent.md
+│   ├── requirements.md
+│   └── plans/
+└── construction/            # Per-unit design and code summaries
+    ├── {unit-name}/
+    └── build-and-test/
+```
+
+### AIDLC Rules System
+
+The installer deploys **26 rule files** to `~/.claude/olympus/rules/` that guide AI behavior at each stage:
+
+- `rules/common/` — Shared rules (terminology, validation, question format, error handling)
+- `rules/inception/` — Stage-specific rules for each inception stage
+- `rules/construction/` — Stage-specific rules for each construction stage
+- `rules/core-workflow.md` — Master workflow definition
+
+These rules are loaded on-demand by the AI when executing each stage.
 
 ### Prometheus Interview Process
 
-**What Prometheus Does:**
+Before the AIDLC pipeline executes, Prometheus conducts a requirements interview:
+
 1. **Clarifies requirements** through targeted questions
 2. **Researches your codebase** to understand existing patterns
 3. **Identifies constraints** (performance, compatibility, architecture)
 4. **Generates detailed work plan** with tasks, acceptance criteria, and guardrails
-5. **Saves plan** to `.olympus/plans/` for execution
 
-**Example Interview:**
-```
-User: /plan add OAuth 2.0 authentication
+### Workflow Commands
 
-Prometheus: I'll help you plan the OAuth 2.0 implementation.
-
-[Launches explore agent to find existing auth code]
-
-Questions:
-1. Which OAuth provider(s)? (Google, GitHub, custom, etc.)
-2. Do you have existing user sessions to integrate with?
-3. Token storage preference? (JWT, server-side sessions, etc.)
-4. Required scopes/permissions?
-
-[User answers questions]
-
-[Launches librarian to research OAuth best practices]
-
-Creating comprehensive work plan...
-
-Plan saved to: .olympus/plans/oauth-implementation.md
-
-Ready to implement? Run: /olympus
-Want review first? Run: /review .olympus/plans/oauth-implementation.md
-```
+| Command | Purpose |
+|---------|---------|
+| `/plan <description>` | Start a new AIDLC workflow |
+| `/continue` | Resume an in-progress workflow from last checkpoint |
+| `/review [plan-path]` | Have Momus critically evaluate a plan |
+| `/complete-plan [path]` | Verify and close out a completed plan |
+| `/retro` | Run a retrospective on workflow guardrail events |
 
 ---
 
@@ -818,9 +850,9 @@ Task: "Implement dashboard with multiple charts"
 
 Auto-detected skills:
 - olympus (primary execution mode)
-- frontend-ui-ux (UI work detected)
 
-Result: Same context, enhanced with UI expertise
+Delegation:
+- frontend-engineer agent handles UI components
 ```
 
 ### 2. Smart Delegation
@@ -883,12 +915,12 @@ Master: ✅ Task complete
 | **Multi-Step Tasks** | Manual tracking, easy to lose context | Automatic todo management, progress tracked |
 | **Parallelization** | Sequential only | 3-5x faster with concurrent sub-agents |
 | **Learning** | Repeats same mistakes | Learns from corrections automatically |
-| **Specialization** | Generic responses | 20+ experts for specific domains |
+| **Specialization** | Generic responses | 19 experts for specific domains |
 | **Model Selection** | Manual tier switching | Smart routing (Haiku/Sonnet/Opus) |
 | **Completion** | Stops when you say stop | Continues until verified complete (ascent) |
 | **Planning** | Ad-hoc | Strategic planning workflow (prometheus) |
-| **Git Commits** | Manual or generic | Atomic commits with style detection (git-master) |
-| **UI/UX Work** | Generic implementation | Design-first approach (frontend-ui-ux) |
+| **Git Commits** | Manual or generic | Atomic commits with style detection |
+| **UI/UX Work** | Generic implementation | Design-first approach with frontend specialists |
 
 ---
 
@@ -966,9 +998,9 @@ Manually combine skills for specific workflows:
 [answer questions]
 > /ascent /olympus
 
-# Frontend work with git commits
+# Frontend work with delegation
 > /olympus build dashboard
-# Skills: [olympus + frontend-ui-ux + git-master]
+# Olympus delegates UI work to frontend-engineer agent
 ```
 
 ### Managing Learning Data
@@ -1021,11 +1053,11 @@ This is a TypeScript monorepo using:
 
 ## Summary
 
-Olympus orchestration = **Skill Composition** + **Smart Delegation** + **Continuous Learning**
+Olympus orchestration = **Fixed Model** + **Customizable Orchestrator** + **Swappable Agents** + **Continuous Learning**
 
 **Key Takeaways:**
-1. Skills layer onto a single master agent (context preserved)
-2. Sub-agents are specialists (oracle, olympian, explore, etc.)
+1. The underlying Claude model is fixed — the orchestrator built on it is deeply customizable (CLAUDE.md + skills + hooks)
+2. Sub-agents are fully swappable specialists defined in `~/.claude/agents/`
 3. Learning happens automatically from corrections
 4. Verification at every step (never trust, always verify)
 5. Smart model routing (Haiku/Sonnet/Opus) optimizes cost
