@@ -1201,12 +1201,26 @@ Key artifacts:
 
 ### 12c. Present execution mode choice
 
-"**Choose execution mode for implementation:**
+Analyze the workflow to recommend the best mode. Use `depth_score`, `risk_tier`, number of units, and pathway to determine the recommendation.
 
-1. **`/ascent`** — Persistent execution loop. Will not stop until all tasks are verified complete.
-2. **`/olympus`** — Standard orchestration mode. Delegates to specialized agents with your oversight.
-3. **`/ultrawork`** — Maximum parallelism. Runs everything concurrently for speed.
-4. **Manual** — You drive implementation yourself using the inception artifacts as your guide.
+**Recommendation logic**:
+- **Multi-unit (2+ units) OR depth_score > 18 OR risk_tier >= 2**: Recommend `/ascent` (persistence is critical)
+- **Single unit, moderate complexity (depth_score 10-18)**: Recommend `/olympus` (standard orchestration)
+- **Simple change (depth_score < 10, single unit)**: Recommend `/olympus` (lightweight orchestration)
+
+Present with the recommendation highlighted:
+
+"**Choose execution mode for construction:**
+
+**Recommended: `{recommended_mode}`** based on {reasoning — e.g., "3 units with depth score 22"}
+
+1. **`/ascent`** — Persistent execution. Cannot stop until all units are built, tested, and verified. Best for multi-unit or complex workflows.
+2. **`/olympus`** — Standard orchestration. Delegates to specialized agents with your oversight at each gate. Good for most workflows.
+3. **`/ultrawork`** — Maximum intensity. Parallel execution of independent units, aggressive verification, zero tolerance for incomplete work. Best when speed matters.
+4. **`/ascent` + `/ultrawork`** — Full Olympus power. Combines persistence with parallelism and verification guarantees. Best for large, complex, multi-unit features.
+5. **Manual** — You drive implementation yourself using the inception artifacts as your guide.
+
+**Note:** All modes include human approval gates between stages. Skill stacking (e.g., `/ascent` + `/ultrawork`) is supported — activate both for combined behavior.
 
 Which mode would you like to use?"
 

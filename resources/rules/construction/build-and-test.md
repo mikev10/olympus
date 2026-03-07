@@ -21,6 +21,16 @@
 
 **After agent completes**: The orchestrator incorporates the agent's test results into the build-and-test-summary.md, presents the results to the user (Step 9), and manages the approval gate.
 
+## Orchestrator Verification Requirements
+
+After `qa-tester` reports results, the orchestrator MUST independently verify — never trust agent self-reports alone:
+
+- **Build Verification**: Run the build command yourself (e.g., `npm run build`, `mvn clean install`) and confirm exit code 0.
+- **Test Verification**: Run the test suite yourself and confirm all tests pass. Compare your results against the agent's report.
+- **Failure Loop**: If failures are found, delegate fixes to the appropriate agent (`olympian` for code fixes, `oracle` or `oracle-medium` for root cause analysis), then re-verify independently.
+- **No Early Exit**: Do not declare Build & Test complete until ALL test categories pass your independent verification.
+- **Evidence-Based Reporting**: When presenting results to the user (Step 9), include the actual command output you observed, not just the agent's summary.
+
 ---
 
 ## Step 1: Analyze Testing Requirements

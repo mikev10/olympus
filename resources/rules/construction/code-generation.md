@@ -32,6 +32,21 @@ This stage generates code for each unit of work through two integrated parts:
 
 **After agent completes**: The orchestrator reviews generated code, presents the completion message (Step 14), and manages the approval gate (Steps 15-16).
 
+## Orchestrator Execution Requirements
+
+When managing code generation, the orchestrator MUST leverage Olympus capabilities:
+
+- **Todo Tracking**: Create a todo for each unit's code generation and mark progress in real-time. Every step in the code generation plan should have a corresponding tracked todo.
+- **Parallel Execution**: When multiple independent units are ready for code generation (no inter-unit dependencies), launch concurrent Task calls to generate them simultaneously.
+- **Independent Verification**: After any agent completes, verify results yourself — run the build, check for type errors, read the generated code. Never trust agent self-reports alone.
+- **Persistence**: Continue through all units without stopping. If multiple units exist, complete the full construction loop before declaring the phase done.
+- **Failure Recovery**: If an agent produces incorrect code, delegate debugging to `oracle` or `oracle-medium` for root cause analysis before re-delegating generation.
+
+**Recommended Skill Stacking**: For maximum effectiveness, users should activate these skills alongside `/plan`:
+- `/plan` + `/ascent` — Persistence guarantee through multi-unit construction loops
+- `/plan` + `/ultrawork` — Parallel unit generation with verification guarantees
+- `/plan` + `/ascent` + `/ultrawork` — Full Olympus power: parallel, persistent, verified
+
 ---
 
 # PART 1: PLANNING
