@@ -4,6 +4,10 @@
 
 **Always Execute**: This phase always runs after understanding requirements and scope
 
+## Execution Model
+
+**Orchestrator-only stage** — no agent delegation. Workflow Planning is meta-planning: the orchestrator synthesizes all prior context (requirements, stories, reverse engineering) to determine which stages to execute and at what depth. Delegating this work would be circular, as the output of this stage drives all subsequent delegation decisions. The orchestrator executes all steps directly.
+
 ## Step 1: Load All Prior Context
 
 ### 1.1 Load Reverse Engineering Artifacts (if brownfield)

@@ -13,6 +13,25 @@ This stage generates code for each unit of work through two integrated parts:
 - All unit design artifacts must be available
 - Unit is ready for code generation
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate code generation (Part 2) to an Olympus agent. Do NOT generate multi-file application code directly.
+
+**Execution mode**: Foreground sequential — one agent per unit, running in the foreground for full visibility into generated code and progress.
+
+**Delegation scope**:
+- **Orchestrator retains**: Part 1 (Planning) — Steps 1-9. The orchestrator reads design artifacts, creates the code generation plan, and obtains user approval.
+- **Delegated to agent**: Part 2 (Generation) — Steps 10-16. The agent executes the approved plan, generating application code, tests, and deployment artifacts.
+
+**Agent routing** — select based on unit scope:
+- **UI/frontend units** (components, pages, styling, client-side logic): Delegate to `frontend-engineer`. For complex design systems or multi-component architectures, escalate to `frontend-engineer-high`.
+- **Backend/general units** (services, APIs, business logic, data layers): Delegate to `olympian`. For complex units (multiple services, intricate business logic, or cross-cutting concerns), escalate to `olympian-high`.
+- **How to determine**: Check the unit's functional design artifacts and story assignments. If the unit scope includes `.tsx`, `.jsx`, `.css`, `.scss` files, UI components, or user-facing screens, route to `frontend-engineer`. Otherwise route to `olympian`.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator reviews generated code, presents the completion message (Step 14), and manages the approval gate (Steps 15-16).
+
 ---
 
 # PART 1: PLANNING

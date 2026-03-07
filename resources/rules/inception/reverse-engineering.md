@@ -25,6 +25,9 @@
 
 **After both agents complete**: Compile their findings into the artifact files defined in the steps below.
 
+**Optional visual analysis — `multimodal-looker`**:
+If the repository contains image-format architecture diagrams, ERDs, wireframes, or design documents (`.png`, `.jpg`, `.pdf`, `.svg` in the repo root, `docs/`, or `diagrams/` directories), optionally invoke `multimodal-looker` to extract architectural context from them. This enriches `architecture.md` and `business-overview.md` with information that text-only analysis cannot capture. Only invoke if relevant image files are discovered during the workspace scan — do not search exhaustively for images.
+
 ## Step 1: Multi-Package Discovery
 
 ### 1.1 Scan Workspace

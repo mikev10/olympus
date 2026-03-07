@@ -17,6 +17,23 @@ Application Design focuses on:
 - Story Development recommended (user stories guide design decisions)
 - Execution plan must indicate Application Design stage should execute
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate application design artifact generation (Step 11) to `oracle`. Do NOT perform architectural design reasoning directly.
+
+**Execution mode**: Foreground sequential — single coherent architecture task requiring Opus-level reasoning due to high downstream impact on all construction work.
+
+**Delegation scope**:
+- **Orchestrator retains**: Steps 1-10 (context analysis, Q&A generation, answer collection, ambiguity resolution, plan creation, plan approval) and Steps 12-16 (logging, completion message, approval gate, state update).
+- **Delegated to `oracle`**: Step 11 (Generate Application Design Artifacts) — the agent produces components.md, component-methods.md, services.md, and component-dependency.md based on the approved plan and resolved Q&A.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator reviews the generated artifacts, presents the completion message, and manages the approval gate.
+
+**Optional quality gate — `momus` review**:
+Application Design artifacts are the foundation for all construction work. Design flaws here cascade to every unit. After `oracle` generates the artifacts (Step 11), the orchestrator may optionally invoke `momus` to critically evaluate the design before presenting it to the user. This is recommended for complex projects or when multiple components/services are defined. The orchestrator should offer: "Would you like Momus to review this design before you approve it?" Momus evaluates against: component completeness, interface consistency, dependency accuracy, and alignment with requirements/stories.
+
 ## Step-by-Step Execution
 
 ### 1. Analyze Context

@@ -15,6 +15,20 @@ User Stories focus on:
 - Requirements Analysis recommended (can reference requirements if available)
 - Workflow Planning must indicate User Stories stage should execute
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate story and persona generation (Part 2) to `oracle-medium`. Do NOT generate user stories and personas directly.
+
+**Execution mode**: Foreground sequential — single coherent story generation task requiring Sonnet-level reasoning for story quality.
+
+**Delegation scope**:
+- **Orchestrator retains**: Part 1 (Planning) — Steps 1-14. The orchestrator performs the intelligent assessment, creates the story plan, manages Q&A, resolves ambiguities, and obtains user approval.
+- **Delegated to `oracle-medium`**: Part 2 (Generation) — Steps 15-18. The agent executes the approved plan to produce stories.md and personas.md following INVEST criteria.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator reviews the generated stories, presents the completion message (Step 20), and manages the approval gate (Steps 21-23).
+
 ## Intelligent Assessment Guidelines
 
 **WHEN TO EXECUTE USER STORIES**: Use this enhanced assessment before proceeding:

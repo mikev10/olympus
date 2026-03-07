@@ -10,6 +10,17 @@
 - Workspace Detection must be complete
 - Reverse Engineering must be complete (if brownfield)
 
+## Agent Delegation Strategy
+
+**Orchestrator-driven stage** with optional agent support. Requirements Analysis is primarily Q&A-driven work that the orchestrator manages directly (intent analysis, question generation, answer collection, requirements document creation).
+
+**Optional delegation**:
+- **`metis`** (Opus, read-only): May be invoked for blind spot analysis during the question-answering phase. If used, findings are presented to the user for review in Step 6b. This is optional and at the orchestrator's discretion based on project complexity.
+
+**Execution mode**: The orchestrator runs all steps directly. If `metis` is invoked, it runs in the foreground as a supplementary analysis — not a replacement for the orchestrator's own work.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
 ## Execution Steps
 
 ### Step 1: Load Reverse Engineering Context (if available)

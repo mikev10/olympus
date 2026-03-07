@@ -206,12 +206,17 @@ Wait for user response before proceeding.
 
 | Stage | Agent |
 |---|---|
-| reverse-engineering | `explore-medium` |
-| requirements-analysis | `prometheus` |
-| application-design | `oracle` |
-| units-generation | `olympian` |
+| reverse-engineering | `explore-medium` + `multimodal-looker` (optional, for diagrams) |
+| requirements-analysis | `metis` (optional blind spot analysis) |
+| user-stories | `oracle-medium` |
+| application-design | `oracle` + `momus` (optional review gate) |
+| units-generation | `olympian` + `momus` (optional review gate) |
 | functional-design | `oracle-medium` |
-| code-generation | `olympian` or `olympian-high` |
+| nfr-requirements | `oracle-medium` + `librarian` (optional tech validation) |
+| nfr-design | `oracle-medium` |
+| infrastructure-design | `oracle-medium` |
+| code-generation (backend) | `olympian` or `olympian-high` |
+| code-generation (frontend) | `frontend-engineer` or `frontend-engineer-high` |
 | build-and-test | `qa-tester` |
 
 ### If user chose B (Review)

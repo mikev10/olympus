@@ -16,6 +16,23 @@ This stage decomposes the system into manageable units of work through two integ
 - Application Design phase REQUIRED (determines components, methods, and services)
 - Execution plan must indicate Design phase should execute
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate unit artifact generation (Part 2) to `olympian`. Do NOT generate unit decomposition artifacts directly.
+
+**Execution mode**: Foreground sequential — single coherent decomposition task per workflow.
+
+**Delegation scope**:
+- **Orchestrator retains**: Part 1 (Planning) — Steps 1-11. The orchestrator creates the decomposition plan, manages Q&A, resolves ambiguities, and obtains user approval.
+- **Delegated to `olympian`**: Part 2 (Generation) — Steps 12-15. The agent executes the approved plan to produce unit-of-work.md, unit-of-work-dependency.md, and unit-of-work-story-map.md.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator reviews the generated artifacts, presents the completion message (Step 16), and manages the approval gate (Steps 17-19).
+
+**Optional quality gate — `momus` review**:
+Unit boundaries define the scope of all subsequent design and code generation work. After `olympian` generates the unit artifacts (Part 2), the orchestrator may optionally invoke `momus` to critically evaluate the decomposition before presenting it to the user. This is recommended when multiple units are defined or when unit boundaries involve complex dependencies. Momus evaluates against: unit independence, story coverage completeness, dependency validity, and absence of circular dependencies.
+
 ---
 
 # PART 1: PLANNING

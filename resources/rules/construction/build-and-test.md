@@ -7,6 +7,20 @@
 - All code artifacts must be generated
 - Project is ready for build and testing
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate test execution to `qa-tester`. Do NOT run test suites directly.
+
+**Execution mode**: Foreground sequential — the orchestrator generates instruction documents first, then delegates actual test execution to the agent.
+
+**Delegation scope**:
+- **Orchestrator retains**: Steps 1-7 (analyze testing requirements, generate build instructions, generate unit/integration/performance/additional test instructions, generate test summary) and Steps 8-10 (state update, results presentation, audit logging). The orchestrator creates all instruction documentation.
+- **Delegated to `qa-tester`**: After instruction documents are generated (post-Step 7), delegate actual test execution to `qa-tester`. The agent uses the generated instruction files as input to build the project and run all test suites (unit, integration, performance, etc.). The agent reports pass/fail results for each test category.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator incorporates the agent's test results into the build-and-test-summary.md, presents the results to the user (Step 9), and manages the approval gate.
+
 ---
 
 ## Step 1: Analyze Testing Requirements

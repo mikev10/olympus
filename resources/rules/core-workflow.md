@@ -525,11 +525,21 @@ When executing AI-DLC workflow stages, Olympus delegates to specialized agents:
 | Stage | Agent | Purpose |
 |-------|-------|---------|
 | Discovery/Reverse Engineering | `explore-medium` | Codebase analysis |
+| Reverse Engineering (visual) | `multimodal-looker` (optional) | Architecture diagram extraction |
 | Intent/Requirements | `prometheus` | Strategic planning with interview |
+| Requirements Analysis | `metis` (optional) | Blind spot analysis |
+| User Stories | `oracle-medium` | Story and persona generation |
 | Application Design | `oracle` | Architecture decisions |
+| Application Design (review) | `momus` (optional) | Design quality gate |
 | Units Generation | `olympian` | Decomposition execution |
+| Units Generation (review) | `momus` (optional) | Decomposition quality gate |
 | Functional Design | `oracle-medium` | Design decisions |
-| Code Generation | `olympian` or `olympian-high` | Implementation |
+| NFR Requirements | `oracle-medium` | NFR assessment |
+| NFR Requirements (validation) | `librarian` (optional) | Technology doc verification |
+| NFR Design | `oracle-medium` | Design pattern incorporation |
+| Infrastructure Design | `oracle-medium` | Infrastructure mapping |
+| Code Generation (backend) | `olympian` or `olympian-high` | Backend/general implementation |
+| Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI/component implementation |
 | Build & Test | `qa-tester` | Testing and verification |
 | Review | `momus` | Critical evaluation |
 

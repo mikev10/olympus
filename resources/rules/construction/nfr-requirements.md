@@ -5,6 +5,23 @@
 - Unit functional design artifacts must be available
 - Execution plan must indicate NFR Requirements stage should execute
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate NFR assessment artifact generation (Step 6) to `oracle-medium`. Do NOT generate NFR requirements and tech stack decisions directly.
+
+**Execution mode**: Foreground sequential — single coherent assessment task per unit.
+
+**Delegation scope**:
+- **Orchestrator retains**: Steps 1-5 (analyze functional design, plan creation, Q&A, answer collection) and Steps 7-9 (completion message, approval gate, state update).
+- **Delegated to `oracle-medium`**: Step 6 (Generate NFR Requirements Artifacts) — the agent analyzes functional design context and user answers to produce nfr-requirements.md and tech-stack-decisions.md.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator compiles the agent's output into the artifact files, presents the completion message, and manages the approval gate.
+
+**Optional technology validation — `librarian`**:
+When user answers in Step 5 name specific technologies, frameworks, or cloud services (e.g., "use Kafka", "Redis for caching", "Next.js 15"), the orchestrator may optionally invoke `librarian` to validate those choices against current documentation. Librarian can verify version compatibility, licensing terms, known limitations, and service-specific constraints that `oracle-medium` may not have in its training data. This is not mandatory — only invoke when specific technology names appear in user answers and validation would improve the accuracy of tech-stack-decisions.md.
+
 ## Overview
 Determine non-functional requirements for the unit and make tech stack choices.
 

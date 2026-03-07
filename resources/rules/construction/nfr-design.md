@@ -5,6 +5,20 @@
 - NFR requirements artifacts must be available
 - Execution plan must indicate NFR Design stage should execute
 
+## Agent Delegation Strategy
+
+**MANDATORY**: Delegate NFR design artifact generation (Step 6) to `oracle-medium`. Do NOT generate design patterns and logical components directly.
+
+**Execution mode**: Foreground sequential — single coherent design task per unit.
+
+**Delegation scope**:
+- **Orchestrator retains**: Steps 1-5 (analyze NFR requirements, plan creation, Q&A, answer collection) and Steps 7-9 (completion message, approval gate, state update).
+- **Delegated to `oracle-medium`**: Step 6 (Generate NFR Design Artifacts) — the agent incorporates NFR requirements into design patterns, producing nfr-design-patterns.md and logical-components.md.
+
+**If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
+
+**After agent completes**: The orchestrator compiles the agent's output into the artifact files, presents the completion message, and manages the approval gate.
+
 ## Overview
 Incorporate NFR requirements into unit design using patterns and logical components.
 
