@@ -115,6 +115,15 @@ export function isClaudeInstalled(): boolean {
 const OLYMPUS_CLAUDE_MD_SENTINEL = '# Olympus Multi-Agent System';
 
 /**
+ * When installing locally (--local), rewrite global paths to project-relative paths.
+ * This ensures rule file references point to .claude/olympus/ instead of ~/.claude/olympus/.
+ */
+function localizeContent(content: string, isLocal: boolean): string {
+  if (!isLocal) return content;
+  return content.replaceAll('~/.claude/olympus/', '.claude/olympus/');
+}
+
+/**
  * Clean up legacy command files that were previously installed to ~/.claude/commands/.
  * These have been migrated to ~/.claude/skills/.
  *
@@ -273,6 +282,7 @@ function cleanupLegacyRuleFiles(rulesDir: string, log: (msg: string) => void): v
 function installAgents(
   agentsDir: string,
   force: boolean,
+  isLocal: boolean,
   log: (msg: string) => void
 ): string[] {
   const installed: string[] = [];
@@ -284,7 +294,7 @@ function installAgents(
     if (existsSync(filepath) && !force) {
       log(`  Skipping ${filename} (already exists)`);
     } else {
-      const content = readContent(`agents/${filename}`);
+      const content = localizeContent(readContent(`agents/${filename}`), isLocal);
       writeFileSync(filepath, content);
       installed.push(filename);
       log(`  Installed ${filename}`);
@@ -302,6 +312,7 @@ function installAgents(
 function installSkills(
   skillsDir: string,
   force: boolean,
+  isLocal: boolean,
   log: (msg: string) => void
 ): string[] {
   const installed: string[] = [];
@@ -325,7 +336,7 @@ function installSkills(
       if (!existsSync(destDir)) {
         mkdirSync(destDir, { recursive: true });
       }
-      const content = readContent(`skills/${skillName}/SKILL.md`);
+      const content = localizeContent(readContent(`skills/${skillName}/SKILL.md`), isLocal);
       writeFileSync(destFile, content);
       installed.push(`${skillName}/SKILL.md`);
       log(`  Installed ${skillName}/SKILL.md`);
@@ -343,6 +354,7 @@ function installSkills(
  */
 function installRules(
   rulesDir: string,
+  isLocal: boolean,
   log: (msg: string) => void
 ): void {
   const rulesContentDir = join(CONTENT_DIR, 'rules');
@@ -358,7 +370,7 @@ function installRules(
 
     const ruleFiles = readdirSync(phaseContentDir).filter(f => f.endsWith('.md'));
     for (const ruleFile of ruleFiles) {
-      const content = readContent(`rules/${phase}/${ruleFile}`);
+      const content = localizeContent(readContent(`rules/${phase}/${ruleFile}`), isLocal);
       writeFileSync(join(phaseDestDir, ruleFile), content);
       fileCount++;
     }
@@ -367,7 +379,7 @@ function installRules(
   // Also install top-level rule files (e.g. core-workflow.md) if they exist
   const topLevelFiles = readdirSync(rulesContentDir).filter(f => f.endsWith('.md'));
   for (const ruleFile of topLevelFiles) {
-    const content = readContent(`rules/${ruleFile}`);
+    const content = localizeContent(readContent(`rules/${ruleFile}`), isLocal);
     writeFileSync(join(rulesDir, ruleFile), content);
     fileCount++;
   }
@@ -552,11 +564,11 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Install agents
     log('Installing agent definitions...');
-    result.installedAgents = installAgents(agentsDir, !!options.force, log);
+    result.installedAgents = installAgents(agentsDir, !!options.force, !!options.local, log);
 
     // Install skills (migrated from commands)
     log('Installing skills...');
-    result.installedSkills = installSkills(skillsDir, !!options.force, log);
+    result.installedSkills = installSkills(skillsDir, !!options.force, !!options.local, log);
 
     // Clean up legacy mega-rule files BEFORE writing new individual rule files
     const rulesDir = join(baseDir, 'olympus', 'rules');
@@ -566,7 +578,7 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Install individual rule files (always overwrite)
     log('Installing AI-DLC rule files...');
-    installRules(rulesDir, log);
+    installRules(rulesDir, !!options.local, log);
 
     // Install CLAUDE.md with smart detection
     log('Installing CLAUDE.md...');
@@ -577,7 +589,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     try {
       const claudeMdPath = join(baseDir, 'CLAUDE.md');
       if (existsSync(claudeMdPath)) {
-        const coreWorkflowContent = readContent('rules/core-workflow.md');
+        const coreWorkflowContent = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
         const currentContent = readFileSync(claudeMdPath, 'utf-8');
         const merged = mergeAidlcRules(currentContent, coreWorkflowContent);
         writeFileSync(claudeMdPath, merged, 'utf-8');
@@ -624,8 +636,8 @@ export function install(options: InstallOptions = {}): InstallResult {
           const existingContent = existsSync(projectClaudeMdPath)
             ? readFileSync(projectClaudeMdPath, 'utf-8')
             : '';
-          const coreWorkflow = readContent('rules/core-workflow.md');
-          const workflowRules = getAidlcRulesContent(workflowId, pathwayType);
+          const coreWorkflow = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
+          const workflowRules = localizeContent(getAidlcRulesContent(workflowId, pathwayType), !!options.local);
           const rules = `${coreWorkflow}\n\n---\n\n${workflowRules}`;
           const merged = mergeAidlcRules(existingContent, rules);
 
