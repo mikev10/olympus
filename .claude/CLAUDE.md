@@ -23,6 +23,8 @@ The AI model intelligently assesses what stages are needed based on:
 - Load `~/.claude/olympus/rules/common/session-continuity.md` for session resumption guidance
 - Load `~/.claude/olympus/rules/common/content-validation.md` for content validation requirements
 - Load `~/.claude/olympus/rules/common/question-format-guide.md` for question formatting rules
+- Load `~/.claude/olympus/rules/common/terminology.md` for phase/stage naming conventions
+- Load `~/.claude/olympus/rules/common/error-handling.md` for error recovery procedures
 - Reference these throughout the workflow execution
 
 ## MANDATORY: Content Validation
