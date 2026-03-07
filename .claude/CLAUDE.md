@@ -523,28 +523,44 @@ WRONG:
 
 When executing AI-DLC workflow stages, Olympus delegates to specialized agents:
 
-| Stage | Agent | Purpose |
-|-------|-------|---------|
-| Discovery/Reverse Engineering | `explore-medium` | Codebase analysis |
-| Reverse Engineering (visual) | `multimodal-looker` (optional) | Architecture diagram extraction |
-| Intent/Requirements | `prometheus` | Strategic planning with interview |
-| Requirements Analysis | `metis` (optional) | Blind spot analysis |
-| User Stories | `oracle-medium` | Story and persona generation |
-| Application Design | `oracle` | Architecture decisions |
-| Application Design (review) | `momus` (optional) | Design quality gate |
-| Units Generation | `olympian` | Decomposition execution |
-| Units Generation (review) | `momus` (optional) | Decomposition quality gate |
-| Functional Design | `oracle-medium` | Design decisions |
-| NFR Requirements | `oracle-medium` | NFR assessment |
-| NFR Requirements (validation) | `librarian` (optional) | Technology doc verification |
-| NFR Design | `oracle-medium` | Design pattern incorporation |
-| Infrastructure Design | `oracle-medium` | Infrastructure mapping |
-| Code Generation (backend) | `olympian` or `olympian-high` | Backend/general implementation |
-| Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI/component implementation |
-| Build & Test | `qa-tester` | Testing and verification |
-| Review | `momus` | Critical evaluation |
+| Stage | Agent | Recommended Skills | Purpose |
+|-------|-------|--------------------|---------|
+| Discovery/Reverse Engineering | `explore-medium` | — | Codebase analysis |
+| Reverse Engineering (visual) | `multimodal-looker` (optional) | — | Architecture diagram extraction |
+| Intent/Requirements | `prometheus` | — | Strategic planning with interview |
+| Requirements Analysis | `metis` (optional) | — | Blind spot analysis |
+| User Stories | `oracle-medium` | — | Story and persona generation |
+| Application Design | `oracle` | — | Architecture decisions |
+| Application Design (review) | `momus` (optional) | — | Design quality gate |
+| Units Generation | `olympian` | — | Decomposition execution |
+| Units Generation (review) | `momus` (optional) | — | Decomposition quality gate |
+| Functional Design | `oracle-medium` | — | Design decisions |
+| NFR Requirements | `oracle-medium` | — | NFR assessment |
+| NFR Requirements (validation) | `librarian` (optional) | — | Technology doc verification |
+| NFR Design | `oracle-medium` | — | Design pattern incorporation |
+| Infrastructure Design | `oracle-medium` | — | Infrastructure mapping |
+| Code Generation (backend) | `olympian` or `olympian-high` | `ascent`, `ultrawork` | Backend/general implementation |
+| Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | `ascent`, `ultrawork` | UI/component implementation |
+| Build & Test | `qa-tester` | `ascent` | Testing and verification |
+| Review | `momus` | — | Critical evaluation |
 
 Use the Task tool to delegate. Run independent stages in parallel when profitable.
+
+## Recommended Skill Stacking for AI-DLC
+
+The `/plan` command starts the AI-DLC workflow. For maximum effectiveness during the construction phase, users should stack additional Olympus skills:
+
+| Combination | Effect | Best For |
+|-------------|--------|----------|
+| `/plan` alone | Structured workflow with agent delegation | Standard features, single-unit work |
+| `/plan` + `/ascent` | Adds persistence — orchestrator cannot stop until all units complete | Multi-unit construction loops |
+| `/plan` + `/ultrawork` | Adds parallel execution and verification guarantees | Large implementations, independent units |
+| `/plan` + `/ascent` + `/ultrawork` | Full Olympus power: parallel, persistent, verified | Complex multi-unit features |
+
+**How skills enhance the orchestrator during AI-DLC**:
+- **`/ascent`** — Ensures the orchestrator persists through all construction units without stopping early. Enforces todo tracking and continuation.
+- **`/ultrawork`** — Enables parallel Task calls for independent units, adds mandatory independent verification after every agent delegation, and enforces zero-tolerance for incomplete work.
+- Skills modify the **orchestrator's behavior** (how it manages the workflow), not the sub-agents. Sub-agents are always delegated to via the Task tool with their own specific prompts.
 
 ## Extensions
 
@@ -693,7 +709,7 @@ Each stage:
 Olympus is a multi-agent orchestration system for Claude Code that enables intelligent task delegation, parallel execution, and specialized agent coordination. Tagline: "Summon the gods of code."
 
 **Distribution:**
-- **npm package**: `olympus-ai` (current version: 3.7.1)
+- **npm package**: `olympus-ai` (current version: 4.0.0)
 - **GitHub**: https://github.com/mikev10/olympus
 - **Claude Code plugin**: Distributed via `.claude-plugin` directory
 - **CLI command**: `olympus-ai`
