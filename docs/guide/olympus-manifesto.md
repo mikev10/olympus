@@ -1,34 +1,39 @@
 # The Olympus Manifesto
 
-## Core Philosophy: Autonomous Execution, Human Intent
+## Core Philosophy: Humans Direct, Agents Execute
 
-**Human intervention during agentic work is fundamentally a wrong signal.**
+**The human's job is to steer. The agent's job is to row.**
 
-The system should function autonomously - like a compiler or a self-driving car. You don't want to manually steer partway through the journey. You specify the destination, and the system gets you there.
+Olympus draws a hard line between *directing* work and *doing* work. You set the destination, approve the route, and review the results. The system handles everything in between — autonomously, in parallel, verified before delivery.
 
-Olympus is built on the principle that **human-in-the-loop equals blocker**. Not collaboration. Not partnership. A blocker. When a human must step in mid-execution, it means the system failed.
+Olympus is built on the principle that **humans should never be implementers**. When a human must write code, fix bugs, or babysit an agent mid-task, the system has failed. But when a human approves a design, greenlights a plan, or corrects a preference? That's governance — and it makes the output better.
 
 ---
 
 ## The Five Tenets
 
-### 1. Eliminate Human Bottlenecks
+### 1. Humans Approve, Agents Implement
 
-**Human involvement during execution signals system failure.**
+**Human as implementer = system failure. Human as decision-maker = good governance.**
 
 Traditional AI coding: You prompt → AI responds → You fix → AI tries again → You fix → ...
 
-This collaborative back-and-forth is a failure mode, not a feature.
+This collaborative back-and-forth is a failure mode, not a feature. You became the AI's debugger.
 
-**Olympus approach:**
-- You specify intent once
-- Olympus executes autonomously
-- Result is production-ready
+But the solution isn't to remove humans entirely — it's to put them in the right seat. Humans are executives, not laborers. You approve direction, review deliverables, and course-correct when needed. You never write the code yourself.
+
+**The Three Tiers of Human Involvement:**
+
+| Tier | Human Role | When | Example |
+|------|-----------|------|---------|
+| **Strategic** | Director — defines what to build | Inception phase | Approving requirements, signing off on architecture |
+| **Tactical** | Approver — reviews AI-produced plans | Phase gates | Greenlighting a code generation plan, reviewing designs |
+| **Execution** | Hands-off — AI works autonomously | Within any stage | Agent delegation, parallel execution, The Ascent |
 
 **Implementation:**
-- **The Ascent** - Cannot stop until verified complete
-- **Continuation Enforcement** - System reminds you to continue if incomplete
-- **Background Execution** - Doesn't wait for human approvals mid-task
+- **Structured Workflow** - AI-DLC phases with approval gates at natural boundaries
+- **The Ascent** - Cannot stop until verified complete within a phase
+- **Continuation Enforcement** - System continues working, not waiting
 - **Verification Built-In** - Oracle reviews, lsp_diagnostics, test runs
 
 **Anti-pattern:**
@@ -36,23 +41,24 @@ This collaborative back-and-forth is a failure mode, not a feature.
 User: "Add authentication"
 Agent: [writes some code]
 Agent: "I've started the implementation. What method would you like?"
-User: "JWT"  ← BLOCKER: Human had to intervene
+User: "JWT"  ← BLOCKER: Human had to intervene mid-implementation
 Agent: [continues]
 Agent: "Should I add refresh tokens?"
-User: "Yes"  ← BLOCKER: Another intervention
+User: "Yes"  ← BLOCKER: Another mid-task interruption
 ```
 
 **Olympus pattern:**
 ```
 User: "/plan add authentication"
-Prometheus: [interviews you BEFORE starting]
-Prometheus: [creates complete plan]
-User: "/olympus"
-Olympus: [executes plan autonomously to completion]
-Result: ✅ Production-ready authentication with JWT and refresh tokens
+Olympus: [analyzes workspace, gathers requirements, interviews you]
+User: ✓ Approves requirements
+Olympus: [designs architecture, creates code generation plan]
+User: ✓ Approves plan
+Olympus: [implements autonomously — parallel agents, tests, verification]
+Result: Production-ready authentication with JWT and refresh tokens
 ```
 
-**Key insight:** Clarification happens **before execution** (planning phase) or **after completion** (review phase). Never during.
+**Key insight:** Humans make decisions at **phase gates** — between stages of work. They never intervene **during execution** within a stage. The AI does all the analysis, design, and implementation. The human approves, steers, and reviews.
 
 ---
 
@@ -80,11 +86,12 @@ You shouldn't need to:
 ## The Ascent Verification Checklist
 
 Before outputting `<promise>DONE</promise>`:
-- [ ] All code compiles/runs without errors
-- [ ] All tests pass
-- [ ] Oracle verified production-ready
-- [ ] Follows existing patterns
-- [ ] No obvious bugs remain
+- [ ] Todo list shows 100% completion
+- [ ] All code changes compile/run without errors
+- [ ] All tests pass (if applicable)
+- [ ] User's original request is FULLY addressed
+- [ ] No obvious bugs or issues remain
+- [ ] You have TESTED the changes, not just written them
 
 If ANY checkbox is unchecked, CONTINUE WORKING.
 ```
@@ -209,95 +216,83 @@ Minimal intervention. Maximum autonomy. Continuous improvement.
 
 ---
 
-## The Learning Paradox: Review Without Interruption
+## Governance and Learning: The Two Loops
 
-**Manifesto principle:** Human intervention during work = blocker
+Olympus has two feedback loops — one for steering work, one for getting smarter.
 
-**Learning principle:** Human corrections improve future performance
+### The Governance Loop
 
-**How do we reconcile this?**
-
-### Post-Completion Review (Not Interruption)
-
-Review happens **AFTER** autonomous completion, not during:
+The AI-DLC workflow gives you control at natural boundaries without micromanaging execution:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│         AUTONOMOUS EXECUTION (No Intervention)       │
-│  Olympus works → Verifies → Delivers complete result│
-└─────────────────────────────────────────────────────┘
-                        ↓
-                   [COMPLETE]
-                        ↓
-┌─────────────────────────────────────────────────────┐
-│         POST-COMPLETION REVIEW (Learning Phase)      │
-│   You review → Correct if needed → Olympus learns   │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  INCEPTION: You define what to build                  │
+│  Requirements → Design → Plan                         │
+│  You approve at each gate                             │
+└──────────────────────────────────────────────────────┘
+                         ↓
+┌──────────────────────────────────────────────────────┐
+│  CONSTRUCTION: Agents build it                        │
+│  Design → Code → Test (autonomous within each stage)  │
+│  You approve plans and review output at gates         │
+└──────────────────────────────────────────────────────┘
+                         ↓
+┌──────────────────────────────────────────────────────┐
+│  REVIEW: You verify the result                        │
+│  Correct if needed → Olympus learns                   │
+└──────────────────────────────────────────────────────┘
 ```
 
-**This is not a blocker because:**
-1. Work is already complete and production-ready
-2. Review happens at your convenience
-3. Corrections improve FUTURE executions, not current one
-4. You're training the system, not fixing broken work
+**What you approve at gates:**
+- Requirements and scope — "Is this what I want?"
+- Architecture and design — "Is this the right approach?"
+- Code generation plans — "Does this plan make sense?"
+- Completed output — "Does this work?"
 
-### What to Review
+**What happens between gates (autonomous):**
+- Agents analyze, design, and implement
+- Multiple agents work in parallel
+- Oracle verifies, tests run, diagnostics check
+- The Ascent ensures no stage ends incomplete
 
-**Correctness** - Does it do what you asked?
-- If no: "No, this should handle X differently"
-- Learning captured: Task-specific correction
+### The Learning Loop
 
-**Style** - Does it match your preferences?
-- If no: "Use async/await instead of .then()"
-- Learning captured: Style preference (applied to future work)
+Every interaction teaches Olympus your preferences — whether at a gate or during free-form work.
 
-**Patterns** - Does it follow codebase conventions?
-- If no: "This project uses kebab-case for files"
-- Learning captured: Project convention (applied automatically)
+**What Olympus learns from:**
 
-**Quality** - Is it production-ready?
-- If no: "Add error handling for network failures"
-- Learning captured: Quality standard (enforced in future)
+| Your Action | What's Captured | How It's Applied |
+|-------------|----------------|-----------------|
+| "No, this should handle X differently" | Task-specific correction | Recorded in feedback log |
+| "Use async/await instead of .then()" | Style preference | Applied in future sessions |
+| "This project uses kebab-case for files" | Project convention | Auto-applied per project |
+| "Always use TypeScript interfaces" | Explicit rule (never decays) | Injected at every session start |
 
-### How Learning Works
+**How learning works:**
 
-**Session 1-2:** You correct Claude a few times
-```
-You: "No, use TypeScript interfaces instead of types"
-→ Olympus: Records feedback
-```
+Learning is threshold-based, not session-based. It can happen within a single long session or across many.
 
-**Session 3:** Pattern detected (3+ similar corrections)
-```
-→ Olympus: Learns preference "Use interfaces over types"
-→ Stored in ~/.claude/olympus/learning/user-preferences.json
-```
+1. **Feedback capture** — Corrections and preferences recorded to `feedback-log.jsonl`
+2. **Pattern extraction** — After 10+ entries, Jaccard similarity clusters similar feedback; 3+ similar corrections become a learned pattern
+3. **Explicit rules** — "Always X" or "Never Y" statements take effect immediately and never decay (regular patterns expire after 30 days of inactivity)
+4. **Session injection** — At every session start, learned preferences, patterns, and discoveries are automatically injected into context
 
-**Session 4+:** Preference automatically applied
-```
-→ Olympus: Uses interfaces by default (no correction needed)
-→ Human cognitive load reduced
-```
+**Result:** The more you use Olympus, the less you need to correct it.
 
-**Result:** Review time decreases over time as system learns.
+### The Relationship
 
-### The Social Contract
+**What we ask of you:**
+- Approve direction at gates — you're the decision-maker
+- Correct when something's wrong — your feedback makes Olympus smarter
+- Teach your preferences — "always/never" rules are captured permanently
 
-**We ask you to review because:**
-- It makes Olympus smarter for everyone
-- Your corrections teach the system your preferences
-- Patterns you identify become automatic
-- Future executions require less review
+**What Olympus delivers:**
+- Autonomous execution within each stage — no babysitting
+- Structured gates that give you control without slowing you down
+- A learning system that remembers your corrections and preferences
+- Each session starts smarter than the last
 
-**In return, Olympus promises:**
-- Never interrupt you mid-execution
-- Deliver production-ready results
-- Learn from corrections so mistakes don't repeat
-- Reduce your review burden over time
-
-**This is not "human-in-the-loop"** - it's "human-in-the-training-loop."
-
-Execution is autonomous. Learning is collaborative.
+**This is not "human-in-the-loop"** — it's governance at the gates, autonomy between them, and learning throughout.
 
 ---
 
@@ -435,22 +430,24 @@ When you activate `/ascent`, you invoke this commitment explicitly. The system b
 
 ## Conclusion
 
-**Human intervention during execution = blocker**
+**Human as implementer = system failure**
 
-**Human review after completion = learning**
+**Human as director = good governance**
 
-This is the distinction that makes Olympus work.
+**Human as reviewer = continuous learning**
 
-You are not collaborating with the AI during execution. You are **delegating** to it. It executes autonomously, verifies independently, and delivers complete results.
+These three lines capture the Olympus philosophy.
 
-Your role is strategic: specify intent, review results, correct as needed. The system learns from your corrections and improves over time.
+You are not pair-programming with the AI. You are **delegating** to it. You set direction at phase gates, approve plans and designs, and review completed work. Between those gates, the system executes autonomously — verifying its own output, delegating to specialists, and running in parallel.
+
+Your role is strategic: define intent, approve direction, review results, correct as needed. The system learns from your corrections and improves over time. The more you use it, the less you need to steer.
 
 **Olympus doesn't make you a better AI prompter.**
 
-**Olympus makes you a better engineer by removing the need to prompt at all.**
+**Olympus makes you a better engineer by letting you focus on decisions, not implementation.**
 
 ---
 
-Summon the gods of code. Let them work autonomously.
+Summon the gods of code. Direct them. Let them execute.
 
 The Ascent Never Ends.
