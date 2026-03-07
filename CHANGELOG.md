@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-03-07
+
+### Fixed
+
+- **CLAUDE.md duplication and bloat** — Global `~/.claude/CLAUDE.md` exceeded 40k char performance threshold
+  - Trimmed `core-workflow.md` from 567 → 168 lines (concise stage tables referencing rule files instead of duplicating content)
+  - Trimmed `getAidlcRulesContent()` to workflow identity only (removed 7 sections that duplicated core-workflow.md)
+  - Global installs no longer inject core-workflow.md into project `.claude/CLAUDE.md` (already in `~/.claude/CLAUDE.md`)
+  - Global CLAUDE.md: 40.1k → 21.2k chars (47% reduction)
+  - Project CLAUDE.md: ~30k → ~3.5k chars (88% reduction)
+
+## [4.0.1] - 2026-03-07
+
+### Changed
+
+- Version bump and metadata updates
+
+## [4.0.0] - 2026-03-07
+
+### Added
+
+- **AI-DLC Workflow** — Full AWS AI-DLC (AI-Driven Development Life Cycle) integration
+  - 3-phase pipeline: Inception (what/why) → Construction (how) → Operations (deploy)
+  - 7 inception stages: Workspace Detection, Reverse Engineering, Requirements Analysis, User Stories, Workflow Planning, Application Design, Units Generation
+  - Per-unit construction loop: Functional Design, NFR Requirements/Design, Infrastructure Design, Code Generation, Build & Test
+  - Checkpoint-based persistence for resumable workflows across sessions
+  - Dual state tracking (checkpoint.json + aidlc-state.md)
+  - Append-only audit.md with complete interaction logging
+  - `/continue` command for workflow resumption from last checkpoint
+  - `/retro` command for guardrail retrospectives
+- **Orchestrator verification and skill stacking** for AI-DLC construction phase
+- **Olympus agent delegation** strategies mapped to all AI-DLC workflow stages
+- **CLAUDE.md sentinel merger** for idempotent, non-destructive rule injection
+- **Brownfield detection and reverse engineering** pipeline
+- **Content validation rules** (Mermaid diagrams, ASCII art, special characters)
+- **Question format guide** with multiple choice and [Answer]: tag support
+- **Session continuity rules** for workflow resumption guidance
+
+### Changed
+
+- Renamed ODLC → AIDLC terminology across entire codebase
+- Renamed forge/ → construction/ and summit/ → operations/ directories
+- Migrated commands to skills architecture
+- Extracted embedded installer content to runtime `resources/` directory
+- Rule detail files installed to `~/.claude/olympus/rules/` for on-demand loading
+
 ## [3.7.0] - 2026-02-06
 
 ### Added
