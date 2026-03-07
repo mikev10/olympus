@@ -11,7 +11,7 @@
 
 **Summon the gods of code.**
 
-[Why Olympus?](#why-olympus) • [Quick Start](#quick-start) • [Self-Learning](#self-learning-system) • [Use Cases](#use-cases) • [Agents](#available-agents) • [Docs](#documentation)
+[Why Olympus?](#why-olympus) • [Quick Start](#quick-start) • [AI-DLC Workflow](#ai-dlc-workflow) • [Self-Learning](#self-learning-system) • [Use Cases](#use-cases) • [Agents](#available-agents) • [Docs](#documentation)
 
 </div>
 
@@ -27,8 +27,8 @@ Olympus is a multi-agent orchestration system for [Claude Code](https://docs.ant
 - 📋 **Todo Management** - Tracks progress with real-time updates
 - 🔄 **Background Execution** - Long-running tasks run async with notifications
 - 🎯 **Continuation Enforcement** - Never stops until all tasks are complete
-- 💬 **18+ Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/idea`, `/prd`, `/spec`, `/intents`, and more
-- 🔮 **Structured Workflows** - IDEA → PRD → SPEC → INTENTS pipeline for complex features
+- 💬 **19 Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/continue`, `/review`, and more
+- 🔮 **AI-DLC Workflow** - Inception → Construction → Operations pipeline for structured development
 - 🌐 **Language Agnostic** - Works with any tech stack: Python, .NET, Go, Rust, Java, and more
 - 🔮 **Magic Keywords** - Natural language triggers for enhanced modes
 
@@ -69,7 +69,7 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 
 - **Zero Configuration** - Works out-of-the-box with sensible defaults
 - **Works Everywhere** - Not tied to any language or framework — orchestrates across .NET, Python, Go, Rust, Java, and any codebase
-- **Slash Commands** - 13+ productivity commands (`/ultrawork`, `/plan`, `/ascent`)
+- **Slash Commands** - 19 slash commands (`/ultrawork`, `/plan`, `/ascent`, `/continue`)
 - **Magic Keywords** - Natural language triggers for enhanced modes
 
 ### 📊 Olympus vs. Manual Claude Usage
@@ -120,7 +120,7 @@ npm install -g olympus-ai
 olympus-ai install
 ```
 
-This installs agents, commands, and hooks to `~/.claude/`.
+This installs agents, skills, rules, and hooks to `~/.claude/`.
 
 ### Local Project Installation
 
@@ -158,10 +158,8 @@ claude
 | `/deepsearch <query>`   | Thorough multi-strategy codebase search                                |
 | `/analyze <target>`     | Deep analysis and investigation                                        |
 | `/complete-plan [path]` | Verify and complete a plan after implementation                        |
-| `/idea <feature>`       | Manually generate IDEA artifact for a feature                          |
-| `/prd <feature>`        | Manually generate PRD artifact for a feature                           |
-| `/spec <feature>`       | Manually generate SPEC artifact for a feature                          |
-| `/intents <feature>`    | Manually generate INTENTS artifact for a feature                       |
+| `/continue`             | Resume an active AI-DLC workflow from last checkpoint                  |
+| `/retro`                | Run a guardrail retrospective on the current AI-DLC workflow           |
 | `/workflow-status`      | View all active structured workflows and their status                  |
 | `/olympus next`         | Get the next ready task from current workflow                          |
 | `/doctor`               | Diagnose and fix olympus installation issues                           |
@@ -232,10 +230,12 @@ Include these words anywhere in your prompt to activate enhanced modes:
 ```
 
 **What happens:**
+- Starts an AI-DLC workflow with full Inception phase
 - Prometheus interviews you about requirements
-- Creates detailed work plan with phases
-- Identifies dependencies and risks
-- Saves plan to `.olympus/plans/` for execution
+- Generates requirements, user stories, and application design
+- Creates a construction plan with units of work
+- Each unit goes through design, code generation, and testing
+- All artifacts saved to `aidlc-docs/` with full audit trail
 
 ### 🧠 Learning Your Workflow
 
@@ -369,13 +369,56 @@ The Ascent is a persistence loop that binds Claude to your task until verified c
 
 ## Planning Workflow
 
-1. **Start planning**: `/plan build a new feature`
-2. **Interview**: Prometheus asks clarifying questions
-3. **Generate plan**: Say "Create the plan" when ready
-4. **Review** (optional): `/review .olympus/plans/my-feature.md`
-5. **Execute**: Use `/olympus` or `/ascent` to implement
+1. **Start AI-DLC workflow**: `/plan build a new feature`
+2. **Inception phase**: Prometheus interviews you about requirements, generates user stories, and plans the architecture
+3. **Workflow planning**: Determines which stages to execute based on project needs
+4. **Construction phase**: Per-unit functional design, NFR assessment, and code generation
+5. **Resume if interrupted**: `/continue` picks up from the last checkpoint
+6. **Review at any gate**: `/review` to evaluate plans before proceeding
 
-Plans are saved to `.olympus/plans/` in your project directory.
+Plans and artifacts are saved to `aidlc-docs/` in your project directory.
+
+---
+
+## AI-DLC Workflow
+
+Olympus includes a structured development workflow inspired by [AWS AI-DLC](https://github.com/awslabs/aidlc-workflows) (AI-Driven Development Life Cycle). It guides you through three phases -- **Inception** (what and why), **Construction** (how), and **Operations** (deploy, placeholder) -- with human approval gates at every stage. The workflow adapts to your project: stages are conditionally executed based on complexity, scope, and whether you are working on a greenfield or brownfield codebase.
+
+### Phases and Stages
+
+**Inception** -- determine what to build and why:
+- Workspace Detection (always) -- scans for existing code, resumes prior workflows
+- Reverse Engineering (brownfield only) -- analyzes existing codebase
+- Requirements Analysis (always) -- gathers functional and non-functional requirements
+- User Stories (conditional) -- generates personas and acceptance criteria
+- Workflow Planning (always) -- determines which construction stages to execute
+- Application Design (conditional) -- component and service design
+- Units Generation (conditional) -- decomposes work into implementable units
+
+**Construction** -- determine how to build it:
+- Per-unit loop (for each unit of work):
+  - Functional Design, NFR Requirements, NFR Design, Infrastructure Design (all conditional)
+  - Code Generation (always)
+- Build and Test (always) -- after all units complete
+
+**Operations** -- placeholder for future deployment and monitoring workflows.
+
+### How to Use
+
+```bash
+# Start a new AI-DLC workflow
+/plan build a user authentication system
+
+# Resume an interrupted workflow
+/continue
+
+# Review at any gate
+/review
+```
+
+State is tracked in `aidlc-docs/aidlc-state.md` and `aidlc-docs/checkpoint.json`. Use `/continue` to resume from exactly where you left off, even across sessions.
+
+**Skill stacking**: Combine `/plan` with `/ascent` for persistent execution that never stops, or with `/ultrawork` for maximum parallelism across units.
 
 ---
 
@@ -506,20 +549,27 @@ Top Verified Discoveries:
 
 ```
 ~/.claude/
-├── agents/                  # 20+ agent definitions
+├── agents/                  # 19 agent definitions (tiered variants)
 │   ├── oracle.md
 │   ├── prometheus.md
 │   ├── olympian.md
 │   └── ...
-├── commands/                # 13+ slash commands
-│   ├── olympus/skill.md
-│   ├── ultrawork/skill.md
-│   ├── plan.md
+├── skills/                  # 19 slash commands
+│   ├── olympus/SKILL.md
+│   ├── ultrawork/SKILL.md
+│   ├── plan/SKILL.md
+│   ├── continue/SKILL.md
 │   └── ...
 ├── hooks/                   # Event handlers
 │   ├── keyword-detector.mjs
 │   ├── persistent-mode.mjs
 │   └── ...
+├── olympus/
+│   ├── rules/              # AI-DLC workflow rules
+│   │   ├── common/
+│   │   ├── inception/
+│   │   └── construction/
+│   └── learning/           # Global learning data
 └── CLAUDE.md               # Olympus system prompt
 ```
 
@@ -551,8 +601,8 @@ This is a TypeScript monorepo using:
 ## Uninstall
 
 ```bash
-# Remove agents and commands
-rm -rf ~/.claude/agents ~/.claude/commands ~/.claude/hooks ~/.claude/CLAUDE.md
+# Remove agents and skills
+rm -rf ~/.claude/agents ~/.claude/skills ~/.claude/hooks ~/.claude/olympus ~/.claude/CLAUDE.md
 ```
 
 ---
@@ -599,14 +649,22 @@ npm run test:coverage # Generate coverage report
 ```
 olympus/
 ├── src/
-│   ├── agents/       # Agent definitions
-│   ├── features/     # Core features (routing, learning, etc.)
-│   ├── hooks/        # Event handlers
+│   ├── cli/          # CLI entry point (olympus-ai command)
+│   ├── installer/    # Installation logic
+│   ├── hooks/        # Event handlers (session, tools, learning)
 │   ├── learning/     # Self-learning system
-│   └── cli/          # CLI commands
-├── agents/           # Agent markdown files (installed)
-├── commands/         # Slash command files (installed)
-└── scripts/          # Build and installation scripts
+│   ├── features/     # Core features
+│   │   └── workflow-engine/  # AI-DLC workflow engine
+│   ├── config/       # Configuration management
+│   ├── shared/       # Shared types and utilities
+│   └── __tests__/    # Test suite (3100+ tests)
+├── resources/
+│   ├── agents/       # Agent markdown definitions
+│   ├── skills/       # Slash command definitions
+│   └── rules/        # AI-DLC workflow rules
+├── dist/             # Build output
+├── docs/             # Documentation
+└── scripts/          # Build scripts
 ```
 
 ---
@@ -614,12 +672,10 @@ olympus/
 ## Documentation
 
 - 📖 [Getting Started Guide](docs/guide/overview.md)
-- 💻 [CLI Reference Guide](docs/guide/cli-reference.md) - Complete command-line tool reference
-- 🔄 [Workflow Selection Guide](docs/guide/workflow-guide.md) - Choose the right workflow for your task
-- 📋 [Structured Workflows Guide](docs/workflow-guide.md) - IDEA → PRD → SPEC → INTENTS pipeline for complex features
-- 🤖 [Agent Reference](docs/AGENTS.md)
-- 🏗️ [Architecture Overview](docs/ARCHITECTURE.md)
-- 🗺️ [Roadmap](docs/ROADMAP.md)
+- 💻 [CLI Reference](docs/guide/cli-reference.md)
+- 🔄 [Workflow Guide](docs/guide/workflow-guide.md) — AI-DLC workflow for structured development
+- 🏗️ [Brownfield Projects](docs/guide/brownfield-projects.md) — Working with existing codebases
+- 🧠 [Learning System](docs/learning-system.md) — How Olympus learns from your interactions
 - 📋 [Changelog](CHANGELOG.md)
 
 ---
