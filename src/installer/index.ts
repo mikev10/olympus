@@ -55,7 +55,7 @@ export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.olympus-version.json');
 
 /** Current version - MUST match package.json */
-export const VERSION = '4.0.1';
+export const VERSION = '4.0.2';
 
 /** Installation result */
 export interface InstallResult {
@@ -636,9 +636,16 @@ export function install(options: InstallOptions = {}): InstallResult {
           const existingContent = existsSync(projectClaudeMdPath)
             ? readFileSync(projectClaudeMdPath, 'utf-8')
             : '';
-          const coreWorkflow = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
           const workflowRules = localizeContent(getAidlcRulesContent(workflowId, pathwayType), !!options.local);
-          const rules = `${coreWorkflow}\n\n---\n\n${workflowRules}`;
+          // For global installs, core-workflow.md is already in ~/.claude/CLAUDE.md — don't duplicate.
+          // For local installs, include it since there's no global CLAUDE.md.
+          let rules: string;
+          if (options.local) {
+            const coreWorkflow = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
+            rules = `${coreWorkflow}\n\n---\n\n${workflowRules}`;
+          } else {
+            rules = workflowRules;
+          }
           const merged = mergeAidlcRules(existingContent, rules);
 
           const projectClaudeDir = join(process.cwd(), '.claude');

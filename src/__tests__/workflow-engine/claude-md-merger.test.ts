@@ -163,36 +163,8 @@ describe('getAidlcRulesContent — greenfield', () => {
     expect(content).toContain('my-workflow');
   });
 
-  it('references prometheus agent', () => {
-    expect(content).toContain('prometheus');
-  });
-
-  it('references momus agent', () => {
-    expect(content).toContain('momus');
-  });
-
-  it('references olympian agent', () => {
-    expect(content).toContain('olympian');
-  });
-
-  it('references oracle agent', () => {
-    expect(content).toContain('oracle');
-  });
-
-  it('references explore agent', () => {
-    expect(content).toContain('explore');
-  });
-
-  it('references librarian agent', () => {
-    expect(content).toContain('librarian');
-  });
-
-  it('references document-writer agent', () => {
-    expect(content).toContain('document-writer');
-  });
-
-  it('references frontend-engineer agent', () => {
-    expect(content).toContain('frontend-engineer');
+  it('labels pathway as greenfield', () => {
+    expect(content).toContain('Greenfield');
   });
 
   it('does not contain the forbidden OVERRIDES phrase', () => {
@@ -211,12 +183,16 @@ describe('getAidlcRulesContent — greenfield', () => {
     expect(content).toContain('audit.md');
   });
 
-  it('lists greenfield inception stages without reverse-engineering', () => {
-    expect(content).not.toContain('Reverse Engineering');
+  it('references core-workflow.md as the source of detailed rules', () => {
+    expect(content).toContain('core-workflow.md');
   });
 
-  it('references ~/.claude/olympus/rules/ on-demand loading', () => {
-    expect(content).toContain('~/.claude/olympus/rules/');
+  it('does not duplicate agent delegation table', () => {
+    expect(content).not.toContain('| Activity |');
+  });
+
+  it('does not duplicate directory layout', () => {
+    expect(content).not.toContain('aidlc-docs/{workflow-id}/');
   });
 });
 
@@ -227,36 +203,12 @@ describe('getAidlcRulesContent — brownfield', () => {
     expect(content).toContain('Brownfield');
   });
 
-  it('includes reverse-engineering stage', () => {
-    expect(content).toContain('Reverse Engineering');
-  });
-
-  it('still references explore agent for reverse engineering', () => {
-    expect(content).toContain('explore');
+  it('contains the pathway type', () => {
+    expect(content).toContain('brownfield-enhancement');
   });
 
   it('does not contain the forbidden OVERRIDES phrase', () => {
     expect(content).not.toContain('OVERRIDES all other built-in workflows');
-  });
-});
-
-describe('getAidlcRulesContent — directory layout', () => {
-  const content = getAidlcRulesContent('test-wf-id', 'greenfield');
-
-  it('uses generic placeholder in directory layout tree', () => {
-    expect(content).toContain('aidlc-docs/{workflow-id}/');
-  });
-
-  it('mentions inception/ subdirectory', () => {
-    expect(content).toContain('inception/');
-  });
-
-  it('mentions construction/ subdirectory', () => {
-    expect(content).toContain('construction/');
-  });
-
-  it('mentions operations/ subdirectory', () => {
-    expect(content).toContain('operations/');
   });
 });
 
