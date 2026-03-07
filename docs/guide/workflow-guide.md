@@ -18,7 +18,7 @@ How complex is your task?
 │  └─ Use /ultrawork <task>
 │
 ├─ Complex & Unclear (need planning)
-│  └─ Use /plan → answer questions → /olympus
+│  └─ Use /plan → file-based Q&A → select execution mode
 │
 └─ Must Complete (critical, can't be partial)
    └─ Use /ascent <task>
@@ -31,7 +31,8 @@ How complex is your task?
 | Quick fix | Normal prompt | Single-file, < 5 lines, obvious solution |
 | Standard | `/olympus` | Multi-step, delegatable, clear scope |
 | Maximum speed | `/ultrawork` | Many independent tasks, speed critical |
-| Need clarity | `/plan` | Requirements unclear, strategic decisions needed |
+| Need clarity | `/plan` | Complex features needing structured AIDLC lifecycle |
+| General planning | `/prometheus` | General planning, non-AIDLC strategic decisions |
 | Must finish | `/ascent` | Critical task, cannot be incomplete |
 
 ---
@@ -48,23 +49,30 @@ flowchart LR
 
     Request --> Simple[Simple Task]
     Request --> Standard[Standard Task]
+    Request --> Fast[Fast & Parallel]
     Request --> Complex[Complex Task]
     Request --> Critical[Critical Task]
 
     Simple --> Normal[Normal Prompt]
     Standard --> Olympus["/olympus"]
+    Fast --> Ultrawork["/ultrawork"]
     Complex --> Plan["/plan"]
+    Complex --> Prometheus["/prometheus"]
     Critical --> Ascent["/ascent"]
 
     Normal --> Done1[Direct Execution]
     Olympus --> Delegate[Delegation + Todos]
-    Plan --> Interview[Prometheus Interview]
+    Ultrawork --> Parallel[Parallel Agents]
+    Plan --> Interview[AIDLC Workflow]
+    Prometheus --> FreeForm[General Planning]
     Ascent --> Guarantee[Continuation Guarantee]
 
     Delegate --> Done2[Verified Complete]
-    Interview --> Execute["/olympus execution"]
-    Execute --> Done3[Plan Complete]
-    Guarantee --> Done4[Cannot Stop Early]
+    Parallel --> Done3[3-5x Faster]
+    Interview --> ModeSelect[Mode Selection]
+    ModeSelect --> Done4[Structured Execution]
+    FreeForm --> Done6[Strategic Plan]
+    Guarantee --> Done5[Cannot Stop Early]
 ```
 
 ---
@@ -108,10 +116,11 @@ flowchart LR
 
 **What happens:**
 1. Creates todo list automatically
-2. Delegates to appropriate agents (Oracle for analysis, Olympian for implementation)
-3. Tracks progress with checkboxes
-4. Verifies each step before marking complete
-5. Learns from your corrections
+2. If an active AIDLC workflow exists, enters unit dispatch mode (reads from checkpoint)
+3. Delegates to appropriate agents (Oracle for analysis, Olympian for implementation)
+4. Tracks progress with checkboxes
+5. Verifies each step before marking complete
+6. Learns from your corrections
 
 **When to skip:** Task is unclear, requirements are ambiguous, or you need strategic planning first.
 
@@ -134,6 +143,8 @@ flowchart LR
 ```
 
 **What changes from `/olympus`:**
+- AIDLC-aware: dispatches units in parallel from active AIDLC checkpoint
+- Batches Gate 4 code reviews across units
 - Spawns multiple agents **in parallel** (3-5 concurrent)
 - Doesn't wait for one task to finish before starting the next
 - Background execution for all compatible operations
@@ -144,14 +155,14 @@ flowchart LR
 
 ---
 
-### When to Use `/plan` → `/olympus`
+### When to Use `/plan`
 
 **Best for:**
 - Complex projects (multi-day work)
 - Unclear or evolving requirements
 - Strategic decisions needed (architecture, tech stack, approach)
 - Critical production changes where mistakes are costly
-- Learning projects where you want to understand before implementing
+- Software development features needing structured lifecycle (AIDLC)
 - Tasks where you're not sure what the right approach is
 
 **Example:**
@@ -163,48 +174,44 @@ flowchart LR
 
 **The Planning Workflow:**
 
+`/plan` **ALWAYS** triggers the **AIDLC (AI-Driven Development Life Cycle)** pipeline — a 7-stage gated Inception workflow. Questions are collected via **file-based Q&A** (multiple choice in `aidlc-docs/{workflowId}/inception/intent-questions.md`), never in chat.
+
 ```mermaid
 sequenceDiagram
     participant You
-    participant Prometheus
-    participant Explore as Explore Agent
-    participant Librarian as Librarian Agent
-    participant Plan as .olympus/plans/
-    participant Claude as Claude (Olympus)
+    participant Pipeline as AIDLC Pipeline
+    participant QAFile as intent-questions.md
+    participant Artifacts as aidlc-docs/{workflowId}/
 
-    You->>Prometheus: /plan <description>
-    Prometheus->>Prometheus: Enter interview mode
+    You->>Pipeline: /plan <description>
+    Pipeline->>Pipeline: Workspace Detection
+    Pipeline->>QAFile: Create multiple-choice Q&A file
+    QAFile->>You: File ready — fill in [Answer]: tags
 
-    par Research Phase
-        Prometheus->>Explore: Search codebase patterns
-        Prometheus->>Librarian: Research best practices
-    end
+    You->>QAFile: Fill answers, say "done"
+    QAFile->>Pipeline: Answers collected
 
-    Explore->>Prometheus: Existing patterns found
-    Librarian->>Prometheus: Documentation & examples
+    Pipeline->>Artifacts: Intent generation
+    Pipeline->>Artifacts: Requirements Analysis (+ more Q&A if needed)
+    Pipeline->>Artifacts: User Stories (conditional)
+    Pipeline->>Artifacts: Workflow Planning
+    Pipeline->>Artifacts: Application Design (conditional)
+    Pipeline->>Artifacts: Units Generation (conditional)
 
-    loop Interview
-        Prometheus->>You: Clarifying question
-        You->>Prometheus: Answer
-        Note over Prometheus: Builds understanding
-    end
-
-    You->>Prometheus: "Create the plan"
-    Prometheus->>Plan: Write comprehensive plan
-    Plan->>You: .olympus/plans/migration.md
-
-    You->>Claude: /olympus
-    Claude->>Plan: Read plan
-    Claude->>Claude: Execute plan tasks
-    Claude->>You: Implementation complete
+    Pipeline->>You: Inception complete — select execution mode
+    Note over You,Pipeline: Choose /ascent, /olympus, /ultrawork, combined, or Manual
 ```
 
+For general planning **without** the AIDLC structure (e.g., brainstorming, non-software decisions), use `/prometheus` instead — it runs a free-form strategic interview in chat.
+
 **Benefits:**
-- Requirements are clarified upfront
-- Strategic decisions documented
-- Can review plan before execution
-- Less back-and-forth during implementation
-- Plan serves as documentation
+- File-based Q&A with multiple choice options and AI recommendations
+- Trust-level calibration (fewer questions as trust builds)
+- Requirements are clarified upfront before any code is written
+- Strategic decisions documented with approval gates at each stage
+- Can review artifacts before execution (`/review`)
+- All artifacts stored in `aidlc-docs/{workflowId}/`
+- Resume interrupted workflows with `/continue` (scans `aidlc-docs/` for checkpoints)
 
 ---
 
@@ -230,6 +237,11 @@ sequenceDiagram
 3. System reminder if attempting to exit early
 4. Re-verification if any step fails
 5. Only exits via `<promise>DONE</promise>` or user cancellation
+
+**AIDLC-aware features:**
+- At Trust Level 2+, code-generation plans are auto-approved (no manual gate)
+- Target a single unit: `/ascent execute {unit-name}`
+- Resume from first pending unit: `/ascent finish remaining units`
 
 **Warning:** Use this when you're committed to finishing. The Ascent Never Ends.
 
@@ -325,103 +337,165 @@ All agents run simultaneously ↑
 
 **Scenario:** Add OAuth authentication (unclear which provider, uncertain about implementation)
 
-**Approach:** `/plan` → `/olympus`
+**Approach:** `/plan` → mode selection → execution
 
-#### Phase 1: Planning
+#### Phase 1: AIDLC Inception
 
 ```bash
 > /plan add OAuth authentication to the application
 ```
 
-**Prometheus interview:**
+**AIDLC pipeline begins — Workspace Detection runs, then a Q&A file is created:**
+
 ```
-Prometheus: I'll help you plan OAuth authentication implementation.
-
-[Prometheus launches explore agent to find existing auth code]
-
-Questions:
-1. Which OAuth provider(s)? (Google, GitHub, Microsoft, custom, multiple?)
-2. Do you have existing user sessions to integrate with?
-3. Token storage preference? (JWT, server-side sessions, database?)
-4. Required scopes/permissions?
-5. Do you need to support both social login and email/password?
-
-[You answer questions]
-
-Prometheus: Creating comprehensive plan...
-
-[Prometheus launches librarian to research OAuth best practices]
-
-Plan created: .olympus/plans/oauth-authentication.md
+[Pipeline creates: aidlc-docs/oauth-auth/inception/intent-questions.md]
 ```
 
-**Plan structure:**
+**The file looks like this:**
+
 ```markdown
-# OAuth Authentication Implementation Plan
+# Intent Questions — OAuth Authentication
 
-## Overview
-Implement OAuth 2.0 authentication with Google as primary provider...
+## Q1: What authentication providers should be supported? (select all that apply)
+A) Google OAuth 2.0
+B) GitHub OAuth
+C) Microsoft/Azure AD
+D) Email/password (non-OAuth)
+E) Other: please specify
 
-## Phase 1: Infrastructure Setup
-- [ ] Install passport.js and passport-google-oauth20
-- [ ] Configure OAuth credentials in Google Console
-- [ ] Set up environment variables
+[Recommendation]: A, D — Google OAuth covers the largest user base, and email/password
+provides a fallback for users who prefer not to use social login.
 
-## Phase 2: Backend Implementation
-- [ ] Create OAuth routes (/auth/google, /auth/callback)
-- [ ] Implement user lookup/creation logic
-- [ ] Add session management
-- [ ] Handle token refresh
+[Answer]:
 
-## Phase 3: Frontend Integration
-- [ ] Add "Sign in with Google" button
-- [ ] Implement OAuth redirect flow
-- [ ] Handle success/error states
+---
 
-## Phase 4: Testing & Security
-- [ ] Test login flow end-to-end
-- [ ] Add CSRF protection
-- [ ] Implement rate limiting
-- [ ] Security audit
+## Q2: How should tokens be stored?
+A) JWT in HTTP-only cookies (most secure)
+B) JWT in localStorage (simpler, less secure)
+C) Server-side sessions (traditional)
+D) Database-backed sessions (for distributed systems)
 
-## Acceptance Criteria
-- User can sign in with Google
-- User data persists across sessions
-- Security best practices followed
+[Recommendation]: A — HTTP-only cookies prevent XSS token theft.
+
+[Answer]:
+
+---
+
+## Q3: Do you have an existing user model to integrate with?
+A) Yes — users table already exists, just add OAuth fields
+B) Yes — but it needs significant restructuring
+C) No — starting from scratch
+
+[Recommendation]: A or C — describe your current state.
+
+[Answer]:
 ```
 
-#### Phase 2: Execution
+**You fill in the `[Answer]:` tags and say "done":**
+
+```
+[Answer]: A, D
+
+[Answer]: A
+
+[Answer]: A
+```
 
 ```bash
-> /olympus
+> done
 ```
 
-**Execution:**
+**Pipeline continues automatically through all Inception stages:**
+
 ```
-[Claude reads .olympus/plans/oauth-authentication.md]
-[Creates todos from plan phases]
+[Requirements Analysis complete]
+  → Requirements document: aidlc-docs/oauth-auth/inception/requirements.md
 
-Delegating Phase 1:
-→ Olympian: Install dependencies, configure environment
+[User Stories generated]
+  → Stories + personas: aidlc-docs/oauth-auth/inception/stories.md
 
-Delegating Phase 2:
-→ Oracle: Review OAuth flow for security concerns
-→ Olympian: Implement OAuth routes
-→ Olympian: Add session management
+[Workflow Planning complete]
+  → Routing plan: aidlc-docs/oauth-auth/inception/plans/workflow-routing.md
+  → Execution plan: aidlc-docs/oauth-auth/inception/plans/execution-plan.md
 
-Delegating Phase 3:
-→ Frontend Engineer: Create sign-in UI component
-→ Olympian: Wire up OAuth redirect handling
+[Units Generated]
+  → Unit 1: oauth-backend (routes, session, user lookup)
+  → Unit 2: oauth-frontend (sign-in button, redirect flow)
+  → Unit 3: oauth-security (CSRF, rate limiting, audit)
+  → Unit of work: aidlc-docs/oauth-auth/inception/unit-of-work.md
 
-Delegating Phase 4:
-→ QA Tester: Test login flow
-→ Oracle: Security review
+Inception complete. Select execution mode:
+  A) /ascent — guaranteed completion, auto-approves at Trust 2+
+  B) /olympus — standard orchestration, sequential units
+  C) /ultrawork — maximum parallelism, all units in parallel
+  D) Combined: /ascent /ultrawork — parallel + completion guarantee
+  E) Manual — I'll trigger execution myself
+```
 
-[All phases complete]
+#### Phase 2: Construction
+
+```bash
+> B
+```
+
+**`/olympus` reads the AIDLC checkpoint and enters unit dispatch mode:**
+
+```
+[Reading checkpoint: aidlc-docs/oauth-auth/checkpoint.json]
+[Units to dispatch: oauth-backend, oauth-frontend, oauth-security]
+
+--- Unit 1: oauth-backend ---
+
+→ Oracle: Review OAuth flow for security concerns (spec.md)
+→ Olympian: Implement OAuth routes (/auth/google, /auth/callback)
+→ Olympian: Add session management and user lookup/creation
+→ Olympian: Handle token refresh
+
+[Gate 4: Code review — approve to continue]
+✅ Unit 1 complete
+
+--- Unit 2: oauth-frontend ---
+
+→ Frontend Engineer: Create "Sign in with Google" component
+→ Olympian: Wire up OAuth redirect flow and error states
+
+[Gate 4: Code review — approve to continue]
+✅ Unit 2 complete
+
+--- Unit 3: oauth-security ---
+
+→ Oracle: Security audit (CSRF, rate limiting)
+→ Olympian: Implement CSRF protection and rate limiting
+→ QA Tester: End-to-end login flow test
+
+[Gate 4: Code review — approve to continue]
+✅ Unit 3 complete
+
+[All units complete — Build and Test phase]
 ✅ Plan fully implemented and verified
 ```
 
-**Timeline:** 20 minutes planning + 40 minutes execution = 1 hour total
+**Artifacts produced:**
+```
+aidlc-docs/oauth-auth/
+  checkpoint.json                  ← machine-readable state
+  aidlc-state.md                   ← human-readable progress
+  inception/
+    intent.md
+    requirements.md
+    stories.md
+    unit-of-work.md
+    plans/
+      workflow-routing.md
+      execution-plan.md
+  construction/
+    oauth-backend/spec.md
+    oauth-frontend/spec.md
+    oauth-security/spec.md
+```
+
+**Timeline:** 15-20 minutes Inception (Q&A + gated approvals) + 40-60 minutes Construction = ~1 hour total
 
 ---
 
@@ -542,17 +616,18 @@ Continue working. The Ascent Never Ends.
 - ❌ Interrupt mid-execution (agents may be running)
 - ❌ Use for simple tasks (overhead not worth it)
 
-### For `/plan` → `/olympus` Workflow
+### For `/plan` Workflow
 
 **Do:**
-- ✅ Take time in Prometheus interview
-- ✅ Ask follow-up questions
-- ✅ Review plan before executing
-- ✅ Use for strategic decisions
+- ✅ Take time answering the Q&A files thoroughly
+- ✅ Use the 'Other' option when the multiple-choice answers don't fit
+- ✅ Review artifacts in `aidlc-docs/{workflowId}/` before executing
+- ✅ Use for strategic decisions and complex features
+- ✅ Use `/prometheus` instead if you need free-form strategic discussion without AIDLC structure
 
 **Don't:**
 - ❌ Rush the planning phase
-- ❌ Skip questions Prometheus asks
+- ❌ Skip or rush through Q&A files
 - ❌ Start executing without reviewing the plan
 - ❌ Use for well-understood simple tasks
 
@@ -579,16 +654,19 @@ Skills can be **stacked** for powerful workflows:
 ### Pattern: Planning + Ultrawork
 
 ```bash
-# Step 1: Plan the work
+# Run the AIDLC pipeline
 > /plan refactor authentication system
 
-[Prometheus creates plan]
+[Answer Q&A files, approve each Inception stage]
 
-# Step 2: Execute with maximum speed
+# At end of Inception, select ultrawork mode:
+> C   # /ultrawork — maximum parallelism
+
+# Or trigger after Inception completes:
 > /ultrawork
 ```
 
-**Result:** Strategic planning + parallel execution = fast, high-quality results
+**Result:** Strategic planning via AIDLC + parallel unit execution = fast, high-quality results
 
 ---
 
@@ -602,15 +680,24 @@ Skills can be **stacked** for powerful workflows:
 
 ---
 
-### Pattern: Ultrawork + Git Master
+### Pattern: Planning + Review
 
 ```bash
-> /ultrawork refactor API layer
+# Step 1: Run the AIDLC pipeline
+> /plan refactor authentication system
+
+[Answer Q&A files, approve each Inception stage]
+
+# Step 2: Have Momus review the AIDLC execution plan
+> /review aidlc-docs/auth-refactor/inception/plans/execution-plan.md
+
+[Momus provides critical feedback on units, risks, approach]
+
+# Step 3: Execute with confidence
+> /olympus
 ```
 
-**Auto-activated:** `git-master` skill activates automatically for multi-file changes
-
-**Result:** Fast parallel work + atomic git commits
+**Result:** AIDLC planning + critical artifact review + execution = high-quality, vetted results
 
 ---
 
@@ -624,8 +711,9 @@ Skills can be **stacked** for powerful workflows:
 
 # If requirements are unclear:
 > /plan build user notifications system
-[Answer Prometheus questions]
-> /olympus
+[Answer Q&A files in aidlc-docs/]
+[Approve each Inception stage]
+[Select execution mode at the end of Inception]
 ```
 
 ---
@@ -674,9 +762,12 @@ Skills can be **stacked** for powerful workflows:
 # Quick exploration:
 > /deepsearch authentication flow
 
-# Strategic understanding:
-> /plan understand the architecture and data flow
-[Don't execute - use plan as documentation]
+# Deep pattern search:
+> /analyze src/auth
+
+# Strategic understanding (free-form, no AIDLC structure):
+> /prometheus understand the architecture and data flow
+[Prometheus interviews you and produces a strategic overview]
 ```
 
 ---
@@ -685,24 +776,30 @@ Skills can be **stacked** for powerful workflows:
 
 ### Problem: Task stalls or gets confused
 
-**Solution: Use `/plan` first**
+**Solution: Resume or replan**
 ```bash
+# If already inside an AIDLC workflow — resume from last checkpoint:
+> /continue
+
+# If no active AIDLC workflow — start structured planning:
 > /plan [original task]
-[Clarify requirements with Prometheus]
-> /olympus
+[Answer Q&A files, approve Inception stages, select execution mode]
+
+# Note: /plan starts a NEW workflow — don't use it to unstall an existing one
 ```
 
 ---
 
 ### Problem: Need to pause multi-step work
 
-**Solution: Check todo list, resume later**
+**Solution: Use `/continue` to resume**
 ```bash
-# Todos persist across sessions
-# Next session, just prompt:
-> Continue the previous task
+# AIDLC workflows save progress automatically in aidlc-docs/
+# Next session, /continue scans aidlc-docs/ for checkpoints and resumes:
+> /continue
 
-# Olympus reads todo state and resumes
+# For non-AIDLC work, todos persist across sessions:
+> Continue the previous task
 ```
 
 ---
@@ -740,7 +837,7 @@ START: You have a task
 │  └─ NO → Continue
 │
 ├─ Do you know exactly what to build?
-│  ├─ NO → Use /plan (Prometheus clarifies)
+│  ├─ NO → Use /plan (AIDLC pipeline with file-based Q&A)
 │  └─ YES → Continue
 │
 ├─ Can subtasks run independently?
@@ -828,14 +925,19 @@ Use normal Claude Code for these - orchestration overhead isn't worth it.
 | Simple task | Normal prompt | Fast, no overhead |
 | Standard task | `/olympus` | Delegation + tracking |
 | Fast & parallel | `/ultrawork` | 3-5x speedup |
-| Need planning | `/plan` → `/olympus` | Clarity + execution |
+| Complex feature | `/plan` | Structured AIDLC lifecycle for complex features |
+| General planning | `/prometheus` | General planning, non-AIDLC strategic decisions |
+| Resume workflow | `/continue` | Pick up from last AIDLC checkpoint |
+| Review a plan | `/review` | Critical evaluation before execution |
 | Must complete | `/ascent` | Completion guarantee |
 | Search | `/deepsearch` | Thorough exploration |
 | Analysis | `/analyze` | Deep investigation |
+| Diagnostics | `/doctor` | Fix installation issues |
 
 **Remember:**
 - Start with the simplest approach that works
 - Escalate to more powerful workflows when needed
+- Use `/plan` for complex features needing AIDLC structure; use `/prometheus` for free-form strategic planning
 - Let Olympus learn from your corrections
 - Trust the orchestration, but verify results
 
