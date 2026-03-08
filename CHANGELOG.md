@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.3] - 2026-03-08
+
+### Fixed
+
+- **Learning system noise reduction** — Removed topic-change detection from success-detector (~91% false positive rate), keeping only explicit praise feedback
+- **Storage bloat prevention** — Truncate evidence examples to 150 chars in pattern-extractor; separate rotation limit (500 lines) for session summaries
+
+### Changed
+
+- **Enhanced frontend-engineer agents** — Merged designer agent into frontend-engineer with structured `<Agent_Prompt>` XML format, investigation protocol, success criteria, output format, and failure modes
+- **Enhanced frontend-engineer-high agent** — Upgraded from minimal 6-line prompt to full structured agent with architecture-focused guidance, aesthetic principles, and design system support
+
 ## [4.0.2] - 2026-03-07
 
 ### Fixed
