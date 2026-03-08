@@ -9,6 +9,8 @@ import { getTokenUsage, safeTokenTotal } from './utils.js';
 /** Maximum lines before rotating JSONL files */
 const MAX_JSONL_LINES = 10000;
 
+const MAX_SESSION_SUMMARY_LINES = 500;
+
 /** Get learning storage directory (cross-platform) */
 export function getLearningDir(): string {
   // Allow tests to override the learning directory via environment variable
@@ -329,7 +331,7 @@ export function writeJsonFile<T>(filePath: string, data: T): void {
 export function appendSessionSummary(summary: SessionSummary): void {
   ensureLearningDirs();
   const logPath = join(getLearningDir(), 'session-summaries.jsonl');
-  rotateIfNeeded(logPath);
+  rotateIfNeeded(logPath, MAX_SESSION_SUMMARY_LINES);
   appendFileSync(logPath, JSON.stringify(summary) + '\n', 'utf-8');
 }
 

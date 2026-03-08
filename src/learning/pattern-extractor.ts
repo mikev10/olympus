@@ -98,7 +98,7 @@ export function extractPatterns(
         pattern: generatePatternDescription(cluster),
         confidence: avgConfidence,
         evidence_count: cluster.length,
-        evidence_examples: cluster.slice(0, 3).map(e => e.user_message),
+        evidence_examples: cluster.slice(0, 3).map(e => e.user_message.substring(0, 150)),
         scope,
         category,
       };
