@@ -87,15 +87,15 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 | workspace-detection | (none needed) |
 | reverse-engineering | inception/intent.md (if exists) |
 | requirements-analysis | inception/intent.md, reverse-engineering artifacts (if brownfield) |
-| user-stories | inception/intent.md, inception/requirements.md, inception/requirements-questions.md |
-| workflow-planning | All above + inception/stories.md, inception/personas.md |
+| user-stories | inception/intent.md, inception/requirements/requirements.md, inception/requirements/requirements-analysis-questions.md |
+| workflow-planning | All above + inception/user-stories/stories.md, inception/user-stories/personas.md |
 | application-design | All above + inception/plans/workflow-routing.md |
 | units-generation | All above + inception/application-design/ artifacts |
 
 ### Construction Phase Artifacts
 
 Load ALL inception artifacts PLUS:
-- `inception/unit-of-work.md` (unit decomposition)
+- `inception/application-design/unit-of-work.md` (unit decomposition)
 - For the active unit: `construction/{unit-name}/functional-design.md`, `nfr-requirements.md`, `nfr-design.md`, `infrastructure-design.md`, `code-generation.md`
 - All completed units' artifacts
 

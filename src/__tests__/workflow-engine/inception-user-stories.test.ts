@@ -253,7 +253,7 @@ describe('executeUserStories', () => {
 
       await executeUserStories(projectPath, workflowId, checkpoint);
 
-      const expectedPersonasPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'personas.md');
+      const expectedPersonasPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'user-stories', 'personas.md');
       expect(mockFsWriteFile).toHaveBeenCalledWith(expectedPersonasPath, expect.any(String), 'utf-8');
     });
 
@@ -262,7 +262,7 @@ describe('executeUserStories', () => {
 
       await executeUserStories(projectPath, workflowId, checkpoint);
 
-      const expectedStoriesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'stories.md');
+      const expectedStoriesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'user-stories', 'stories.md');
       expect(mockFsWriteFile).toHaveBeenCalledWith(expectedStoriesPath, expect.any(String), 'utf-8');
     });
 
@@ -271,8 +271,8 @@ describe('executeUserStories', () => {
 
       const result = await executeUserStories(projectPath, workflowId, checkpoint);
 
-      const expectedPersonasPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'personas.md');
-      const expectedStoriesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'stories.md');
+      const expectedPersonasPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'user-stories', 'personas.md');
+      const expectedStoriesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'user-stories', 'stories.md');
       expect(result.artifacts_generated).toContain(expectedPersonasPath);
       expect(result.artifacts_generated).toContain(expectedStoriesPath);
     });
@@ -339,7 +339,7 @@ describe('executeUserStories', () => {
       await executeUserStories(projectPath, workflowId, checkpoint);
 
       const intentPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'intent.md');
-      const requirementsPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements.md');
+      const requirementsPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements', 'requirements.md');
       expect(mockFsReadFile).toHaveBeenCalledWith(intentPath, 'utf-8');
       expect(mockFsReadFile).toHaveBeenCalledWith(requirementsPath, 'utf-8');
     });
@@ -542,8 +542,9 @@ describe('user-stories integration', () => {
     const workflowId = 'test-wf-integration';
     const inceptionDir = join(tmpDir, 'aidlc-docs', workflowId, 'inception');
     mkdirSync(inceptionDir, { recursive: true });
+    mkdirSync(join(inceptionDir, 'requirements'), { recursive: true });
     writeFileSync(join(inceptionDir, 'intent.md'), '# Intent\nBuild a user portal', 'utf-8');
-    writeFileSync(join(inceptionDir, 'requirements.md'), '# Requirements\nUser authentication and admin dashboard', 'utf-8');
+    writeFileSync(join(inceptionDir, 'requirements', 'requirements.md'), '# Requirements\nUser authentication and admin dashboard', 'utf-8');
 
     vi.doUnmock('fs-extra');
     vi.doUnmock('../../features/workflow-engine/inception/orchestrator.js');
@@ -559,15 +560,16 @@ describe('user-stories integration', () => {
 
     expect(result.status).toBe('review_required');
     expect(existsSync(join(inceptionDir, 'user-stories-plan.md'))).toBe(true);
-    expect(existsSync(join(inceptionDir, 'stories.md'))).toBe(false);
+    expect(existsSync(join(inceptionDir, 'user-stories', 'stories.md'))).toBe(false);
   });
 
   it('writes personas.md and stories.md on second call (Part 2)', async () => {
     const workflowId = 'test-wf-integration-p2';
     const inceptionDir = join(tmpDir, 'aidlc-docs', workflowId, 'inception');
     mkdirSync(inceptionDir, { recursive: true });
+    mkdirSync(join(inceptionDir, 'requirements'), { recursive: true });
     writeFileSync(join(inceptionDir, 'intent.md'), '# Intent\nBuild a user portal', 'utf-8');
-    writeFileSync(join(inceptionDir, 'requirements.md'), '# Requirements\nUser authentication', 'utf-8');
+    writeFileSync(join(inceptionDir, 'requirements', 'requirements.md'), '# Requirements\nUser authentication', 'utf-8');
     writeFileSync(join(inceptionDir, 'user-stories-plan.md'), '# Plan\nApproved plan', 'utf-8');
 
     vi.doUnmock('fs-extra');
@@ -583,8 +585,8 @@ describe('user-stories integration', () => {
     const result = await executeReal(tmpDir, workflowId, checkpoint);
 
     expect(result.status).toBe('completed');
-    expect(existsSync(join(inceptionDir, 'personas.md'))).toBe(true);
-    expect(existsSync(join(inceptionDir, 'stories.md'))).toBe(true);
+    expect(existsSync(join(inceptionDir, 'user-stories', 'personas.md'))).toBe(true);
+    expect(existsSync(join(inceptionDir, 'user-stories', 'stories.md'))).toBe(true);
   });
 
   it('personas.md contains Given/When/Then stories content in stories.md', async () => {
@@ -606,7 +608,7 @@ describe('user-stories integration', () => {
     await executeReal(tmpDir, workflowId, checkpoint);
 
     const { readFileSync } = await import('fs');
-    const storiesContent = readFileSync(join(inceptionDir, 'stories.md'), 'utf-8');
+    const storiesContent = readFileSync(join(inceptionDir, 'user-stories', 'stories.md'), 'utf-8');
     expect(storiesContent).toContain('Given');
     expect(storiesContent).toContain('When');
     expect(storiesContent).toContain('Then');

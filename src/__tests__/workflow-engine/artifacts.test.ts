@@ -122,7 +122,7 @@ describe('artifacts', () => {
     });
 
     it('should return correct path for nfr artifact', () => {
-      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
+      const expected = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements', 'nfr.md');
       expect(getArtifactPath(projectPath, workflowId, 'nfr')).toBe(expected);
     });
 

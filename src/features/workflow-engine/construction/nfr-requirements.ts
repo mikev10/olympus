@@ -17,7 +17,7 @@ export async function executeNFRRequirementsStage(
   workflowId: string,
   unitId: string
 ): Promise<NFRRequirementsResult> {
-  const inceptionNfrPath = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
+  const inceptionNfrPath = path.join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements', 'nfr.md');
   const unitSpecPath = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'spec.md');
   const outputPath = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'nfr-requirements.md');
 

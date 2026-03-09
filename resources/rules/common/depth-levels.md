@@ -32,7 +32,7 @@ The model considers these factors when determining appropriate detail:
 ## Example: Requirements Analysis Artifacts
 
 **All scenarios create the same artifacts**:
-- `requirement-verification-questions.md` (if needed)
+- `requirements-analysis-questions.md` (if needed)
 - `requirements.md`
 
 **Note**: User's initial request is captured in `audit.md` (no separate user-intent.md needed)
@@ -40,11 +40,11 @@ The model considers these factors when determining appropriate detail:
 **Detail level varies by complexity**:
 
 ### Simple Scenario (Bug Fix)
-- **requirement-verification-questions.md**: necessary clarifying questions
+- **requirements-analysis-questions.md**: necessary clarifying questions
 - **requirements.md**: Concise functional requirement, minimal sections
 
 ### Complex Scenario (System Migration)
-- **requirement-verification-questions.md**: Multiple rounds, 10+ questions
+- **requirements-analysis-questions.md**: Multiple rounds, 10+ questions
 - **requirements.md**: Comprehensive functional + non-functional requirements, traceability, acceptance criteria
 
 ## Example: Application Design Artifacts

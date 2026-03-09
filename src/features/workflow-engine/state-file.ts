@@ -127,8 +127,10 @@ function buildArtifactsSection(
   const workflowDir = path.join(projectPath, WORKFLOW_DIR, workflowId);
   const artifacts = [
     { name: 'Intent Analysis', path: 'inception/intent.md' },
-    { name: 'Requirements', path: 'inception/requirements.md' },
-    { name: 'User Stories', path: 'inception/stories.md' },
+    { name: 'Requirements', path: 'inception/requirements/requirements.md' },
+    { name: 'NFR', path: 'inception/requirements/nfr.md' },
+    { name: 'User Stories', path: 'inception/user-stories/stories.md' },
+    { name: 'Personas', path: 'inception/user-stories/personas.md' },
     { name: 'Workflow Plan', path: 'inception/workflow-plan.md' },
     { name: 'Unit Definitions', path: 'inception/application-design/unit-of-work.md' },
     { name: 'Dependency Matrix', path: 'inception/application-design/unit-of-work-dependency.md' },

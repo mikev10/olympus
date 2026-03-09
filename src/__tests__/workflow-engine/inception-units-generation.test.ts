@@ -200,7 +200,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'unit-of-work.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
@@ -212,7 +212,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'unit-of-work-dependency.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work-dependency.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
@@ -224,7 +224,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'unit-of-work-story-map.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work-story-map.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
@@ -309,7 +309,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const reqPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements.md');
+      const reqPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'requirements', 'requirements.md');
       expect(mockFsReadFile).toHaveBeenCalledWith(reqPath, 'utf-8');
     });
 
@@ -318,7 +318,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const storiesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'stories.md');
+      const storiesPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'user-stories', 'stories.md');
       expect(mockFsReadFile).toHaveBeenCalledWith(storiesPath, 'utf-8');
     });
 

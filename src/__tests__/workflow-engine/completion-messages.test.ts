@@ -93,7 +93,7 @@ describe('buildInceptionStageCompletionMessage', () => {
   it('returns REVIEW REQUIRED format', () => {
     const result = buildInceptionStageCompletionMessage(
       'requirements-analysis',
-      ['inception/requirements.md', 'inception/requirements-questions.md'],
+      ['inception/requirements/requirements.md', 'inception/requirements/requirements-analysis-questions.md'],
       'user-stories',
     );
     expect(result).toContain('## REVIEW REQUIRED');
@@ -131,11 +131,11 @@ describe('buildInceptionStageCompletionMessage', () => {
   it('lists artifacts in output', () => {
     const result = buildInceptionStageCompletionMessage(
       'user-stories',
-      ['inception/personas.md', 'inception/stories.md'],
+      ['inception/user-stories/personas.md', 'inception/user-stories/stories.md'],
       'workflow-planning',
     );
-    expect(result).toContain('`inception/personas.md`');
-    expect(result).toContain('`inception/stories.md`');
+    expect(result).toContain('`inception/user-stories/personas.md`');
+    expect(result).toContain('`inception/user-stories/stories.md`');
   });
 
   it('accepts custom depth and reflects in time hints', () => {

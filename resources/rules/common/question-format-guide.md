@@ -11,7 +11,7 @@
 - Use descriptive names: `{phase-name}-questions.md`
 - Examples:
   - `classification-questions.md`
-  - `requirements-questions.md`
+  - `requirements-analysis-questions.md`
   - `story-planning-questions.md`
   - `design-questions.md`
 

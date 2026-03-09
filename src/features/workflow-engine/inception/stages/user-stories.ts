@@ -29,11 +29,13 @@ async function executeUserStories(
     intentContent = await fs.readFile(join(inceptionDir, 'intent.md'), 'utf-8');
   } catch {}
   try {
-    requirementsContent = await fs.readFile(join(inceptionDir, 'requirements.md'), 'utf-8');
+    requirementsContent = await fs.readFile(join(inceptionDir, 'requirements', 'requirements.md'), 'utf-8');
   } catch {}
 
-  const storiesPath = join(inceptionDir, 'stories.md');
-  const personasPath = join(inceptionDir, 'personas.md');
+  const userStoriesDir = join(inceptionDir, 'user-stories');
+  await fs.ensureDir(userStoriesDir);
+  const storiesPath = join(userStoriesDir, 'stories.md');
+  const personasPath = join(userStoriesDir, 'personas.md');
   const planPath = join(inceptionDir, 'user-stories-plan.md');
 
   const storiesExist = await fs.pathExists(storiesPath);

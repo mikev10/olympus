@@ -641,9 +641,9 @@ This is a totally different feature about data visualization.`;
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'requirements'));
 
-      const nfrPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
+      const nfrPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'requirements', 'nfr.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.writeFile(nfrPath, '# NFR\nOriginal', 'utf-8');
@@ -701,9 +701,9 @@ This is a totally different feature about data visualization.`;
       const manifestPath = createManifest('test-wf', 'test feature', TEST_DIR);
 
       const workflowId = 'test-wf';
-      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception'));
+      await fs.ensureDir(path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'requirements'));
 
-      const nfrPath2 = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'nfr.md');
+      const nfrPath2 = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'requirements', 'nfr.md');
       const intentPath = path.join(TEST_DIR, 'aidlc-docs', workflowId, 'inception', 'intent.md');
 
       await fs.writeFile(nfrPath2, '# NFR\nOriginal', 'utf-8');

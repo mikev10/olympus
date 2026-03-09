@@ -844,7 +844,7 @@ export class WorkflowEngine {
    * Generates all Inception content in a single pass:
    * 1. inception/intent.md - Problem statement, personas, success metrics, constraints,
    *    business requirements, technical specification, implementation plan
-   * 2. inception/nfr.md - Non-functional requirements (security, performance, etc.)
+   * 2. inception/requirements/nfr.md - Non-functional requirements (security, performance, etc.)
    */
   private async executeIntentStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
     const initialPrompt = checkpoint.resume_context?.initial_prompt || 'No initial prompt provided';
@@ -1066,7 +1066,7 @@ created: ${timestamp}
 `;
 
     await writeArtifact(this.projectPath, this.workflowId, 'nfr', nfrContent);
-    console.log('[WorkflowEngine] Generated NFR artifact at inception/nfr.md');
+    console.log('[WorkflowEngine] Generated NFR artifact at inception/requirements/nfr.md');
 
     // Validate the generated artifact
     const intentPath = getArtifactPath(this.projectPath, this.workflowId, 'intent');

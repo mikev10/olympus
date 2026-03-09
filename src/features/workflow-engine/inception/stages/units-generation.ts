@@ -23,7 +23,8 @@ async function executeUnitsGeneration(
   }
 
   const inceptionDir = join(projectPath, 'aidlc-docs', workflowId, 'inception');
-  await fs.ensureDir(inceptionDir);
+  const appDesignDir = join(inceptionDir, 'application-design');
+  await fs.ensureDir(appDesignDir);
 
   let intentContent = '';
   let requirementsContent = '';
@@ -31,20 +32,20 @@ async function executeUnitsGeneration(
   let componentsContent = '';
 
   try { intentContent = await fs.readFile(join(inceptionDir, 'intent.md'), 'utf-8'); } catch {}
-  try { requirementsContent = await fs.readFile(join(inceptionDir, 'requirements.md'), 'utf-8'); } catch {}
-  try { storiesContent = await fs.readFile(join(inceptionDir, 'stories.md'), 'utf-8'); } catch {}
+  try { requirementsContent = await fs.readFile(join(inceptionDir, 'requirements', 'requirements.md'), 'utf-8'); } catch {}
+  try { storiesContent = await fs.readFile(join(inceptionDir, 'user-stories', 'stories.md'), 'utf-8'); } catch {}
   try { componentsContent = await fs.readFile(join(inceptionDir, 'application-design', 'components.md'), 'utf-8'); } catch {}
 
   const unitDefinitions = generateUnitDefinitions(intentContent, requirementsContent, componentsContent);
-  const unitPath = join(inceptionDir, 'unit-of-work.md');
+  const unitPath = join(appDesignDir, 'unit-of-work.md');
   await fs.writeFile(unitPath, unitDefinitions, 'utf-8');
 
   const dependencies = generateUnitDependencies(unitDefinitions);
-  const depPath = join(inceptionDir, 'unit-of-work-dependency.md');
+  const depPath = join(appDesignDir, 'unit-of-work-dependency.md');
   await fs.writeFile(depPath, dependencies, 'utf-8');
 
   const storyMap = generateStoryMap(unitDefinitions, storiesContent);
-  const storyMapPath = join(inceptionDir, 'unit-of-work-story-map.md');
+  const storyMapPath = join(appDesignDir, 'unit-of-work-story-map.md');
   await fs.writeFile(storyMapPath, storyMap, 'utf-8');
 
   const artifactPaths = [unitPath, depPath, storyMapPath];

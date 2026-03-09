@@ -18,7 +18,7 @@
 
 ### 1.2 Load Requirements Analysis
 - requirements.md (includes intent analysis)
-- requirement-verification-questions.md (with answers)
+- requirements-analysis-questions.md (with answers)
 
 ### 1.3 Load User Stories (if executed)
 - stories.md

@@ -135,7 +135,7 @@ export function getArtifactPath(
     case 'intent':
       return path.join(workflowDir, 'inception', 'intent.md');
     case 'nfr':
-      return path.join(workflowDir, 'inception', 'nfr.md');
+      return path.join(workflowDir, 'inception', 'requirements', 'nfr.md');
     case 'unit':
       if (!artifactId) {
         throw new Error('artifactId is required for unit artifacts');
@@ -187,21 +187,21 @@ export function getArtifactPath(
     case 'WORKFLOW_ROUTING':
       return path.join(workflowDir, 'inception', 'plans', 'workflow-routing.md');
     case 'requirements-qa':
-      return path.join(workflowDir, 'inception', 'requirements-questions.md');
+      return path.join(workflowDir, 'inception', 'requirements', 'requirements-analysis-questions.md');
     case 'requirements':
-      return path.join(workflowDir, 'inception', 'requirements.md');
+      return path.join(workflowDir, 'inception', 'requirements', 'requirements.md');
     case 'personas':
-      return path.join(workflowDir, 'inception', 'personas.md');
+      return path.join(workflowDir, 'inception', 'user-stories', 'personas.md');
     case 'user-stories':
-      return path.join(workflowDir, 'inception', 'stories.md');
+      return path.join(workflowDir, 'inception', 'user-stories', 'stories.md');
     case 'execution-plan':
       return path.join(workflowDir, 'inception', 'plans', 'execution-plan.md');
     case 'units-generation':
-      return path.join(workflowDir, 'inception', 'unit-of-work.md');
+      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work.md');
     case 'unit-dependency':
-      return path.join(workflowDir, 'inception', 'unit-of-work-dependency.md');
+      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work-dependency.md');
     case 'unit-story-map':
-      return path.join(workflowDir, 'inception', 'unit-of-work-story-map.md');
+      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work-story-map.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }
@@ -426,7 +426,11 @@ This feature was developed using the structured workflow system:
 
 ### Inception Phase
 - [Intent Document](aidlc-docs/${workflowId}/inception/intent.md)
-- [Non-Functional Requirements](aidlc-docs/${workflowId}/inception/nfr.md)
+- [Requirements](aidlc-docs/${workflowId}/inception/requirements/requirements.md)
+- [Non-Functional Requirements](aidlc-docs/${workflowId}/inception/requirements/nfr.md)
+- [User Stories](aidlc-docs/${workflowId}/inception/user-stories/stories.md)
+- [Personas](aidlc-docs/${workflowId}/inception/user-stories/personas.md)
+- [Unit Definitions](aidlc-docs/${workflowId}/inception/application-design/unit-of-work.md)
 
 ### Construction Phase
 - [Units](aidlc-docs/${workflowId}/construction/) - Per-unit directories (UNIT-001/, UNIT-002/, etc.)

@@ -82,7 +82,11 @@ function renderQuestionBlock(question: Question): string {
 
 function resolveQuestionsDir(projectPath: string, workflowId: string, stage: string): string {
   const phase = stageToPhase(stage);
-  return path.join(projectPath, 'aidlc-docs', workflowId, phase);
+  const phaseDir = path.join(projectPath, 'aidlc-docs', workflowId, phase);
+  if (stage.startsWith('requirements')) {
+    return path.join(phaseDir, 'requirements');
+  }
+  return phaseDir;
 }
 
 export async function generateQuestionFile(

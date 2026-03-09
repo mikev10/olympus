@@ -15,7 +15,7 @@ describe('nfr-requirements.ts', () => {
   }
 
   async function writeInceptionNfr(content: string): Promise<void> {
-    const nfrPath = aidlcPath('inception', 'nfr.md');
+    const nfrPath = aidlcPath('inception', 'requirements', 'nfr.md');
     await fs.ensureDir(path.dirname(nfrPath));
     await fs.writeFile(nfrPath, content, 'utf-8');
   }

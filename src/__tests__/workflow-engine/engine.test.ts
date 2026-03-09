@@ -259,7 +259,7 @@ describe('WorkflowEngine', () => {
 
       await engine.executeStage('intent');
 
-      const nfrPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'nfr.md');
+      const nfrPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'inception', 'requirements', 'nfr.md');
       const exists = await fs.pathExists(nfrPath);
       expect(exists).toBe(true);
 

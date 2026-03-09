@@ -529,7 +529,7 @@ Mark `inception_stages["requirements-analysis"].status = "in_progress"`. Update 
 
 If `inception_stages["requirements-analysis"].questions_file` is already set (resume case), skip to Phase B.
 
-Create `aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md` using the file-only Q&A format (same structure as Step 3b):
+Create `aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-questions.md` using the file-only Q&A format (same structure as Step 3b):
 
 Generate 4 questions (scale up/down based on trust level):
 1. **Functional Requirements**: What specific capabilities must this feature deliver? (options: A. {list option}, B. {another}, etc.)
@@ -537,11 +537,11 @@ Generate 4 questions (scale up/down based on trust level):
 3. **Constraints**: What technical or business constraints must the implementation respect? (options around timeline, compatibility, team skills, platform, budget, etc.)
 4. **Success Metrics**: How will we measure that this feature succeeded? (options around quantitative metrics, qualitative goals, user adoption, etc.)
 
-Update checkpoint: `inception_stages["requirements-analysis"].questions_file = "aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md"`
+Update checkpoint: `inception_stages["requirements-analysis"].questions_file = "aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-questions.md"`
 
 ### Phase B: Inform user and wait
 
-Tell the user: "I've created `aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md` with {N} questions about requirements. Please fill in the `[Answer]:` tags and say 'done' when finished."
+Tell the user: "I've created `aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-questions.md` with {N} questions about requirements. Please fill in the `[Answer]:` tags and say 'done' when finished."
 
 Wait for "done", "finished", or "ready".
 
@@ -559,11 +559,11 @@ Update checkpoint: `inception_stages["requirements-analysis"].answers_received =
 
 ### Phase E: Handle issues (if any)
 
-If contradictions or ambiguities are found: create `aidlc-docs/{workflowId}/inception/requirements-analysis-clarification-questions.md` with targeted clarification questions (same Q&A format). Inform the user. Loop back to Phase B.
+If contradictions or ambiguities are found: create `aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-clarification-questions.md` with targeted clarification questions (same Q&A format). Inform the user. Loop back to Phase B.
 
 ### Phase F: Synthesize requirements artifacts
 
-**`aidlc-docs/{workflowId}/inception/requirements.md`**:
+**`aidlc-docs/{workflowId}/inception/requirements/requirements.md`**:
 
 ```markdown
 ---
@@ -586,7 +586,7 @@ created: "{ISO-8601}"
 - **BR-001**: {rule}
 ```
 
-**`aidlc-docs/{workflowId}/inception/nfr.md`**:
+**`aidlc-docs/{workflowId}/inception/requirements/nfr.md`**:
 
 ```markdown
 ---
@@ -616,17 +616,25 @@ created: "{ISO-8601}"
 
 **NFR classification**: Design-time NFRs (security, compliance, accessibility) are gate-blocking. Runtime NFRs (performance, availability) are tracked but not gate-blocking.
 
-### Phase G: Dispatch Metis for blind spot analysis (silent)
+### Phase G: Dispatch Metis for blind spot analysis
 
 ```
 Task(
   subagent_type="metis",
   description="Requirements blind spot analysis",
-  prompt="Review this feature's requirements and identify blind spots, unstated assumptions, and missing considerations. Feature: {summarize intent.md}. Requirements: {summarize requirements.md}. Discovery findings: {summarize if reverse-engineering ran, otherwise 'greenfield project'}."
+  prompt="Review this feature's requirements and identify blind spots, unstated assumptions, and missing considerations. Feature: {summarize intent.md}. Requirements: {summarize requirements.md}. Discovery findings: {summarize if reverse-engineering ran, otherwise 'greenfield project'}. For each finding, include a recommendation with your suggested course of action to help the user decide whether to incorporate it."
 )
 ```
 
-Do not announce this dispatch. Surface findings by incorporating them into requirements.md where relevant.
+**Write findings to file**: After Metis returns, create `aidlc-docs/{workflowId}/inception/requirements/metis-blind-spot-analysis.md` with the full analysis. Format each finding with:
+- The finding description and why it was flagged
+- **Recommendation**: Metis's suggested course of action (incorporate, defer, investigate, etc.)
+- **Decision**: `[ ]` — empty checkbox for the user to mark with their decision
+- **User Comments**: blank line for the user to add notes
+
+Include a response guide at the top of the file explaining how to review (check findings to include, add comments, or skip).
+
+Do not silently incorporate findings. The user must review the file and respond before findings are merged into requirements.
 
 ### 7d. Update state (triple write)
 
@@ -646,14 +654,16 @@ Do not announce this dispatch. Surface findings by incorporating them into requi
 - **Requirements Analysis**: Captured structured requirements from Q&A interaction
 
 ### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/requirements-analysis-questions.md`
-- `aidlc-docs/{workflowId}/inception/requirements.md`
-- `aidlc-docs/{workflowId}/inception/nfr.md`
+- `aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-questions.md`
+- `aidlc-docs/{workflowId}/inception/requirements/requirements.md`
+- `aidlc-docs/{workflowId}/inception/requirements/nfr.md`
+- `aidlc-docs/{workflowId}/inception/requirements/metis-blind-spot-analysis.md` (if Metis was dispatched)
 
 ### What needs your review
 - [ ] Functional requirements accurately capture what must be built
 - [ ] Non-functional requirements and gate-blocking designations are correct
 - [ ] No significant requirements are missing
+- [ ] Metis blind spot findings reviewed (if applicable) — check findings to include, add comments in the file
 
 ---
 
@@ -684,7 +694,7 @@ Mark `inception_stages["user-stories"].status = "in_progress"`. Update checkpoin
 
 Read `intent.md` and `requirements.md` for context.
 
-**`aidlc-docs/{workflowId}/inception/personas.md`**:
+**`aidlc-docs/{workflowId}/inception/user-stories/personas.md`**:
 
 ```markdown
 # User Personas: {Title}
@@ -697,7 +707,7 @@ Read `intent.md` and `requirements.md` for context.
 - **Key User Stories**: US-001, US-002, ...
 ```
 
-**`aidlc-docs/{workflowId}/inception/stories.md`** (Gherkin format):
+**`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (Gherkin format):
 
 ```markdown
 # User Stories: {Title}
@@ -737,8 +747,8 @@ Then {expected outcome}
 - **User Stories**: Generated user personas and user stories with acceptance criteria
 
 ### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/personas.md`
-- `aidlc-docs/{workflowId}/inception/stories.md`
+- `aidlc-docs/{workflowId}/inception/user-stories/personas.md`
+- `aidlc-docs/{workflowId}/inception/user-stories/stories.md`
 
 ### What needs your review
 - [ ] Personas accurately represent the intended users
@@ -1059,9 +1069,9 @@ Mark `inception_stages["units-generation"].status = "in_progress"`. Update check
 
 ### 11a. Generate unit artifacts
 
-Read `requirements.md`, `stories.md`, and `application-design/components.md` for context.
+Read `requirements/requirements.md`, `user-stories/stories.md`, and `application-design/components.md` for context.
 
-**`aidlc-docs/{workflowId}/inception/unit-of-work.md`**:
+**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`**:
 
 ```markdown
 # Units of Work: {Title}
@@ -1078,7 +1088,7 @@ Read `requirements.md`, `stories.md`, and `application-design/components.md` for
 ...
 ```
 
-**`aidlc-docs/{workflowId}/inception/unit-of-work-dependency.md`**:
+**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work-dependency.md`**:
 
 ```markdown
 # Unit Dependency Map: {Title}
@@ -1100,7 +1110,7 @@ graph TD
 ```
 ```
 
-**`aidlc-docs/{workflowId}/inception/unit-of-work-story-map.md`**:
+**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work-story-map.md`**:
 
 ```markdown
 # Story Map: {Title}
@@ -1132,9 +1142,9 @@ graph TD
 - **Units Generation**: Decomposed requirements into implementation units with dependency mapping
 
 ### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/unit-of-work.md`
-- `aidlc-docs/{workflowId}/inception/unit-of-work-dependency.md`
-- `aidlc-docs/{workflowId}/inception/unit-of-work-story-map.md`
+- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`
+- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work-dependency.md`
+- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work-story-map.md`
 
 ### What needs your review
 - [ ] Units correctly partition the work into manageable implementation chunks
@@ -1194,7 +1204,7 @@ Trust Level: {0-3}
 
 Key artifacts:
 - `aidlc-docs/{workflowId}/inception/intent.md`
-- `aidlc-docs/{workflowId}/inception/requirements.md`
+- `aidlc-docs/{workflowId}/inception/requirements/requirements.md`
 - `aidlc-docs/{workflowId}/inception/plans/execution-plan.md`
 - `aidlc-docs/{workflowId}/inception/plans/workflow-routing.md`
 {list additional artifacts}"
@@ -1263,7 +1273,7 @@ Update `aidlc-docs/{workflowId}/checkpoint.json`:
 4. **CHECKPOINTS ARE MANDATORY**: Save checkpoint state after every stage transition (update inception_stages, current_inception_stage, state file, audit). This enables resume on interruption.
 5. **TRUST ADJUSTS CEREMONY**: Higher trust = fewer questions + lighter gates. Lower trust = more thorough validation.
 6. **REVIEW REQUIRED AFTER EVERY STAGE**: Use the exact REVIEW REQUIRED / WHAT'S NEXT format after each stage completes.
-7. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian, metis) happen without announcing them to the user. Only surface findings in the artifacts.
+7. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian) happen without announcing them to the user. Only surface findings in the artifacts. **Exception**: Metis blind spot analysis writes findings to a dedicated file for user review — do not silently incorporate.
 8. **STATE TRACKING IS TRIPLE**: Every stage update must write to checkpoint.json + aidlc-state.md + audit.md.
 9. **RESUME IS IDEMPOTENT**: Each stage checks its `inception_stages` entry before executing. `completed` or `skipped` → skip to next. `in_progress` with `questions_file` set → resume Q&A without regenerating.
 

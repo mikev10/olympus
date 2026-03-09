@@ -26,9 +26,9 @@
 ### Step 1: Load Reverse Engineering Context (if available)
 
 **IF brownfield project**:
-- Load `aidlc-docs/inception/reverse-engineering/architecture.md`
-- Load `aidlc-docs/inception/reverse-engineering/component-inventory.md`
-- Load `aidlc-docs/inception/reverse-engineering/technology-stack.md`
+- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/architecture.md`
+- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/component-inventory.md`
+- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/technology-stack.md`
 - Use these to understand existing system when analyzing request
 
 ### Step 2: Analyze User Request (Intent Analysis)
@@ -102,7 +102,7 @@ Analyze whatever the user has provided:
 **When in doubt, ask questions** - incomplete requirements lead to poor implementations.
 
 ### Step 6: Generate Clarifying Questions (PROACTIVE APPROACH)
-   - **ALWAYS** create `aidlc-docs/inception/requirements/requirement-verification-questions.md` unless requirements are exceptionally clear and complete
+   - **ALWAYS** create `aidlc-docs/{workflow-id}/inception/requirements/requirements-analysis-questions.md` unless requirements are exceptionally clear and complete
    - Ask questions about ANY missing, unclear, or ambiguous areas
    - Focus on functional requirements, non-functional requirements, user scenarios, and business context
    - Request user to fill in all [Answer]: tags directly in the questions document
@@ -115,41 +115,73 @@ Analyze whatever the user has provided:
    - **MANDATORY**: Keep asking questions until ALL ambiguities are resolved OR user explicitly asks to proceed
 
 ### ⛔ GATE: Await User Answers
-DO NOT proceed to Step 7 until all questions in requirement-verification-questions.md are answered and validated.
+DO NOT proceed to Step 7 until all questions in requirements-analysis-questions.md are answered and validated.
 Present the question file to the user and STOP.
 
 ### Step 6b: Review Supplementary Analysis (if applicable)
 
 **IF a Metis blind spot analysis (or any supplementary agent analysis) was run during the question-answering phase:**
 
-1. Present a summary of the agent's findings to the user — clearly separated from the user's own answers
-2. Format as a numbered list of findings, each with a brief explanation of why it was flagged
-3. Ask the user to review and indicate which findings to incorporate:
+1. **Write findings to a file** — Create `aidlc-docs/{workflow-id}/inception/requirements/metis-blind-spot-analysis.md` with this structure:
 
 ```markdown
-> **🔎 Metis Blind Spot Analysis Findings**
->
-> The following potential gaps or risks were identified during requirements analysis:
->
-> 1. [Finding description]
-> 2. [Finding description]
-> ...
->
-> **Please review these findings.** You may:
-> - ✅ **Approve All** — Incorporate all findings into requirements
-> - ✏️ **Select Specific** — Indicate which findings to include (e.g., "include 1, 3, skip 2")
-> - ❌ **Skip All** — Proceed without incorporating supplementary findings
+# Metis Blind Spot Analysis
+
+Date: {ISO-8601}
+Feature: {feature name}
+
+## How to Review
+
+For each finding below, Metis has provided a **Recommendation** with a suggested course of action.
+Review each finding and:
+- **Check the box** `[x]` next to findings you want incorporated into requirements
+- **Add comments** in the "Your Comments" field if you want to modify or clarify a finding
+- Leave unchecked findings as `[ ]` to skip them
+
+When done, let me know and I will incorporate your approved findings into the requirements.
+
+---
+
+## Findings
+
+### 1. [Finding title]
+[Description of the gap/risk and why it was flagged]
+
+**Recommendation**: [Metis's suggested course of action — e.g., incorporate as requirement, defer to later phase, investigate further, add as constraint, etc.]
+
+- [ ] Include this finding
+- **Your Comments**:
+
+---
+
+### 2. [Finding title]
+...
+
+{repeat for all findings}
 ```
 
-4. **MANDATORY**: Do NOT proceed to Step 7 until the user has reviewed and responded
-5. **MANDATORY**: Only incorporate findings the user explicitly approved
-6. Log the user's response in `audit.md` with complete raw input
+2. **Present the file to the user** for review:
+
+```markdown
+> **🔎 Metis Blind Spot Analysis**
+>
+> Metis identified potential gaps and risks during requirements analysis.
+> Findings with recommendations have been written to:
+> `aidlc-docs/{workflow-id}/inception/requirements/metis-blind-spot-analysis.md`
+>
+> Please review the file — each finding includes Metis's recommended course of action to help you decide.
+> Check the boxes for findings you want included and add any comments, then let me know to continue.
+```
+
+3. **MANDATORY**: Do NOT proceed to Step 7 until the user has reviewed the file and responded
+4. **MANDATORY**: Only incorporate findings the user explicitly checked/approved in the file
+5. Log the user's response in `audit.md` with complete raw input
 
 **IF no supplementary analysis was run**: Skip directly to Step 7.
 
 ### Step 7: Generate Requirements Document
    - **PREREQUISITE**: Step 6 gate must be passed — all answers received and analyzed. If Step 6b applied, supplementary findings must also be reviewed.
-   - Create `aidlc-docs/inception/requirements/requirements.md`
+   - Create `aidlc-docs/{workflow-id}/inception/requirements/requirements.md`
    - Include intent analysis summary at the top:
      - User request
      - Request type
@@ -192,7 +224,7 @@ Present the question file to the user and STOP.
 
 ```markdown
 > **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the requirements document at: `aidlc-docs/inception/requirements/requirements.md`
+> Please examine the requirements document at: `aidlc-docs/{workflow-id}/inception/requirements/requirements.md`
 
 
 
