@@ -111,27 +111,37 @@ claude
 
 ## Installation
 
+### Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/claude-code) installed
+- Node.js 20+ (`node -v` to check)
+
 ### Global Installation (Recommended)
 
-Install Olympus globally to use across all projects:
+Install Olympus globally to enable it across all your projects:
 
 ```bash
 npm install -g olympus-ai
 olympus-ai install
 ```
 
-This installs agents, skills, rules, and hooks to `~/.claude/`.
+This installs agents, skills, rules, and hooks to `~/.claude/` so every Claude Code session has access to Olympus.
 
 ### Local Project Installation
 
-Install Olympus for a specific project only:
+Install Olympus as a dev dependency for a specific project. This is useful for teams that want Olympus pinned to a specific version in their repo:
 
 ```bash
-npm install -g olympus-ai
-olympus-ai install --local
+# Install as a dev dependency
+npm install --save-dev olympus-ai
+
+# Run the installer for this project only
+npx olympus-ai install --local
 ```
 
-This installs to `./.claude/` in your current project directory.
+This installs agents, skills, rules, hooks, and settings to `./.claude/` in your current project directory.
+
+> **Note:** You can use both. A global install provides Olympus across all projects, while a local install scopes everything to the current project. Local files take precedence over global ones.
 
 ---
 
@@ -600,17 +610,68 @@ This is a TypeScript monorepo using:
 
 ## Uninstall
 
+Olympus provides a safe uninstall that **only removes Olympus-owned files** — your own Claude Code agents, skills, hooks, and CLAUDE.md content are preserved.
+
+### Quick Uninstall (One Command)
+
+For global installations, a single npm command handles everything — the `preuninstall` hook automatically cleans up Olympus config files before removing the package:
+
 ```bash
-# Remove agents and skills
-rm -rf ~/.claude/agents ~/.claude/skills ~/.claude/hooks ~/.claude/olympus ~/.claude/CLAUDE.md
+npm uninstall -g olympus-ai
 ```
+
+For local project installations:
+
+```bash
+npm uninstall olympus-ai
+```
+
+> **Note:** Local `npm uninstall` removes the package dependency but does not clean up `.claude/` config files. Run `npx olympus-ai uninstall --local` first if you need to remove those, or see the manual steps below.
+
+### Manual Uninstall
+
+If you prefer more control, or need to remove config files without uninstalling the package:
+
+```bash
+# Remove Olympus config files from ~/.claude/ (global)
+olympus-ai uninstall
+
+# Remove Olympus config files from ./.claude/ (current project)
+olympus-ai uninstall --local
+
+# Preview what would be removed without deleting anything
+olympus-ai uninstall --dry-run
+```
+
+Then remove the npm package:
+
+```bash
+# Global
+npm uninstall -g olympus-ai
+
+# Local
+npm uninstall olympus-ai
+```
+
+### What Gets Removed
+
+The uninstall command removes only files that Olympus installed:
+- Olympus agent definitions from `agents/` (e.g., `oracle.md`, `prometheus.md`)
+- Olympus skill directories from `skills/` (e.g., `ultrawork/`, `plan/`)
+- The `olympus/` directory (rules, learning data)
+- Olympus hook scripts from `hooks/`
+- Olympus hook entries from `settings.json`
+- The Olympus section from `CLAUDE.md` (user content is preserved)
+- The `.olympus-version.json` metadata file
+- The Olympus plugin registration
+
+Any custom agents, skills, hooks, or CLAUDE.md content you added yourself will **not** be touched.
 
 ---
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/claude-code) installed
-- Anthropic API key (`ANTHROPIC_API_KEY` environment variable)
+- [Claude Code](https://docs.anthropic.com/claude-code) installed and configured
 - Node.js 20+ (for npm installation)
 
 ---

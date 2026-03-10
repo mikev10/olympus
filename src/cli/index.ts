@@ -30,6 +30,7 @@ import {
 } from '../features/auto-update.js';
 import {
   install as installOlympus,
+  uninstall as uninstallOlympus,
   isInstalled,
   getInstallInfo
 } from '../installer/index.js';
@@ -577,9 +578,50 @@ program
     }
   });
 
-/**
- * Postinstall command - Silent install for npm postinstall hook
- */
+program
+  .command('uninstall')
+  .description('Uninstall Olympus files (only removes Olympus-owned files)')
+  .option('--local', 'Uninstall from current project (./.claude/) instead of global (~/.claude/)')
+  .option('--dry-run', 'Show what would be removed without actually removing')
+  .option('-v, --verbose', 'Show detailed output')
+  .action((opts) => {
+    const prefix = opts.dryRun ? chalk.yellow('[DRY RUN] ') : '';
+    console.log(chalk.blue(`${prefix}Uninstalling Olympus...`));
+    console.log('');
+
+    const result = uninstallOlympus({
+      local: opts.local,
+      dryRun: opts.dryRun,
+      verbose: opts.verbose || opts.dryRun
+    });
+
+    if (result.errors.length > 0) {
+      result.errors.forEach(err => console.error(chalk.red(`  Error: ${err}`)));
+      console.log('');
+    }
+
+    if (opts.dryRun) {
+      console.log(chalk.yellow(`Would remove ${result.removedFiles.length} file(s)/directories.`));
+      console.log(chalk.gray('Run without --dry-run to apply.'));
+    } else {
+      if (result.success) {
+        console.log(chalk.green(`Removed ${result.removedFiles.length} file(s)/directories. Olympus has been uninstalled.`));
+      } else {
+        console.log(chalk.yellow(`Removed ${result.removedFiles.length} file(s)/directories (with ${result.errors.length} error(s)).`));
+      }
+      console.log('');
+      if (opts.local) {
+        console.log(chalk.gray('To also remove the npm package: npm uninstall olympus-ai'));
+      } else {
+        console.log(chalk.gray('To also remove the npm package: npm uninstall -g olympus-ai'));
+      }
+    }
+
+    if (!result.success) {
+      process.exit(1);
+    }
+  });
+
 program
   .command('postinstall', { hidden: true })
   .description('Run post-install setup (called automatically by npm)')

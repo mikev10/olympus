@@ -33,10 +33,12 @@ const __dirname = dirname(__filename);
  */
 const CONTENT_DIR = resolve(__dirname, '../../resources');
 
-import { mergeAidlcRules, getAidlcRulesContent } from '../features/workflow-engine/claude-md-merger.js';
+import { mergeAidlcRules, getAidlcRulesContent, SENTINEL_START, SENTINEL_END } from '../features/workflow-engine/claude-md-merger.js';
 
 import {
   HOOK_SCRIPTS,
+  HOOK_SCRIPTS_BASH,
+  HOOK_SCRIPTS_NODE,
   getHookScripts,
   getHooksSettingsConfig,
   isWindows,
@@ -55,7 +57,7 @@ export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.olympus-version.json');
 
 /** Current version - MUST match package.json */
-export const VERSION = '4.0.4';
+export const VERSION = '4.1.0';
 
 /** Installation result */
 export interface InstallResult {
@@ -494,8 +496,8 @@ export function install(options: InstallOptions = {}): InstallResult {
   const agentsDir = join(baseDir, 'agents');
   const commandsDir = join(baseDir, 'commands');
   const skillsDir = join(baseDir, 'skills');
-  const hooksDir = options.local ? null : HOOKS_DIR;  // Hooks only for global install
-  const settingsFile = options.local ? null : SETTINGS_FILE;  // Settings only for global install
+  const hooksDir = options.local ? join(process.cwd(), '.claude', 'hooks') : HOOKS_DIR;
+  const settingsFile = options.local ? join(process.cwd(), '.claude', 'settings.json') : SETTINGS_FILE;
   const versionFile = options.local ? join(baseDir, '.olympus-version.json') : VERSION_FILE;
 
   if (options.local) {
@@ -703,8 +705,6 @@ export function install(options: InstallOptions = {}): InstallResult {
           }
         }
       }
-    } else {
-      log('Skipping hooks (local install - hooks require global installation)');
     }
 
     // Handle legacy hooks.json file (only for bundled hooks on global install)
@@ -815,9 +815,6 @@ export function install(options: InstallOptions = {}): InstallResult {
         log('  Warning: Could not configure hooks in settings.json (non-fatal)');
         result.hooksConfigured = false;
       }
-    } else {
-      log('Skipping settings.json (local install)');
-      result.hooksConfigured = false;
     }
 
     // Register as Claude Code plugin (for native installer) - only for global install
@@ -934,4 +931,248 @@ export function getInstallInfo(): { version: string; installedAt: string; method
   } catch {
     return null;
   }
+}
+
+export interface UninstallOptions {
+  verbose?: boolean;
+  local?: boolean;
+  dryRun?: boolean;
+}
+
+export interface UninstallResult {
+  success: boolean;
+  message: string;
+  removedFiles: string[];
+  errors: string[];
+}
+
+export function uninstall(options: UninstallOptions = {}): UninstallResult {
+  const result: UninstallResult = {
+    success: false,
+    message: '',
+    removedFiles: [],
+    errors: []
+  };
+
+  const log = (msg: string) => { if (options.verbose) console.log(msg); };
+  const baseDir = options.local ? join(process.cwd(), '.claude') : CLAUDE_CONFIG_DIR;
+
+  const removeFile = (filePath: string, label: string) => {
+    if (options.dryRun) {
+      log(`[DRY RUN] Would remove ${label}: ${filePath}`);
+    } else {
+      unlinkSync(filePath);
+      log(`  Removed ${label}: ${filePath}`);
+    }
+    result.removedFiles.push(filePath);
+  };
+
+  const removeDir = (dirPath: string, label: string) => {
+    if (options.dryRun) {
+      log(`[DRY RUN] Would remove ${label}: ${dirPath}`);
+    } else {
+      rmSync(dirPath, { recursive: true, force: true });
+      log(`  Removed ${label}: ${dirPath}`);
+    }
+    result.removedFiles.push(dirPath);
+  };
+
+  try {
+    const agentsResourceDir = join(CONTENT_DIR, 'agents');
+    const agentsInstallDir = join(baseDir, 'agents');
+    if (existsSync(agentsResourceDir) && existsSync(agentsInstallDir)) {
+      for (const filename of readdirSync(agentsResourceDir).filter(f => f.endsWith('.md'))) {
+        const targetPath = join(agentsInstallDir, filename);
+        if (existsSync(targetPath)) {
+          removeFile(targetPath, 'agent');
+        }
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Failed to remove agent files: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const skillsResourceDir = join(CONTENT_DIR, 'skills');
+    const skillsInstallDir = join(baseDir, 'skills');
+    if (existsSync(skillsResourceDir) && existsSync(skillsInstallDir)) {
+      const skillDirs = readdirSync(skillsResourceDir, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name);
+      for (const skillName of skillDirs) {
+        const targetPath = join(skillsInstallDir, skillName);
+        if (existsSync(targetPath)) {
+          removeDir(targetPath, 'skill directory');
+        }
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Failed to remove skill directories: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const olympusDir = join(baseDir, 'olympus');
+    if (existsSync(olympusDir)) {
+      removeDir(olympusDir, 'olympus directory');
+    }
+  } catch (error) {
+    result.errors.push(`Failed to remove olympus directory: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const hooksDir = options.local ? join(process.cwd(), '.claude', 'hooks') : join(CLAUDE_CONFIG_DIR, 'hooks');
+    if (existsSync(hooksDir)) {
+      const allHookFilenames = new Set<string>([
+        ...Object.keys(HOOK_SCRIPTS_BASH),
+        ...Object.keys(HOOK_SCRIPTS_NODE),
+        'olympus-hooks.cjs'
+      ]);
+      for (const filename of allHookFilenames) {
+        const targetPath = join(hooksDir, filename);
+        if (existsSync(targetPath)) {
+          removeFile(targetPath, 'hook script');
+        }
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Failed to remove hook scripts: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const settingsPath = options.local ? join(process.cwd(), '.claude', 'settings.json') : join(CLAUDE_CONFIG_DIR, 'settings.json');
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      const existingHooks = settings.hooks as Record<string, unknown> | undefined;
+      if (existingHooks) {
+        const cleanedHooks: Record<string, unknown> = {};
+        let removedCount = 0;
+        for (const [eventType, eventValue] of Object.entries(existingHooks)) {
+          if (Array.isArray(eventValue)) {
+            const filtered = eventValue.filter((entry: unknown) => {
+              if (typeof entry === 'object' && entry !== null && 'command' in entry) {
+                const cmd = (entry as Record<string, unknown>).command;
+                return typeof cmd !== 'string' || !cmd.includes('olympus');
+              }
+              return true;
+            });
+            removedCount += eventValue.length - filtered.length;
+            if (filtered.length > 0) {
+              cleanedHooks[eventType] = filtered;
+            }
+          } else {
+            cleanedHooks[eventType] = eventValue;
+          }
+        }
+        settings.hooks = cleanedHooks;
+        if (options.dryRun) {
+          log(`[DRY RUN] Would clean ${removedCount} olympus hook entries from settings.json`);
+        } else {
+          writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+          log(`  Cleaned ${removedCount} olympus hook entries from settings.json`);
+        }
+        if (removedCount > 0) {
+          result.removedFiles.push(settingsPath + ' (cleaned)');
+        }
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Failed to clean settings.json: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const claudeMdPath = join(baseDir, 'CLAUDE.md');
+    if (existsSync(claudeMdPath)) {
+      let content = readFileSync(claudeMdPath, 'utf-8');
+      let modified = false;
+
+      const olympusIdx = content.indexOf(OLYMPUS_CLAUDE_MD_SENTINEL);
+      if (olympusIdx !== -1) {
+        content = content.slice(0, olympusIdx).replace(/\s+$/, '');
+        modified = true;
+      }
+
+      if (content.includes(SENTINEL_START) && content.includes(SENTINEL_END)) {
+        const startIdx = content.indexOf(SENTINEL_START);
+        const endIdx = content.indexOf(SENTINEL_END) + SENTINEL_END.length;
+        const before = content.slice(0, startIdx).replace(/\s+$/, '');
+        const after = content.slice(endIdx).replace(/^\s+/, '');
+        content = before && after ? `${before}\n\n${after}` : (before || after);
+        modified = true;
+      }
+
+      if (modified) {
+        if (options.dryRun) {
+          log(`[DRY RUN] Would strip Olympus sections from CLAUDE.md`);
+          result.removedFiles.push(claudeMdPath + ' (stripped)');
+        } else {
+          const trimmed = content.trim();
+          if (trimmed.length === 0) {
+            unlinkSync(claudeMdPath);
+            log(`  Deleted empty CLAUDE.md`);
+            result.removedFiles.push(claudeMdPath);
+          } else {
+            writeFileSync(claudeMdPath, trimmed + '\n', 'utf-8');
+            log(`  Stripped Olympus sections from CLAUDE.md`);
+            result.removedFiles.push(claudeMdPath + ' (stripped)');
+          }
+        }
+      }
+    }
+  } catch (error) {
+    result.errors.push(`Failed to strip CLAUDE.md: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  try {
+    const versionFile = join(baseDir, '.olympus-version.json');
+    if (existsSync(versionFile)) {
+      removeFile(versionFile, 'version file');
+    }
+  } catch (error) {
+    result.errors.push(`Failed to remove version file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!options.local) {
+    try {
+      const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
+      if (existsSync(installedPluginsPath)) {
+        const pluginsData = JSON.parse(readFileSync(installedPluginsPath, 'utf-8')) as { version: number; plugins: Record<string, unknown> };
+        if (pluginsData.plugins && 'olympus-ai' in pluginsData.plugins) {
+          delete pluginsData.plugins['olympus-ai'];
+          if (options.dryRun) {
+            log(`[DRY RUN] Would unregister olympus-ai from installed_plugins.json`);
+          } else {
+            if (Object.keys(pluginsData.plugins).length === 0) {
+              unlinkSync(installedPluginsPath);
+              log(`  Deleted empty installed_plugins.json`);
+            } else {
+              writeFileSync(installedPluginsPath, JSON.stringify(pluginsData, null, 2));
+              log(`  Unregistered olympus-ai from installed_plugins.json`);
+            }
+          }
+          result.removedFiles.push(installedPluginsPath + ' (cleaned)');
+        }
+      }
+    } catch (error) {
+      result.errors.push(`Failed to unregister from installed_plugins.json: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (!options.local) {
+    try {
+      const pluginDir = join(CLAUDE_CONFIG_DIR, '.claude-plugin');
+      if (existsSync(pluginDir)) {
+        removeDir(pluginDir, '.claude-plugin directory');
+      }
+    } catch (error) {
+      result.errors.push(`Failed to remove .claude-plugin directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  result.success = result.errors.length === 0;
+  const actionWord = options.dryRun ? 'Would remove' : 'Removed';
+  result.message = result.success
+    ? `${actionWord} ${result.removedFiles.length} file(s)/directories. Olympus has been uninstalled.`
+    : `Uninstall completed with ${result.errors.length} error(s). Removed ${result.removedFiles.length} file(s)/directories.`;
+
+  return result;
 }

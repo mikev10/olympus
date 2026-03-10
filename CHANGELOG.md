@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-03-10
+
+### Added
+
+- **`olympus-ai uninstall` command** — New CLI command to cleanly remove Olympus installations with `--local`, `--dry-run`, and `--verbose` flags
+- **`preuninstall` npm lifecycle hook** — Automatically runs cleanup when users run `npm uninstall -g olympus-ai`, leaving no orphaned files in `~/.claude/`
+- **Hooks and settings in local installs** — `olympus-ai install --local` now includes hooks and settings files (previously only global installs received them)
+- **Workflow engine archival** — Completed workflows are archived to a timestamped subdirectory, keeping the workspace clean for new runs
+- **Metis agent enhancements** — Added pre-planning guidance and hidden requirements discovery capabilities
+
+### Changed
+
+- **README Installation section** — Rewrote with clear global vs. local installation instructions and explicit Node.js ≥20 prerequisite
+- **README Uninstall section** — Rewrote with safe uninstall workflow showing the recommended `olympus-ai uninstall` → `npm uninstall` sequence
+- **Learning storage** — Refactored discovery and preference storage with improved session-state backward compatibility and JSONL rotation
+- **Workflow engine phase types** — Extended phase type definitions to support archival and additional workflow states
+- **`user-prompt-submit` hook** — Added context injection for active workflow state on prompt submission
+- **`continue` and `plan` skills** — Minor refinements to routing and resumption guidance
+
+### Fixed
+
+- **Learning preference detection** — Reduced false positives in feedback signals; session-state fields now initialized consistently in both `createSessionState()` and `loadSessionState()`
+- **Discovery integration** — Corrected category handling so new `DiscoveryCategory` values are registered in both the type union and the `readDiscoveries()` categories record
+
 ## [4.0.4] - 2026-03-09
 
 ### Fixed
