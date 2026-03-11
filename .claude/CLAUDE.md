@@ -2,11 +2,7 @@
 # AI-DLC Workflow Rules (Olympus-Native)
 
 ## Active Workflow
-- **Workflow ID**: `installer-content-extraction`
-- **Pathway**: Brownfield (brownfield-refactor)
-- **State file**: `aidlc-docs/installer-content-extraction/checkpoint.json`
-- **Human-readable state**: `aidlc-docs/installer-content-extraction/aidlc-state.md`
-- **Audit log**: `aidlc-docs/installer-content-extraction/audit.md`
+No active workflow. Use `/plan` to start a new one.
 
 All workflow stages, agent delegation, directory layout, and rules are defined in the
 AI-DLC Core Workflow reference (loaded from core-workflow.md). This block only tracks
