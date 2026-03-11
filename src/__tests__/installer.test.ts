@@ -153,6 +153,7 @@ describe('Installer Constants', () => {
   describe('Skills Content', () => {
     it('should contain expected skills', () => {
       const expectedSkills = [
+        'archive',
         'ultrawork',
         'deepsearch',
         'analyze',

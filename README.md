@@ -27,7 +27,7 @@ Olympus is a multi-agent orchestration system for [Claude Code](https://docs.ant
 - 📋 **Todo Management** - Tracks progress with real-time updates
 - 🔄 **Background Execution** - Long-running tasks run async with notifications
 - 🎯 **Continuation Enforcement** - Never stops until all tasks are complete
-- 💬 **19 Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/continue`, `/review`, and more
+- 💬 **20 Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/continue`, `/review`, and more
 - 🔮 **AI-DLC Workflow** - Inception → Construction → Operations pipeline for structured development
 - 🌐 **Language Agnostic** - Works with any tech stack: Python, .NET, Go, Rust, Java, and more
 - 🔮 **Magic Keywords** - Natural language triggers for enhanced modes
@@ -69,7 +69,7 @@ Olympus transforms Claude Code from a single agent into a **pantheon of speciali
 
 - **Zero Configuration** - Works out-of-the-box with sensible defaults
 - **Works Everywhere** - Not tied to any language or framework — orchestrates across .NET, Python, Go, Rust, Java, and any codebase
-- **Slash Commands** - 19 slash commands (`/ultrawork`, `/plan`, `/ascent`, `/continue`)
+- **Slash Commands** - 20 slash commands (`/ultrawork`, `/plan`, `/ascent`, `/continue`)
 - **Magic Keywords** - Natural language triggers for enhanced modes
 
 ### 📊 Olympus vs. Manual Claude Usage
@@ -168,6 +168,7 @@ claude
 | `/deepsearch <query>`   | Thorough multi-strategy codebase search                                |
 | `/analyze <target>`     | Deep analysis and investigation                                        |
 | `/complete-plan [path]` | Verify and complete a plan after implementation                        |
+| `/archive [id\|--all]`  | Archive completed AI-DLC workflows to aidlc-docs/completed/           |
 | `/continue`             | Resume an active AI-DLC workflow from last checkpoint                  |
 | `/retro`                | Run a guardrail retrospective on the current AI-DLC workflow           |
 | `/workflow-status`      | View all active structured workflows and their status                  |
