@@ -19,7 +19,7 @@ import {
   WorkflowStatus,
   ArtifactReference,
 } from './types.js';
-import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
+import { saveCheckpoint, loadCheckpoint, archiveWorkflow } from './checkpoint.js';
 import { ensureWorkflowDir, writeArtifact, getArtifactPath } from './artifacts.js';
 import { validateIntent, clearFileCache } from './validation.js';
 import { ConstructionExecutor } from './construction/executor.js';
@@ -101,9 +101,12 @@ export class WorkflowEngine {
       slug = slug.substring(0, 80).replace(/-$/, '');
     }
 
-    // Reject empty slugs
     if (!slug) {
       throw new Error('Feature name produced an empty workflow ID after sanitization');
+    }
+
+    if (slug === 'completed') {
+      throw new Error("'completed' is a reserved directory name and cannot be used as a workflow ID");
     }
 
     this.workflowId = slug;
@@ -412,22 +415,10 @@ export class WorkflowEngine {
     checkpoint.current_stage = nextStage;
 
     if (nextStage === 'complete') {
-      checkpoint.status = 'complete';
-      try {
-        const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
-        if (fs.existsSync(claudeMdPath)) {
-          const content = fs.readFileSync(claudeMdPath, 'utf-8');
-          const cleaned = removeAidlcRules(content);
-          fs.writeFileSync(claudeMdPath, cleaned, 'utf-8');
-          console.log('[WorkflowEngine] Removed AI-DLC rules from .claude/CLAUDE.md (workflow complete)');
-        }
-      } catch (error) {
-        console.error('[WorkflowEngine] Failed to remove AI-DLC rules from CLAUDE.md:', error);
-      }
+      await this.completeWorkflow(checkpoint);
+    } else {
+      await saveCheckpoint(this.projectPath, checkpoint);
     }
-
-    // Save updated checkpoint
-    await saveCheckpoint(this.projectPath, checkpoint);
   }
 
   /**
@@ -742,6 +733,25 @@ export class WorkflowEngine {
         break;
       }
     }
+  }
+
+  private async completeWorkflow(checkpoint: WorkflowCheckpointV3): Promise<void> {
+    checkpoint.status = 'complete';
+
+    try {
+      const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
+      if (fs.existsSync(claudeMdPath)) {
+        const content = fs.readFileSync(claudeMdPath, 'utf-8');
+        const cleaned = removeAidlcRules(content);
+        fs.writeFileSync(claudeMdPath, cleaned, 'utf-8');
+        console.log('[WorkflowEngine] Removed AI-DLC rules from .claude/CLAUDE.md (workflow complete)');
+      }
+    } catch (error) {
+      console.error('[WorkflowEngine] Failed to remove AI-DLC rules from CLAUDE.md:', error);
+    }
+
+    await saveCheckpoint(this.projectPath, checkpoint);
+    await archiveWorkflow(this.projectPath, this.workflowId);
   }
 
   async approveWorkflowRouting(feedback?: string): Promise<void> {

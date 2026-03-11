@@ -275,6 +275,7 @@ export async function listWorkflows(projectPath: string): Promise<string[]> {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      if (entry.name === 'completed') continue;
       const cpPath = join(baseDir, entry.name, CHECKPOINT_FILENAME);
       if (await fs.pathExists(cpPath)) {
         try {
@@ -349,6 +350,59 @@ export async function deleteWorkflow(
  * @param projectPath - Root path of the project
  * @returns Object with workflowId and checkpoint, or null if not found
  */
+export async function archiveWorkflow(projectPath: string, workflowId: string): Promise<void> {
+  const checkpoint = await loadCheckpoint(projectPath, workflowId);
+  if (!checkpoint || checkpoint.status !== 'complete') {
+    return;
+  }
+
+  const sourcePath = join(projectPath, WORKFLOW_DIR, workflowId);
+  const targetPath = join(projectPath, WORKFLOW_DIR, 'completed', workflowId);
+
+  // Idempotency: if target already has a valid checkpoint, skip (FR-013)
+  const targetCheckpointPath = join(targetPath, CHECKPOINT_FILENAME);
+  if (await fs.pathExists(targetCheckpointPath)) {
+    try {
+      const content = await fs.readFile(targetCheckpointPath, 'utf-8');
+      const existing = JSON.parse(content);
+      if (existing.workflow_id === workflowId) {
+        console.log(`[Checkpoint] Workflow ${workflowId} already archived at ${targetPath}`);
+        return;
+      }
+    } catch {
+      await fs.remove(targetPath);
+    }
+  } else if (await fs.pathExists(targetPath)) {
+    await fs.remove(targetPath);
+  }
+
+  checkpoint.archived_at = new Date().toISOString();
+  checkpoint.archived_path = `${WORKFLOW_DIR}/completed/${workflowId}`;
+
+  await saveCheckpoint(projectPath, checkpoint);
+
+  try {
+    await fs.move(sourcePath, targetPath, { overwrite: false });
+    invalidateCache(projectPath, workflowId);
+    console.log(`[Checkpoint] Workflow archived to ${WORKFLOW_DIR}/completed/${workflowId}/`);
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    const hint = err.code === 'EBUSY' && process.platform === 'win32'
+      ? ' — try closing open files in the workflow directory'
+      : '';
+    console.warn(`[Checkpoint] Failed to move workflow folder (non-fatal): ${err.message}${hint}`);
+  }
+
+  // Best-effort master plan update (FR-015)
+  try {
+    const planPath = join(projectPath, '.olympus', 'plans', `${workflowId}-plan.md`);
+    if (await fs.pathExists(planPath)) {
+      const note = `\n\n---\n_This workflow was archived to \`${WORKFLOW_DIR}/completed/${workflowId}/\` on ${checkpoint.archived_at}_\n`;
+      await fs.appendFile(planPath, note, 'utf-8');
+    }
+  } catch { }
+}
+
 export async function findActiveWorkflow(projectPath: string): Promise<{ workflowId: string; checkpoint: WorkflowCheckpointV3 } | null> {
   const baseDir = join(projectPath, WORKFLOW_DIR);
   try {
@@ -358,6 +412,7 @@ export async function findActiveWorkflow(projectPath: string): Promise<{ workflo
     const entries = await fs.readdir(baseDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      if (entry.name === 'completed') continue;
       const cpPath = join(baseDir, entry.name, CHECKPOINT_FILENAME);
       if (!(await fs.pathExists(cpPath))) continue;
       try {

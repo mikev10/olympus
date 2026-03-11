@@ -114,6 +114,12 @@ export function registerUserPromptSubmitHooks(): void {
             .replace(/[^a-z0-9-]/g, '')
             .replace(/-+/g, '-')
             .replace(/^-|-$/g, '');
+
+          if (workflowId === 'completed') {
+            console.warn('[user-prompt-submit] "completed" is a reserved workflow directory name');
+            return { continue: true };
+          }
+
           const checkpoint = await loadCheckpoint(ctx.directory, workflowId);
 
           if (!checkpoint) {

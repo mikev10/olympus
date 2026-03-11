@@ -167,7 +167,9 @@ export function generateStateFile(
 | **Stage** | ${checkpoint.current_stage} |
 | **Pathway** | ${checkpoint.pathway_type ?? 'unknown'} |
 | **Created** | ${checkpoint.created_at ?? new Date().toISOString()} |
-| **Last Updated** | ${new Date().toISOString()} |
+| **Last Updated** | ${new Date().toISOString()} |${checkpoint.archived_at ? `
+| **Archived** | ${checkpoint.archived_at} |
+| **Location** | ${checkpoint.archived_path} |` : ''}
 
 ## Summary
 

@@ -295,6 +295,9 @@ export interface WorkflowCheckpointV3 {
   pathway_type?: PathwayType;
   skipped_phases?: WorkflowPhase[];
   origin?: 'hook-init' | 'ai-initialized' | 'manual';
+  // Physical archival fields — distinct from status:'archived' which means aborted-in-place (BR-004)
+  archived_at?: string;
+  archived_path?: string;
   code_plan_path?: string;
   plan_steps_total?: number;
   plan_steps_completed?: number;
