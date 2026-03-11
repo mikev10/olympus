@@ -5,6 +5,7 @@ coverage/
 .DS_Store
 .npmrc
 .env.local
+.vscode
 
 # Olympus runtime state
 .olympus/
@@ -33,6 +34,7 @@ test-output.txt
 /test-*.log
 /*.log
 /nul
+metrics-export.json
 
 # Test temporary directories
 /.test-*/
