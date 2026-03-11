@@ -14,7 +14,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
   loadConfig,
@@ -43,6 +43,7 @@ import {
   updateAgentPerformance,
   loadSessionSummaries,
   getLastSessionSummary,
+  readAgentPerformance,
 } from '../learning/storage.js';
 import { extractPatterns } from '../learning/pattern-extractor.js';
 import { extractPatterns as extractTaskPatterns, computePatternConfidence } from '../learning/pattern-matcher.js';
@@ -52,14 +53,15 @@ import { generatePromptPatches, previewPatches, applyPromptPatches } from '../le
 import { readDiscoveries, getDiscoveriesForInjection, recordDiscovery } from '../learning/discovery.js';
 import { migrateNotepads } from '../learning/migrate-notepads.js';
 import { generateLearningStats, formatLearningStats } from '../learning/stats.js';
-import { cleanupLearning, formatCleanupResult } from '../learning/cleanup.js';
+import { cleanupLearning, formatCleanupResult, collectProjectDirStats } from '../learning/cleanup.js';
+import { resolveProjectRoot, deriveProjectSlug, getProjectScopedDir } from '../learning/project-resolver.js';
 import { getSessionBaseline, getWarningThreshold } from '../learning/baselines.js';
 import { calculateCost, DEFAULT_PRICING } from '../learning/pricing.js';
 import { getTokenUsage, hasEfficiencyMetrics, safeTokenTotal } from '../learning/utils.js';
 import { getSessionStatePath } from '../learning/session-state.js';
 import type { UserPreferences, AgentPerformance, SessionSummary, TaskPattern } from '../learning/types.js';
 import { randomUUID } from 'crypto';
-import { rmSync, appendFileSync } from 'fs';
+import { rmSync, appendFileSync, readdirSync, statSync } from 'fs';
 import {
   showMetrics,
   exportMetrics,
@@ -659,19 +661,73 @@ program
   .option('--suggest', 'Show suggested prompt improvements')
   .option('--apply', 'Apply suggested improvements')
   .option('-f, --forget', 'Forget all learnings')
-  .option('-p, --project', 'Scope to current project (with --forget)')
-  .option('-e, --export', 'Export learnings to JSON')
+  .option('-p, --project [slug]', 'Project slug for --forget; omit value to use current project')
+  .option('-e, --export [file]', 'Export current project data to file or stdout')
   .option('-i, --import <file>', 'Import learnings from JSON')
   .option('--efficiency', 'Show agent efficiency rankings and token metrics')
   .option('--show-costs', 'Show cost breakdown by model and agent')
   .option('--budget-status', 'Show current session token budget status')
   .option('--last-session', 'Show last session summary')
   .option('--sessions [n]', 'Show last N sessions (default: 10)')
+  .option('--global', 'Show global learning data, bypassing project scoping')
+  .option('--all-projects', 'List all project directories with stats')
+  .option('--confirm', 'Confirm destructive operations (required for --forget)')
   .action(async (options) => {
     const learningDir = getLearningDir();
 
+    function resolveProjectContext(): { projectPath: string | null; isInProject: boolean } {
+      if (options.global) {
+        return { projectPath: null, isInProject: false };
+      }
+      try {
+        const resolved = resolveProjectRoot(process.cwd());
+        const cwd = resolve(process.cwd());
+        if (resolved === cwd) {
+          return { projectPath: null, isInProject: false };
+        }
+        return { projectPath: resolved, isInProject: true };
+      } catch {
+        return { projectPath: null, isInProject: false };
+      }
+    }
+
+    if (options.allProjects) {
+      try {
+        const projectsDir = join(getLearningDir(), 'projects');
+        const stats = collectProjectDirStats(projectsDir);
+        if (stats.length === 0) {
+          console.log('No project directories found.');
+          return;
+        }
+        const slugW = 40, dateW = 22, sizeW = 10, feedW = 10, sessW = 8;
+        const header = 'Project'.padEnd(slugW) + 'Last Modified'.padEnd(dateW) + 'Size'.padStart(sizeW) + 'Feedback'.padStart(feedW) + 'Sessions'.padStart(sessW);
+        const divider = '-'.repeat(slugW + dateW + sizeW + feedW + sessW);
+        console.log(header);
+        console.log(divider);
+        for (const s of stats) {
+          const sizeKb = (s.sizeBytes / 1024).toFixed(0) + ' KB';
+          const dateStr = s.lastModified.toISOString().replace('T', ' ').substring(0, 16);
+          const line = s.slug.substring(0, slugW).padEnd(slugW)
+            + dateStr.padEnd(dateW)
+            + sizeKb.padStart(sizeW)
+            + String(s.feedbackCount).padStart(feedW)
+            + String(s.sessionCount).padStart(sessW);
+          console.log(line);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Olympus] Failed to list project directories: ${msg}`);
+      }
+      return;
+    }
+
     if (options.lastSession) {
-      const summary = getLastSessionSummary();
+      const { projectPath: lsProjectPath } = resolveProjectContext();
+      if (!lsProjectPath && !options.global) {
+        console.log('Not inside a recognized project directory. Showing global data.');
+      }
+      const lsSummaries = loadSessionSummaries(lsProjectPath ?? undefined);
+      const summary = lsSummaries.length > 0 ? lsSummaries[lsSummaries.length - 1] : null;
       if (!summary) {
         console.log(chalk.yellow('No session summaries recorded yet. Complete a session first.'));
         return;
@@ -707,9 +763,13 @@ program
     }
 
     if (options.sessions !== undefined) {
+      const { projectPath: sessProjectPath } = resolveProjectContext();
+      if (!sessProjectPath && !options.global) {
+        console.log('Not inside a recognized project directory. Showing global data.');
+      }
       const n = typeof options.sessions === 'string' ? parseInt(options.sessions) : 10;
       const count = isNaN(n) ? 10 : n;
-      const allSummaries = loadSessionSummaries();
+      const allSummaries = loadSessionSummaries(sessProjectPath ?? undefined);
 
       if (allSummaries.length === 0) {
         console.log(chalk.yellow('No session summaries recorded yet. Complete a session first.'));
@@ -777,6 +837,24 @@ program
     if (options.stats) {
       const stats = generateLearningStats(process.cwd());
       console.log(formatLearningStats(stats));
+
+      try {
+        const projectsDir = join(getLearningDir(), 'projects');
+        const projStats = collectProjectDirStats(projectsDir);
+        if (projStats.length > 0) {
+          console.log('\nPer-Project Storage:');
+          let totalBytes = 0;
+          for (const ps of projStats) {
+            const sizeKb = (ps.sizeBytes / 1024).toFixed(0) + ' KB';
+            console.log(`  ${ps.slug.padEnd(40)} ${sizeKb.padStart(8)}`);
+            totalBytes += ps.sizeBytes;
+          }
+          const totalKb = (totalBytes / 1024).toFixed(0) + ' KB';
+          console.log(`  ${'-'.repeat(49)}`);
+          console.log(`  Total (${projStats.length} project${projStats.length === 1 ? '' : 's'}):${' '.repeat(Math.max(0, 33 - String(projStats.length).length - 10))} ${totalKb.padStart(8)}`);
+          console.log(`\nGlobal learning directory: ${getLearningDir()} (${totalKb})`);
+        }
+      } catch {}
       return;
     }
 
@@ -792,11 +870,16 @@ program
     }
 
     if (options.show) {
+      const { projectPath: showProjectPath, isInProject: showIsInProject } = resolveProjectContext();
+      if (!showIsInProject && !options.global) {
+        console.log('Not inside a recognized project directory. Showing global data.');
+      }
+
       console.log(chalk.blue.bold('\n╭─────────────────────────────────────────────────────────────╮'));
       console.log(chalk.blue.bold('│                  OLYMPUS LEARNING STATUS                    │'));
       console.log(chalk.blue.bold('╰─────────────────────────────────────────────────────────────╯\n'));
 
-      const feedback = readFeedbackLog();
+      const feedback = readFeedbackLog(showProjectPath ?? undefined);
       const revisions = feedback.filter(f => f.event_type === 'revision').length;
       const cancellations = feedback.filter(f => f.event_type === 'cancellation').length;
       const successes = feedback.filter(f => f.event_type === 'success').length;
@@ -813,8 +896,18 @@ program
         console.log(chalk.white('👤 User Preferences:'));
         if (prefs.verbosity !== 'unknown') console.log(`   • Verbosity: ${prefs.verbosity}`);
         if (prefs.autonomy !== 'unknown') console.log(`   • Autonomy: ${prefs.autonomy}`);
-        for (const rule of prefs.explicit_rules.slice(0, 3)) {
-          console.log(`   • ${rule}`);
+        const filteredRules = (prefs.explicit_rules as unknown[]).filter((r): r is { rule: string; project_path?: string } => {
+          if (typeof r === 'object' && r !== null && 'rule' in r) {
+            const rObj = r as { rule: string; project_path?: string };
+            return !showProjectPath || !rObj.project_path || rObj.project_path === showProjectPath;
+          }
+          return true;
+        });
+        for (const rule of filteredRules.slice(0, 3)) {
+          const ruleText = typeof rule === 'object' && rule !== null && 'rule' in rule
+            ? (rule as { rule: string }).rule
+            : String(rule);
+          console.log(`   * ${ruleText}`);
         }
         console.log('');
       }
@@ -827,10 +920,7 @@ program
         console.log('');
       }
 
-      const agentPerf = readJsonFile<Record<string, AgentPerformance>>(
-        join(learningDir, 'agent-performance.json'),
-        {}
-      );
+      const agentPerf = readAgentPerformance(showProjectPath ?? undefined);
 
       if (Object.keys(agentPerf).length > 0) {
         console.log(chalk.white('🤖 Agent Performance:'));
@@ -841,7 +931,17 @@ program
         console.log('');
       }
 
-      // Show discoveries
+      const showSummaries = loadSessionSummaries(showProjectPath ?? undefined);
+      if (showSummaries.length > 0) {
+        console.log(chalk.white('📅 Sessions:'));
+        console.log(`   • Total recorded: ${showSummaries.length}`);
+        const lastS = showSummaries[showSummaries.length - 1];
+        if (lastS) {
+          console.log(`   • Last: ${new Date(lastS.started_at).toLocaleString()}`);
+        }
+        console.log('');
+      }
+
       const discoveries = readDiscoveries(process.cwd());
       if (discoveries.total_discoveries > 0) {
         console.log(chalk.white('💡 Discoveries:'));
@@ -857,7 +957,6 @@ program
         console.log('');
       }
 
-      // Show auto-discovery configuration status
       try {
         const { loadDiscoveryConfig } = await import('../learning/config.js');
         const discoveryConfig = loadDiscoveryConfig(process.cwd());
@@ -868,7 +967,6 @@ program
         console.log(`   • Limits: ${discoveryConfig.maxPerSession}/session, ${discoveryConfig.maxPerDay}/day`);
         console.log(`   • Dedup Window: ${discoveryConfig.deduplicationWindowDays} days`);
 
-        // Show recent auto-discoveries with confidence scores
         if (discoveries.total_discoveries > 0) {
           const recentAuto = [...discoveries.project_discoveries]
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -885,17 +983,20 @@ program
         }
         console.log('');
       } catch {
-        // Silent failure - auto-discovery status is non-critical
       }
 
       return;
     }
 
     if (options.analyze) {
+      const { projectPath: analyzeProjectPath } = resolveProjectContext();
+      if (!analyzeProjectPath && !options.global) {
+        console.log('Not inside a recognized project directory. Showing global data.');
+      }
       console.log(chalk.blue('Analyzing feedback...\n'));
 
-      const feedback = readFeedbackLog();
-      const patterns = extractPatterns(feedback);
+      const feedback = readFeedbackLog(analyzeProjectPath ?? undefined);
+      const patterns = extractPatterns(feedback, undefined, undefined, analyzeProjectPath ?? undefined);
 
       console.log(chalk.white(`Found ${patterns.length} patterns:\n`));
       for (const p of patterns) {
@@ -903,26 +1004,22 @@ program
         console.log(chalk.gray(`       Seen ${p.evidence_count}x, scope: ${p.scope}, category: ${p.category}`));
       }
 
-      // Update preferences
       const currentPrefs = readJsonFile<UserPreferences>(
         join(learningDir, 'user-preferences.json'),
         createDefaultPreferences()
       );
 
-      const updatedPrefs = updatePreferences(currentPrefs, feedback, patterns);
+      const updatedPrefs = updatePreferences(currentPrefs, feedback, patterns, analyzeProjectPath ?? undefined);
       writeJsonFile(join(learningDir, 'user-preferences.json'), updatedPrefs);
 
-      // Update agent performance
       const agentPerf = evaluateAgentPerformance(feedback);
-
-      // Extract task patterns for routing recommendations
       const agentPerfObj = Object.fromEntries(agentPerf);
 
-      // Load existing performance to preserve existing task_patterns
-      const existingPerf = readJsonFile<Record<string, AgentPerformance>>(
-        join(learningDir, 'agent-performance.json'),
-        {}
-      );
+      const agentPerfWritePath = analyzeProjectPath
+        ? join(getProjectScopedDir(analyzeProjectPath), 'agent-performance.json')
+        : join(learningDir, 'agent-performance.json');
+
+      const existingPerf = readJsonFile<Record<string, AgentPerformance>>(agentPerfWritePath, {});
 
       // Analyze task patterns per agent
       for (const [agentName, perf] of Object.entries(agentPerfObj)) {
@@ -958,15 +1055,13 @@ program
         }
 
         if (taskPatterns.length > 0) {
-          perf.task_patterns = taskPatterns.slice(0, 10); // Limit to top 10 patterns
+          perf.task_patterns = taskPatterns.slice(0, 10);
         } else if (existingPerf[agentName]?.task_patterns) {
-          // Preserve existing patterns if no new ones found
           perf.task_patterns = existingPerf[agentName].task_patterns;
         }
       }
 
-      // Write with patterns included
-      writeJsonFile(join(learningDir, 'agent-performance.json'), agentPerfObj);
+      writeJsonFile(agentPerfWritePath, agentPerfObj);
 
       const totalPatterns = Object.values(agentPerfObj).reduce(
         (sum, p) => sum + (p.task_patterns?.length || 0), 0
@@ -1037,19 +1132,38 @@ program
 
     if (options.forget) {
       if (options.project) {
-        const projectDir = join(process.cwd(), '.olympus', 'learning');
-        if (existsSync(projectDir)) {
-          rmSync(projectDir, { recursive: true });
-          console.log(chalk.green('✓ Project learnings forgotten.'));
-        } else {
-          console.log(chalk.yellow('No project learnings found.'));
-        }
+        try {
+          const targetSlug = typeof options.project === 'string'
+            ? options.project
+            : deriveProjectSlug(resolveProjectRoot(process.cwd()));
+          const targetPath = join(getLearningDir(), 'projects', targetSlug);
 
-        // DELETE SESSION STATE (privacy fix)
-        const sessionStatePath = getSessionStatePath(process.cwd());
-        if (existsSync(sessionStatePath)) {
-          rmSync(sessionStatePath);
-          console.log(chalk.green('✓ Session state deleted.'));
+          if (!options.confirm) {
+            if (!existsSync(targetPath)) {
+              console.log(`Project directory not found: ${targetSlug}`);
+              return;
+            }
+            const files = readdirSync(targetPath);
+            console.log(`Would delete: ${targetPath}`);
+            for (const f of files) {
+              const fp = join(targetPath, f);
+              let sz = 0;
+              try { sz = statSync(fp).size; } catch {}
+              console.log(`  ${f} (${sz} bytes)`);
+            }
+            console.log('Run with --confirm to delete.');
+          } else {
+            if (!existsSync(targetPath)) {
+              console.log(`Project directory not found: ${targetSlug}`);
+              return;
+            }
+            const fileCount = readdirSync(targetPath).length;
+            rmSync(targetPath, { recursive: true, force: true });
+            console.log(chalk.green(`Deleted project data for ${targetSlug} (${fileCount} files removed).`));
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[Olympus] Failed to forget project: ${msg}`);
         }
       } else {
         if (existsSync(learningDir)) {
@@ -1063,15 +1177,33 @@ program
       return;
     }
 
-    if (options.export) {
-      const data = {
-        feedback: readFeedbackLog(),
-        preferences: readJsonFile(join(learningDir, 'user-preferences.json'), null),
-        agentPerformance: readJsonFile(join(learningDir, 'agent-performance.json'), {}),
-        discoveries: readDiscoveries(process.cwd()),
-        exportedAt: new Date().toISOString(),
-      };
-      console.log(JSON.stringify(data, null, 2));
+    if (options.export !== undefined) {
+      try {
+        const { projectPath: exportProjectPath, isInProject: exportIsInProject } = resolveProjectContext();
+        if (!exportIsInProject) {
+          console.log('Not inside a recognized project directory. Showing global data.');
+          return;
+        }
+        const exportProjDir = getProjectScopedDir(exportProjectPath!);
+        const readRaw = (file: string): string | null => {
+          const p = join(exportProjDir, file);
+          return existsSync(p) ? readFileSync(p, 'utf-8') : null;
+        };
+        const output = JSON.stringify({
+          feedback_log: readRaw('feedback-log.jsonl'),
+          agent_performance: readRaw('agent-performance.json'),
+          session_insights: readRaw('session-insights.json'),
+        }, null, 2);
+        if (typeof options.export === 'string' && options.export.length > 0) {
+          writeFileSync(options.export, output, 'utf-8');
+          console.log(chalk.green(`✓ Exported to ${options.export}`));
+        } else {
+          console.log(output);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[Olympus] Failed to export: ${msg}`);
+      }
       return;
     }
 
@@ -1108,13 +1240,13 @@ program
     }
 
     if (options.efficiency) {
-      const feedback = readFeedbackLog();
-      const agentPerfRaw = readJsonFile<Record<string, AgentPerformance>>(
-        join(learningDir, 'agent-performance.json'),
-        {}
-      );
+      const { projectPath: effProjectPath } = resolveProjectContext();
+      if (!effProjectPath && !options.global) {
+        console.log('Not inside a recognized project directory. Showing global data.');
+      }
+      const feedback = readFeedbackLog(effProjectPath ?? undefined);
+      const agentPerfRaw = readAgentPerformance(effProjectPath ?? undefined);
 
-      // Compute agent performance from feedback if not already computed
       const agentPerf: Record<string, AgentPerformance> = {};
       const agentNames = new Set(feedback.filter(f => f.agent_used).map(f => f.agent_used!));
 
@@ -1125,7 +1257,6 @@ program
         }
       }
 
-      // Merge with existing performance data
       Object.assign(agentPerf, agentPerfRaw);
 
       const agents = Object.values(agentPerf).filter(p => hasEfficiencyMetrics(p));

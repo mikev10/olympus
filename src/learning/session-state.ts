@@ -14,7 +14,7 @@ export function getSessionStatePath(directory: string): string {
 
 /** Create fresh session state */
 export function createSessionState(sessionId?: string, projectPath?: string): SessionState {
-  const baseline = getSessionBaseline(projectPath);
+  const baseline = getSessionBaseline();
 
   return {
     session_id: sessionId || randomUUID(),
@@ -37,6 +37,7 @@ export function createSessionState(sessionId?: string, projectPath?: string): Se
       daily_count: 0,
       daily_reset_at: new Date().toISOString(),
     },
+    resolved_project_root: null,
   };
 }
 
@@ -63,7 +64,7 @@ export function loadSessionState(directory: string, sessionId?: string): Session
 
   // Initialize token_budget if missing (backward compatibility)
   if (!state.token_budget) {
-    const baseline = getSessionBaseline(directory);
+    const baseline = getSessionBaseline();
     state.token_budget = {
       session_baseline: baseline,
       current_usage: 0,
@@ -90,6 +91,10 @@ export function loadSessionState(directory: string, sessionId?: string): Session
       daily_count: 0,
       daily_reset_at: new Date().toISOString(),
     };
+  }
+
+  if (state.resolved_project_root === undefined) {
+    state.resolved_project_root = null;
   }
 
   return state;
@@ -157,7 +162,7 @@ export function initializeTokenBudget(
   state: SessionState,
   projectPath?: string
 ): SessionState {
-  const baseline = getSessionBaseline(projectPath);
+  const baseline = getSessionBaseline();
 
   state.token_budget = {
     session_baseline: baseline,

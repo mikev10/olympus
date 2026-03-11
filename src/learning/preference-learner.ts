@@ -62,18 +62,25 @@ function inferAutonomy(feedback: FeedbackEntry[]): 'ask_first' | 'just_do_it' | 
   return 'unknown';
 }
 
-/** Update preferences based on new feedback */
 export function updatePreferences(
   currentPrefs: UserPreferences,
   newFeedback: FeedbackEntry[],
-  extractedPatterns: ExtractedPattern[]
+  extractedPatterns: ExtractedPattern[],
+  projectPath?: string
 ): UserPreferences {
-  // Start with current preferences
   const updated: UserPreferences = { ...currentPrefs };
 
-  // Add new explicit rules
-  const newRules = extractExplicitPreferences(newFeedback);
-  updated.explicit_rules = [...new Set([...updated.explicit_rules, ...newRules])];
+  const inferredProjectPath = projectPath ?? newFeedback.find(e => e.project_path)?.project_path;
+  const newRuleStrings = extractExplicitPreferences(newFeedback);
+  const existingRuleStrings = new Set(updated.explicit_rules.map(r => r.rule));
+  const newExplicitRules = newRuleStrings
+    .filter(r => !existingRuleStrings.has(r))
+    .map(r => ({
+      rule: r,
+      created_at: new Date().toISOString(),
+      ...(inferredProjectPath ? { project_path: inferredProjectPath } : {}),
+    }));
+  updated.explicit_rules = [...updated.explicit_rules, ...newExplicitRules];
 
   // Update verbosity if we have enough signal
   const newVerbosity = inferVerbosity(newFeedback);

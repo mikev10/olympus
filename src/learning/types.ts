@@ -66,6 +66,8 @@ export interface SessionState {
     daily_count: number;        // Discoveries today (max 20)
     daily_reset_at: string;     // ISO timestamp for daily reset
   };
+
+  resolved_project_root: string | null;  // Cached canonical project root (null until first resolution)
 }
 
 export type FeedbackCategory =
@@ -135,12 +137,19 @@ export interface SessionSummary {
   outcome: 'success' | 'revision' | 'cancellation' | 'unknown';
 }
 
+export interface ExplicitRule {
+  rule: string;
+  project_path?: string;
+  source?: string;
+  created_at?: string;
+}
+
 export interface UserPreferences {
   verbosity: 'concise' | 'detailed' | 'unknown';
   autonomy: 'ask_first' | 'just_do_it' | 'balanced' | 'unknown';
   explanation_depth: 'minimal' | 'moderate' | 'thorough' | 'unknown';
 
-  explicit_rules: string[];           // "always use TypeScript"
+  explicit_rules: ExplicitRule[];     // ExplicitRule objects with optional project scoping
   inferred_preferences: string[];     // Learned from patterns
   recurring_corrections: Array<{
     pattern: string;
@@ -240,6 +249,38 @@ export const DEFAULT_ARCHIVE_RETENTION: ArchiveRetentionConfig = {
   maxAgeInDays: 30,
   maxArchiveCount: 5,
 };
+
+/**
+ * Aggregated session insights for observability
+ * Written to session-insights.json, NOT injected into context (BR-INT-005)
+ */
+export interface SessionInsights {
+  project_slug: string;
+  computed_at: string; // ISO 8601
+  high_token_sessions: Array<{
+    session_id: string;
+    total_tokens: number;
+    baseline_tokens: number;
+    ratio: number; // total_tokens / baseline_tokens, >= 2.0
+  }>;
+  agent_usage: Record<string, number>; // agent_name -> invocation count
+  duration_trend: {
+    rolling_avg_seconds: number;
+    sample_count: number;
+  };
+  outcome_distribution: {
+    success: number;
+    revision: number;
+    cancellation: number;
+    unknown: number;
+    total: number;
+  };
+  cost_trend: {
+    rolling_avg_cost: number;
+    total_cost: number;
+    sample_count: number;
+  };
+}
 
 // AGENT DISCOVERY TYPES (Phase 6)
 

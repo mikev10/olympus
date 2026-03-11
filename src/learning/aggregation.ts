@@ -5,6 +5,8 @@
 
 import { AgentPerformance, TokenEfficiency, FeedbackEntry } from './types.js';
 import { calculateEfficiencyScore, calculateTrend } from './efficiency.js';
+import { readAgentPerformance } from './storage.js';
+import { getSessionBaseline } from './baselines.js';
 
 /**
  * Update agent token efficiency with new session data
@@ -16,19 +18,46 @@ import { calculateEfficiencyScore, calculateTrend } from './efficiency.js';
  * @param baselineTokens - Global baseline for efficiency calculation
  * @returns Updated performance with new token efficiency
  */
+function resolveBaseline(
+  performance: AgentPerformance,
+  baselineTokens: number,
+  projectPath?: string
+): number {
+  if (projectPath) {
+    try {
+      const projectPerf = readAgentPerformance(projectPath);
+      const agentPerf = projectPerf[performance.agent_name];
+      if (agentPerf?.token_efficiency && agentPerf.token_efficiency.invocation_count >= 5) {
+        return agentPerf.token_efficiency.total_tokens / agentPerf.token_efficiency.invocation_count;
+      }
+    } catch { /* fall through */ }
+
+    try {
+      const globalPerf = readAgentPerformance();
+      const agentPerf = globalPerf[performance.agent_name];
+      if (agentPerf?.token_efficiency && agentPerf.token_efficiency.invocation_count >= 5) {
+        return agentPerf.token_efficiency.total_tokens / agentPerf.token_efficiency.invocation_count;
+      }
+    } catch { /* fall through */ }
+  }
+
+  return baselineTokens;
+}
+
 export function updateAgentTokenEfficiency(
   performance: AgentPerformance,
   newTokens: number,
   success: boolean,
-  baselineTokens: number
+  baselineTokens: number,
+  projectPath?: string
 ): AgentPerformance {
   if (newTokens < 0) {
     throw new Error('Token count cannot be negative');
   }
 
+  const resolvedBaseline = resolveBaseline(performance, baselineTokens, projectPath);
   const currentEfficiency = performance.token_efficiency;
 
-  // Initialize efficiency data for new agent
   if (!currentEfficiency) {
     return {
       ...performance,
@@ -40,19 +69,17 @@ export function updateAgentTokenEfficiency(
         efficiency_score: calculateEfficiencyScore(
           success ? 1 : 0,
           newTokens,
-          baselineTokens
+          resolvedBaseline
         ),
         trend: 'insufficient_data'
       }
     };
   }
 
-  // Update counts
   const newInvocationCount = currentEfficiency.invocation_count + 1;
   const newTotalTokens = currentEfficiency.total_tokens + newTokens;
 
-  // Update success/failure averages using exponential moving average
-  const ALPHA = 0.2; // Weight for new samples (higher = more reactive)
+  const ALPHA = 0.2;
 
   let newAvgSuccess = currentEfficiency.avg_tokens_per_success;
   let newAvgFailure = currentEfficiency.avg_tokens_per_failure;
@@ -67,17 +94,14 @@ export function updateAgentTokenEfficiency(
       : currentEfficiency.avg_tokens_per_failure * (1 - ALPHA) + newTokens * ALPHA;
   }
 
-  // Calculate recent average (last 10 samples approximation)
   const recentAvg = newTokens * ALPHA + (newTotalTokens / newInvocationCount) * (1 - ALPHA);
   const historicalAvg = newTotalTokens / newInvocationCount;
 
-  // Calculate trend
   const trend = calculateTrend(recentAvg, historicalAvg, newInvocationCount);
 
-  // Recalculate efficiency score
   const avgTokens = newTotalTokens / newInvocationCount;
-  const successRate = performance.success_rate; // Use existing success rate
-  const efficiencyScore = calculateEfficiencyScore(successRate, avgTokens, baselineTokens);
+  const successRate = performance.success_rate;
+  const efficiencyScore = calculateEfficiencyScore(successRate, avgTokens, resolvedBaseline);
 
   return {
     ...performance,

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { appendFeedback, readFeedbackLog, getLearningDir, updateAgentPerformance } from '../../learning/storage.js';
@@ -7,40 +7,18 @@ import type { FeedbackEntry } from '../../learning/types.js';
 const TEST_DIR = join(process.cwd(), '.test-learning');
 
 describe('Storage with Rotation', () => {
-  let originalHome: string | undefined;
-  let originalUserProfile: string | undefined;
-
   beforeEach(() => {
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
     }
     mkdirSync(TEST_DIR, { recursive: true });
-
-    // Save original values
-    originalHome = process.env.HOME;
-    originalUserProfile = process.env.USERPROFILE;
-
-    // Set both HOME (Unix) and USERPROFILE (Windows)
-    process.env.HOME = TEST_DIR;
-    process.env.USERPROFILE = TEST_DIR;
+    process.env.OLYMPUS_TEST_LEARNING_DIR = TEST_DIR;
   });
 
   afterEach(() => {
+    delete process.env.OLYMPUS_TEST_LEARNING_DIR;
     if (existsSync(TEST_DIR)) {
       rmSync(TEST_DIR, { recursive: true });
-    }
-
-    // Restore original values
-    if (originalHome !== undefined) {
-      process.env.HOME = originalHome;
-    } else {
-      delete process.env.HOME;
-    }
-
-    if (originalUserProfile !== undefined) {
-      process.env.USERPROFILE = originalUserProfile;
-    } else {
-      delete process.env.USERPROFILE;
     }
   });
 
@@ -49,35 +27,28 @@ describe('Storage with Rotation', () => {
       id: 'test-1',
       timestamp: new Date().toISOString(),
       session_id: 'session-1',
-      project_path: '/test',
+      project_path: '',
       event_type: 'revision',
       user_message: 'Test message',
       feedback_category: 'correction',
       confidence: 0.9,
     };
 
-    // Create a file with many lines (simulating large file)
-    const learningDir = join(TEST_DIR, '.claude', 'olympus', 'learning');
-    mkdirSync(learningDir, { recursive: true });
-    const logPath = join(learningDir, 'feedback-log.jsonl');
+    const logPath = join(TEST_DIR, 'feedback-log.jsonl');
 
-    // Write 10,001 lines to trigger rotation
     const lines: string[] = [];
     for (let i = 0; i < 10001; i++) {
       lines.push(JSON.stringify({ ...testEntry, id: `test-${i}` }));
     }
     writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
 
-    // Append new entry (should trigger rotation)
     appendFeedback(testEntry);
 
-    // Check that archive file was created
-    const files = require('fs').readdirSync(learningDir);
+    const files = require('fs').readdirSync(TEST_DIR);
     const archiveFiles = files.filter((f: string) => f.includes('.old.jsonl'));
 
     expect(archiveFiles.length).toBeGreaterThan(0);
 
-    // Check that new file has only 1 entry
     const newLog = readFeedbackLog();
     expect(newLog.length).toBe(1);
   });
@@ -87,20 +58,18 @@ describe('Storage with Rotation', () => {
       id: 'test-1',
       timestamp: new Date().toISOString(),
       session_id: 'session-1',
-      project_path: '/test',
+      project_path: '',
       event_type: 'revision',
       user_message: 'Test message',
       feedback_category: 'correction',
       confidence: 0.9,
     };
 
-    // Add a few entries (below threshold)
     for (let i = 0; i < 5; i++) {
       appendFeedback({ ...testEntry, id: `test-${i}` });
     }
 
-    const learningDir = join(TEST_DIR, '.claude', 'olympus', 'learning');
-    const files = require('fs').readdirSync(learningDir);
+    const files = require('fs').readdirSync(TEST_DIR);
     const archiveFiles = files.filter((f: string) => f.includes('.old.jsonl'));
 
     expect(archiveFiles.length).toBe(0);
@@ -125,6 +94,18 @@ function mockFeedbackEntry(overrides: Partial<FeedbackEntry>): FeedbackEntry {
 }
 
 describe('updateAgentPerformance derived fields', () => {
+  const PERF_TEST_DIR = join(process.cwd(), '.test-learning-perf-' + Date.now());
+
+  beforeEach(() => {
+    mkdirSync(PERF_TEST_DIR, { recursive: true });
+    process.env.OLYMPUS_TEST_LEARNING_DIR = PERF_TEST_DIR;
+  });
+
+  afterEach(() => {
+    delete process.env.OLYMPUS_TEST_LEARNING_DIR;
+    rmSync(PERF_TEST_DIR, { recursive: true, force: true });
+  });
+
   it('90% success rate populates strong_areas and leaves weak_areas empty', () => {
     const entries: FeedbackEntry[] = [
       ...Array.from({ length: 9 }, (_, i) =>

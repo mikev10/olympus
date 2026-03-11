@@ -1,6 +1,6 @@
 import { join } from 'path';
-import type { UserPreferences, AgentPerformance, ProjectPatterns, AgentDiscovery } from '../types.js';
-import { readJsonFile, getLearningDir, getProjectLearningDir } from '../storage.js';
+import type { UserPreferences, AgentPerformance, ProjectPatterns, AgentDiscovery, ExplicitRule } from '../types.js';
+import { readJsonFile, getLearningDir, getProjectLearningDir, readAgentPerformance } from '../storage.js';
 import { hasMinimumSamples } from '../aggregation.js';
 import { getSessionBaseline } from '../baselines.js';
 
@@ -18,16 +18,22 @@ export function generateLearnedContext(projectPath: string): string {
     null
   );
 
-  const agentPerformance = readJsonFile<Record<string, AgentPerformance>>(
-    join(getLearningDir(), 'agent-performance.json'),
-    {}
-  );
+  const globalPerf = readAgentPerformance();
+  const projectPerf = readAgentPerformance(projectPath);
+  const agentPerformance: Record<string, AgentPerformance> = { ...globalPerf, ...projectPerf };
 
   const sections: string[] = [];
 
-  // User preferences
   if (globalPrefs && hasContent(globalPrefs)) {
-    sections.push(formatPreferences(globalPrefs));
+    const filteredRules = globalPrefs.explicit_rules.filter(
+      (rule: ExplicitRule) =>
+        !rule.project_path || rule.project_path === projectPath
+    );
+    const filteredPrefs: UserPreferences = {
+      ...globalPrefs,
+      explicit_rules: filteredRules,
+    };
+    sections.push(formatPreferences(filteredPrefs));
   }
 
   // Project conventions
@@ -95,7 +101,8 @@ function formatPreferences(prefs: UserPreferences): string {
     lines.push(`- Autonomy: ${prefs.autonomy}`);
   }
   for (const rule of prefs.explicit_rules.slice(0, 5)) {
-    lines.push(`- ${rule}`);
+    const ruleText = typeof rule === 'string' ? rule : rule.rule;
+    lines.push(`- ${ruleText}`);
   }
 
   return lines.join('\n');

@@ -1,5 +1,7 @@
 import type { FeedbackEntry, ExtractedPattern } from './types.js';
 
+export const SIMILARITY_THRESHOLD = 0.4;
+
 /** Extract n-grams from text for similarity comparison */
 function extractNgrams(text: string, n: number = 2): Set<string> {
   const normalized = text.toLowerCase().replace(/[^\w\s]/g, '');
@@ -31,7 +33,7 @@ export function jaccardSimilarity(text1: string, text2: string): number {
 /** Group similar feedback entries */
 function clusterFeedback(
   entries: FeedbackEntry[],
-  similarityThreshold: number = 0.1
+  similarityThreshold: number = SIMILARITY_THRESHOLD
 ): FeedbackEntry[][] {
   const clusters: FeedbackEntry[][] = [];
   const assigned = new Set<string>();
@@ -62,10 +64,14 @@ function clusterFeedback(
 export function extractPatterns(
   feedbackLog: FeedbackEntry[],
   minOccurrences: number = 3,
-  maxEntries: number = 1000
+  maxEntries: number = 1000,
+  projectPath?: string
 ): ExtractedPattern[] {
-  // Only analyze recent feedback to improve performance
-  const recent = feedbackLog.slice(-maxEntries);
+  const filtered = projectPath
+    ? feedbackLog.filter(e => e.project_path === projectPath)
+    : feedbackLog;
+
+  const recent = filtered.slice(-maxEntries);
 
   // Only analyze corrections and clarifications
   const relevantFeedback = recent.filter(

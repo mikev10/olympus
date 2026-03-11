@@ -1,7 +1,15 @@
 import { join } from 'path';
-import { existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync, statSync, rmSync } from 'fs';
 import { getLearningDir, getProjectLearningDir } from './storage.js';
 import type { FeedbackEntry, AgentDiscovery } from './types.js';
+
+export interface ProjectDirStats {
+  slug: string;
+  lastModified: Date;
+  sizeBytes: number;
+  feedbackCount: number;
+  sessionCount: number;
+}
 
 export interface CleanupOptions {
   dryRun?: boolean;
@@ -16,6 +24,7 @@ export interface CleanupResult {
   archived_files_removed: number;
   space_freed_mb: number;
   files_processed: string[];
+  projects_pruned: number;
 }
 
 /** Clean up old learning data */
@@ -36,6 +45,7 @@ export function cleanupLearning(
     archived_files_removed: 0,
     space_freed_mb: 0,
     files_processed: [],
+    projects_pruned: 0,
   };
 
   const globalDir = getLearningDir();
@@ -99,7 +109,93 @@ export function cleanupLearning(
 
   result.space_freed_mb = parseFloat(result.space_freed_mb.toFixed(4));
 
+  const projectsDir = join(globalDir, 'projects');
+  if (existsSync(projectsDir)) {
+    const entries = readdirSync(projectsDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => ({
+        name: e.name,
+        path: join(projectsDir, e.name),
+        mtime: statSync(join(projectsDir, e.name)).mtime,
+      }));
+
+    const cutoff90 = new Date();
+    cutoff90.setDate(cutoff90.getDate() - 90);
+
+    const ageCandidates = new Set(entries.filter(e => e.mtime < cutoff90).map(e => e.name));
+    const remaining = entries.filter(e => !ageCandidates.has(e.name));
+
+    const countCandidates: Set<string> = new Set();
+    if (remaining.length > 50) {
+      const sorted = [...remaining].sort((a, b) => a.mtime.getTime() - b.mtime.getTime());
+      const toRemove = sorted.slice(0, remaining.length - 50);
+      for (const e of toRemove) countCandidates.add(e.name);
+    }
+
+    const allCandidates = [...ageCandidates, ...countCandidates].filter(
+      (name, idx, arr) => arr.indexOf(name) === idx
+    );
+
+    for (const name of allCandidates) {
+      const dirPath = join(projectsDir, name);
+      console.log(`[Olympus Cleanup] Pruning project directory: ${dirPath}`);
+      let spaceFreed = 0;
+      try {
+        const files = readdirSync(dirPath);
+        for (const f of files) {
+          try { spaceFreed += statSync(join(dirPath, f)).size; } catch {}
+        }
+      } catch {}
+      if (!dryRun) {
+        rmSync(dirPath, { recursive: true, force: true });
+      }
+      result.space_freed_mb += spaceFreed / (1024 * 1024);
+      result.projects_pruned++;
+      result.files_processed.push(dirPath);
+    }
+  }
+
+  result.space_freed_mb = parseFloat(result.space_freed_mb.toFixed(4));
+
   return result;
+}
+
+export function collectProjectDirStats(projectsDir: string): ProjectDirStats[] {
+  if (!existsSync(projectsDir)) return [];
+  const entries = readdirSync(projectsDir, { withFileTypes: true }).filter(e => e.isDirectory());
+  const stats: ProjectDirStats[] = [];
+  for (const entry of entries) {
+    const dirPath = join(projectsDir, entry.name);
+    const dirStat = statSync(dirPath);
+    let sizeBytes = 0;
+    let feedbackCount = 0;
+    let sessionCount = 0;
+    const knownFiles = [
+      'feedback-log.jsonl',
+      'agent-performance.json',
+      'session-summaries.jsonl',
+      'session-insights.json',
+      'baselines.json',
+      'preferences.json',
+    ];
+    for (const f of knownFiles) {
+      const fp = join(dirPath, f);
+      if (!existsSync(fp)) continue;
+      try { sizeBytes += statSync(fp).size; } catch {}
+      if (f === 'feedback-log.jsonl') {
+        try {
+          feedbackCount = readFileSync(fp, 'utf-8').split('\n').filter(l => l.trim()).length;
+        } catch {}
+      }
+      if (f === 'session-summaries.jsonl') {
+        try {
+          sessionCount = readFileSync(fp, 'utf-8').split('\n').filter(l => l.trim()).length;
+        } catch {}
+      }
+    }
+    stats.push({ slug: entry.name, lastModified: dirStat.mtime, sizeBytes, feedbackCount, sessionCount });
+  }
+  return stats.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
 }
 
 /** Clean old entries from feedback log */
@@ -197,19 +293,24 @@ export function formatCleanupResult(result: CleanupResult, dryRun: boolean): str
     lines.push(`Archived files:   ${result.archived_files_removed} ${dryRun ? 'would be' : ''} deleted`);
   }
 
+  if (result.projects_pruned > 0) {
+    lines.push(`Project directories: ${result.projects_pruned} ${dryRun ? 'would be' : ''} pruned`);
+  }
+
   if (result.space_freed_mb > 0) {
     lines.push(`Space freed:      ${result.space_freed_mb} MB`);
   }
 
   if (result.feedback_entries_removed === 0 &&
       result.discoveries_removed === 0 &&
-      result.archived_files_removed === 0) {
+      result.archived_files_removed === 0 &&
+      result.projects_pruned === 0) {
     lines.push('No cleanup needed.');
   }
 
   lines.push('');
 
-  if (dryRun && (result.feedback_entries_removed > 0 || result.discoveries_removed > 0 || result.archived_files_removed > 0)) {
+  if (dryRun && (result.feedback_entries_removed > 0 || result.discoveries_removed > 0 || result.archived_files_removed > 0 || result.projects_pruned > 0)) {
     lines.push('Run without --dry-run to execute cleanup.');
     lines.push('');
   }

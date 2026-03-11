@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { deriveProjectSlug } from '../../learning/project-resolver.js';
 import { registerDiscoveryCaptureHooks } from '../../hooks/registrations/discovery-capture.js';
 import { registerAgentTrackingHook } from '../../hooks/registrations/agent-tracking.js';
 import { registerLearningCaptureHooks } from '../../hooks/registrations/learning-capture.js';
@@ -218,8 +219,10 @@ describe('Discovery Integration', () => {
 
     await routeHook('Stop', { sessionId, directory: TEST_DIR });
 
-    // Verify feedback-log.jsonl exists and has content (from success detector, not Stop hook)
-    const feedbackPath = join(TEST_LEARNING_DIR, 'feedback-log.jsonl');
+    const slug = deriveProjectSlug(TEST_DIR);
+    const projectFeedbackPath = join(TEST_LEARNING_DIR, 'projects', slug, 'feedback-log.jsonl');
+    const globalFeedbackPath = join(TEST_LEARNING_DIR, 'feedback-log.jsonl');
+    const feedbackPath = existsSync(projectFeedbackPath) ? projectFeedbackPath : globalFeedbackPath;
     expect(existsSync(feedbackPath)).toBe(true);
 
     const feedbackContent = readFileSync(feedbackPath, 'utf-8');

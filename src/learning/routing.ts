@@ -1,7 +1,9 @@
 import { join } from 'path';
-import { getLearningDir, readJsonFile, writeJsonFile } from './storage.js';
+import { getLearningDir, readJsonFile, writeJsonFile, readAgentPerformance } from './storage.js';
 import type { AgentPerformance, RoutingThresholds } from './types.js';
 import { extractPatterns as extractTaskPatterns } from './pattern-matcher.js';
+
+export const COLD_START_FALLBACK_RATE = 0.5;
 
 /** Default routing configuration */
 const DEFAULT_ROUTING_CONFIG = {
@@ -61,9 +63,18 @@ function findAgentTier(
  *
  * This function must be fast (<50ms) to fit within the 100ms hook timeout.
  */
+function resolveBlendedSuccessRate(
+  perf: AgentPerformance | undefined,
+  weight: number
+): number {
+  if (!perf || weight === 0) return COLD_START_FALLBACK_RATE;
+  return weight * perf.success_rate + (1 - weight) * COLD_START_FALLBACK_RATE;
+}
+
 export function getRoutingRecommendation(
   agentName: string,
-  taskDescription: string
+  taskDescription: string,
+  projectPath?: string
 ): string | null {
   try {
     const config = loadRoutingConfig();
@@ -73,27 +84,25 @@ export function getRoutingRecommendation(
     const tierInfo = findAgentTier(agentName, config.agentTiers);
     if (!tierInfo) return null;
 
-    // Only recommend if the requested agent is NOT already the lowest tier
     if (tierInfo.index === 0) return null;
 
-    // Load agent performance data
-    const perfPath = join(getLearningDir(), 'agent-performance.json');
-    const allPerf = readJsonFile<Record<string, AgentPerformance>>(perfPath, {});
+    const allPerf = readAgentPerformance(projectPath);
 
-    // Check lower-tier agents for sufficient data and success rate
-    // Start from the lowest tier (index 0) and work upward
     const lowerTierAgents = tierInfo.tierList.slice(0, tierInfo.index);
 
     for (const lowerAgent of lowerTierAgents) {
       const perf = allPerf[lowerAgent];
-      if (!perf) continue;
 
-      if (perf.total_invocations < config.minDataPoints) continue;
-      if (perf.success_rate < config.minSuccessRate) continue;
+      const invocations = perf?.total_invocations ?? 0;
+      const weight = Math.min(1.0, invocations / 5);
+      const blendedRate = resolveBlendedSuccessRate(perf, weight);
 
-      // Check task patterns for more specific recommendation
+      if (blendedRate < config.minSuccessRate) continue;
+
+      if (weight >= 1.0 && invocations < config.minDataPoints) continue;
+
       let patternNote = '';
-      if (perf.task_patterns && perf.task_patterns.length > 0) {
+      if (perf?.task_patterns && perf.task_patterns.length > 0) {
         const matchedPatterns = extractTaskPatterns(taskDescription);
         for (const tp of perf.task_patterns) {
           if (matchedPatterns.includes(tp.pattern) &&
@@ -105,13 +114,13 @@ export function getRoutingRecommendation(
         }
       }
 
-      const successPct = (perf.success_rate * 100).toFixed(0);
-      return `Based on ${perf.total_invocations} data points, ${lowerAgent} handles this type of task with ${successPct}% success rate${patternNote}. Consider using ${lowerAgent} instead of ${agentName} to save tokens.`;
+      const successPct = (blendedRate * 100).toFixed(0);
+      const dataPoints = invocations;
+      return `Based on ${dataPoints} data points, ${lowerAgent} handles this type of task with ${successPct}% success rate${patternNote}. Consider using ${lowerAgent} instead of ${agentName} to save tokens.`;
     }
 
     return null;
   } catch {
-    // Any error → no recommendation (non-critical)
     return null;
   }
 }

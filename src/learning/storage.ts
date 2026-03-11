@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import type { FeedbackEntry, AgentPerformance, TokenEfficiency, SessionSummary, ArchiveRetentionConfig } from './types.js';
 import { DEFAULT_ARCHIVE_RETENTION } from './types.js';
 import { getTokenUsage, safeTokenTotal } from './utils.js';
+import { deriveProjectSlug, getProjectScopedDir, ensureProjectDir } from './project-resolver.js';
 
 /** Maximum lines before rotating JSONL files */
 const MAX_JSONL_LINES = 10000;
@@ -130,20 +131,29 @@ function rotateIfNeeded(
   }
 }
 
-/** Append feedback entry to JSONL log */
 export function appendFeedback(entry: FeedbackEntry): void {
+  if (entry.project_path && typeof entry.project_path === 'string') {
+    try {
+      ensureProjectDir(entry.project_path);
+      const projectLogPath = join(getProjectScopedDir(entry.project_path), 'feedback-log.jsonl');
+      rotateIfNeeded(projectLogPath);
+      appendFileSync(projectLogPath, JSON.stringify(entry) + '\n', 'utf-8');
+      return;
+    } catch (error) {
+      console.error('[Olympus Learning] Project write failed, using global fallback:', error);
+    }
+  }
+
   ensureLearningDirs();
   const logPath = join(getLearningDir(), 'feedback-log.jsonl');
-
-  // Rotate before appending
   rotateIfNeeded(logPath);
-
   appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
 }
 
-/** Read feedback log */
-export function readFeedbackLog(): FeedbackEntry[] {
-  const logPath = join(getLearningDir(), 'feedback-log.jsonl');
+export function readFeedbackLog(projectPath?: string): FeedbackEntry[] {
+  const logPath = projectPath
+    ? join(getProjectScopedDir(projectPath), 'feedback-log.jsonl')
+    : join(getLearningDir(), 'feedback-log.jsonl');
   if (!existsSync(logPath)) return [];
 
   const content = readFileSync(logPath, 'utf-8');
@@ -215,7 +225,8 @@ function deriveWeakAreas(successRate: number, cancellationCount: number): string
 
 export function updateAgentPerformance(
   agentName: string,
-  feedbackEntries: FeedbackEntry[]
+  feedbackEntries: FeedbackEntry[],
+  projectPath?: string
 ): AgentPerformance | null {
   const agentEntries = feedbackEntries.filter(e => e.agent_used === agentName);
 
@@ -223,14 +234,12 @@ export function updateAgentPerformance(
     return null;
   }
 
-  // Basic performance metrics
   const totalInvocations = agentEntries.length;
   const successCount = agentEntries.filter(e => e.event_type === 'success').length;
   const revisionCount = agentEntries.filter(e => e.event_type === 'revision').length;
   const cancellationCount = agentEntries.filter(e => e.event_type === 'cancellation').length;
   const successRate = totalInvocations > 0 ? successCount / totalInvocations : 0;
 
-  // Token efficiency metrics
   let tokenEfficiency: TokenEfficiency | undefined;
 
   const entriesWithTokens = agentEntries.filter(e => getTokenUsage(e) !== null);
@@ -257,7 +266,6 @@ export function updateAgentPerformance(
       trend: 'insufficient_data' as const
     };
 
-    // Calculate trend (simple heuristic: compare first half vs second half)
     if (entriesWithTokens.length >= 10) {
       const midpoint = Math.floor(entriesWithTokens.length / 2);
       const firstHalf = entriesWithTokens.slice(0, midpoint);
@@ -267,19 +275,19 @@ export function updateAgentPerformance(
       const secondAvg = secondHalf.reduce((sum, e) => sum + safeTokenTotal(e), 0) / secondHalf.length;
 
       const difference = secondAvg - firstAvg;
-      const threshold = firstAvg * 0.1; // 10% threshold
+      const threshold = firstAvg * 0.1;
 
       if (Math.abs(difference) < threshold) {
         tokenEfficiency.trend = 'stable';
       } else if (difference < 0) {
-        tokenEfficiency.trend = 'improving'; // Fewer tokens is better
+        tokenEfficiency.trend = 'improving';
       } else {
         tokenEfficiency.trend = 'declining';
       }
     }
   }
 
-  return {
+  const performance: AgentPerformance = {
     agent_name: agentName,
     total_invocations: totalInvocations,
     success_count: successCount,
@@ -292,6 +300,31 @@ export function updateAgentPerformance(
     last_updated: new Date().toISOString(),
     token_efficiency: tokenEfficiency
   };
+
+  if (projectPath) {
+    try {
+      const projectPerfPath = join(getProjectScopedDir(projectPath), 'agent-performance.json');
+      const projectPerf = readJsonFile<Record<string, AgentPerformance>>(projectPerfPath, {});
+      projectPerf[agentName] = performance;
+      writeJsonFile(projectPerfPath, projectPerf);
+    } catch (error) {
+      console.error('[Olympus Learning] Failed to write project agent performance:', error);
+    }
+  }
+
+  const globalPerfPath = join(getLearningDir(), 'agent-performance.json');
+  const globalPerf = readJsonFile<Record<string, AgentPerformance>>(globalPerfPath, {});
+  globalPerf[agentName] = performance;
+  writeJsonFile(globalPerfPath, globalPerf);
+
+  return performance;
+}
+
+export function readAgentPerformance(projectPath?: string): Record<string, AgentPerformance> {
+  const perfPath = projectPath
+    ? join(getProjectScopedDir(projectPath), 'agent-performance.json')
+    : join(getLearningDir(), 'agent-performance.json');
+  return readJsonFile<Record<string, AgentPerformance>>(perfPath, {});
 }
 
 /**
@@ -327,17 +360,29 @@ export function writeJsonFile<T>(filePath: string, data: T): void {
   }
 }
 
-/** Append session summary to JSONL log */
-export function appendSessionSummary(summary: SessionSummary): void {
+export function appendSessionSummary(summary: SessionSummary, projectPath?: string): void {
+  if (projectPath) {
+    try {
+      ensureProjectDir(projectPath);
+      const projectLogPath = join(getProjectScopedDir(projectPath), 'session-summaries.jsonl');
+      rotateIfNeeded(projectLogPath, MAX_SESSION_SUMMARY_LINES);
+      appendFileSync(projectLogPath, JSON.stringify(summary) + '\n', 'utf-8');
+      return;
+    } catch (error) {
+      console.error('[Olympus Learning] Project session summary write failed, using global fallback:', error);
+    }
+  }
+
   ensureLearningDirs();
   const logPath = join(getLearningDir(), 'session-summaries.jsonl');
   rotateIfNeeded(logPath, MAX_SESSION_SUMMARY_LINES);
   appendFileSync(logPath, JSON.stringify(summary) + '\n', 'utf-8');
 }
 
-/** Load all session summaries */
-export function loadSessionSummaries(): SessionSummary[] {
-  const logPath = join(getLearningDir(), 'session-summaries.jsonl');
+export function loadSessionSummaries(projectPath?: string): SessionSummary[] {
+  const logPath = projectPath
+    ? join(getProjectScopedDir(projectPath), 'session-summaries.jsonl')
+    : join(getLearningDir(), 'session-summaries.jsonl');
   if (!existsSync(logPath)) return [];
   try {
     const content = readFileSync(logPath, 'utf-8');
