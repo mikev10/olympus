@@ -80,6 +80,12 @@ Examine planning sessions and identify:
 1. [Unusual scenario] - [How to handle]
 
 ### Recommendations
+For each finding above, provide an actionable recommendation:
+- **What to do**: Specific suggested course of action (incorporate as requirement, defer, investigate, add constraint, etc.)
+- **Priority**: Critical / Important / Nice-to-have
+- **Rationale**: Brief explanation of why this action is recommended
+
+Summary:
 - [Prioritized list of things to clarify before planning]
 ```
 </Output_Format>
