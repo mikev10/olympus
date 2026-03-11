@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-03-11
+
 ### Added
 
 - **`/archive` skill** — New slash command to archive completed AI-DLC workflows to `aidlc-docs/completed/` with support for `--all` and individual workflow IDs
