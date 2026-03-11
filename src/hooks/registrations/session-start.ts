@@ -5,6 +5,7 @@
  */
 
 import { registerHook } from '../registry.js';
+import { createMcpCleanupHook } from '../mcp-cleanup/index.js';
 import { readUltraworkState } from '../ultrawork-state/index.js';
 import { checkIncompleteTodos } from '../todo-continuation/index.js';
 import { generateLearnedContext, formatDiscoveries } from '../../learning/hooks/learned-context.js';
@@ -16,6 +17,8 @@ import { loadTrustState } from '../../features/workflow-engine/trust.js';
 import type { HookContext, HookResult } from '../types.js';
 
 export function registerSessionStartHooks(): void {
+  createMcpCleanupHook();
+
   // Learned Context Injection (earliest priority - adds context before other hooks)
   registerHook({
     name: 'learnedContextInjection',

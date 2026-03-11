@@ -44,6 +44,18 @@ export {
 } from './bridge.js';
 
 export {
+  createMcpCleanupHook,
+  cleanupOrphanedMcpProcesses,
+  findOrphanedMcpProcesses,
+  killOrphanedProcesses,
+  isMcpProcess,
+  HOOK_NAME as MCP_CLEANUP_HOOK_NAME,
+  MCP_COMMAND_PATTERN,
+  MCP_SPECIFIC_PATTERNS,
+  type ProcessInfo as McpProcessInfo
+} from './mcp-cleanup/index.js';
+
+export {
   // Edit Error Recovery
   createEditErrorRecoveryHook,
   detectEditError,
