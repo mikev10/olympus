@@ -57,14 +57,14 @@ Before starting anything new, check for existing workflow state.
 ### 1a. Handle --abort flag
 
 If the `--abort` flag is present:
-1. Scan `aidlc-docs/` subdirectories for checkpoint.json files. Read each to find active workflows.
+1. Scan `aidlc-docs/` subdirectories for checkpoint.json files (skip the `completed/` subdirectory — it contains archived workflows). Read each to find active workflows.
 2. If a checkpoint exists: update its status to 'archived'. Confirm to the user: "Workflow '{name}' archived at `aidlc-docs/{workflowId}/`."
 3. If no checkpoint exists: display "No active workflow to abort." and stop.
 4. Stop here — do not continue the pipeline.
 
 ### 1b. Check aidlc-docs/{workflowId}/checkpoint.json
 
-Scan the `aidlc-docs/` directory for workflow subdirectories. Each subdirectory that contains a `checkpoint.json` represents a workflow. Read each checkpoint to determine its status.
+Scan the `aidlc-docs/` directory for workflow subdirectories (skip the `completed/` subdirectory — it contains archived workflows, not active ones). Each subdirectory that contains a `checkpoint.json` represents a workflow. Read each checkpoint to determine its status.
 
 - **If checkpoint exists with `status: 'awaiting_mode_selection'`**: The pipeline previously completed Inception and is waiting for the user to choose an execution mode. Present the mode choice again (see Step 12) and stop — do not restart the pipeline.
 
@@ -834,7 +834,7 @@ graph TD
 - [ ] Design-time NFRs addressed in application design
 
 ### Construction
-- [ ] {unit-name}: {description}
+- [ ] {U-NNN: Name} (e.g., `U-001: Foundation`): {description}
 
 ### Post-Construction
 - [ ] Integration tests pass
@@ -1071,20 +1071,27 @@ Mark `inception_stages["units-generation"].status = "in_progress"`. Update check
 
 Read `requirements/requirements.md`, `user-stories/stories.md`, and `application-design/components.md` for context.
 
+**Unit Naming Convention** (MANDATORY):
+- Documentation headings use `## U-NNN: Name` format (e.g., `## U-001: Foundation`, `## U-002: API Layer`)
+- Construction folder names use `u-nnn-name` kebab-case format (e.g., `u-001-foundation/`, `u-002-api-layer/`)
+- The TypeScript engine enforces `u-nnn-name` folder format automatically via `slugifyUnitName()`
+- Numbering is zero-padded to three digits: U-001, U-002, ... U-010, U-011, etc.
+
 **`aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`**:
 
 ```markdown
 # Units of Work: {Title}
 
-## {unit-name}: {Module Name}
+## U-001: {Module Name}
 - **Scope**: {one-sentence scope description}
 - **Phase**: construction
 - **Estimated Effort**: {N}
 - **User Stories**: US-001, US-002
 - **NFRs**: SEC-001, PERF-001
 - **Components**: {component names}
+- **Folder**: `construction/u-001-{module-name-kebab}/`
 
-## {unit-name}: {Module Name}
+## U-002: {Module Name}
 ...
 ```
 
@@ -1097,16 +1104,16 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 
 | Unit | Depends On | Blocks |
 |------|-----------|--------|
-| {unit-name-a} | -- | {unit-name-b}, {unit-name-c} |
-| {unit-name-b} | {unit-name-a} | {unit-name-d} |
+| U-001: {Name A} | -- | U-002: {Name B}, U-003: {Name C} |
+| U-002: {Name B} | U-001: {Name A} | U-004: {Name D} |
 
 ## Dependency Diagram
 
 ```mermaid
 graph TD
-    U1[{unit-name-a}] --> U2[{unit-name-b}]
-    U1 --> U3[{unit-name-c}]
-    U2 --> U4[{unit-name-d}]
+    U1[U-001: Name A] --> U2[U-002: Name B]
+    U1 --> U3[U-003: Name C]
+    U2 --> U4[U-004: Name D]
 ```
 ```
 
@@ -1119,9 +1126,9 @@ graph TD
 
 | User Story | Unit | Priority | Notes |
 |-----------|------|---------|-------|
-| US-001 | {unit-name-a} | Must Have | |
-| US-002 | {unit-name-a} | Should Have | |
-| US-003 | {unit-name-b} | Must Have | |
+| US-001 | U-001: {Name A} | Must Have | |
+| US-002 | U-001: {Name A} | Should Have | |
+| US-003 | U-002: {Name B} | Must Have | |
 ```
 
 ### 11b. Update state (triple write)

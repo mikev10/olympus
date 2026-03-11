@@ -28,21 +28,23 @@ export interface DecompositionTree {
 const DEFAULT_MAX_UNITS = 10;
 
 /**
- * Converts a unit title into a human-readable slug suitable for directory names.
+ * Converts a unit title into a prefixed slug suitable for directory names.
  *
  * Examples:
- *   "Auth Service"       -> "auth-service"
- *   "API Gateway"        -> "api-gateway"
- *   "User Onboarding"    -> "user-onboarding"
- *   ""                   -> "unit-0" (fallback with index)
+ *   "Auth Service", 1      -> "u-001-auth-service"
+ *   "API Gateway", 2       -> "u-002-api-gateway"
+ *   "User Onboarding", 3   -> "u-003-user-onboarding"
+ *   "", 1                  -> "u-001-untitled" (fallback)
  *
  * @param title - The human-readable unit title
- * @param index - Zero-based index used as fallback when title is empty
- * @returns A lowercase, hyphen-separated slug
+ * @param index - 1-based unit index for the u-XXX prefix
+ * @returns A prefixed, lowercase, hyphen-separated slug (e.g., "u-001-auth-service")
  */
 export function slugifyUnitName(title: string, index: number): string {
+  const prefix = `u-${String(index).padStart(3, '0')}`;
+
   if (!title || !title.trim()) {
-    return `unit-${index}`;
+    return `${prefix}-untitled`;
   }
 
   const slug = title
@@ -53,15 +55,15 @@ export function slugifyUnitName(title: string, index: number): string {
     .replace(/^-|-$/g, '');
 
   if (!slug) {
-    return `unit-${index}`;
+    return `${prefix}-untitled`;
   }
 
-  // Truncate overly long slugs
+  // Truncate overly long slugs (limit applies to slug portion only)
   if (slug.length > 60) {
-    return slug.substring(0, 60).replace(/-$/, '');
+    return `${prefix}-${slug.substring(0, 60).replace(/-$/, '')}`;
   }
 
-  return slug;
+  return `${prefix}-${slug}`;
 }
 
 /**
@@ -179,7 +181,7 @@ export async function parseIntentFromFile(intentPath: string): Promise<{
       while ((bulletMatch = bulletRegex.exec(unitsSection)) !== null) {
         const rawTitle = bulletMatch[1].trim();
         const description = bulletMatch[2].trim();
-        const id = slugifyUnitName(rawTitle, index);
+        const id = slugifyUnitName(rawTitle, index + 1);
         proposedUnits.push({
           id,
           title: rawTitle,
@@ -224,7 +226,7 @@ export function decomposeIntentToUnits(
 
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i];
-    const unitId = slugifyUnitName(spec.title, i);
+    const unitId = slugifyUnitName(spec.title, i + 1);
 
     const unit: HierarchicalNode = {
       id: unitId,

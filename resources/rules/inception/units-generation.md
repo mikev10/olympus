@@ -9,6 +9,20 @@ This stage decomposes the system into manageable units of work through two integ
 
 **Terminology**: Use "Service" for independently deployable components, "Module" for logical groupings within a service, "Unit of Work" for planning context.
 
+## Unit Naming Convention (MANDATORY)
+
+All units of work MUST follow a consistent naming scheme:
+
+- **Documentation headings**: Use `## U-NNN: Name` format
+  - Example: `## U-001: Foundation`, `## U-002: API Layer`, `## U-003: Frontend`
+  - Number is zero-padded to three digits (U-001, U-002, ... U-010, U-011)
+- **Construction folder names**: Use `u-nnn-name` kebab-case format
+  - Example: `u-001-foundation/`, `u-002-api-layer/`, `u-003-frontend/`
+  - This format is automatically enforced by the TypeScript engine via `slugifyUnitName()`
+- **AI-generated artifacts** (unit-of-work.md, unit-of-work-dependency.md, unit-of-work-story-map.md) MUST use `## U-NNN: Name` headings — not plain unit names
+
+This convention ensures that construction artifacts are traceable to their inception units and that folder paths are consistent across all workflows.
+
 ## Prerequisites
 - Context Assessment must be complete
 - Requirements Assessment recommended (provides functional scope)

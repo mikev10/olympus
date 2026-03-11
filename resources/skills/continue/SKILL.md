@@ -25,7 +25,7 @@ If the input above is a file path (contains `/` or `\` or ends in `.json`), trea
 
 Auto-detect by scanning `aidlc-docs/` subdirectories:
 
-1. List all directories under `aidlc-docs/`
+1. List all directories under `aidlc-docs/` (excluding `completed/`, which contains archived workflows)
 2. For each, check if `checkpoint.json` exists
 3. Read each checkpoint and filter to those with `status` NOT equal to `complete` or `archived`
 4. If exactly one active workflow found: use it
@@ -96,7 +96,7 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 
 Load ALL inception artifacts PLUS:
 - `inception/application-design/unit-of-work.md` (unit decomposition)
-- For the active unit: `construction/{unit-name}/functional-design.md`, `nfr-requirements.md`, `nfr-design.md`, `infrastructure-design.md`, `code-generation.md`
+- For the active unit: `construction/u-nnn-name/functional-design.md`, `nfr-requirements.md`, `nfr-design.md`, `infrastructure-design.md`, `code-generation.md` (e.g., `construction/u-001-foundation/functional-design.md`)
 - All completed units' artifacts
 
 ### Read `aidlc-state.md`
