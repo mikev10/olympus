@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-03-11
+
+### Added
+
+- **Project-scoped learning** — Learning data (metrics, discoveries, preferences) is now stored per-project instead of globally, enabling isolated analytics per workspace
+- **Project resolver** — Git-based project root detection with filesystem-safe slug derivation (`{basename}-{sha256hash8}`)
+- **One-time migration** — Automatic migration of existing global learning data to project-scoped directories on first run
+- **Session insights** — Rolling 20-session analytics window with high-token detection and per-agent usage tracking
+- **Cold-start blending** — New projects blend project metrics with global baselines using `min(1.0, invocations/5)` weighting
+- **CLI project flags** — `--global`, `--all-projects`, and `--confirm` flags for all `learn` subcommands
+- **Project directory pruning** — Age-based and count-based cleanup thresholds for stale project learning data
+- **85 new tests** across 6 test files for full project-scoped learning coverage
+
+### Changed
+
+- **Agent routing** — `resolveBlendedSuccessRate()` now uses project→global→fallback resolution chain
+- **Pattern extraction** — Jaccard similarity threshold lowered to 0.4 for better pattern clustering
+- **Learned context hook** — Explicit rules filtered by `project_path`; agent performance merges project + global data
+- **Baselines** — Removed `by_project` field from `SessionBaseline`; project scoping handled at storage layer
+
 ## [4.1.1] - 2026-03-10
 
 ### Added
