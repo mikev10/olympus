@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-03-11
+
+### Added
+
+- **Metis recommendations** — Metis agent now generates actionable recommendations and summary in analysis framework
+- **Workflow archival** — Completed workflows are automatically archived to `aidlc-docs/completed/`
+
+### Changed
+
+- **`.gitignore`** — Updated to include `.vscode` and `metrics-export.json`
+- **Markdownlint** — Corrected MD033 configuration to allow specific HTML elements
+
+### Removed
+
+- **`metrics-export.json`** — Removed from repository
+
 ## [4.2.0] - 2026-03-11
 
 ### Added
