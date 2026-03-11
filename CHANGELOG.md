@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-03-10
+
+### Added
+
+- **Unit naming convention** — `slugifyUnitName()` now prepends a `u-NNN-` prefix to all unit IDs (e.g., `u-001-foundation`), making construction folder names directly correlate with unit numbers
+- **Skill prompt updates** — `/plan` and `/continue` skills and `units-generation` rule updated with mandatory naming convention documentation
+
+### Changed
+
+- **`slugifyUnitName()` signature** — The `index` parameter is now 1-based; empty titles fall back to `u-NNN-untitled`
+
 ## [4.1.0] - 2026-03-10
 
 ### Added
