@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-03-11
+
+### Added
+
+- **MCP process cleanup hook** — Automatically cleans up orphaned MCP server processes to prevent resource leaks
+- **Workflow prompt improvement** — Removes active workflow details and prompts user to start a new plan when no workflow is active
+
 ## [4.4.0] - 2026-03-11
 
 ### Added
