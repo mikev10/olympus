@@ -71,9 +71,27 @@ vi.mock('../../features/workflow-engine/trust.js', () => ({
     incident_count: 0,
     last_level_change: null,
     level_history: [],
+    consecutive_rejections: 0,
+    transition_history: [],
   }),
   saveTrustState: vi.fn(),
   shouldAutoAdvance: vi.fn().mockReturnValue(false),
+  recordTransition: vi.fn().mockImplementation((state: any, success: boolean, rejected: boolean) => {
+    const history = Array.isArray(state.transition_history) ? state.transition_history : [];
+    return {
+      ...state,
+      total_transitions: state.total_transitions + 1,
+      rejection_count: rejected ? state.rejection_count + 1 : state.rejection_count,
+      rejection_rate: rejected
+        ? (state.rejection_count + 1) / (state.total_transitions + 1)
+        : state.rejection_count / (state.total_transitions + 1),
+      consecutive_rejections: rejected ? (state.consecutive_rejections ?? 0) + 1 : 0,
+      transition_history: [
+        ...history,
+        { success, rejected, timestamp: new Date().toISOString() },
+      ],
+    };
+  }),
 }));
 
 // Mock alignment module
@@ -125,7 +143,7 @@ vi.mock('../../features/workflow-engine/gate-presenter.js', () => ({
 import { registerQualityGateHooks } from '../../hooks/registrations/quality-gate.js';
 import { loadCheckpoint, listWorkflows, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import { loadManifest, saveManifest, addGateAuditEntry, updateContractStatus } from '../../features/workflow-engine/manifest.js';
-import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../features/workflow-engine/trust.js';
+import { loadTrustState, saveTrustState, shouldAutoAdvance, recordTransition } from '../../features/workflow-engine/trust.js';
 import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
 import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
 import { readFileSync } from 'fs';
@@ -216,8 +234,26 @@ describe('Quality Gate Hooks', () => {
       incident_count: 0,
       last_level_change: null,
       level_history: [],
+      consecutive_rejections: 0,
+      transition_history: [],
     });
     vi.mocked(shouldAutoAdvance).mockReturnValue(false);
+    vi.mocked(recordTransition).mockImplementation((state: any, success: boolean, rejected: boolean) => {
+      const history = Array.isArray(state.transition_history) ? state.transition_history : [];
+      return {
+        ...state,
+        total_transitions: state.total_transitions + 1,
+        rejection_count: rejected ? state.rejection_count + 1 : state.rejection_count,
+        rejection_rate: rejected
+          ? (state.rejection_count + 1) / (state.total_transitions + 1)
+          : state.rejection_count / (state.total_transitions + 1),
+        consecutive_rejections: rejected ? (state.consecutive_rejections ?? 0) + 1 : 0,
+        transition_history: [
+          ...history,
+          { success, rejected, timestamp: new Date().toISOString() },
+        ],
+      };
+    });
     vi.mocked(saveCheckpoint).mockResolvedValue(undefined);
     registerQualityGateHooks();
   });
@@ -918,6 +954,8 @@ describe('Quality Gate Hooks', () => {
         incident_count: 0,
         last_level_change: null,
         level_history: [],
+        consecutive_rejections: 0,
+        transition_history: [],
       });
     });
 
@@ -1116,6 +1154,8 @@ describe('Quality Gate Hooks', () => {
         incident_count: 0,
         last_level_change: null,
         level_history: [],
+        consecutive_rejections: 0,
+        transition_history: [],
       });
     });
 
@@ -1257,6 +1297,142 @@ describe('Quality Gate Hooks', () => {
     });
   });
 
+  describe('qualityGateApprover - recordTransition integration', () => {
+    function setupApprovalGate(trustOverrides: Record<string, any> = {}) {
+      vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(
+        createMockCheckpoint({
+          current_stage: 'intent',
+          current_phase: 'inception',
+          trust_state_path: '/test/project/aidlc-docs/test-feature/trust-state.json',
+        })
+      );
+      vi.mocked(loadManifest).mockReturnValue(
+        createMockManifest({
+          phases: {
+            discovery: { status: 'complete', gate_result: { passed: true, approved_by: 'human', approved_at: '2025-01-01T00:00:00.000Z', feedback: null, verification: null, validation: null } },
+            inception: {
+              status: 'in_progress',
+              gate_result: { passed: false, approved_by: null, reason: null },
+            },
+            construction: { status: 'not_started' },
+            operations: { status: 'not_started' },
+          },
+          artifacts: [
+            { id: 'intent-001', type: 'intent', phase: 'inception', path: 'intent.json', contract_status: 'draft' },
+          ],
+        })
+      );
+      vi.mocked(loadTrustState).mockReturnValue({
+        current_level: 0,
+        total_transitions: 5,
+        rejection_count: 1,
+        rejection_rate: 0.2,
+        incident_count: 0,
+        last_level_change: null,
+        level_history: [],
+        consecutive_rejections: 0,
+        transition_history: [],
+        ...trustOverrides,
+      });
+    }
+
+    it('gate approval calls recordTransition with (state, true, false)', async () => {
+      setupApprovalGate();
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      expect(recordTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ total_transitions: 5 }),
+        true,
+        false
+      );
+    });
+
+    it('gate rejection calls recordTransition with (state, false, true)', async () => {
+      setupApprovalGate();
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject missing coverage');
+      await approver!.handler(ctx);
+
+      expect(recordTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ total_transitions: 5 }),
+        false,
+        true
+      );
+    });
+
+    it('trust level advances after sufficient approvals', async () => {
+      setupApprovalGate({ total_transitions: 9, rejection_count: 0, rejection_rate: 0 });
+      vi.mocked(recordTransition).mockReturnValueOnce({
+        current_level: 1,
+        total_transitions: 10,
+        rejection_count: 0,
+        rejection_rate: 0,
+        incident_count: 0,
+        last_level_change: new Date().toISOString(),
+        level_history: [{ from: 0, to: 1, reason: 'Qualification threshold met', timestamp: new Date().toISOString() }],
+        consecutive_rejections: 0,
+        transition_history: [{ success: true, rejected: false, timestamp: new Date().toISOString() }],
+      });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      expect(saveTrustState).toHaveBeenCalledWith(
+        expect.objectContaining({ current_level: 1 }),
+        expect.any(String)
+      );
+    });
+
+    it('consecutive rejections tracked on rejection', async () => {
+      setupApprovalGate({ consecutive_rejections: 1 });
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('reject needs more work');
+      await approver!.handler(ctx);
+
+      expect(recordTransition).toHaveBeenCalledWith(
+        expect.objectContaining({ consecutive_rejections: 1 }),
+        false,
+        true
+      );
+      expect(saveTrustState).toHaveBeenCalledWith(
+        expect.objectContaining({ consecutive_rejections: 2 }),
+        expect.any(String)
+      );
+    });
+
+    it('transition_history populated after gate decisions', async () => {
+      setupApprovalGate();
+
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      const approver = hooks.find(h => h.name === 'qualityGateApprover');
+
+      const ctx = createUserPromptCtx('approve');
+      await approver!.handler(ctx);
+
+      expect(saveTrustState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transition_history: expect.arrayContaining([
+            expect.objectContaining({ success: true, rejected: false }),
+          ]),
+        }),
+        expect.any(String)
+      );
+    });
+  });
+
   describe('qualityGateApprover - bypass', () => {
     beforeEach(() => {
       vi.mocked(listWorkflows).mockResolvedValue(['test-feature']);
@@ -1291,6 +1467,8 @@ describe('Quality Gate Hooks', () => {
         incident_count: 0,
         last_level_change: null,
         level_history: [],
+        consecutive_rejections: 0,
+        transition_history: [],
       });
     });
 

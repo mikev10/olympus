@@ -143,6 +143,45 @@ describe('WorkflowEngine', () => {
       const intentContent = await fs.readFile(intentPath, 'utf-8');
       expect(intentContent).toContain('Build a test feature with OAuth');
     });
+
+    it('creates manifest.json in aidlc-docs/{workflowId}/', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      await engine.start('Build a test feature');
+
+      const manifestPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'manifest.json');
+      const exists = await fs.pathExists(manifestPath);
+      expect(exists).toBe(true);
+
+      const manifest = loadManifest(manifestPath);
+      expect(manifest).not.toBeNull();
+      expect(manifest?.schema_version).toBe('2.0.0');
+    });
+
+    it('does not overwrite existing manifest.json', async () => {
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      await engine.start('Build a test feature');
+
+      const manifestPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'manifest.json');
+      const sentinel = { custom: 'sentinel-data' };
+      await fs.writeJson(manifestPath, sentinel);
+
+      const engine2 = new WorkflowEngine(tmpDir, 'Test Feature');
+      await engine2.start('Build a test feature again');
+
+      const raw = await fs.readJson(manifestPath);
+      expect(raw.custom).toBe('sentinel-data');
+    });
+
+    it('continues if manifest creation fails', async () => {
+      const manifestPath = join(tmpDir, 'aidlc-docs', 'test-feature', 'manifest.json');
+      await fs.ensureDir(manifestPath);
+
+      const engine = new WorkflowEngine(tmpDir, 'Test Feature');
+      await expect(engine.start('Build a test feature')).resolves.toBeUndefined();
+
+      const checkpoint = await loadCheckpoint(tmpDir, 'test-feature');
+      expect(checkpoint).not.toBeNull();
+    });
   });
 
   describe('resume()', () => {

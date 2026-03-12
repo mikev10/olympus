@@ -30,7 +30,7 @@ import { recordDiscovery } from '../../learning/discovery.js';
 import type { WorkflowPhase, WorkflowCheckpointV3 } from './phase-types.js';
 import { detectPathway, generateWorkflowRouting, writeWorkflowRoutingArtifact, loadWorkflowRouting, isPhaseIncluded } from './workflow-routing.js';
 import { assessDepthFromIntent } from './depth-assessment.js';
-import { addGateAuditEntry } from './manifest.js';
+import { addGateAuditEntry, createManifest } from './manifest.js';
 import { mergeAidlcRules, removeAidlcRules, getAidlcRulesContent } from './claude-md-merger.js';
 
 /**
@@ -180,6 +180,18 @@ export class WorkflowEngine {
       throw new Error(
         `Failed to start workflow: Could not create directory structure - ${err.message}`
       );
+    }
+
+    // Create manifest.json for artifact tracking
+    // Only create if it doesn't already exist (idempotent for resumed workflows)
+    const manifestFullPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'manifest.json');
+    if (!fs.existsSync(manifestFullPath)) {
+      try {
+        createManifest(this.workflowId, this.featureName, this.projectPath);
+      } catch (manifestError) {
+        // Manifest creation is non-blocking -- workflow can proceed without it
+        console.warn(`[WorkflowEngine] Failed to create manifest: ${(manifestError as Error).message}`);
+      }
     }
 
     try {

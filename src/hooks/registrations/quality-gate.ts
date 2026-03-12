@@ -31,7 +31,7 @@ import {
   updateContractStatus,
   updatePhaseStatus,
 } from '../../features/workflow-engine/manifest.js';
-import { loadTrustState, saveTrustState, shouldAutoAdvance } from '../../features/workflow-engine/trust.js';
+import { loadTrustState, saveTrustState, shouldAutoAdvance, recordTransition } from '../../features/workflow-engine/trust.js';
 import { computeVerification, generateValidationQuestions, runDualValidation } from '../../features/workflow-engine/alignment.js';
 import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
 import { generateValidationReport, getValidationReportPath } from '../../features/workflow-engine/validation-report.js';
@@ -1194,11 +1194,8 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
 
       // Record transition for trust evaluation
       const trustState = loadTrustState(ctx.directory);
-      trustState.total_transitions += 1;
-      if (trustState.total_transitions > 0) {
-        trustState.rejection_rate = trustState.rejection_count / trustState.total_transitions;
-      }
-      saveTrustState(trustState, ctx.directory);
+      const updatedTrustState = recordTransition(trustState, true, false);
+      saveTrustState(updatedTrustState, ctx.directory);
 
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);
@@ -1318,12 +1315,8 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
 
       // Record rejection for trust evaluation
       const trustState = loadTrustState(ctx.directory);
-      trustState.rejection_count += 1;
-      trustState.total_transitions += 1;
-      if (trustState.total_transitions > 0) {
-        trustState.rejection_rate = trustState.rejection_count / trustState.total_transitions;
-      }
-      saveTrustState(trustState, ctx.directory);
+      const updatedTrustState = recordTransition(trustState, false, true);
+      saveTrustState(updatedTrustState, ctx.directory);
 
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, activeWorkflow.checkpoint);

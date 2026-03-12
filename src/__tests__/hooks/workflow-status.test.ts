@@ -153,7 +153,7 @@ describe('Workflow Status Hook', () => {
       expect(result.hookSpecificOutput?.additionalContext).toContain('Test Feature');
       expect(loadManifest).toHaveBeenCalled();
       expect(loadTrustState).toHaveBeenCalled();
-      expect(generateWorkflowReport).toHaveBeenCalledWith(mockManifest, mockTrustState);
+      expect(generateWorkflowReport).toHaveBeenCalledWith(mockManifest, mockTrustState, mockCheckpoint);
     });
 
     it('detects skill template expansion markers', async () => {
@@ -349,6 +349,124 @@ describe('Workflow Status Hook', () => {
       expect(consoleSpy).toHaveBeenCalled();
 
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Missing Manifest Fallback', () => {
+    let statusHook: any;
+
+    beforeEach(() => {
+      registerWorkflowStatusHook();
+      const hooks = getHooksForEvent('UserPromptSubmit');
+      statusHook = hooks.find(h => h.name === 'workflowStatusReporter');
+    });
+
+    it('returns workflow info when manifest is missing but workflow exists', async () => {
+      const mockCheckpoint = {
+        status: 'in_progress',
+        workflow_id: 'wf-abc',
+        current_phase: 'inception',
+        current_stage: 'requirements-analysis',
+      };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['wf-abc']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
+      vi.mocked(loadManifest).mockReturnValue(null);
+
+      const ctx: HookContext = {
+        prompt: '/workflow-status',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const result = await statusHook.handler(ctx);
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.additionalContext).toContain('wf-abc');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('inception');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('requirements-analysis');
+    });
+
+    it('does not say "No active workflows" when workflow exists without manifest', async () => {
+      const mockCheckpoint = {
+        status: 'in_progress',
+        workflow_id: 'wf-abc',
+        current_phase: 'inception',
+        current_stage: 'requirements-analysis',
+      };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['wf-abc']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
+      vi.mocked(loadManifest).mockReturnValue(null);
+
+      const ctx: HookContext = {
+        prompt: '/workflow-status',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      const result = await statusHook.handler(ctx);
+
+      expect(result.hookSpecificOutput?.additionalContext).not.toContain('No active workflows found');
+    });
+
+    it('passes checkpoint to generateWorkflowReport', async () => {
+      const mockManifest: ManifestSchema = {
+        schema_version: '2.0.0',
+        workflow_id: 'wf-xyz',
+        feature_name: 'My Feature',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        phases: {
+          discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'in_progress', started_at: '2024-01-01T00:00:00Z', completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        depth_assessment: null,
+        artifacts: [],
+        links: [],
+        risks: [],
+        gate_audit: [],
+        metrics: null,
+        alignment_checks: [],
+        risk_tier: null,
+      };
+
+      const mockCheckpoint = {
+        status: 'in_progress',
+        workflow_id: 'wf-xyz',
+        current_phase: 'inception',
+        current_stage: 'requirements-analysis',
+        inception_stages: { 'requirements-analysis': 'complete' },
+      };
+
+      const mockReport = {
+        summary: '0/4 phases complete | 0 artifacts total',
+        phaseProgress: [],
+        artifactTree: '',
+        riskSummary: 'No risks registered',
+        gateSummary: 'No gate transitions recorded',
+        trustDisplay: 'Trust Level 0: Baseline',
+        alignmentSummary: 'No alignment checks recorded',
+        fullReport: '# Workflow Status: My Feature',
+      };
+
+      vi.mocked(listWorkflows).mockResolvedValue(['wf-xyz']);
+      vi.mocked(loadCheckpoint).mockResolvedValue(mockCheckpoint as any);
+      vi.mocked(loadManifest).mockReturnValue(mockManifest);
+      vi.mocked(loadTrustState).mockReturnValue({ current_level: 0, total_transitions: 0, rejection_count: 0, rejection_rate: 0, incident_count: 0, last_level_change: null, level_history: [] });
+      vi.mocked(generateWorkflowReport).mockReturnValue(mockReport);
+
+      const ctx: HookContext = {
+        prompt: '/workflow-status',
+        directory: '/test/project',
+        sessionId: 'test-session',
+      };
+
+      await statusHook.handler(ctx);
+
+      expect(generateWorkflowReport).toHaveBeenCalledWith(mockManifest, expect.anything(), mockCheckpoint);
     });
   });
 

@@ -63,11 +63,14 @@ export function registerWorkflowStatusHook(): void {
         const manifest = loadManifest(manifestPath);
 
         if (!manifest) {
+          const cp = await loadCheckpoint(directory, activeWorkflowId);
+          const phase = cp?.current_phase || 'unknown';
+          const stage = cp?.current_stage || 'unknown';
           return {
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'UserPromptSubmit',
-              additionalContext: `<workflow-status>\nNo active workflows found. Start one with \`/plan <description>\`\n</workflow-status>`
+              additionalContext: `<workflow-status>\n# Workflow Status: ${activeWorkflowId}\n\nPhase: ${phase} | Stage: ${stage}\n\nNote: manifest.json not found. Detailed artifact tracking unavailable. The workflow is active and can proceed normally.\n</workflow-status>`
             }
           };
         }
@@ -76,7 +79,8 @@ export function registerWorkflowStatusHook(): void {
         const trustState = loadTrustState(directory);
 
         // Generate programmatic report
-        const report = generateWorkflowReport(manifest, trustState);
+        const checkpoint = await loadCheckpoint(directory, activeWorkflowId);
+        const report = generateWorkflowReport(manifest, trustState, checkpoint as any);
 
         return {
           continue: true,
