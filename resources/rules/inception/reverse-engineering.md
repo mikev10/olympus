@@ -318,15 +318,24 @@ Create `aidlc-docs/inception/reverse-engineering/reverse-engineering-timestamp.m
 
 [AI-generated summary of key findings from analysis in the form of bullet points]
 
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the reverse engineering artifacts at: `aidlc-docs/inception/reverse-engineering/`
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the reverse engineering analysis if required
-> ✅ **Approve & Continue** - Approve analysis and proceed to **Requirements Analysis**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the reverse engineering artifacts at:                         │
+│ `aidlc-docs/{workflow-id}/inception/reverse-engineering/`                    │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    reverse engineering analysis if required                                  │
+│ ➕ **Add Skipped Stage** - Include a previously excluded                     │
+│    stage in the workflow                                                     │
+│ ✅ **Approve & Continue** - Approve analysis and proceed                    │
+│    to **Requirements Analysis**                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Step 12: Wait for User Approval

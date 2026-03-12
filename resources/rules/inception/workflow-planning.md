@@ -452,17 +452,26 @@ I recommend skipping [Y] stages:
 
 **Estimated Timeline**: [Duration]
 
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the execution plan at: `aidlc-docs/inception/plans/execution-plan.md`
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the execution plan if required
-> [IF any stages are skipped:]
-> 📝 **Add Skipped Stages** - Choose to include stages currently marked as SKIP
-> ✅ **Approve & Continue** - Approve plan and proceed to **[Next Stage Name]**
+```markdown
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the execution plan at:                                        │
+│ `aidlc-docs/{workflow-id}/inception/plans/                                   │
+│ execution-plan.md`                                                           │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    execution plan if required                                                │
+│ ➕ **Add Skipped Stage** - Choose to include stages                          │
+│    currently marked as SKIP                                                  │
+│ ✅ **Approve & Continue** - Approve plan and proceed to                     │
+│    **[Next Stage Name]**                                                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Step 10: Handle User Response

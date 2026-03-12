@@ -149,17 +149,24 @@ If the analysis in Step 5 reveals ANY ambiguous answers, you MUST:
 
 [AI-generated summary of application design artifacts created in bullet points]
 
-> **REVIEW REQUIRED:**
-> Please examine the application design artifacts at: `aidlc-docs/inception/application-design/`
-
-> **WHAT'S NEXT?**
->
-> **You may:**
->
-> **Request Changes** - Ask for modifications to the application design if required
-> [IF Units Generation is skipped:]
-> **Add Units Generation** - Choose to include **Units Generation** stage (currently skipped)
-> **Approve & Continue** - Approve design and proceed to **[Units Generation/CONSTRUCTION PHASE]**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the application design artifacts at:                          │
+│ `aidlc-docs/{workflow-id}/inception/application-design/`                     │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    application design if required                                            │
+│ ➕ **Add Skipped Stage** - Choose to include Units                           │
+│    Generation stage (if currently skipped)                                   │
+│ ✅ **Approve & Continue** - Approve design and proceed to                   │
+│    **[Units Generation/CONSTRUCTION PHASE]**                                 │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 14. Wait for Explicit Approval

@@ -223,19 +223,25 @@ When done, let me know and I will incorporate your approved findings into the re
      3. **Formatted Workflow Message** (mandatory): Always end with this exact format:
 
 ```markdown
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the requirements document at: `aidlc-docs/{workflow-id}/inception/requirements/requirements.md`
-
-
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** -  Ask for modifications to the requirements if required based on your review 
-> [IF User Stories will be skipped, add this option:]
-> 📝 **Add User Stories** - Choose to Include **User Stories** stage (currently skipped based on project simplicity)  
-> ✅ **Approve & Continue** - Approve requirements and proceed to **[User Stories/Workflow Planning]**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the requirements document at:                                 │
+│ `aidlc-docs/{workflow-id}/inception/requirements/                            │
+│ requirements.md`                                                             │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    requirements if required based on your review                             │
+│ ➕ **Add Skipped Stage** - Include a previously excluded                     │
+│    stage (e.g., User Stories if currently skipped)                           │
+│ ✅ **Approve & Continue** - Approve requirements and                        │
+│    proceed to **[User Stories/Workflow Planning]**                           │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 ---
 ```

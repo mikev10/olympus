@@ -1,7 +1,7 @@
-import { formatStageCompletion, formatInceptionComplete } from './inception/response-formatter.js';
+import { formatStageCompletion, formatInceptionComplete, formatFieldsetBox } from './inception/response-formatter.js';
 import type { InceptionStage } from './phase-types.js';
 
-export { formatStageCompletion, formatInceptionComplete };
+export { formatStageCompletion, formatInceptionComplete, formatFieldsetBox };
 
 export const INCEPTION_STAGE_REVIEW_ITEMS: Record<InceptionStage, string[]> = {
   'workspace-detection': [
@@ -55,32 +55,30 @@ export const INCEPTION_COMPLETION_FORMAT = `## Stage Complete: {stage}
 
 {summary}
 
----
-
-### REVIEW REQUIRED
-
-Please review the artifacts at: \`{reviewPath}\`
-
-**What would you like to do?**
-1. **Request Changes** — I'll revise based on your feedback
-2. **Add Skipped Stage** — Include a stage that was previously excluded
-3. **Approve & Continue** — Proceed to the next stage
-` as const;
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please review the artifacts at: \`{reviewPath}\`                              │
+│                                                                              │
+│ **What would you like to do?**                                               │
+│ 1. 🔧 **Request Changes** — I'll revise based on feedback                   │
+│ 2. ➕ **Add Skipped Stage** — Include excluded stage                         │
+│ 3. ✅ **Approve & Continue** — Proceed to next stage                         │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘` as const;
 
 export const CONSTRUCTION_COMPLETION_FORMAT = `## Stage Complete: {stage}
 
 {summary}
 
----
-
-### REVIEW REQUIRED
-
-Please review the artifacts at: \`{reviewPath}\`
-
-**What would you like to do?**
-1. **Request Changes** — I'll revise based on your feedback
-2. **Continue to Next Stage** — Approve and proceed
-` as const;
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please review the artifacts at: \`{reviewPath}\`                              │
+│                                                                              │
+│ **What would you like to do?**                                               │
+│ 1. 🔧 **Request Changes** — I'll revise based on feedback                   │
+│ 2. ✅ **Continue to Next Stage** — Approve and proceed                       │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘` as const;
 
 /**
  * Build a standardized completion message for a stage.
@@ -127,10 +125,10 @@ export function formatSummaryBullets(bullets: string[]): string {
 export const COMPLETION_MESSAGE_RULES = `## Completion Message Rules
 
 At the end of EVERY stage:
-1. Display the stage completion header
-2. Include a factual summary (bullet points ONLY — NO workflow instructions in summary)
-3. Show REVIEW REQUIRED block with artifact path
-4. Show options:
+1. Display the stage completion header with factual summary
+2. Display the REVIEW REQUIRED fieldset box using Unicode box-drawing characters
+3. Box format: ┌─ ⚠ REVIEW REQUIRED ───┐ with │ side borders │ and └───┘ bottom
+4. Show options inside the box:
    - Inception stages: 3 options (Request Changes / Add Skipped Stage / Approve & Continue)
    - Construction stages: 2 options ONLY (Request Changes / Continue to Next Stage)
 5. WAIT for user selection before proceeding`;

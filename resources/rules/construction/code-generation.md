@@ -177,19 +177,24 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
      3. **Formatted Workflow Message** (mandatory): Always end with this exact format:
 
 ```markdown
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the generated code at:
-> - **Application Code**: `[actual-workspace-path]`
-> - **Documentation**: `aidlc-docs/construction/[unit-name]/code/`
-
-
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the generated code based on your review  
-> ✅ **Continue to Next Stage** - Approve code generation and proceed to **[next-unit/Build & Test]**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the generated code at:                                        │
+│ - **Application Code**: `[actual-workspace-path]`                            │
+│ - **Documentation**: `aidlc-docs/construction/                               │
+│   [unit-name]/code/`                                                         │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    generated code based on your review                                       │
+│ ✅ **Continue to Next Stage** - Approve code generation                     │
+│    and proceed to **[next-unit/Build & Test]**                               │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 ---
 ```

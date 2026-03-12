@@ -82,17 +82,23 @@ Map logical software components to actual infrastructure choices for deployment 
      3. **Formatted Workflow Message** (mandatory): Always end with this exact format:
 
 ```markdown
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the infrastructure design at: `aidlc-docs/construction/[unit-name]/infrastructure-design/`
-
-
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the infrastructure design based on your review  
-> ✅ **Continue to Next Stage** - Approve infrastructure design and proceed to **Code Generation**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the infrastructure design at:                                 │
+│ `aidlc-docs/{workflow-id}/construction/[unit-name]/                          │
+│ infrastructure-design/`                                                      │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    infrastructure design based on your review                                │
+│ ✅ **Continue to Next Stage** - Approve infrastructure                      │
+│    design and proceed to **Code Generation**                                 │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 ---
 ```

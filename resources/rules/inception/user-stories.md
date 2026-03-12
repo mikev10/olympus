@@ -287,17 +287,25 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
      3. **Formatted Workflow Message** (mandatory): Always end with this exact format:
 
 ```markdown
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the user stories and personas at: `aidlc-docs/inception/user-stories/stories.md` and `aidlc-docs/inception/user-stories/personas.md`
-
-
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** -  Ask for modifications to the stories or personas based on your review  
-> ✅ **Approve & Continue** - Approve user stories and proceed to **Workflow Planning**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the user stories and personas at:                             │
+│ `aidlc-docs/{workflow-id}/inception/user-stories/                            │
+│ stories.md` and `personas.md`                                                │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    stories or personas based on your review                                  │
+│ ➕ **Add Skipped Stage** - Include a previously excluded                     │
+│    stage in the workflow                                                     │
+│ ✅ **Approve & Continue** - Approve user stories and                        │
+│    proceed to **Workflow Planning**                                           │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 ---
 ```

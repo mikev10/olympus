@@ -107,17 +107,23 @@ Design detailed business logic for the unit, technology-agnostic and focused pur
      3. **Formatted Workflow Message** (mandatory): Always end with this exact format:
 
 ```markdown
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the functional design artifacts at: `aidlc-docs/construction/[unit-name]/functional-design/`
-
-
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the functional design based on your review  
-> ✅ **Continue to Next Stage** - Approve functional design and proceed to **[next-stage-name]**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the functional design artifacts at:                           │
+│ `aidlc-docs/{workflow-id}/construction/[unit-name]/                          │
+│ functional-design/`                                                          │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    functional design based on your review                                    │
+│ ✅ **Continue to Next Stage** - Approve functional design                   │
+│    and proceed to **[next-stage-name]**                                      │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
 ---
 ```

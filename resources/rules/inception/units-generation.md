@@ -162,15 +162,24 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 
 [AI-generated summary of units and decomposition created in bullet points]
 
-> **📋 <u>**REVIEW REQUIRED:**</u>**  
-> Please examine the units generation artifacts at: `aidlc-docs/inception/application-design/`
-
-> **🚀 <u>**WHAT'S NEXT?**</u>**
->
-> **You may:**
->
-> 🔧 **Request Changes** - Ask for modifications to the units generation if required
-> ✅ **Approve & Continue** - Approve units and proceed to **CONSTRUCTION PHASE**
+┌─ ⚠ REVIEW REQUIRED ──────────────────────────────────────────────────────────┐
+│                                                                              │
+│ Please examine the units generation artifacts at:                            │
+│ `aidlc-docs/{workflow-id}/inception/application-design/`                     │
+│                                                                              │
+│ ---                                                                          │
+│                                                                              │
+│ **📋 WHAT'S NEXT?**                                                         │
+│                                                                              │
+│ **You may:**                                                                 │
+│ 🔧 **Request Changes** - Ask for modifications to the                       │
+│    units generation if required                                              │
+│ ➕ **Add Skipped Stage** - Include a previously excluded                     │
+│    stage in the workflow                                                     │
+│ ✅ **Approve & Continue** - Approve units and proceed to                    │
+│    **CONSTRUCTION PHASE**                                                    │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Step 17: Wait for Explicit Approval

@@ -9,6 +9,7 @@ import {
   INCEPTION_STAGE_REVIEW_ITEMS,
   formatStageCompletion,
   formatInceptionComplete,
+  formatFieldsetBox,
 } from '../../features/workflow-engine/completion-messages.js';
 import type { InceptionStage } from '../../features/workflow-engine/phase-types.js';
 
@@ -96,7 +97,7 @@ describe('buildInceptionStageCompletionMessage', () => {
       ['inception/requirements/requirements.md', 'inception/requirements/requirements-analysis-questions.md'],
       'user-stories',
     );
-    expect(result).toContain('## REVIEW REQUIRED');
+    expect(result).toContain('⚠ REVIEW REQUIRED');
   });
 
   it("includes WHAT'S NEXT when nextStage provided", () => {
@@ -105,7 +106,7 @@ describe('buildInceptionStageCompletionMessage', () => {
       [],
       'user-stories',
     );
-    expect(result).toContain("## WHAT'S NEXT");
+    expect(result).toContain("📋 WHAT'S NEXT");
     expect(result).toContain('User Stories');
   });
 
@@ -176,12 +177,50 @@ describe('re-exports from response-formatter', () => {
   it('formatStageCompletion is re-exported', () => {
     expect(typeof formatStageCompletion).toBe('function');
     const result = formatStageCompletion('workspace-detection', [], [], null, '');
-    expect(result).toContain('## REVIEW REQUIRED');
+    expect(result).toContain('⚠ REVIEW REQUIRED');
   });
 
   it('formatInceptionComplete is re-exported', () => {
     expect(typeof formatInceptionComplete).toBe('function');
     const result = formatInceptionComplete('wf-test', 7, 14);
-    expect(result).toContain('Inception Phase Complete');
+    expect(result).toContain('INCEPTION COMPLETE');
+  });
+
+  it('formatFieldsetBox is re-exported', () => {
+    expect(typeof formatFieldsetBox).toBe('function');
+  });
+});
+
+describe('formatFieldsetBox', () => {
+  it('creates a box with label and content', () => {
+    const result = formatFieldsetBox('TEST LABEL', ['Line 1', 'Line 2']);
+    expect(result).toContain('┌─ TEST LABEL');
+    expect(result).toContain('┐');
+    expect(result).toContain('│');
+    expect(result).toContain('└');
+    expect(result).toContain('┘');
+    expect(result).toContain('Line 1');
+    expect(result).toContain('Line 2');
+  });
+
+  it('pads short lines to box width', () => {
+    const result = formatFieldsetBox('LABEL', ['Hi']);
+    const lines = result.split('\n');
+    expect(lines[0].length).toBe(80);
+    expect(lines[1].length).toBe(80);
+    expect(lines[lines.length - 1].length).toBe(80);
+  });
+
+  it('handles empty lines as spacers', () => {
+    const result = formatFieldsetBox('LABEL', ['', 'Content', '']);
+    const lines = result.split('\n');
+    expect(lines[1]).toMatch(/^│\s+│$/);
+  });
+
+  it('handles long lines gracefully', () => {
+    const longLine = 'A'.repeat(80);
+    const result = formatFieldsetBox('LABEL', [longLine]);
+    expect(result).toContain(longLine);
+    expect(result).toContain(' │');
   });
 });
