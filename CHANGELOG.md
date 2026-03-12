@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.3] - 2026-03-11
+
+### Changed
+
+- **Approval gate styling** — Replaced dim markdown headers with visible emoji+bold headers, `---` separators, and blockquoted artifact paths for REVIEW REQUIRED and WHAT'S NEXT sections
+- **Removed fieldset boxes** — Replaced fixed-width Unicode box-drawing borders with free-flowing markdown to prevent text wrapping in narrow terminals
+- **Unified approval format** — Standardized completion message format across all 11 rule files (inception + construction) and TypeScript formatters
+
 ## [4.4.2] - 2026-03-11
 
 ### Changed
 
-- **Approval gate styling** — Replaced dim markdown headers with Unicode box-drawing fieldset boxes for REVIEW REQUIRED and WHAT'S NEXT sections, improving visibility in dark terminal themes
-- **Wider approval boxes** — Increased fieldset box width from 65 to 80 characters to reduce text wrapping
-- **Unified approval format** — Standardized completion message format across all 11 rule files (inception + construction) and TypeScript formatters to use consistent fieldset box styling
-
-### Added
-
-- **`formatFieldsetBox()` helper** — New exported utility for creating Unicode box-drawing fieldset boxes with configurable labels and content
+- **Approval gate styling** — Added Unicode box-drawing fieldset boxes (superseded by v4.4.3)
 
 ## [4.4.1] - 2026-03-11
 
