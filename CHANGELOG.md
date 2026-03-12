@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.4] - 2026-03-12
+
+### Fixed
+
+- **Workflow engine** — Wired manifest creation, trust transitions, and status reporting
+
 ## [4.4.3] - 2026-03-11
 
 ### Changed
