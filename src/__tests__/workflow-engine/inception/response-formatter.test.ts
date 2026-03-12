@@ -13,7 +13,7 @@ describe('formatStageCompletion', () => {
       'user-stories',
       '',
     );
-    expect(result).toContain('⚠ REVIEW REQUIRED');
+    expect(result).toContain('⚠️ **REVIEW REQUIRED**');
   });
 
   it('includes WHAT\'S NEXT section when nextStage is provided', () => {
@@ -24,7 +24,7 @@ describe('formatStageCompletion', () => {
       'user-stories',
       '',
     );
-    expect(result).toContain("📋 WHAT'S NEXT");
+    expect(result).toContain("📋 **WHAT'S NEXT**");
     expect(result).toContain('User Stories');
   });
 
@@ -36,7 +36,7 @@ describe('formatStageCompletion', () => {
       null,
       '',
     );
-    expect(result).toContain("📋 WHAT'S NEXT");
+    expect(result).toContain("📋 **WHAT'S NEXT**");
     expect(result).toContain('Inception phase is complete');
   });
 
@@ -172,8 +172,8 @@ describe('formatStageCompletion', () => {
       null,
       '',
     );
-    expect(result).toContain('⚠ REVIEW REQUIRED');
-    expect(result).toContain("📋 WHAT'S NEXT");
+    expect(result).toContain('⚠️ **REVIEW REQUIRED**');
+    expect(result).toContain("📋 **WHAT'S NEXT**");
   });
 
   it('handles all known inception stages without throwing', () => {
@@ -209,7 +209,7 @@ describe('formatStageCompletion', () => {
 describe('formatInceptionComplete', () => {
   it('includes inception complete header', () => {
     const result = formatInceptionComplete('wf-123', 7, 14);
-    expect(result).toContain('INCEPTION COMPLETE');
+    expect(result).toContain('✅ **INCEPTION COMPLETE**');
   });
 
   it('shows total stages count', () => {
@@ -237,11 +237,9 @@ describe('formatInceptionComplete', () => {
     expect(result).toContain('continue');
   });
 
-  it('includes box-drawing borders', () => {
+  it('uses horizontal rule separators', () => {
     const result = formatInceptionComplete('wf-123', 7, 14);
-    expect(result).toContain('┌');
-    expect(result).toContain('└');
-    expect(result).toContain('│');
+    expect(result).toContain('---');
   });
 
   it('handles zero artifacts gracefully', () => {

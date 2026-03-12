@@ -1,26 +1,5 @@
 import type { InceptionStage } from '../phase-types.js';
 
-const BOX_WIDTH = 80;
-const CONTENT_WIDTH = BOX_WIDTH - 4;
-
-export function formatFieldsetBox(label: string, lines: string[]): string {
-  const labelPart = `─ ${label} `;
-  const topFillLen = Math.max(0, BOX_WIDTH - 2 - labelPart.length);
-  const top = `┌${labelPart}${'─'.repeat(topFillLen)}┐`;
-
-  const formatted = lines.map(line => {
-    if (line === '') {
-      return `│${' '.repeat(BOX_WIDTH - 2)}│`;
-    }
-    const pad = Math.max(0, CONTENT_WIDTH - line.length);
-    return `│ ${line}${' '.repeat(pad)} │`;
-  });
-
-  const bottom = `└${'─'.repeat(BOX_WIDTH - 2)}┘`;
-
-  return [top, ...formatted, bottom].join('\n');
-}
-
 const STAGE_LABELS: Record<InceptionStage, string> = {
   'workspace-detection': 'Workspace Detection',
   'reverse-engineering': 'Reverse Engineering',
@@ -81,7 +60,10 @@ export function formatStageCompletion(
     ? reviewItems.map(item => `- [ ] ${item}`)
     : ['- [ ] Review the generated artifacts for accuracy and completeness'];
 
-  const contentLines: string[] = [
+  const lines: string[] = [
+    '---',
+    '',
+    '⚠️ **REVIEW REQUIRED**',
     '',
     '**What was completed**',
     `- **${label}**: ${description}`,
@@ -89,8 +71,8 @@ export function formatStageCompletion(
     '**Artifacts generated**',
     ...artifactLines,
     '',
-    '**What needs your review**',
-    ...reviewLines,
+    '> **What needs your review**',
+    ...reviewLines.map(r => `> ${r}`),
     '',
     '---',
     '',
@@ -104,29 +86,29 @@ export function formatStageCompletion(
     const timeHints = STAGE_TIME_HINTS[nextStage as InceptionStage];
     const timeHint = timeHints ? timeHints[depth] ?? timeHints['standard'] : 'a few minutes';
 
-    contentLines.push(
-      `**📋 WHAT'S NEXT**`,
+    lines.push(
+      "📋 **WHAT'S NEXT**",
+      '',
       `After your review, proceed to: **${nextLabel}**`,
       `- ${effectiveNextDesc}`,
       `- Estimated time: ${timeHint}`,
       '',
       'To proceed: `continue` or `approve`',
       'To request changes: `revise [specific feedback]`',
-      '',
     );
   } else {
-    contentLines.push(
-      `**📋 WHAT'S NEXT**`,
+    lines.push(
+      "📋 **WHAT'S NEXT**",
+      '',
       'Inception phase is complete.',
       '- All inception stages have been executed and artifacts are ready for construction',
       '- Review the execution plan at `aidlc-docs/{workflow-id}/inception/plans/execution-plan.md`',
       '',
       'To proceed to Construction: `continue` or `approve`',
-      '',
     );
   }
 
-  return formatFieldsetBox('⚠ REVIEW REQUIRED', contentLines);
+  return lines.join('\n');
 }
 
 export function formatInceptionComplete(
@@ -136,7 +118,10 @@ export function formatInceptionComplete(
 ): string {
   const artifactPath = `aidlc-docs/${workflowId}/inception/`;
 
-  const contentLines: string[] = [
+  const lines: string[] = [
+    '---',
+    '',
+    '✅ **INCEPTION COMPLETE**',
     '',
     `All ${totalStages} inception stage(s) completed successfully.`,
     `${artifactCount} artifact(s) generated in \`${artifactPath}\``,
@@ -147,12 +132,14 @@ export function formatInceptionComplete(
     '- Workflow execution plan created',
     '- Units of work defined and mapped',
     '',
-    `**📋 Next Phase: Construction**`,
-    'The Construction phase will execute design/implementation.',
+    '---',
+    '',
+    '📋 **Next Phase: Construction**',
+    '',
+    'The Construction phase will execute design and implementation for each unit.',
     '',
     'To begin Construction: `continue` or `/ascent`',
-    '',
   ];
 
-  return formatFieldsetBox('✅ INCEPTION COMPLETE', contentLines);
+  return lines.join('\n');
 }
