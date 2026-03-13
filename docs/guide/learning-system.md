@@ -71,7 +71,13 @@ Session End (Stop hook)                        |
 | Preference learning | `src/learning/preference-learner.ts` |
 | Efficiency tracking | `src/learning/efficiency.ts` |
 | Smart routing | `src/learning/routing.ts` |
+| Token estimation | `src/learning/token-estimator.ts` |
+| Statistics | `src/learning/stats.ts` |
+| Aggregation | `src/learning/aggregation.ts` |
+| Session insights | `src/learning/session-insights.ts` |
+| Anomaly detection | `src/learning/anomaly.ts` |
 | Context injection | `src/learning/hooks/learned-context.ts` |
+| Cancellation detection | `src/learning/hooks/cancellation-detector.ts` |
 | Hook registrations | `src/hooks/registrations/learning-capture.ts`, `src/hooks/registrations/discovery-capture.ts` |
 | Cleanup & management | `src/learning/cleanup.ts` |
 | Configuration | `src/learning/config.ts` |
@@ -264,7 +270,7 @@ Three hooks work together to track token usage per session:
 | `learningCaptureTool` | PostToolUse | 70 | Estimates output tokens from tool results |
 | `learningCaptureStop` | Stop | 90 | Aggregates session totals, writes summary, resets |
 
-Token estimates use a character-based approximation (not exact API counts). The model identifier is captured from context when available.
+Token estimates use `gpt-tokenizer` for accurate counting, with a character-based fallback (1 token per 4 characters) when the library is unavailable. These are local estimates, not exact API-reported counts. The model identifier is captured from context when available.
 
 At session end, the Stop hook:
 1. Creates a `SessionSummary` with total tokens, duration, cost estimate, and agents used
@@ -439,7 +445,7 @@ Transient state for the current session — recent prompts, pending completions,
 
 ### Rotation & Archival
 
-JSONL files automatically rotate when they exceed 10,000 lines:
+JSONL files automatically rotate when they reach 10,000 lines (500 lines for session summaries):
 - The current file is renamed with a timestamp: `feedback-log.2026-01-28T14-30-00-000Z.old.jsonl`
 - A fresh file is created for new entries
 - Old archives are pruned based on retention policy (default: 30 days, max 5 archives per file type)
@@ -567,8 +573,11 @@ olympus-ai learn --cleanup --remove-archived
 ### Reset
 
 ```bash
-# Forget all learnings (irreversible)
-olympus-ai learn --forget
+# Forget all learnings (requires confirmation)
+olympus-ai learn --forget --confirm
+
+# Forget learnings for a specific project only
+olympus-ai learn --forget --project /path/to/project --confirm
 ```
 
 ### Debug Mode

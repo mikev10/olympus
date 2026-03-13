@@ -432,5 +432,5 @@ You get smarter about the codebase with every session, **without doing anything 
 
 - [Understanding the Orchestration System](understanding-orchestration-system.md) - Deep dive into Olympus architecture
 - [Workflow Guide](workflow-guide.md) - Planning and execution workflows
-- [Configuration](../configuration.md) - Customizing Olympus behavior
+- [Configuration](./configuration.md) - Customizing Olympus behavior
 - [Interactive Workflows](../interactive-workflows.md) - Working with the workflow engine

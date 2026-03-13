@@ -900,7 +900,7 @@ olympus-ai learn --export            # Backup your learnings
 
 - **Get started:** Run `olympus-ai install` to add agents to Claude Code
 - **Learn more:** Read the [Understanding Orchestration System](understanding-orchestration-system.md) guide
-- **Configure agents:** See [Configuration Guide](../configuration.md)
+- **Configure agents:** See [Configuration Guide](./configuration.md)
 - **Workflow examples:** Check out [Workflow Guide](workflow-guide.md)
 
 ---
