@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.5] - 2026-03-16
+
+### Fixed
+
+- **AIDLC workflow rules** — Clarified CLAUDE.md reference to point to global `~/.claude/CLAUDE.md` instead of ambiguous `core-workflow.md` file reference
+
+### Changed
+
+- **Question/plan separation** — Questions are now always in dedicated files, never embedded in plan files (fixes user-stories stage inconsistency with question-format-guide)
+- **Post-answer consolidation** — Added mandatory consolidation step: finalized decisions must be written back into plan files before requesting approval (new common rule in question-format-guide.md)
+- **User stories rule** — Renumbered steps, added Step 11 for mandatory answer consolidation, updated delegation scope
+
 ## [4.4.4] - 2026-03-12
 
 ### Fixed
