@@ -113,8 +113,8 @@ export function getAidlcRulesContent(workflowId: string, pathwayType: PathwayTyp
 - **Audit log**: \`aidlc-docs/${workflowId}/audit.md\`
 
 All workflow stages, agent delegation, directory layout, and rules are defined in the
-AI-DLC Core Workflow reference (loaded from core-workflow.md). This block only tracks
-the active workflow identity above.`;
+global \`~/.claude/CLAUDE.md\` (installed by Olympus). This block only tracks the active
+workflow identity — do NOT search for a separate core-workflow.md file.`;
 }
 
 /**
