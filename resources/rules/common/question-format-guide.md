@@ -352,6 +352,33 @@ E) Other (please describe after [Answer]: tag below)
 [Answer]:
 ```
 
+## Post-Answer Consolidation
+
+### MANDATORY: Update Plan After Answers Are Collected
+
+**CRITICAL**: After collecting and analyzing user answers, you MUST consolidate the finalized decisions back into the plan or deliverable file BEFORE requesting approval. The user approves the PLAN FILE, not a chat summary.
+
+### Consolidation Rules
+
+1. **Questions and plans are ALWAYS separate files** — questions go in dedicated `{stage}-questions.md` files. Do NOT embed questions in plan files, deliverable files, or any other artifact.
+2. **After answers are analyzed**, update the plan file with a "Finalized Approach" section that synthesizes the user's decisions into clear, actionable directives.
+3. **The plan file must be self-contained** — someone reading only the plan file should understand the complete approach without needing to cross-reference the questions file.
+4. **Present the updated plan file for approval** — never summarize decisions only in chat. The artifact is the source of truth.
+
+### Consolidation Workflow
+
+1. Collect answers in the dedicated questions file
+2. Analyze answers for contradictions/ambiguities (resolve if found)
+3. **Write finalized decisions into the plan file** (new section or update existing sections)
+4. Present the **updated plan file path** for user approval
+5. Wait for explicit approval before proceeding
+
+### What NOT to Do
+
+- Do NOT present a plan summary in chat while the plan file still contains raw unanswered questions
+- Do NOT ask the user to approve a file that hasn't been updated with their decisions
+- Do NOT embed questions inside plan files — always use separate dedicated question files
+
 ## Summary
 
 **Remember**:

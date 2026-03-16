@@ -22,12 +22,12 @@ User Stories focus on:
 **Execution mode**: Foreground sequential — single coherent story generation task requiring Sonnet-level reasoning for story quality.
 
 **Delegation scope**:
-- **Orchestrator retains**: Part 1 (Planning) — Steps 1-14. The orchestrator performs the intelligent assessment, creates the story plan, manages Q&A, resolves ambiguities, and obtains user approval.
-- **Delegated to `oracle-medium`**: Part 2 (Generation) — Steps 15-18. The agent executes the approved plan to produce stories.md and personas.md following INVEST criteria.
+- **Orchestrator retains**: Part 1 (Planning) — Steps 1-15. The orchestrator performs the intelligent assessment, creates the story plan, manages Q&A, resolves ambiguities, and obtains user approval.
+- **Delegated to `oracle-medium`**: Part 2 (Generation) — Steps 16-19. The agent executes the approved plan to produce stories.md and personas.md following INVEST criteria.
 
 **If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
 
-**After agent completes**: The orchestrator reviews the generated stories, presents the completion message (Step 20), and manages the approval gate (Steps 21-23).
+**After agent completes**: The orchestrator reviews the generated stories, presents the completion message (Step 21), and manages the approval gate (Steps 22-24).
 
 ## Intelligent Assessment Guidelines
 
@@ -142,7 +142,8 @@ For medium priority cases, execute user stories if ANY of these apply:
 
 **See `common/question-format-guide.md` for question formatting rules**
 
-- EMBED questions using [Answer]: tag format
+- Create a SEPARATE question file: `aidlc-docs/{workflow-id}/inception/user-stories/story-planning-questions.md`
+- Do NOT embed questions in the story generation plan — questions and plans are always separate files
 - Focus on ANY ambiguities, missing information, or areas needing clarification
 - Generate questions wherever user input would improve story creation decisions
 - **When in doubt, ask the question** - overconfidence leads to poor stories
@@ -176,13 +177,13 @@ For medium priority cases, execute user stories if ANY of these apply:
 - Allow for hybrid approaches with clear decision criteria
 
 ## Step 6: Store Story Plan
-- Save the complete story plan with embedded questions in `aidlc-docs/inception/plans/` directory
-- Filename: `story-generation-plan.md`
-- Include all [Answer]: tags for user input
+- Save the story plan in `aidlc-docs/{workflow-id}/inception/plans/story-generation-plan.md`
+- The plan contains: overview, personas, execution steps, mandatory artifacts, story approach options
+- Do NOT include questions in this file — questions are in the separate `story-planning-questions.md`
 - Ensure plan is comprehensive and covers all story development aspects
 
 ## Step 7: Request User Input
-- Ask user to fill in all [Answer]: tags directly in the story plan document
+- Ask user to fill in all [Answer]: tags in the questions file (`story-planning-questions.md`)
 - Emphasize importance of audit trail and decision documentation
 - Provide clear instructions on how to fill in the [Answer]: tags
 - Explain that all questions must be answered before proceeding
@@ -216,23 +217,39 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
   - "You said 'probably X' - what factors would make it definitely X vs definitely not X?"
   - "You referenced 'standard practice' - can you define what that standard practice is?"
 
-## Step 11: Avoid Implementation Details
+## Step 11: MANDATORY: Consolidate Answers Into Plan
+
+**See `common/question-format-guide.md` Post-Answer Consolidation rules**
+
+After all answers are collected and ambiguities resolved, you MUST update the story generation plan file:
+1. Read all finalized answers from `story-planning-questions.md`
+2. Add a "Finalized Approach" section to `story-generation-plan.md` that synthesizes the user's decisions:
+   - Story organization approach (with rationale from user's choice)
+   - Acceptance criteria format
+   - Priority system
+   - Persona decisions
+   - Any other methodology decisions from the Q&A
+3. Update the execution steps if needed to reflect the chosen approach
+4. The plan file must be self-contained — readable without cross-referencing the questions file
+5. **Do NOT present for approval until the plan file contains the finalized approach**
+
+## Step 12: Avoid Implementation Details
 - Focus on story creation methodology, not prioritization or development tasks
 - Do not discuss technical generation at this stage
 - Avoid creating development timelines or sprint planning
 - Keep focus on story structure and format decisions
 
-## Step 12: Log Approval Prompt
+## Step 13: Log Approval Prompt
 - Before asking for approval, log the prompt with timestamp in `aidlc-docs/audit.md`
 - Include the complete approval prompt text
 - Use ISO 8601 timestamp format
 
-## Step 13: Wait for Explicit Approval of Plan
+## Step 14: Wait for Explicit Approval of Plan
 - Do not proceed until the user explicitly approves the story approach
 - Approval must be clear and unambiguous
 - If user requests changes, update the plan and repeat the approval process
 
-## Step 14: Record Approval Response
+## Step 15: Record Approval Response
 - Log the user's approval response with timestamp in `aidlc-docs/audit.md`
 - Include the exact user response text
 - Mark the approval status clearly
@@ -241,35 +258,35 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
 
 # PART 2: GENERATION
 
-## Step 15: Load Story Generation Plan
-- [ ] Read the complete story plan from `aidlc-docs/inception/plans/story-generation-plan.md`
+## Step 16: Load Story Generation Plan
+- [ ] Read the complete story plan from `aidlc-docs/{workflow-id}/inception/plans/story-generation-plan.md`
 - [ ] Identify the next uncompleted step (first [ ] checkbox)
 - [ ] Load the context and requirements for that step
 
-## Step 16: Execute Current Step
+## Step 17: Execute Current Step
 - [ ] Perform exactly what the current step describes
 - [ ] Generate story artifacts as specified in the plan
 - [ ] Follow the approved methodology and format from Planning
 - [ ] Use the story breakdown approach specified in the plan
 
-## Step 17: MANDATORY: Update Progress
+## Step 18: MANDATORY: Update Progress
 - [ ] Mark the completed step as [x] in the story generation plan
 - [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/aidlc-state.md` current status
 - [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
 - [ ] Save all generated artifacts
 - **Do NOT proceed without completing state updates**
 
-## Step 18: Continue or Complete Generation
-- [ ] If more steps remain, return to Step 14
+## Step 19: Continue or Complete Generation
+- [ ] If more steps remain, return to Step 16
 - [ ] If all steps complete, verify stories are ready for next stage
 - [ ] Ensure all mandatory artifacts are generated
 
-## Step 19: Log Approval Prompt
+## Step 20: Log Approval Prompt
 - Before asking for approval, log the prompt with timestamp in `aidlc-docs/audit.md`
 - Include the complete approval prompt text
 - Use ISO 8601 timestamp format
 
-## Step 20: Present Completion Message
+## Step 21: Present Completion Message
 - Present completion message in this structure:
      1. **Completion Announcement** (mandatory): Always start with this:
 
@@ -302,17 +319,17 @@ If the analysis in step 9 reveals ANY ambiguous answers, you MUST:
 ---
 ```
 
-## Step 21: Wait for Explicit Approval of Generated Stories
+## Step 22: Wait for Explicit Approval of Generated Stories
 - Do not proceed until the user explicitly approves the generated stories
 - Approval must be clear and unambiguous
 - If user requests changes, update stories and repeat the approval process
 
-## Step 22: Record Approval Response
+## Step 23: Record Approval Response
 - Log the user's approval response with timestamp in `aidlc-docs/audit.md`
 - Include the exact user response text
 - Mark the approval status clearly
 
-## Step 23: MANDATORY: Update State Tracking
+## Step 24: MANDATORY: Update State Tracking
 - **MANDATORY**: Update BOTH state files in the SAME interaction:
   1. Mark User Stories stage complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
   2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set user-stories status to "completed" with completed_at timestamp, update current_inception_stage to next stage
