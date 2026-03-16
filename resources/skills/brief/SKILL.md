@@ -27,11 +27,11 @@ If the input already contains substantial context (e.g., the user pasted a featu
 
 When the input is vague or minimal (e.g., "we need password reset" with no further detail), don't generate a brief full of assumptions. Instead:
 
-1. **Generate the brief anyway** — a brief with TBD sections is better than no brief. Fill in what you can reasonably infer from the request itself.
-2. **Mark unknowns explicitly as TBD** — for each TBD section, include the specific questions you would have asked. This turns the brief into a structured interview guide for the next conversation. Example: "TBD — Who is requesting this? What is the business impact? Is there a deadline?"
+1. **Generate the brief anyway** — a brief with "Unknown" sections is better than no brief. Fill in what you can reasonably infer from the request itself.
+2. **Mark unknowns explicitly** — for each unknown section, include the specific questions you would have asked. This turns the brief into a structured interview guide for the next conversation. Example: "Unknown — Who is requesting this? What is the business impact? Is there a deadline?"
 3. **Invest in Notes for Elaboration** — when context is thin, this section becomes the most valuable part of the brief. List the open questions, risks, and decisions the elaboration team needs to resolve.
 
-The goal is that even a thin-context brief is useful — it captures what's known, makes the unknowns visible, and gives the team a structured starting point for discussion.
+The goal is that even a thin-context brief is useful — it captures what is known, makes the unknowns visible, and gives the team a structured starting point for discussion.
 
 ---
 
@@ -67,7 +67,7 @@ Have a natural conversation to understand the user's intent. You're trying to fi
 
 ### Generating the Brief
 
-Once you have enough context, generate the brief. Don't wait for perfect information — a brief with a few "TBD" sections is better than no brief.
+Once you have enough context, generate the brief. Don't wait for perfect information — a brief with a few "Unknown" sections is better than no brief.
 
 Create the directory if needed, then write the brief:
 
@@ -79,7 +79,7 @@ Create the directory if needed, then write the brief:
 # Intent Brief: [Name]
 
 **Date:** [ISO date]
-**Author:** [who created it — ask if not obvious, default to "TBD" if unknown]
+**Author:** [who created it — ask if not obvious, default to "Unknown" if not provided]
 **Status:** Draft
 
 ## Problem
@@ -217,7 +217,7 @@ This integration point will be formalized in a future update to the `/plan` skil
 ## Principles
 
 - **Capture intent, not design.** Briefs describe problems and outcomes. Solutions, architecture, and implementation details belong to `/plan` and Mob Elaboration.
-- **Good enough beats perfect.** A brief with a "TBD" section is better than no brief. The elaboration team will fill gaps — that's their job.
+- **Good enough beats perfect.** A brief with an "Unknown" section is better than no brief. The elaboration team will fill gaps — that's their job.
 - **Respect the user's time.** In batch mode especially, don't ask questions you can infer the answers to. Template similar items. Be efficient.
 - **Standalone value.** A brief should be useful even if `/plan` is never run — it's a communication artifact that helps teams align on what needs to be built and why.
 - **No codebase analysis.** Briefs are business-context documents. Technical discovery, reverse engineering, and architecture decisions happen in `/plan`. Don't read source code or suggest implementations.

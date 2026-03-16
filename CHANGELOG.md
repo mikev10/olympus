@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.6] - 2026-03-16
+
+### Added
+
+- **Intent Brief skill** (`/brief`) — New skill for generating structured intent briefs as pre-elaboration inputs for `/plan` workflows and Mob Elaboration sessions. Supports single and batch modes with prioritization, cross-brief dependency detection, and thin-context handling.
+
 ## [4.4.5] - 2026-03-16
 
 ### Fixed
