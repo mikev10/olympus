@@ -51,6 +51,19 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
 
 # PART 1: PLANNING
 
+## Step 0: Check for Existing Artifacts (Idempotency Gate)
+- [ ] Scan `aidlc-docs/{workflow-id}/construction/` for any existing code generation plan for this unit
+  - Check canonical path: `construction/plans/{unit-name}-code-generation-plan.md`
+  - Check legacy paths: `construction/u-*-{unit-name}/code-generation-plan*`, `construction/{unit-name}/code-generation-plan*`
+- [ ] If a plan exists:
+  - Read it and present a summary to the user
+  - Ask: "An existing code generation plan was found at `{path}`. Would you like to (A) reuse it as-is, (B) update it, or (C) replace it with a new plan?"
+  - If at a non-canonical path, migrate it to the canonical location: `construction/plans/{unit-name}-code-generation-plan.md`
+  - If reusing (A): skip to Step 7 (approval) with the existing plan
+  - If updating (B): load it as the starting point for Steps 1-6
+  - If replacing (C): proceed to Step 1 as normal
+- [ ] If no plan exists: proceed to Step 1
+
 ## Step 1: Analyze Unit Context
 - [ ] Read unit design artifacts from Unit Design Generation
 - [ ] Read unit story map to understand assigned stories
@@ -92,7 +105,7 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
   - Service boundaries and responsibilities
 
 ## Step 4: Create Unit Plan Document
-- [ ] Save complete plan as `aidlc-docs/construction/plans/{unit-name}-code-generation-plan.md`
+- [ ] Save complete plan as `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md` (CANONICAL PATH — do not use any other location)
 - [ ] Include step numbering (Step 1, Step 2, etc.)
 - [ ] Include unit context and dependencies
 - [ ] Include story traceability
@@ -238,6 +251,12 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
 - **UPDATE CHECKBOXES**: Mark [x] immediately after completing each step
 - **STORY TRACEABILITY**: Mark unit stories [x] when functionality is implemented
 - **RESPECT DEPENDENCIES**: Only implement when unit dependencies are satisfied
+
+### Canonical Path Rules
+- **Code generation plans MUST be saved at**: `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`
+- Do NOT create code generation plans at any other path (e.g., `construction/u-nnn-{name}/`, `construction/{name}/`)
+- If a plan is found at a non-canonical path during Step 0, migrate it to the canonical location before proceeding
+- Per-unit directories (`construction/u-nnn-{name}/`) are reserved for construction output artifacts (code summaries, documentation), NOT plans
 
 ### Automation Friendly Code Rules
 When generating UI code (web, mobile, desktop), ensure elements are automation-friendly:

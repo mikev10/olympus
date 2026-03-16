@@ -31,6 +31,12 @@ B) Review a previous stage ([Show available stages])
    - **Application Design**: Read application-design artifacts (components.md, component-methods.md, services.md)
    - **Design (Units)**: Read unit-of-work.md, unit-of-work-dependency.md, unit-of-work-story-map.md
    - **Per-Unit Design**: Read functional-design.md, nfr-requirements.md, nfr-design.md, infrastructure-design.md
+   - **Construction In-Progress Artifacts**: Before creating any new construction artifacts, scan for existing ones:
+     - Check `construction/plans/` for code generation plans
+     - Check `construction/u-*-{unit-name}/` for legacy per-unit artifacts
+     - Check for partially-generated code files referenced in any existing plan
+     - Present an inventory of found artifacts to the user: "Found N existing construction artifacts: [list]. These will be loaded as the starting point."
+     - Do NOT create new artifacts that duplicate existing ones — always check first
    - **Code Stages**: Read all code files, plans, AND all previous artifacts
 4. **Smart Context Loading by Stage**:
    - **Early Stages (Workspace Detection, Reverse Engineering)**: Load workspace analysis
