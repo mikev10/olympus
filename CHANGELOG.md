@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.7] - 2026-03-16
+
+### Fixed
+
+- **AI-DLC workflow resume** — Added idempotency checks to prevent duplicate artifact creation when resuming workflows across sessions. Code generation now scans for existing plans before creating new ones (Step 0 gate), enforces canonical paths, and session continuity rules scan for construction in-progress artifacts.
+
 ## [4.4.6] - 2026-03-16
 
 ### Added

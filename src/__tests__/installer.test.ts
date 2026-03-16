@@ -304,7 +304,7 @@ describe('Installer Constants', () => {
     });
 
     it('should match package.json version', () => {
-      expect(VERSION).toBe('4.4.6');
+      expect(VERSION).toBe('4.4.7');
     });
   });
 
