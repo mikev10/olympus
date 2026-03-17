@@ -11,79 +11,19 @@
 
 **Summon the gods of code.**
 
-[Why Olympus?](#why-olympus) • [Quick Start](#quick-start) • [AI-DLC Workflow](#ai-dlc-workflow) • [Self-Learning](#self-learning-system) • [Use Cases](#use-cases) • [Agents](#available-agents) • [Docs](#documentation)
+[Why Olympus?](#why-olympus) • [Quick Start](#quick-start) • [What is Olympus?](#what-is-olympus) • [How It Works](#how-it-works) • [AI-DLC Workflow](#ai-dlc-workflow) • [Self-Learning](#self-learning-system) • [Use Cases](#use-cases) • [Reference](#reference) • [Docs](#documentation)
 
 </div>
 
 ---
 
-## What is Olympus?
+## ⚡ Why Olympus?
 
-Olympus is a multi-agent orchestration system for [Claude Code](https://docs.anthropic.com/claude-code). It provides:
+AI coding assistants are powerful — but out of the box, they produce prototypes, not production software. The code works, but there is no structured workflow, no learning between sessions, no persistence when tasks get complex, and no coordination between specialized capabilities. You end up doing the orchestration yourself.
 
-- 🧠 **Self-Learning System** - Learns your preferences, patterns, and codebase over time
-- 🤖 **20+ Specialized Agents** - Oracle, Prometheus, Olympian, Librarian, and more
-- ⚡ **Smart Model Routing** - Auto-selects Haiku/Sonnet/Opus based on task complexity
-- 📋 **Todo Management** - Tracks progress with real-time updates
-- 🔄 **Background Execution** - Long-running tasks run async with notifications
-- 🎯 **Continuation Enforcement** - Never stops until all tasks are complete
-- 💬 **20 Slash Commands** - `/ultrawork`, `/plan`, `/ascent`, `/continue`, `/review`, and more
-- 🔮 **AI-DLC Workflow** - Inception → Construction → Operations pipeline for structured development
-- 🌐 **Language Agnostic** - Works with any tech stack: Python, .NET, Go, Rust, Java, and more
-- 🔮 **Magic Keywords** - Natural language triggers for enhanced modes
+Olympus adds a quality layer on top of Claude Code. It brings structured development workflows, a pantheon of specialized agents, a self-learning system that carries context across sessions, and persistence mechanisms that keep Claude working until your tasks are actually done.
 
----
-
-## Why Olympus?
-
-Olympus transforms Claude Code from a single agent into a **pantheon of specialized experts** that work together seamlessly.
-
-### 🧠 Self-Learning System
-
-**Olympus learns from your preferences and evolves over time.**
-
-- **Active Agent Learning** - Agents proactively record patterns, gotchas, and workarounds they discover during work
-- **Passive Feedback Capture** - Automatically detects corrections, preferences, and patterns from your interactions
-- **Pattern Extraction** - Identifies recurring feedback and adapts behavior accordingly
-- **Preference Learning** - Infers your communication style (concise vs. detailed, autonomous vs. collaborative)
-- **Agent Performance Tracking** - Monitors which agents succeed or fail for specific tasks
-- **Token Efficiency Tracking** - Automatically tracks token usage per agent to optimize cost without manual intervention
-- **Discovery Storage** - Structured JSONL storage with verification tracking and confidence scoring
-- **Context Injection** - Learned preferences and discoveries are automatically applied in new sessions
-
-**The more you use Olympus, the better it understands your workflow.**
-
-### ⚡ Intelligent Orchestration
-
-- **Smart Delegation** - Routes tasks to specialized agents based on complexity
-- **Model Routing** - Automatically selects Haiku/Sonnet/Opus to optimize cost and performance
-- **Parallel Execution** - Runs independent tasks concurrently for maximum throughput
-
-### 🎯 Continuous Delivery
-
-- **Todo Management** - Tracks progress across complex multi-step tasks
-- **Continuation Enforcement** - Never stops until all tasks are verified complete
-- **Background Operations** - Long-running builds, tests, and installs run async with notifications
-
-### 🔧 Developer Experience
-
-- **Zero Configuration** - Works out-of-the-box with sensible defaults
-- **Works Everywhere** - Not tied to any language or framework — orchestrates across .NET, Python, Go, Rust, Java, and any codebase
-- **Slash Commands** - 20 slash commands (`/ultrawork`, `/plan`, `/ascent`, `/continue`)
-- **Magic Keywords** - Natural language triggers for enhanced modes
-
-### 📊 Olympus vs. Manual Claude Usage
-
-| Feature | Manual Claude | Olympus |
-|---------|---------------|---------|
-| **Multi-Step Tasks** | Sequential, manual tracking | Automatic todo management |
-| **Parallel Execution** | One task at a time | 3-5x faster with concurrent agents |
-| **Learning** | Repeats mistakes | Learns from corrections automatically |
-| **Model Selection** | Manual switching | Smart routing (cost optimized) |
-| **Task Persistence** | Stops when asked | Continues until verified complete |
-| **Background Tasks** | Blocks waiting | Runs async with notifications |
-| **Agent Specialization** | Generic responses | 20+ experts for specific domains |
-| **Token Awareness** | Manual tracking | Automatic efficiency guidance |
+The result is less "AI that answers questions" and more "AI development team that ships software."
 
 ---
 
@@ -109,162 +49,17 @@ claude
 
 ---
 
-## Installation
+## What is Olympus?
 
-### Prerequisites
+Olympus is a multi-agent orchestration system for [Claude Code](https://docs.anthropic.com/claude-code). It turns a single Claude session into a coordinated team of specialized agents — each optimized for a different kind of work.
 
-- [Claude Code](https://docs.anthropic.com/claude-code) installed
-- Node.js 20+ (`node -v` to check)
-
-### Global Installation (Recommended)
-
-Install Olympus globally to enable it across all your projects:
-
-```bash
-npm install -g olympus-ai
-olympus-ai install
-```
-
-This installs agents, skills, rules, and hooks to `~/.claude/` so every Claude Code session has access to Olympus.
-
-### Local Project Installation
-
-Install Olympus as a dev dependency for a specific project. This is useful for teams that want Olympus pinned to a specific version in their repo:
-
-```bash
-# Install as a dev dependency
-npm install --save-dev olympus-ai
-
-# Run the installer for this project only
-npx olympus-ai install --local
-```
-
-This installs agents, skills, rules, hooks, and settings to `./.claude/` in your current project directory.
-
-> **Note:** You can use both. A global install provides Olympus across all projects, while a local install scopes everything to the current project. Local files take precedence over global ones.
+Key capabilities: 20+ specialized agents (Oracle, Prometheus, Olympian, Librarian, and more), smart model routing that auto-selects Haiku/Sonnet/Opus based on task complexity, an AI-DLC structured development workflow, a self-learning system that persists context across sessions, continuation enforcement so tasks never stall, 20 slash commands, and support for any tech stack — Python, .NET, Go, Rust, Java, or anything else.
 
 ---
 
-## Usage
+## 🔧 How It Works
 
-### Start Claude Code
-
-```bash
-claude
-```
-
-### Slash Commands
-
-| Command                 | Description                                                            |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `/olympus <task>`       | Activate multi-agent orchestration mode                                |
-| `/olympus-default`      | Set Olympus as your permanent default mode                             |
-| `/ultrawork <task>`     | Maximum performance mode with parallel agents                          |
-| `/plan <description>`   | Start planning session with Prometheus                                 |
-| `/prometheus <task>`    | Strategic planning with interview workflow                             |
-| `/review [plan-path]`   | Review a plan with Momus                                               |
-| `/ascent <task>`        | Persistence loop until task completion                                 |
-| `/cancel-ascent`        | Cancel active The Ascent                                               |
-| `/deepsearch <query>`   | Thorough multi-strategy codebase search                                |
-| `/analyze <target>`     | Deep analysis and investigation                                        |
-| `/complete-plan [path]` | Verify and complete a plan after implementation                        |
-| `/archive [id\|--all]`  | Archive completed AI-DLC workflows to aidlc-docs/completed/           |
-| `/continue`             | Resume an active AI-DLC workflow from last checkpoint                  |
-| `/retro`                | Run a guardrail retrospective on the current AI-DLC workflow           |
-| `/workflow-status`      | View all active structured workflows and their status                  |
-| `/olympus next`         | Get the next ready task from current workflow                          |
-| `/doctor`               | Diagnose and fix olympus installation issues                           |
-| `/deepinit`             | Deep codebase initialization with hierarchical AGENTS.md documentation |
-| `/update`               | Check for and install updates                                          |
-
-### Examples
-
-```bash
-# Activate Olympus for a task
-/olympus refactor the authentication module
-
-# Set as default mode (persistent)
-/olympus-default
-
-# Use ultrawork for maximum performance
-/ultrawork implement user dashboard with charts
-
-# Start planning
-/plan build a task management application
-
-# Deep search
-/deepsearch API endpoints that handle user data
-```
-
-### Magic Keywords
-
-Include these words anywhere in your prompt to activate enhanced modes:
-
-| Keyword                    | Effect                                 |
-| -------------------------- | -------------------------------------- |
-| `ultrawork`, `ulw`, `uw`   | Activates parallel agent orchestration |
-| `search`, `find`, `locate` | Enhanced search mode                   |
-| `analyze`, `investigate`   | Deep analysis mode                     |
-
----
-
-## Use Cases
-
-### 🏗️ Complex Refactoring
-
-```bash
-/ascent refactor the entire authentication module to use OAuth 2.0
-```
-
-**What happens:**
-- Creates todo list for all subtasks
-- Delegates to specialized agents (Oracle for architecture, Olympian for execution)
-- Runs tests in background
-- Continues until all tasks verified complete
-
-### 📊 Multi-Agent Research
-
-```bash
-/ultrawork research and document all API endpoints in the codebase
-```
-
-**What happens:**
-- Spawns multiple agents in parallel (Explore for search, Librarian for docs)
-- Aggregates findings
-- Generates comprehensive documentation
-- ~3x faster than sequential execution
-
-### 📋 Strategic Planning
-
-```bash
-/plan build a real-time chat application with WebSocket support
-```
-
-**What happens:**
-- Starts an AI-DLC workflow with full Inception phase
-- Prometheus interviews you about requirements
-- Generates requirements, user stories, and application design
-- Creates a construction plan with units of work
-- Each unit goes through design, code generation, and testing
-- All artifacts saved to `aidlc-docs/` with full audit trail
-
-### 🧠 Learning Your Workflow
-
-**Automatic - no command needed**
-
-You: "No, use TypeScript interfaces instead of types"
-→ Olympus records this preference
-
-You: "Use functional components, not class components"
-→ Olympus learns your React style
-
-**Next session:** Claude automatically applies these preferences without being told.
-
----
-
-## Architecture
-
-Olympus operates as a three-tier orchestration system with a continuous learning loop:
+Olympus operates as a multi-agent orchestration system with smart model routing and a continuous learning loop:
 
 ```mermaid
 graph TD
@@ -273,146 +68,108 @@ graph TD
     C -->|Simple| D[Haiku Agent]
     C -->|Standard| E[Sonnet Agent]
     C -->|Complex| F[Opus Agent]
-    D --> G[Learning System]
+    D --> G[Result]
     E --> G
     F --> G
-    G --> H[Feedback Storage]
-    H -.->|Next Session| B
-    B --> I[Todo Manager]
-    I --> J[Background Executor]
-    J --> K[Result]
+    G --> H{Incomplete todos?}
+    H -->|Yes| B
+    H -->|No| I[Done]
+    D -.-> J[Learning System]
+    E -.-> J
+    F -.-> J
+    J --> K[(Feedback Storage)]
+    K -.->|Next session| B
 ```
 
-### How It Works
+**Session Flow:**
 
-**Current Session Flow:**
-1. **User Request** → Arrives with learned context already injected at SessionStart
-2. **Orchestrator** → Analyzes task complexity and delegates to appropriate agents
-3. **Model Router** → Selects Haiku (simple), Sonnet (standard), or Opus (complex)
-4. **Agents Execute** → Specialized agents complete their tasks
-5. **Learning System** → Passively captures feedback from corrections, preferences, and patterns
-6. **Feedback Storage** → Stores learned preferences, agent performance, and discoveries
+1. **User Request** → Arrives with learned context already injected from previous sessions
+2. **Orchestrator** → Analyzes task complexity and delegates to specialized agents
+3. **Model Routing** → Selects the appropriate model tier: Haiku (simple), Sonnet (standard), or Opus (complex)
+4. **Agents Execute** → Specialized subagents complete their tasks and return results
+5. **Learning System** → Hooks passively capture corrections, preferences, and discoveries during execution
+6. **Persistence** → If incomplete todos remain, the orchestrator continues working
 7. **Result** → User sees the completed work
 
-**Learning & Context Injection (Between Sessions):**
+**Cross-Session Learning:**
 
 The learning system operates across session boundaries:
 
-- **During Session**: Captures feedback from user corrections ("No, use async/await"), preferences ("Always use TypeScript"), and agent discoveries (gotchas, workarounds)
+- **During Session**: Hooks passively capture feedback from user corrections ("No, use async/await"), preferences ("Always use TypeScript"), and agent discoveries (gotchas, workarounds)
 - **Storage**: Writes to `~/.claude/olympus/learning/` (global) and `.olympus/learning/` (project-specific)
-- **Next Session Start**: SessionStart hook automatically injects learned context into the initial prompt
-- **Context Types Injected**:
+- **Next Session Start**: SessionStart hook reads stored learnings and injects relevant context into the initial prompt
+- **Context Injected**:
   - User preferences (verbosity, autonomy, explicit rules)
   - Recurring corrections (mistakes to avoid)
   - Project conventions (tech stack, patterns)
-  - Agent performance notes (weak areas to watch)
   - Recent discoveries (technical insights about your codebase)
 
-**Key Insight:** Context injection happens at the **beginning** of each session (via SessionStart hook), not in the result. This means every new conversation starts with Claude already aware of your preferences and past learnings.
+**Key Insight:** Context injection happens at the **beginning** of each session (via SessionStart hook), not in the result. Every new conversation starts with Claude already aware of your preferences and past learnings.
 
 **Key Components:**
 - **Orchestrator** - Delegates tasks to specialized agents based on complexity
 - **Model Router** - Selects optimal tier (Haiku/Sonnet/Opus) to balance cost and capability
 - **Learning System** - Captures feedback passively and builds preference models
-- **Todo Manager** - Tracks multi-step task progress with real-time status updates
-- **Background Executor** - Runs long-running operations (builds, tests, installs) async with notifications
+- **Todo Continuation** - Blocks session exit when incomplete tasks remain
 - **Feedback Storage** - Persists learned preferences, patterns, and discoveries across sessions
 
----
+### Available Agents
 
-## Available Agents
+**Task Execution**
 
-### Task Execution
-
-| Agent                 | Model  | Best For                                                       |
+| Agent | Model | Best For |
 | --------------------- | ------ | -------------------------------------------------------------- |
-| **Oracle**            | Opus   | Complex debugging, architecture decisions, root cause analysis |
-| **Librarian**         | Sonnet | Finding documentation, understanding code organization         |
-| **Explore**           | Haiku  | Quick file searches, pattern matching, reconnaissance          |
-| **Frontend Engineer** | Sonnet | UI components, styling, accessibility                          |
-| **Document Writer**   | Haiku  | README files, API docs, code comments                          |
-| **Multimodal Looker** | Sonnet | Analyzing screenshots, diagrams, mockups                       |
-| **QA Tester**         | Sonnet | Interactive CLI/service testing with tmux                      |
-| **Olympian**          | Sonnet | Focused task execution, direct implementation                  |
+| **Oracle** | Opus | Complex debugging, architecture decisions, root cause analysis |
+| **Librarian** | Sonnet | Finding documentation, understanding code organization |
+| **Explore** | Haiku | Quick file searches, pattern matching, reconnaissance |
+| **Frontend Engineer** | Sonnet | UI components, styling, accessibility |
+| **Document Writer** | Haiku | README files, API docs, code comments |
+| **Multimodal Looker** | Sonnet | Analyzing screenshots, diagrams, mockups |
+| **QA Tester** | Sonnet | Interactive CLI/service testing with tmux |
+| **Olympian** | Sonnet | Focused task execution, direct implementation |
 
-### Planning & Review
+**Planning & Review**
 
-| Agent          | Model | Best For                                                          |
+| Agent | Model | Best For |
 | -------------- | ----- | ----------------------------------------------------------------- |
-| **Prometheus** | Opus  | Strategic planning, work plans, requirement gathering             |
-| **Momus**      | Opus  | Critical plan review, feasibility assessment, risk identification |
-| **Metis**      | Opus  | Pre-planning analysis, hidden requirement detection               |
+| **Prometheus** | Opus | Strategic planning, work plans, requirement gathering |
+| **Momus** | Opus | Critical plan review, feasibility assessment, risk identification |
+| **Metis** | Opus | Pre-planning analysis, hidden requirement detection |
 
-### Tiered Variants (Smart Model Routing)
+**Tiered Variants (Smart Model Routing)**
 
-| Domain        | LOW (Haiku)             | MEDIUM (Sonnet)     | HIGH (Opus)              |
+| Domain | LOW (Haiku) | MEDIUM (Sonnet) | HIGH (Opus) |
 | ------------- | ----------------------- | ------------------- | ------------------------ |
-| **Analysis**  | `oracle-low`            | `oracle-medium`     | `oracle`                 |
-| **Execution** | `olympian-low`          | `olympian`          | `olympian-high`          |
-| **Search**    | `explore`               | `explore-medium`    | -                        |
-| **Research**  | `librarian-low`         | `librarian`         | -                        |
-| **Frontend**  | `frontend-engineer-low` | `frontend-engineer` | `frontend-engineer-high` |
+| **Analysis** | `oracle-low` | `oracle-medium` | `oracle` |
+| **Execution** | `olympian-low` | `olympian` | `olympian-high` |
+| **Search** | `explore` | `explore-medium` | - |
+| **Research** | `librarian-low` | `librarian` | - |
+| **Frontend** | `frontend-engineer-low` | `frontend-engineer` | `frontend-engineer-high` |
 
 ---
 
-## The Ascent
+## 🗺️ AI-DLC Workflow
 
-The Ascent is a persistence loop that binds Claude to your task until verified completion.
-
-```bash
-/ascent implement the entire authentication system
-```
-
-**How it works:**
-
-1. Creates a todo list for all subtasks
-2. Works continuously until all tasks complete
-3. Can only exit by outputting `<promise>DONE</promise>` after verification
-4. If stopped prematurely, continuation is enforced
-
-**Exit conditions:**
-
-- `<promise>DONE</promise>` - Work verified complete
-- `/cancel-ascent` - User cancels the loop
-- Max iterations (100) - Safety limit
-
----
-
-## Planning Workflow
-
-1. **Start AI-DLC workflow**: `/plan build a new feature`
-2. **Inception phase**: Prometheus interviews you about requirements, generates user stories, and plans the architecture
-3. **Workflow planning**: Determines which stages to execute based on project needs
-4. **Construction phase**: Per-unit functional design, NFR assessment, and code generation
-5. **Resume if interrupted**: `/continue` picks up from the last checkpoint
-6. **Review at any gate**: `/review` to evaluate plans before proceeding
-
-Plans and artifacts are saved to `aidlc-docs/` in your project directory.
-
----
-
-## AI-DLC Workflow
-
-Olympus includes a structured development workflow inspired by [AWS AI-DLC](https://github.com/awslabs/aidlc-workflows) (AI-Driven Development Life Cycle). It guides you through three phases -- **Inception** (what and why), **Construction** (how), and **Operations** (deploy, placeholder) -- with human approval gates at every stage. The workflow adapts to your project: stages are conditionally executed based on complexity, scope, and whether you are working on a greenfield or brownfield codebase.
+Olympus includes a structured development workflow inspired by [AWS AI-DLC](https://github.com/awslabs/aidlc-workflows) (AI-Driven Development Life Cycle). It guides you through three phases — **Inception** (what and why), **Construction** (how), and **Operations** (deploy, placeholder) — with human approval gates at every stage. The workflow adapts to your project: stages are conditionally executed based on complexity, scope, and whether you are working on a greenfield or brownfield codebase.
 
 ### Phases and Stages
 
-**Inception** -- determine what to build and why:
-- Workspace Detection (always) -- scans for existing code, resumes prior workflows
-- Reverse Engineering (brownfield only) -- analyzes existing codebase
-- Requirements Analysis (always) -- gathers functional and non-functional requirements
-- User Stories (conditional) -- generates personas and acceptance criteria
-- Workflow Planning (always) -- determines which construction stages to execute
-- Application Design (conditional) -- component and service design
-- Units Generation (conditional) -- decomposes work into implementable units
+**Inception** — determine what to build and why:
+- Workspace Detection (always) — scans for existing code, resumes prior workflows
+- Reverse Engineering (brownfield only) — analyzes existing codebase
+- Requirements Analysis (always) — gathers functional and non-functional requirements
+- User Stories (conditional) — generates personas and acceptance criteria
+- Workflow Planning (always) — determines which construction stages to execute
+- Application Design (conditional) — component and service design
+- Units Generation (conditional) — decomposes work into implementable units
 
-**Construction** -- determine how to build it:
+**Construction** — determine how to build it:
 - Per-unit loop (for each unit of work):
   - Functional Design, NFR Requirements, NFR Design, Infrastructure Design (all conditional)
   - Code Generation (always)
-- Build and Test (always) -- after all units complete
+- Build and Test (always) — after all units complete
 
-**Operations** -- placeholder for future deployment and monitoring workflows.
+**Operations** — placeholder for future deployment and monitoring workflows.
 
 ### How to Use
 
@@ -427,13 +184,22 @@ Olympus includes a structured development workflow inspired by [AWS AI-DLC](http
 /review
 ```
 
-State is tracked in `aidlc-docs/aidlc-state.md` and `aidlc-docs/checkpoint.json`. Use `/continue` to resume from exactly where you left off, even across sessions.
+State is tracked in `aidlc-docs/{workflow-id}/aidlc-state.md` and `aidlc-docs/{workflow-id}/checkpoint.json`. Use `/continue` to resume from exactly where you left off, even across sessions.
+
+- Start AI-DLC workflow: `/plan build a new feature`
+- Inception phase: Prometheus interviews you about requirements, generates user stories, and plans the architecture
+- Workflow planning: Determines which stages to execute based on project needs
+- Construction phase: Per-unit functional design, NFR assessment, and code generation
+- Resume if interrupted: `/continue` picks up from the last checkpoint
+- Review at any gate: `/review` to evaluate plans before proceeding
+
+Plans and artifacts are saved to `aidlc-docs/{workflow-id}/` in your project directory.
 
 **Skill stacking**: Combine `/plan` with `/ascent` for persistent execution that never stops, or with `/ultrawork` for maximum parallelism across units.
 
 ---
 
-## Self-Learning System
+## 🧠 Self-Learning System
 
 Olympus continuously learns from your interactions to provide increasingly personalized assistance.
 
@@ -556,6 +322,161 @@ Top Verified Discoveries:
 
 ---
 
+## Use Cases
+
+### 🏗️ Complex Refactoring
+
+```bash
+/ascent refactor the entire authentication module to use OAuth 2.0
+```
+
+**What happens:**
+- Creates todo list for all subtasks
+- Delegates to specialized agents (Oracle for architecture, Olympian for execution)
+- Runs tests in background
+- Continues until all tasks verified complete
+
+### 📊 Multi-Agent Research
+
+```bash
+/ultrawork research and document all API endpoints in the codebase
+```
+
+**What happens:**
+- Spawns multiple agents in parallel (Explore for search, Librarian for docs)
+- Aggregates findings
+- Generates comprehensive documentation
+- ~3x faster than sequential execution
+
+### 📋 Strategic Planning
+
+```bash
+/plan build a real-time chat application with WebSocket support
+```
+
+**What happens:**
+- Starts an AI-DLC workflow with full Inception phase
+- Prometheus interviews you about requirements
+- Generates requirements, user stories, and application design
+- Creates a construction plan with units of work
+- Each unit goes through design, code generation, and testing
+- All artifacts saved to `aidlc-docs/{workflow-id}/` with full audit trail
+
+### 🧠 Learning Your Workflow
+
+**Automatic - no command needed**
+
+You: "No, use TypeScript interfaces instead of types"
+→ Olympus records this preference
+
+You: "Use functional components, not class components"
+→ Olympus learns your React style
+
+**Next session:** Claude automatically applies these preferences without being told.
+
+---
+
+## Reference
+
+### Slash Commands
+
+| Command | Description |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `/olympus <task>` | Activate multi-agent orchestration mode |
+| `/olympus-default` | Set Olympus as your permanent default mode |
+| `/ultrawork <task>` | Maximum performance mode with parallel agents |
+| `/plan <description>` | Start planning session with Prometheus |
+| `/prometheus <task>` | Strategic planning with interview workflow |
+| `/review [plan-path]` | Review a plan with Momus |
+| `/ascent <task>` | Persistence loop until task completion |
+| `/cancel-ascent` | Cancel active The Ascent |
+| `/deepsearch <query>` | Thorough multi-strategy codebase search |
+| `/analyze <target>` | Deep analysis and investigation |
+| `/complete-plan [path]` | Verify and complete a plan after implementation |
+| `/archive [id\|--all]` | Archive completed AI-DLC workflows to aidlc-docs/completed/ |
+| `/continue` | Resume an active AI-DLC workflow from last checkpoint |
+| `/retro` | Run a guardrail retrospective on the current AI-DLC workflow |
+| `/workflow-status` | View all active structured workflows and their status |
+| `/olympus next` | Get the next ready task from current workflow |
+| `/doctor` | Diagnose and fix olympus installation issues |
+| `/deepinit` | Deep codebase initialization with hierarchical AGENTS.md documentation |
+| `/update` | Check for and install updates |
+
+### Examples
+
+```bash
+# Activate Olympus for a task
+/olympus refactor the authentication module
+
+# Set as default mode (persistent)
+/olympus-default
+
+# Use ultrawork for maximum performance
+/ultrawork implement user dashboard with charts
+
+# Start planning
+/plan build a task management application
+
+# Deep search
+/deepsearch API endpoints that handle user data
+```
+
+### Magic Keywords
+
+Include these words anywhere in your prompt to activate enhanced modes:
+
+| Keyword | Effect |
+| -------------------------- | -------------------------------------- |
+| `ultrawork`, `ulw`, `uw` | Activates parallel agent orchestration |
+| `search`, `find`, `locate` | Enhanced search mode |
+| `analyze`, `investigate` | Deep analysis mode |
+
+### Configuration
+
+#### Project-Level Config
+
+Create `.claude/CLAUDE.md` in your project for project-specific instructions:
+
+```markdown
+# Project Context
+
+This is a TypeScript monorepo using:
+
+- React for frontend
+- Node.js backend
+- PostgreSQL database
+
+## Conventions
+
+- Use functional components
+- All API routes in /src/api
+```
+
+---
+
+## The Ascent
+
+The Ascent is a persistence loop that binds Claude to your task until verified completion.
+
+```bash
+/ascent implement the entire authentication system
+```
+
+**How it works:**
+
+1. Creates a todo list for all subtasks
+2. Works continuously until all tasks complete
+3. Can only exit by outputting `<promise>DONE</promise>` after verification
+4. If stopped prematurely, continuation is enforced
+
+**Exit conditions:**
+
+- `<promise>DONE</promise>` - Work verified complete
+- `/cancel-ascent` - User cancels the loop
+- Max iterations (100) - Safety limit
+
+---
+
 ## What Gets Installed
 
 ```
@@ -586,26 +507,39 @@ Top Verified Discoveries:
 
 ---
 
-## Configuration
+## Installation
 
-### Project-Level Config
+### Prerequisites
 
-Create `.claude/CLAUDE.md` in your project for project-specific instructions:
+- [Claude Code](https://docs.anthropic.com/claude-code) installed
+- Node.js 20+ (`node -v` to check)
 
-```markdown
-# Project Context
+### Global Installation (Recommended)
 
-This is a TypeScript monorepo using:
+Install Olympus globally to enable it across all your projects:
 
-- React for frontend
-- Node.js backend
-- PostgreSQL database
-
-## Conventions
-
-- Use functional components
-- All API routes in /src/api
+```bash
+npm install -g olympus-ai
+olympus-ai install
 ```
+
+This installs agents, skills, rules, and hooks to `~/.claude/` so every Claude Code session has access to Olympus.
+
+### Local Project Installation
+
+Install Olympus as a dev dependency for a specific project. This is useful for teams that want Olympus pinned to a specific version in their repo:
+
+```bash
+# Install as a dev dependency
+npm install --save-dev olympus-ai
+
+# Run the installer for this project only
+npx olympus-ai install --local
+```
+
+This installs agents, skills, rules, hooks, and settings to `./.claude/` in your current project directory.
+
+> **Note:** You can use both. A global install provides Olympus across all projects, while a local install scopes everything to the current project. Local files take precedence over global ones.
 
 ---
 
@@ -733,12 +667,12 @@ olympus/
 
 ## Documentation
 
-- 📖 [Getting Started Guide](docs/guide/overview.md)
-- 💻 [CLI Reference](docs/guide/cli-reference.md)
-- 🔄 [Workflow Guide](docs/guide/workflow-guide.md) — AI-DLC workflow for structured development
-- 🏗️ [Brownfield Projects](docs/guide/brownfield-projects.md) — Working with existing codebases
-- 🧠 [Learning System](docs/learning-system.md) — How Olympus learns from your interactions
-- 📋 [Changelog](CHANGELOG.md)
+- [Getting Started Guide](docs/guide/overview.md)
+- [CLI Reference](docs/guide/cli-reference.md)
+- [Workflow Guide](docs/guide/workflow-guide.md) — AI-DLC workflow for structured development
+- [Brownfield Projects](docs/guide/brownfield-projects.md) — Working with existing codebases
+- [Learning System](docs/learning-system.md) — How Olympus learns from your interactions
+- [Changelog](CHANGELOG.md)
 
 ---
 
@@ -757,4 +691,3 @@ MIT - see [LICENSE](LICENSE)
 **Summon the gods of code.**
 
 </div>
-

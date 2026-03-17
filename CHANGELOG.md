@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.8] - 2026-03-16
+
+### Changed
+
+- **Code generation plan approval** — Added formal Part 1 completion message template to code-generation rule requiring plan path display, structured summary, and standardized 2-option approval gate
+
+### Fixed
+
+- **AIDLC unit folder structure** — Created missing construction unit documentation folders per directory structure spec (completed units now have `{unit-name}/code/` with summary artifacts)
+
 ## [4.4.7] - 2026-03-16
 
 ### Fixed
