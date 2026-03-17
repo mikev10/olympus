@@ -112,11 +112,42 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
 - [ ] Ensure plan is executable step-by-step
 - [ ] Emphasize that this plan is the single source of truth for Code Generation
 
-## Step 5: Summarize Unit Plan
-- [ ] Provide summary of the unit code generation plan to the user
-- [ ] Highlight unit generation approach
-- [ ] Explain step sequence and story coverage
-- [ ] Note total number of steps and estimated scope
+## Step 5: Present Plan Summary and Approval Request
+- [ ] Present plan summary in this structure:
+
+     1. **Plan Summary Header** (mandatory): Always start with:
+
+```markdown
+# 📋 Code Generation Plan — [unit-name] (Unit [N] of [total])
+```
+
+     2. **Plan Details** (mandatory): Include structured summary:
+        - **Steps**: Total step count and brief description of each
+        - **Stories**: Which user stories are covered
+        - **Agent**: Which agent will execute Part 2 and why
+        - **Key highlights**: Notable design decisions, constraints, or risks
+
+     3. **Plan Path** (mandatory): Always show the canonical plan path:
+
+```markdown
+> **Plan saved to**: `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`
+```
+
+     4. **Approval Gate** (mandatory): Always end with this exact format:
+
+```markdown
+---
+
+You may:
+- **Request Changes** — Ask for modifications to the plan
+- **Continue** — Approve the plan and proceed to Part 2 (Code Generation)
+
+---
+```
+
+- [ ] Do NOT include emojis in the approval options (only in the header)
+- [ ] Do NOT add a third option — strictly 2 options per construction stage rules
+- [ ] Ensure the plan path uses the actual workflow-id, not a placeholder
 
 ## Step 6: Log Approval Prompt
 - [ ] Before asking for approval, log the prompt with timestamp in `aidlc-docs/audit.md`
