@@ -109,11 +109,17 @@ async function main(): Promise<void> {
 
   // Map aggregated messages to hookSpecificOutput.additionalContext
   // This is the field Claude Code actually injects into the AI's context
+  // Only emit hookSpecificOutput for events Claude Code supports in its schema:
+  // PreToolUse, UserPromptSubmit, and PostToolUse
   if (result.message) {
-    output.hookSpecificOutput = {
-      hookEventName: event,
-      additionalContext: result.message,
-    };
+    if (event === 'PreToolUse' || event === 'UserPromptSubmit' || event === 'PostToolUse') {
+      output.hookSpecificOutput = {
+        hookEventName: event,
+        additionalContext: result.message,
+      };
+    } else {
+      output.reason = result.message;
+    }
   }
 
   // Output result as JSON
