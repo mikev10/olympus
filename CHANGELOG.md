@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.9] - 2026-03-17
+
+### Fixed
+
+- **Hook schema validation** — Stop hooks no longer emit `hookSpecificOutput` with unsupported event types. Claude Code's schema only supports `PreToolUse`, `UserPromptSubmit`, and `PostToolUse` in `hookSpecificOutput`; other events now use the top-level `reason` field instead.
+
 ## [4.4.8] - 2026-03-16
 
 ### Changed
