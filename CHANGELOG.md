@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.11] - 2026-03-18
+
+### Fixed
+
+- **AIDLC unit registration on skip** — When workflow planning skips the full Units Generation stage, a mandatory lightweight Unit Registration step now ensures U-NNN IDs are assigned and a `unit-of-work.md` registry is created. Dependency and story-map files are conditional (only created when they add value). Checkpoint status for skipped stages now uses `"skipped"` instead of `"completed"`.
+
 ## [4.4.10] - 2026-03-18
 
 ### Fixed

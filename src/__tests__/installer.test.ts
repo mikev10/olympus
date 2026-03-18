@@ -165,6 +165,7 @@ describe('Installer Constants', () => {
         'ascent',
         'cancel-ascent',
         'update',
+        'getting-started',
       ];
 
       for (const skill of expectedSkills) {
@@ -304,7 +305,7 @@ describe('Installer Constants', () => {
     });
 
     it('should match package.json version', () => {
-      expect(VERSION).toBe('4.4.10');
+      expect(VERSION).toBe('4.4.11');
     });
   });
 
