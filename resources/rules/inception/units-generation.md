@@ -23,12 +23,25 @@ All units of work MUST follow a consistent naming scheme:
 
 This convention ensures that construction artifacts are traceable to their inception units and that folder paths are consistent across all workflows.
 
+## Skip Pathway: Mandatory Unit Registration
+
+When Workflow Planning (Step 3.3) determines that the full Units Generation stage should be **skipped**, a lightweight **Unit Registration** step MUST still execute. This ensures all units have `U-NNN` IDs and a unit registry exists — even when the full Q&A decomposition process is unnecessary.
+
+The Unit Registration is defined in `workflow-planning.md` (Step 3.5) and executes as part of the Workflow Planning stage itself. It produces:
+- `unit-of-work.md` (MANDATORY) — minimal unit definitions (ID, name, description, key deliverables)
+- `unit-of-work-dependency.md` (CONDITIONAL) — only when units have actual blocking dependencies
+- `unit-of-work-story-map.md` (CONDITIONAL) — only when stories exist and aren't already mapped to units elsewhere
+
+All artifacts are placed in `aidlc-docs/{workflow-id}/inception/application-design/` and follow the **Unit Naming Convention** defined below.
+
+When the full Units Generation stage executes (PART 1 + PART 2 below), these lightweight artifacts are not needed — the full process produces comprehensive versions instead.
+
 ## Prerequisites
 - Context Assessment must be complete
 - Requirements Assessment recommended (provides functional scope)
 - Story Development recommended (stories map to units)
-- Application Design phase REQUIRED (determines components, methods, and services)
-- Execution plan must indicate Design phase should execute
+- Application Design recommended (determines components, methods, and services); not required when units are already well-defined in requirements
+- Execution plan must indicate Units Generation stage should execute (if skipped, see Skip Pathway above)
 
 ## Agent Delegation Strategy
 
@@ -57,7 +70,7 @@ Unit boundaries define the scope of all subsequent design and code generation wo
 - Each step and sub-step should have a checkbox []
 
 ## Step 2: Include Mandatory Unit Artifacts in Plan
-**ALWAYS** include these mandatory artifacts in the unit plan:
+**ALWAYS** include these mandatory artifacts in the unit plan (when executing the full stage — if the stage is skipped, the Skip Pathway above handles these):
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work.md` with unit definitions and responsibilities
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-dependency.md` with dependency matrix
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-story-map.md` mapping stories to units

@@ -132,7 +132,9 @@ Evaluate risk level:
 - No new components or methods
 - Pure implementation changes
 
-### 3.3 Design (Units Planning/Generation) - Execute IF:
+> **Note**: When Application Design is skipped, the `inception/application-design/` directory will still be created by the Mandatory Unit Registration step (3.5) to house the unit artifacts.
+
+### 3.3 Units Planning/Generation - Execute IF:
 - New data models or schemas
 - API changes or new endpoints
 - Complex algorithms or business logic
@@ -145,6 +147,9 @@ Evaluate risk level:
 - UI-only changes
 - Configuration updates
 - Straightforward implementations
+- Units are already clearly defined in requirements with obvious boundaries
+
+> **IMPORTANT**: When skipping Units Generation, the Mandatory Unit Registration step (3.5) MUST still execute. This ensures all units have `U-NNN` IDs and a unit registry exists for downstream construction stages.
 
 ### 3.4 NFR Implementation - Execute IF:
 - Performance requirements
@@ -156,6 +161,42 @@ Evaluate risk level:
 - Existing NFR setup sufficient
 - No new NFR requirements
 - Simple changes with no NFR impact
+
+### 3.5 Mandatory Unit Registration (when Units Generation is skipped)
+
+**TRIGGER**: This step executes when Step 3.3 determines Units Generation should be skipped but the workflow has identifiable units of work (from requirements, stories, or scope analysis).
+
+**PURPOSE**: Assign `U-NNN` IDs and create a unit registry so that construction stages have a consistent, traceable unit structure — even when full decomposition is unnecessary.
+
+**The orchestrator MUST**:
+
+1. **Assign `U-NNN` IDs** to each unit identified in requirements/stories, following the naming convention in `units-generation.md`:
+   - Documentation headings: `## U-NNN: Name`
+   - Construction folder names: `u-nnn-name` (kebab-case)
+
+2. **Create `aidlc-docs/{workflow-id}/inception/application-design/unit-of-work.md`** (MANDATORY):
+   ```markdown
+   # Units of Work
+
+   > Lightweight registration — full Units Generation stage was skipped.
+   > Units derived from requirements analysis.
+
+   ## U-001: [Unit Name]
+   - **Description**: [One-line description from requirements]
+   - **Key Deliverables**: [Bullet list of primary outputs]
+   - **Construction Folder**: `u-001-[slug]/`
+
+   ## U-002: [Unit Name]
+   ...
+   ```
+
+3. **Conditionally create `unit-of-work-dependency.md`** — ONLY if units have actual blocking dependencies between them. Skip this file when all units are independent or can execute in any order.
+
+4. **Conditionally create `unit-of-work-story-map.md`** — ONLY if user stories exist AND are not already mapped to units within `stories.md`. Skip this file when story-to-unit mappings are already recorded elsewhere.
+
+5. **Update `checkpoint.json`**: Record units in `construction_units` array using the `U-NNN` IDs. Set units-generation status to `"skipped"` with `unit_registration_completed: true`.
+
+**NO user approval gate** is required for unit registration — these are bookkeeping assignments derived directly from already-approved requirements, not new design decisions.
 
 ## Step 4: Note Adaptive Detail
 
@@ -400,6 +441,8 @@ flowchart TD
 ```
 
 2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — initialize workflow state with all stage statuses, current_inception_stage set to next stage after Workflow Planning
+   - **Skipped stages MUST use `"status": "skipped"`** (not `"completed"`) with a `skip_reason` field. This distinguishes stages that were intentionally excluded from stages that ran and produced artifacts.
+   - If Unit Registration (Step 3.5) was executed, include `"unit_registration_completed": true` on the units-generation entry.
 - **Do NOT proceed to the next stage without completing this step**
 
 ## Step 9: Present Plan to User
