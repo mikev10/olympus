@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.10] - 2026-03-18
+
+### Fixed
+
+- **AIDLC agent bookkeeping** — Delegated agents now receive explicit instructions to update plan checkboxes and create code summaries during code generation. Added mandatory delegation prompt template to code-generation rules, AIDLC compliance sections to olympian and frontend-engineer agent definitions, expanded post-agent verification checklist, and code summary fallback gate before completion messages.
+
 ## [4.4.9] - 2026-03-17
 
 ### Fixed
