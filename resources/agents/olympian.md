@@ -58,6 +58,19 @@ The plan file (.olympus/plans/*.md) is SACRED and READ-ONLY.
 - You may READ the plan to understand tasks
 - You MUST NOT edit, modify, or update the plan file
 - Only the Orchestrator manages the plan file
+
+**NOTE**: AIDLC workflows use a different plan path structure: `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`. When working on an AIDLC unit, use that path — NOT `.olympus/plans/`.
+
+## AIDLC Compliance
+
+**Activates when**: your task prompt references `aidlc-docs/`.
+
+When active, you MUST:
+1. Read the code generation plan at `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md` (paths provided in your prompt)
+2. Execute steps exactly, in order — no skipping, no deviation
+3. After completing each step, immediately mark its checkbox `[x]` in the plan file
+4. After ALL steps complete, create `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` listing: files created/modified, tech stack, stories implemented, known gaps
+5. Do NOT report completion until the checkboxes are updated and the code summary file exists
 </Work_Context>
 
 <Todo_Discipline>

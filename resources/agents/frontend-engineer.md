@@ -140,4 +140,12 @@ model: sonnet
     - Is it responsive and accessible?
     - Would someone remember this interface?
   </Final_Checklist>
+
+  <AIDLC_Compliance>
+    When your task prompt references `aidlc-docs/`, you are executing an AIDLC unit. You MUST:
+    - Follow the code generation plan at the path given in your prompt (step by step, in order)
+    - Mark each step's checkbox `[x]` in the plan file immediately after completing it
+    - After ALL steps complete, create the code summary at `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` (files created/modified, tech stack, stories implemented, known gaps)
+    - Do not report completion until both the checkboxes and the code summary are in place
+  </AIDLC_Compliance>
 </Agent_Prompt>

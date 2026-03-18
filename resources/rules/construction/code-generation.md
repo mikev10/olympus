@@ -32,13 +32,43 @@ This stage generates code for each unit of work through two integrated parts:
 
 **After agent completes**: The orchestrator reviews generated code, presents the completion message (Step 14), and manages the approval gate (Steps 15-16).
 
+### Mandatory Delegation Prompt Requirements
+
+When delegating Part 2 to an agent, the Task tool prompt MUST include all of the following. Replace `{workflow-id}` and `{unit-name}` with the concrete values for this unit — never use placeholders.
+
+```
+You are executing Part 2 (Code Generation) for the AIDLC unit "{unit-name}".
+
+1. Read the complete code generation plan at:
+   aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md
+
+2. Execute each step in the plan exactly, in order. Do NOT skip steps or deviate.
+
+3. After completing each step, immediately mark its checkbox [x] in the plan file.
+
+4. After ALL steps are complete, create a code summary at:
+   aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md
+
+   The summary must include:
+   - Files created (with paths)
+   - Files modified (with paths, brownfield only)
+   - Tech stack and key libraries used
+   - User stories implemented (reference story IDs)
+   - Known gaps or deferred items
+
+Do not report completion until the plan checkboxes are updated and the code summary exists.
+```
+
 ## Orchestrator Execution Requirements
 
 When managing code generation, the orchestrator MUST leverage Olympus capabilities:
 
 - **Todo Tracking**: Create a todo for each unit's code generation and mark progress in real-time. Every step in the code generation plan should have a corresponding tracked todo.
 - **Parallel Execution**: When multiple independent units are ready for code generation (no inter-unit dependencies), launch concurrent Task calls to generate them simultaneously.
-- **Independent Verification**: After any agent completes, verify results yourself — run the build, check for type errors, read the generated code. Never trust agent self-reports alone.
+- **Independent Verification**: After any agent completes, verify results yourself — run the build, check for type errors, read the generated code. Never trust agent self-reports alone. Verification checklist:
+  - [ ] Plan checkboxes: all completed steps are marked `[x]` in `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`
+  - [ ] Code summary exists at `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md`
+  - If either is missing, the orchestrator MUST perform the bookkeeping before presenting the completion message
 - **Persistence**: Continue through all units without stopping. If multiple units exist, complete the full construction loop before declaring the phase done.
 - **Failure Recovery**: If an agent produces incorrect code, delegate debugging to `oracle` or `oracle-medium` for root cause analysis before re-delegating generation.
 
@@ -206,6 +236,16 @@ You may:
 - [ ] If all steps complete, proceed to present completion message
 
 ## Step 14: Present Completion Message
+
+**Pre-step — Code Summary Gate**: Before presenting the completion message, verify that `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` exists. If it does not, the orchestrator creates it by reviewing the generated code and writing:
+- Files created (with paths)
+- Files modified (with paths, brownfield only)
+- Tech stack and key libraries used
+- User stories implemented (reference story IDs)
+- Known gaps or deferred items
+
+This ensures the summary always exists regardless of agent compliance.
+
 - Present completion message in this structure:
      1. **Completion Announcement** (mandatory): Always start with this:
 
