@@ -1,3 +1,9 @@
+---
+title: "Installation"
+sidebar_label: "Installation"
+sidebar_position: 2
+---
+
 # Installation Guide
 
 Complete setup instructions for Olympus, the multi-agent orchestration system for Claude Code.
@@ -668,11 +674,10 @@ Olympus is a **plugin system** for Claude Code that adds:
 
 After successful installation:
 
-1. **[Read the Overview](./overview.md)** - Understand what Olympus can do
-2. **[Understand Orchestration](./understanding-orchestration-system.md)** - Learn how it works
+1. **[Read the Overview](./overview)** - Understand what Olympus can do
+2. **[Understand Orchestration](../core-concepts/orchestration)** - Learn how it works
 3. **Try the examples** - Start with simple tasks like `/olympus hello world`
 4. **Let it learn** - Use Claude naturally and let Olympus learn your preferences
-5. **Explore agents** - Check the [Agent Reference](../AGENTS.md)
 
 ---
 
@@ -684,11 +689,6 @@ If you encounter issues during installation:
 2. **Check GitHub Issues**: [github.com/mikev10/olympus/issues](https://github.com/mikev10/olympus/issues)
 3. **View logs**: Check `~/.claude/olympus/logs/` for error messages
 4. **Ask the community**: GitHub Discussions
-
-**Common support resources:**
-- Documentation: [docs folder](../README.md)
-- Example workflows: [Use Cases](../../README.md#use-cases)
-- Configuration: See [Customize Configuration](#customize-configuration-advanced) section above
 
 ---
 
@@ -712,9 +712,8 @@ claude
 ```
 
 **Next:**
-- [Overview](./overview.md) - Quick start guide
-- [Understanding Orchestration](./understanding-orchestration-system.md) - How it works
-- [README](../../README.md) - Full project documentation
+- [Overview](./overview) - Quick start guide
+- [Understanding Orchestration](../core-concepts/orchestration) - How it works
 
 ---
 

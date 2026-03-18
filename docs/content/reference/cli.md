@@ -1,4 +1,10 @@
-# Olympus CLI Reference Guide
+---
+title: "CLI Reference"
+sidebar_label: "CLI Reference"
+sidebar_position: 1
+---
+
+# Olympus CLI Reference
 
 The `olympus-ai` command-line tool is your interface to manage the Olympus multi-agent system. This guide covers all available commands, options, and practical workflows.
 
@@ -168,11 +174,6 @@ Displays feedback collected, learned preferences, agent performance metrics, and
 - Agent performance (success rates and revision counts)
 - Project discoveries (patterns, gotchas, insights)
 
-**Example:**
-```bash
-olympus-ai learn --show
-```
-
 ### Learning System Statistics
 
 ```bash
@@ -184,11 +185,6 @@ Shows comprehensive statistics about your learning data:
 - Time range of collected data
 - Agent usage patterns
 - Performance trends
-
-**Example:**
-```bash
-olympus-ai learn --stats
-```
 
 ### Analyze Patterns & Update Preferences
 
@@ -203,11 +199,6 @@ Analyzes your feedback log to extract patterns and update user preferences autom
 2. Updates your user preferences file
 3. Updates agent performance rankings
 
-**Example:**
-```bash
-olympus-ai learn --analyze
-```
-
 ### Suggest Prompt Improvements
 
 ```bash
@@ -221,7 +212,6 @@ Based on agent performance and your preferences, suggests improvements to agent 
 - Confidence levels for each suggestion
 - Expected impact
 
-**Example:**
 ```bash
 olympus-ai learn --suggest
 
@@ -242,11 +232,6 @@ Automatically applies suggested prompt improvements to agent prompts. Creates ba
 - Modifies agent prompt files
 - Creates backup copies (`.backup.txt`)
 - Updates all suggested improvements
-
-**Example:**
-```bash
-olympus-ai learn --apply
-```
 
 ### Forget All Learnings
 
@@ -344,8 +329,6 @@ olympus-ai learn --cleanup --remove-archived
 
 ## Token Efficiency & Cost Tracking
 
-NEW: Advanced token metrics to optimize your agent usage and understand costs.
-
 ### View Agent Efficiency Rankings
 
 ```bash
@@ -376,11 +359,6 @@ explore         92%      2,100       1.05        improving
 - **Avg Tokens**: Average tokens used per successful task
 - **Efficiency**: Combined score (higher is better)
 - **Trend**: Is this agent improving, stable, or declining?
-
-**Use cases:**
-- Identify most cost-effective agents
-- Spot agents with declining performance
-- Make informed decisions about delegation
 
 ### Show Cost Breakdown
 
@@ -505,14 +483,6 @@ olympus-ai discover "configuration | Node version | Project requires Node 20+" -
 
 After recording, discoveries appear in `olympus-ai learn --show` and are automatically injected into agent prompts.
 
-### View Discoveries
-
-```bash
-olympus-ai learn --show
-```
-
-View section includes all discovered patterns, gotchas, workarounds, and insights. Agents use these to make smarter decisions.
-
 ## Preferences & Feedback
 
 ### Log a Preference
@@ -562,17 +532,6 @@ olympus-ai update --check
 
 Checks if a newer version is available without installing.
 
-**Output:**
-```
-Olympus Update
-
-Current version: X.Y.Z
-Install method: npm global
-
-Checking for updates...
-✓ You are running the latest version (X.Y.Z)
-```
-
 ### Install Updates
 
 ```bash
@@ -586,31 +545,9 @@ Installs the latest version of olympus-ai. Automatically installed from npm.
 - `--force` - Force reinstall even if up to date
 - `--quiet` - Suppress output except errors
 
-**Example:**
-```bash
-# Update with full output
-olympus-ai update
-
-# Force reinstall
-olympus-ai update --force
-
-# Silent mode
-olympus-ai update --quiet
-```
-
 **After updating:**
 - Restart Claude Code to use new version
 - Run `olympus info` to verify
-
-### Postinstall Hook (Automatic)
-
-```bash
-olympus-ai postinstall
-```
-
-Automatically runs after `npm install -g olympus-ai`. Creates initial configuration and validates setup.
-
-This is called automatically and doesn't need manual execution.
 
 ## Testing & Debugging
 
@@ -665,13 +602,6 @@ olympus-ai migrate-notepads
 ```
 
 One-time utility to migrate content from `.olympus/notepads/` to the modern discovery system.
-
-**Example:**
-```bash
-olympus-ai migrate-notepads
-✓ Migrated 12 discoveries from notepads
-Run "olympus-ai learn --show" to see the discoveries.
-```
 
 After migration, old notepads can be safely deleted.
 
@@ -897,9 +827,9 @@ olympus-ai learn --export            # Backup your learnings
 ## What's Next?
 
 - **Get started:** Run `olympus-ai install` to add agents to Claude Code
-- **Learn more:** Read the [Understanding Orchestration System](understanding-orchestration-system.md) guide
-- **Configure agents:** See [Configuration Guide](./configuration.md)
-- **Workflow examples:** Check out [Workflow Guide](workflow-guide.md)
+- **Learn more:** Read the [Understanding Orchestration System](../core-concepts/orchestration) guide
+- **Configure agents:** See [Configuration Guide](./configuration)
+- **Workflow examples:** Check out [Workflow Guide](../guides/workflow)
 
 ---
 

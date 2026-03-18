@@ -1,3 +1,9 @@
+---
+title: "Understanding the Orchestration System"
+sidebar_label: "Orchestration"
+sidebar_position: 2
+---
+
 # Understanding the Olympus Orchestration System
 
 Olympus transforms Claude Code from a single AI assistant into a coordinated team of specialized experts. This document explains how the skill-based orchestration system creates high-quality, reliable code through intelligent delegation and continuous learning.
@@ -25,33 +31,33 @@ Olympus leverages Claude Code's full customization surface through a **three-lay
 ```mermaid
 flowchart TB
     subgraph User["User Layer"]
-        Human[("👤 User")]
+        Human[("User")]
     end
 
     subgraph Orchestrator["Customizable Orchestrator Layer"]
-        Claude["🧠 Claude Orchestrator<br/>(Fixed Model, Custom Behavior)"]
+        Claude["Claude Orchestrator (Fixed Model, Custom Behavior)"]
 
         subgraph Customization["Customization Mechanisms"]
-            CLAUDE_MD["📋 CLAUDE.md<br/>Project instructions"]
-            Skills["⚡ Skills<br/>Composable behaviors"]
-            Hooks["🔧 Hooks<br/>Enforcement & learning"]
+            CLAUDE_MD["CLAUDE.md - Project instructions"]
+            Skills["Skills - Composable behaviors"]
+            Hooks["Hooks - Enforcement & learning"]
         end
 
         Claude -->|"Configured by"| Customization
     end
 
     subgraph Workers["Swappable Sub-Agents"]
-        Oracle["🧠 Oracle<br/>(Architecture)<br/>Claude Opus"]
-        Olympian["⚡ Olympian<br/>(Execution)<br/>Claude Sonnet"]
-        Explore["🔍 Explore<br/>(Search)<br/>Claude Haiku"]
-        Librarian["📚 Librarian<br/>(Research)<br/>Claude Sonnet"]
-        Frontend["🎨 Frontend Engineer<br/>(UI/UX)<br/>Claude Sonnet"]
+        Oracle["Oracle (Architecture) - Claude Opus"]
+        Olympian["Olympian (Execution) - Claude Sonnet"]
+        Explore["Explore (Search) - Claude Haiku"]
+        Librarian["Librarian (Research) - Claude Sonnet"]
+        Frontend["Frontend Engineer (UI/UX) - Claude Sonnet"]
     end
 
     subgraph Learning["Learning System"]
-        Feedback["💾 Feedback Capture"]
-        Patterns["🧩 Pattern Recognition"]
-        Context["📋 Context Injection"]
+        Feedback["Feedback Capture"]
+        Patterns["Pattern Recognition"]
+        Context["Context Injection"]
     end
 
     Human -->|"Task description"| Claude
@@ -212,18 +218,18 @@ The underlying Claude model is fixed — you can't swap it for a different LLM. 
 ### What the Master Agent Does
 
 **Direct Execution** (No delegation needed):
-- ✅ Read single files
-- ✅ Quick searches (<10 results)
-- ✅ Status checks and verification
-- ✅ Single-line code changes
-- ✅ Simple command execution
+- Read single files
+- Quick searches (fewer than 10 results)
+- Status checks and verification
+- Single-line code changes
+- Simple command execution
 
 **Delegates to Sub-Agents**:
-- ❌ Multi-file code changes
-- ❌ Complex debugging/architecture
-- ❌ Deep codebase exploration
-- ❌ Specialized work (UI, docs, testing)
-- ❌ Long-running analysis
+- Multi-file code changes
+- Complex debugging/architecture
+- Deep codebase exploration
+- Specialized work (UI, docs, testing)
+- Long-running analysis
 
 ### How Delegation Actually Works
 
@@ -234,11 +240,9 @@ Olympus enforces delegation through **two mechanisms**:
 When the master agent tries to Write/Edit files outside `.olympus/`, a hook intervenes:
 
 ```typescript
-// Real code from src/hooks/olympus-orchestrator/index.ts
-
 export function isAllowedPath(filePath: string): boolean {
   if (!filePath) return true;
-  return filePath.includes('.olympus/'); // Only .olympus/ is allowed
+  return filePath.includes('.olympus/');
 }
 
 export function processOrchestratorPreTool(input: ToolExecuteInput) {
@@ -250,12 +254,10 @@ export function processOrchestratorPreTool(input: ToolExecuteInput) {
 
   const filePath = toolInput?.filePath;
 
-  // Block direct code edits
   if (!filePath || isAllowedPath(filePath)) {
     return { continue: true };
   }
 
-  // Inject warning before tool executes
   const warning = `
 [CRITICAL - DELEGATION REQUIRED]
 
@@ -265,10 +267,6 @@ As an ORCHESTRATOR, you MUST:
 1. DELEGATE implementation work via Task tool
 2. VERIFY the work done by subagents
 3. COORDINATE - you orchestrate, not implement
-
-CORRECT APPROACH:
-Task tool with subagent_type="olympian"
-prompt="[specific single task]"
 `;
 
   return { continue: true, message: warning };
@@ -302,7 +300,7 @@ The olympus skill (`.claude/commands/olympus/SKILL.md`) contains explicit rules:
 
 Direct Execution (No delegation):
 ✅ Read single files
-✅ Quick searches (<10 results)
+✅ Quick searches (fewer than 10 results)
 ✅ Status checks and verification
 ✅ Single-line code changes
 
@@ -637,7 +635,7 @@ Efficiency:  1.5x (better than baseline)
 ```mermaid
 sequenceDiagram
     participant User
-    participant Master as Claude Master<br/>(olympus skill active)
+    participant Master as Claude Master (olympus skill active)
     participant Sub as Olympian Agent
 
     User->>Master: "Add user login endpoint"
@@ -654,7 +652,7 @@ sequenceDiagram
     Master->>Sub: Task(subagent_type="olympian", prompt="Add tests...")
     Sub->>Master: Results
     Master->>Master: Verify, mark todo #3 complete
-    Master->>User: ✅ All done - 3 todos complete
+    Master->>User: All done - 3 todos complete
 ```
 
 ### Complex Multi-Skill Workflow
@@ -662,7 +660,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User
-    participant Master as Claude Master<br/>(olympus + ultrawork)
+    participant Master as Claude Master (olympus + ultrawork)
     participant Oracle
     participant Olympian1 as Olympian #1
     participant Olympian2 as Olympian #2
@@ -696,7 +694,7 @@ sequenceDiagram
     Master->>Master: git commit with detailed message
     Master->>Master: git status verification
 
-    Master->>User: ✅ Refactor complete, committed atomically
+    Master->>User: Refactor complete, committed atomically
 ```
 
 ---
@@ -784,7 +782,7 @@ The `/ascent` skill adds a **completion guarantee** - Claude cannot stop until t
 
 ```mermaid
 flowchart TB
-    Start(["/ascent <task>"]) --> CreateTodos["Create todos for all subtasks"]
+    Start(["/ascent task"]) --> CreateTodos["Create todos for all subtasks"]
     CreateTodos --> Work["Execute next todo"]
     Work --> Verify["Verify completion"]
     Verify -->|"Incomplete"| Work
@@ -793,7 +791,7 @@ flowchart TB
     NextTodo -->|"No"| FinalCheck["Run full verification"]
     FinalCheck -->|"Issues found"| CreateFix["Create fix todos"]
     CreateFix --> Work
-    FinalCheck -->|"All verified"| Done["Output: <promise>DONE</promise>"]
+    FinalCheck -->|"All verified"| Done["Output: DONE"]
     Done --> End([Task Complete])
 
     Cancel["/cancel-ascent"] -.->|"User cancels"| End
@@ -814,9 +812,9 @@ flowchart TB
 5. Only exits via `<promise>DONE</promise>` or user cancellation
 
 **Exit Conditions:**
-- ✅ `<promise>DONE</promise>` - All work verified complete
-- ✅ `/cancel-ascent` - User explicitly cancels
-- ❌ ~~User says "stop"~~ - Ignored (continuation enforced)
+- `<promise>DONE</promise>` - All work verified complete
+- `/cancel-ascent` - User explicitly cancels
+- "User says stop" — Ignored (continuation enforced)
 
 **Note:** Maximum iterations are enforced to prevent infinite loops. The Ascent continues until completion, explicit cancellation, or iteration limit is reached.
 
@@ -903,7 +901,7 @@ Master: [Runs lsp_diagnostics - finds TypeScript error]
 Master: [Re-delegates with error context]
 Olympian: [Fixes error]
 Master: [Verifies again - passes]
-Master: ✅ Task complete
+Master: Task complete
 ```
 
 ---
@@ -1042,11 +1040,10 @@ This is a TypeScript monorepo using:
 
 ## Further Reading
 
-- [Installation Guide](./installation.md) - Step-by-step setup
-- [Overview](./overview.md) - Quick start and feature summary
-- [Agent Reference](../AGENTS.md) - Complete agent documentation
-- [Architecture](../ARCHITECTURE.md) - Deep dive into skill system
-- [README](../../README.md) - Project overview
+- [Installation Guide](../getting-started/installation) - Step-by-step setup
+- [Overview](../getting-started/overview) - Quick start and feature summary
+- [Workflow Guide](../guides/workflow) - Practical workflow selection guide
+- [Learning System](../guides/learning-system) - Deep dive into the learning system
 
 ---
 

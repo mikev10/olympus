@@ -1,3 +1,9 @@
+---
+title: "Brownfield Projects"
+sidebar_label: "Brownfield Projects"
+sidebar_position: 2
+---
+
 # Working with Brownfield Projects
 
 Olympus is **particularly well-suited for brownfield projects** (existing codebases) because its delegation-first architecture forces proper exploration and understanding before making changes.
@@ -180,7 +186,7 @@ You **cannot** make multi-file changes directly - you **must** delegate to an ag
 
 ### 4. Pattern Detection and Respect
 
-When delegating to `olympian`, Olympus automatically detects and follows existing patterns:
+When delegating to `olympian` or when `/git-master` auto-activates on multi-file git changes, Olympus automatically detects and follows existing patterns:
 
 - **Commit message style** - Conventional commits, semantic versioning, custom formats
 - **Code formatting** - Discovered via prettier/eslint configs
@@ -188,6 +194,12 @@ When delegating to `olympian`, Olympus automatically detects and follows existin
 - **Testing patterns** - Jest, Mocha, test file locations and naming
 - **Import styles** - Named vs default imports, path aliases
 - **Error handling** - Try/catch conventions, error types, logging patterns
+
+The `/git-master` skill is especially effective at maintaining consistency:
+- Analyzes recent commits for style and conventions
+- Creates atomic commits matching project standards
+- Preserves git history quality
+- Groups related changes intelligently
 
 ### 5. Practical Brownfield Workflow
 
@@ -268,17 +280,6 @@ User: "Fix session timeout issue"
 5. Token usage: oracle-low = 3k tokens (75% reduction)
 ```
 
-**Session 5 - Complex Refactor:**
-```
-User: "Migrate from passport to custom JWT auth"
-
-1. System recognizes complexity from prompt
-2. Knows this codebase from prior sessions
-3. Routes directly to oracle (Opus) - skips cheaper models
-4. Injects all accumulated discoveries
-5. No trial-and-error routing = efficient execution
-```
-
 ### What Gets Learned Automatically
 
 | Knowledge Type | Captured When | Reused For |
@@ -330,23 +331,23 @@ cat .olympus/learning/discoveries.jsonl
 ## Best Practices for Brownfield Work
 
 ### DO:
-- ✅ Use `/deepinit` on first encounter with complex codebase (creates permanent docs)
-- ✅ Let agents explore before making assumptions (they'll learn and cache patterns)
-- ✅ Trust the mandatory delegation rules (they prevent mistakes)
-- ✅ Use `/plan` for any significant changes
-- ✅ Run tests frequently to catch regressions early
-- ✅ Ensure commits match the project's existing commit style
-- ✅ Trust the learning system - it's accumulating knowledge automatically
-- ✅ Keep `.olympus/learning/` files (don't gitignore or delete them)
+- Use `/deepinit` on first encounter with complex codebase (creates permanent docs)
+- Let agents explore before making assumptions (they'll learn and cache patterns)
+- Trust the mandatory delegation rules (they prevent mistakes)
+- Use `/plan` for any significant changes
+- Run tests frequently to catch regressions early
+- Let `/git-master` maintain commit consistency
+- Trust the learning system - it's accumulating knowledge automatically
+- Keep `.olympus/learning/` files (don't gitignore or delete them)
 
 ### DON'T:
-- ❌ Try to bypass delegation for "quick fixes" (they rarely are)
-- ❌ Make assumptions about patterns without exploration
-- ❌ Skip the `/review` step for complex changes
-- ❌ Ignore existing conventions (agents will follow them - you should too)
-- ❌ Create documentation files in project root (use `.olympus/` or `docs/`)
-- ❌ Delete `.olympus/learning/` directory (accumulated knowledge is stored there)
-- ❌ Worry about re-exploration - the learning system prevents it automatically
+- Try to bypass delegation for "quick fixes" (they rarely are)
+- Make assumptions about patterns without exploration
+- Skip the `/review` step for complex changes
+- Ignore existing conventions (agents will follow them - you should too)
+- Create documentation files in project root (use `.olympus/` or `docs/`)
+- Delete `.olympus/learning/` directory (accumulated knowledge is stored there)
+- Worry about re-exploration - the learning system prevents it automatically
 
 ## Common Brownfield Scenarios
 
@@ -406,7 +407,7 @@ cat .olympus/learning/discoveries.jsonl
 4. **Maps complex codebases** with `/deepinit` (manual) and automatic learning (background)
 5. **Never re-explores** - accumulated knowledge persists across sessions
 6. **Learns efficiency** - routes to best agents, reduces token usage over time
-7. **Maintains consistency** through pattern detection and delegation enforcement
+7. **Maintains consistency** through pattern detection and `/git-master`
 8. **Reduces risk** by ensuring understanding before modification
 
 The delegation-first philosophy means you **can't accidentally break things** by making changes without understanding the full context - which is exactly what brownfield projects need.
@@ -424,7 +425,6 @@ You get smarter about the codebase with every session, **without doing anything 
 
 ## Related Documentation
 
-- [Understanding the Orchestration System](understanding-orchestration-system.md) - Deep dive into Olympus architecture
-- [Workflow Guide](workflow-guide.md) - Planning and execution workflows
-- [Configuration](./configuration.md) - Customizing Olympus behavior
-- [Interactive Workflows](../interactive-workflows.md) - Working with the workflow engine
+- [Understanding the Orchestration System](../core-concepts/orchestration) - Deep dive into Olympus architecture
+- [Workflow Guide](./workflow) - Planning and execution workflows
+- [Configuration](../reference/configuration) - Customizing Olympus behavior

@@ -1,3 +1,9 @@
+---
+title: "Overview"
+sidebar_label: "Overview"
+sidebar_position: 1
+---
+
 # Olympus Overview
 
 A multi-agent orchestration plugin that transforms Claude Code from a single assistant into a coordinated team of specialized experts.
@@ -328,7 +334,7 @@ Every session now starts with Olympus active.
 
 Edit `~/.claude/olympus/config.jsonc` to customize agent models, background task limits, and feature toggles. Most users don't need to touch this.
 
-See [Installation Guide](./installation.md#customize-configuration-advanced) for full config options.
+See [Configuration](../reference/configuration) for full config options.
 
 ---
 
@@ -357,7 +363,7 @@ olympus-ai install
 claude
 ```
 
-Full instructions: [Installation Guide](./installation.md)
+Full instructions: [Installation Guide](./installation)
 
 ### Your First Task
 
@@ -376,7 +382,7 @@ Watch Olympus:
 1. Try `/ultrawork` for a more intense workflow
 2. Use `/plan` for a complex feature
 3. Let Olympus learn from your corrections
-4. Explore the [full orchestration guide](./understanding-orchestration-system.md)
+4. Explore the [full orchestration guide](../core-concepts/orchestration)
 
 ---
 
@@ -396,10 +402,9 @@ Watch Olympus:
 
 ## Further Reading
 
-- **[Installation Guide](./installation.md)** - Step-by-step setup
-- **[Understanding Orchestration](./understanding-orchestration-system.md)** - Deep dive into how it works
-- **[Agent Reference](../AGENTS.md)** - Complete agent documentation
-- **[Architecture](../ARCHITECTURE.md)** - Technical details
+- **[Installation Guide](./installation)** - Step-by-step setup
+- **[Understanding Orchestration](../core-concepts/orchestration)** - Deep dive into how it works
+- **[Workflow Guide](../guides/workflow)** - Practical workflow selection guide
 
 ---
 

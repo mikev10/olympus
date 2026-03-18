@@ -59,6 +59,10 @@ docs/hackathon
 docs/presentation-logs
 docs/drafts
 
+# Docusaurus generated files
+docs/.docusaurus/
+docs/build/
+
 # Local RAG / embedding data
 lancedb/
 models/

@@ -521,7 +521,7 @@ program
       if (!options.quiet) {
         console.log('');
         console.log(chalk.green('╔═══════════════════════════════════════════════════════════╗'));
-        console.log(chalk.green('║         Installation Complete!                            ║'));
+        console.log(chalk.green('║         Olympus Installed!                                ║'));
         console.log(chalk.green('╚═══════════════════════════════════════════════════════════╝'));
         console.log('');
         console.log(chalk.gray(`Installed to: ${options.local ? './.claude/' : '~/.claude/'}`));
@@ -530,46 +530,13 @@ program
           console.log(chalk.yellow('For full functionality, also run: olympus-ai install'));
         }
         console.log('');
-        console.log(chalk.yellow('Usage:'));
-        console.log('  claude                        # Start Claude Code normally');
+        console.log(chalk.yellow('Get started:'));
+        console.log('  /getting-started         # Guided tour — start here');
+        console.log('  /olympus-default         # Set Olympus as your default mode');
+        console.log('  /plan <task>             # Start a structured development workflow');
+        console.log('  /ultrawork <task>        # Maximum performance mode');
         console.log('');
-        console.log(chalk.yellow('Slash Commands:'));
-        console.log('  /olympus <task>              # Activate Olympus orchestration mode');
-        console.log('  /olympus-default             # Set Olympus as default behavior');
-        console.log('  /ultrawork <task>             # Maximum performance mode');
-        console.log('  /deepsearch <query>           # Thorough codebase search');
-        console.log('  /analyze <target>             # Deep analysis mode');
-        console.log('  /plan <description>           # Start planning with Prometheus');
-        console.log('  /review [plan-path]           # Review plan with Momus');
-        console.log('');
-        console.log(chalk.yellow('Available Agents (via Task tool):'));
-        console.log(chalk.gray('  Base Agents:'));
-        console.log('    oracle              - Architecture & debugging (Opus)');
-        console.log('    librarian           - Documentation & research (Sonnet)');
-        console.log('    explore             - Fast pattern matching (Haiku)');
-        console.log('    frontend-engineer   - UI/UX specialist (Sonnet)');
-        console.log('    document-writer     - Technical writing (Haiku)');
-        console.log('    multimodal-looker   - Visual analysis (Sonnet)');
-        console.log('    momus               - Plan review (Opus)');
-        console.log('    metis               - Pre-planning analysis (Opus)');
-        console.log('    orchestrator-olympus - Todo coordination (Opus)');
-        console.log('    olympian     - Focused execution (Sonnet)');
-        console.log('    prometheus          - Strategic planning (Opus)');
-        console.log('    qa-tester           - Interactive CLI testing (Sonnet)');
-        console.log(chalk.gray('  Tiered Variants (for smart routing):'));
-        console.log('    oracle-medium       - Simpler analysis (Sonnet)');
-        console.log('    oracle-low          - Quick questions (Haiku)');
-        console.log('    olympian-high - Complex tasks (Opus)');
-        console.log('    olympian-low  - Trivial tasks (Haiku)');
-        console.log('    librarian-low       - Quick lookups (Haiku)');
-        console.log('    explore-medium      - Thorough search (Sonnet)');
-        console.log('    frontend-engineer-high - Design systems (Opus)');
-        console.log('    frontend-engineer-low  - Simple styling (Haiku)');
-        console.log('');
-        console.log(chalk.blue('Quick Start:'));
-        console.log('  1. Run \'claude\' to start Claude Code');
-        console.log('  2. Type \'/olympus-default\' to enable Olympus permanently');
-        console.log('  3. Or use \'/olympus <task>\' for one-time activation');
+        console.log(chalk.gray('Run /getting-started in Claude Code for your guided tour.'));
       }
     } else {
       console.error(chalk.red(`Installation failed: ${result.message}`));
@@ -637,7 +604,7 @@ program
 
     if (result.success) {
       console.log(chalk.green('✓ Olympus installed successfully!'));
-      console.log(chalk.gray('  Run "olympus info" to see available agents.'));
+      console.log(chalk.gray('  Run /getting-started in Claude Code for a guided tour.'));
     } else {
       // Don't fail the npm install, just warn
       console.warn(chalk.yellow('⚠ Could not complete Olympus setup:'), result.message);
