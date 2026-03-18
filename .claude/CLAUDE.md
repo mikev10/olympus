@@ -2,11 +2,7 @@
 # AI-DLC Workflow Rules (Olympus-Native)
 
 ## Active Workflow
-- **Workflow ID**: `launch-readiness`
-- **Pathway**: Brownfield (brownfield-enhancement)
-- **State file**: `aidlc-docs/launch-readiness/checkpoint.json`
-- **Human-readable state**: `aidlc-docs/launch-readiness/aidlc-state.md`
-- **Audit log**: `aidlc-docs/launch-readiness/audit.md`
+No active workflow. Start one with `/plan <description>`.
 
 All workflow stages, agent delegation, directory layout, and rules are defined in the
 global `~/.claude/CLAUDE.md` (installed by Olympus). This block only tracks the active
