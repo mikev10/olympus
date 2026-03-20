@@ -56,32 +56,7 @@ Phase 1: INCEPTION
 
 ## Markdown Formatting Standards
 
-**MANDATORY**: All generated markdown files MUST follow these formatting rules to produce clean, linter-friendly output.
-
-### Document Structure (MD025)
-
-- **One H1 per document**: Use a single `#` heading as the document title. All other sections use `##` or lower.
-- YAML frontmatter `---` does NOT count as an H1. The first `#` heading after frontmatter is the title.
-- Exception: If a document has YAML frontmatter with a `title:` field, you may omit the H1 entirely.
-
-### Blank Lines Around Block Elements (MD022, MD031, MD032)
-
-- **Headings**: Always leave one blank line BEFORE and AFTER every heading (`#`, `##`, `###`, etc.).
-- **Lists**: Always leave one blank line BEFORE and AFTER a list block (both ordered and unordered).
-- **Fenced code blocks**: Always leave one blank line BEFORE and AFTER fenced code blocks.
-- **Block quotes**: Always leave one blank line BEFORE and AFTER block quotes (`>`).
-
-### Whitespace Rules (MD009, MD047, MD012)
-
-- **No trailing spaces**: Lines must not end with trailing whitespace. Use `<br>` for intentional line breaks.
-- **File ending**: Every file must end with exactly one newline character.
-- **No consecutive blank lines**: Use at most one blank line between elements (no double blanks).
-
-### List Formatting (MD004, MD007, MD030)
-
-- **Consistent markers**: Use `-` for unordered lists (not `*` or `+`).
-- **Indentation**: Use 2 spaces for nested list indentation.
-- **Ordered list spacing**: Use `1.` followed by a single space.
+**MANDATORY**: Load and follow `common/markdown-formatting.md` for the complete markdownlint rule set and project-specific overrides. That file is the authoritative reference for all markdown formatting requirements.
 
 ## General Content Validation
 
