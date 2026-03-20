@@ -895,10 +895,19 @@ Write result to `aidlc-docs/{workflowId}/inception/prfaq.md`. If generation fail
   Task(
     subagent_type="momus",
     description="Workflow planning review",
-    prompt="Critically review this inception plan for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks, (5) incorrect depth/risk assessment. Intent: {intent.md}. Requirements: {requirements.md}. Execution plan: {execution-plan.md}."
+    prompt="Critically review this inception plan for: (1) gaps in requirements, (2) unrealistic acceptance criteria, (3) missing edge cases, (4) architectural risks, (5) incorrect depth/risk assessment. Intent: {intent.md}. Requirements: {requirements.md}. Execution plan: {execution-plan.md}. For each finding, include a clear recommendation stating whether the issue should be fixed now, deferred, or is informational only."
   )
   ```
-  Save output to `aidlc-docs/{workflowId}/inception/intent-review.md` with metadata (reviewer: momus, trigger: automatic, trust level, verdict). Present Momus feedback to the user. Address critical issues.
+
+  **Write findings to file**: After Momus returns, create `aidlc-docs/{workflowId}/inception/momus-review.md` with metadata (reviewer: momus, trigger: automatic, trust level, verdict) and the full review. Format each finding with:
+  - The finding description and severity (critical, important, minor)
+  - **Recommendation**: Whether to fix now (with suggested change), defer to a later stage, or note as informational — be explicit about the recommended action
+  - **Decision**: `[ ]` — empty checkbox for the user to mark with their decision
+  - **User Comments**: blank line for the user to add notes
+
+  Include a response guide at the top of the file explaining how to review (check findings to incorporate, add comments, or skip).
+
+  Do not silently incorporate or fix findings. The user must review the file and respond before any changes are made. This is a human approval gate.
 
 - **Trust 2+** (and not Risk Tier 3): Tell the user: "Optional: Run `/review` for Momus feedback on the inception plan."
 
@@ -923,12 +932,13 @@ Write result to `aidlc-docs/{workflowId}/inception/prfaq.md`. If generation fail
 - `aidlc-docs/{workflowId}/inception/plans/execution-plan.md`
 - `aidlc-docs/{workflowId}/inception/plans/workflow-routing.md`
 - `aidlc-docs/{workflowId}/inception/prfaq.md` (if generated)
-- `aidlc-docs/{workflowId}/inception/intent-review.md` (if Momus ran)
+- `aidlc-docs/{workflowId}/inception/momus-review.md` (if Momus ran)
 
 ### What needs your review
 - [ ] Depth assessment ({SHALLOW|MEDIUM|DEEP}, score {N}/30) is appropriate
 - [ ] Risk tier ({1|2|3}) correctly reflects implementation risk
 - [ ] Execution plan covers all required phases and stages
+- [ ] Momus review findings reviewed (if applicable) — check findings to incorporate, add comments in the file
 
 ---
 
@@ -1280,7 +1290,7 @@ Update `aidlc-docs/{workflowId}/checkpoint.json`:
 4. **CHECKPOINTS ARE MANDATORY**: Save checkpoint state after every stage transition (update inception_stages, current_inception_stage, state file, audit). This enables resume on interruption.
 5. **TRUST ADJUSTS CEREMONY**: Higher trust = fewer questions + lighter gates. Lower trust = more thorough validation.
 6. **REVIEW REQUIRED AFTER EVERY STAGE**: Use the exact REVIEW REQUIRED / WHAT'S NEXT format after each stage completes.
-7. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian) happen without announcing them to the user. Only surface findings in the artifacts. **Exception**: Metis blind spot analysis writes findings to a dedicated file for user review — do not silently incorporate.
+7. **RESEARCH IS SILENT**: Agent research dispatches (explore, librarian) happen without announcing them to the user. Only surface findings in the artifacts. **Exception**: Metis blind spot analysis and Momus review findings write to dedicated files for user review — do not silently incorporate or fix.
 8. **STATE TRACKING IS TRIPLE**: Every stage update must write to checkpoint.json + aidlc-state.md + audit.md.
 9. **RESUME IS IDEMPOTENT**: Each stage checks its `inception_stages` entry before executing. `completed` or `skipped` → skip to next. `in_progress` with `questions_file` set → resume Q&A without regenerating.
 
