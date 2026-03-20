@@ -77,9 +77,9 @@ All 54 active markdownlint rules organized by category. Rules disabled by projec
 | MD010 | `no-hard-tabs`         | No tab characters — use spaces only                        |
 | MD014 | `commands-show-output` | Don't prefix commands with `$` unless showing output below |
 | MD031 | `blanks-around-fences` | One blank line BEFORE and AFTER every fenced code block    |
-| MD040 | `fenced-code-language` | Fenced code blocks MUST specify a language (e.g., ` ```typescript `) |
-| MD046 | `code-block-style` | Use consistent code block style — use **fenced** (backtick) style, not indented |
-| MD048 | `code-fence-style` | Use consistent fence delimiters — use **backticks** (`` ` ``), not tildes (`~`) |
+| MD040 | `fenced-code-language` | Fenced code blocks MUST specify a language (e.g., ` ```typescript `)            |
+| MD046 | `code-block-style`     | Use consistent code block style — use **fenced** (backtick) style, not indented |
+| MD048 | `code-fence-style`     | Use consistent fence delimiters — use **backticks** (`` ` ``), not tildes (`~`) |
 
 ### Whitespace and Formatting
 
