@@ -2,7 +2,11 @@
 # AI-DLC Workflow Rules (Olympus-Native)
 
 ## Active Workflow
-No active workflow. Start one with `/plan <description>`.
+- **Workflow ID**: `group-1a-test-infrastructure`
+- **Pathway**: Brownfield (brownfield-enhancement)
+- **State file**: `aidlc-docs/group-1a-test-infrastructure/checkpoint.json`
+- **Human-readable state**: `aidlc-docs/group-1a-test-infrastructure/aidlc-state.md`
+- **Audit log**: `aidlc-docs/group-1a-test-infrastructure/audit.md`
 
 All workflow stages, agent delegation, directory layout, and rules are defined in the
 global `~/.claude/CLAUDE.md` (installed by Olympus). This block only tracks the active
@@ -17,7 +21,7 @@ workflow identity — do NOT search for a separate core-workflow.md file.
 Olympus is a multi-agent orchestration system for Claude Code that enables intelligent task delegation, parallel execution, and specialized agent coordination. Tagline: "Summon the gods of code."
 
 **Distribution:**
-- **npm package**: `olympus-ai` (current version: 4.4.11)
+- **npm package**: `olympus-ai` (current version: 4.4.12)
 - **GitHub**: https://github.com/mikev10/olympus
 - **Claude Code plugin**: Distributed via `.claude-plugin` directory
 - **CLI command**: `olympus-ai`

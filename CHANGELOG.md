@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.12] - 2026-03-19
+
+### Added
+
+- **Markdown formatting standards rule** — New `common/markdown-formatting.md` rule covering all 54 markdownlint v0.40.0 rules with project-specific overrides. Replaces duplicated formatting section in `content-validation.md` with a reference to the new authoritative file. Registered in `core-workflow.md` for automatic loading at workflow start.
+
+### Changed
+
+- **AI-DLC intent brief template** — Added mandatory question format section to SKILL.md and created intent brief template for pre-elaboration workflows.
+- **Gitignore updates** — Added models and `.mcp.json` to `.gitignore`.
+
+### Fixed
+
+- **CLAUDE.md cleanup** — Removed outdated active workflow details.
+
 ## [4.4.11] - 2026-03-18
 
 ### Fixed
