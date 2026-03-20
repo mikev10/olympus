@@ -94,7 +94,7 @@ Analyze whatever the user has provided:
 **MANDATORY**: Evaluate ALL of these areas and ask questions for ANY that are unclear:
 - **Functional Requirements**: Core features, user interactions, system behaviors
 - **Non-Functional Requirements**: Performance, security, scalability, usability
-- **User Scenarios**: Use cases, user journeys, edge cases, error scenarios
+- **Scenario Coverage**: Use cases, user journeys, edge cases, error scenarios
 - **Business Context**: Goals, constraints, success criteria, stakeholder needs
 - **Technical Context**: Integration points, data requirements, system boundaries
 - **Quality Attributes**: Reliability, maintainability, testability, accessibility
@@ -188,8 +188,10 @@ When done, let me know and I will incorporate your approved findings into the re
      - Scope estimate
      - Complexity estimate
    - Include both functional and non-functional requirements
+   - Include scenario coverage when relevant (use cases, edge cases, error scenarios)
    - Incorporate user's answers to clarifying questions
    - Provide brief summary of key requirements
+   - **Do NOT include a User Stories section** — user stories with personas and acceptance criteria are generated in the dedicated User Stories stage
 
 ### Step 8: MANDATORY: Update State Tracking
 
