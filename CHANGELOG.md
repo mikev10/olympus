@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.14] - 2026-03-20
+
+### Added
+
+- **Terminal output formatting standards** — New `common/terminal-formatting.md` rule with patterns for phase banners, action prompts, status lines, and standardized emoji vocabulary. Concise version embedded in `claude-md.md` so formatting rules are always active, even outside AI-DLC workflows.
+- **AI-DLC engine** — Completed group-1a-test-infrastructure workflow.
+
 ## [4.4.13] - 2026-03-19
 
 ### Fixed
