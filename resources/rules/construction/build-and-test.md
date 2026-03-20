@@ -269,6 +269,64 @@ Create `aidlc-docs/construction/build-and-test/e2e-test-instructions.md`:
 
 ---
 
+## Step 6b: Run Smoke Tests
+
+Run the full test suite (or a targeted subset for bugfix pathway) and generate a structured
+test report that aggregates results across all units.
+
+**Scope parameter** — determined by `pathway_type`:
+
+| Scope | Pathway | What runs |
+|-------|---------|-----------|
+| `full` | standard, comprehensive, brownfield-enhancement, brownfield-refactor | Entire test suite |
+| `targeted` | bugfix | Only tests for changed units (scoped by file path filter) |
+| `summary` | minimal, optimization | Smoke pass — quick sanity check only |
+
+**Delegation**: Delegate test execution to `qa-tester` using the same pattern established
+in the Agent Delegation Strategy section. The orchestrator generates the scope instruction
+first, then delegates; after the agent reports, the orchestrator runs the test command
+independently to verify (see Orchestrator Verification Requirements above).
+
+**Output artifact**: `aidlc-docs/{workflow-id}/construction/build-and-test/test-report.md`
+
+Aggregate per-unit test reports from `aidlc-docs/{workflow-id}/construction/{unit}/testing/test-report.md`
+into the build-level report using this schema:
+
+```markdown
+# Test Report — Build and Test
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| total_tests | [X] |
+| passed | [X] |
+| failed | [X] |
+| skipped | [X] |
+
+## Per-Unit Breakdown
+
+| Unit | Total | Passed | Failed | Skipped | Status |
+|------|-------|--------|--------|---------|--------|
+| [unit-id] | [X] | [X] | [X] | [X] | Pass/Fail |
+
+## Failure Details
+
+[For each failing test: unit, test name, file path, error message]
+
+## Remediation Guidance
+
+[Populated only when failures exist — links to the failing unit's test-report.md]
+\`\`\`
+
+**Critical failure gate**: If `tests_failed > 0` and `allowFailures` is not set:
+- Block workflow progression
+- Surface the failing unit's `test-report.md` path in the Remediation Guidance section
+- Do NOT proceed to Step 7 until all failures are resolved or `allowFailures` is explicitly
+  confirmed by the user
+
+---
+
 ## Step 7: Generate Test Summary
 
 Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:

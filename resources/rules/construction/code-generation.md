@@ -341,5 +341,8 @@ When generating UI code (web, mobile, desktop), ensure elements are automation-f
 - All steps in unit code generation plan marked [x]
 - All unit stories implemented according to plan
 - All code and tests generated (tests will be executed in Build & Test phase)
+- After code generation completes for a unit, proceed to the **Test Generation** stage
+  (see `resources/rules/construction/test-generation.md`) before moving to the next unit
+  or Build & Test.
 - Deployment artifacts generated
 - Complete unit ready for build and verification

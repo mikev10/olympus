@@ -298,6 +298,7 @@ export interface WorkflowCheckpointV3 {
   // Physical archival fields — distinct from status:'archived' which means aborted-in-place (BR-004)
   archived_at?: string;
   archived_path?: string;
+  bug_description?: string;
   code_plan_path?: string;
   plan_steps_total?: number;
   plan_steps_completed?: number;
@@ -335,7 +336,13 @@ export interface CeremonyConfig {
   review_prompt_style: 'inline' | 'explicit';
 }
 
-export type ConstructionDesignStage = 'functional-design' | 'nfr-requirements' | 'nfr-design' | 'infrastructure-design' | 'code-generation';
+export type ConstructionDesignStage =
+  | 'functional-design'
+  | 'nfr-requirements'
+  | 'nfr-design'
+  | 'infrastructure-design'
+  | 'code-generation'
+  | 'test-generation';
 
 export interface ConstructionUnitProgress {
   unitId: string;
@@ -346,6 +353,13 @@ export interface ConstructionUnitProgress {
   }>;
   code_plan_path: string | null;
   code_generation_status: 'not_started' | 'planning' | 'awaiting_approval' | 'generating' | 'completed';
+  tests_total?: number;
+  tests_passed?: number;
+  tests_failed?: number;
+  test_framework?: string;
+  regressions_count?: number;
+  flaky_count?: number;
+  test_generation_status?: 'not_started' | 'in_progress' | 'completed' | 'skipped';
 }
 
 export interface UserStory {
@@ -360,4 +374,51 @@ export interface UnitDefinition {
   name: string;
   description: string;
   scope: string;
+}
+
+/**
+ * Baseline snapshot of all test results captured before a code-generation unit runs.
+ * This is a frozen Group 1B contract surface — do NOT modify field names or types.
+ */
+export interface RegressionBaseline {
+  tests: Array<{
+    name: string;
+    filePath: string;
+    status: 'passed' | 'failed' | 'skipped';
+    duration_ms: number;
+  }>;
+  captured_at: string;
+  test_command: string;
+  framework: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+export type RegressionCategory =
+  | 'legitimate_regression'
+  | 'intentional_change'
+  | 'flaky'
+  | 'pre_existing_failure';
+
+export interface RegressionReport {
+  workflow_id: string;
+  unit_id: string;
+  baseline_captured_at: string;
+  compared_at: string;
+  failures: Array<{
+    test_name: string;
+    file_path: string;
+    category: RegressionCategory;
+    rationale: string;
+  }>;
+  total_regressions: number;
+  legitimate_regressions: number;
+}
+
+export interface TestFrameworkInfo {
+  name: string;
+  testCommand: string;
+  configPath?: string;
 }

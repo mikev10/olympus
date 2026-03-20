@@ -3,6 +3,24 @@
  *
  * Central registry for all hooks. Hooks are organized by event type
  * and sorted by priority (lower runs first).
+ *
+ * Reserved priority ranges (do NOT reuse without updating this table):
+ *
+ *  Priority  Owner / Purpose
+ *  --------  -------------------------------------------------------
+ *   5        SessionStart — early session initialization
+ *  10        SessionStart — standard session initialization
+ *  50        AgentTracking — PreToolUse, tracks Task tool invocations
+ *  70        LearningTool — discovery capture, tool-use learning
+ *  75        PlanLifecycle — plan creation events
+ *  76        PlanLifecycle — plan completion events
+ *  84-86     Test infrastructure (Group 1A) — reserved for U-002/U-003
+ *  90        LearningStop — session-end learning flush
+ *  92        DiscoveryCapture — PostToolUse discovery events
+ * 110        CompletePlan — plan completion and archival hook
+ * 115        CompletePlan — final plan state persistence
+ *
+ * Available gaps: 77-83, 87-89
  */
 
 import type { HookDefinition, HookEvent } from './types.js';

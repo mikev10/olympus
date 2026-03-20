@@ -12,7 +12,7 @@
 
 import * as fs from 'fs-extra';
 import { join } from 'path';
-import type { WorkflowCheckpointV3 } from './phase-types.js';
+import type { WorkflowCheckpointV3, ConstructionUnitProgress } from './phase-types.js';
 
 const WORKFLOW_DIR = 'aidlc-docs';
 const CHECKPOINT_FILENAME = 'checkpoint.json';
@@ -210,6 +210,19 @@ export async function loadCheckpoint(
     if (checkpoint.current_stage === 'idea') {
       console.warn(`[Checkpoint] Migrating legacy 'idea' stage to 'intent' for workflow ${workflowId}`);
       checkpoint.current_stage = 'intent';
+    }
+
+    if (checkpoint.construction_units) {
+      for (const unit of Object.values(checkpoint.construction_units) as ConstructionUnitProgress[]) {
+        if (!unit.stages['test-generation']) {
+          const isComplete = unit.code_generation_status === 'completed';
+          unit.stages['test-generation'] = {
+            status: isComplete ? 'skipped' : 'not_started',
+            artifact_path: null,
+            completed_at: null,
+          };
+        }
+      }
     }
 
     // inception_stages: left as undefined for legacy checkpoints.

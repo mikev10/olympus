@@ -15,8 +15,9 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import type { HierarchicalNode } from '../phase-types.js';
+import type { HierarchicalNode, ConstructionUnitProgress, PathwayType } from '../phase-types.js';
 import type { ValidationResult } from '../types.js';
+import { loadCheckpoint, saveCheckpoint } from '../checkpoint.js';
 
 type ConstructionStage = 'unit' | 'code-generation' | 'design';
 
@@ -66,6 +67,28 @@ export interface ConstructionOptions {
   checkpointStatus?: string;
   /** Optional callback invoked after successful decomposition for checkpoint persistence */
   onCheckpointSave?: () => Promise<void>;
+  /** Pathway type — used to skip baseline capture for greenfield */
+  pathwayType?: PathwayType;
+  /** Test command to run for regression baseline capture (brownfield/bugfix only) */
+  testCommand?: string;
+}
+
+export interface TestGenerationOptions {
+  projectPath?: string;
+  workflowId?: string;
+  /** User override to allow completion even if tests fail or total === 0 */
+  allowFailures?: boolean;
+}
+
+export interface TestGenerationResult {
+  status: 'completed' | 'blocked';
+  unitId: string;
+  tests_total: number;
+  tests_passed: number;
+  tests_failed: number;
+  test_framework: string;
+  reportPath: string;
+  blockingReason?: string;
 }
 
 /**
@@ -153,6 +176,20 @@ export class ConstructionExecutor {
     }
 
     console.log(`[ConstructionExecutor] Starting Construction phase execution (depth: ${depth})`);
+
+    const isBrownfield = options.pathwayType === 'brownfield-enhancement'
+      || options.pathwayType === 'brownfield-refactor'
+      || options.pathwayType === 'bugfix';
+
+    if (isBrownfield && options.testCommand) {
+      try {
+        const { captureBaseline } = await import('./regression-baseline.js');
+        await captureBaseline(this.projectPath, this.workflowId, options.testCommand);
+        console.log('[ConstructionExecutor] Regression baseline captured');
+      } catch (err) {
+        console.error('[ConstructionExecutor] Baseline capture failed (non-fatal):', err);
+      }
+    }
 
     // SHALLOW depth: single BOLT from INTENT, skip everything else
     if (depth === 'SHALLOW') {
@@ -354,12 +391,262 @@ export class ConstructionExecutor {
     };
   }
 
+  async executeTestGeneration(unitId: string, options: TestGenerationOptions = {}): Promise<TestGenerationResult> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
+    const loaded = await loadCheckpoint(projectPath, workflowId);
+    const checkpoint = loaded ?? {
+      schema_version: '3.0.0' as const,
+      workflow_id: workflowId,
+      feature_name: '',
+      current_phase: 'construction' as const,
+      current_stage: 'code-generation' as const,
+      status: 'in_progress' as const,
+      phases: {} as any,
+      manifest_path: '',
+      trust_state_path: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      construction_units: {} as Record<string, ConstructionUnitProgress>,
+    };
+
+    if (!checkpoint.construction_units) {
+      checkpoint.construction_units = {} as Record<string, ConstructionUnitProgress>;
+    }
+
+    let unitProgress: ConstructionUnitProgress = checkpoint.construction_units[unitId] ?? {
+      unitId,
+      stages: {
+        'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
+        'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
+        'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
+        'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
+        'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+        'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+      },
+      code_plan_path: null,
+      code_generation_status: 'not_started',
+      tests_total: 0,
+      tests_passed: 0,
+      tests_failed: 0,
+      test_framework: 'unknown',
+      test_generation_status: 'not_started',
+    };
+
+    unitProgress.stages['test-generation'].status = 'in_progress';
+    unitProgress.test_generation_status = 'in_progress';
+    checkpoint.construction_units[unitId] = unitProgress;
+    await saveCheckpoint(projectPath, checkpoint);
+
+    const reportDir = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'testing');
+    await fs.ensureDir(reportDir);
+    const reportPath = path.join(reportDir, 'test-report.md');
+
+    let codeSummaryContent = '';
+    const codeSummaryPath = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'code', 'code-summary.md');
+    try {
+      if (await fs.pathExists(codeSummaryPath)) {
+        codeSummaryContent = await fs.readFile(codeSummaryPath, 'utf-8');
+      }
+    } catch {}
+
+    const framework = await this.detectTestFramework(projectPath);
+
+    const now = new Date().toISOString();
+    const scaffold = this.buildTestReportScaffold(unitId, framework, codeSummaryContent, now);
+    await fs.writeFile(reportPath, scaffold, 'utf-8');
+
+    const tests_total = 0;
+    const tests_passed = 0;
+    const tests_failed = 0;
+
+    let status: 'completed' | 'blocked' = 'completed';
+    let blockingReason: string | undefined;
+
+    if (options.allowFailures !== true) {
+      if (tests_total === 0) {
+        status = 'blocked';
+        blockingReason = `No tests detected for unit ${unitId}. Set allowFailures: true to override.`;
+      } else if (tests_failed > 0) {
+        status = 'blocked';
+        blockingReason = `${tests_failed} test(s) failed for unit ${unitId}. Set allowFailures: true to override.`;
+      }
+    }
+
+    unitProgress.stages['test-generation'].status = status === 'completed' ? 'completed' : 'in_progress';
+    unitProgress.stages['test-generation'].artifact_path = reportPath;
+    if (status === 'completed') {
+      unitProgress.stages['test-generation'].completed_at = now;
+    }
+    unitProgress.tests_total = tests_total;
+    unitProgress.tests_passed = tests_passed;
+    unitProgress.tests_failed = tests_failed;
+    unitProgress.test_framework = framework;
+    unitProgress.test_generation_status = status === 'completed' ? 'completed' : 'in_progress';
+
+    checkpoint.construction_units[unitId] = unitProgress;
+    await saveCheckpoint(projectPath, checkpoint);
+
+    const result: TestGenerationResult = {
+      status,
+      unitId,
+      tests_total,
+      tests_passed,
+      tests_failed,
+      test_framework: framework,
+      reportPath,
+      blockingReason,
+    };
+
+    return result;
+  }
+
   /**
-   * Execute SHALLOW mode: create a single BOLT directly from INTENT content.
-   * No UNITs, no design artifacts.
+   * Validates that a bugfix unit has satisfied the missing-test requirement.
    *
-   * @private
+   * For non-bugfix pathways returns `{ valid: true }` immediately.
+   * For bugfix pathway: test-generation must be completed AND tests_total > 0.
    */
+  async validateBugfixTestRequirement(
+    unitId: string,
+    options: TestGenerationOptions = {}
+  ): Promise<{ valid: boolean; reason?: string }> {
+    try {
+      const projectPath = options.projectPath || this.projectPath;
+      const workflowId = options.workflowId || this.workflowId;
+
+      const loaded = await loadCheckpoint(projectPath, workflowId);
+      if (!loaded) {
+        return { valid: false, reason: 'checkpoint not found' };
+      }
+
+      if (loaded.pathway_type !== 'bugfix') {
+        return { valid: true };
+      }
+
+      const unitProgress = loaded.construction_units?.[unitId];
+      if (!unitProgress) {
+        return { valid: false, reason: `no unit progress found for unit ${unitId}` };
+      }
+
+      const tgStatus = unitProgress.stages?.['test-generation']?.status;
+      if (tgStatus !== 'completed') {
+        return { valid: false, reason: 'test-generation stage not completed for bugfix unit' };
+      }
+
+      const testsTotal = unitProgress.tests_total ?? 0;
+      if (testsTotal === 0) {
+        return { valid: false, reason: 'bugfix unit must have at least one test (tests_total === 0)' };
+      }
+
+      return { valid: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[ConstructionExecutor] validateBugfixTestRequirement error for ${unitId}:`, err);
+      return { valid: false, reason: `validation error: ${message}` };
+    }
+  }
+
+  /**
+   * Captures the bug description for a bugfix workflow and persists it to the checkpoint.
+   */
+  async captureBugDescription(
+    description: string,
+    options?: { projectPath?: string; workflowId?: string }
+  ): Promise<void> {
+    try {
+      const projectPath = options?.projectPath || this.projectPath;
+      const workflowId = options?.workflowId || this.workflowId;
+
+      const loaded = await loadCheckpoint(projectPath, workflowId);
+      const checkpoint = (loaded ?? {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: '',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {} as any,
+        manifest_path: '',
+        trust_state_path: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        construction_units: {} as Record<string, ConstructionUnitProgress>,
+      }) as import('../phase-types.js').WorkflowCheckpointV3;
+
+      checkpoint.bug_description = description;
+      checkpoint.updated_at = new Date().toISOString();
+
+      await saveCheckpoint(projectPath, checkpoint);
+    } catch (err) {
+      console.error('[ConstructionExecutor] captureBugDescription error:', err);
+    }
+  }
+
+  private async detectTestFramework(projectPath: string): Promise<string> {
+    const pkgPath = path.join(projectPath, 'package.json');
+    try {
+      if (!(await fs.pathExists(pkgPath))) {
+        return 'unknown';
+      }
+      const content = await fs.readFile(pkgPath, 'utf-8');
+      const pkg = JSON.parse(content);
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (allDeps['vitest']) return 'vitest';
+      if (allDeps['jest']) return 'jest';
+      if (allDeps['mocha']) return 'mocha';
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private buildTestReportScaffold(unitId: string, framework: string, codeSummaryContent: string, now: string): string {
+    let filesInScope = '_No code-summary.md found — files in scope unknown._';
+    if (codeSummaryContent) {
+      const match = codeSummaryContent.match(/## Files (?:created|modified|created\/modified)[^\n]*\n([\s\S]*?)(?=\n##|$)/i);
+      if (match && match[1].trim()) {
+        filesInScope = match[1].trim();
+      }
+    }
+
+    return `---
+unit_id: ${unitId}
+framework: ${framework}
+generated_at: ${now}
+---
+
+# Test Report — ${unitId}
+
+## Files in Scope
+
+${filesInScope}
+
+## Test Results
+
+| Metric | Value |
+|--------|-------|
+| tests_total | 0 |
+| tests_passed | 0 |
+| tests_failed | 0 |
+
+## Test Types
+
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] E2E tests
+
+## Failure Details
+
+_No failures recorded._
+
+## Override
+
+_allowFailures was not set._
+`;
+  }
+
   private async executeShallow(): Promise<ValidationResult> {
     const intentPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception', 'intent.md');
     const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
@@ -427,6 +714,12 @@ export class ConstructionExecutor {
     this.totalEffort = intentEffort;
 
     console.log('[ConstructionExecutor] SHALLOW mode: created single unit for code generation from INTENT');
+
+    try {
+      await this.executeTestGeneration('shallow-impl');
+    } catch (err) {
+      console.error('[ConstructionExecutor] Test generation failed for shallow-impl:', err);
+    }
 
     return {
       passed: true,

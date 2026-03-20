@@ -138,6 +138,8 @@ If `current_phase === 'construction'`:
 - Check `construction_units` for the active unit
 - Determine which design stage is `in_progress` or `not_started`
 - Resume from that point
+- If a `construction_units` entry has `stages['test-generation'].status === 'in_progress'` or `test_generation_status === 'in_progress'`, resume at test-generation for that unit
+- Note: test-generation runs after code-generation for each unit; check `test_generation_status` in the unit progress
 
 ### 4d. Other Phases
 
@@ -163,6 +165,7 @@ Based on the resume point determined in Step 4, read the corresponding rule file
 | nfr-design | `~/.claude/olympus/rules/construction/nfr-design.md` |
 | infrastructure-design | `~/.claude/olympus/rules/construction/infrastructure-design.md` |
 | code-generation | `~/.claude/olympus/rules/construction/code-generation.md` |
+| test-generation | `~/.claude/olympus/rules/construction/test-generation.md` |
 
 ---
 
@@ -217,6 +220,7 @@ Wait for user response before proceeding.
 | infrastructure-design | `oracle-medium` |
 | code-generation (backend) | `olympian` or `olympian-high` |
 | code-generation (frontend) | `frontend-engineer` or `frontend-engineer-high` |
+| test-generation | `qa-tester` |
 | build-and-test | `qa-tester` |
 
 ### If user chose B (Review)
