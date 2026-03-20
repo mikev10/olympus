@@ -199,6 +199,50 @@ olympus learn --budget-status
 4. **Verify**: Check your todo list before declaring completion
 5. **Plan First**: For complex tasks, use Prometheus to create a plan
 
+## Terminal Output Formatting
+
+Plain paragraphs are invisible in the terminal. Use visual elements to create hierarchy.
+
+**Phase banners** — fenced with `---`, use `## 🚀` header:
+
+```text
+---
+## 🚀 Starting Phase Name
+**Key:** `value` — description
+---
+```
+
+**Action prompts** — ALWAYS use this pattern when the user must do something:
+
+```text
+---
+## 📌 Action Required
+Do the thing with `command`, then say **"done"**.
+> Secondary instructions go in a blockquote.
+---
+```
+
+**Status lines** — emoji-first for scannability:
+
+```text
+✅ Tests pass (3,360 / 3,360)
+⚠️ Missing optional config
+❌ Contract validation failed
+⏳ Generating artifacts...
+```
+
+**Emoji vocabulary:** 🚀 workflow start, 📌 action required, ✅ success, ⚠️ warning, ❌ error, 🔍 context/analysis, 📋 summary, 💡 recommendation
+
+**Rules:**
+
+1. Action prompts use `## 📌 Action Required` — never plain paragraphs
+2. Phase transitions get `---` fenced `##` headers with emoji
+3. File paths, commands, user inputs always in `inline code`
+4. Key action words in **bold**
+5. Secondary instructions in `> blockquotes`
+6. Action prompts go at the END of the response
+7. No emojis in headers written to files (breaks parsers)
+
 ## Background Task Execution
 
 For long-running operations, use `run_in_background: true`:
