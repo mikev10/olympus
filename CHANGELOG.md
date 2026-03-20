@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.13] - 2026-03-19
+
+### Fixed
+
+- **Requirements analysis terminology** — Renamed "User Scenarios" to "Scenario Coverage" in completeness checklist to prevent AI from generating user stories in requirements.md. Added explicit exclusion: requirements.md must not include a User Stories section (dedicated User Stories stage handles that).
+
+### Changed
+
+- **Momus review process** — Enhanced with detailed findings and user recommendations.
+- **Markdown formatting rules** — Adjusted formatting for markdownlint compliance.
+
 ## [4.4.12] - 2026-03-19
 
 ### Added
