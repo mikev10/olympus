@@ -6,6 +6,10 @@ description: Generate structured intent briefs as pre-elaboration inputs for /pl
 
 You help teams capture the "what" and "why" before diving into the "how." Intent briefs are lightweight, structured documents that serve as high-quality inputs to `/plan` workflows and Mob Elaboration sessions. They live in `.olympus/briefs/` as pre-workflow artifacts — created before any AI-DLC workflow exists.
 
+## MANDATORY: Question Format
+
+**CRITICAL**: Load and follow `resources/rules/common/question-format-guide.md` for ALL questions. You must NEVER ask questions directly in chat. ALL questions must be placed in dedicated question files using the multiple-choice format defined in the guide.
+
 ## Input
 
 ```
@@ -21,7 +25,7 @@ Determine which mode to run based on the input:
 - **`--batch`** flag or input contains a list of items → **Batch Mode**
 - Everything else → **Single Mode**
 
-If the input already contains substantial context (e.g., the user pasted a feature description, a ticket, or a problem statement), extract what you can from it and confirm rather than re-asking. The goal is a conversation, not a questionnaire.
+If the input already contains substantial context (e.g., the user pasted a feature description, a ticket, or a problem statement), extract what you can and pre-fill it — then only ask questions for the gaps via question files.
 
 ### Thin-Context Handling
 
@@ -37,84 +41,96 @@ The goal is that even a thin-context brief is useful — it captures what is kno
 
 ## Single Mode
 
-### The Interview
+### Step 1: Extract Context from Input
 
-Have a natural conversation to understand the user's intent. You're trying to fill in these sections, but don't march through them like a checklist — let the conversation flow and ask follow-ups where it matters most.
+Before creating questions, analyze the user's input to extract everything you already know. If the input contains substantial context (a feature description, ticket, problem statement), pre-fill what you can. This reduces the number of questions the user needs to answer.
 
-**Core questions (ask these):**
-
-1. **What needs to change?** — The problem or opportunity. What's broken, missing, or possible? Get specific enough that someone unfamiliar with the context could understand.
-
-2. **Why does it matter?** — Who's asking for this, what's the business impact, and why now? This is what separates a brief from a sticky note. If the user mentions a stakeholder request, capture the name and context.
-
-3. **What does "done" look like?** — The desired outcome, described in terms of what should be true when this work is complete. Keep it outcome-focused ("customers can self-serve password resets") not implementation-focused ("add a /reset-password endpoint").
-
-**Contextual questions (ask as needed — skip what's obvious or irrelevant):**
-
-4. **What's in scope and what's not?** — Boundaries prevent scope creep during elaboration. Especially useful when a problem could be interpreted broadly.
-
-5. **Known constraints?** — Technical limitations, deadlines, dependencies on other work, team availability. Anything the elaboration team should know upfront.
-
-6. **Priority relative to other work?** — Where does this sit? Is it urgent, important-but-not-urgent, or nice-to-have? If other briefs exist, how does this one rank?
-
-7. **Any references?** — Tickets, designs, prior art, related features, stakeholder emails. Links and pointers that give the elaboration team a head start.
-
-**Things to listen for and capture even if not explicitly asked:**
+Capture from input:
 - Stakeholder names and their relationship to the request
 - Implicit constraints ("we're on .NET 6" or "this is a legacy iFrame")
 - Dependencies between this work and other known work
 - Urgency signals ("Mario asked for this", "blocking 3 accounts")
+- Project type signals (greenfield vs brownfield)
 
-### Generating the Brief
+### Step 2: Create the Question File
 
-Once you have enough context, generate the brief. Don't wait for perfect information — a brief with a few "Unknown" sections is better than no brief.
+Create a question file following the format in `resources/rules/common/question-format-guide.md`.
+
+**File location:** `.olympus/briefs/{kebab-case-name}-questions.md`
+
+Generate questions that map to the brief template sections. Skip questions where the input already provides a clear answer — pre-fill those into your context and note them at the top of the question file as "Pre-filled from input."
+
+**Question bank** — include all that are relevant, skip what's already known:
+
+1. **Intent** — "What best describes the core intent?" Frame options around: "We need to [what] so that [who] can [outcome], because today [pain point]." Push for specificity. `(select one)`
+
+2. **Primary audience** — "Who is the primary audience for this work?" Options based on likely personas from the input. `(select one)`
+
+3. **Secondary audiences** — "Who else is affected by or benefits from this work?" `(select all that apply)`
+
+4. **Success criteria** — "What does success look like?" Directional outcomes, not precise metrics. Keep options outcome-focused, not implementation-focused. `(select all that apply)`
+
+5. **Scope signals (in scope)** — "Which capabilities are in scope?" High-level capabilities the user expects. `(select all that apply)`
+
+6. **Scope boundaries (out of scope)** — "What is explicitly out of scope?" Critical for preventing AI over-scoping during Inception. `(select all that apply)`
+
+7. **Technical constraints** — "What technical constraints apply?" Platform, framework, database, API limitations. `(select all that apply)`
+
+8. **Business/organizational constraints** — "What business or organizational constraints apply?" Team capacity, deadlines, approval gates. `(select all that apply)`
+
+9. **Compliance/security constraints** — "What compliance or security constraints apply?" Data handling, access control, regulatory requirements. `(select all that apply)`
+
+10. **Project type** — "Is this a new project or existing codebase?" `(select one)`
+
+11. **Existing system context** — For brownfield: "What describes the current system landscape?" System architecture, integration points, known tech debt. `(select all that apply)`
+
+12. **Dependencies and risks** — "What could block this work?" `(select all that apply)`
+
+13. **Non-functional requirements** — "Which NFRs are relevant?" Performance, availability, scalability, accessibility, observability. `(select all that apply)`
+
+14. **Stakeholders for Mob Elaboration** — "Who needs to be in the Mob Elaboration room?" `(select all that apply)`
+
+15. **Open pre-inception questions** — "Are there questions that must be answered BEFORE Mob Elaboration?" `(select all that apply)`
+
+16. **Priority** — "How does this rank relative to other work?" `(select one)`
+
+**Question generation guidelines:**
+- Only include questions where the answer is NOT already clear from the input
+- For questions you do include, craft meaningful options based on what you know about the context — don't use generic filler options
+- Always include "Other" as the last option (MANDATORY per question-format-guide)
+- Always include `[Recommendation]:` with reasoning before `[Answer]:`
+- Always include selection type `(select one)` or `(select all that apply)`
+
+### Step 3: Inform User and Wait
+
+Tell the user the question file has been created, how many questions it contains, and where to find it. Wait for the user to confirm they've completed their answers ("done", "completed", "finished", or similar).
+
+### Step 4: Read, Validate, and Analyze Answers
+
+1. Read the question file
+2. Extract answers after `[Answer]:` tags
+3. Validate all questions are answered — if any are empty, ask the user to complete them
+4. Check for contradictions and ambiguities per the question-format-guide
+5. If contradictions found, create a clarification file at `.olympus/briefs/{kebab-case-name}-clarification-questions.md` and wait for resolution
+
+### Step 5: Generate the Brief
+
+Once all answers are validated and contradictions resolved, generate the brief.
 
 Create the directory if needed, then write the brief:
 
 **File location:** `.olympus/briefs/{kebab-case-name}.md`
 
-**Template:**
+**Template:** Read and use the template at `resources/skills/brief/templates/ai-dlc-intent-brief-template.md`. Fill in each section based on the user's answers and any context extracted in Step 1. For sections where you have no information:
+- Replace placeholder text with "Unknown" followed by the specific questions that would need to be answered
+- For tables, keep the header row and add a single row with "Unknown — [what needs to be determined]"
+- Remove the instructional italics and example text, replacing them with actual content
 
-```markdown
-# Intent Brief: [Name]
-
-**Date:** [ISO date]
-**Author:** [who created it — ask if not obvious, default to "Unknown" if not provided]
-**Status:** Draft
-
-## Problem
-
-[Clear problem statement — what's wrong or what opportunity exists. 2-4 sentences that someone unfamiliar with the context could understand.]
-
-## Business Motivation
-
-[Who wants this, why it matters, business impact. Include stakeholder names if known. Capture urgency signals.]
-
-## Desired Outcome
-
-[What "done" looks like — outcome-focused, not implementation-focused. Describe the end state, not the steps to get there.]
-
-## Scope
-
-### In Scope
-- [Specific items this work covers]
-
-### Out of Scope
-- [What this work explicitly does NOT cover — prevents scope creep during elaboration]
-
-## Known Constraints
-
-- [Technical, timeline, dependency, or team constraints]
-- [Include anything that would surprise the elaboration team if they didn't know it upfront]
-
-## References
-
-- [Links to tickets, designs, prior art, stakeholder communications]
-
-## Notes for Elaboration
-
-[Anything the team should discuss during Mob Elaboration — open questions, risks you can see, areas where the team's expertise is needed to make decisions. This section is where you flag things the brief can't answer alone.]
-```
+**Metadata mapping:**
+- **Author** → from answers or "Unknown"
+- **Last Updated** → current ISO date
+- **Status** → "Draft" (always for new briefs)
+- **Project Type** → "Greenfield" or "Brownfield" based on answers
 
 After writing, confirm the file path and offer:
 - "Want to adjust anything before we finalize?"
@@ -134,13 +150,19 @@ Confirm the list back: "I see N items. Here's what I've got: [list]. Does this l
 
 ### Step 2: Lightweight Interview
 
-Don't run the full 7-question interview for each item — that would take forever with a large list. Instead:
+Don't run the full 16-question interview for each item — that would take forever with a large list. Instead, create a single consolidated question file.
 
-1. **Ask shared context questions once** — things that apply to all items (e.g., "Who's the stakeholder for all of these?", "What's the common motivation?", "Are there shared constraints?")
+**File location:** `.olympus/briefs/batch-questions.md`
 
-2. **For each item, ask only what's unique** — the problem statement and any item-specific context. If items are similar (e.g., "update iFrame for billing page" and "update iFrame for schedule page"), you can template the brief structure and ask about differences.
+Structure the question file in two parts:
 
-3. **Infer where possible** — if the user says "Mario requested the first 5", you don't need to ask about stakeholder for each of those 5.
+1. **Shared context questions** — things that apply to all items (e.g., stakeholder, common motivation, shared constraints, project type, compliance requirements). Ask these once.
+
+2. **Per-item questions** — for each item, ask only what's unique: the intent and any item-specific context. If items are similar (e.g., "update iFrame for billing page" and "update iFrame for schedule page"), template the question structure and ask about differences.
+
+3. **Infer where possible** — if the user says "Mario requested the first 5", don't ask about stakeholder for each of those 5. Note inferences at the top of the file as "Pre-filled from input."
+
+Follow the question-format-guide for all questions (multiple-choice, `[Recommendation]:`, `[Answer]:` tags, "Other" as last option). Inform the user, then wait for completion before proceeding.
 
 ### Step 3: Prioritize
 
@@ -157,7 +179,7 @@ If the user already has a priority order, confirm it rather than re-deriving it.
 
 ### Step 4: Generate All Briefs
 
-Write each brief to `.olympus/briefs/{kebab-case-name}.md` using the same template as single mode. Include the priority position in each brief's metadata.
+Write each brief to `.olympus/briefs/{kebab-case-name}.md` using the same template as single mode (from `resources/skills/brief/templates/ai-dlc-intent-brief-template.md`). Include the priority position in each brief's metadata.
 
 ### Step 5: Generate the Index
 

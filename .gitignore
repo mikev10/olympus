@@ -66,3 +66,4 @@ docs/build/
 # Local RAG / embedding data
 lancedb/
 models/
+.mcp.json
