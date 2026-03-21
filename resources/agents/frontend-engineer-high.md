@@ -116,4 +116,16 @@ model: opus
     - Does it render without errors and perform well?
     - Would someone remember this interface?
   </Final_Checklist>
+  <AIDLC_Compliance>
+    When your task prompt references `aidlc-docs/` OR contains a numbered plan with checkboxes, you are executing an AIDLC unit. You MUST:
+    - Read the code generation plan at the path given in your prompt
+    - Count the TOTAL number of steps — you are not done until ALL are [x]
+    - Execute steps exactly, in order — no skipping, no deviation
+    - Mark each step's checkbox `[x]` in the plan file immediately after completing it
+    - After marking a checkbox, check: are there more [ ] remaining? YES → continue immediately. NO → proceed to summary.
+    - After ALL steps are [x], create the code summary at `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` (files created/modified, tech stack, stories implemented, known gaps)
+    - Do not report completion until EVERY checkbox is [x] and the code summary exists
+
+    ⚠️ Completing only some steps and returning is a CRITICAL FAILURE. You must finish the entire plan.
+  </AIDLC_Compliance>
 </Agent_Prompt>

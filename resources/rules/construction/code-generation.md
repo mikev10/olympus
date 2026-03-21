@@ -30,7 +30,14 @@ This stage generates code for each unit of work through two integrated parts:
 
 **If an agent task fails**: Follow the Agent Task Failure Recovery procedure in `error-handling.md` — retry the delegation, never silently do the work yourself.
 
-**After agent completes**: The orchestrator reviews generated code, presents the completion message (Step 14), and manages the approval gate (Steps 15-16).
+**After agent completes**: The orchestrator MUST verify completion before proceeding:
+1. Read the plan file and count `[x]` vs `[ ]` checkboxes
+2. If ALL checkboxes are `[x]` AND code-summary.md exists → proceed to Step 14 (completion message)
+3. If ANY checkboxes remain `[ ]` OR code-summary.md is missing → **re-delegate** from the first unchecked step:
+   - Log the partial completion in audit.md ("Agent completed steps 1-{M} of {N}, re-delegating steps {M+1}-{N}")
+   - Send a new Task to the same agent type with the prompt: "Continue Part 2 from step {M+1}. Steps 1-{M} are already complete. Complete the remaining steps {M+1} through {N}." followed by the standard delegation prompt
+   - Repeat until all checkboxes are marked
+4. The orchestrator manages the approval gate (Steps 15-16)
 
 ### Mandatory Delegation Prompt Requirements
 
@@ -38,15 +45,22 @@ When delegating Part 2 to an agent, the Task tool prompt MUST include all of the
 
 ```
 You are executing Part 2 (Code Generation) for the AIDLC unit "{unit-name}".
+This plan has {N} steps. Your task is NOT complete until ALL {N} steps are marked [x].
 
 1. Read the complete code generation plan at:
    aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md
 
-2. Execute each step in the plan exactly, in order. Do NOT skip steps or deviate.
+2. Count the total number of steps with checkboxes [ ]. This is your completion target.
 
-3. After completing each step, immediately mark its checkbox [x] in the plan file.
+3. Execute each step in the plan exactly, in order. Do NOT skip steps or deviate.
 
-4. After ALL steps are complete, create a code summary at:
+4. After completing each step, immediately mark its checkbox [x] in the plan file.
+
+5. After marking a checkbox, check: are there more [ ] checkboxes remaining in the plan?
+   - YES → Continue to the next step immediately. DO NOT STOP OR RETURN.
+   - NO → All steps done. Proceed to step 6.
+
+6. After ALL steps are marked [x], create a code summary at:
    aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md
 
    The summary must include:
@@ -56,8 +70,12 @@ You are executing Part 2 (Code Generation) for the AIDLC unit "{unit-name}".
    - User stories implemented (reference story IDs)
    - Known gaps or deferred items
 
-Do not report completion until the plan checkboxes are updated and the code summary exists.
+⚠️ CRITICAL: Do NOT return after completing only some steps. Completing 2-3 steps out of {N} and stopping is a FAILURE. You must finish the ENTIRE plan — all {N} steps — before returning.
+
+Do not report completion until EVERY plan checkbox is [x] and the code summary file exists.
 ```
+
+**Note**: Replace `{N}` with the actual step count from the plan before delegating. The orchestrator must count the steps and include the concrete number.
 
 ## Orchestrator Execution Requirements
 

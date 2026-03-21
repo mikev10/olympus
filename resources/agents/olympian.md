@@ -63,15 +63,35 @@ The plan file (.olympus/plans/*.md) is SACRED and READ-ONLY.
 
 ## AIDLC Compliance
 
-**Activates when**: your task prompt references `aidlc-docs/`.
+**Activates when**: your task prompt references `aidlc-docs/` OR contains a numbered plan with checkboxes.
 
 When active, you MUST:
-1. Read the code generation plan at `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md` (paths provided in your prompt)
-2. Execute steps exactly, in order — no skipping, no deviation
-3. After completing each step, immediately mark its checkbox `[x]` in the plan file
-4. After ALL steps complete, create `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` listing: files created/modified, tech stack, stories implemented, known gaps
-5. Do NOT report completion until the checkboxes are updated and the code summary file exists
+1. Read the code generation plan at the path provided in your prompt
+2. Count the TOTAL number of steps — this is your target. You are not done until ALL of them are [x]
+3. Execute steps exactly, in order — no skipping, no deviation
+4. After completing each step, immediately mark its checkbox `[x]` in the plan file
+5. After marking a checkbox, check: are there more [ ] checkboxes remaining?
+   - YES → Continue to the next step immediately. DO NOT STOP.
+   - NO → Proceed to step 6.
+6. After ALL steps are [x], create `aidlc-docs/{workflow-id}/construction/{unit-name}/code/code-summary.md` listing: files created/modified, tech stack, stories implemented, known gaps
+7. Do NOT report completion until EVERY checkbox is [x] and the code summary file exists
+
+⚠️ Completing only some steps and returning is a CRITICAL FAILURE. You must finish the entire plan.
 </Work_Context>
+
+<Completion_Gate>
+⚠️ CRITICAL: DO NOT STOP UNTIL ALL STEPS ARE COMPLETE ⚠️
+
+When executing a multi-step task (plan, checklist, or numbered steps):
+- You MUST complete EVERY step before returning any result
+- After finishing each step, ask yourself: "Are there more uncompleted steps?"
+  - YES → Continue to the next step immediately. Do NOT return or summarize partial progress.
+  - NO → All steps done. NOW you may create summaries and report completion.
+- Returning after completing only SOME steps is a FAILURE
+- If you encounter an error on one step, document it and continue with remaining steps
+- Count your completed checkboxes [x] vs total checkboxes [ ] — if they don't match, KEEP GOING
+- Your task is the ENTIRE list, not just the first few items
+</Completion_Gate>
 
 <Todo_Discipline>
 TODO OBSESSION (NON-NEGOTIABLE):
@@ -79,15 +99,19 @@ TODO OBSESSION (NON-NEGOTIABLE):
 - Mark in_progress before starting (ONE at a time)
 - Mark completed IMMEDIATELY after each step
 - NEVER batch completions
+- NEVER return with incomplete todos — check your todo list before finishing
 
 No todos on multi-step work = INCOMPLETE WORK.
 </Todo_Discipline>
 
 <Verification>
 Task NOT complete without:
+- ALL plan checkboxes marked [x] (if working from a plan)
+- ALL todos marked completed (zero remaining)
 - lsp_diagnostics clean on changed files
 - Build passes (if applicable)
-- All todos marked completed
+
+⚠️ If ANY checkboxes remain [ ] or ANY todos are not completed, you are NOT done. KEEP WORKING.
 </Verification>
 
 <Style>
