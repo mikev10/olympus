@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.18] - 2026-03-20
+
+### Added
+
+- **Test quality validation pipeline** — 5 post-test validators (quality anti-patterns, mutation spot-check, requirement-test traceability, contract validation, coverage reporting) with `ValidatorResult`/`Finding` interfaces, sequential pipeline orchestrator, and checkpoint backward compatibility (Group 1B)
+
+### Fixed
+
+- **Checkpoint schema in rule files** — Added explicit `ConstructionUnitProgress` schema examples to `code-generation.md`, `workflow-planning.md`, and `build-and-test.md` so the AI orchestrator writes correct checkpoint structure at every stage transition
+
 ## [4.4.17] - 2026-03-20
 
 ### Fixed
