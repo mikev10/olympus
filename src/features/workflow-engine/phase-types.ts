@@ -344,6 +344,30 @@ export type ConstructionDesignStage =
   | 'code-generation'
   | 'test-generation';
 
+export type ValidatorStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped';
+
+export type ValidatorFindingSeverity = 'error' | 'warning' | 'info';
+
+export type ValidatorResultStatus = 'passed' | 'warned' | 'failed' | 'skipped' | 'timeout';
+
+export interface Finding {
+  id: string;
+  severity: ValidatorFindingSeverity;
+  category: string;
+  message: string;
+  location?: {
+    file: string;
+    line?: number;
+    testName?: string;
+  };
+}
+
+export interface ValidatorResult {
+  status: ValidatorResultStatus;
+  findings: Finding[];
+  artifactPath: string;
+}
+
 export interface ConstructionUnitProgress {
   unitId: string;
   stages: Record<ConstructionDesignStage, {
@@ -360,6 +384,12 @@ export interface ConstructionUnitProgress {
   regressions_count?: number;
   flaky_count?: number;
   test_generation_status?: 'not_started' | 'in_progress' | 'completed' | 'skipped';
+  quality_validation_status?: ValidatorStatus;
+  mutation_validation_status?: ValidatorStatus;
+  traceability_status?: ValidatorStatus;
+  contract_validation_status?: ValidatorStatus;
+  coverage_status?: ValidatorStatus;
+  coverage_percentage?: number | null;
 }
 
 export interface UserStory {

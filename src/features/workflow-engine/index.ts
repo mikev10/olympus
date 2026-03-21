@@ -444,7 +444,31 @@ export {
 } from './audit-generator.js';
 
 // Phase 4: Construction Design Stages
-export type { ConstructionDesignStage, ConstructionUnitProgress, UserStory, UnitDefinition } from './phase-types.js';
+export type {
+  ConstructionDesignStage,
+  ConstructionUnitProgress,
+  UserStory,
+  UnitDefinition,
+  ValidatorStatus,
+  ValidatorFindingSeverity,
+  ValidatorResultStatus,
+  Finding,
+  ValidatorResult,
+} from './phase-types.js';
+export type {
+  ValidatorName,
+  ValidatorConfig,
+  ValidatorRiskTier,
+  RiskKeywordConfig,
+  PipelineResult,
+  ValidatorFn,
+} from './construction/validators/index.js';
+export {
+  runValidationPipeline,
+  shouldSkipValidator,
+  applyAllowFailures,
+  updateCheckpointForValidator,
+} from './construction/validators/index.js';
 export type { DomainDesignArtifact } from './construction/domain-design.js';
 export {
   buildDomainDesignPrompt,
