@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.17] - 2026-03-20
+
+### Fixed
+
+- **CLI fs-extra ESM compatibility** — `import * as fs from 'fs-extra'` doesn't expose standard `fs` methods (`readFile`, `readdir`, etc.) in ESM context, causing `olympus-ai workflow-status` to silently fail. Switched to default import in `checkpoint.ts` and `manifest.ts`.
+
 ## [4.4.16] - 2026-03-20
 
 ### Fixed
