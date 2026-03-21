@@ -45,6 +45,35 @@ function isCacheValid(entry: CacheEntry): boolean {
   return Date.now() - entry.timestamp < CACHE_TTL;
 }
 
+function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
+  if ((checkpoint.current_stage as string) === 'idea') {
+    checkpoint.current_stage = 'intent';
+  }
+
+  if (!checkpoint.construction_units || Array.isArray(checkpoint.construction_units)) return;
+
+  for (const unit of Object.values(checkpoint.construction_units) as ConstructionUnitProgress[]) {
+    if (!unit.stages) {
+      unit.stages = {} as ConstructionUnitProgress['stages'];
+    }
+    if (!unit.stages['test-generation']) {
+      const isComplete = unit.code_generation_status === 'completed';
+      unit.stages['test-generation'] = {
+        status: isComplete ? 'skipped' : 'not_started',
+        artifact_path: null,
+        completed_at: null,
+      };
+    }
+
+    if (unit.quality_validation_status === undefined) unit.quality_validation_status = 'not_started';
+    if (unit.mutation_validation_status === undefined) unit.mutation_validation_status = 'not_started';
+    if (unit.traceability_status === undefined) unit.traceability_status = 'not_started';
+    if (unit.contract_validation_status === undefined) unit.contract_validation_status = 'not_started';
+    if (unit.coverage_status === undefined) unit.coverage_status = 'not_started';
+    if (unit.coverage_percentage === undefined) unit.coverage_percentage = null;
+  }
+}
+
 /**
  * Clear the entire checkpoint cache
  * Useful for testing or when you want to force fresh reads
@@ -174,8 +203,9 @@ export async function loadCheckpoint(
   // Check cache first
   const cachedEntry = checkpointCache.get(cacheKey);
   if (cachedEntry && isCacheValid(cachedEntry)) {
-    // Return a deep copy to prevent external mutations from affecting the cache
-    return structuredClone(cachedEntry.checkpoint);
+    const copy = structuredClone(cachedEntry.checkpoint);
+    applyMigrations(copy);
+    return copy;
   }
 
   const checkpointPath = join(
@@ -206,27 +236,11 @@ export async function loadCheckpoint(
       return null;
     }
 
-    // Migrate legacy 'idea' stage to 'intent' (IDEA→INTENT merge)
     if (checkpoint.current_stage === 'idea') {
       console.warn(`[Checkpoint] Migrating legacy 'idea' stage to 'intent' for workflow ${workflowId}`);
-      checkpoint.current_stage = 'intent';
     }
 
-    if (checkpoint.construction_units) {
-      for (const unit of Object.values(checkpoint.construction_units) as ConstructionUnitProgress[]) {
-        if (!unit.stages['test-generation']) {
-          const isComplete = unit.code_generation_status === 'completed';
-          unit.stages['test-generation'] = {
-            status: isComplete ? 'skipped' : 'not_started',
-            artifact_path: null,
-            completed_at: null,
-          };
-        }
-      }
-    }
-
-    // inception_stages: left as undefined for legacy checkpoints.
-    // The inception orchestrator initializes it when first needed.
+    applyMigrations(checkpoint);
 
     // Update cache with fresh data
     checkpointCache.set(cacheKey, {

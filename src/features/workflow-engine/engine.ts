@@ -309,6 +309,25 @@ export class WorkflowEngine {
       }
     }
 
+    try {
+      let pathwayType = (checkpoint as WorkflowCheckpointV3).pathway_type;
+      if (!pathwayType) {
+        const { isBrownfield } = await detectBrownfield(this.projectPath);
+        pathwayType = isBrownfield ? 'brownfield-enhancement' : 'greenfield';
+      }
+      const claudeMdPath = path.join(this.projectPath, '.claude', 'CLAUDE.md');
+      const existingContent = fs.existsSync(claudeMdPath)
+        ? fs.readFileSync(claudeMdPath, 'utf-8')
+        : '';
+      const rules = getAidlcRulesContent(this.workflowId, pathwayType);
+      const merged = mergeAidlcRules(existingContent, rules);
+      fs.mkdirSync(path.join(this.projectPath, '.claude'), { recursive: true });
+      fs.writeFileSync(claudeMdPath, merged, 'utf-8');
+      console.log('[WorkflowEngine] Injected AI-DLC rules into .claude/CLAUDE.md');
+    } catch (error) {
+      console.error('[WorkflowEngine] Failed to inject AI-DLC rules into CLAUDE.md:', error);
+    }
+
     // Setup interrupt handler before executing stages
     this.setupInterruptHandler();
 

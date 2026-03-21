@@ -1626,6 +1626,60 @@ program
   });
 
 /**
+ * Workflow Status command - Show active workflow status
+ */
+program
+  .command('workflow-status')
+  .description('Show status of active AI-DLC workflow')
+  .option('-d, --directory <path>', 'Project directory (default: cwd)')
+  .action(async (options) => {
+    const { listWorkflows, loadCheckpoint } = await import('../features/workflow-engine/checkpoint.js');
+    const { loadManifest } = await import('../features/workflow-engine/manifest.js');
+    const { loadTrustState } = await import('../features/workflow-engine/trust.js');
+    const { generateWorkflowReport } = await import('../features/workflow-engine/status-reporter.js');
+
+    const directory = options.directory ? resolve(options.directory) : process.cwd();
+
+    const workflowIds = await listWorkflows(directory);
+    if (workflowIds.length === 0) {
+      console.log(chalk.yellow('No workflows found. Start one with /plan <description>'));
+      return;
+    }
+
+    let activeWorkflowId: string | null = null;
+    for (const wfId of workflowIds) {
+      const cp = await loadCheckpoint(directory, wfId);
+      if (cp && cp.status !== 'complete' && cp.status !== 'archived' && cp.status !== 'deferred') {
+        activeWorkflowId = wfId;
+        break;
+      }
+    }
+
+    if (!activeWorkflowId) {
+      console.log(chalk.yellow('No active workflows found. All workflows are complete or archived.'));
+      console.log(chalk.dim(`Found ${workflowIds.length} workflow(s): ${workflowIds.join(', ')}`));
+      return;
+    }
+
+    const checkpoint = await loadCheckpoint(directory, activeWorkflowId);
+    const manifestPath = join(directory, 'aidlc-docs', activeWorkflowId, 'manifest.json');
+    const manifest = loadManifest(manifestPath);
+
+    if (!manifest) {
+      const phase = checkpoint?.current_phase || 'unknown';
+      const stage = checkpoint?.current_stage || 'unknown';
+      console.log(chalk.bold(`Workflow: ${activeWorkflowId}`));
+      console.log(`Phase: ${phase} | Stage: ${stage}`);
+      console.log(chalk.dim('Note: manifest.json not found. Detailed artifact tracking unavailable.'));
+      return;
+    }
+
+    const trustState = loadTrustState(directory);
+    const report = generateWorkflowReport(manifest, trustState, checkpoint as any);
+    console.log(report.fullReport);
+  });
+
+/**
  * Metrics command - View and analyze token metrics
  */
 const metricsCommand = program
