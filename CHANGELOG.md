@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.16] - 2026-03-20
+
+### Fixed
+
+- **Workflow status detection** — `applyMigrations()` crashed silently on array-shaped `construction_units`, causing `loadCheckpoint` to return null and `/workflow-status` to report no active workflows.
+
+### Added
+
+- **CLI `workflow-status` command** — `olympus-ai workflow-status` exposes the existing status reporter as a CLI command with `--directory` option.
+- **CLAUDE.md injection on resume** — `engine.resume()` now updates `.claude/CLAUDE.md` with the active workflow ID, matching the behavior already present in `engine.start()`.
+
 ## [4.4.15] - 2026-03-20
 
 ### Fixed
