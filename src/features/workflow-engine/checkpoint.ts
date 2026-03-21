@@ -10,7 +10,7 @@
  * - Batched writes to reduce I/O operations
  */
 
-import * as fs from 'fs-extra';
+import fs from 'fs-extra';
 import { join } from 'path';
 import type { WorkflowCheckpointV3, ConstructionUnitProgress } from './phase-types.js';
 
