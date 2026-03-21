@@ -443,6 +443,28 @@ flowchart TD
 2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — initialize workflow state with all stage statuses, current_inception_stage set to next stage after Workflow Planning
    - **Skipped stages MUST use `"status": "skipped"`** (not `"completed"`) with a `skip_reason` field. This distinguishes stages that were intentionally excluded from stages that ran and produced artifacts.
    - If Unit Registration (Step 3.5) was executed, include `"unit_registration_completed": true` on the units-generation entry.
+   - **CRITICAL: `construction_units` schema** — When initializing units, use the `ConstructionUnitProgress` object format keyed by unit folder name. Each unit MUST include the full `stages` record:
+
+```json
+"construction_units": {
+  "u-001-unit-name": {
+    "unitId": "u-001-unit-name",
+    "stages": {
+      "functional-design": { "status": "not_started", "artifact_path": null, "completed_at": null },
+      "nfr-requirements": { "status": "not_started", "artifact_path": null, "completed_at": null },
+      "nfr-design": { "status": "not_started", "artifact_path": null, "completed_at": null },
+      "infrastructure-design": { "status": "not_started", "artifact_path": null, "completed_at": null },
+      "code-generation": { "status": "not_started", "artifact_path": null, "completed_at": null },
+      "test-generation": { "status": "not_started", "artifact_path": null, "completed_at": null }
+    },
+    "code_plan_path": null,
+    "code_generation_status": "not_started"
+  }
+}
+```
+
+   - Also include these top-level fields: `"active_unit_id": null`, `"units_total": N`, `"units_completed": 0`
+   - When design stages are skipped per the execution plan, set their status to `"skipped"` (not `"not_started"`)
 - **Do NOT proceed to the next stage without completing this step**
 
 ## Step 9: Present Plan to User

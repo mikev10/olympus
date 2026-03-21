@@ -384,7 +384,21 @@ Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:
 1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
    - Mark Build and Test stage as complete
    - Update current status
-2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set build-and-test status to "completed" with completed_at timestamp
+2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — mark the workflow as complete:
+
+```json
+{
+  "current_stage": "complete",
+  "status": "complete",
+  "active_unit_id": null,
+  "units_completed": N
+}
+```
+
+  - `current_stage` MUST be `"complete"` (not `"build-and-test"`)
+  - `status` MUST be `"complete"` (not `"in_progress"`)
+  - Verify `units_completed` equals `units_total`
+  - Verify all units in `construction_units` have `"code_generation_status": "completed"`
 - **Do NOT proceed to the next stage without completing this step**
 
 ---

@@ -214,7 +214,21 @@ You may:
 
 ## Step 9: MANDATORY: Update Progress
 - [ ] **MANDATORY**: Mark Code Planning complete in `aidlc-docs/{workflow-id}/aidlc-state.md`
-- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` current status
+- [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` — update the unit entry using the `ConstructionUnitProgress` schema:
+
+```json
+"u-nnn-unit-name": {
+  "unitId": "u-nnn-unit-name",
+  "stages": {
+    "code-generation": { "status": "in_progress", "artifact_path": null, "completed_at": null }
+  },
+  "code_plan_path": "construction/plans/u-nnn-unit-name-code-generation-plan.md",
+  "code_generation_status": "awaiting_approval"
+}
+```
+
+  - Set `active_unit_id` to the current unit ID
+  - Increment design stage statuses to `"skipped"` for stages that were skipped per the execution plan
 - [ ] Prepare for transition to Code Generation
 - **Do NOT proceed without completing state updates**
 
@@ -304,7 +318,20 @@ This ensures the summary always exists regardless of agent compliance.
 - Record the user's approval response with timestamp
 - **MANDATORY**: Update BOTH state files in the SAME interaction:
   1. Mark Code Generation stage as complete for this unit in `aidlc-docs/{workflow-id}/aidlc-state.md`
-  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — set code-generation status to "completed" for this unit with completed_at timestamp
+  2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — update the unit entry:
+
+```json
+"u-nnn-unit-name": {
+  "stages": {
+    "code-generation": { "status": "completed", "artifact_path": "construction/u-nnn-unit-name/", "completed_at": "ISO-TIMESTAMP" }
+  },
+  "code_generation_status": "completed"
+}
+```
+
+  - Increment `units_completed`
+  - If this is the last unit: set `active_unit_id` to `null`
+  - If more units remain: set `active_unit_id` to the next unit ID
 - **Do NOT proceed to the next stage without completing state updates**
 
 ---
