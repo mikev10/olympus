@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.15] - 2026-03-20
+
+### Fixed
+
+- **Agent completion gate enforcement** — Subagents (olympian, olympian-high, frontend-engineer-high) were stopping after 2-3 steps when given multi-step plans. Added `<Completion_Gate>` sections with explicit loop enforcement, strengthened AIDLC compliance with step counting, and added orchestrator re-dispatch protocol for partial completion recovery.
+
 ## [4.4.14] - 2026-03-20
 
 ### Added
