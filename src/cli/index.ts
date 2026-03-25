@@ -337,7 +337,7 @@ program
     console.log(`  Search:    ${chalk.cyan(session.config.magicKeywords?.search?.join(', ') ?? 'search, find, locate')}`);
     console.log(`  Analyze:   ${chalk.cyan(session.config.magicKeywords?.analyze?.join(', ') ?? 'analyze, investigate, examine')}`);
 
-    console.log(chalk.gray('\n━'.repeat(50)));
+    console.log(chalk.gray('\n' + '━'.repeat(50)));
     console.log(chalk.gray(`Version: ${version}`));
   });
 
@@ -467,7 +467,7 @@ program
       console.log(chalk.gray('  (Run the install script to create version metadata)'));
     }
 
-    console.log(chalk.gray('\n━'.repeat(50)));
+    console.log(chalk.gray('\n' + '━'.repeat(50)));
     console.log(chalk.gray('\nTo check for updates, run: olympus update --check'));
   });
 
