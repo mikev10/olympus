@@ -121,7 +121,7 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
 ## Step 2: Create Detailed Unit Code Generation Plan
 - [ ] Read workspace root and project type from `aidlc-docs/aidlc-state.md`
 - [ ] Determine code location (see Critical Rules for structure patterns)
-- [ ] **Brownfield only**: Review reverse engineering code-structure.md for existing files to modify
+- [ ] **Brownfield only**: Review discovery static-model.md for existing files to modify
 - [ ] Document exact paths (never aidlc-docs/)
 - [ ] Create explicit steps for unit generation:
   - Project Structure Setup (greenfield only)

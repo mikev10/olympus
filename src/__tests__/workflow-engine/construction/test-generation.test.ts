@@ -8,6 +8,8 @@
  * 4. Checkpoint persistence
  * 5. executeShallow() integration
  * 6. Framework detection
+ * 7. Validation pipeline integration
+ * 8. Smoke test coverage report
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -27,6 +29,26 @@ vi.mock('../../../features/workflow-engine/checkpoint.js', () => ({
   saveCheckpoint: mockSaveCheckpoint,
   clearCache: vi.fn(),
   invalidateCache: vi.fn(),
+}));
+
+const mockRunValidationPipeline = vi.hoisted(() => vi.fn());
+const mockShouldSkipValidator = vi.hoisted(() => vi.fn());
+const mockUpdateCheckpointForValidator = vi.hoisted(() => vi.fn());
+const mockCreateQualityValidator = vi.hoisted(() => vi.fn());
+const mockCreateMutationValidator = vi.hoisted(() => vi.fn());
+const mockCreateTraceabilityValidator = vi.hoisted(() => vi.fn());
+const mockCreateContractValidator = vi.hoisted(() => vi.fn());
+const mockCreateCoverageValidator = vi.hoisted(() => vi.fn());
+
+vi.mock('../../../features/workflow-engine/construction/validators/index.js', () => ({
+  runValidationPipeline: mockRunValidationPipeline,
+  shouldSkipValidator: mockShouldSkipValidator,
+  updateCheckpointForValidator: mockUpdateCheckpointForValidator,
+  createQualityValidator: mockCreateQualityValidator,
+  createMutationValidator: mockCreateMutationValidator,
+  createTraceabilityValidator: mockCreateTraceabilityValidator,
+  createContractValidator: mockCreateContractValidator,
+  createCoverageValidator: mockCreateCoverageValidator,
 }));
 
 describe('ConstructionExecutor.executeTestGeneration()', () => {
@@ -57,6 +79,29 @@ describe('ConstructionExecutor.executeTestGeneration()', () => {
     mockLoadCheckpoint.mockReset();
     mockSaveCheckpoint.mockReset();
     mockSaveCheckpoint.mockResolvedValue(undefined);
+
+    mockRunValidationPipeline.mockReset();
+    mockShouldSkipValidator.mockReset();
+    mockUpdateCheckpointForValidator.mockReset();
+    mockCreateQualityValidator.mockReset();
+    mockCreateMutationValidator.mockReset();
+    mockCreateTraceabilityValidator.mockReset();
+    mockCreateContractValidator.mockReset();
+    mockCreateCoverageValidator.mockReset();
+
+    const passedResult = { status: 'passed', findings: [], artifactPath: '/fake' };
+    mockCreateQualityValidator.mockReturnValue(() => Promise.resolve(passedResult));
+    mockCreateMutationValidator.mockReturnValue(() => Promise.resolve(passedResult));
+    mockCreateTraceabilityValidator.mockReturnValue(() => Promise.resolve(passedResult));
+    mockCreateContractValidator.mockReturnValue(() => Promise.resolve(passedResult));
+    mockCreateCoverageValidator.mockReturnValue(() => Promise.resolve({ ...passedResult, coverage_percentage: 85.2 }));
+    mockShouldSkipValidator.mockReturnValue({ skip: false });
+    mockRunValidationPipeline.mockResolvedValue({ results: [
+      { validator: 'quality', result: passedResult },
+      { validator: 'traceability', result: passedResult },
+      { validator: 'coverage', result: { ...passedResult, coverage_percentage: 85.2 } },
+    ] });
+    mockUpdateCheckpointForValidator.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -260,6 +305,8 @@ Implement ${title}
         tests_failed: 0,
         test_framework: 'unknown',
         reportPath: '/fake/path',
+        regressions_count: 0,
+        flaky_count: 0,
       });
 
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
@@ -327,6 +374,295 @@ Implement ${title}
       const result = await executor.executeTestGeneration(unitId, { allowFailures: true });
 
       expect(result.test_framework).toBe('unknown');
+    });
+  });
+
+  describe('Group 7: currentResults and regression analysis', () => {
+    const makeBaseline = (tests: Array<{ name: string; status: 'passed' | 'failed' | 'skipped' }>) => ({
+      tests: tests.map(t => ({ name: t.name, filePath: 'src/foo.test.ts', status: t.status, duration_ms: 10 })),
+      captured_at: '2026-01-01T00:00:00.000Z',
+      test_command: 'npm test',
+      framework: 'vitest',
+      total: tests.length,
+      passed: tests.filter(t => t.status === 'passed').length,
+      failed: tests.filter(t => t.status === 'failed').length,
+      skipped: tests.filter(t => t.status === 'skipped').length,
+    });
+
+    it('reflects actual currentResults in tests_total, tests_passed, tests_failed', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const currentResults = [
+        { name: 'test A', filePath: 'src/a.test.ts', status: 'passed' as const, duration_ms: 5 },
+        { name: 'test B', filePath: 'src/b.test.ts', status: 'passed' as const, duration_ms: 5 },
+        { name: 'test C', filePath: 'src/c.test.ts', status: 'failed' as const, duration_ms: 5 },
+      ];
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults });
+
+      expect(result.tests_total).toBe(3);
+      expect(result.tests_passed).toBe(2);
+      expect(result.tests_failed).toBe(1);
+    });
+
+    it('returns regressions_count: 0 and flaky_count: 0 when no currentResults provided', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { allowFailures: true });
+
+      expect(result.regressions_count).toBe(0);
+      expect(result.flaky_count).toBe(0);
+    });
+
+    it('blocks with legitimate regression message when baseline exists and a previously passing test now fails', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const baselineDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
+      await fs.ensureDir(baselineDir);
+      await fs.writeJson(
+        path.join(baselineDir, 'regression-baseline.json'),
+        makeBaseline([{ name: 'test A', status: 'passed' }])
+      );
+
+      const currentResults = [
+        { name: 'test A', filePath: 'src/a.test.ts', status: 'failed' as const, duration_ms: 5 },
+      ];
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { currentResults });
+
+      expect(result.status).toBe('blocked');
+      expect(result.blockingReason).toContain('legitimate regression');
+      expect(result.regressions_count).toBe(1);
+    });
+
+    it('does not block when baseline exists and only flaky failures are found', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const baselineDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
+      await fs.ensureDir(baselineDir);
+      await fs.writeJson(
+        path.join(baselineDir, 'regression-baseline.json'),
+        makeBaseline([{ name: 'pre-existing failure', status: 'failed' }])
+      );
+
+      const currentResults = [
+        { name: 'pre-existing failure', filePath: 'src/a.test.ts', status: 'failed' as const, duration_ms: 5 },
+      ];
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { currentResults });
+
+      expect(result.status).toBe('completed');
+      expect(result.regressions_count).toBe(0);
+    });
+
+    it('blocks with generic failure message when no baseline and tests fail', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const currentResults = [
+        { name: 'test A', filePath: 'src/a.test.ts', status: 'failed' as const, duration_ms: 5 },
+      ];
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { currentResults });
+
+      expect(result.status).toBe('blocked');
+      expect(result.blockingReason).toContain('test(s) failed');
+      expect(result.blockingReason).not.toContain('legitimate regression');
+    });
+
+    it('writes regressions_count and flaky_count to checkpoint', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const baselineDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
+      await fs.ensureDir(baselineDir);
+      await fs.writeJson(
+        path.join(baselineDir, 'regression-baseline.json'),
+        makeBaseline([{ name: 'test A', status: 'passed' }])
+      );
+
+      const currentResults = [
+        { name: 'test A', filePath: 'src/a.test.ts', status: 'failed' as const, duration_ms: 5 },
+      ];
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId, { currentResults, allowFailures: true });
+
+      const lastSave = mockSaveCheckpoint.mock.calls[mockSaveCheckpoint.mock.calls.length - 1][1];
+      const unit = lastSave.construction_units[unitId];
+      expect(unit.regressions_count).toBe(1);
+      expect(unit.flaky_count).toBe(0);
+    });
+  });
+
+  describe('Group 8: validation pipeline integration', () => {
+    const passingResults = [
+      { name: 'test1', filePath: 'test.ts', status: 'passed' as const, duration_ms: 10 },
+    ];
+
+    it('calls runValidationPipeline when test generation completes', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      expect(mockRunValidationPipeline).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call runValidationPipeline when status is blocked', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId);
+
+      expect(mockRunValidationPipeline).not.toHaveBeenCalled();
+    });
+
+    it('returns validationPipeline in result when pipeline runs', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      expect(result.validationPipeline).toBeDefined();
+      expect(Array.isArray(result.validationPipeline?.results)).toBe(true);
+    });
+
+    it('calls updateCheckpointForValidator for each pipeline result', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      expect(mockUpdateCheckpointForValidator).toHaveBeenCalledTimes(3);
+    });
+
+    it('sets status to blocked when a validator fails and allowFailures is false', async () => {
+      const failedResult = { status: 'failed', findings: [], artifactPath: '/fake' };
+      mockRunValidationPipeline.mockResolvedValue({ results: [
+        { validator: 'quality', result: { status: 'passed', findings: [], artifactPath: '/fake' } },
+        { validator: 'contract', result: failedResult },
+      ] });
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { currentResults: passingResults });
+
+      expect(result.status).toBe('blocked');
+      expect(result.blockingReason).toContain('contract');
+    });
+
+    it('does not block when validator fails but allowFailures is true', async () => {
+      const failedResult = { status: 'failed', findings: [], artifactPath: '/fake' };
+      mockRunValidationPipeline.mockResolvedValue({ results: [
+        { validator: 'quality', result: { status: 'passed', findings: [], artifactPath: '/fake' } },
+        { validator: 'contract', result: failedResult },
+      ] });
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('pipeline failure is non-fatal', async () => {
+      mockRunValidationPipeline.mockRejectedValue(new Error('pipeline exploded'));
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      expect(result.status).toBe('completed');
+      expect(result.validationPipeline).toBeUndefined();
+    });
+
+    it('passes coverage_percentage to updateCheckpointForValidator for coverage validator', async () => {
+      const covResult = { status: 'passed', findings: [], artifactPath: '/fake', coverage_percentage: 91.5 };
+      mockRunValidationPipeline.mockResolvedValue({ results: [
+        { validator: 'coverage', result: covResult },
+      ] });
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      const coverageCall = mockUpdateCheckpointForValidator.mock.calls.find(
+        (c: unknown[]) => c[3] === 'coverage'
+      );
+      expect(coverageCall).toBeDefined();
+      expect(coverageCall![5]).toBe(91.5);
+    });
+
+    it('passes criticalGapCount from findings to updateCheckpointForValidator', async () => {
+      const covResult = {
+        status: 'passed',
+        findings: [
+          { category: 'uncovered-critical-file', file: 'src/a.ts', message: 'missing' },
+          { category: 'uncovered-critical-file', file: 'src/b.ts', message: 'missing' },
+          { category: 'low-coverage', file: 'src/c.ts', message: 'low' },
+        ],
+        artifactPath: '/fake',
+        coverage_percentage: 55.0,
+      };
+      mockRunValidationPipeline.mockResolvedValue({ results: [
+        { validator: 'coverage', result: covResult },
+      ] });
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeTestGeneration(unitId, { allowFailures: true, currentResults: passingResults });
+
+      const coverageCall = mockUpdateCheckpointForValidator.mock.calls.find(
+        (c: unknown[]) => c[3] === 'coverage'
+      );
+      expect(coverageCall).toBeDefined();
+      expect(coverageCall![6]).toBe(2);
+    });
+  });
+
+  describe('Group 9: smoke test coverage report', () => {
+    it('executeSmokeTest writes coverage-report.md', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint({
+        construction_units: {
+          'u-alpha': {
+            unit_id: 'u-alpha',
+            status: 'active',
+            stages: {},
+            tests_total: 10,
+            tests_passed: 10,
+            tests_failed: 0,
+            coverage_percentage: 88.0,
+            critical_gap_count: 1,
+          },
+          'u-beta': {
+            unit_id: 'u-beta',
+            status: 'active',
+            stages: {},
+            tests_total: 5,
+            tests_passed: 4,
+            tests_failed: 1,
+            coverage_percentage: 72.5,
+            critical_gap_count: 3,
+          },
+        },
+      }));
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeSmokeTest();
+
+      const coverageReportPath = path.join(
+        testDir, 'aidlc-docs', workflowId, 'construction', 'build-and-test', 'coverage-report.md'
+      );
+      expect(await fs.pathExists(coverageReportPath)).toBe(true);
+
+      const content = await fs.readFile(coverageReportPath, 'utf-8');
+      expect(content).toContain('Workflow Coverage Report');
+      expect(content).toContain('u-alpha');
+      expect(content).toContain('u-beta');
     });
   });
 });

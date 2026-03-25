@@ -1,8 +1,9 @@
-import { join } from 'path';
+import { join, basename } from 'path';
 import * as fs from 'fs-extra';
 import { detectBrownfield } from '../../discovery.js';
 import { detectPathway } from '../../workflow-routing.js';
 import { loadCheckpoint, saveCheckpoint, invalidateCache } from '../../checkpoint.js';
+import { initializeGreenfieldArchitectureModel } from '../../architecture-model.js';
 import { registerStageHandler } from '../orchestrator.js';
 import type { InceptionStageResult } from '../orchestrator.js';
 import type { WorkflowCheckpointV3, PathwayType } from '../../phase-types.js';
@@ -86,6 +87,14 @@ export async function executeWorkspaceDetection(
       freshCheckpoint.origin = 'ai-initialized';
       await saveCheckpoint(projectPath, freshCheckpoint);
       invalidateCache(projectPath, workflowId);
+    }
+  }
+
+  if (pathwayType === 'greenfield') {
+    try {
+      await initializeGreenfieldArchitectureModel(projectPath, basename(projectPath));
+    } catch {
+      // non-blocking
     }
   }
 

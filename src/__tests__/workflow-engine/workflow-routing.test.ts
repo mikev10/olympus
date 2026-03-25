@@ -9,10 +9,15 @@ import {
   isPhaseIncluded,
   isStageIncluded,
   WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS,
+  buildPathwayAnnouncement,
+  applyPathwayOverride,
+  recordPathwayOverride,
+  getPathwayDisplayName,
+  PATHWAY_DISPLAY_NAMES,
 } from '../../features/workflow-engine/workflow-routing.js';
 import { adjustDepthForPathway } from '../../features/workflow-engine/depth-assessment.js';
 import type { DepthAssessment } from '../../features/workflow-engine/phase-types.js';
-import type { PathwayType, WorkflowRoutingPlan } from '../../features/workflow-engine/phase-types.js';
+import type { PathwayType, WorkflowRoutingPlan, WorkflowCheckpointV3, WorkflowPhase } from '../../features/workflow-engine/phase-types.js';
 
 vi.mock('../../features/workflow-engine/discovery.js', () => ({
   detectBrownfield: vi.fn(),
@@ -781,5 +786,299 @@ describe('Engine Integration (isPhaseIncluded / loadWorkflowRouting boundary)', 
     expect(isPhaseIncluded(loaded!, 'inception')).toBe(false);
     expect(isPhaseIncluded(loaded!, 'construction')).toBe(true);
     expect(isPhaseIncluded(loaded!, 'operations')).toBe(true);
+  });
+});
+
+describe('getPathwayDisplayName', () => {
+  it('returns "Greenfield" for greenfield', () => {
+    expect(getPathwayDisplayName('greenfield')).toBe('Greenfield');
+  });
+
+  it('returns "Enhancement" for brownfield-enhancement', () => {
+    expect(getPathwayDisplayName('brownfield-enhancement')).toBe('Enhancement');
+  });
+
+  it('returns "Refactor" for brownfield-refactor', () => {
+    expect(getPathwayDisplayName('brownfield-refactor')).toBe('Refactor');
+  });
+
+  it('returns "Bug Fix" for bugfix', () => {
+    expect(getPathwayDisplayName('bugfix')).toBe('Bug Fix');
+  });
+
+  it('returns "Optimization" for optimization', () => {
+    expect(getPathwayDisplayName('optimization')).toBe('Optimization');
+  });
+
+  it('all 5 pathway types have display names in PATHWAY_DISPLAY_NAMES', () => {
+    const pathways: PathwayType[] = ['greenfield', 'brownfield-enhancement', 'brownfield-refactor', 'bugfix', 'optimization'];
+    for (const pathway of pathways) {
+      expect(PATHWAY_DISPLAY_NAMES[pathway]).toBeDefined();
+      expect(PATHWAY_DISPLAY_NAMES[pathway].length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('buildPathwayAnnouncement', () => {
+  it('returns correct structure for bugfix pathway', () => {
+    const announcement = buildPathwayAnnouncement('bugfix', 8, 42);
+    expect(announcement.detectedPathway).toBe('bugfix');
+    expect(announcement.displayName).toBe('Bug Fix');
+    expect(announcement.depthScore).toBe(8);
+    expect(announcement.sourceFileCount).toBe(42);
+    expect(typeof announcement.rationale).toBe('string');
+    expect(announcement.rationale.length).toBeGreaterThan(0);
+  });
+
+  it('includes displayName field for all 5 pathway types', () => {
+    const pathways: PathwayType[] = ['greenfield', 'brownfield-enhancement', 'brownfield-refactor', 'bugfix', 'optimization'];
+    const expectedDisplayNames: Record<PathwayType, string> = {
+      greenfield: 'Greenfield',
+      'brownfield-enhancement': 'Enhancement',
+      'brownfield-refactor': 'Refactor',
+      bugfix: 'Bug Fix',
+      optimization: 'Optimization',
+    };
+    for (const pathway of pathways) {
+      const ann = buildPathwayAnnouncement(pathway, 10, 10);
+      expect(ann.displayName).toBe(expectedDisplayNames[pathway]);
+    }
+  });
+
+  it('rationale for bugfix mentions expected keywords', () => {
+    const announcement = buildPathwayAnnouncement('bugfix', 8, 0);
+    expect(announcement.rationale).toContain('bugfix');
+  });
+
+  it('rationale for greenfield mentions greenfield', () => {
+    const announcement = buildPathwayAnnouncement('greenfield', 5, 0);
+    expect(announcement.rationale).toContain('greenfield');
+  });
+
+  it('rationale for optimization mentions optimization', () => {
+    const announcement = buildPathwayAnnouncement('optimization', 15, 30);
+    expect(announcement.rationale).toContain('optimization');
+  });
+
+  it('rationale for brownfield-refactor mentions brownfield-refactor', () => {
+    const announcement = buildPathwayAnnouncement('brownfield-refactor', 20, 100);
+    expect(announcement.rationale).toContain('brownfield-refactor');
+  });
+
+  it('rationale for brownfield-enhancement mentions brownfield-enhancement or default', () => {
+    const announcement = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    expect(announcement.rationale.length).toBeGreaterThan(0);
+  });
+
+  it('all 5 pathway types produce non-empty rationale', () => {
+    const pathways: PathwayType[] = ['greenfield', 'bugfix', 'optimization', 'brownfield-refactor', 'brownfield-enhancement'];
+    for (const pathway of pathways) {
+      const ann = buildPathwayAnnouncement(pathway, 10, 10);
+      expect(ann.rationale.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('depthScore and sourceFileCount are preserved exactly', () => {
+    const announcement = buildPathwayAnnouncement('brownfield-enhancement', 17, 99);
+    expect(announcement.depthScore).toBe(17);
+    expect(announcement.sourceFileCount).toBe(99);
+  });
+});
+
+describe('applyPathwayOverride', () => {
+  function baseAnnouncement(): ReturnType<typeof buildPathwayAnnouncement> {
+    return buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+  }
+
+  it('empty override returns same pathway and depthScore', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, {});
+    expect(result.detectedPathway).toBe('brownfield-enhancement');
+    expect(result.displayName).toBe('Enhancement');
+    expect(result.depthScore).toBe(15);
+    expect(result.sourceFileCount).toBe(50);
+  });
+
+  it('empty override does NOT append override marker to rationale', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, {});
+    expect(result.rationale).not.toContain('overridden by user');
+  });
+
+  it('pathway-only override changes detectedPathway', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { pathwayType: 'bugfix' });
+    expect(result.detectedPathway).toBe('bugfix');
+    expect(result.displayName).toBe('Bug Fix');
+    expect(result.depthScore).toBe(15);
+  });
+
+  it('pathway-only override appends override marker to rationale', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { pathwayType: 'bugfix' });
+    expect(result.rationale).toContain('overridden by user');
+    expect(result.rationale).toContain('bugfix');
+  });
+
+  it('depth-only override changes depthScore', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { depthScore: 25 });
+    expect(result.detectedPathway).toBe('brownfield-enhancement');
+    expect(result.depthScore).toBe(25);
+  });
+
+  it('depth-only override appends override marker to rationale', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { depthScore: 25 });
+    expect(result.rationale).toContain('overridden by user');
+    expect(result.rationale).toContain('25');
+  });
+
+  it('both pathway and depth overridden', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { pathwayType: 'greenfield', depthScore: 5 });
+    expect(result.detectedPathway).toBe('greenfield');
+    expect(result.displayName).toBe('Greenfield');
+    expect(result.depthScore).toBe(5);
+    expect(result.rationale).toContain('overridden by user');
+  });
+
+  it('sourceFileCount is always preserved from original', () => {
+    const original = baseAnnouncement();
+    const result = applyPathwayOverride(original, { pathwayType: 'bugfix', depthScore: 7 });
+    expect(result.sourceFileCount).toBe(50);
+  });
+
+  it('does not mutate the original announcement', () => {
+    const original = baseAnnouncement();
+    const originalPathway = original.detectedPathway;
+    const originalDepth = original.depthScore;
+    applyPathwayOverride(original, { pathwayType: 'bugfix', depthScore: 5 });
+    expect(original.detectedPathway).toBe(originalPathway);
+    expect(original.depthScore).toBe(originalDepth);
+  });
+});
+
+function makeMinimalCheckpoint(overrides: Partial<WorkflowCheckpointV3> = {}): WorkflowCheckpointV3 {
+  return {
+    schema_version: '3.0.0',
+    workflow_id: 'wf-test',
+    feature_name: 'Test Feature',
+    current_phase: 'inception' as WorkflowPhase,
+    current_stage: 'intent',
+    status: 'in_progress',
+    phases: {
+      discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+    },
+    manifest_path: '',
+    trust_state_path: '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    pathway_type: 'brownfield-enhancement',
+    depth_score: 15,
+    ...overrides,
+  };
+}
+
+describe('recordPathwayOverride', () => {
+  it('sets original_pathway_type from detected announcement', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'bugfix' });
+    expect(result.original_pathway_type).toBe('brownfield-enhancement');
+  });
+
+  it('sets original_depth_score from detected announcement', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'bugfix' });
+    expect(result.original_depth_score).toBe(15);
+  });
+
+  it('sets pathway_override to user-specified pathway', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'bugfix' });
+    expect(result.pathway_override).toBe('bugfix');
+  });
+
+  it('sets depth_override to user-specified depth', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { depthScore: 25 });
+    expect(result.depth_override).toBe(25);
+  });
+
+  it('updates pathway_type to effective (overridden) value', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'optimization' });
+    expect(result.pathway_type).toBe('optimization');
+  });
+
+  it('updates depth_score to effective (overridden) value', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { depthScore: 22 });
+    expect(result.depth_score).toBe(22);
+  });
+
+  it('no pathway override keeps original pathway as effective pathway_type', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-refactor', 18, 80);
+    const result = recordPathwayOverride(checkpoint, detected, { depthScore: 20 });
+    expect(result.pathway_type).toBe('brownfield-refactor');
+  });
+
+  it('no depth override keeps original depthScore as effective depth_score', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-refactor', 18, 80);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'optimization' });
+    expect(result.depth_score).toBe(18);
+  });
+
+  it('returns a partial object (only the fields to merge)', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    const detected = buildPathwayAnnouncement('brownfield-enhancement', 15, 50);
+    const result = recordPathwayOverride(checkpoint, detected, { pathwayType: 'bugfix', depthScore: 5 });
+    expect(result).toHaveProperty('original_pathway_type');
+    expect(result).toHaveProperty('original_depth_score');
+    expect(result).toHaveProperty('pathway_override');
+    expect(result).toHaveProperty('depth_override');
+    expect(result).toHaveProperty('pathway_type');
+    expect(result).toHaveProperty('depth_score');
+  });
+});
+
+describe('WorkflowCheckpointV3 override fields', () => {
+  it('checkpoint accepts original_pathway_type field', () => {
+    const checkpoint = makeMinimalCheckpoint({ original_pathway_type: 'brownfield-enhancement' });
+    expect(checkpoint.original_pathway_type).toBe('brownfield-enhancement');
+  });
+
+  it('checkpoint accepts original_depth_score field', () => {
+    const checkpoint = makeMinimalCheckpoint({ original_depth_score: 15 });
+    expect(checkpoint.original_depth_score).toBe(15);
+  });
+
+  it('checkpoint accepts pathway_override field', () => {
+    const checkpoint = makeMinimalCheckpoint({ pathway_override: 'bugfix' });
+    expect(checkpoint.pathway_override).toBe('bugfix');
+  });
+
+  it('checkpoint accepts depth_override field', () => {
+    const checkpoint = makeMinimalCheckpoint({ depth_override: 8 });
+    expect(checkpoint.depth_override).toBe(8);
+  });
+
+  it('all override fields are optional — checkpoint without them is valid', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    expect(checkpoint.original_pathway_type).toBeUndefined();
+    expect(checkpoint.original_depth_score).toBeUndefined();
+    expect(checkpoint.pathway_override).toBeUndefined();
+    expect(checkpoint.depth_override).toBeUndefined();
   });
 });

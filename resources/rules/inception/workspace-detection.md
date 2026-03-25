@@ -34,7 +34,7 @@ Check if `aidlc-docs/aidlc-state.md` exists:
 
 **IF workspace has existing code**:
 - Set flag: `brownfield = true`
-- Check for existing reverse engineering artifacts in `aidlc-docs/inception/reverse-engineering/`
+- Check for existing discovery artifacts in `aidlc-docs/{workflowId}/discovery/`
 - **IF reverse engineering artifacts exist**: Load them, skip to Requirements Analysis
 - **IF no reverse engineering artifacts**: Next phase is Reverse Engineering
 

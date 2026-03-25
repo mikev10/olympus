@@ -19,6 +19,7 @@ export interface CodeGenerationDispatchResult {
     intentSummary: string;
     intentSummary2: string;
     targetFiles: string[];
+    architectureContext?: string;
   };
 }
 
@@ -138,7 +139,8 @@ export function buildCodeGenerationPrompt(
   intentProblemSummary: string,
   intentSummary: string,
   unitSpec: string,
-  codePlanPath?: string
+  codePlanPath?: string,
+  additionalContext?: string
 ): string {
   const planInstructions = codePlanPath ? `
 ## Execution Protocol (Two-Part Code Generation)
@@ -155,13 +157,15 @@ Do NOT begin implementation until the plan is approved.
 
 ` : '';
 
+  const contextSection = additionalContext ? `\n## Architecture Context\n${additionalContext}\n` : '';
+
   return `You are executing code generation as part of a structured workflow.
 
 ## Context
 **Problem**: ${intentProblemSummary}
 **Technical Plan**: ${intentSummary}
 **Module**: ${unitSpec}
-${planInstructions}## Your Task
+${planInstructions}${contextSection}## Your Task
 Generate code for this unit according to the spec above.
 
 ## Instructions
@@ -201,9 +205,49 @@ export async function dispatchCodeGeneration(
 
   const targetFiles = extractTargetFiles(unitSpec);
 
+  let architectureContext = '';
+  try {
+    const { getArchitectureContext } = await import('./architecture-model.js');
+    const touchedComponents = [...new Set(targetFiles.map(f => {
+      const parts = f.replace(/\\/g, '/').split('/').filter(Boolean);
+      if (parts[0] === 'src' && parts.length > 1) return parts[1];
+      return parts[0] || '';
+    }).filter(Boolean))];
+    if (touchedComponents.length > 0) {
+      architectureContext = await getArchitectureContext(projectPath, touchedComponents);
+    }
+  } catch {}
+
+  let pathwayRulesContext = '';
+  try {
+    const { loadPathwayBehaviors } = await import('./workflow-routing.js');
+    const { loadCheckpoint } = await import('./checkpoint.js');
+    const checkpoint = await loadCheckpoint(projectPath, workflowId);
+    if (checkpoint?.pathway_type) {
+      const behaviors = await loadPathwayBehaviors(checkpoint.pathway_type);
+      if (behaviors) {
+        const rulesText = behaviors.rules.map(r => `- **${r.name}**: ${r.description}`).join('\n');
+        const checklistText = behaviors.qualityGateChecklist.map(c => `- [ ] ${c}`).join('\n');
+        pathwayRulesContext = `\n## Pathway Rules (${checkpoint.pathway_type})\n${rulesText}\n\n### Quality Checklist\n${checklistText}`;
+      }
+    }
+  } catch {}
+
+  let designSystemRule = '';
+  try {
+    const { loadArchitectureModel } = await import('./architecture-model.js');
+    const archModel = await loadArchitectureModel(projectPath);
+    if (archModel?.designSystem?.detected && archModel.designSystem.systems.length > 0) {
+      const systemNames = archModel.designSystem.systems.map(s => s.name).join(', ');
+      designSystemRule = `\n## Design System Enforcement\nThis project uses: ${systemNames}. You MUST:\n- Use existing components from the detected design system before creating new ones\n- If you must create a new component, include a justification comment explaining why no existing component suffices\n- Do NOT duplicate functionality already provided by ${systemNames}`;
+    }
+  } catch {}
+
+  const combinedContext = [architectureContext, pathwayRulesContext, designSystemRule].filter(Boolean).join('\n\n');
+
   const agentType = selectAgentForCodeGeneration(unitSpec);
 
-  const prompt = buildCodeGenerationPrompt(intentSummary2, intentSummary, unitSpec);
+  const prompt = buildCodeGenerationPrompt(intentSummary2, intentSummary, unitSpec, undefined, combinedContext || undefined);
 
   return {
     unitName,
@@ -214,6 +258,7 @@ export async function dispatchCodeGeneration(
       intentSummary,
       intentSummary2,
       targetFiles,
+      architectureContext: combinedContext || undefined,
     },
   };
 }

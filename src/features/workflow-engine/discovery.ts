@@ -1,14 +1,25 @@
 import * as path from 'path';
 import * as fs from 'fs-extra';
-import { ensureDiscoveryDir, getArtifactPath, writeArtifact } from './artifacts.js';
+import { ensureDiscoveryDir, getArtifactPath, writeArtifact, appendAuditEntry } from './artifacts.js';
 import { registerArtifact, updatePhaseStatus, addGateAuditEntry } from './manifest.js';
 import { saveCheckpoint, loadCheckpoint } from './checkpoint.js';
 import type { WorkflowPhase } from './phase-types.js';
 import type { WorkflowStage } from './types.js';
 import { scanWorkspace, selectKeyFiles, selectIntentRelevantFiles, generateComponentInventory, generateTechnologyStack, generateDependencies } from './brownfield-scanner.js';
 import type { WorkspaceScanResult } from './brownfield-scanner.js';
+import {
+  readCacheManifest,
+  writeCacheManifest,
+  isCacheStale,
+  incrementalRescan,
+  buildInitialManifest,
+} from './discovery-cache.js';
+import { getGitHeadSha } from './git-utils.js';
 import { writeProjectPatterns } from '../../learning/project-patterns.js';
 import { buildStaticModelPrompt, writeModelsToArtifacts } from './brownfield-analysis.js';
+import { generateArchitectureModel, saveArchitectureModel } from './architecture-model.js';
+import { detectDesignSystems } from './design-system-detection.js';
+import type { DesignSystemInfo } from './design-system-detection.js';
 
 /**
  * Source file extensions used for brownfield detection.
@@ -82,16 +93,21 @@ export interface ExecuteDiscoveryOptions {
   featureName: string;
   manifestPath: string;
   includeFiles?: string[];
+  forceRescan?: boolean;
 }
 
-/**
- * Result of executeDiscoveryPhase.
- */
 export interface DiscoveryResult {
   completed: boolean;
-  gateRequired: boolean;        // true = gate approval needed before inception
-  artifactsGenerated: string[];  // paths to generated artifacts
+  gateRequired: boolean;
+  artifactsGenerated: string[];
   sourceFileCount: number;
+  agentsMdDetected?: boolean;
+  agentsMdFileCount?: number;
+  deepinitSuggested?: boolean;
+  deepinitUpdateMode?: boolean;
+  agentsMdStale?: boolean;
+  architectureModelGenerated?: boolean;
+  designSystem?: DesignSystemInfo;
   brownfieldData?: {
     scanResult: WorkspaceScanResult;
     keyFiles: string[];
@@ -108,6 +124,28 @@ export interface DiscoveryGateOptions {
   workflowId: string;
   manifestPath: string;
   feedback?: string;
+}
+
+async function getDeepInitThreshold(projectPath: string): Promise<number> {
+  const DEFAULT_THRESHOLD = 50;
+  try {
+    const configPath = path.join(projectPath, '.olympus', 'config.json');
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const config = JSON.parse(raw) as { deepinit_threshold?: number };
+    return config.deepinit_threshold ?? DEFAULT_THRESHOLD;
+  } catch {
+    return DEFAULT_THRESHOLD;
+  }
+}
+
+function getToolVersion(): string {
+  try {
+    const pkgPath = path.resolve(__dirname, '../../../package.json');
+    const pkg = JSON.parse(require('fs').readFileSync(pkgPath, 'utf-8')) as { version?: string };
+    return pkg.version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /**
@@ -217,6 +255,9 @@ export function getDiscoveryTemplate(
 3. Dependency mapping
 4. Test coverage assessment
 5. Change impact prediction
+
+## AGENTS.md Status
+<!-- Populated during brownfield scanning. Indicates whether AGENTS.md files were found. -->
 
 ## Out of Scope
 <!-- Areas explicitly not analyzed -->
@@ -376,7 +417,55 @@ export async function executeDiscoveryPhase(
     let brownfieldData: DiscoveryResult['brownfieldData'];
     if (isBrownfield) {
       try {
-        const scanResult = await scanWorkspace(projectPath);
+        let scanResult: WorkspaceScanResult;
+
+        const forceRescan = options.forceRescan === true;
+        const cachedManifest = forceRescan ? null : await readCacheManifest(projectPath);
+
+        const toolVersion = getToolVersion();
+        let incrementalFailed = false;
+
+        if (cachedManifest && !forceRescan) {
+          const stalenessCheck = await isCacheStale(projectPath, cachedManifest, toolVersion);
+          if (!stalenessCheck.stale) {
+            const cachedScanPath = getArtifactPath(projectPath, workflowId, 'workspace-scan' as any);
+            try {
+              const cachedScanRaw = await fs.readFile(cachedScanPath, 'utf-8');
+              scanResult = JSON.parse(cachedScanRaw) as WorkspaceScanResult;
+            } catch {
+              scanResult = await scanWorkspace(projectPath);
+            }
+          } else if (stalenessCheck.changedFiles && stalenessCheck.changedFiles.length > 0) {
+            const cachedScanPath = getArtifactPath(projectPath, workflowId, 'workspace-scan' as any);
+            try {
+              const cachedScanRaw = await fs.readFile(cachedScanPath, 'utf-8');
+              const existingResult = JSON.parse(cachedScanRaw) as WorkspaceScanResult;
+              const rescanResult = await incrementalRescan(projectPath, stalenessCheck.changedFiles, existingResult);
+              // If incrementalRescan returned the existingResult unchanged (fallback on error),
+              // don't advance the SHA anchor — the partial scan didn't succeed
+              if (rescanResult === existingResult) {
+                incrementalFailed = true;
+              }
+              scanResult = rescanResult;
+            } catch {
+              scanResult = await scanWorkspace(projectPath);
+            }
+          } else {
+            scanResult = await scanWorkspace(projectPath);
+          }
+        } else {
+          scanResult = await scanWorkspace(projectPath);
+        }
+
+        // Only advance the SHA anchor if the scan actually succeeded.
+        // Failed incremental rescans preserve the previous SHA so the next run retries.
+        const gitSha = incrementalFailed && cachedManifest
+          ? cachedManifest.gitSha
+          : await getGitHeadSha(projectPath);
+        const agentsMdStatus = (scanResult.agentsMdEntries && scanResult.agentsMdEntries.length > 0) ? 'present' as const : 'absent' as const;
+        const newManifest = buildInitialManifest(gitSha, scanResult, {}, agentsMdStatus, toolVersion);
+        await writeCacheManifest(projectPath, newManifest);
+
         writeProjectPatterns(projectPath, scanResult);
 
         // Select key files (Tier 2)
@@ -435,15 +524,141 @@ export async function executeDiscoveryPhase(
       }
     }
 
-    // Mark discovery phase as blocked — awaiting Discovery Gate approval
-    // The gate blocks until the user reviews discovery findings and approves
+    let designSystem: DesignSystemInfo | undefined;
+    try {
+      designSystem = await detectDesignSystems(projectPath);
+    } catch {
+      // non-blocking
+    }
+
+    let architectureModelGenerated: boolean | undefined;
+    if (brownfieldData) {
+      try {
+        const archModel = await generateArchitectureModel(projectPath, brownfieldData.scanResult, designSystem);
+        await saveArchitectureModel(projectPath, archModel);
+        architectureModelGenerated = true;
+      } catch (err) {
+        console.error('[Discovery] Architecture model generation failed (non-blocking):', err);
+        architectureModelGenerated = false;
+      }
+    }
+
+    let agentsMdDetected = false;
+    let agentsMdFileCount: number | undefined;
+    let deepinitSuggested = false;
+    let deepinitUpdateMode = false;
+
+    const deepinitThreshold = await getDeepInitThreshold(projectPath);
+
+    let agentsMdStale = false;
+
+    if (brownfieldData) {
+      if (brownfieldData.scanResult.agentsMdEntries && brownfieldData.scanResult.agentsMdEntries.length > 0) {
+        agentsMdDetected = true;
+        agentsMdFileCount = brownfieldData.scanResult.agentsMdEntries.length;
+        deepinitSuggested = false;
+
+        try {
+          const { isFileStale } = await import('./git-utils.js');
+          for (const entry of brownfieldData.scanResult.agentsMdEntries) {
+            if (await isFileStale(projectPath, entry.relativeFilePath, 30)) {
+              agentsMdStale = true;
+              break;
+            }
+          }
+        } catch {
+          // non-blocking
+        }
+
+        if (agentsMdStale) {
+          deepinitSuggested = true;
+          deepinitUpdateMode = true;
+        }
+
+        // Register AGENTS.md files as workflow artifacts
+        for (const entry of brownfieldData.scanResult.agentsMdEntries) {
+          registerArtifact(manifestPath, {
+            id: `DISCOVERY-agents-md-${path.basename(path.dirname(entry.relativeFilePath)) || 'root'}`,
+            type: 'structural-map',
+            phase: 'discovery' as WorkflowPhase,
+            stage: 'intent' as WorkflowStage,
+            path: entry.relativeFilePath,
+            validation_passed: null,
+            write_complete: true,
+            checksum: null,
+          });
+        }
+      } else {
+        deepinitSuggested = sourceFileCount >= deepinitThreshold;
+      }
+    } else if (isBrownfield) {
+      deepinitSuggested = sourceFileCount >= deepinitThreshold;
+    }
+
+    try {
+      const analysisPlanPath = getArtifactPath(projectPath, workflowId, 'analysis-plan' as any);
+      const analysisPlanContent = await fs.readFile(analysisPlanPath, 'utf-8');
+      const agentsMdStatusText = agentsMdDetected
+        ? `**Status**: Present (${agentsMdFileCount} file(s) found)${agentsMdStale ? ' — **Stale** (>30 days old)' : ''}\n**Files**:\n${brownfieldData!.scanResult.agentsMdEntries!.map(e => `- \`${e.relativeFilePath}\``).join('\n')}`
+        : '**Status**: Absent — no AGENTS.md files found in project';
+      const updated = analysisPlanContent.replace(
+        /## AGENTS\.md Status\n<!-- Populated during brownfield scanning\. Indicates whether AGENTS\.md files were found\. -->/,
+        `## AGENTS.md Status\n${agentsMdStatusText}`
+      );
+      if (updated !== analysisPlanContent) {
+        await fs.writeFile(analysisPlanPath, updated, 'utf-8');
+      }
+    } catch {
+      // non-blocking
+    }
+
+    if (agentsMdStale && brownfieldData) {
+      try {
+        const cachedManifest = await readCacheManifest(projectPath);
+        if (cachedManifest) {
+          cachedManifest.agentsMdStatus = 'stale';
+          await writeCacheManifest(projectPath, cachedManifest);
+        }
+      } catch {
+        // non-blocking
+      }
+    }
+
+    try {
+      const deepinitStatus = agentsMdDetected ? 'pre-existing' : deepinitSuggested ? 'suggested' : 'skipped';
+      const agentsMdInfo = agentsMdDetected
+        ? `AGENTS.md detected (${agentsMdFileCount} file(s), stale: ${agentsMdStale})`
+        : 'No AGENTS.md files found';
+      await appendAuditEntry(projectPath, workflowId, `## Discovery — Deepinit Detection
+**Timestamp**: ${new Date().toISOString()}
+**Source file count**: ${sourceFileCount}
+**Deepinit threshold**: ${deepinitThreshold}
+**Deepinit status**: ${deepinitStatus}
+**AGENTS.md**: ${agentsMdInfo}
+
+---
+`);
+    } catch {
+      // non-blocking
+    }
+
     updatePhaseStatus(manifestPath, 'discovery', 'blocked');
 
-    // Save checkpoint: discovery artifacts generated, awaiting gate (CCR-1)
     const checkpoint = await loadCheckpoint(projectPath, workflowId);
     if (checkpoint) {
       checkpoint.current_phase = 'discovery';
       checkpoint.phases.discovery.status = 'blocked';
+      if (agentsMdDetected && deepinitUpdateMode) {
+        checkpoint.deepinit_status = 'suggested';
+      } else if (agentsMdDetected) {
+        checkpoint.deepinit_status = 'pre-existing';
+      } else if (deepinitSuggested) {
+        checkpoint.deepinit_status = 'suggested';
+      } else if (isBrownfield) {
+        checkpoint.deepinit_status = 'skipped';
+      } else {
+        checkpoint.deepinit_status = 'not_applicable';
+      }
       await saveCheckpoint(projectPath, checkpoint);
     }
 
@@ -452,6 +667,13 @@ export async function executeDiscoveryPhase(
       gateRequired: true,
       artifactsGenerated,
       sourceFileCount,
+      agentsMdDetected,
+      agentsMdFileCount,
+      agentsMdStale,
+      deepinitSuggested,
+      deepinitUpdateMode,
+      architectureModelGenerated,
+      designSystem,
       brownfieldData,
     };
   } catch (error) {
@@ -509,10 +731,11 @@ export async function writeExtendedDiscoveryArtifacts(
   workflowId: string,
   scan: WorkspaceScanResult,
   agentGeneratedArtifacts: {
-    businessOverview?: string;
-    codeStructure?: string;
-    apiDocumentation?: string;
-    codeQualityAssessment?: string;
+    currentStateAnalysis?: string;
+    staticModel?: string;
+    dynamicModel?: string;
+    changeImpact?: string;
+    regressionBaseline?: string;
   }
 ): Promise<string[]> {
   const discoveryDir = path.join(projectPath, 'aidlc-docs', workflowId, 'discovery');
@@ -521,36 +744,29 @@ export async function writeExtendedDiscoveryArtifacts(
   const manifestPath = path.join(projectPath, 'aidlc-docs', workflowId, 'manifest.json');
   const writtenPaths: string[] = [];
 
-  const scannerArtifacts: Array<{ id: string; filename: string; content: string }> = [
-    { id: 'component-inventory', filename: 'component-inventory.md', content: generateComponentInventory(scan) },
-    { id: 'technology-stack', filename: 'technology-stack.md', content: generateTechnologyStack(scan) },
-    { id: 'dependencies', filename: 'dependencies.md', content: generateDependencies(scan) },
+  // Generate current-state-analysis from scanner data if not provided
+  const currentStateContent = agentGeneratedArtifacts.currentStateAnalysis ?? [
+    '# Current State Analysis',
+    '',
+    '## Component Inventory',
+    generateComponentInventory(scan),
+    '',
+    '## Technology Stack',
+    generateTechnologyStack(scan),
+    '',
+    '## Dependencies',
+    generateDependencies(scan),
+  ].join('\n');
+
+  const artifacts: Array<{ id: string; filename: string; content: string | undefined }> = [
+    { id: 'current-state-analysis', filename: 'current-state-analysis.md', content: currentStateContent },
+    { id: 'static-model', filename: 'static-model.md', content: agentGeneratedArtifacts.staticModel },
+    { id: 'dynamic-model', filename: 'dynamic-model.md', content: agentGeneratedArtifacts.dynamicModel },
+    { id: 'change-impact', filename: 'change-impact.md', content: agentGeneratedArtifacts.changeImpact },
+    { id: 'regression-baseline', filename: 'regression-baseline.md', content: agentGeneratedArtifacts.regressionBaseline },
   ];
 
-  for (const artifact of scannerArtifacts) {
-    const filePath = path.join(discoveryDir, artifact.filename);
-    await fs.writeFile(filePath, artifact.content, 'utf8');
-    registerArtifact(manifestPath, {
-      id: `DISCOVERY-${artifact.id}`,
-      type: artifact.id,
-      phase: 'discovery' as WorkflowPhase,
-      stage: 'intent' as WorkflowStage,
-      path: filePath,
-      validation_passed: null,
-      write_complete: true,
-      checksum: null,
-    });
-    writtenPaths.push(filePath);
-  }
-
-  const agentArtifacts: Array<{ id: string; filename: string; content: string | undefined }> = [
-    { id: 'business-overview', filename: 'business-overview.md', content: agentGeneratedArtifacts.businessOverview },
-    { id: 'code-structure', filename: 'code-structure.md', content: agentGeneratedArtifacts.codeStructure },
-    { id: 'api-documentation', filename: 'api-documentation.md', content: agentGeneratedArtifacts.apiDocumentation },
-    { id: 'code-quality-assessment', filename: 'code-quality-assessment.md', content: agentGeneratedArtifacts.codeQualityAssessment },
-  ];
-
-  for (const artifact of agentArtifacts) {
+  for (const artifact of artifacts) {
     if (!artifact.content) continue;
     const filePath = path.join(discoveryDir, artifact.filename);
     await fs.writeFile(filePath, artifact.content, 'utf8');

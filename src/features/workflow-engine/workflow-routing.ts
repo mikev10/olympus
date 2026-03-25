@@ -1,10 +1,56 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
+import * as os from 'os';
 import { detectBrownfield } from './discovery.js';
 import { registerArtifact } from './manifest.js';
-import type { PathwayType, WorkflowRoutingPlan, WorkflowRoutingStage, WorkflowPhase, RiskTier } from './phase-types.js';
+import type { PathwayType, WorkflowRoutingPlan, WorkflowRoutingStage, WorkflowPhase, RiskTier, WorkflowCheckpointV3 } from './phase-types.js';
 import type { DepthAssessment } from './phase-types.js';
+
+export interface PathwayBehaviorRule {
+  id: string;
+  name: string;
+  description: string;
+  enforcement: string;
+}
+
+export interface PathwayBehaviorRules {
+  rules: PathwayBehaviorRule[];
+  qualityGateChecklist: string[];
+}
+
+const PATHWAYS_WITH_RULES: PathwayType[] = ['bugfix', 'optimization'];
+
+export async function loadPathwayBehaviors(pathwayType: PathwayType): Promise<PathwayBehaviorRules | null> {
+  if (!PATHWAYS_WITH_RULES.includes(pathwayType)) {
+    return null;
+  }
+
+  const installedPath = path.join(os.homedir(), '.claude', 'olympus', 'rules', 'common', 'pathway-behaviors.json');
+  const sourcePath = path.join(process.cwd(), 'resources', 'rules', 'common', 'pathway-behaviors.json');
+
+  const tryRead = (p: string) => fs.readFile(p, 'utf-8').catch(() => null);
+  const raw = await tryRead(installedPath) ?? await tryRead(sourcePath);
+
+  if (raw === null) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { rules: PathwayBehaviorRule[]; quality_gate_checklist: string[] }>;
+    const section = parsed[pathwayType];
+    if (!section) {
+      return null;
+    }
+    return {
+      rules: section.rules,
+      qualityGateChecklist: section.quality_gate_checklist,
+    };
+  } catch {
+    console.error('[PathwayBehaviors] Failed to parse pathway-behaviors.json');
+    return null;
+  }
+}
 
 const PATHWAY_KEYWORDS: Array<{ pathway: PathwayType; keywords: string[] }> = [
   {
@@ -43,6 +89,87 @@ export async function detectPathway(projectPath: string, intentText: string): Pr
   }
 
   return 'brownfield-enhancement';
+}
+
+export interface PathwayAnnouncement {
+  detectedPathway: PathwayType;
+  displayName: string;
+  depthScore: number;
+  sourceFileCount: number;
+  rationale: string;
+}
+
+const PATHWAY_RATIONALE: Record<PathwayType, string> = {
+  greenfield: 'No existing source files detected — greenfield project.',
+  bugfix: "Intent keywords matched 'fix', 'bug', 'broken', 'regression', 'error', 'crash', 'issue', 'defect', or 'patch' → bugfix pathway.",
+  optimization: "Intent keywords matched 'optimize', 'performance', 'speed', 'cache', 'reduce', 'improve latency', 'memory', or 'bottleneck' → optimization pathway.",
+  'brownfield-refactor': "Intent keywords matched 'refactor', 'restructure', 'migrate', 'rewrite', 'reorganize', 'modernize', or 'upgrade' → brownfield-refactor pathway.",
+  'brownfield-enhancement': "Intent keywords matched 'add', 'new', 'feature', 'implement', 'integrate', 'extend', or 'support' (or no keywords matched — default brownfield pathway).",
+};
+
+export const PATHWAY_DISPLAY_NAMES: Record<PathwayType, string> = {
+  greenfield: 'Greenfield',
+  'brownfield-enhancement': 'Enhancement',
+  'brownfield-refactor': 'Refactor',
+  bugfix: 'Bug Fix',
+  optimization: 'Optimization',
+};
+
+export function getPathwayDisplayName(pathway: PathwayType): string {
+  return PATHWAY_DISPLAY_NAMES[pathway] ?? pathway;
+}
+
+export function buildPathwayAnnouncement(
+  pathway: PathwayType,
+  depthScore: number,
+  sourceFileCount: number,
+): PathwayAnnouncement {
+  return {
+    detectedPathway: pathway,
+    displayName: getPathwayDisplayName(pathway),
+    depthScore,
+    sourceFileCount,
+    rationale: PATHWAY_RATIONALE[pathway],
+  };
+}
+
+export interface PathwayOverride {
+  pathwayType?: PathwayType;
+  depthScore?: number;
+}
+
+export function applyPathwayOverride(
+  original: PathwayAnnouncement,
+  override: PathwayOverride,
+): PathwayAnnouncement {
+  const effectivePathway = override.pathwayType ?? original.detectedPathway;
+  const effectiveDepth = override.depthScore ?? original.depthScore;
+  const overrideRationale = override.pathwayType != null || override.depthScore != null
+    ? ` (overridden by user: pathway=${override.pathwayType ?? 'unchanged'}, depthScore=${override.depthScore ?? 'unchanged'})`
+    : '';
+  return {
+    detectedPathway: effectivePathway,
+    displayName: getPathwayDisplayName(effectivePathway),
+    depthScore: effectiveDepth,
+    sourceFileCount: original.sourceFileCount,
+    rationale: original.rationale + overrideRationale,
+  };
+}
+
+export function recordPathwayOverride(
+  _checkpoint: WorkflowCheckpointV3,
+  detected: PathwayAnnouncement,
+  override: PathwayOverride,
+): Partial<WorkflowCheckpointV3> {
+  const effective = applyPathwayOverride(detected, override);
+  return {
+    original_pathway_type: detected.detectedPathway,
+    original_depth_score: detected.depthScore,
+    pathway_override: override.pathwayType,
+    depth_override: override.depthScore,
+    pathway_type: effective.detectedPathway,
+    depth_score: effective.depthScore,
+  };
 }
 
 export interface WorkflowRoutingOptions {

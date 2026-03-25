@@ -103,6 +103,11 @@ export interface ImportEdge {
   importedModule: string;
 }
 
+export interface AgentsMdEntry {
+  relativeFilePath: string;
+  pathDescriptionPairs: Array<{ path: string; description: string }>;
+}
+
 export interface WorkspaceScanResult {
   totalFiles: number;
   sourceFiles: number;
@@ -112,6 +117,7 @@ export interface WorkspaceScanResult {
   entryPoints: string[];
   largestFilesByDirectory: Record<string, string[]>;
   configFiles: string[];
+  agentsMdEntries?: AgentsMdEntry[];
 }
 
 export const WORKSPACE_SCAN_SCHEMA = `WorkspaceScanResult JSON schema:
@@ -123,7 +129,8 @@ export const WORKSPACE_SCAN_SCHEMA = `WorkspaceScanResult JSON schema:
   "importGraph": [{ "sourceFile": string, "importedModule": string }],
   "entryPoints": ["path/to/index.ts", ...],
   "largestFilesByDirectory": { "src": ["largest.ts", "second.ts", "third.ts"], ... },
-  "configFiles": ["package.json", "tsconfig.json", ...]
+  "configFiles": ["package.json", "tsconfig.json", ...],
+  "agentsMdEntries": [{ "filePath": string, "entries": [{ "path": string, "description": string }] }] (optional)
 }`;
 
 function countLines(filePath: string): number {
@@ -133,6 +140,77 @@ function countLines(filePath: string): number {
   } catch {
     return 0;
   }
+}
+
+function parseAgentsMd(content: string, relativeFilePath: string): AgentsMdEntry {
+  const pathDescriptionPairs: Array<{ path: string; description: string }> = [];
+  const lines = content.split('\n');
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const headingMatch = /^##\s+(.+)$/.exec(line);
+    if (headingMatch) {
+      const entryPath = headingMatch[1].trim();
+      const descLines: string[] = [];
+      i++;
+      while (i < lines.length && !/^##/.test(lines[i])) {
+        const trimmed = lines[i].trim();
+        if (trimmed.length > 0) descLines.push(trimmed);
+        i++;
+      }
+      if (descLines.length > 0) {
+        pathDescriptionPairs.push({ path: entryPath, description: descLines.join(' ') });
+      }
+      continue;
+    }
+
+    const bulletMatch = /^[-*]\s+\*{0,2}([^*:]+)\*{0,2}:\s*(.+)$/.exec(line);
+    if (bulletMatch) {
+      const entryPath = bulletMatch[1].trim();
+      const description = bulletMatch[2].trim();
+      if (entryPath && description) {
+        pathDescriptionPairs.push({ path: entryPath, description });
+      }
+    }
+
+    i++;
+  }
+
+  return { relativeFilePath, pathDescriptionPairs };
+}
+
+export async function detectAgentsMdFiles(projectPath: string): Promise<AgentsMdEntry[]> {
+  const results: AgentsMdEntry[] = [];
+
+  async function tryRead(filePath: string, relPath: string): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      const entry = parseAgentsMd(content, relPath);
+      if (entry.pathDescriptionPairs.length > 0) results.push(entry);
+    } catch {
+      return;
+    }
+  }
+
+  await tryRead(path.join(projectPath, 'AGENTS.md'), 'AGENTS.md');
+
+  let rootEntries: Dirent[] = [];
+  try {
+    rootEntries = await fs.readdir(projectPath, { withFileTypes: true }) as Dirent[];
+  } catch {
+    return results;
+  }
+
+  for (const entry of rootEntries) {
+    if (entry.isDirectory() && !entry.name.startsWith('.') && !SKIP_DIRS.has(entry.name)) {
+      const subPath = path.join(projectPath, entry.name, 'AGENTS.md');
+      await tryRead(subPath, path.join(entry.name, 'AGENTS.md').replace(/\\/g, '/'));
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -286,6 +364,8 @@ export async function scanWorkspace(projectPath: string): Promise<WorkspaceScanR
     largestFilesByDirectory[dir] = sorted.slice(0, 3).map(f => f.file);
   }
 
+  const agentsMdEntries = await detectAgentsMdFiles(projectPath);
+
   return {
     totalFiles: totalFilesCount.value,
     sourceFiles: sourceFilesCount.value,
@@ -295,8 +375,11 @@ export async function scanWorkspace(projectPath: string): Promise<WorkspaceScanR
     entryPoints,
     largestFilesByDirectory,
     configFiles,
+    ...(agentsMdEntries.length > 0 ? { agentsMdEntries } : {}),
   };
 }
+
+const ARCHITECTURALLY_SIGNIFICANT_KEYWORDS = ['core', 'entry', 'main', 'critical', 'primary', 'central'];
 
 export function selectKeyFiles(scan: WorkspaceScanResult, maxFiles = 20): string[] {
   const selected: string[] = [];
@@ -306,6 +389,16 @@ export function selectKeyFiles(scan: WorkspaceScanResult, maxFiles = 20): string
     if (!seen.has(filePath)) {
       seen.add(filePath);
       selected.push(filePath);
+    }
+  }
+
+  if (scan.agentsMdEntries && scan.agentsMdEntries.length > 0) {
+    for (const agentEntry of scan.agentsMdEntries) {
+      for (const pair of agentEntry.pathDescriptionPairs) {
+        const descLower = pair.description.toLowerCase();
+        const isSignificant = ARCHITECTURALLY_SIGNIFICANT_KEYWORDS.some(kw => descLower.includes(kw));
+        if (isSignificant) add(pair.path);
+      }
     }
   }
 
@@ -340,6 +433,15 @@ export function selectIntentRelevantFiles(
     for (const f of files) allSourceFiles.add(f);
   }
 
+  const agentsDescriptionByPath = new Map<string, string>();
+  if (scan.agentsMdEntries && scan.agentsMdEntries.length > 0) {
+    for (const agentEntry of scan.agentsMdEntries) {
+      for (const pair of agentEntry.pathDescriptionPairs) {
+        agentsDescriptionByPath.set(pair.path, pair.description.toLowerCase());
+      }
+    }
+  }
+
   const forwardMap = new Map<string, string[]>();
   for (const edge of scan.importGraph) {
     const existing = forwardMap.get(edge.sourceFile) ?? [];
@@ -355,11 +457,27 @@ export function selectIntentRelevantFiles(
     );
   }
 
-  const matched = new Set<string>();
+  function descriptionScore(filePath: string): number {
+    const normalizedFilePath = filePath.replace(/\\/g, '/');
+    for (const [agentsPath, desc] of agentsDescriptionByPath) {
+      if (normalizedFilePath.includes(agentsPath) || agentsPath.includes(normalizedFilePath)) {
+        return keywords.filter(kw => desc.includes(kw)).length;
+      }
+    }
+    return 0;
+  }
+
+  const fileScores = new Map<string, number>();
   for (const file of allSourceFiles) {
     const normalized = file.replace(/\\/g, '/').toLowerCase();
-    if (keywords.some(kw => normalized.includes(kw))) matched.add(file);
+    const pathMatchCount = keywords.filter(kw => normalized.includes(kw)).length;
+    const descBonus = descriptionScore(file) * 2;
+    if (pathMatchCount > 0 || descBonus > 0) {
+      fileScores.set(file, pathMatchCount + descBonus);
+    }
   }
+
+  const matched = new Set<string>(fileScores.keys());
 
   const expanded = new Set<string>(matched);
   for (const file of matched) {
@@ -368,10 +486,13 @@ export function selectIntentRelevantFiles(
     }
   }
 
+  const scoredFiles = Array.from(matched)
+    .sort((a, b) => (fileScores.get(b) ?? 0) - (fileScores.get(a) ?? 0));
+
   const result: string[] = [];
   const seen = new Set<string>();
 
-  for (const f of matched) {
+  for (const f of scoredFiles) {
     if (!seen.has(f)) { seen.add(f); result.push(f); }
   }
   for (const f of expanded) {

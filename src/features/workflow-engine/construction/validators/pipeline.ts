@@ -96,7 +96,8 @@ export async function updateCheckpointForValidator(
   unitId: string,
   validatorName: ValidatorName,
   status: ValidatorStatus,
-  coveragePercentage?: number
+  coveragePercentage?: number,
+  criticalGapCount?: number
 ): Promise<void> {
   const checkpoint = await loadCheckpoint(projectPath, workflowId);
   if (!checkpoint || !checkpoint.construction_units) {
@@ -113,6 +114,10 @@ export async function updateCheckpointForValidator(
 
   if (validatorName === 'coverage' && coveragePercentage !== undefined) {
     unit.coverage_percentage = coveragePercentage;
+  }
+
+  if (validatorName === 'coverage' && criticalGapCount !== undefined) {
+    unit.critical_gap_count = criticalGapCount;
   }
 
   await saveCheckpoint(projectPath, checkpoint);

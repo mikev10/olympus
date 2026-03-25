@@ -54,7 +54,7 @@ function createMockChildProcess() {
 describe('Build Check Hooks', () => {
   beforeEach(() => {
     clearHooks();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     resetBuildCheckState();
 
     // Default mocks
@@ -153,7 +153,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
       mockExistsSync.mockImplementation((path: string) => {
         // Config exists but tsconfig doesn't
-        if (path.includes('config.json')) return false;
+        if (path.includes('.olympus')) return false;
         if (path.includes('tsconfig.json')) return false;
         return false;
       });
@@ -190,7 +190,7 @@ describe('Build Check Hooks', () => {
 
       // Setup: tsc exists
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -585,7 +585,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
 
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -616,7 +616,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
 
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -646,7 +646,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
 
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -676,7 +676,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
 
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -725,7 +725,7 @@ describe('Build Check Hooks', () => {
       mockExistsSync.mockImplementation((path: string) => {
         const pathStr = String(path).replace(/\\/g, '/');
         // No config file
-        if (pathStr.includes('config.json')) return false;
+        if (pathStr.includes('.olympus')) return false;
         // tsconfig exists
         if (pathStr === '/test/project/tsconfig.json') return true;
         // Local tsc exists
@@ -753,7 +753,7 @@ describe('Build Check Hooks', () => {
       const ctx = createPostToolUseCtx('Write');
 
       mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
+        if (path.includes('.olympus')) return true;
         if (path.includes('tsconfig.json')) return true;
         if (path.includes('node_modules/.bin/tsc')) return true;
         return false;
@@ -782,41 +782,46 @@ describe('Build Check Hooks', () => {
     });
 
     it('reads debounceMs from config', async () => {
-      const ctx = createPostToolUseCtx('Write');
+      vi.useFakeTimers();
+      try {
+        const ctx = createPostToolUseCtx('Write');
 
-      mockExistsSync.mockImplementation((path: string) => {
-        if (path.includes('config.json')) return true;
-        if (path.includes('tsconfig.json')) return true;
-        if (path.includes('node_modules/.bin/tsc')) return true;
-        return false;
-      });
-      mockReadFileSync.mockReturnValue(JSON.stringify({
-        hooks: {
-          buildCheck: {
-            debounceMs: 100, // Very short debounce for testing
+        mockExistsSync.mockImplementation((path: string) => {
+          if (path.includes('.olympus')) return true;
+          if (path.includes('tsconfig.json')) return true;
+          if (path.includes('node_modules/.bin/tsc')) return true;
+          return false;
+        });
+        mockReadFileSync.mockReturnValue(JSON.stringify({
+          hooks: {
+            buildCheck: {
+              debounceMs: 100, // Very short debounce for testing
+            },
           },
-        },
-      }));
+        }));
 
-      const mockProc = createMockChildProcess();
-      mockSpawn.mockReturnValue(mockProc);
+        const mockProc = createMockChildProcess();
+        mockSpawn.mockReturnValue(mockProc);
 
-      // First call
-      await triggerHandler(ctx);
-      expect(mockSpawn).toHaveBeenCalledTimes(1);
+        // First call
+        await triggerHandler(ctx);
+        expect(mockSpawn).toHaveBeenCalledTimes(1);
 
-      mockSpawn.mockClear();
+        mockSpawn.mockClear();
 
-      // Second call immediately - should be debounced
-      await triggerHandler(ctx);
-      expect(mockSpawn).not.toHaveBeenCalled();
+        // Second call immediately - should be debounced
+        await triggerHandler(ctx);
+        expect(mockSpawn).not.toHaveBeenCalled();
 
-      // Wait for debounce to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
+        // Advance time past debounce
+        vi.advanceTimersByTime(150);
 
-      // Third call after debounce - should spawn
-      await triggerHandler(ctx);
-      expect(mockSpawn).toHaveBeenCalledTimes(1);
+        // Third call after debounce - should spawn
+        await triggerHandler(ctx);
+        expect(mockSpawn).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -931,7 +936,7 @@ describe('Build Check Hooks', () => {
 
       mockExistsSync.mockImplementation((path: string) => {
         const pathStr = String(path);
-        if (pathStr.includes('config.json')) return true;
+        if (pathStr.includes('.olympus')) return true;
         // No tsconfig, so should return early before spawn
         return false;
       });
@@ -1009,38 +1014,40 @@ describe('Build Check Hooks', () => {
     });
 
     it('kills previous process when new one starts', async () => {
-      const ctx = createPostToolUseCtx('Write');
+      vi.useFakeTimers();
+      try {
+        const ctx = createPostToolUseCtx('Write');
 
-      mockExistsSync.mockImplementation((path: string) => {
-        const pathStr = String(path);
-        if (pathStr.includes('config.json')) return true;
-        if (pathStr === '/test/project/tsconfig.json' || pathStr === '\\test\\project\\tsconfig.json') return true;
-        if (pathStr.includes('node_modules') && pathStr.includes('tsc')) return true;
-        return false;
-      });
-      mockReadFileSync.mockReturnValue(JSON.stringify({
-        hooks: {
-          buildCheck: {
-            debounceMs: 1, // Very short debounce
+        mockExistsSync.mockImplementation((path: string) => {
+          const pathStr = String(path);
+          if (pathStr.includes('.olympus')) return true;
+          if (pathStr === '/test/project/tsconfig.json' || pathStr === '\\test\\project\\tsconfig.json') return true;
+          if (pathStr.includes('node_modules') && pathStr.includes('tsc')) return true;
+          return false;
+        });
+        mockReadFileSync.mockReturnValue(JSON.stringify({
+          hooks: {
+            buildCheck: {
+              debounceMs: 1,
+            },
           },
-        },
-      }));
+        }));
 
-      const mockProc1 = createMockChildProcess();
-      const mockProc2 = createMockChildProcess();
-      mockSpawn.mockReturnValueOnce(mockProc1).mockReturnValueOnce(mockProc2);
+        const mockProc1 = createMockChildProcess();
+        const mockProc2 = createMockChildProcess();
+        mockSpawn.mockReturnValueOnce(mockProc1).mockReturnValueOnce(mockProc2);
 
-      // Start first build
-      await triggerHandler(ctx);
-      expect(mockSpawn).toHaveBeenCalledTimes(1);
+        await triggerHandler(ctx);
+        expect(mockSpawn).toHaveBeenCalledTimes(1);
 
-      // Wait for debounce to expire
-      await new Promise(resolve => setTimeout(resolve, 10));
+        vi.advanceTimersByTime(10);
 
-      // Start second build (should kill first)
-      await triggerHandler(ctx);
-      expect(mockProc1.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(mockSpawn).toHaveBeenCalledTimes(2);
+        await triggerHandler(ctx);
+        expect(mockProc1.kill).toHaveBeenCalledWith('SIGTERM');
+        expect(mockSpawn).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('handles process error event', async () => {

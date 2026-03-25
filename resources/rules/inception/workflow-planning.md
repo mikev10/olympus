@@ -10,11 +10,11 @@
 
 ## Step 1: Load All Prior Context
 
-### 1.1 Load Reverse Engineering Artifacts (if brownfield)
-- architecture.md
-- component-inventory.md
-- technology-stack.md
-- dependencies.md
+### 1.1 Load Discovery Artifacts (if brownfield)
+- static-model.md
+- dynamic-model.md
+- current-state-analysis.md
+- workspace-scan.json
 
 ### 1.2 Load Requirements Analysis
 - requirements.md (includes intent analysis)

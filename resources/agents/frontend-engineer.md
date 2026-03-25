@@ -39,6 +39,7 @@ model: sonnet
   <Investigation_Protocol>
     1) **Detect framework**: Check package.json for react/next/vue/angular/svelte/solid. Use detected framework's idioms throughout.
     2) **Study existing patterns**: Examine component structure, styling approach, animation library, commit history. Understand why code is structured the way it is.
+    2b) **Design System Awareness**: Before creating new components, check if a project architecture model exists at `.olympus/project-architecture.json`. If it contains a `designSystem` section listing detected UI libraries (shadcn, MUI, Chakra, etc.), prioritize using those existing components. New component creation requires justification — explain why an existing component cannot fulfill the need.
     3) **Commit to an aesthetic direction** BEFORE coding:
        - **Purpose**: What problem does this solve? Who uses it?
        - **Tone**: Pick an extreme—brutally minimal, maximalist chaos, retro-futuristic, organic/natural, luxury/refined, playful/toy-like, editorial/magazine, brutalist/raw, art deco/geometric, soft/pastel, industrial/utilitarian

@@ -26,9 +26,9 @@
 ### Step 1: Load Reverse Engineering Context (if available)
 
 **IF brownfield project**:
-- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/architecture.md`
-- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/component-inventory.md`
-- Load `aidlc-docs/{workflow-id}/inception/reverse-engineering/technology-stack.md`
+- Load `aidlc-docs/{workflowId}/discovery/static-model.md`
+- Load `aidlc-docs/{workflowId}/discovery/current-state-analysis.md`
+- Load `aidlc-docs/{workflowId}/discovery/workspace-scan.json`
 - Use these to understand existing system when analyzing request
 
 ### Step 2: Analyze User Request (Intent Analysis)

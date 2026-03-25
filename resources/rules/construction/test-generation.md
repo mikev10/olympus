@@ -63,6 +63,36 @@ Evaluate each criterion explicitly and record which test types apply in `test-re
 - Both blocks can be overridden by setting `allowFailures: true` in `TestGenerationOptions`
 - Override must be logged in `test-report.md` under the `## Override` section
 
+## Regression Category Handling
+
+When a regression baseline exists (brownfield/bugfix pathways), each newly failing test is categorized before any fix is attempted. Follow these category-specific instructions:
+
+### legitimate_regression
+The test was passing in the baseline but now fails due to unintended code changes.
+- **Action**: Fix the regression before the unit can complete
+- **Priority**: Blocking — the unit CANNOT proceed until all legitimate regressions are resolved
+- **Approach**: Identify the code change that caused the failure, revert or fix the logic, re-run the test
+
+### intentional_change
+The test behavior changed by design — either a new test was added or existing behavior was deliberately modified.
+- **Action**: Update the test expectations to match the new intended behavior
+- **Priority**: Non-blocking — but the test MUST be updated (not deleted or suppressed)
+- **Rationale logging**: Document WHY the behavior changed in the test-report.md under "Intentional Changes"
+- **Example**: If a function's return type changed from `string` to `number`, update assertions to expect `number`
+
+### flaky
+The test passed on re-run without any code changes, indicating non-deterministic behavior.
+- **Action**: Flag the test but do NOT block unit completion
+- **Priority**: Non-blocking — flaky tests are tracked but do not gate progress
+- **Documentation**: Record the flaky test name and file in test-report.md under "Flaky Tests"
+- **Do NOT**: Attempt to fix flaky tests as part of this unit — that is separate work
+
+### pre_existing_failure
+The test was already failing before this unit's changes began.
+- **Action**: Ignore — this is not caused by the current unit's work
+- **Priority**: Non-blocking
+- **Do NOT**: Attempt to fix pre-existing failures as part of this unit
+
 ## Code Modification Scope
 
 - The agent may ONLY modify files listed in `code-summary.md` for this unit

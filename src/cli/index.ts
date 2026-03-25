@@ -1632,7 +1632,14 @@ program
   .command('workflow-status')
   .description('Show status of active AI-DLC workflow')
   .option('-d, --directory <path>', 'Project directory (default: cwd)')
+  .option('--force-rescan', 'Force a fresh brownfield scan on next /plan invocation (clears cached discovery results)')
   .action(async (options) => {
+    if (options.forceRescan) {
+      const { clearCache } = await import('../features/workflow-engine/discovery-cache.js');
+      const directory = options.directory ? resolve(options.directory) : process.cwd();
+      await clearCache(directory);
+      console.log(chalk.green('Discovery cache cleared. The next /plan invocation will perform a fresh brownfield scan.'));
+    }
     const { listWorkflows, loadCheckpoint } = await import('../features/workflow-engine/checkpoint.js');
     const { loadManifest } = await import('../features/workflow-engine/manifest.js');
     const { loadTrustState } = await import('../features/workflow-engine/trust.js');
@@ -1720,6 +1727,37 @@ metricsCommand
   .option('-d, --days <number>', 'Age threshold in days (default: 30)', '30')
   .action(async (options) => {
     await cleanMetrics({ days: parseInt(options.days) });
+  });
+
+/**
+ * Cache command — manage discovery cache
+ */
+program
+  .command('cache')
+  .description('Manage the Olympus discovery cache')
+  .option('--clear', 'Clear the discovery cache for the current project')
+  .option('--project-path <path>', 'Project path (default: current working directory)')
+  .action(async (options) => {
+    const { clearCache } = await import('../features/workflow-engine/discovery-cache.js');
+    const projectPath = options.projectPath ? resolve(options.projectPath) : process.cwd();
+
+    if (options.clear) {
+      try {
+        await clearCache(projectPath);
+        console.log(chalk.green(`Cache cleared for ${projectPath}`));
+      } catch (err) {
+        const { existsSync } = await import('fs');
+        const { join: joinPath } = await import('path');
+        if (!existsSync(joinPath(projectPath, '.olympus', 'cache'))) {
+          console.log(chalk.gray(`No cache found for ${projectPath}`));
+        } else {
+          console.error(chalk.red(`Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`));
+          process.exit(1);
+        }
+      }
+    } else {
+      console.log(chalk.blue('Usage: olympus cache --clear [--project-path <path>]'));
+    }
   });
 
 // Parse arguments

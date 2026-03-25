@@ -370,7 +370,7 @@ function installRules(
     const phaseDestDir = join(rulesDir, phase);
     mkdirSync(phaseDestDir, { recursive: true });
 
-    const ruleFiles = readdirSync(phaseContentDir).filter(f => f.endsWith('.md'));
+    const ruleFiles = readdirSync(phaseContentDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
     for (const ruleFile of ruleFiles) {
       const content = localizeContent(readContent(`rules/${phase}/${ruleFile}`), isLocal);
       writeFileSync(join(phaseDestDir, ruleFile), content);
@@ -378,8 +378,7 @@ function installRules(
     }
   }
 
-  // Also install top-level rule files (e.g. core-workflow.md) if they exist
-  const topLevelFiles = readdirSync(rulesContentDir).filter(f => f.endsWith('.md'));
+  const topLevelFiles = readdirSync(rulesContentDir).filter(f => f.endsWith('.md') || f.endsWith('.json'));
   for (const ruleFile of topLevelFiles) {
     const content = localizeContent(readContent(`rules/${ruleFile}`), isLocal);
     writeFileSync(join(rulesDir, ruleFile), content);

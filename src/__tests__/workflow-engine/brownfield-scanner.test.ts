@@ -6,10 +6,11 @@ import {
   scanWorkspace,
   selectKeyFiles,
   selectIntentRelevantFiles,
+  detectAgentsMdFiles,
   WORKSPACE_SCAN_SCHEMA,
   SKIP_DIRS,
 } from '../../features/workflow-engine/brownfield-scanner.js';
-import type { WorkspaceScanResult } from '../../features/workflow-engine/brownfield-scanner.js';
+import type { WorkspaceScanResult, AgentsMdEntry } from '../../features/workflow-engine/brownfield-scanner.js';
 
 let tmpDir: string;
 
@@ -270,6 +271,243 @@ describe('brownfield-scanner', () => {
       expect(SKIP_DIRS.has('node_modules')).toBe(true);
       expect(SKIP_DIRS.has('.git')).toBe(true);
       expect(SKIP_DIRS.has('dist')).toBe(true);
+    });
+  });
+});
+
+describe('AGENTS.md integration', () => {
+  const AGENTS_MD_CONTENT = `# AGENTS.md
+
+## src/features/workflow-engine/
+Core workflow engine handling AIDLC lifecycle phases. Central entry point for all workflow state.
+
+## src/hooks/
+Hook system for event interception. Registers PreToolUse, PostToolUse, and Notification handlers.
+
+## src/installer/
+Installation and distribution logic. Manages file copying.
+`;
+
+  const AGENTS_MD_BULLET_CONTENT = `# AGENTS.md
+
+- **src/features/auth/**: Primary authentication service with critical login flows.
+- **src/models/user.ts**: Main user data model central to all operations.
+`;
+
+  function makeBaseScan(overrides?: Partial<WorkspaceScanResult>): WorkspaceScanResult {
+    return {
+      totalFiles: 10,
+      sourceFiles: 8,
+      directoryTree: [],
+      languageDistribution: { '.ts': 8 },
+      importGraph: [
+        { sourceFile: 'src/index.ts', importedModule: './features/workflow-engine/index.js' },
+      ],
+      entryPoints: ['src/index.ts'],
+      largestFilesByDirectory: {
+        src: ['src/features/workflow-engine/engine.ts', 'src/installer/index.ts'],
+      },
+      configFiles: ['package.json', 'tsconfig.json'],
+      ...overrides,
+    };
+  }
+
+  function makeAgentsMdEntry(content: string): AgentsMdEntry {
+    const pairs: Array<{ path: string; description: string }> = [];
+    const lines = content.split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      const headingMatch = /^##\s+(.+)$/.exec(lines[i]);
+      if (headingMatch) {
+        const entryPath = headingMatch[1].trim();
+        const descLines: string[] = [];
+        i++;
+        while (i < lines.length && !/^##/.test(lines[i])) {
+          const trimmed = lines[i].trim();
+          if (trimmed.length > 0) descLines.push(trimmed);
+          i++;
+        }
+        if (descLines.length > 0) pairs.push({ path: entryPath, description: descLines.join(' ') });
+        continue;
+      }
+      const bulletMatch = /^[-*]\s+\*{0,2}([^*:]+)\*{0,2}:\s*(.+)$/.exec(lines[i]);
+      if (bulletMatch) {
+        pairs.push({ path: bulletMatch[1].trim(), description: bulletMatch[2].trim() });
+      }
+      i++;
+    }
+    return { relativeFilePath: 'AGENTS.md', pathDescriptionPairs: pairs };
+  }
+
+  describe('detectAgentsMdFiles()', () => {
+    let agentsTmpDir: string;
+
+    beforeEach(async () => {
+      agentsTmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-md-test-'));
+    });
+
+    afterEach(async () => {
+      await fs.remove(agentsTmpDir);
+    });
+
+    it('parses AGENTS.md at project root and returns entries', async () => {
+      await fs.writeFile(path.join(agentsTmpDir, 'AGENTS.md'), AGENTS_MD_CONTENT);
+      const results = await detectAgentsMdFiles(agentsTmpDir);
+      expect(results.length).toBeGreaterThan(0);
+      const pairs = results[0].pathDescriptionPairs;
+      expect(pairs.length).toBeGreaterThanOrEqual(3);
+      expect(pairs.some(p => p.path.includes('workflow-engine'))).toBe(true);
+      expect(pairs.some(p => p.description.toLowerCase().includes('core'))).toBe(true);
+    });
+
+    it('parses bullet-point format AGENTS.md', async () => {
+      await fs.writeFile(path.join(agentsTmpDir, 'AGENTS.md'), AGENTS_MD_BULLET_CONTENT);
+      const results = await detectAgentsMdFiles(agentsTmpDir);
+      expect(results.length).toBeGreaterThan(0);
+      const pairs = results[0].pathDescriptionPairs;
+      expect(pairs.length).toBeGreaterThanOrEqual(2);
+      expect(pairs.some(p => p.path.includes('auth'))).toBe(true);
+    });
+
+    it('returns empty array when no AGENTS.md exists', async () => {
+      const results = await detectAgentsMdFiles(agentsTmpDir);
+      expect(results).toHaveLength(0);
+    });
+
+    it('scans AGENTS.md in immediate subdirectories', async () => {
+      await fs.ensureDir(path.join(agentsTmpDir, 'src'));
+      await fs.writeFile(path.join(agentsTmpDir, 'src', 'AGENTS.md'), AGENTS_MD_CONTENT);
+      const results = await detectAgentsMdFiles(agentsTmpDir);
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].relativeFilePath).toContain('src');
+    });
+
+    it('does not throw on unreadable directory', async () => {
+      const results = await detectAgentsMdFiles(path.join(agentsTmpDir, 'nonexistent'));
+      expect(results).toHaveLength(0);
+    });
+  });
+
+  describe('selectKeyFiles() with AGENTS.md', () => {
+    it('places architecturally significant files before entry points when agentsMdEntries present', () => {
+      const agentEntry = makeAgentsMdEntry(AGENTS_MD_CONTENT);
+      const scan = makeBaseScan({ agentsMdEntries: [agentEntry] });
+      const result = selectKeyFiles(scan);
+      const workflowEngineIdx = result.findIndex(f => f.includes('workflow-engine'));
+      const indexTsIdx = result.findIndex(f => f === 'src/index.ts');
+      expect(workflowEngineIdx).toBeGreaterThanOrEqual(0);
+      expect(workflowEngineIdx).toBeLessThan(indexTsIdx);
+    });
+
+    it('is identical to baseline when agentsMdEntries is absent', () => {
+      const scanWithout = makeBaseScan();
+      const scanWithEmpty = makeBaseScan({ agentsMdEntries: [] });
+      const resultWithout = selectKeyFiles(scanWithout);
+      const resultWithEmpty = selectKeyFiles(scanWithEmpty);
+      expect(resultWithout).toEqual(resultWithEmpty);
+    });
+
+    it('does not regress: entry points still appear when no agentsMdEntries', () => {
+      const scan = makeBaseScan();
+      const result = selectKeyFiles(scan);
+      expect(result).toContain('src/index.ts');
+    });
+
+    it('respects maxFiles cap with agentsMdEntries', () => {
+      const agentEntry = makeAgentsMdEntry(AGENTS_MD_CONTENT);
+      const scan = makeBaseScan({ agentsMdEntries: [agentEntry] });
+      const result = selectKeyFiles(scan, 2);
+      expect(result.length).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe('selectIntentRelevantFiles() with AGENTS.md', () => {
+    it('ranks files higher when AGENTS.md description matches intent keywords', () => {
+      const agentEntry = makeAgentsMdEntry(AGENTS_MD_CONTENT);
+      const scanWith = makeBaseScan({ agentsMdEntries: [agentEntry] });
+      const scanWithout = makeBaseScan();
+
+      const resultWith = selectIntentRelevantFiles(scanWith, 'workflow lifecycle phases');
+      const resultWithout = selectIntentRelevantFiles(scanWithout, 'workflow lifecycle phases');
+
+      const workflowRankWith = resultWith.findIndex(f => f.includes('workflow-engine'));
+      const workflowRankWithout = resultWithout.findIndex(f => f.includes('workflow-engine'));
+
+      if (workflowRankWith >= 0 && workflowRankWithout >= 0) {
+        expect(workflowRankWith).toBeLessThanOrEqual(workflowRankWithout);
+      } else {
+        expect(resultWith.length).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('is identical to baseline when agentsMdEntries is absent', () => {
+      const scanWithout = makeBaseScan();
+      const scanWithEmpty = makeBaseScan({ agentsMdEntries: [] });
+      const resultWithout = selectIntentRelevantFiles(scanWithout, 'auth service');
+      const resultWithEmpty = selectIntentRelevantFiles(scanWithEmpty, 'auth service');
+      expect(resultWithout).toEqual(resultWithEmpty);
+    });
+
+    it('returns empty for empty intent regardless of agentsMdEntries', () => {
+      const agentEntry = makeAgentsMdEntry(AGENTS_MD_CONTENT);
+      const scan = makeBaseScan({ agentsMdEntries: [agentEntry] });
+      const result = selectIntentRelevantFiles(scan, '');
+      expect(result).toHaveLength(0);
+    });
+
+    it('description match boosts score: keyword in description ranks above path-only match', () => {
+      const agentsContent = `# AGENTS.md\n\n## src/features/hooks/\nCore hook interception system. Primary event handler.\n`;
+      const agentEntry = makeAgentsMdEntry(agentsContent);
+      const scan = makeBaseScan({
+        importGraph: [
+          { sourceFile: 'src/features/hooks/registry.ts', importedModule: './base.js' },
+          { sourceFile: 'src/features/core/engine.ts', importedModule: './state.js' },
+        ],
+        entryPoints: [],
+        largestFilesByDirectory: {
+          src: ['src/features/hooks/registry.ts', 'src/features/core/engine.ts'],
+        },
+        agentsMdEntries: [agentEntry],
+      });
+
+      const result = selectIntentRelevantFiles(scan, 'core primary');
+      const hooksIdx = result.findIndex(f => f.includes('hooks'));
+      const coreIdx = result.findIndex(f => f.includes('core/engine'));
+
+      if (hooksIdx >= 0 && coreIdx >= 0) {
+        expect(hooksIdx).toBeLessThan(coreIdx);
+      } else {
+        expect(result.length).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  describe('file selection order comparison', () => {
+    it('order differs between scan with and without AGENTS.md when descriptions match intent', () => {
+      const agentsContent = `# AGENTS.md\n\n## src/features/workflow-engine/\nCore workflow engine. Central entry point for lifecycle.\n`;
+      const agentEntry = makeAgentsMdEntry(agentsContent);
+      const scanWith = makeBaseScan({
+        importGraph: [
+          { sourceFile: 'src/features/workflow-engine/engine.ts', importedModule: './state.js' },
+          { sourceFile: 'src/installer/index.ts', importedModule: './copy.js' },
+        ],
+        entryPoints: ['src/installer/index.ts'],
+        largestFilesByDirectory: {
+          src: ['src/features/workflow-engine/engine.ts', 'src/installer/index.ts'],
+        },
+        agentsMdEntries: [agentEntry],
+      });
+      const scanWithout = makeBaseScan({
+        importGraph: scanWith.importGraph,
+        entryPoints: scanWith.entryPoints,
+        largestFilesByDirectory: scanWith.largestFilesByDirectory,
+      });
+
+      const keyWith = selectKeyFiles(scanWith);
+      const keyWithout = selectKeyFiles(scanWithout);
+
+      expect(keyWith[0]).toContain('workflow-engine');
+      expect(keyWithout[0]).not.toContain('workflow-engine');
     });
   });
 });

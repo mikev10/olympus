@@ -385,6 +385,43 @@ Choose from:
 - **bugfix**: Intent mentions "fix", "bug", "broken", "regression", "error"
 - **optimization**: Intent mentions "optimize", "performance", "speed", "cache", "reduce"
 
+### 5b2. Announce pathway and confirm with user (US-029, US-030, US-031, US-033)
+
+Build a pathway announcement using the data from 5a and 5b:
+
+```
+---
+## Pathway Detected
+
+- **Pathway**: {display_name}
+- **Depth Score**: {depth_score} → {recommended_depth}
+- **Source Files**: {sourceFileCount}
+- **Rationale**: {rationale from PATHWAY_KEYWORDS match, or "No existing source files detected — greenfield project."}
+
+---
+## Confirm or Override
+
+Accept this pathway, or override it:
+- To **accept**: say `confirm`
+- To **override pathway**: say `override pathway {pathway-type}` (options: greenfield | brownfield-enhancement | brownfield-refactor | bugfix | optimization)
+- To **override depth**: say `override depth {score}` (1–30)
+- To **override both**: say `override pathway {type} depth {score}`
+---
+```
+
+**Block here** — do NOT proceed to stage skip rules until the user responds.
+
+When the user responds:
+- `confirm` → continue with detected pathway and depth
+- `override ...` → apply the specified override(s). Record in checkpoint:
+  - `original_pathway_type` = detected pathway
+  - `original_depth_score` = detected depth score
+  - `pathway_override` = overridden pathway (if changed)
+  - `depth_override` = overridden depth score (if changed)
+  - `pathway_type` = effective pathway (after override)
+  - `depth_score` = effective depth score (after override)
+  - Display: "Override applied. Proceeding with pathway: {effective_pathway}, depth: {effective_depth}."
+
 ### 5c. Apply stage skip rules based on pathway
 
 Update `inception_stages` in checkpoint with `status: "skipped"` and `skip_reason` for stages excluded by pathway:
@@ -422,6 +459,20 @@ Proceeding to {next stage name}...
 ```
 
 Do NOT display "REVIEW REQUIRED" or wait for approval. Immediately proceed to the next stage.
+
+### 5f. Auto-run deepinit for large brownfield projects
+
+Check `checkpoint.json` for `deepinit_status`:
+- If `deepinit_status === 'suggested'`: The project has >=50 source files and no existing AGENTS.md files. Run `/deepinit` now to generate structural documentation before proceeding to Reverse Engineering.
+  - After `/deepinit` completes, update `checkpoint.json`: set `deepinit_status = 'completed'`
+  - Register each generated `AGENTS.md` file as a workflow artifact in `manifest.json` with `phase: 'discovery'`, `type: 'structural-map'`
+  - Log in `audit.md`: `"Deepinit auto-executed — {N} AGENTS.md files generated | ai"`
+- If `deepinit_status === 'pre-existing'`: AGENTS.md files already exist. Check their staleness using `git log -1 --format="%at" -- {path}` for each AGENTS.md file.
+  - If any AGENTS.md file was last modified more than 30 days ago, run `/deepinit --update` to refresh stale entries.
+  - After update, log in `audit.md`: `"Deepinit update executed — refreshed stale AGENTS.md files | ai"`
+- If `deepinit_status === 'skipped'` or `'not_applicable'`: Skip this step.
+
+This step is **automatic** — no user approval required. Proceed to Step 6 after completion.
 
 ---
 
@@ -1227,6 +1278,8 @@ Key artifacts:
 {list additional artifacts}"
 
 ### 12c. Present execution mode choice
+
+When starting Construction, if the pathway is `bugfix` or `optimization`, load behavioral rules from `resources/rules/common/pathway-behaviors.json` and inject the relevant section into agent context.
 
 Analyze the workflow to recommend the best mode. Use `depth_score`, `risk_tier`, number of units, and pathway to determine the recommendation.
 
