@@ -240,30 +240,41 @@ Identify for each affected module:
 
 ## Step 6: Generate Workflow Visualization
 
-Create Mermaid flowchart showing:
-- All phases in sequence
-- EXECUTE or SKIP decision for each conditional phase
-- Proper styling for each phase state
+**MANDATORY — Follow this format EXACTLY. Do NOT simplify, omit styling, or use `graph TD`.**
 
-**Styling rules** (add after flowchart):
-```
-style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-style CP fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-style CG fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-style BT fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-style US fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
-style Start fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
-style End fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
+The Workflow Visualization MUST include ALL of the following elements. Omitting any element is a rule violation:
 
-linkStyle default stroke:#333,stroke-width:2px
-```
+1. **`flowchart TD`** (NOT `graph TD`) — required for subgraph and styling support
+2. **Start node**: `Start(["User Request"])` with purple stadium shape
+3. **Phase subgraphs**: `subgraph INCEPTION["INCEPTION PHASE"]` and `subgraph CONSTRUCTION["CONSTRUCTION PHASE"]`
+4. **AIDLC stage nodes** inside subgraphs (Workspace Detection, Reverse Engineering, etc.) — NOT individual units of work
+5. **Status labels**: Each node shows `<b>COMPLETED</b>`, `<b>SKIP</b>`, or `<b>EXECUTE</b>`
+6. **End node**: `End(["Complete"])` with purple stadium shape
+7. **Full Material styling** on EVERY node (see palette below)
+8. **`linkStyle default`** for arrow styling
+9. **Text Alternative** block after the diagram
 
-**Style Guidelines**:
-- Completed/Always execute: `fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff` (Material Green with white text)
-- Conditional EXECUTE: `fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000` (Material Orange with black text)
-- Conditional SKIP: `fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000` (Material Gray with black text)
-- Start/End: `fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000` (Material Purple with black text)
-- Phase containers: Use lighter Material colors (INCEPTION: #BBDEFB, CONSTRUCTION: #C8E6C9, OPERATIONS: #FFF59D)
+**DO NOT:**
+- Use `graph TD` — it does not support subgraph styling
+- Show individual units (U-001, U-002, ...) — the visualization shows AIDLC stages
+- Omit styling — unstyled diagrams are not acceptable
+- Use the header "Workflow Diagram" — the correct header is "Workflow Visualization"
+- Skip the text alternative
+
+**MANDATORY Style Palette** — apply to EVERY node after the flowchart definition:
+
+| Status | Style | Use For |
+|--------|-------|---------|
+| COMPLETED | `fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff` | Stages already done |
+| EXECUTE (always) | `fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff` | Stages that always run |
+| EXECUTE (conditional) | `fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000` | Conditional stages chosen to run |
+| SKIP | `fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000` | Skipped stages |
+| Start/End | `fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000` | Entry/exit nodes |
+| INCEPTION container | `fill:#BBDEFB,stroke:#1565C0,stroke-width:3px,color:#000` | Phase background |
+| CONSTRUCTION container | `fill:#C8E6C9,stroke:#2E7D32,stroke-width:3px,color:#000` | Phase background |
+| OPERATIONS container | `fill:#FFF59D,stroke:#F57F17,stroke-width:3px,color:#000` | Phase background |
+
+**Link styling**: `linkStyle default stroke:#333,stroke-width:2px`
 
 ## Step 7: Create Execution Plan Document
 
@@ -296,48 +307,73 @@ Create `aidlc-docs/inception/plans/execution-plan.md`:
 
 ## Workflow Visualization
 
+> **MANDATORY**: Follow Step 6 rules exactly. Use `flowchart TD`, subgraphs, full styling. Do NOT simplify.
+
+Only include stages that are relevant to this workflow (omit stages that were never considered).
+Only include edges between stages that actually connect in sequence (skip stages with SKIP status in the flow).
+Replace every STATUS placeholder with the actual status. Apply the MANDATORY style from Step 6 to EVERY node.
+
 ```mermaid
 flowchart TD
     Start(["User Request"])
-    
-    subgraph INCEPTION["🔵 INCEPTION PHASE"]
-        WD["Workspace Detection<br/><b>STATUS</b>"]
-        RE["Reverse Engineering<br/><b>STATUS</b>"]
-        RA["Requirements Analysis<br/><b>STATUS</b>"]
-        US["User Stories<br/><b>STATUS</b>"]
-        WP["Workflow Planning<br/><b>STATUS</b>"]
-        AD["Application Design<br/><b>STATUS</b>"]
-        UP["Units Planning<br/><b>STATUS</b>"]
-        UG["Units Generation<br/><b>STATUS</b>"]
+
+    subgraph INCEPTION["INCEPTION PHASE"]
+        WD["Workspace Detection<br/><b>COMPLETED</b>"]
+        RE["Reverse Engineering<br/><b>COMPLETED</b>"]
+        RA["Requirements Analysis<br/><b>COMPLETED</b>"]
+        US["User Stories<br/><b>COMPLETED</b>"]
+        WP["Workflow Planning<br/><b>COMPLETED</b>"]
+        AD["Application Design<br/><b>SKIP</b>"]
+        UG["Units Generation<br/><b>SKIP</b>"]
     end
-    
-    subgraph CONSTRUCTION["🟢 CONSTRUCTION PHASE"]
-        FD["Functional Design<br/><b>STATUS</b>"]
-        NFRA["NFR Requirements<br/><b>STATUS</b>"]
-        NFRD["NFR Design<br/><b>STATUS</b>"]
-        ID["Infrastructure Design<br/><b>STATUS</b>"]
-        CP["Code Planning<br/><b>EXECUTE</b>"]
-        CG["Code Generation<br/><b>EXECUTE</b>"]
+
+    subgraph CONSTRUCTION["CONSTRUCTION PHASE"]
+        CG["Code Generation<br/><b>EXECUTE</b><br/>N units"]
         BT["Build and Test<br/><b>EXECUTE</b>"]
     end
-    
-    subgraph OPERATIONS["🟡 OPERATIONS PHASE"]
-        OPS["Operations<br/><b>PLACEHOLDER</b>"]
-    end
-    
+
     Start --> WD
-    WD --> RA
-    RA --> WP
-    WP --> CP
-    CP --> CG
+    WD --> RE
+    RE --> RA
+    RA --> US
+    US --> WP
+    WP --> CG
     CG --> BT
     BT --> End(["Complete"])
-    
-    %% Replace STATUS with COMPLETED, SKIP, EXECUTE as appropriate
-    %% Apply styling based on status
+
+    style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style RE fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style RA fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style US fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style WP fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style AD fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
+    style UG fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
+    style CG fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style BT fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style INCEPTION fill:#BBDEFB,stroke:#1565C0,stroke-width:3px,color:#000
+    style CONSTRUCTION fill:#C8E6C9,stroke:#2E7D32,stroke-width:3px,color:#000
+    style Start fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
+    style End fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
+
+    linkStyle default stroke:#333,stroke-width:2px
 ```
 
-**Note**: Replace STATUS placeholders with actual phase status (COMPLETED/SKIP/EXECUTE) and apply appropriate styling
+Text Alternative:
+
+```text
+INCEPTION PHASE
+  - Workspace Detection     [COMPLETED]
+  - Reverse Engineering      [COMPLETED]
+  - Requirements Analysis    [COMPLETED]
+  - User Stories             [COMPLETED]
+  - Workflow Planning        [COMPLETED]
+  - Application Design       [SKIP]
+  - Units Generation         [SKIP]
+
+CONSTRUCTION PHASE
+  - Code Generation          [EXECUTE - N units]
+  - Build and Test           [EXECUTE]
+```
 
 ## Phases to Execute
 
