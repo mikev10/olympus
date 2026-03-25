@@ -1,7 +1,8 @@
 import { registerHook } from '../registry.js';
 import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
 import { loadManifest } from '../../features/workflow-engine/manifest.js';
-import { runAllCIChecks, loadCICheckConfig, formatCIResults, scanForSecrets, scanForRiskyPatterns } from '../../features/workflow-engine/ci-checks.js';
+import { runAllCIChecks, loadCICheckConfig, formatCIResults } from '../../features/workflow-engine/ci-checks.js';
+import { scanFileForSecrets, scanFileForXSS } from '../../features/workflow-engine/security-scanner.js';
 import type { HookContext, HookResult } from '../types.js';
 import { readFileSync } from 'fs';
 
@@ -69,11 +70,9 @@ async function ciReviewPipeline(ctx: HookContext): Promise<HookResult> {
     if (boltArtifact) {
       try {
         const boltContent = readFileSync(boltArtifact.path, 'utf-8');
-        securityFindings = scanForSecrets(boltContent);
-        riskyPatterns = scanForRiskyPatterns(boltContent);
-      } catch {
-        // Fail-open if file can't be read
-      }
+        securityFindings = scanFileForSecrets(boltContent, boltArtifact.path).map(f => f.message);
+        riskyPatterns = scanFileForXSS(boltContent, boltArtifact.path).map(f => f.message);
+      } catch {}
     }
 
     // Format results

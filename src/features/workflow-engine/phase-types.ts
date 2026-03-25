@@ -133,6 +133,60 @@ export interface AlignmentCheck {
   checked_at: string;
 }
 
+export interface ContentCheck {
+  name: string;
+  passed: boolean;
+  severity: 'error' | 'warning' | 'info';
+  remediation?: string;
+}
+
+export interface SecurityFinding {
+  id: string;
+  category: 'hardcoded-secret' | 'sql-injection' | 'xss' | 'dependency-cve' | 'risky-pattern';
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+  file?: string;
+  line?: number;
+  pattern?: string;
+  suppressed?: boolean;
+  suppress_reason?: string;
+}
+
+export interface SecurityScanResult {
+  status: 'completed' | 'failed' | 'skipped';
+  findings: SecurityFinding[];
+  scanned_files: number;
+  scan_duration_ms: number;
+  report_path: string;
+}
+
+export interface RecreationReadinessResult {
+  overall_score: number;
+  passed: boolean;
+  mode: 'advisory' | 'blocking';
+  dimensions: {
+    requirements_coverage: number;
+    data_model_completeness: number;
+    implementation_guidance: number;
+    test_coverage_documentation: number;
+    bootstrap_capability: number;
+  };
+  remediation?: string[];
+}
+
+export interface QualityScorecardData {
+  tests_total: number;
+  tests_passed: number;
+  tests_failed: number;
+  coverage_percentage: number | null;
+  security_findings: { critical: number; warning: number; info: number };
+  units_completed: number;
+  units_total: number;
+  regressions_count: number;
+  gate_bypass_count: number;
+  data_sources: Record<string, 'connected' | 'pending'>;
+}
+
 export interface GateResult {
   passed: boolean;
   approved_by: 'human' | 'auto' | 'trust' | null;
@@ -140,6 +194,7 @@ export interface GateResult {
   feedback: string | null;
   verification: AlignmentVerificationResult;
   validation: AlignmentValidationResult;
+  content_checks?: ContentCheck[];
 }
 
 export interface DepthAssessment {
@@ -305,6 +360,12 @@ export interface WorkflowCheckpointV3 {
   inception_stages?: Record<InceptionStage, InceptionStageState>;
   current_inception_stage?: InceptionStage;
   construction_units?: Record<string, ConstructionUnitProgress>;
+  deepinit_status?: 'skipped' | 'completed' | 'pre-existing' | 'suggested' | 'not_applicable' | 'not_detected' | 'detected';
+  original_pathway_type?: PathwayType;
+  original_depth_score?: number;
+  pathway_override?: PathwayType;
+  depth_override?: number;
+  smoke_test?: SmokeTestResult;
 }
 
 export type PathwayType = 'greenfield' | 'brownfield-enhancement' | 'brownfield-refactor' | 'bugfix' | 'optimization';
@@ -390,6 +451,19 @@ export interface ConstructionUnitProgress {
   contract_validation_status?: ValidatorStatus;
   coverage_status?: ValidatorStatus;
   coverage_percentage?: number | null;
+  critical_gap_count?: number;
+  security_scan_status?: ValidatorStatus;
+  security_findings_critical?: number;
+  security_findings_warning?: number;
+  security_findings_info?: number;
+  feature_doc_status?: 'not_started' | 'in_progress' | 'completed' | 'skipped';
+  feature_doc_path?: string | null;
+  recreation_readiness_score?: number | null;
+  recreation_readiness_dimensions?: Record<string, number> | null;
+  adr_count?: number;
+  impact_scan_status?: 'not_started' | 'completed' | 'skipped';
+  recreation_readiness_override?: boolean;
+  recreation_readiness_override_rationale?: string | null;
 }
 
 export interface UserStory {
@@ -451,4 +525,22 @@ export interface TestFrameworkInfo {
   name: string;
   testCommand: string;
   configPath?: string;
+}
+
+/**
+ * Build-level smoke test result aggregating all per-unit test results.
+ * Written to checkpoint at the end of the Construction phase.
+ */
+export interface SmokeTestResult {
+  status: 'passed' | 'failed' | 'not_run';
+  tests_total: number;
+  tests_passed: number;
+  tests_failed: number;
+  tests_skipped: number;
+  regressions_total: number;
+  flaky_total: number;
+  units_tested: number;
+  units_passed: number;
+  report_path: string | null;
+  completed_at: string | null;
 }

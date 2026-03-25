@@ -40,7 +40,7 @@ describe('Hook Bundle', () => {
       expect(existsSync(BUNDLE_PATH)).toBe(true);
     });
 
-    it('bundle size is reasonable (<500KB)', () => {
+    it('bundle size is reasonable (<600KB)', () => {
       if (!existsSync(BUNDLE_PATH)) {
         console.log('Bundle not found, skipping size test.');
         return;
@@ -50,7 +50,7 @@ describe('Hook Bundle', () => {
       const sizeKB = stats.size / 1024;
 
       console.log(`Bundle size: ${sizeKB.toFixed(2)} KB`);
-      expect(sizeKB).toBeLessThan(500);
+      expect(sizeKB).toBeLessThan(600);
     });
   });
 

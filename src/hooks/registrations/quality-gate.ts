@@ -36,6 +36,7 @@ import { computeVerification, generateValidationQuestions, runDualValidation } f
 import { presentGate3, presentGate4, presentGate5, getGate3TrustBehavior, getGate4TrustBehavior, findParentUnit } from '../../features/workflow-engine/gate-presenter.js';
 import { generateValidationReport, getValidationReportPath } from '../../features/workflow-engine/validation-report.js';
 import { dispatchRejection } from '../../features/workflow-engine/rejection-dispatcher.js';
+import { runGate1ContentChecks, runGate4ContentChecks, runGate5ContentChecks } from '../../features/workflow-engine/construction/gate-content-checks.js';
 import { captureWorkflowDiscovery } from '../../features/workflow-engine/learning-bridge.js';
 import type { WorkflowEvent, WorkflowContext } from '../../features/workflow-engine/learning-bridge.js';
 import { recordDiscovery } from '../../learning/discovery.js';
@@ -641,7 +642,7 @@ Type "approve" to proceed or "reject <reason>" to block.
         });
 
         const now = new Date().toISOString();
-        manifest.phases.construction.gate_result = {
+        const gate4AutoResult: GateResult = {
           passed: true,
           approved_by: 'trust',
           approved_at: now,
@@ -649,6 +650,21 @@ Type "approve" to proceed or "reject <reason>" to block.
           verification,
           validation,
         };
+
+        try {
+          const unitProgress = checkpoint.construction_units?.[boltId];
+          if (unitProgress) {
+            const gate4ContentChecks = runGate4ContentChecks(unitProgress, join(ctx.directory, 'aidlc-docs', workflowId));
+            gate4AutoResult.content_checks = gate4ContentChecks;
+            if (gate4ContentChecks.some((c) => !c.passed && c.severity === 'error')) {
+              gate4AutoResult.passed = false;
+            }
+          }
+        } catch (e) {
+          console.error('[quality-gate] Gate 4 content check error:', e);
+        }
+
+        manifest.phases.construction.gate_result = gate4AutoResult;
 
         // Set reviewedBy on the BOLT artifact
         const boltArtifact = manifest.artifacts.find(a => a.id === boltId);
@@ -744,7 +760,7 @@ Type "approve" to proceed or "reject <reason>" to block.
         return { continue: true };
       }
 
-      manifest.phases.construction.gate_result = {
+      const gate4BlockResult: GateResult = {
         passed: false,
         approved_by: null,
         approved_at: null,
@@ -752,6 +768,21 @@ Type "approve" to proceed or "reject <reason>" to block.
         verification,
         validation,
       };
+
+      try {
+        const unitProgress = checkpoint.construction_units?.[boltId];
+        if (unitProgress) {
+          const gate4ContentChecks = runGate4ContentChecks(unitProgress, join(ctx.directory, 'aidlc-docs', workflowId));
+          gate4BlockResult.content_checks = gate4ContentChecks;
+          if (gate4ContentChecks.some((c) => !c.passed && c.severity === 'error')) {
+            gate4BlockResult.passed = false;
+          }
+        }
+      } catch (e) {
+        console.error('[quality-gate] Gate 4 content check error:', e);
+      }
+
+      manifest.phases.construction.gate_result = gate4BlockResult;
 
       addGateAuditEntry(manifestPath, {
         phase: 'construction',
@@ -811,7 +842,7 @@ Type "approve" to proceed or "reject <reason>" to block.
         passed: false,
       };
 
-      manifest.phases.operations.gate_result = {
+      const gate5Result: GateResult = {
         passed: false,
         approved_by: null,
         approved_at: null,
@@ -819,6 +850,18 @@ Type "approve" to proceed or "reject <reason>" to block.
         verification,
         validation,
       };
+
+      try {
+        const gate5ContentChecks = runGate5ContentChecks(checkpoint, join(ctx.directory, 'aidlc-docs', workflowId));
+        gate5Result.content_checks = gate5ContentChecks;
+        if (gate5ContentChecks.some((c) => !c.passed && c.severity === 'error')) {
+          gate5Result.passed = false;
+        }
+      } catch (e) {
+        console.error('[quality-gate] Gate 5 content check error:', e);
+      }
+
+      manifest.phases.operations.gate_result = gate5Result;
 
       saveManifest(manifestPath, manifest);
       await saveCheckpoint(ctx.directory, checkpoint);
@@ -955,7 +998,7 @@ Type "approve" to proceed or "reject <reason>" to block.
     }
 
     // Store gate request in manifest
-    manifest.phases[transitioningPhase].gate_result = {
+    const gate1Result: GateResult = {
       passed: false,
       approved_by: null,
       approved_at: null,
@@ -963,6 +1006,19 @@ Type "approve" to proceed or "reject <reason>" to block.
       verification,
       validation,
     };
+
+    try {
+      const workflowDocPath = join(ctx.directory, 'aidlc-docs', workflowId);
+      const gate1ContentChecks = runGate1ContentChecks(workflowDocPath);
+      gate1Result.content_checks = gate1ContentChecks;
+      if (gate1ContentChecks.some((c) => !c.passed && c.severity === 'error')) {
+        gate1Result.passed = false;
+      }
+    } catch (e) {
+      console.error('[quality-gate] Gate 1 content check error:', e);
+    }
+
+    manifest.phases[transitioningPhase].gate_result = gate1Result;
 
     saveManifest(manifestPath, manifest);
     await saveCheckpoint(ctx.directory, checkpoint);

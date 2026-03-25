@@ -157,8 +157,7 @@ export function runCICheck(
 }
 
 /**
- * Performs basic secret scanning on changed files.
- * Looks for common API key/token patterns.
+ * @deprecated Use scanFileForSecrets() from security-scanner.ts instead.
  */
 export function scanForSecrets(content: string): string[] {
   const patterns = [
@@ -180,7 +179,7 @@ export function scanForSecrets(content: string): string[] {
 }
 
 /**
- * Scans for risky code patterns.
+ * @deprecated Use scanFileForXSS() from security-scanner.ts instead.
  */
 export function scanForRiskyPatterns(content: string): string[] {
   const patterns = [

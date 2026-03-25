@@ -71,6 +71,17 @@ function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
     if (unit.contract_validation_status === undefined) unit.contract_validation_status = 'not_started';
     if (unit.coverage_status === undefined) unit.coverage_status = 'not_started';
     if (unit.coverage_percentage === undefined) unit.coverage_percentage = null;
+    if (unit.critical_gap_count === undefined) unit.critical_gap_count = 0;
+    if (unit.security_scan_status === undefined) unit.security_scan_status = 'not_started';
+    if (unit.security_findings_critical === undefined) unit.security_findings_critical = 0;
+    if (unit.security_findings_warning === undefined) unit.security_findings_warning = 0;
+    if (unit.security_findings_info === undefined) unit.security_findings_info = 0;
+    if (unit.feature_doc_status === undefined) unit.feature_doc_status = 'not_started';
+    if (unit.feature_doc_path === undefined) unit.feature_doc_path = null;
+    if (unit.recreation_readiness_score === undefined) unit.recreation_readiness_score = null;
+    if (unit.recreation_readiness_dimensions === undefined) unit.recreation_readiness_dimensions = null;
+    if (unit.adr_count === undefined) unit.adr_count = 0;
+    if (unit.impact_scan_status === undefined) unit.impact_scan_status = 'not_started';
   }
 }
 

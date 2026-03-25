@@ -406,7 +406,7 @@ describe('CI Review Pipeline Hook', () => {
       const result = await ciHook!.handler(ctx);
 
       expect(result.hookSpecificOutput?.additionalContext).toContain('RISKY PATTERNS');
-      expect(result.hookSpecificOutput?.additionalContext).toContain('eval() usage');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('eval usage');
     });
 
     it('should handle missing BOLT artifact gracefully', async () => {

@@ -15,9 +15,11 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import type { HierarchicalNode, ConstructionUnitProgress, PathwayType } from '../phase-types.js';
+import type { HierarchicalNode, ConstructionUnitProgress, PathwayType, ValidatorResult } from '../phase-types.js';
 import type { ValidationResult } from '../types.js';
 import { loadCheckpoint, saveCheckpoint } from '../checkpoint.js';
+import { generateDocumentation, runPostDocGeneration, getRequiredSections, type FeatureDocOptions, type DocumentationGenerationResult } from './documentation-generator.js';
+import { evaluateRecreationReadiness } from './recreation-readiness.js';
 
 type ConstructionStage = 'unit' | 'code-generation' | 'design';
 
@@ -78,6 +80,8 @@ export interface TestGenerationOptions {
   workflowId?: string;
   /** User override to allow completion even if tests fail or total === 0 */
   allowFailures?: boolean;
+  /** Actual test results from running the test suite. When provided, enables regression analysis. */
+  currentResults?: Array<{ name: string; filePath: string; status: 'passed' | 'failed' | 'skipped'; duration_ms: number }>;
 }
 
 export interface TestGenerationResult {
@@ -89,6 +93,9 @@ export interface TestGenerationResult {
   test_framework: string;
   reportPath: string;
   blockingReason?: string;
+  regressions_count: number;
+  flaky_count: number;
+  validationPipeline?: import('./validators/types.js').PipelineResult;
 }
 
 /**
@@ -302,7 +309,8 @@ export class ConstructionExecutor {
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
       dispatch.context.unitSpec,
-      codePlanPath
+      codePlanPath,
+      dispatch.context.architectureContext
     );
 
     return {
@@ -342,7 +350,9 @@ export class ConstructionExecutor {
     const prompt = buildCodeGenerationPrompt(
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
-      dispatch.context.unitSpec
+      dispatch.context.unitSpec,
+      undefined,
+      dispatch.context.architectureContext
     );
 
     return {
@@ -382,7 +392,9 @@ export class ConstructionExecutor {
     const prompt = buildCodeGenerationPrompt(
       dispatch.context.intentSummary2,
       dispatch.context.intentSummary,
-      dispatch.context.unitSpec
+      dispatch.context.unitSpec,
+      undefined,
+      dispatch.context.architectureContext
     );
 
     return {
@@ -457,9 +469,71 @@ export class ConstructionExecutor {
     const scaffold = this.buildTestReportScaffold(unitId, framework, codeSummaryContent, now);
     await fs.writeFile(reportPath, scaffold, 'utf-8');
 
-    const tests_total = 0;
-    const tests_passed = 0;
-    const tests_failed = 0;
+    let tests_total = 0;
+    let tests_passed = 0;
+    let tests_failed = 0;
+    let regressions_count = 0;
+    let flaky_count = 0;
+
+    if (options.currentResults && options.currentResults.length > 0) {
+      tests_total = options.currentResults.length;
+      tests_passed = options.currentResults.filter(r => r.status === 'passed').length;
+      tests_failed = options.currentResults.filter(r => r.status === 'failed').length;
+    }
+
+    let hasBaseline = false;
+    let legitimateRegressionCount = 0;
+    const baselinePath = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'regression-baseline.json');
+
+    if (options.currentResults && tests_failed > 0 && await fs.pathExists(baselinePath)) {
+      try {
+        const { compareAgainstBaseline, writeRegressionReport } = await import('./regression-baseline.js');
+        const { categorizeFailure, buildRegressionSummary } = await import('./regression-categorizer.js');
+
+        const baseline: import('../phase-types.js').RegressionBaseline = await fs.readJson(baselinePath);
+        hasBaseline = true;
+        const diff = compareAgainstBaseline(baseline, options.currentResults);
+
+        const categories: import('../phase-types.js').RegressionCategory[] = [];
+        const failures: import('../phase-types.js').RegressionReport['failures'] = [];
+
+        for (const failure of diff.new_failures) {
+          const baselineEntry = baseline.tests.find(t => t.name === failure.name) ?? null;
+          const category = categorizeFailure(failure.name, baselineEntry, []);
+          categories.push(category);
+          failures.push({
+            test_name: failure.name,
+            file_path: failure.filePath,
+            category,
+            rationale: category === 'legitimate_regression' ? 'Test was passing in baseline, now fails'
+              : category === 'flaky' ? 'Test passed on re-run without code changes'
+              : category === 'intentional_change' ? 'New test not present in baseline'
+              : 'Test was already failing in baseline',
+          });
+        }
+
+        const summary = buildRegressionSummary(
+          failures.map(f => ({ test_name: f.test_name, file_path: f.file_path })),
+          categories
+        );
+        regressions_count = summary.regressions_count;
+        flaky_count = summary.flaky_count;
+        legitimateRegressionCount = summary.regressions_count;
+
+        const report: import('../phase-types.js').RegressionReport = {
+          workflow_id: workflowId,
+          unit_id: unitId,
+          baseline_captured_at: baseline.captured_at,
+          compared_at: new Date().toISOString(),
+          failures,
+          total_regressions: categories.filter(c => c !== 'pre_existing_failure').length,
+          legitimate_regressions: summary.regressions_count,
+        };
+        await writeRegressionReport(projectPath, workflowId, unitId, report);
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Regression analysis failed for ${unitId} (non-fatal):`, err);
+      }
+    }
 
     let status: 'completed' | 'blocked' = 'completed';
     let blockingReason: string | undefined;
@@ -468,7 +542,10 @@ export class ConstructionExecutor {
       if (tests_total === 0) {
         status = 'blocked';
         blockingReason = `No tests detected for unit ${unitId}. Set allowFailures: true to override.`;
-      } else if (tests_failed > 0) {
+      } else if (hasBaseline && legitimateRegressionCount > 0) {
+        status = 'blocked';
+        blockingReason = `${legitimateRegressionCount} legitimate regression(s) for unit ${unitId}. Flaky: ${flaky_count} (non-blocking). Fix regressions before proceeding.`;
+      } else if (!hasBaseline && tests_failed > 0) {
         status = 'blocked';
         blockingReason = `${tests_failed} test(s) failed for unit ${unitId}. Set allowFailures: true to override.`;
       }
@@ -484,9 +561,113 @@ export class ConstructionExecutor {
     unitProgress.tests_failed = tests_failed;
     unitProgress.test_framework = framework;
     unitProgress.test_generation_status = status === 'completed' ? 'completed' : 'in_progress';
+    unitProgress.regressions_count = regressions_count;
+    unitProgress.flaky_count = flaky_count;
 
     checkpoint.construction_units[unitId] = unitProgress;
     await saveCheckpoint(projectPath, checkpoint);
+
+    if (status === 'completed') {
+      try {
+        const { updateArchitectureModel } = await import('../architecture-model.js');
+        const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
+        if (unitFiles.length > 0) {
+          await updateArchitectureModel(projectPath, unitFiles);
+        }
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Architecture model update failed for ${unitId} (non-blocking):`, err);
+      }
+    }
+
+    let validationPipeline: import('./validators/types.js').PipelineResult | undefined;
+
+    if (status === 'completed') {
+      try {
+        const {
+          runValidationPipeline,
+          shouldSkipValidator,
+          updateCheckpointForValidator,
+          createQualityValidator,
+          createMutationValidator,
+          createTraceabilityValidator,
+          createContractValidator,
+          createCoverageValidator,
+        } = await import('./validators/index.js');
+
+        const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
+        const apiSurfaceFiles = this.detectApiSurfaceFiles(unitFiles);
+        const workflowDepth = this.deriveWorkflowDepth(
+          checkpoint as import('../phase-types.js').WorkflowCheckpointV3
+        );
+
+        const validatorConfig: import('./validators/types.js').ValidatorConfig = {
+          timeoutBudgetMs: 30000,
+          allowFailures: options.allowFailures ?? false,
+          workflowDepth,
+          unitId,
+          unitFiles,
+          apiSurfaceFiles,
+          projectPath,
+          workflowId,
+        };
+
+        const validators = new Map<
+          import('./validators/types.js').ValidatorName,
+          import('./validators/types.js').ValidatorFn
+        >();
+        validators.set('quality', createQualityValidator());
+
+        if (!shouldSkipValidator('mutation', validatorConfig).skip) {
+          validators.set('mutation', createMutationValidator());
+        }
+
+        validators.set('traceability', createTraceabilityValidator());
+
+        if (!shouldSkipValidator('contract', validatorConfig).skip) {
+          validators.set('contract', createContractValidator());
+        }
+
+        validators.set('coverage', createCoverageValidator());
+
+        validationPipeline = await runValidationPipeline(validators, validatorConfig);
+
+        for (const { validator, result: vResult } of validationPipeline.results) {
+          const checkpointStatus: import('../phase-types.js').ValidatorStatus =
+            vResult.status === 'passed' || vResult.status === 'warned' ? 'completed'
+            : vResult.status === 'skipped' ? 'skipped'
+            : 'in_progress';
+
+          const coveragePct = validator === 'coverage'
+            ? (vResult as ValidatorResult & { coverage_percentage?: number }).coverage_percentage
+            : undefined;
+
+          const criticalGapCount = validator === 'coverage'
+            ? vResult.findings.filter(f => f.category === 'uncovered-critical-file').length
+            : undefined;
+
+          await updateCheckpointForValidator(
+            projectPath, workflowId, unitId, validator, checkpointStatus, coveragePct, criticalGapCount
+          );
+        }
+
+        if (!options.allowFailures) {
+          const blockingValidators = validationPipeline.results.filter(
+            r => r.result.status === 'failed'
+          );
+          if (blockingValidators.length > 0) {
+            status = 'blocked';
+            blockingReason = `Validation blocked: ${blockingValidators.map(v => v.validator).join(', ')}`;
+
+            unitProgress.stages['test-generation'].status = 'in_progress';
+            unitProgress.test_generation_status = 'in_progress';
+            checkpoint.construction_units[unitId] = unitProgress;
+            await saveCheckpoint(projectPath, checkpoint);
+          }
+        }
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Validation pipeline failed for ${unitId} (non-fatal):`, err);
+      }
+    }
 
     const result: TestGenerationResult = {
       status,
@@ -497,6 +678,9 @@ export class ConstructionExecutor {
       test_framework: framework,
       reportPath,
       blockingReason,
+      regressions_count,
+      flaky_count,
+      validationPipeline,
     };
 
     return result;
@@ -548,9 +732,274 @@ export class ConstructionExecutor {
     }
   }
 
-  /**
-   * Captures the bug description for a bugfix workflow and persists it to the checkpoint.
-   */
+  async executeDocumentationGeneration(
+    unitId: string,
+    options: { projectPath?: string; workflowId?: string } = {}
+  ): Promise<DocumentationGenerationResult> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
+    const checkpoint = await loadCheckpoint(projectPath, workflowId);
+    const depth = checkpoint?.depth_score
+      ? checkpoint.depth_score <= 12 ? 'minimal' : checkpoint.depth_score <= 20 ? 'standard' : 'comprehensive'
+      : 'standard';
+    const pathway = checkpoint?.pathway_type || 'brownfield-enhancement';
+
+    const docOptions: FeatureDocOptions = {
+      unitId,
+      workflowId,
+      projectPath,
+      depth,
+      pathway,
+    };
+
+    const featureDocResult = generateDocumentation(docOptions);
+
+    let impactScanResult: DocumentationGenerationResult['impactScan'];
+    let adrCount = 0;
+    let recreationReadinessResult: DocumentationGenerationResult['recreationReadiness'];
+
+    if (featureDocResult.status === 'completed') {
+      try {
+        const postDocResult = runPostDocGeneration({
+          projectPath,
+          workflowId,
+          unitId,
+          modifiedFiles: docOptions.unitFiles || [],
+        });
+        impactScanResult = { status: postDocResult.impactScan.status, path: postDocResult.impactScan.reportPath };
+        adrCount = postDocResult.adrCount;
+      } catch {
+        // Non-fatal: impact scan and ADR generation are advisory
+      }
+
+      if (featureDocResult.path && pathway !== 'bugfix' && depth !== 'minimal') {
+        try {
+          const readinessResult = evaluateRecreationReadiness({
+            featureDocPath: featureDocResult.path,
+            projectPath,
+            depth,
+            pathway,
+          });
+          recreationReadinessResult = readinessResult;
+        } catch {
+          // Non-fatal: recreation readiness is advisory
+        }
+      }
+    }
+
+    if (checkpoint?.construction_units?.[unitId]) {
+      const unit = checkpoint.construction_units[unitId];
+      unit.feature_doc_status = featureDocResult.status === 'completed' ? 'completed' : 'not_started';
+      unit.feature_doc_path = featureDocResult.path;
+      unit.impact_scan_status = impactScanResult?.status === 'completed' ? 'completed' : 'not_started';
+      unit.adr_count = adrCount;
+      if (recreationReadinessResult) {
+        unit.recreation_readiness_score = recreationReadinessResult.overall_score;
+      }
+      await saveCheckpoint(projectPath, checkpoint);
+    }
+
+    return { featureDoc: featureDocResult, impactScan: impactScanResult, adrCount, recreationReadiness: recreationReadinessResult };
+  }
+
+  async executeUnitCompletion(
+    unitId: string,
+    options: TestGenerationOptions & { skipDocumentation?: boolean } = {}
+  ): Promise<{ testGeneration: TestGenerationResult; documentation?: DocumentationGenerationResult }> {
+    const testResult = await this.executeTestGeneration(unitId, options);
+
+    if (testResult.status === 'completed' && !options.skipDocumentation) {
+      const docResult = await this.executeDocumentationGeneration(unitId, {
+        projectPath: options.projectPath,
+        workflowId: options.workflowId,
+      });
+      return { testGeneration: testResult, documentation: docResult };
+    }
+
+    return { testGeneration: testResult };
+  }
+
+  async executeSmokeTest(options: { projectPath?: string; workflowId?: string } = {}): Promise<{
+    status: 'passed' | 'failed' | 'not_run';
+    reportPath: string | null;
+  }> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
+    const loaded = await loadCheckpoint(projectPath, workflowId);
+    if (!loaded || !loaded.construction_units) {
+      return { status: 'not_run', reportPath: null };
+    }
+
+    const units = loaded.construction_units;
+    const unitIds = Object.keys(units);
+
+    if (unitIds.length === 0) {
+      return { status: 'not_run', reportPath: null };
+    }
+
+    let totalTests = 0;
+    let totalPassed = 0;
+    let totalFailed = 0;
+    let totalSkipped = 0;
+    let totalRegressions = 0;
+    let totalFlaky = 0;
+    let unitsTested = 0;
+    let unitsPassed = 0;
+
+    const unitRows: string[] = [];
+
+    for (const id of unitIds) {
+      const u = units[id];
+      const uTotal = u.tests_total ?? 0;
+      const uPassed = u.tests_passed ?? 0;
+      const uFailed = u.tests_failed ?? 0;
+      const uSkipped = uTotal - uPassed - uFailed;
+      const uRegressions = u.regressions_count ?? 0;
+      const uFlaky = u.flaky_count ?? 0;
+
+      if (uTotal > 0) {
+        unitsTested++;
+        if (uFailed === 0) unitsPassed++;
+      }
+
+      totalTests += uTotal;
+      totalPassed += uPassed;
+      totalFailed += uFailed;
+      totalSkipped += Math.max(0, uSkipped);
+      totalRegressions += uRegressions;
+      totalFlaky += uFlaky;
+
+      const statusEmoji = uTotal === 0 ? '⚠️' : uFailed === 0 ? '✅' : '❌';
+      unitRows.push(`| ${id} | ${uTotal} | ${uPassed} | ${uFailed} | ${uRegressions} | ${uFlaky} | ${statusEmoji} |`);
+    }
+
+    const overallStatus: 'passed' | 'failed' | 'not_run' = totalTests === 0 ? 'not_run'
+      : totalFailed === 0 ? 'passed'
+      : 'failed';
+
+    const reportDir = path.join(projectPath, 'aidlc-docs', workflowId, 'construction', 'build-and-test');
+    await fs.ensureDir(reportDir);
+    const reportPath = path.join(reportDir, 'test-report.md');
+
+    const now = new Date().toISOString();
+    const report = `# Build-Level Test Report
+
+**Workflow ID**: ${workflowId}
+**Generated At**: ${now}
+**Status**: ${overallStatus.toUpperCase()}
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Total Tests | ${totalTests} |
+| Passed | ${totalPassed} |
+| Failed | ${totalFailed} |
+| Skipped | ${totalSkipped} |
+| Regressions | ${totalRegressions} |
+| Flaky | ${totalFlaky} |
+| Units Tested | ${unitsTested} |
+| Units All-Passing | ${unitsPassed} |
+
+## Per-Unit Breakdown
+
+| Unit | Total | Passed | Failed | Regressions | Flaky | Status |
+|------|-------|--------|--------|-------------|-------|--------|
+${unitRows.join('\n')}
+`;
+
+    await fs.writeFile(reportPath, report, 'utf-8');
+
+    try {
+      const coverageRows: string[] = [];
+      let totalCovPct = 0;
+      let totalCriticalGaps = 0;
+      let unitsWithCoverage = 0;
+
+      for (const id of unitIds) {
+        const u = units[id];
+        const pct = u.coverage_percentage ?? null;
+        const gaps = u.critical_gap_count ?? 0;
+        totalCriticalGaps += gaps;
+        if (pct !== null) {
+          totalCovPct += pct;
+          unitsWithCoverage++;
+        }
+        const tier = pct === null ? 'N/A'
+          : pct >= 90 ? 'Exemplary'
+          : pct >= 75 ? 'Commendable'
+          : pct >= 60 ? 'Acceptable'
+          : 'Below threshold';
+        coverageRows.push(`| ${id} | ${pct !== null ? pct + '%' : 'N/A'} | ${gaps} | ${tier} |`);
+      }
+
+      const avgCoverage = unitsWithCoverage > 0
+        ? Math.round((totalCovPct / unitsWithCoverage) * 10) / 10
+        : null;
+
+      const coverageReport = `# Workflow Coverage Report
+
+**Workflow ID**: ${workflowId}
+**Generated At**: ${now}
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Average Coverage | ${avgCoverage !== null ? avgCoverage + '%' : 'N/A'} |
+| Critical Gaps (total) | ${totalCriticalGaps} |
+| Units with Coverage Data | ${unitsWithCoverage} / ${unitIds.length} |
+
+## Per-Unit Coverage
+
+| Unit | Coverage | Critical Gaps | Tier |
+|------|----------|---------------|------|
+${coverageRows.join('\n')}
+`;
+
+      const coverageReportPath = path.join(reportDir, 'coverage-report.md');
+      await fs.writeFile(coverageReportPath, coverageReport, 'utf-8');
+    } catch (err) {
+      console.error('[ConstructionExecutor] Workflow-level coverage report failed (non-fatal):', err);
+    }
+
+    const smokeResult: import('../phase-types.js').SmokeTestResult = {
+      status: overallStatus,
+      tests_total: totalTests,
+      tests_passed: totalPassed,
+      tests_failed: totalFailed,
+      tests_skipped: totalSkipped,
+      regressions_total: totalRegressions,
+      flaky_total: totalFlaky,
+      units_tested: unitsTested,
+      units_passed: unitsPassed,
+      report_path: reportPath,
+      completed_at: now,
+    };
+
+    loaded.smoke_test = smokeResult;
+    loaded.updated_at = now;
+    await saveCheckpoint(projectPath, loaded);
+
+    try {
+      const { generateChangelogEntry } = await import('../changelog-generator.js');
+      const unitIds = Object.keys(units);
+      generateChangelogEntry({
+        projectPath,
+        workflowId,
+        featureName: loaded.feature_name ?? workflowId,
+        unitIds,
+        pathway: loaded.pathway_type ?? undefined,
+      });
+    } catch (err) {
+      console.error('[ConstructionExecutor] Changelog generation failed (non-fatal):', err);
+    }
+
+    return { status: overallStatus, reportPath };
+  }
+
   async captureBugDescription(
     description: string,
     options?: { projectPath?: string; workflowId?: string }
@@ -582,6 +1031,56 @@ export class ConstructionExecutor {
     } catch (err) {
       console.error('[ConstructionExecutor] captureBugDescription error:', err);
     }
+  }
+
+  /**
+   * Discover source files associated with a construction unit by parsing
+   * the code-summary.md artifact for file paths.
+   */
+  private async discoverUnitFiles(projectPath: string, workflowId: string, unitId: string): Promise<string[]> {
+    const codeSummaryPath = path.join(
+      projectPath, 'aidlc-docs', workflowId, 'construction', unitId, 'code', 'code-summary.md'
+    );
+    try {
+      if (!await fs.pathExists(codeSummaryPath)) return [];
+      const content = await fs.readFile(codeSummaryPath, 'utf-8');
+      const files: string[] = [];
+      // Match lines like: - `src/foo/bar.ts` or - src/foo/bar.ts or | src/foo/bar.ts |
+      const patterns = [
+        /[`|]\s*([\w/.\\-]+\.\w{1,5})\s*[`|]/g,
+        /^[-*]\s+`?([\w/.\\-]+\.\w{1,5})`?\s*$/gm,
+      ];
+      for (const pattern of patterns) {
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const filePath = match[1];
+          if (!files.includes(filePath)) files.push(filePath);
+        }
+      }
+      return files;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Filter unit files to find likely API surface files (routes, controllers, endpoints).
+   */
+  private detectApiSurfaceFiles(unitFiles: string[]): string[] {
+    const apiPatterns = [
+      /route/i, /controller/i, /handler/i, /endpoint/i,
+      /api\//i, /server/i, /middleware/i, /graphql/i,
+    ];
+    return unitFiles.filter(f => apiPatterns.some(p => p.test(f)));
+  }
+
+  /**
+   * Derive a numeric workflow depth (0=bugfix, 1=minimal, 2=standard+) from checkpoint state.
+   */
+  private deriveWorkflowDepth(checkpoint: import('../phase-types.js').WorkflowCheckpointV3): number {
+    if (checkpoint.pathway_type === 'bugfix') return 0;
+    const score = checkpoint.depth_score ?? 3;
+    return score <= 2 ? 1 : 2;
   }
 
   private async detectTestFramework(projectPath: string): Promise<string> {

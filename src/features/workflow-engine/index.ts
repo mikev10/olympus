@@ -216,12 +216,67 @@ export {
   CONSTRUCTION_STAGE_AGENT_MAP,
 } from './construction/executor.js';
 export type { ConstructionProgress, ConstructionOptions } from './construction/executor.js';
+export type {
+  FeatureDocOptions,
+  FeatureDocResult,
+  DocumentationGenerationResult,
+} from './construction/documentation-generator.js';
+export {
+  getRequiredSections,
+  buildFeatureDocPrompt,
+  writeFeatureDoc,
+  generateFeatureDocScaffold,
+  generateDocumentation,
+  generateDocumentationWithReadiness,
+  appendRecreationReadinessFooter,
+  runPostDocGeneration,
+} from './construction/documentation-generator.js';
+export type { RecreationReadinessOptions } from './construction/recreation-readiness.js';
+export {
+  evaluateRecreationReadiness,
+  scoreRequirementsCoverage,
+  scoreDataModelCompleteness,
+  scoreImplementationGuidance,
+  scoreTestCoverageDocumentation,
+  scoreBootstrapCapability,
+  generateRemediationGuidance,
+  loadRecreationReadinessConfig,
+} from './construction/recreation-readiness.js';
+export type { ImpactScanOptions, ImpactScanResult } from './construction/impact-scanner.js';
+export {
+  findDocFiles,
+  findReferences,
+  generateImpactReport,
+  runImpactScan,
+} from './construction/impact-scanner.js';
+export type { ADROptions, ADRResult } from './construction/adr-generator.js';
+export {
+  getNextADRNumber,
+  generateADR,
+  detectSignificantDecisions,
+} from './construction/adr-generator.js';
 export {
   validateUnits,
   validateDesignArtifacts,
   validateBolt,
   validateConstructionPhase,
 } from './construction/validation.js';
+export {
+  safeCheck,
+  checkUserStoriesHaveAcceptanceCriteria,
+  checkAppDesignHasConcreteTech,
+  checkUnitsHaveDescriptions,
+  runGate1ContentChecks,
+  checkTestsExistAndPass,
+  checkSecurityScanClean,
+  checkFeatureDocExists,
+  runGate4ContentChecks,
+  checkAllUnitsComplete,
+  checkSmokeTestPassed,
+  checkSecurityReportClean,
+  checkTestReportExists,
+  runGate5ContentChecks,
+} from './construction/gate-content-checks.js';
 
 // Operations Phase
 export type { OperationsContext, OperationsResult } from './operations/templates.js';
@@ -295,6 +350,20 @@ export {
   scanForRiskyPatterns,
 } from './ci-checks.js';
 
+// Security Scanner
+export type { SecurityScanOptions, SecurityIgnoreConfig } from './security-scanner.js';
+export {
+  scanProject,
+  scanFileForSecrets,
+  scanFileForSQLInjection,
+  scanFileForXSS,
+  runDependencyAudit,
+  generateSecurityReport,
+  loadSecurityIgnore,
+  applySuppression,
+  discoverFiles,
+} from './security-scanner.js';
+
 // Manifest Updater (atomic writes)
 export {
   atomicManifestUpdate,
@@ -338,6 +407,12 @@ export {
   isPhaseIncluded,
   isStageIncluded,
   WORKFLOW_ROUTING_FORMAT_INSTRUCTIONS,
+  PATHWAY_DISPLAY_NAMES,
+  getPathwayDisplayName,
+  loadPathwayBehaviors,
+  buildPathwayAnnouncement,
+  applyPathwayOverride,
+  recordPathwayOverride,
 } from './workflow-routing.js';
 
 // Brownfield Scanner
@@ -454,6 +529,11 @@ export type {
   ValidatorResultStatus,
   Finding,
   ValidatorResult,
+  ContentCheck,
+  SecurityFinding,
+  SecurityScanResult,
+  RecreationReadinessResult,
+  QualityScorecardData,
 } from './phase-types.js';
 export type {
   ValidatorName,
@@ -501,6 +581,25 @@ export {
   generateTechnologyStack,
   generateDependencies,
 } from './brownfield-scanner.js';
+
+// Architecture Model
+export type {
+  ComponentEntry,
+  DataModelEntry,
+  ApiEntry,
+  ArchDependencyEdge,
+  PatternEntry,
+  TechStackEntry,
+  ProjectArchitecture,
+} from './architecture-model.js';
+export {
+  generateArchitectureModel,
+  saveArchitectureModel,
+  loadArchitectureModel,
+  updateArchitectureModel,
+  getArchitectureContext,
+  initializeGreenfieldArchitectureModel,
+} from './architecture-model.js';
 export {
   buildBusinessOverviewPrompt,
   buildAPIDocumentationPrompt,
@@ -589,3 +688,33 @@ export {
   generateWelcomeBackMessage,
   getContextLoadingRecommendation,
 } from './status-reporter.js';
+
+export type { EnvVarReference } from './secrets-management.js';
+export {
+  detectEnvVarReferences,
+  getPlaceholderValue,
+  generateEnvExample,
+  ensureGitignore,
+  runSecretsManagement,
+} from './secrets-management.js';
+
+export type { ScorecardOptions } from './quality-scorecard.js';
+export {
+  collectScorecardData,
+  determineDataSources,
+  writeScorecardReport,
+  generateQualityScorecard,
+} from './quality-scorecard.js';
+
+export type { ChangelogOptions, ChangelogResult } from './changelog-generator.js';
+export {
+  detectExistingChangelogTool,
+  readFeatureDocSummaries,
+  categorizeChanges,
+  formatChangelogEntry,
+  isKeepAChangelogFormat,
+  prependToChangelog,
+  appendOlympusSection,
+  createNewChangelog,
+  generateChangelogEntry,
+} from './changelog-generator.js';
