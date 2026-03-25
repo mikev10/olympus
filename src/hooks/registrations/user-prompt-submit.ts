@@ -17,7 +17,7 @@ import {
 } from '../../installer/hooks.js';
 import { handleRevisionDetection } from '../../learning/hooks/revision-detector.js';
 import { handleSuccessDetection } from '../../learning/hooks/success-detector.js';
-import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
+import { WorkflowEngine, deriveWorkflowSlug } from '../../features/workflow-engine/engine.js';
 import { loadCheckpoint, listWorkflows } from '../../features/workflow-engine/checkpoint.js';
 import {
   buildStructuredWorkflowPrompt,
@@ -106,19 +106,7 @@ export function registerUserPromptSubmitHooks(): void {
           // Start the workflow (creates checkpoint and initializes)
           await engine.start(featureName);
 
-          // Load the checkpoint to get the initial state (use same slugify as engine.ts)
-          const workflowId = featureName
-            .toLowerCase()
-            .replace(/\.[a-z]{1,4}$/, '')
-            .replace(/[_\s]+/g, '-')
-            .replace(/[^a-z0-9-]/g, '')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
-
-          if (workflowId === 'completed') {
-            console.warn('[user-prompt-submit] "completed" is a reserved workflow directory name');
-            return { continue: true };
-          }
+          const workflowId = deriveWorkflowSlug(featureName);
 
           const checkpoint = await loadCheckpoint(ctx.directory, workflowId);
 

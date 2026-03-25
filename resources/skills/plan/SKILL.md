@@ -84,11 +84,11 @@ Scan the `aidlc-docs/` directory for workflow subdirectories (skip the `complete
 
 **Workflow name derivation** (for freshly initialized checkpoints):
 1. The `/plan` argument can be: a file path (read the file), a description string (use directly), or a URL (fetch if possible). Users may provide a PRD, rough concept, spec, meeting notes, or just a sentence.
-2. From the CONTENT (never the filename or raw argument), derive a concise 1-3 word name capturing the core product or feature. Examples: "ai-native-marketplace", "user-auth", "payment-system".
-3. Slugify: lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim.
-4. Show user: "Workflow name: `{derivedName}`. OK, or would you like a different name?"
-5. If user provides a different name, slugify that instead.
-6. If derived name differs from current workflowId on disk, rename the directory and update checkpoint fields.
+2. The hook already derives a short slug by stripping leading verbs, articles, and trailing prepositional phrases (e.g., "build an alert banner for global notifications" → `alert-banner`). Check the current `workflowId` in checkpoint.json — it is likely already a good short name.
+3. If the derived name is acceptable, confirm it with the user: "Workflow name: `{workflowId}`. This will be used for the `aidlc-docs/{workflowId}/` directory and all artifact references. OK, or would you like a different name?"
+4. If you believe a better name exists (e.g., the hook truncated meaningful words, or the CONTENT suggests a different core concept), suggest your alternative alongside the current name.
+5. If user provides a different name, slugify that (lowercase, spaces/underscores→hyphens, strip non-alphanumeric, collapse hyphens, trim) and rename the directory + update checkpoint fields.
+6. If your suggestion differs from the current workflowId on disk, rename the directory and update checkpoint fields only AFTER user approval.
 
 ### 1c. Validate feature description
 

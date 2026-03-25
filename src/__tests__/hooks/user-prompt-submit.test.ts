@@ -11,8 +11,10 @@ import type { HookContext, HookResult } from '../../hooks/types.js';
 import type { WorkflowCheckpoint } from '../../features/workflow-engine/types.js';
 
 // Mock the workflow engine modules
-vi.mock('../../features/workflow-engine/engine.js', () => {
+vi.mock('../../features/workflow-engine/engine.js', async () => {
+  const actual = await vi.importActual<typeof import('../../features/workflow-engine/engine.js')>('../../features/workflow-engine/engine.js');
   return {
+    deriveWorkflowSlug: actual.deriveWorkflowSlug,
     WorkflowEngine: vi.fn(function(this: any, projectPath: string, featureName: string) {
       this.start = vi.fn().mockResolvedValue(undefined);
       this.resume = vi.fn().mockResolvedValue('Resumed workflow');

@@ -34,6 +34,81 @@ import { addGateAuditEntry, createManifest } from './manifest.js';
 import { mergeAidlcRules, removeAidlcRules, getAidlcRulesContent } from './claude-md-merger.js';
 
 /**
+ * Common verb phrases that precede feature descriptions in user prompts.
+ * Multi-word phrases are listed first so they match before their single-word prefixes.
+ */
+const LEADING_VERB_PHRASES = [
+  // Multi-word first (matched before single-word variants)
+  'set up', 'build out', 'roll out', 'hook up', 'wire up', 'spin up',
+  // Single-word
+  'build', 'create', 'add', 'implement', 'design', 'make', 'develop',
+  'configure', 'integrate', 'fix', 'update', 'refactor', 'migrate',
+  'deploy', 'setup', 'establish', 'introduce', 'enable', 'write',
+  'construct', 'generate', 'define', 'prepare',
+];
+
+/**
+ * Derive a concise workflow slug from a user's feature description.
+ *
+ * Strips leading verb phrases, articles, and trailing prepositional phrases
+ * to produce a short, meaningful directory name.
+ *
+ * @example
+ *   deriveWorkflowSlug("build an alert banner for global notifications") // "alert-banner"
+ *   deriveWorkflowSlug("implement user authentication") // "user-authentication"
+ *   deriveWorkflowSlug("add payment processing with Stripe") // "payment-processing"
+ *   deriveWorkflowSlug("user-auth") // "user-auth"
+ */
+export function deriveWorkflowSlug(featureName: string): string {
+  let text = featureName.trim();
+
+  text = text.replace(/\.[a-z]{1,4}$/i, '');
+
+  const sortedVerbs = [...LEADING_VERB_PHRASES].sort((a, b) => b.length - a.length);
+  for (const verb of sortedVerbs) {
+    const pattern = new RegExp(`^${verb}\\s+`, 'i');
+    if (pattern.test(text)) {
+      text = text.replace(pattern, '');
+      break; // Only strip one verb phrase
+    }
+  }
+
+  text = text.replace(/^(?:a|an|the)\s+/i, '');
+
+  const stripped = text.replace(
+    /\s+(?:for|with|using|via|in|to|on|at|from|into|across|through|about|of)\s+.+$/i,
+    ''
+  ).trim();
+  if (stripped.length > 0) {
+    text = stripped;
+  }
+
+  let slug = text
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (slug.length > 40) {
+    const truncated = slug.substring(0, 40);
+    const lastHyphen = truncated.lastIndexOf('-');
+    slug = lastHyphen > 0 ? truncated.substring(0, lastHyphen) : truncated;
+    slug = slug.replace(/-$/, '');
+  }
+
+  if (!slug) {
+    throw new Error('Feature name produced an empty workflow ID after sanitization');
+  }
+
+  if (slug === 'completed') {
+    throw new Error("'completed' is a reserved directory name and cannot be used as a workflow ID");
+  }
+
+  return slug;
+}
+
+/**
  * Ordered list of workflow stages for progression validation
  */
 const STAGE_ORDER: WorkflowStage[] = ['intent', 'unit', 'code-generation', 'complete'];
@@ -87,29 +162,7 @@ export class WorkflowEngine {
   constructor(projectPath: string, featureName: string) {
     this.projectPath = projectPath;
     this.featureName = featureName;
-    // Sanitize feature name to create workflow ID (slugify)
-    let slug = featureName
-      .toLowerCase()
-      .replace(/\.[a-z]{1,4}$/, '')   // Strip file extensions (.md, .txt, .json, etc.)
-      .replace(/[_\s]+/g, '-')         // Convert underscores and spaces to hyphens
-      .replace(/[^a-z0-9-]/g, '')      // Remove remaining non-alphanumeric chars
-      .replace(/-+/g, '-')             // Collapse multiple hyphens
-      .replace(/^-|-$/g, '');           // Trim leading/trailing hyphens
-
-    // Defense-in-depth: truncate overly long slugs
-    if (slug.length > 80) {
-      slug = slug.substring(0, 80).replace(/-$/, '');
-    }
-
-    if (!slug) {
-      throw new Error('Feature name produced an empty workflow ID after sanitization');
-    }
-
-    if (slug === 'completed') {
-      throw new Error("'completed' is a reserved directory name and cannot be used as a workflow ID");
-    }
-
-    this.workflowId = slug;
+    this.workflowId = deriveWorkflowSlug(featureName);
   }
 
   /**

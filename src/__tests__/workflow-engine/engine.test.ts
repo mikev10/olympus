@@ -7,7 +7,7 @@
 import * as fs from 'fs-extra';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { WorkflowEngine } from '../../features/workflow-engine/engine.js';
+import { WorkflowEngine, deriveWorkflowSlug } from '../../features/workflow-engine/engine.js';
 import { loadCheckpoint, saveCheckpoint } from '../../features/workflow-engine/checkpoint.js';
 import { loadWorkflowRouting } from '../../features/workflow-engine/workflow-routing.js';
 import { createManifest, loadManifest } from '../../features/workflow-engine/manifest.js';
@@ -56,16 +56,16 @@ describe('WorkflowEngine', () => {
     });
 
     it('handles multiple spaces in feature name', () => {
-      const engine = new WorkflowEngine(tmpDir, 'Feature   With   Spaces');
+      const engine = new WorkflowEngine(tmpDir, 'Feature   Has   Spaces');
       const engineAny = engine as any;
-      expect(engineAny.workflowId).toBe('feature-with-spaces');
+      expect(engineAny.workflowId).toBe('feature-has-spaces');
     });
 
-    it('truncates slug longer than 80 chars', () => {
+    it('truncates slug longer than 40 chars', () => {
       const longName = 'a-very-long-feature-name-that-goes-on-and-on-and-on-and-produces-a-slug-beyond-eighty-characters';
       const engine = new WorkflowEngine(tmpDir, longName);
       const engineAny = engine as any;
-      expect(engineAny.workflowId.length).toBeLessThanOrEqual(80);
+      expect(engineAny.workflowId.length).toBeLessThanOrEqual(40);
     });
 
     it('truncated slug does not end with a hyphen', () => {
@@ -85,6 +85,83 @@ describe('WorkflowEngine', () => {
       expect(() => new WorkflowEngine(tmpDir, '!@#$%^&*()')).toThrow(
         'Feature name produced an empty workflow ID after sanitization'
       );
+    });
+  });
+
+  describe('deriveWorkflowSlug()', () => {
+    it('strips leading verb and article', () => {
+      expect(deriveWorkflowSlug('build an alert banner for global notifications')).toBe('alert-banner');
+    });
+
+    it('strips leading verb only', () => {
+      expect(deriveWorkflowSlug('implement user authentication')).toBe('user-authentication');
+    });
+
+    it('strips trailing prepositional phrase with "with"', () => {
+      expect(deriveWorkflowSlug('add payment processing with Stripe')).toBe('payment-processing');
+    });
+
+    it('strips trailing prepositional phrase with "for"', () => {
+      expect(deriveWorkflowSlug('create dashboard for analytics')).toBe('dashboard');
+    });
+
+    it('passes through already-concise names unchanged', () => {
+      expect(deriveWorkflowSlug('user-auth')).toBe('user-auth');
+    });
+
+    it('strips multi-word verb phrases', () => {
+      expect(deriveWorkflowSlug('set up CI pipeline')).toBe('ci-pipeline');
+    });
+
+    it('strips "the" as leading article', () => {
+      expect(deriveWorkflowSlug('fix the login bug')).toBe('login-bug');
+    });
+
+    it('strips verb + article + trailing prep in one pass', () => {
+      expect(deriveWorkflowSlug('create a notification system for mobile users')).toBe('notification-system');
+    });
+
+    it('does not strip prepositions at the start of text', () => {
+      // After stripping verb "fix", "for login issue" starts with "for" — no leading whitespace means no strip
+      expect(deriveWorkflowSlug('fix for login issue')).toBe('for-login-issue');
+    });
+
+    it('handles file extension stripping', () => {
+      expect(deriveWorkflowSlug('requirements.md')).toBe('requirements');
+    });
+
+    it('truncates long slugs at word boundary', () => {
+      const result = deriveWorkflowSlug('comprehensive user authentication system management');
+      expect(result.length).toBeLessThanOrEqual(40);
+      expect(result).not.toMatch(/-$/);
+    });
+
+    it('preserves non-verb leading words', () => {
+      expect(deriveWorkflowSlug('payment gateway')).toBe('payment-gateway');
+    });
+
+    it('handles underscores as separators', () => {
+      expect(deriveWorkflowSlug('user_profile_settings')).toBe('user-profile-settings');
+    });
+
+    it('throws on empty result', () => {
+      expect(() => deriveWorkflowSlug('---')).toThrow(
+        'Feature name produced an empty workflow ID after sanitization'
+      );
+    });
+
+    it('throws on reserved name "completed"', () => {
+      expect(() => deriveWorkflowSlug('completed')).toThrow(
+        "'completed' is a reserved directory name"
+      );
+    });
+
+    it('strips verb but keeps entire core phrase when no prep', () => {
+      expect(deriveWorkflowSlug('design new onboarding flow')).toBe('new-onboarding-flow');
+    });
+
+    it('is case insensitive for verb stripping', () => {
+      expect(deriveWorkflowSlug('BUILD the search feature')).toBe('search-feature');
     });
   });
 

@@ -462,7 +462,7 @@ export {
 export { populateDiscoveryModels } from './discovery.js';
 
 // Engine
-export { WorkflowEngine, WorkflowStatusResponse } from './engine.js';
+export { WorkflowEngine, WorkflowStatusResponse, deriveWorkflowSlug } from './engine.js';
 
 // Audit Generator
 export type {
