@@ -11,7 +11,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Core Concepts',
-      items: ['core-concepts/manifesto', 'core-concepts/orchestration'],
+      items: ['core-concepts/manifesto', 'core-concepts/orchestration', 'core-concepts/architecture-and-distribution'],
     },
     {
       type: 'category',

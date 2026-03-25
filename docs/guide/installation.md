@@ -28,20 +28,19 @@ Before installing Olympus, ensure you have:
 For most users, this is all you need:
 
 ```bash
-# 1. Install Olympus CLI
+# 1. Install Olympus (automatically installs agents, skills, rules, and hooks)
 npm install -g olympus-ai
 
-# 2. Install agents, skills, rules, and hooks
-olympus-ai install
-
-# 3. Start Claude Code
+# 2. Start Claude Code
 claude
 
-# 4. Try it out
+# 3. Try it out
 /olympus hello world
 ```
 
-That's it! Olympus is now active.
+That's it! The postinstall hook in `package.json` runs the installer automatically, so a single `npm install -g` is all you need.
+
+**Re-running the installer:** If you need to reinstall (e.g. after a manual change), run `olympus-ai install`. To overwrite existing files, use `olympus-ai install --force`.
 
 ---
 
@@ -60,9 +59,9 @@ claude --version
 
 **Claude Code handles all authentication.** Once Claude Code is set up, Olympus will work automatically.
 
-### Step 2: Install Olympus CLI
+### Step 2: Install Olympus CLI and Agents
 
-Install the Olympus command-line interface globally:
+Install the Olympus CLI globally. The `package.json` postinstall hook automatically runs the installer, so this single command installs the CLI **and** copies agents, skills, rules, and hooks to your Claude Code configuration:
 
 ```bash
 npm install -g olympus-ai
@@ -77,13 +76,7 @@ olympus-ai --version
 node --version  # Should be v20.0.0 or higher
 ```
 
-### Step 3: Install Olympus Agents & Skills
-
-Run the installer to copy agents, skills, rules, and hooks to your Claude Code configuration:
-
-```bash
-olympus-ai install
-```
+**Re-running the installer:** To reinstall manually (e.g. after an upgrade), run `olympus-ai install`. To overwrite existing files, use `olympus-ai install --force`.
 
 **What this installs:**
 
@@ -102,7 +95,7 @@ olympus-ai install
 │   ├── momus.md
 │   ├── metis.md
 │   └── ... (+ tiered variants)
-├── commands/                # 19 slash command skills
+├── skills/                  # 19 slash command skills
 │   ├── olympus/SKILL.md
 │   ├── ultrawork/SKILL.md
 │   ├── plan/SKILL.md
@@ -166,11 +159,17 @@ olympus-ai install
 
 **Local Installation**
 
-Installs to `./.claude/` in current directory - project-specific:
+Installs to `./.claude/` in the current directory — project-specific:
 
 ```bash
-olympus-ai install --local
+# 1. Add Olympus as a dev dependency in the project
+npm install --save-dev olympus-ai
+
+# 2. Run the installer targeting the local .claude/ directory
+npx olympus-ai install --local
 ```
+
+**Note:** The postinstall hook targets the global `~/.claude/` by default. For a local install you must pass `--local` explicitly as shown above.
 
 **Benefits:**
 - Project-specific configuration
@@ -181,6 +180,8 @@ olympus-ai install --local
 - Team projects where everyone uses Olympus
 - Project-specific agent configurations
 - When you want project-isolated learning data
+
+**Global and local can coexist.** When both are present, Claude Code loads the local `.claude/` configuration first, so local settings take precedence over the global `~/.claude/` installation.
 
 ### Installation Flags
 
@@ -405,7 +406,7 @@ olympus-ai install --force
 
 ```bash
 # Verify skills directory
-ls ~/.claude/commands/
+ls ~/.claude/skills/
 
 # Reinstall with force
 olympus-ai install --force
@@ -662,6 +663,8 @@ Olympus is a **plugin system** for Claude Code that adds:
 
 **All authentication is handled by Claude Code.** When you run `claude`, you're already authenticated. Olympus piggybacks on that authentication - no separate API keys or configuration needed.
 
+For a deeper look at why Olympus uses TypeScript and how the build and distribution pipeline works, see [Architecture and Distribution Pipeline](../content/core-concepts/architecture-and-distribution.md).
+
 ---
 
 ## Next Steps
@@ -697,9 +700,8 @@ If you encounter issues during installation:
 **For most users:**
 
 ```bash
-# Three commands, that's it
+# Two commands, that's it
 npm install -g olympus-ai
-olympus-ai install
 claude
 ```
 
