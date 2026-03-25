@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.19] - 2026-03-25
+
+### Added
+
+- **Architecture & discovery enhancements** (Group 1C) — Discovery cache with incremental re-scan, persistent architecture model with selective agent injection, AGENTS.md-aware brownfield scanner, deepinit integration, design system detection, pathway announcement/override gate, and pathway-specific behavioral rules
+- **Gates, security & docs enhancements** (Group 1D) — Hardened implementation with expanded tests and edge cases
+
+### Fixed
+
+- **Workflow visualization consistency** — Enforced mandatory styling rules for execution plan Mermaid diagrams in `workflow-planning.md`. Replaced soft guidelines with explicit MANDATORY requirements, DO NOT list, and complete reference example to prevent unstyled `graph TD` diagrams
+
 ## [4.4.18] - 2026-03-20
 
 ### Added
