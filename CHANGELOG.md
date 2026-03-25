@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.20] - 2026-03-25
+
+### Fixed
+
+- **CLI version output formatting** — Fixed `'\n━'.repeat(50)` producing 50 separate lines instead of a single horizontal rule in `version` and `config` command output
+
+### Added
+
+- **Documentation sidebars** — Added architecture and distribution documentation to core concepts
+
 ## [4.4.19] - 2026-03-25
 
 ### Added
