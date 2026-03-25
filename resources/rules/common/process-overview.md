@@ -139,3 +139,20 @@ flowchart TD
 - OPERATIONS is placeholder for future expansion
 - Simple changes may skip conditional INCEPTION stages
 - Complex changes get full INCEPTION and CONSTRUCTION treatment
+
+## Approval Gate Safety Rule
+
+**CRITICAL**: NEVER present an approval gate while background agents are still running.
+
+All background agents and parallel tasks MUST complete — and their results MUST be fully incorporated — BEFORE presenting any approval prompt to the user.
+
+**Why**: When a background agent completes, it triggers a new processing turn for the orchestrator. If an approval gate has already been presented, the orchestrator will resume processing from the agent completion notification instead of waiting for the user's response. This bypasses the approval gate entirely.
+
+**Rule**: Before displaying any "You may: Request Changes / Continue" prompt:
+1. Confirm zero pending background agents or tasks
+2. Incorporate all returned results into the current artifact
+3. Only then present the approval prompt
+
+If exploration or file reading is needed during planning, either:
+- Run it in the **foreground** (blocking) so it completes before the approval gate, OR
+- Run it in the background but **wait for completion** before presenting the approval prompt — do NOT present the prompt while agents are still running

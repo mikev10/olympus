@@ -160,6 +160,14 @@ When managing code generation, the orchestrator MUST leverage Olympus capabiliti
 - [ ] Ensure plan is executable step-by-step
 - [ ] Emphasize that this plan is the single source of truth for Code Generation
 
+## Step 4b: Background Agent Completion Gate (MANDATORY)
+- [ ] Before presenting the approval prompt, verify ALL background agents and tasks have completed
+- [ ] If any agents are still running, WAIT for them to finish — do NOT proceed to Step 5
+- [ ] Incorporate all agent results into the plan (update scope, file lists, step counts if needed)
+- [ ] Only after zero pending agents remain, proceed to Step 5
+
+**Why this gate exists**: Background agent completion triggers a new orchestrator processing turn. If the approval prompt has already been displayed, the orchestrator resumes from the agent notification instead of waiting for the user — silently bypassing the approval gate.
+
 ## Step 5: Present Plan Summary and Approval Request
 - [ ] Present plan summary in this structure:
 

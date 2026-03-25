@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.22] - 2026-03-25
+
+### Fixed
+
+- **Approval gate bypass from background agents** — Added mandatory Background Agent Completion Gate (Step 4b) to code generation and universal Approval Gate Safety Rule to process overview, preventing background agent completions from triggering new orchestrator turns that skip user approval prompts
+
 ## [4.4.21] - 2026-03-25
 
 ### Fixed
