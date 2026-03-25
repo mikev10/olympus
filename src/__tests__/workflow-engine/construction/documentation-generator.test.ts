@@ -302,6 +302,59 @@ describe('ConstructionExecutor.executeDocumentationGeneration', () => {
     expect(loaded?.construction_units?.['u-cp']?.feature_doc_status).toBe('completed');
     expect(loaded?.construction_units?.['u-cp']?.feature_doc_path).not.toBeNull();
   });
+
+  it('stores doc_generation_agent and doc_generation_prompt in checkpoint on success', async () => {
+    const { saveCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
+
+    const checkpoint: any = {
+      schema_version: '3.0.0',
+      workflow_id: 'wf-dispatch-test',
+      feature_name: 'test',
+      current_phase: 'construction',
+      current_stage: 'code-generation',
+      status: 'in_progress',
+      phases: {},
+      manifest_path: '',
+      trust_state_path: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      construction_units: {
+        'u-dispatch': {
+          unitId: 'u-dispatch',
+          stages: {
+            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
+            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
+            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
+            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
+            'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+            'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+          },
+          code_plan_path: null,
+          code_generation_status: 'not_started',
+          tests_total: 0,
+          tests_passed: 0,
+          tests_failed: 0,
+          test_framework: 'unknown',
+          test_generation_status: 'not_started',
+          feature_doc_status: 'not_started',
+          feature_doc_path: null,
+        },
+      },
+    };
+
+    await saveCheckpoint(TEST_DIR, checkpoint);
+
+    const executor = new ConstructionExecutor(TEST_DIR, 'wf-dispatch-test');
+    await executor.executeDocumentationGeneration('u-dispatch');
+
+    const { loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
+    const loaded = await loadCheckpoint(TEST_DIR, 'wf-dispatch-test');
+    const unit = loaded?.construction_units?.['u-dispatch'];
+    expect(unit?.doc_generation_agent).toBeDefined();
+    expect(typeof unit?.doc_generation_agent).toBe('string');
+    expect(unit?.doc_generation_prompt).toBeDefined();
+    expect(unit?.doc_generation_prompt).toContain('u-dispatch');
+  });
 });
 
 describe('ConstructionExecutor.executeUnitCompletion', () => {

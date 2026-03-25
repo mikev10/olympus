@@ -111,7 +111,11 @@ function buildUnitsSection(checkpoint: WorkflowCheckpointV3): string {
   lines.push('| Unit | Status |');
   lines.push('|------|--------|');
   for (const [key, unit] of Object.entries(checkpoint.construction_units)) {
-    lines.push(`| ${key} | ${unit.code_generation_status} |`);
+    let statusText = unit.code_generation_status;
+    if (unit.recreation_readiness_score != null && unit.recreation_readiness_score > 0) {
+      statusText += ` | Readiness: ${unit.recreation_readiness_score}/5.0`;
+    }
+    lines.push(`| ${key} | ${statusText} |`);
   }
   return lines.join('\n');
 }

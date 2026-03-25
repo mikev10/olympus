@@ -348,7 +348,7 @@ describe('evaluateRecreationReadiness', () => {
     expect(result.dimensions.bootstrap_capability).toBe(0);
   });
 
-  it('skips and returns all zeros with passed=true for minimal depth', () => {
+  it('minimal depth scores only requirements_coverage and implementation_guidance for rich doc', () => {
     const docPath = writeDoc('feature-doc.md', RICH_DOC);
     const result = evaluateRecreationReadiness({
       featureDocPath: docPath,
@@ -357,7 +357,79 @@ describe('evaluateRecreationReadiness', () => {
       pathway: 'greenfield',
     });
     expect(result.passed).toBe(true);
+    expect(result.dimensions.requirements_coverage).toBeGreaterThan(0);
+    expect(result.dimensions.implementation_guidance).toBeGreaterThan(0);
+    expect(result.dimensions.data_model_completeness).toBe(0);
+    expect(result.dimensions.test_coverage_documentation).toBe(0);
+    expect(result.dimensions.bootstrap_capability).toBe(0);
+    expect(result.overall_score).toBeGreaterThan(0);
+  });
+
+  it('minimal depth uses 3.5 threshold — passes in blocking mode when average >= 3.5', () => {
+    writeConfig('blocking');
+    const docPath = writeDoc('feature-doc.md', RICH_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'minimal',
+      pathway: 'greenfield',
+    });
+    const expectedAvg = (result.dimensions.requirements_coverage + result.dimensions.implementation_guidance) / 2;
+    expect(expectedAvg).toBeGreaterThanOrEqual(3.5);
+    expect(result.passed).toBe(true);
+    expect(result.mode).toBe('blocking');
+  });
+
+  it('minimal depth fails in blocking mode when average < 3.5', () => {
+    writeConfig('blocking');
+    const docPath = writeDoc('feature-doc.md', SPARSE_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'minimal',
+      pathway: 'greenfield',
+    });
+    expect(result.overall_score).toBeLessThan(3.5);
+    expect(result.passed).toBe(false);
+    expect(result.mode).toBe('blocking');
+    expect(result.remediation).toBeDefined();
+  });
+
+  it('minimal depth passes in advisory mode even when scores are low', () => {
+    const docPath = writeDoc('feature-doc.md', SPARSE_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'minimal',
+      pathway: 'greenfield',
+    });
+    expect(result.passed).toBe(true);
+    expect(result.mode).toBe('advisory');
+  });
+
+  it('minimal depth returns failed with remediation when feature doc cannot be read', () => {
+    const result = evaluateRecreationReadiness({
+      featureDocPath: path.join(testDir, 'nonexistent.md'),
+      projectPath: testDir,
+      depth: 'minimal',
+      pathway: 'greenfield',
+    });
+    expect(result.passed).toBe(false);
     expect(result.overall_score).toBe(0);
+    expect(result.remediation).toBeDefined();
+    expect(result.remediation![0]).toContain('could not be read');
+  });
+
+  it('minimal depth overall_score is average of 2 dimensions rounded to 1 decimal', () => {
+    const docPath = writeDoc('feature-doc.md', RICH_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'minimal',
+      pathway: 'greenfield',
+    });
+    const expected = Math.round(((result.dimensions.requirements_coverage + result.dimensions.implementation_guidance) / 2) * 10) / 10;
+    expect(result.overall_score).toBe(expected);
   });
 
   it('returns high scores and passed=true for rich doc in advisory mode', () => {
@@ -465,5 +537,68 @@ describe('evaluateRecreationReadiness', () => {
     });
     const rounded = Math.round(result.overall_score * 10) / 10;
     expect(result.overall_score).toBe(rounded);
+  });
+
+  it('override=true returns passed=true for sparse doc in blocking mode', () => {
+    writeConfig('blocking');
+    const docPath = writeDoc('feature-doc.md', SPARSE_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'standard',
+      pathway: 'greenfield',
+      override: true,
+    });
+    expect(result.passed).toBe(true);
+    expect(result.overall_score).toBe(0);
+    expect(result.mode).toBe('blocking');
+    expect(result.remediation).toBeUndefined();
+  });
+
+  it('override=true with rationale includes rationale in remediation', () => {
+    const docPath = writeDoc('feature-doc.md', SPARSE_DOC);
+    const result = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'standard',
+      pathway: 'greenfield',
+      override: true,
+      overrideRationale: 'approved by tech lead on 2026-03-24',
+    });
+    expect(result.passed).toBe(true);
+    expect(result.remediation).toBeDefined();
+    expect(result.remediation![0]).toContain('approved by tech lead on 2026-03-24');
+  });
+
+  it('override=true bypasses scoring even for nonexistent feature doc', () => {
+    const result = evaluateRecreationReadiness({
+      featureDocPath: path.join(testDir, 'nonexistent.md'),
+      projectPath: testDir,
+      depth: 'standard',
+      pathway: 'greenfield',
+      override: true,
+    });
+    expect(result.passed).toBe(true);
+    expect(result.overall_score).toBe(0);
+  });
+
+  it('override=false behaves identically to omitting the field', () => {
+    const docPath = writeDoc('feature-doc.md', SPARSE_DOC);
+    const withFalse = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'standard',
+      pathway: 'greenfield',
+      override: false,
+    });
+    const withOmitted = evaluateRecreationReadiness({
+      featureDocPath: docPath,
+      projectPath: testDir,
+      depth: 'standard',
+      pathway: 'greenfield',
+    });
+    expect(withFalse.passed).toBe(withOmitted.passed);
+    expect(withFalse.overall_score).toBe(withOmitted.overall_score);
+    expect(withFalse.dimensions).toEqual(withOmitted.dimensions);
   });
 });

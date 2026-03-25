@@ -92,6 +92,7 @@ describe('collectScorecardData', () => {
     expect(data.units_total).toBe(2);
     expect(data.regressions_count).toBe(1);
     expect(data.gate_bypass_count).toBe(0);
+    expect(data.average_recreation_readiness_score).toBe(85);
   });
 
   it('returns all zeros and null when checkpoint has no units', () => {
@@ -110,6 +111,11 @@ describe('collectScorecardData', () => {
     expect(data.units_total).toBe(0);
     expect(data.regressions_count).toBe(0);
     expect(data.gate_bypass_count).toBe(0);
+    expect(data.phases_completed).toBe(0);
+    expect(data.validation_pass_rate).toBe(0);
+    expect(data.rework_count).toBe(0);
+    expect(data.regressions_fixed).toBe(0);
+    expect(data.average_recreation_readiness_score).toBeNull();
   });
 
   it('returns all zeros and null when construction_units is undefined', () => {
@@ -172,6 +178,63 @@ describe('collectScorecardData', () => {
     const data = collectScorecardData(checkpoint);
 
     expect(data.coverage_percentage).toBe(72.2);
+  });
+
+  it('counts phases_completed from checkpoint phases', () => {
+    const checkpoint = makeCheckpoint({
+      'u-001': makeUnit({ unitId: 'u-001' }),
+    });
+    checkpoint.phases = {
+      discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      inception: { status: 'completed', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      construction: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+    } as any;
+
+    const data = collectScorecardData(checkpoint);
+
+    expect(data.phases_completed).toBe(2);
+  });
+
+  it('computes regressions_fixed when regressions exist but tests pass', () => {
+    const checkpoint = makeCheckpoint({
+      'u-001': makeUnit({ unitId: 'u-001', regressions_count: 3, tests_failed: 0, tests_total: 10 }),
+      'u-002': makeUnit({ unitId: 'u-002', regressions_count: 1, tests_failed: 2, tests_total: 5 }),
+    });
+
+    const data = collectScorecardData(checkpoint);
+
+    expect(data.regressions_fixed).toBe(3);
+  });
+
+  it('computes average_recreation_readiness_score across units', () => {
+    const checkpoint = makeCheckpoint({
+      'u-001': makeUnit({ unitId: 'u-001', recreation_readiness_score: 80 }),
+      'u-002': makeUnit({ unitId: 'u-002', recreation_readiness_score: 90 }),
+      'u-003': makeUnit({ unitId: 'u-003' }),
+    });
+
+    const data = collectScorecardData(checkpoint);
+
+    expect(data.average_recreation_readiness_score).toBe(85);
+  });
+
+  it('returns null average_recreation_readiness_score when no units have scores', () => {
+    const checkpoint = makeCheckpoint({
+      'u-001': makeUnit({ unitId: 'u-001' }),
+    });
+
+    const data = collectScorecardData(checkpoint);
+
+    expect(data.average_recreation_readiness_score).toBeNull();
+  });
+
+  it('returns default time_per_phase when no metrics exist', () => {
+    const checkpoint = makeCheckpoint({});
+
+    const data = collectScorecardData(checkpoint);
+
+    expect(data.time_per_phase).toEqual({ inception_ms: 0, construction_ms: 0, operations_ms: 0 });
   });
 });
 
@@ -290,7 +353,44 @@ describe('writeScorecardReport', () => {
     expect(content).toContain('## Test Results');
     expect(content).toContain('## Security');
     expect(content).toContain('## Unit Completion');
+    expect(content).toContain('## Methodology Metrics');
+    expect(content).toContain('## Recreation Readiness');
     expect(content).toContain('## Data Sources');
+  });
+
+  it('includes new metrics in frontmatter', () => {
+    const extendedData = {
+      ...baseData,
+      phases_completed: 2,
+      validation_pass_rate: 95,
+      rework_count: 1,
+      regressions_fixed: 3,
+      average_recreation_readiness_score: 82.5,
+    };
+    const options = { projectPath: tmpDir, workflowId: 'wf-fm', featureName: 'FM Test' };
+
+    const outputPath = writeScorecardReport(extendedData, options);
+    const content = fs.readFileSync(outputPath, 'utf-8');
+
+    expect(content).toContain('phases_completed: 2');
+    expect(content).toContain('validation_pass_rate: 95');
+    expect(content).toContain('rework_count: 1');
+    expect(content).toContain('regressions_fixed: 3');
+    expect(content).toContain('average_recreation_readiness_score: 82.5');
+  });
+
+  it('shows pending for recreation readiness when score is null', () => {
+    const extendedData = {
+      ...baseData,
+      average_recreation_readiness_score: null,
+    };
+    const options = { projectPath: tmpDir, workflowId: 'wf-rr-null', featureName: 'RR Null' };
+
+    const outputPath = writeScorecardReport(extendedData, options);
+    const content = fs.readFileSync(outputPath, 'utf-8');
+
+    expect(content).toContain('| Average Score | pending |');
+    expect(content).toContain('average_recreation_readiness_score: null');
   });
 
   it('calculates pass rate correctly in the table', () => {

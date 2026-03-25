@@ -7,6 +7,8 @@ export interface RecreationReadinessOptions {
   projectPath: string;
   depth: string;
   pathway: string;
+  override?: boolean;
+  overrideRationale?: string;
 }
 
 export function scoreRequirementsCoverage(featureDocContent: string): number {
@@ -119,7 +121,27 @@ export function loadRecreationReadinessConfig(projectPath: string): 'advisory' |
 }
 
 export function evaluateRecreationReadiness(options: RecreationReadinessOptions): RecreationReadinessResult {
-  if (options.pathway === 'bugfix' || options.depth === 'minimal') {
+  if (options.override === true) {
+    const result: RecreationReadinessResult = {
+      overall_score: 0,
+      passed: true,
+      mode: loadRecreationReadinessConfig(options.projectPath),
+      dimensions: {
+        requirements_coverage: 0,
+        data_model_completeness: 0,
+        implementation_guidance: 0,
+        test_coverage_documentation: 0,
+        bootstrap_capability: 0,
+      },
+    };
+    if (options.overrideRationale) {
+      result.remediation = [`Override applied: ${options.overrideRationale}`];
+    }
+    return result;
+  }
+
+  if (options.pathway === 'bugfix') {
+    // Full skip — bugfix docs are summary-only
     return {
       overall_score: 0,
       passed: true,
@@ -132,6 +154,56 @@ export function evaluateRecreationReadiness(options: RecreationReadinessOptions)
         bootstrap_capability: 0,
       },
     };
+  }
+
+  if (options.depth === 'minimal') {
+    // Minimal depth: score only 2 dimensions with a lower threshold of 3.5
+    const mode = loadRecreationReadinessConfig(options.projectPath);
+
+    let content = '';
+    try {
+      content = fs.readFileSync(options.featureDocPath, 'utf-8');
+    } catch {
+      return {
+        overall_score: 0,
+        passed: false,
+        mode,
+        dimensions: {
+          requirements_coverage: 0,
+          data_model_completeness: 0,
+          implementation_guidance: 0,
+          test_coverage_documentation: 0,
+          bootstrap_capability: 0,
+        },
+        remediation: ['Feature doc could not be read — ensure it exists at the expected path'],
+      };
+    }
+
+    const reqScore = scoreRequirementsCoverage(content);
+    const implScore = scoreImplementationGuidance(content);
+    const overall = (reqScore + implScore) / 2;
+    const passed = overall >= 3.5 || mode === 'advisory';
+
+    const dimensions = {
+      requirements_coverage: reqScore,
+      data_model_completeness: 0,
+      implementation_guidance: implScore,
+      test_coverage_documentation: 0,
+      bootstrap_capability: 0,
+    };
+
+    const result: RecreationReadinessResult = {
+      overall_score: Math.round(overall * 10) / 10,
+      passed,
+      mode,
+      dimensions,
+    };
+
+    if (overall < 3.5) {
+      result.remediation = generateRemediationGuidance(dimensions);
+    }
+
+    return result;
   }
 
   let content = '';

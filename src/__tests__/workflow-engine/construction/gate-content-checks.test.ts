@@ -11,6 +11,7 @@ import {
   checkTestsExistAndPass,
   checkSecurityScanClean,
   checkFeatureDocExists,
+  checkArchitectureModelUpdated,
   runGate4ContentChecks,
   checkAllUnitsComplete,
   checkSmokeTestPassed,
@@ -380,19 +381,20 @@ describe('checkSecurityScanClean (null-safe)', () => {
 });
 
 describe('checkFeatureDocExists', () => {
-  it('returns passed:true with warning when feature_doc_status is undefined', () => {
+  it('returns passed:false with error when feature_doc_status is undefined', () => {
     const unit = makeUnit();
     const result = checkFeatureDocExists(unit);
-    expect(result.passed).toBe(true);
-    expect(result.severity).toBe('warning');
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('error');
     expect(result.name).toBe('feature-doc-exists');
   });
 
-  it('passes with warning when feature_doc_status is not_started', () => {
+  it('fails with error when feature_doc_status is not_started', () => {
     const unit = makeUnit({ feature_doc_status: 'not_started' });
     const result = checkFeatureDocExists(unit);
-    expect(result.passed).toBe(true);
-    expect(result.severity).toBe('warning');
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('error');
+    expect(result.remediation).toContain('FR-DOC-003');
   });
 
   it('passes with info when feature_doc_status is skipped', () => {
@@ -412,22 +414,22 @@ describe('checkFeatureDocExists', () => {
     expect(result.severity).toBe('info');
   });
 
-  it('fails with warning when completed but no path recorded', () => {
+  it('fails with error when completed but no path recorded', () => {
     const unit = makeUnit({
       feature_doc_status: 'completed',
       feature_doc_path: null,
     });
     const result = checkFeatureDocExists(unit);
     expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
+    expect(result.severity).toBe('error');
   });
 });
 
 describe('runGate4ContentChecks', () => {
-  it('returns array of 3 checks', () => {
+  it('returns array of 4 checks', () => {
     const unit = makeUnit();
     const results = runGate4ContentChecks(unit, TEST_DIR);
-    expect(results).toHaveLength(3);
+    expect(results).toHaveLength(4);
   });
 
   it('all checks have valid ContentCheck shape', () => {
@@ -448,6 +450,46 @@ describe('runGate4ContentChecks', () => {
     expect(names).toContain('tests-pass');
     expect(names).toContain('security-clean');
     expect(names).toContain('feature-doc-exists');
+    expect(names).toContain('architecture-model-updated');
+  });
+});
+
+describe('checkArchitectureModelUpdated', () => {
+  it('returns passed:true with warning when architecture_model_status is undefined', () => {
+    const unit = makeUnit();
+    const result = checkArchitectureModelUpdated(unit);
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('warning');
+    expect(result.name).toBe('architecture-model-updated');
+  });
+
+  it('returns passed:true with warning when status is not_started', () => {
+    const unit = makeUnit({ architecture_model_status: 'not_started' });
+    const result = checkArchitectureModelUpdated(unit);
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('warning');
+  });
+
+  it('returns passed:true with info when status is updated', () => {
+    const unit = makeUnit({ architecture_model_status: 'updated' });
+    const result = checkArchitectureModelUpdated(unit);
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('info');
+  });
+
+  it('returns passed:true with info when status is completed', () => {
+    const unit = makeUnit({ architecture_model_status: 'completed' });
+    const result = checkArchitectureModelUpdated(unit);
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('info');
+  });
+
+  it('returns passed:true with warning for unknown status', () => {
+    const unit = makeUnit({ architecture_model_status: 'failed' });
+    const result = checkArchitectureModelUpdated(unit);
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('warning');
+    expect(result.remediation).toContain('failed');
   });
 });
 

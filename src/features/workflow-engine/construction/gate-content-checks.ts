@@ -163,7 +163,7 @@ export function checkFeatureDocExists(unitProgress: ConstructionUnitProgress): C
   const docStatus = unitProgress.feature_doc_status;
 
   if (!docStatus || docStatus === 'not_started') {
-    return { name, passed: true, severity: 'warning', remediation: 'Feature documentation has not been generated. Consider running the documentation generator before approving this unit.' };
+    return { name, passed: false, severity: 'error', remediation: 'Feature documentation has not been generated. Feature docs are mandatory for unit completion (FR-DOC-003). Run the documentation generator before approving this unit.' };
   }
 
   if (docStatus === 'skipped' || docStatus === 'in_progress') {
@@ -171,10 +171,35 @@ export function checkFeatureDocExists(unitProgress: ConstructionUnitProgress): C
   }
 
   if (!unitProgress.feature_doc_path) {
-    return { name, passed: false, severity: 'warning', remediation: 'Feature documentation status is completed but no artifact path was recorded. Re-run the documentation generator.' };
+    return { name, passed: false, severity: 'error', remediation: 'Feature documentation status is completed but no artifact path was recorded. Re-run the documentation generator.' };
   }
 
   return { name, passed: true, severity: 'info' };
+}
+
+export function checkArchitectureModelUpdated(unitProgress: ConstructionUnitProgress): ContentCheck {
+  const name = 'architecture-model-updated';
+  const status = unitProgress.architecture_model_status;
+
+  if (!status || status === 'not_started') {
+    return {
+      name,
+      passed: true,
+      severity: 'warning',
+      remediation: 'Architecture model has not been updated for this unit. Consider running the architecture model updater.',
+    };
+  }
+
+  if (status === 'updated' || status === 'completed') {
+    return { name, passed: true, severity: 'info' };
+  }
+
+  return {
+    name,
+    passed: true,
+    severity: 'warning',
+    remediation: `Architecture model status is "${status}". Verify the model reflects this unit's changes.`,
+  };
 }
 
 export function runGate4ContentChecks(
@@ -185,6 +210,7 @@ export function runGate4ContentChecks(
     safeCheck('tests-pass', () => checkTestsExistAndPass(unitProgress)),
     safeCheck('security-clean', () => checkSecurityScanClean(unitProgress)),
     safeCheck('feature-doc-exists', () => checkFeatureDocExists(unitProgress)),
+    safeCheck('architecture-model-updated', () => checkArchitectureModelUpdated(unitProgress)),
   ];
 }
 

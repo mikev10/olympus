@@ -50,11 +50,20 @@ import type {
   AlignmentQuestion,
   GateResult,
   ManifestSchema,
+  ContentCheck,
 } from '../../features/workflow-engine/phase-types.js';
 import type { HookContext, HookResult } from '../types.js';
 import * as fs from 'fs-extra';
 import { join } from 'path';
 import { readFileSync } from 'fs';
+
+function formatContentCheckFailures(contentChecks?: ContentCheck[]): string {
+  if (!contentChecks) return '';
+  const failed = contentChecks.filter(c => !c.passed);
+  if (failed.length === 0) return '';
+  const lines = failed.map(c => `- ${c.name}: ${c.remediation ?? 'No remediation provided.'}`);
+  return `\n\n**Content Check Failures:**\n${lines.join('\n')}`;
+}
 
 /**
  * V&V validation questions templates by transition type.
@@ -789,6 +798,7 @@ Type "approve" to proceed or "reject <reason>" to block.
         action: 'approved',
         actor: 'trust',
         reason: `Gate 4 pending review for BOLT ${boltId}`,
+        content_checks: gate4BlockResult.content_checks,
       });
 
       saveManifest(manifestPath, manifest);
@@ -806,7 +816,7 @@ Missing: ${verification.missing_items.join(', ')}
 VALIDATION: Review alignment questions:
 ${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
 
-Type "approve" to proceed or "reject <reason>" to block.
+Type "approve" to proceed or "reject <reason>" to block.${formatContentCheckFailures(gate4BlockResult.content_checks)}
 
 [GATE_PENDING]`;
 
@@ -873,7 +883,7 @@ ${presentation.reviewContent}
 VALIDATION: Review alignment questions:
 ${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
 
-Type "approve" to proceed or "reject <reason>" to block.
+Type "approve" to proceed or "reject <reason>" to block.${formatContentCheckFailures(gate5Result.content_checks)}
 
 [GATE_PENDING]`;
 
@@ -1036,7 +1046,7 @@ Missing: ${verification.missing_items.join(', ')}
 VALIDATION: Review alignment questions:
 ${questions.map((q, i) => `${i + 1}. ${q.question}`).join('\n')}
 
-Type "approve" to proceed or "reject <reason>" to block.${depthWarning}
+Type "approve" to proceed or "reject <reason>" to block.${depthWarning}${formatContentCheckFailures(gate1Result.content_checks)}
 
 [GATE_PENDING]`;
 
@@ -1219,12 +1229,12 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         }
       }
 
-      // Add gate audit entry
       addGateAuditEntry(manifestPath, {
         phase: pendingPhase,
         action: 'approved',
         actor: 'human',
         reason: null,
+        content_checks: manifest.phases[pendingPhase].gate_result?.content_checks,
       });
 
       // CCR-3: Capture gate approval as learning discovery
@@ -1340,12 +1350,12 @@ async function qualityGateApprover(ctx: HookContext): Promise<HookResult> {
         }
       }
 
-      // Add gate audit entry
       addGateAuditEntry(manifestPath, {
         phase: pendingPhase,
         action: 'rejected',
         actor: 'human',
         reason,
+        content_checks: manifest.phases[pendingPhase].gate_result?.content_checks,
       });
 
       // CCR-3: Capture gate rejection as learning discovery

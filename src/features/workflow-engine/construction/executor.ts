@@ -18,8 +18,11 @@ import path from 'path';
 import type { HierarchicalNode, ConstructionUnitProgress, PathwayType, ValidatorResult } from '../phase-types.js';
 import type { ValidationResult } from '../types.js';
 import { loadCheckpoint, saveCheckpoint } from '../checkpoint.js';
-import { generateDocumentation, runPostDocGeneration, getRequiredSections, type FeatureDocOptions, type DocumentationGenerationResult } from './documentation-generator.js';
+import { generateDocumentation, runPostDocGeneration, getRequiredSections, buildFeatureDocPrompt, type FeatureDocOptions, type DocumentationGenerationResult } from './documentation-generator.js';
 import { evaluateRecreationReadiness } from './recreation-readiness.js';
+import { runSecretsManagement } from '../secrets-management.js';
+import { scanProject } from '../security-scanner.js';
+import { generateQualityScorecard } from '../quality-scorecard.js';
 
 type ConstructionStage = 'unit' | 'code-generation' | 'design';
 
@@ -573,9 +576,15 @@ export class ConstructionExecutor {
         const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
         if (unitFiles.length > 0) {
           await updateArchitectureModel(projectPath, unitFiles);
+          unitProgress.architecture_model_status = 'updated';
+          checkpoint.construction_units[unitId] = unitProgress;
+          await saveCheckpoint(projectPath, checkpoint);
         }
       } catch (err) {
         console.error(`[ConstructionExecutor] Architecture model update failed for ${unitId} (non-blocking):`, err);
+        unitProgress.architecture_model_status = 'failed';
+        checkpoint.construction_units[unitId] = unitProgress;
+        try { await saveCheckpoint(projectPath, checkpoint); } catch {}
       }
     }
 
@@ -745,18 +754,22 @@ export class ConstructionExecutor {
       : 'standard';
     const pathway = checkpoint?.pathway_type || 'brownfield-enhancement';
 
+    const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
+
     const docOptions: FeatureDocOptions = {
       unitId,
       workflowId,
       projectPath,
       depth,
       pathway,
+      unitFiles,
     };
 
     const featureDocResult = generateDocumentation(docOptions);
 
     let impactScanResult: DocumentationGenerationResult['impactScan'];
     let adrCount = 0;
+    let adrEntries: Array<{ path: string; title: string; number: number }> = [];
     let recreationReadinessResult: DocumentationGenerationResult['recreationReadiness'];
 
     if (featureDocResult.status === 'completed') {
@@ -769,17 +782,23 @@ export class ConstructionExecutor {
         });
         impactScanResult = { status: postDocResult.impactScan.status, path: postDocResult.impactScan.reportPath };
         adrCount = postDocResult.adrCount;
+        if ((postDocResult as any).adrEntries) {
+          adrEntries = (postDocResult as any).adrEntries;
+        }
       } catch {
         // Non-fatal: impact scan and ADR generation are advisory
       }
 
       if (featureDocResult.path && pathway !== 'bugfix' && depth !== 'minimal') {
         try {
+          const unitData = checkpoint?.construction_units?.[unitId];
           const readinessResult = evaluateRecreationReadiness({
             featureDocPath: featureDocResult.path,
             projectPath,
             depth,
             pathway,
+            override: unitData?.recreation_readiness_override,
+            overrideRationale: unitData?.recreation_readiness_override_rationale ?? undefined,
           });
           recreationReadinessResult = readinessResult;
         } catch {
@@ -793,9 +812,16 @@ export class ConstructionExecutor {
       unit.feature_doc_status = featureDocResult.status === 'completed' ? 'completed' : 'not_started';
       unit.feature_doc_path = featureDocResult.path;
       unit.impact_scan_status = impactScanResult?.status === 'completed' ? 'completed' : 'not_started';
+      unit.impact_scan_report_path = impactScanResult?.path ?? null;
       unit.adr_count = adrCount;
+      unit.adr_entries = adrEntries.length > 0 ? adrEntries : undefined;
       if (recreationReadinessResult) {
         unit.recreation_readiness_score = recreationReadinessResult.overall_score;
+        unit.recreation_readiness_dimensions = recreationReadinessResult.dimensions ?? null;
+      }
+      if (featureDocResult.status === 'completed') {
+        unit.doc_generation_agent = CONSTRUCTION_STAGE_AGENT_MAP['code-generation'];
+        unit.doc_generation_prompt = buildFeatureDocPrompt(docOptions);
       }
       await saveCheckpoint(projectPath, checkpoint);
     }
@@ -807,14 +833,51 @@ export class ConstructionExecutor {
     unitId: string,
     options: TestGenerationOptions & { skipDocumentation?: boolean } = {}
   ): Promise<{ testGeneration: TestGenerationResult; documentation?: DocumentationGenerationResult }> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
     const testResult = await this.executeTestGeneration(unitId, options);
 
-    if (testResult.status === 'completed' && !options.skipDocumentation) {
-      const docResult = await this.executeDocumentationGeneration(unitId, {
-        projectPath: options.projectPath,
-        workflowId: options.workflowId,
-      });
-      return { testGeneration: testResult, documentation: docResult };
+    if (testResult.status === 'completed') {
+      try {
+        const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
+        if (unitFiles.length > 0) {
+          runSecretsManagement(projectPath, unitFiles);
+        }
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Secrets management failed for ${unitId} (non-blocking):`, err);
+      }
+
+      try {
+        const unitFiles = await this.discoverUnitFiles(projectPath, workflowId, unitId);
+        const scanResult = await scanProject({
+          projectPath,
+          workflowId,
+          unitId,
+          includeGlobs: unitFiles.length > 0 ? unitFiles : undefined,
+        });
+
+        const checkpoint = await loadCheckpoint(projectPath, workflowId);
+        if (checkpoint?.construction_units?.[unitId]) {
+          const unit = checkpoint.construction_units[unitId];
+          unit.security_scan_status = scanResult.status === 'completed' ? 'completed'
+            : scanResult.status === 'failed' ? 'in_progress' : 'not_started';
+          unit.security_findings_critical = scanResult.findings.filter(f => f.severity === 'critical').length;
+          unit.security_findings_warning = scanResult.findings.filter(f => f.severity === 'warning').length;
+          unit.security_findings_info = scanResult.findings.filter(f => f.severity === 'info').length;
+          await saveCheckpoint(projectPath, checkpoint);
+        }
+      } catch (err) {
+        console.error(`[ConstructionExecutor] Security scan failed for ${unitId} (non-blocking):`, err);
+      }
+
+      if (!options.skipDocumentation) {
+        const docResult = await this.executeDocumentationGeneration(unitId, {
+          projectPath,
+          workflowId,
+        });
+        return { testGeneration: testResult, documentation: docResult };
+      }
     }
 
     return { testGeneration: testResult };
@@ -995,6 +1058,19 @@ ${coverageRows.join('\n')}
       });
     } catch (err) {
       console.error('[ConstructionExecutor] Changelog generation failed (non-fatal):', err);
+    }
+
+    try {
+      const refreshedCheckpoint = await loadCheckpoint(projectPath, workflowId);
+      if (refreshedCheckpoint) {
+        generateQualityScorecard(refreshedCheckpoint, {
+          projectPath,
+          workflowId,
+          featureName: refreshedCheckpoint.feature_name ?? workflowId,
+        });
+      }
+    } catch (err) {
+      console.error('[ConstructionExecutor] Quality scorecard generation failed (non-fatal):', err);
     }
 
     return { status: overallStatus, reportPath };

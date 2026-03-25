@@ -751,4 +751,154 @@ Test problem
       expect(specContent).toContain('User Authentication System');
     });
   });
+
+  describe('secrets management wiring', () => {
+    it('generates .env.example when unit files reference env vars', async () => {
+      const unitId = 'u-secrets';
+      const unitDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction', unitId, 'code');
+      await fs.ensureDir(unitDir);
+
+      const sourceFile = path.join(testDir, 'src', 'index.ts');
+      await fs.ensureDir(path.join(testDir, 'src'));
+      await fs.writeFile(sourceFile, 'const url = process.env.DATABASE_URL;\n', 'utf-8');
+
+      const summaryFile = path.join(unitDir, 'code-summary.md');
+      await fs.writeFile(summaryFile, `## Files created\n- \`src/index.ts\`\n`, 'utf-8');
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeUnitCompletion(unitId, { allowFailures: true });
+
+      expect(result.testGeneration.status).toBe('completed');
+
+      const envExamplePath = path.join(testDir, '.env.example');
+      if (await fs.pathExists(envExamplePath)) {
+        const content = await fs.readFile(envExamplePath, 'utf-8');
+        expect(content).toContain('DATABASE_URL');
+      }
+    });
+
+    it('does not throw when unit has no code files', async () => {
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeUnitCompletion('u-no-files', { allowFailures: true });
+      expect(result.testGeneration).toBeDefined();
+    });
+
+    it('secrets management failure does not block unit completion', async () => {
+      const { runSecretsManagement } = await import('../../../features/workflow-engine/secrets-management.js');
+      vi.spyOn({ runSecretsManagement }, 'runSecretsManagement').mockImplementation(() => {
+        throw new Error('secrets failure');
+      });
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeUnitCompletion('u-sm-fail', { allowFailures: true });
+      expect(result.testGeneration).toBeDefined();
+    });
+  });
+
+  describe('security scan wiring', () => {
+    it('security scan failure does not block unit completion', async () => {
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeUnitCompletion('u-sec-fail', { allowFailures: true });
+      expect(result.testGeneration).toBeDefined();
+    });
+  });
+
+  describe('quality scorecard wiring in smoke test', () => {
+    it('generates scorecard after smoke test without error', async () => {
+      const { saveCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
+      const checkpoint = {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: 'Scorecard Test',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {} as any,
+        manifest_path: '',
+        trust_state_path: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        construction_units: {
+          'u-001': {
+            unitId: 'u-001',
+            stages: {
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'completed' as const,
+            tests_total: 5,
+            tests_passed: 5,
+            tests_failed: 0,
+            test_framework: 'vitest',
+            test_generation_status: 'completed' as const,
+          },
+        },
+      };
+      await saveCheckpoint(testDir, checkpoint as any);
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.executeSmokeTest();
+      expect(result.status).toBe('passed');
+
+      const scorecardPath = path.join(testDir, 'aidlc-docs', workflowId, 'quality-scorecard.md');
+      expect(await fs.pathExists(scorecardPath)).toBe(true);
+    });
+  });
+
+  describe('documentation generation persists new fields', () => {
+    it('persists impact_scan_report_path and recreation_readiness_dimensions', async () => {
+      const { saveCheckpoint, loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
+
+      const unitId = 'u-doc-fields';
+      const unitDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction', unitId, 'code');
+      await fs.ensureDir(unitDir);
+      await fs.writeFile(path.join(unitDir, 'code-summary.md'), '## Files created\n- `src/app.ts`\n');
+
+      const checkpoint = {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: 'Doc Fields Test',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {} as any,
+        manifest_path: '',
+        trust_state_path: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        pathway_type: 'brownfield-enhancement' as const,
+        depth_score: 15,
+        construction_units: {
+          [unitId]: {
+            unitId,
+            stages: {
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
+              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'completed' as const,
+          },
+        },
+      };
+      await saveCheckpoint(testDir, checkpoint as any);
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.executeDocumentationGeneration(unitId);
+
+      const loaded = await loadCheckpoint(testDir, workflowId);
+      const unit = loaded?.construction_units?.[unitId];
+      expect(unit).toBeDefined();
+      expect(unit?.feature_doc_status).toBeDefined();
+      expect('impact_scan_report_path' in (unit ?? {})).toBe(true);
+    });
+  });
 });

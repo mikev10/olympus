@@ -185,6 +185,12 @@ export interface QualityScorecardData {
   regressions_count: number;
   gate_bypass_count: number;
   data_sources: Record<string, 'connected' | 'pending'>;
+  phases_completed?: number;
+  time_per_phase?: { inception_ms: number; construction_ms: number; operations_ms: number };
+  validation_pass_rate?: number;
+  rework_count?: number;
+  regressions_fixed?: number;
+  average_recreation_readiness_score?: number | null;
 }
 
 export interface GateResult {
@@ -282,6 +288,7 @@ export interface GateAuditEntry {
   action: 'approved' | 'rejected' | 'bypassed';
   actor: 'human' | 'config' | 'flag' | 'trust';
   reason: string | null;
+  content_checks?: ContentCheck[];
 }
 
 export interface MethodologyMetrics {
@@ -458,10 +465,15 @@ export interface ConstructionUnitProgress {
   security_findings_info?: number;
   feature_doc_status?: 'not_started' | 'in_progress' | 'completed' | 'skipped';
   feature_doc_path?: string | null;
+  doc_generation_agent?: string;
+  doc_generation_prompt?: string;
   recreation_readiness_score?: number | null;
   recreation_readiness_dimensions?: Record<string, number> | null;
   adr_count?: number;
+  adr_entries?: Array<{ path: string; title: string; number: number }>;
   impact_scan_status?: 'not_started' | 'completed' | 'skipped';
+  impact_scan_report_path?: string | null;
+  architecture_model_status?: string;
   recreation_readiness_override?: boolean;
   recreation_readiness_override_rationale?: string | null;
 }

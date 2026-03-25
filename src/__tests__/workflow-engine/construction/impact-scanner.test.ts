@@ -6,8 +6,11 @@ import {
   findReferences,
   generateImpactReport,
   runImpactScan,
+  updateAffectedDocs,
+  buildRenameMap,
   type ImpactScanOptions,
   type ImpactScanResult,
+  type DocUpdate,
 } from '../../../features/workflow-engine/construction/impact-scanner.js';
 
 const TEST_DIR = path.join(process.cwd(), '.test-impact-scanner');
@@ -194,5 +197,134 @@ describe('runImpactScan', () => {
       modifiedFiles: ['a.ts'],
     });
     expect(result.status).toBe('skipped');
+  });
+
+  it('returns updatedDocs when docs are updated by impact scan', () => {
+    setupDir({
+      'README.md': 'This project uses impact-scanner for scanning docs.',
+    });
+    const result = runImpactScan({
+      projectPath: TEST_DIR,
+      workflowId: 'wf-1',
+      unitId: 'u-005',
+      modifiedFiles: ['src/construction/impact-scanner.ts'],
+    });
+    expect(result.status).toBe('completed');
+    expect(result.updatedDocs).toBeDefined();
+    expect(result.updatedDocs!.length).toBeGreaterThan(0);
+  });
+
+  it('impact report includes auto-updated documents section when docs are updated', () => {
+    setupDir({
+      'README.md': 'This project uses impact-scanner for scanning docs.',
+    });
+    const result = runImpactScan({
+      projectPath: TEST_DIR,
+      workflowId: 'wf-1',
+      unitId: 'u-005',
+      modifiedFiles: ['src/construction/impact-scanner.ts'],
+    });
+    expect(result.reportPath).not.toBeNull();
+    const reportContent = fs.readFileSync(result.reportPath!, 'utf-8');
+    expect(reportContent).toContain('Auto-Updated Documents');
+  });
+});
+
+describe('buildRenameMap', () => {
+  it('returns empty map when renamedFiles is undefined', () => {
+    const map = buildRenameMap(undefined);
+    expect(map.size).toBe(0);
+  });
+
+  it('returns empty map when renamedFiles is empty', () => {
+    const map = buildRenameMap({});
+    expect(map.size).toBe(0);
+  });
+
+  it('maps old basename to new basename for a renamed file', () => {
+    const map = buildRenameMap({ 'src/old-name.ts': 'src/new-name.ts' });
+    expect(map.size).toBe(1);
+    expect(map.get('old-name')).toBe('new-name');
+  });
+
+  it('ignores entries where basenames are the same (directory move only)', () => {
+    const map = buildRenameMap({ 'src/module.ts': 'lib/module.ts' });
+    expect(map.size).toBe(0);
+  });
+
+  it('handles multiple renames', () => {
+    const map = buildRenameMap({
+      'src/old-scanner.ts': 'src/new-scanner.ts',
+      'src/old-util.ts': 'src/new-util.ts',
+    });
+    expect(map.size).toBe(2);
+    expect(map.get('old-scanner')).toBe('new-scanner');
+    expect(map.get('old-util')).toBe('new-util');
+  });
+});
+
+describe('updateAffectedDocs', () => {
+  it('adds advisory notes to affected docs with unresolved references', () => {
+    setupDir({
+      'docs/guide.md': 'This guide references my-module for processing.',
+    });
+    const docPath = path.join(TEST_DIR, 'docs', 'guide.md');
+    const affectedDocs = [{
+      path: docPath,
+      references: ['my-module'],
+      description: 'References to my-module',
+    }];
+    const updates = updateAffectedDocs(affectedDocs, ['src/my-module.ts']);
+    expect(updates.length).toBe(1);
+    expect(updates[0].notesAdded.length).toBeGreaterThan(0);
+    const content = fs.readFileSync(docPath, 'utf-8');
+    expect(content).toContain('<!-- Impact scan');
+    expect(content).toContain('my-module');
+  });
+
+  it('returns empty array when doc files cannot be read', () => {
+    const affectedDocs = [{
+      path: path.join(TEST_DIR, 'nonexistent.md'),
+      references: ['foo'],
+      description: 'test',
+    }];
+    const updates = updateAffectedDocs(affectedDocs, ['src/foo.ts']);
+    expect(updates).toEqual([]);
+  });
+
+  it('does not modify docs when no references match rename map or unresolved terms', () => {
+    setupDir({
+      'docs/clean.md': 'No relevant references here at all.',
+    });
+    const docPath = path.join(TEST_DIR, 'docs', 'clean.md');
+    const affectedDocs = [{
+      path: docPath,
+      references: [],
+      description: 'No refs',
+    }];
+    const updates = updateAffectedDocs(affectedDocs, ['src/unrelated.ts']);
+    expect(updates).toEqual([]);
+  });
+
+  it('applies rename replacements when renamedFiles is provided', () => {
+    setupDir({
+      'docs/api.md': 'Import from old-scanner to use scanning.',
+    });
+    const docPath = path.join(TEST_DIR, 'docs', 'api.md');
+    const affectedDocs = [{
+      path: docPath,
+      references: ['old-scanner'],
+      description: 'References old-scanner',
+    }];
+    const updates = updateAffectedDocs(
+      affectedDocs,
+      ['src/old-scanner.ts', 'src/new-scanner.ts'],
+      { 'src/old-scanner.ts': 'src/new-scanner.ts' }
+    );
+    expect(updates.length).toBe(1);
+    const content = fs.readFileSync(docPath, 'utf-8');
+    expect(content).toContain('new-scanner');
+    expect(content).not.toContain('old-scanner');
+    expect(updates[0].updatedReferences.length).toBeGreaterThan(0);
   });
 });

@@ -6,6 +6,13 @@ export interface ImpactScanOptions {
   workflowId: string;
   unitId: string;
   modifiedFiles: string[];
+  renamedFiles?: Record<string, string>;
+}
+
+export interface DocUpdate {
+  path: string;
+  updatedReferences: string[];
+  notesAdded: string[];
 }
 
 export interface ImpactScanResult {
@@ -16,6 +23,7 @@ export interface ImpactScanResult {
     description: string;
   }>;
   reportPath: string | null;
+  updatedDocs?: DocUpdate[];
 }
 
 export function findDocFiles(projectPath: string, workflowId: string): string[] {
@@ -133,11 +141,99 @@ export function generateImpactReport(
     }
   }
 
+  if (result.updatedDocs && result.updatedDocs.length > 0) {
+    lines.push(
+      '## Auto-Updated Documents',
+      '',
+      `${result.updatedDocs.length} document(s) were automatically updated:`,
+      ''
+    );
+    for (const upd of result.updatedDocs) {
+      lines.push(`- \`${path.basename(upd.path)}\``);
+      for (const ref of upd.updatedReferences) {
+        lines.push(`  - Renamed reference: ${ref}`);
+      }
+      for (const note of upd.notesAdded) {
+        lines.push(`  - ${note}`);
+      }
+    }
+    lines.push('');
+  }
+
   lines.push('> This is an advisory scan. Review and update affected documents as needed.', '');
 
   const reportPath = path.join(docDir, 'impact-scan.md');
   fs.writeFileSync(reportPath, lines.join('\n'));
   return reportPath;
+}
+
+export function buildRenameMap(renamedFiles?: Record<string, string>): Map<string, string> {
+  const renameMap = new Map<string, string>();
+  if (!renamedFiles) return renameMap;
+
+  for (const [oldPath, newPath] of Object.entries(renamedFiles)) {
+    const oldBase = path.basename(oldPath).replace(/\.[^.]+$/, '');
+    const newBase = path.basename(newPath).replace(/\.[^.]+$/, '');
+    if (oldBase && newBase && oldBase !== newBase) {
+      renameMap.set(oldBase, newBase);
+    }
+  }
+
+  return renameMap;
+}
+
+export function updateAffectedDocs(
+  affectedDocs: ImpactScanResult['affectedDocs'],
+  modifiedFiles: string[],
+  renamedFiles?: Record<string, string>
+): DocUpdate[] {
+  const updates: DocUpdate[] = [];
+  const renameMap = buildRenameMap(renamedFiles);
+  const timestamp = new Date().toISOString().split('T')[0];
+
+  for (const doc of affectedDocs) {
+    let content: string;
+    try {
+      content = fs.readFileSync(doc.path, 'utf-8');
+    } catch {
+      continue;
+    }
+
+    const updatedReferences: string[] = [];
+    const notesAdded: string[] = [];
+    let modified = content;
+
+    for (const [oldName, newName] of renameMap) {
+      if (modified.includes(oldName)) {
+        modified = modified.split(oldName).join(newName);
+        updatedReferences.push(`${oldName} -> ${newName}`);
+      }
+    }
+
+    const renamedKeys = new Set(renameMap.keys());
+    const unresolvedRefs = doc.references.filter(ref => !renamedKeys.has(ref));
+
+    if (unresolvedRefs.length > 0) {
+      const note = `\n\n<!-- Impact scan (${timestamp}): References to ${unresolvedRefs.join(', ')} may need manual review after recent changes. -->`;
+      modified += note;
+      notesAdded.push(`Advisory note added for: ${unresolvedRefs.join(', ')}`);
+    }
+
+    if (modified !== content) {
+      try {
+        fs.writeFileSync(doc.path, modified, 'utf-8');
+        updates.push({
+          path: doc.path,
+          updatedReferences,
+          notesAdded,
+        });
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return updates;
 }
 
 export function runImpactScan(options: ImpactScanOptions): ImpactScanResult {
@@ -183,10 +279,18 @@ export function runImpactScan(options: ImpactScanOptions): ImpactScanResult {
     options.unitId
   );
 
+  let updatedDocs: DocUpdate[] = [];
+  try {
+    updatedDocs = updateAffectedDocs(affectedDocs, options.modifiedFiles, options.renamedFiles);
+  } catch {
+    // Non-fatal: doc updates are a bonus on top of the advisory report
+  }
+
   const result: ImpactScanResult = {
     status: 'completed',
     affectedDocs,
     reportPath: null,
+    updatedDocs: updatedDocs.length > 0 ? updatedDocs : undefined,
   };
 
   const reportPath = generateImpactReport(result, {

@@ -4,6 +4,7 @@ import type {
   QualityScorecardData,
   WorkflowCheckpointV3,
   ConstructionUnitProgress,
+  WorkflowPhase,
 } from './phase-types.js';
 
 export interface ScorecardOptions {
@@ -48,6 +49,44 @@ export function collectScorecardData(checkpoint: WorkflowCheckpointV3): QualityS
   // v1: gate_bypass_count requires manifest.gate_audit which is not available here
   const gate_bypass_count = 0;
 
+  const phases = checkpoint.phases ?? {} as Record<WorkflowPhase, unknown>;
+  let phases_completed = 0;
+  for (const phase of ['discovery', 'inception', 'construction', 'operations'] as WorkflowPhase[]) {
+    const phaseState = (phases as Record<string, { status?: string }>)[phase];
+    if (phaseState && phaseState.status && phaseState.status !== 'not_started') {
+      phases_completed++;
+    }
+  }
+
+  const metrics = (checkpoint as any).metrics as import('./phase-types.js').MethodologyMetrics | null | undefined;
+  const time_per_phase = {
+    inception_ms: metrics?.inception_duration_ms ?? 0,
+    construction_ms: metrics?.construction_duration_ms ?? 0,
+    operations_ms: metrics?.operations_duration_ms ?? 0,
+  };
+  const validation_pass_rate = metrics?.validation_pass_rate ?? 0;
+  const rework_count = metrics?.rework_count ?? 0;
+
+  let regressions_fixed = 0;
+  for (const unit of units) {
+    const regCount = unit.regressions_count ?? 0;
+    const failedCount = unit.tests_failed ?? 0;
+    if (regCount > 0 && failedCount === 0) {
+      regressions_fixed += regCount;
+    }
+  }
+
+  let readiness_sum = 0;
+  let readiness_count = 0;
+  for (const unit of units) {
+    if (unit.recreation_readiness_score != null) {
+      readiness_sum += unit.recreation_readiness_score;
+      readiness_count++;
+    }
+  }
+  const average_recreation_readiness_score =
+    readiness_count > 0 ? Math.round((readiness_sum / readiness_count) * 10) / 10 : null;
+
   return {
     tests_total,
     tests_passed,
@@ -60,6 +99,12 @@ export function collectScorecardData(checkpoint: WorkflowCheckpointV3): QualityS
     regressions_count: regressions,
     gate_bypass_count,
     data_sources: determineDataSources(units),
+    phases_completed,
+    time_per_phase,
+    validation_pass_rate,
+    rework_count,
+    regressions_fixed,
+    average_recreation_readiness_score,
   };
 }
 
@@ -105,6 +150,11 @@ export function writeScorecardReport(data: QualityScorecardData, options: Scorec
     `units_total: ${data.units_total}`,
     `regressions_count: ${data.regressions_count}`,
     `gate_bypass_count: ${data.gate_bypass_count}`,
+    `phases_completed: ${data.phases_completed ?? 0}`,
+    `validation_pass_rate: ${data.validation_pass_rate ?? 0}`,
+    `rework_count: ${data.rework_count ?? 0}`,
+    `regressions_fixed: ${data.regressions_fixed ?? 0}`,
+    `average_recreation_readiness_score: ${data.average_recreation_readiness_score ?? 'null'}`,
     '---',
     '',
   ].join('\n');
@@ -141,6 +191,24 @@ export function writeScorecardReport(data: QualityScorecardData, options: Scorec
     `| Units Completed | ${data.units_completed} |`,
     `| Units Total | ${data.units_total} |`,
     `| Gate Bypasses | ${data.gate_bypass_count} |`,
+    '',
+    '## Methodology Metrics',
+    '',
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| Phases Completed | ${data.phases_completed ?? 0} |`,
+    `| Inception Time | ${data.time_per_phase?.inception_ms ?? 0}ms |`,
+    `| Construction Time | ${data.time_per_phase?.construction_ms ?? 0}ms |`,
+    `| Operations Time | ${data.time_per_phase?.operations_ms ?? 0}ms |`,
+    `| Validation Pass Rate | ${data.validation_pass_rate ?? 0}% |`,
+    `| Rework Count | ${data.rework_count ?? 0} |`,
+    `| Regressions Fixed | ${data.regressions_fixed ?? 0} |`,
+    '',
+    '## Recreation Readiness',
+    '',
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| Average Score | ${data.average_recreation_readiness_score != null ? data.average_recreation_readiness_score : 'pending'} |`,
     '',
     '## Data Sources',
     '',

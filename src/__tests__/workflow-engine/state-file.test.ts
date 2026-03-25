@@ -215,6 +215,76 @@ describe('generateStateFile', () => {
     expect(content).toContain('| engine-alignment | not_started |');
   });
 
+  it('includes recreation readiness score in unit status when present and non-zero', () => {
+    const checkpoint = makeCheckpoint({
+      construction_units: {
+        'scored-unit': {
+          unitId: 'scored-unit',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'completed',
+          recreation_readiness_score: 4.2,
+        },
+      },
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-readiness', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| scored-unit | completed | Readiness: 4.2/5.0 |');
+  });
+
+  it('omits recreation readiness score when it is null', () => {
+    const checkpoint = makeCheckpoint({
+      construction_units: {
+        'null-score-unit': {
+          unitId: 'null-score-unit',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'completed',
+          recreation_readiness_score: null,
+        },
+      },
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-null-readiness', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| null-score-unit | completed |');
+    expect(content).not.toContain('Readiness');
+  });
+
+  it('omits recreation readiness score when it is zero', () => {
+    const checkpoint = makeCheckpoint({
+      construction_units: {
+        'zero-score-unit': {
+          unitId: 'zero-score-unit',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'completed',
+          recreation_readiness_score: 0,
+        },
+      },
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-zero-readiness', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| zero-score-unit | completed |');
+    expect(content).not.toContain('Readiness');
+  });
+
+  it('omits recreation readiness score when field is undefined', () => {
+    const checkpoint = makeCheckpoint({
+      construction_units: {
+        'no-field-unit': {
+          unitId: 'no-field-unit',
+          stages: {} as any,
+          code_plan_path: null,
+          code_generation_status: 'not_started',
+        },
+      },
+    });
+    const filePath = generateStateFile(tmpDir, 'wf-undef-readiness', checkpoint);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    expect(content).toContain('| no-field-unit | not_started |');
+    expect(content).not.toContain('Readiness');
+  });
+
   it('includes Key Artifacts table', () => {
     const checkpoint = makeCheckpoint();
     const filePath = generateStateFile(tmpDir, 'wf-artifacts', checkpoint);
