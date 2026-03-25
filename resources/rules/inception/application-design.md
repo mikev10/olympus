@@ -137,6 +137,18 @@ If the analysis in Step 5 reveals ANY ambiguous answers, you MUST:
   - Communication patterns between components
   - Data flow diagrams
 
+### MANDATORY: Post-Generation Consistency Validation
+
+After the agent generates application design artifacts (components.md, services.md, dependencies.md), the orchestrator MUST validate before presenting to the user:
+
+1. **Load decision registry**: Read `aidlc-docs/{workflow-id}/inception/decisions.md` if it exists
+2. **Verify folder paths**: Grep generated artifacts for file path references. All paths must match the decisions in requirements.md BRs (e.g., bolt folder structure, code plan locations)
+3. **Verify naming conventions**: Grep for ID formats. All IDs must match the agreed naming convention (e.g., BOLT-NNN-slug, UNIT-NNN-slug)
+4. **Verify lifecycle states**: Grep for state names. All states must match the agreed state machine in requirements.md BRs
+5. **Verify type definitions**: Check Record vs Array, union member lists against requirements.md FRs
+6. **Fix any violations** before presenting for user review
+7. **Log validation results** in audit.md
+
 ### 12. Log Approval
 - Log approval prompt with timestamp in `aidlc-docs/audit.md`
 - Include complete approval prompt text

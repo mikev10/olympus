@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.21] - 2026-03-25
+
+### Fixed
+
+- **Artifact consistency validation** — Added mandatory post-generation consistency checks to prevent agent-generated content from drifting from agreed structural decisions (folder paths, naming conventions, lifecycle states, type definitions)
+
+### Added
+
+- **Decision registry support** — New `decisions.md` artifact requirement for complex workflows, listing all structural decisions as key-value pairs for agent prompt inclusion
+- **Agent prompt constraints** — Content validation rules now require verbatim BR/FR quotes in agent delegation prompts instead of summaries
+
 ## [4.4.20] - 2026-03-25
 
 ### Fixed

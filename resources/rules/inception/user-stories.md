@@ -286,6 +286,18 @@ After all answers are collected and ambiguities resolved, you MUST update the st
 - Include the complete approval prompt text
 - Use ISO 8601 timestamp format
 
+### MANDATORY: Post-Generation Consistency Validation
+
+After the agent generates stories.md and personas.md, the orchestrator MUST validate before presenting to the user:
+
+1. **Load decision registry**: Read `aidlc-docs/{workflow-id}/inception/decisions.md` if it exists
+2. **Verify acceptance criteria paths**: Grep stories for file path references. All paths must match decisions in requirements.md BRs
+3. **Verify naming conventions**: Grep stories for ID formats (bolt IDs, unit IDs). All must match agreed conventions
+4. **Verify state references**: Grep stories for lifecycle state names. All must match agreed state machine
+5. **Cross-reference story count**: Verify persona count matches the approved plan
+6. **Fix any violations** before presenting for user review
+7. **Log validation results** in audit.md
+
 ## Step 21: Present Completion Message
 - Present completion message in this structure:
      1. **Completion Announcement** (mandatory): Always start with this:
