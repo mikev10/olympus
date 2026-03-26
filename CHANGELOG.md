@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-03-26
+
+### Fixed
+
+- **Workflow slug derivation** — `deriveWorkflowSlug` now strips path components when `/plan` receives a file path argument (e.g., `.olympus/briefs/feature.md` → `feature` instead of `olympusbriefsonline-registration-iframe`)
+
 ## [4.5.0] - 2026-03-26
 
 ### Added
