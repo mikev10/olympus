@@ -67,6 +67,8 @@ export function createExpressBolt(
     depth_target: 1,
     express_mode: true,
     estimated_effort_hours: unit.estimated_effort,
+    requirements: [],
+    stories: [],
   };
 
   return bolt;

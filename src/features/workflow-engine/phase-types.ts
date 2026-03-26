@@ -516,6 +516,12 @@ export interface BoltSpec extends HierarchicalNode {
 
   /** Estimated duration in hours. Sourced from bolt spec frontmatter. */
   estimated_effort_hours: number;
+
+  /** Requirement IDs this bolt satisfies (e.g. ['FR-1', 'FR-3']). */
+  requirements?: string[];
+
+  /** Story IDs this bolt satisfies (e.g. ['S-001', 'S-004']). */
+  stories?: string[];
 }
 
 /**

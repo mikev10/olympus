@@ -20,9 +20,13 @@
 - requirements.md (includes intent analysis)
 - requirements-analysis-questions.md (with answers)
 
+> **Traceability prerequisite**: Verify that `requirements.md` contains named requirement IDs in `FR-NNN` format (e.g., `FR-001`, `FR-002`). These IDs are referenced throughout construction — bolt specs cite them in `requirements` frontmatter and `## Traceability` sections, and the bolt planner performs coverage checks against `must`-priority requirements. If requirements exist but lack explicit IDs, add them before proceeding to construction.
+
 ### 1.3 Load User Stories (if executed)
 - stories.md
 - personas.md
+
+> **Traceability prerequisite**: Verify that `stories.md` contains named story IDs in `S-NNN` format (e.g., `S-001`, `S-002`). These IDs are referenced in bolt specs and coverage validation. If stories exist but lack explicit IDs, add them before proceeding to construction.
 
 ## Step 2: Detailed Scope and Impact Analysis
 

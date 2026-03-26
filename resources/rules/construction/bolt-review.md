@@ -100,12 +100,25 @@ These fields are stored on the `ConstructionBoltProgress` object alongside the b
 
 ---
 
+## Traceability Check
+
+As part of evaluating each bolt, BoltReviewer performs a lightweight traceability check:
+
+- Read the `requirements` and `stories` fields from the bolt's `spec.md` frontmatter and the `## Traceability` section.
+- Verify that the generated code actually touches functionality relevant to the cited requirement IDs. If a bolt claims to satisfy `FR-3` (e.g., "user authentication") but the code contains no authentication logic, flag this as a concern.
+- Add a **Traceability** line to `review.md` under the **Feedback** section:
+  `Traceability: Requirements {ID list} addressed — Yes / Partial / No`
+- A "Partial" or "No" finding should reduce the alignment score and appear as a **Concerns** item. It does not automatically trigger a hard block, but it does lower the score and may push a bolt into the advisory or rejected tier.
+
+---
+
 ## BoltReviewer Behavior
 
 BoltReviewer is a decision engine, not an interactive agent. It:
 
 - Reads the bolt spec (`spec.md`) and the generated code in `Target Files`
 - Evaluates alignment against each acceptance criterion
+- Performs a traceability check against the cited requirement and story IDs
 - Computes a score and selects a tier
 - Writes the `review.md` artifact
 - Returns a structured decision object to the orchestrator

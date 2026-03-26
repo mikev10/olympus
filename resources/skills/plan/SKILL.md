@@ -1167,6 +1167,7 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 - **Scope**: {one-sentence scope description}
 - **Phase**: construction
 - **Estimated Effort**: {N}
+- **Requirements**: FR-001, FR-002
 - **User Stories**: S-001, S-002
 - **NFRs**: SEC-001, PERF-001
 - **Components**: {component names}
@@ -1175,6 +1176,8 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 ## U-002: {Module Name}
 ...
 ```
+
+> **Note**: The `Requirements` field lists the FR-N IDs from `requirements.md` that this unit addresses. These IDs flow directly into bolt planning — the bolt planner reads them to populate the `requirements` frontmatter field and `## Traceability` section of each bolt spec. Establish requirement IDs during Requirements Analysis so they are available here.
 
 **`aidlc-docs/{workflowId}/inception/application-design/unit-of-work-dependency.md`**:
 

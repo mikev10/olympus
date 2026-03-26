@@ -11,7 +11,7 @@ const MAX_BOLTS_PER_UNIT = 8;
 const MAX_BOLTS_TOTAL = 50;
 
 export class BoltSpecValidator {
-  static validate(spec: BoltSpec, context: ValidationContext): void {
+  static validate(spec: BoltSpec, context: ValidationContext): string[] {
     if (context.existing_bolts_in_unit >= MAX_BOLTS_PER_UNIT) {
       throw new BoltValidationError(
         'MAX_PER_UNIT_EXCEEDED',
@@ -60,5 +60,17 @@ export class BoltSpecValidator {
         'BoltSpec.sequence must be a positive integer (>= 1).',
       );
     }
+
+    const warnings: string[] = [];
+
+    if (spec.requirements !== undefined && spec.requirements.length === 0) {
+      warnings.push('Bolt has no requirement traceability');
+    }
+
+    if (spec.stories !== undefined && spec.stories.length === 0) {
+      warnings.push('Bolt has no story traceability');
+    }
+
+    return warnings;
   }
 }

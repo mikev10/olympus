@@ -25,6 +25,8 @@ sequence: 1
 depth_target: 6
 express_mode: false
 estimated_effort_hours: 4
+requirements: ["FR-1", "FR-3"]
+stories: ["S-001"]
 ---
 ```
 
@@ -37,10 +39,12 @@ estimated_effort_hours: 4
 | `depth_target` | Reasoning depth (1-10). Express mode threshold: <= 4 |
 | `express_mode` | `true` if eligible for express execution (skips elaboration) |
 | `estimated_effort_hours` | Rough hours estimate for human review |
+| `requirements` | Requirement IDs from `requirements.md` that this bolt satisfies (e.g., `["FR-1", "FR-3"]`) |
+| `stories` | Story IDs from `stories.md` that this bolt addresses (e.g., `["S-001"]`). Optional but recommended. |
 
 ### Required Sections
 
-Every bolt spec must contain all four sections:
+Every bolt spec must contain all five sections:
 
 **Scope** — What this bolt implements. A focused description of the functionality delivered by this bolt alone.
 
@@ -49,6 +53,10 @@ Every bolt spec must contain all four sections:
 **Target Files** — List of files to be created or modified. Paths are relative to the project root.
 
 **Dependencies** — Other bolts that must complete before this bolt can begin. Use bolt IDs (e.g., `BOLT-001-data-model`). Leave empty if no dependencies.
+
+**Traceability** — Which requirements and stories this bolt satisfies:
+- **Requirements**: {comma-separated requirement IDs from requirements.md}
+- **Stories**: {comma-separated story IDs from stories.md}
 
 ---
 
@@ -80,9 +88,20 @@ If a unit's scope exceeds 8 bolts, it must be re-scoped or split into multiple u
 
 ---
 
+## Traceability Rules
+
+Every bolt MUST satisfy the following traceability requirements:
+
+- **Requirement reference is mandatory**: Every bolt must reference at least one requirement ID in its `requirements` frontmatter field and its `## Traceability` section. Requirement IDs come from `requirements.md` (e.g., `FR-1`, `FR-3`). A bolt with no requirement reference is invalid and must be revised before execution.
+- **Story reference is recommended but optional**: Not all bolts map directly to user stories (infrastructure, scaffolding, and cross-cutting bolts often do not). Include story IDs when they exist; leave the `stories` field as an empty array `[]` when none apply.
+- **Planner responsibility**: The planner agent is responsible for reading the inception `requirements.md` and `stories.md` artifacts and populating these fields for every bolt it generates. Do not leave them as placeholder values.
+- **Coverage check at plan completion**: After all bolts for a unit are planned, a coverage check verifies that every requirement with `must` priority in `requirements.md` is addressed by at least one bolt. Unaddressed `must` requirements must be resolved before bolt execution begins (either by revising an existing bolt's scope or adding a new bolt).
+
+---
+
 ## Coverage Validation
 
-After bolt decomposition, the BoltPlanner validates that the bolt set covers all unit stories.
+After bolt decomposition, the BoltPlanner validates that the bolt set covers all unit stories and requirements.
 
 | Coverage | Result |
 |----------|--------|
@@ -90,7 +109,9 @@ After bolt decomposition, the BoltPlanner validates that the bolt set covers all
 | 80-94% | Warning — user must explicitly acknowledge the gap before proceeding |
 | < 80% | Hard block — bolt planning rejected, must revise decomposition |
 
-Coverage is measured as: (stories with at least one covering bolt) / (total unit stories).
+Story coverage is measured as: (stories with at least one covering bolt) / (total unit stories).
+
+Requirement coverage (must-priority only): all `must`-priority requirements in `requirements.md` must be referenced by at least one bolt. Any uncovered `must` requirement is treated as a hard block regardless of story coverage score.
 
 ---
 

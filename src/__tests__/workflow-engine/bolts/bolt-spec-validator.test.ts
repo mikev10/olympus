@@ -23,6 +23,8 @@ function makeValidBoltSpec(overrides?: Partial<BoltSpec>): BoltSpec {
     depth_target: 5,
     express_mode: false,
     estimated_effort_hours: 2,
+    requirements: ['FR-1'],
+    stories: ['S-001'],
     ...overrides,
   };
 }

@@ -112,6 +112,8 @@ export async function writeBoltArtifacts(
       );
       await fs.ensureDir(boltDir);
 
+      const reqYaml = JSON.stringify(bolt.requirements ?? []);
+      const storiesYaml = JSON.stringify(bolt.stories ?? []);
       const frontmatter = [
         '---',
         `id: ${bolt.id}`,
@@ -121,6 +123,8 @@ export async function writeBoltArtifacts(
         `depth_target: ${bolt.depth_target}`,
         `express_mode: ${bolt.express_mode}`,
         `estimated_effort_hours: ${bolt.estimated_effort_hours}`,
+        `requirements: ${reqYaml}`,
+        `stories: ${storiesYaml}`,
         '---',
       ].join('\n');
 
@@ -132,6 +136,14 @@ export async function writeBoltArtifacts(
       const depsList =
         bolt.dependencies.length > 0
           ? bolt.dependencies.map((d) => `- ${d}`).join('\n')
+          : 'None';
+      const reqList =
+        (bolt.requirements ?? []).length > 0
+          ? (bolt.requirements ?? []).join(', ')
+          : 'None';
+      const storiesList =
+        (bolt.stories ?? []).length > 0
+          ? (bolt.stories ?? []).join(', ')
           : 'None';
 
       const specContent = [
@@ -154,6 +166,11 @@ export async function writeBoltArtifacts(
         '## Dependencies',
         '',
         depsList,
+        '',
+        '## Traceability',
+        '',
+        `- **Requirements**: ${reqList}`,
+        `- **Stories**: ${storiesList}`,
         '',
       ].join('\n');
 
@@ -288,6 +305,8 @@ export function buildDecompositionPrompt(
     '- `target_files` (string[]): Relative file paths to modify/create',
     '- `dependencies` (string[]): IDs of preceding bolts (or empty array)',
     '- `estimated_effort_hours` (number): Estimated duration in hours',
+    '- `requirements` (string[]): requirement IDs from requirements.md that this bolt addresses (e.g. ["FR-1", "FR-3"])',
+    '- `stories` (string[]): story IDs from stories.md that this bolt addresses (e.g. ["S-001"])',
     '',
     'Return ONLY the JSON array, no other text.',
   ].join('\n');
@@ -300,6 +319,8 @@ interface RawBoltFromAgent {
   target_files: string[];
   dependencies: string[];
   estimated_effort_hours: number;
+  requirements?: string[];
+  stories?: string[];
 }
 
 export function parseAgentResponse(
@@ -354,6 +375,8 @@ export function parseAgentResponse(
       depth_target: depth,
       express_mode: expressMode,
       estimated_effort_hours: raw.estimated_effort_hours || 0,
+      requirements: raw.requirements ?? [],
+      stories: raw.stories ?? [],
     };
   });
 
