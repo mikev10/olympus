@@ -200,7 +200,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'units', 'unit-of-work.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
@@ -212,7 +212,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work-dependency.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'units', 'unit-of-work-dependency.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
@@ -224,7 +224,7 @@ describe('executeUnitsGeneration', () => {
 
       await executeUnitsGeneration(projectPath, workflowId, checkpoint);
 
-      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'application-design', 'unit-of-work-story-map.md');
+      const expectedPath = join(projectPath, 'aidlc-docs', workflowId, 'inception', 'units', 'unit-of-work-story-map.md');
       const writeCall = vi.mocked(mockFsWriteFile).mock.calls.find(
         ([path]) => path === expectedPath
       );
