@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.4] - 2026-03-26
+
+### Added
+
+- **Requirement traceability** — Bolt specs now track which requirements (`FR-N`) and stories (`S-NNN`) they satisfy via `requirements` and `stories` fields in frontmatter and a `## Traceability` section in spec.md
+- **Traceability in bolt planning** — Agent decomposition prompt requests traceability fields; planner validates must-priority requirement coverage
+- **Traceability in bolt review** — Reviewer verifies cited requirements are addressed in code, emits traceability status in review.md
+- **Traceability in code generation** — Code gen agent reads Traceability section for implementation context
+- **Inception→Construction flow** — Workflow planning ensures FR-NNN and S-NNN IDs exist before entering construction phase
+
 ## [4.5.3] - 2026-03-26
 
 ### Fixed
