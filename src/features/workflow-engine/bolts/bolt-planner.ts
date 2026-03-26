@@ -114,6 +114,7 @@ export async function writeBoltArtifacts(
 
       const reqYaml = JSON.stringify(bolt.requirements ?? []);
       const storiesYaml = JSON.stringify(bolt.stories ?? []);
+      const docsImpactYaml = JSON.stringify(bolt.docs_impact ?? ['none']);
       const frontmatter = [
         '---',
         `id: ${bolt.id}`,
@@ -125,6 +126,7 @@ export async function writeBoltArtifacts(
         `estimated_effort_hours: ${bolt.estimated_effort_hours}`,
         `requirements: ${reqYaml}`,
         `stories: ${storiesYaml}`,
+        `docs_impact: ${docsImpactYaml}`,
         '---',
       ].join('\n');
 
@@ -307,6 +309,7 @@ export function buildDecompositionPrompt(
     '- `estimated_effort_hours` (number): Estimated duration in hours',
     '- `requirements` (string[]): requirement IDs from requirements.md that this bolt addresses (e.g. ["FR-1", "FR-3"])',
     '- `stories` (string[]): story IDs from stories.md that this bolt addresses (e.g. ["S-001"])',
+    '- `docs_impact` (string[]): documentation types this bolt impacts (e.g. ["user-guide", "readme"]) — valid values: none, readme, user-guide, config-reference, cli-reference, migration-guide, architecture, code-comments. Assess based on what the bolt changes — user-facing features need user-guide, config changes need config-reference, breaking changes need migration-guide, internal-only changes use none.',
     '',
     'Return ONLY the JSON array, no other text.',
   ].join('\n');
@@ -321,6 +324,7 @@ interface RawBoltFromAgent {
   estimated_effort_hours: number;
   requirements?: string[];
   stories?: string[];
+  docs_impact?: string[];
 }
 
 export function parseAgentResponse(
@@ -377,6 +381,7 @@ export function parseAgentResponse(
       estimated_effort_hours: raw.estimated_effort_hours || 0,
       requirements: raw.requirements ?? [],
       stories: raw.stories ?? [],
+      docs_impact: raw.docs_impact ?? ['none'],
     };
   });
 

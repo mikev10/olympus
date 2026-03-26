@@ -73,6 +73,8 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 
 **Build and Test** (ALWAYS, after all units): Load `~/.claude/olympus/rules/construction/build-and-test.md`
 
+**Documentation** (ALWAYS, after Build and Test): Load `~/.claude/olympus/rules/construction/documentation.md`
+
 ---
 
 # OPERATIONS PHASE — Placeholder for future deployment/monitoring workflows
@@ -133,7 +135,8 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 │   │   │   ├── nfr-design/
 │   │   │   ├── infrastructure-design/
 │   │   │   └── code/               # Markdown summaries only
-│   │   └── build-and-test/
+│   │   ├── build-and-test/
+│   │   └── documentation/
 │   ├── operations/                 # Placeholder
 │   ├── aidlc-state.md
 │   └── audit.md
@@ -153,6 +156,7 @@ Application code: workspace root (NEVER in aidlc-docs/). Documentation: aidlc-do
 | Code Generation (backend) | `olympian` or `olympian-high` | Implementation |
 | Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI implementation |
 | Build & Test | `qa-tester` | Testing and verification |
+| Documentation | `document-writer` | Documentation draft generation |
 | Review | `momus` | Critical evaluation |
 
 ## Skill Stacking for AI-DLC

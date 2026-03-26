@@ -36,6 +36,7 @@ function makeBoltSpec(overrides: Partial<BoltSpec> = {}): BoltSpec {
     estimated_effort_hours: 4,
     requirements: [],
     stories: [],
+    docs_impact: ['none'],
     ...overrides,
   };
 }

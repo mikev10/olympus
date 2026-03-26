@@ -372,7 +372,7 @@ Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:
 - **Ready for Operations**: [Yes/No]
 
 ## Next Steps
-[If all pass]: Ready to proceed to Operations phase for deployment planning
+[If all pass]: Ready to proceed to Documentation Generation stage
 [If failures]: Address failing tests and rebuild
 ```
 
@@ -384,19 +384,19 @@ Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:
 1. Update `aidlc-docs/{workflow-id}/aidlc-state.md`:
    - Mark Build and Test stage as complete
    - Update current status
-2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — mark the workflow as complete:
+2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — transition to documentation stage:
 
 ```json
 {
-  "current_stage": "complete",
-  "status": "complete",
+  "current_stage": "documentation",
+  "status": "in_progress",
   "active_unit_id": null,
   "units_completed": N
 }
 ```
 
-  - `current_stage` MUST be `"complete"` (not `"build-and-test"`)
-  - `status` MUST be `"complete"` (not `"in_progress"`)
+  - `current_stage` MUST be `"documentation"` (not `"complete"` — Documentation Generation follows)
+  - `status` MUST be `"in_progress"`
   - Verify `units_completed` equals `units_total`
   - Verify all units in `construction_units` have `"code_generation_status": "completed"`
 - **Do NOT proceed to the next stage without completing this step**
@@ -428,7 +428,7 @@ Present comprehensive message:
 
 Review the summary in aidlc-docs/construction/build-and-test/build-and-test-summary.md
 
-**Ready to proceed to Operations stage for deployment planning?""
+**Ready to proceed to Documentation Generation?""
 ```
 
 ---
@@ -451,3 +451,11 @@ Review the summary in aidlc-docs/construction/build-and-test/build-and-test-summ
 
 ---
 ```
+
+---
+
+## Mandatory Next Stage: Documentation Generation
+
+After Build and Test is approved, the workflow MUST proceed to Documentation Generation.
+Load `~/.claude/olympus/rules/construction/documentation.md` and execute.
+This stage is MANDATORY and cannot be skipped regardless of depth, pathway, or trust level.

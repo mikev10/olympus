@@ -25,6 +25,7 @@ function makeValidBoltSpec(overrides?: Partial<BoltSpec>): BoltSpec {
     estimated_effort_hours: 2,
     requirements: ['FR-1'],
     stories: ['S-001'],
+    docs_impact: ['none'],
     ...overrides,
   };
 }
@@ -220,6 +221,42 @@ describe('BoltSpecValidator', () => {
         `expected no error for id="${id}"`,
       ).not.toThrow();
     }
+  });
+
+  it('returns warning for invalid docs_impact value', () => {
+    const warnings = BoltSpecValidator.validate(
+      makeValidBoltSpec({ docs_impact: ['invalid-type'] }),
+      makeContext(),
+    );
+    expect(warnings.some((w) => w.includes('docs_impact') && w.includes('invalid-type'))).toBe(true);
+  });
+
+  it('passes without warning for valid docs_impact values', () => {
+    const validValues = ['none', 'readme', 'user-guide', 'config-reference', 'cli-reference', 'migration-guide', 'architecture', 'code-comments'];
+    for (const value of validValues) {
+      const warnings = BoltSpecValidator.validate(
+        makeValidBoltSpec({ docs_impact: [value] }),
+        makeContext(),
+      );
+      expect(warnings.some((w) => w.includes('docs_impact'))).toBe(false);
+    }
+  });
+
+  it('returns multiple warnings for multiple invalid docs_impact values', () => {
+    const warnings = BoltSpecValidator.validate(
+      makeValidBoltSpec({ docs_impact: ['bad-one', 'bad-two'] }),
+      makeContext(),
+    );
+    expect(warnings.filter((w) => w.includes('docs_impact'))).toHaveLength(2);
+  });
+
+  it('passes when docs_impact is undefined', () => {
+    expect(() =>
+      BoltSpecValidator.validate(
+        makeValidBoltSpec({ docs_impact: undefined }),
+        makeContext(),
+      ),
+    ).not.toThrow();
   });
 
   it('boundary cases: exactly 8 bolts blocks, 7 passes; exactly 50 total blocks, 49 passes', () => {

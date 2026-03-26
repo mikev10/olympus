@@ -13,11 +13,11 @@
 • **OPERATIONS PHASE**: Placeholder for future deployment and monitoring workflows
 
 ## The Adaptive Workflow:
-• **Workspace Detection** (always) → **Reverse Engineering** (brownfield only) → **Requirements Analysis** (always, adaptive depth) → **Conditional Phases** (as needed) → **Workflow Planning** (always) → **Code Generation** (always, per-unit) → **Build and Test** (always)
+• **Workspace Detection** (always) → **Reverse Engineering** (brownfield only) → **Requirements Analysis** (always, adaptive depth) → **Conditional Phases** (as needed) → **Workflow Planning** (always) → **Code Generation** (always, per-unit) → **Build and Test** (always) → **Documentation** (always)
 
 ## How It Works:
 • **AI analyzes** your request, workspace, and complexity to determine which stages are needed
-• **These stages always execute**: Workspace Detection, Requirements Analysis (adaptive depth), Workflow Planning, Code Generation (per-unit), Build and Test
+• **These stages always execute**: Workspace Detection, Requirements Analysis (adaptive depth), Workflow Planning, Code Generation (per-unit), Build and Test, Documentation
 • **All other stages are conditional**: Reverse Engineering, User Stories, Application Design, Units Generation, per-unit design stages (Functional Design, NFR Requirements, NFR Design, Infrastructure Design)
 • **No fixed sequences**: Stages execute in the order that makes sense for your specific task
 
@@ -51,6 +51,7 @@ flowchart TD
         ID["Infrastructure Design<br/><b>CONDITIONAL</b>"]
         CG["Code Generation<br/><b>ALWAYS</b>"]
         BT["Build and Test<br/><b>ALWAYS</b>"]
+        DOC["Documentation<br/><b>ALWAYS</b>"]
     end
     
     subgraph OPERATIONS["🟡 OPERATIONS PHASE"]
@@ -81,8 +82,9 @@ flowchart TD
     ID --> CG
     CG -.->|Next Unit| FD
     CG --> BT
-    BT -.-> OPS
-    BT --> End(["Complete"])
+    BT --> DOC
+    DOC -.-> OPS
+    DOC --> End(["Complete"])
     
     style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style RA fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
@@ -90,6 +92,7 @@ flowchart TD
 
     style CG fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style BT fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style DOC fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style OPS fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style RE fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
     style Stories fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
@@ -127,6 +130,7 @@ flowchart TD
 - Infrastructure Design: Map to actual infrastructure services (CONDITIONAL, per-unit)
 - Code Generation: Generate code with Part 1 - Planning, Part 2 - Generation (ALWAYS, per-unit)
 - Build and Test: Build all units and execute comprehensive testing (ALWAYS)
+- Documentation: Generate documentation drafts from workflow artifacts (ALWAYS)
 
 **🟡 OPERATIONS PHASE** - Placeholder
 - Operations: Placeholder for future deployment and monitoring workflows (PLACEHOLDER)

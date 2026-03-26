@@ -27,6 +27,7 @@ express_mode: false
 estimated_effort_hours: 4
 requirements: ["FR-1", "FR-3"]
 stories: ["S-001"]
+docs_impact: ["none"]
 ---
 ```
 
@@ -41,6 +42,7 @@ stories: ["S-001"]
 | `estimated_effort_hours` | Rough hours estimate for human review |
 | `requirements` | Requirement IDs from `requirements.md` that this bolt satisfies (e.g., `["FR-1", "FR-3"]`) |
 | `stories` | Story IDs from `stories.md` that this bolt addresses (e.g., `["S-001"]`). Optional but recommended. |
+| `docs_impact` | Array of strings indicating documentation types this bolt impacts: `none`, `readme`, `user-guide`, `config-reference`, `cli-reference`, `migration-guide`, `architecture`, `code-comments`. Used by the Documentation Generation stage to determine which docs to produce. |
 
 ### Required Sections
 
@@ -96,6 +98,23 @@ Every bolt MUST satisfy the following traceability requirements:
 - **Story reference is recommended but optional**: Not all bolts map directly to user stories (infrastructure, scaffolding, and cross-cutting bolts often do not). Include story IDs when they exist; leave the `stories` field as an empty array `[]` when none apply.
 - **Planner responsibility**: The planner agent is responsible for reading the inception `requirements.md` and `stories.md` artifacts and populating these fields for every bolt it generates. Do not leave them as placeholder values.
 - **Coverage check at plan completion**: After all bolts for a unit are planned, a coverage check verifies that every requirement with `must` priority in `requirements.md` is addressed by at least one bolt. Unaddressed `must` requirements must be resolved before bolt execution begins (either by revising an existing bolt's scope or adding a new bolt).
+
+---
+
+## Documentation Impact Assessment
+
+The planner MUST assess `docs_impact` for every bolt based on what the bolt changes. Apply these rules:
+
+- **User-facing features** (new UI, new CLI commands, new API endpoints): include `user-guide`
+- **Configuration changes** (new env vars, new settings, new options): include `config-reference`
+- **CLI changes** (new commands, new flags, changed usage): include `cli-reference`
+- **Breaking changes** (removed features, changed APIs, migration needed): include `migration-guide`
+- **README-worthy changes** (new capabilities, changed project setup): include `readme`
+- **Architectural changes** (new services, new data flows, new components): include `architecture`
+- **Complex internal logic** (non-obvious algorithms, intricate state machines): include `code-comments`
+- **Internal-only changes** (refactoring, test fixes, minor tweaks with no user impact): use `none`
+
+A bolt may have multiple `docs_impact` values (e.g., `["user-guide", "config-reference"]`). Only use `none` when the bolt has zero documentation impact.
 
 ---
 

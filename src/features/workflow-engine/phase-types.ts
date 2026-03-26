@@ -522,6 +522,9 @@ export interface BoltSpec extends HierarchicalNode {
 
   /** Story IDs this bolt satisfies (e.g. ['S-001', 'S-004']). */
   stories?: string[];
+
+  /** Documentation types this bolt impacts: 'none', 'readme', 'user-guide', 'config-reference', 'cli-reference', 'migration-guide', 'architecture', 'code-comments'. */
+  docs_impact?: string[];
 }
 
 /**

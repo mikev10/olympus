@@ -334,6 +334,7 @@ flowchart TD
     subgraph CONSTRUCTION["CONSTRUCTION PHASE"]
         CG["Code Generation<br/><b>EXECUTE</b><br/>N units"]
         BT["Build and Test<br/><b>EXECUTE</b>"]
+        DOC["Documentation<br/><b>EXECUTE</b>"]
     end
 
     Start --> WD
@@ -343,7 +344,8 @@ flowchart TD
     US --> WP
     WP --> CG
     CG --> BT
-    BT --> End(["Complete"])
+    BT --> DOC
+    DOC --> End(["Complete"])
 
     style WD fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style RE fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
@@ -354,6 +356,7 @@ flowchart TD
     style UG fill:#BDBDBD,stroke:#424242,stroke-width:2px,stroke-dasharray: 5 5,color:#000
     style CG fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style BT fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style DOC fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style INCEPTION fill:#BBDEFB,stroke:#1565C0,stroke-width:3px,color:#000
     style CONSTRUCTION fill:#C8E6C9,stroke:#2E7D32,stroke-width:3px,color:#000
     style Start fill:#CE93D8,stroke:#6A1B9A,stroke-width:3px,color:#000
@@ -377,6 +380,7 @@ INCEPTION PHASE
 CONSTRUCTION PHASE
   - Code Generation          [EXECUTE - N units]
   - Build and Test           [EXECUTE]
+  - Documentation            [EXECUTE]
 ```
 
 ## Phases to Execute
@@ -409,6 +413,8 @@ CONSTRUCTION PHASE
   - **Rationale**: Code implementation needed
 - [ ] Build and Test - EXECUTE (ALWAYS)
   - **Rationale**: Build, test, and verification needed
+- [ ] Documentation - EXECUTE (ALWAYS)
+  - **Rationale**: Generate documentation drafts from workflow artifacts
 
 ### 🟡 OPERATIONS PHASE
 - [ ] Operations - PLACEHOLDER
@@ -469,6 +475,7 @@ CONSTRUCTION PHASE
 - [ ] Code Planning - EXECUTE
 - [ ] Code Generation - EXECUTE
 - [ ] Build and Test - EXECUTE
+- [ ] Documentation - EXECUTE
 
 ### 🟡 OPERATIONS PHASE
 - [ ] Operations - PLACEHOLDER

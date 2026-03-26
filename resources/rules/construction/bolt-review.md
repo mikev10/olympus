@@ -112,6 +112,19 @@ As part of evaluating each bolt, BoltReviewer performs a lightweight traceabilit
 
 ---
 
+## Documentation Quality Check
+
+The reviewer MUST evaluate documentation aspects of the bolt:
+
+- If `docs_impact` includes `code-comments`: verify complex logic has adequate inline comments in the generated code. Flag missing comments on non-obvious algorithms, public API entry points, or intricate state management as a concern.
+- If `docs_impact` includes any user-facing type (`readme`, `user-guide`, `config-reference`, `cli-reference`, `migration-guide`): verify the code behavior is clear enough to document -- acceptance criteria are testable and descriptive, public interfaces are well-named, and usage patterns are evident from the code structure.
+- If the bolt introduces new public APIs, new CLI commands, or new configuration options but `docs_impact` is set to `none`: flag this as a likely missed assessment. Include a concern noting that documentation impact may need to be updated before the Documentation Generation stage.
+
+Include a documentation quality note in the review.md Feedback section:
+`Documentation: docs_impact [{values}] -- {assessment: adequate / concerns noted / impact likely missed}`
+
+---
+
 ## BoltReviewer Behavior
 
 BoltReviewer is a decision engine, not an interactive agent. It:

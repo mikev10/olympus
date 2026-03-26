@@ -1,6 +1,17 @@
 import type { BoltSpec } from '../phase-types.js';
 import { BoltValidationError } from '../phase-types.js';
 
+const VALID_DOCS_IMPACT_VALUES = new Set([
+  'none',
+  'readme',
+  'user-guide',
+  'config-reference',
+  'cli-reference',
+  'migration-guide',
+  'architecture',
+  'code-comments',
+]);
+
 export interface ValidationContext {
   existing_bolts_in_unit: number;
   existing_bolts_total: number;
@@ -69,6 +80,14 @@ export class BoltSpecValidator {
 
     if (spec.stories !== undefined && spec.stories.length === 0) {
       warnings.push('Bolt has no story traceability');
+    }
+
+    if (spec.docs_impact !== undefined) {
+      for (const value of spec.docs_impact) {
+        if (!VALID_DOCS_IMPACT_VALUES.has(value)) {
+          warnings.push(`docs_impact contains invalid value: "${value}". Valid values are: ${[...VALID_DOCS_IMPACT_VALUES].join(', ')}`);
+        }
+      }
     }
 
     return warnings;

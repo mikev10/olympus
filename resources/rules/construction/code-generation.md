@@ -407,6 +407,7 @@ When a unit has been decomposed into bolts (see `resources/rules/construction/bo
 - Each bolt has its own `spec.md` defining scope, acceptance criteria, and target files
 - The code generation agent receives one bolt spec at a time
 - **Before writing any code**, the agent MUST read the bolt's `## Traceability` section (and the `requirements` / `stories` frontmatter fields) to understand which business requirements this bolt serves and why it exists. This context informs implementation decisions — for example, knowing a bolt satisfies `FR-5` (audit logging) tells the agent to write every mutating operation with an audit trail, even if the acceptance criteria do not spell out every detail.
+- **Inline documentation**: If the bolt's `docs_impact` frontmatter includes `code-comments`, the code generation agent MUST add explanatory inline comments for complex logic, non-obvious algorithms, and public API entry points. These comments should explain the "why" (business rationale) not just the "what" (mechanical description). Well-commented code feeds directly into the Documentation Generation stage that follows Build and Test.
 - After each bolt's code generation completes, **Bolt Review** runs before the next bolt begins (see `resources/rules/construction/bolt-review.md`)
 - The checkpoint tracks bolt state via `construction_bolts`, `active_bolt_id`, and `active_bolt_stage`
 - The unit-level code generation plan still governs overall unit scope; bolts decompose its execution into focused, reviewable increments

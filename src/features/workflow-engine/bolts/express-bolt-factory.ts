@@ -69,6 +69,7 @@ export function createExpressBolt(
     estimated_effort_hours: unit.estimated_effort,
     requirements: [],
     stories: [],
+    docs_impact: ['none'],
   };
 
   return bolt;
