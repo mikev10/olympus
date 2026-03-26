@@ -69,6 +69,11 @@ Create `aidlc-docs/{workflowId}/discovery/workspace-scan.json`:
 
 ```json
 {
+  "_meta": {
+    "artifact": "Workspace Scan",
+    "contains": "Raw inventory of packages, languages, frameworks, and structural patterns discovered in the codebase",
+    "reviewFor": "Verify all packages and repos were discovered. Flag any missed projects or incorrectly categorized packages."
+  },
   "scanDate": "[ISO timestamp]",
   "projectPath": "[Project root path]",
   "fileCount": "[Total number of source files]",
@@ -96,6 +101,10 @@ Create `aidlc-docs/{workflowId}/discovery/workspace-scan.json`:
 Create `aidlc-docs/{workflowId}/discovery/analysis-plan.md`:
 
 ```markdown
+> **Artifact**: Analysis Plan
+> **Contains**: Scope, methodology, key questions, and success criteria that guided the AI agents during reverse engineering
+> **Review for**: Confirm the analysis scope and key questions cover what matters to you. These questions are answered by the other discovery artifacts — you do not need to answer them yourself.
+
 # Analysis Plan
 
 ## Scope
@@ -122,6 +131,10 @@ Create `aidlc-docs/{workflowId}/discovery/analysis-plan.md`:
 Create `aidlc-docs/{workflowId}/discovery/current-state-analysis.md`:
 
 ```markdown
+> **Artifact**: Current State Analysis
+> **Contains**: Architecture summary, technology stack, component inventory, data models, and integration points
+> **Review for**: Verify the architecture summary and tech stack match reality. Flag missing components, incorrect relationships, or outdated technology versions.
+
 # Current State Analysis
 
 ## System Overview
@@ -156,6 +169,10 @@ Create `aidlc-docs/{workflowId}/discovery/current-state-analysis.md`:
 Create `aidlc-docs/{workflowId}/discovery/regression-baseline.md`:
 
 ```markdown
+> **Artifact**: Regression Baseline
+> **Contains**: Test coverage status, quality metrics, known issues, technical debt, and behaviors that must be preserved
+> **Review for**: Confirm the baseline behavior list is complete and accurate. Add any missing behaviors that should survive the migration. These items are verified during Build and Test via coverage mapping.
+
 # Regression Baseline
 
 ## Test Coverage Status
@@ -186,6 +203,10 @@ Create `aidlc-docs/{workflowId}/discovery/regression-baseline.md`:
 Create `aidlc-docs/{workflowId}/discovery/change-impact.md`:
 
 ```markdown
+> **Artifact**: Change Impact Analysis
+> **Contains**: Affected components, dependency impact, risk assessment, and regression test strategy for the planned changes
+> **Review for**: Validate the risk levels assigned to each component. Verify all affected areas are identified — especially indirect dependencies the AI may have missed.
+
 # Change Impact Analysis
 
 ## Scope of Proposed Changes
@@ -214,6 +235,10 @@ Create `aidlc-docs/{workflowId}/discovery/change-impact.md`:
 Create `aidlc-docs/{workflowId}/discovery/static-model.md`:
 
 ```markdown
+> **Artifact**: Static Code Model
+> **Contains**: Module hierarchy, data models, design patterns, package dependencies, and file inventory
+> **Review for**: Verify module structure and data model relationships match your understanding. Flag missing components, incorrect dependency directions, or design patterns that aren't actually used.
+
 # Static Code Model
 
 ## Module Hierarchy
@@ -248,6 +273,10 @@ Create `aidlc-docs/{workflowId}/discovery/static-model.md`:
 Create `aidlc-docs/{workflowId}/discovery/dynamic-model.md`:
 
 ```markdown
+> **Artifact**: Dynamic Behavior Model
+> **Contains**: User flows, state management, authentication/authorization, API interactions, error handling, and integration patterns
+> **Review for**: Verify user flows and auth patterns are correctly captured. Flag missing API interactions, incorrect sequence flows, or error handling gaps the AI may have overlooked.
+
 # Dynamic Behavior Model
 
 ## User Flows

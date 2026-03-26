@@ -99,7 +99,8 @@ aidlc-docs/{workflowId}/
 │   ├── design/                             <- shared design artifacts
 │   │
 │   ├── build-and-test/                     <- ALWAYS (after all units)
-│   │   └── build-and-test-summary.md
+│   │   ├── build-and-test-summary.md
+│   │   └── baseline-coverage.md            <- brownfield only: regression baseline coverage mapping
 │   │
 │   └── documentation/                      <- ALWAYS (after build-and-test)
 │       ├── doc-plan.md                     <- what docs needed + where
@@ -157,6 +158,7 @@ aidlc-docs/{workflowId}/
 | `BOLT-NNN-{slug}/spec.md` | Per bolt | Scope, acceptance criteria, target files, traceability, docs_impact |
 | `BOLT-NNN-{slug}/review.md` | Per bolt | Score, decision, feedback, traceability check |
 | `build-and-test-summary.md` | ALWAYS | Build results, test results, pass/fail status |
+| `baseline-coverage.md` | Conditional (brownfield/bugfix) | Maps each regression baseline behavior to covering test(s), flags coverage gaps |
 | `documentation/doc-plan.md` | ALWAYS | Documentation impact assessment and placement plan |
 | `documentation/*.md` | Based on docs_impact | Human-readable documentation drafts for user review |
 

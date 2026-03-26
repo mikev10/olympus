@@ -322,8 +322,64 @@ into the build-level report using this schema:
 **Critical failure gate**: If `tests_failed > 0` and `allowFailures` is not set:
 - Block workflow progression
 - Surface the failing unit's `test-report.md` path in the Remediation Guidance section
-- Do NOT proceed to Step 7 until all failures are resolved or `allowFailures` is explicitly
+- Do NOT proceed to Step 6c or Step 7 until all failures are resolved or `allowFailures` is explicitly
   confirmed by the user
+
+---
+
+## Step 6c: Regression Baseline Coverage Mapping (Conditional)
+
+**Execute when**: `aidlc-docs/{workflow-id}/discovery/regression-baseline.md` exists (brownfield/bugfix pathways only).
+
+**Skip when**: No regression baseline artifact exists (greenfield workflows).
+
+**Purpose**: Close the loop between the behaviors inventoried during Reverse Engineering and the
+tests executed during Construction. Every baseline item must be mapped to at least one covering
+test — or explicitly flagged as a coverage gap.
+
+**Execution**: The orchestrator performs this step directly (no agent delegation needed). Read the
+regression baseline file, extract each checkbox item, then search test results and test files to
+find covering tests for each item.
+
+**Output artifact**: `aidlc-docs/{workflow-id}/construction/build-and-test/baseline-coverage.md`
+
+```markdown
+# Regression Baseline Coverage Mapping
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total baseline behaviors | [X] |
+| Covered by tests | [X] |
+| Coverage gaps | [X] |
+| Coverage percentage | [X]% |
+
+## Coverage Matrix
+
+| # | Baseline Behavior | Covering Test(s) | Status |
+|---|---|---|---|
+| 1 | [Behavior from regression-baseline.md] | [test file:test name] | Covered |
+| 2 | [Behavior from regression-baseline.md] | [test file:test name] | Covered |
+| 3 | [Behavior from regression-baseline.md] | (none identified) | Gap |
+
+## Coverage Gaps
+
+[For each gap: explain why no test was identified and recommend whether a test should be
+added, or whether the behavior is verified through other means (e.g., manual QA, integration
+test, or framework guarantee)]
+
+### [Gap #]: [Behavior description]
+- **Risk**: [Low/Medium/High — impact if this behavior silently breaks]
+- **Recommendation**: [Add test / Manual QA sufficient / Covered by integration test X]
+```
+
+**Gap handling**: Coverage gaps are **surfaced but non-blocking**. The mapping is informational —
+it gives the user visibility into what is and isn't covered by automated tests. The user decides
+whether to add tests for gaps or accept the risk. Do NOT block workflow progression on gaps alone.
+
+**Include in summary**: Add a Regression Baseline Coverage section to `build-and-test-summary.md`
+(Step 7) summarizing the coverage percentage and listing any gaps.
 
 ---
 
@@ -365,6 +421,12 @@ Create `aidlc-docs/construction/build-and-test/build-and-test-summary.md`:
 - **Contract Tests**: [Pass/Fail/N/A]
 - **Security Tests**: [Pass/Fail/N/A]
 - **E2E Tests**: [Pass/Fail/N/A]
+
+### Regression Baseline Coverage (Brownfield Only)
+- **Baseline Behaviors**: [X] total
+- **Covered by Tests**: [X] ([Y]%)
+- **Coverage Gaps**: [X] — see baseline-coverage.md for details
+[Omit this section if no regression baseline exists]
 
 ## Overall Status
 - **Build**: [Success/Failed]
@@ -424,7 +486,11 @@ Present comprehensive message:
 3. ✅ integration-test-instructions.md
 4. ✅ performance-test-instructions.md (if applicable)
 5. ✅ [additional test files as needed]
-6. ✅ build-and-test-summary.md
+6. ✅ baseline-coverage.md (brownfield only)
+7. ✅ build-and-test-summary.md
+
+**Regression Baseline**: [X]/[Y] behaviors covered ([Z]%) — [N] gaps identified
+[Omit this line if no regression baseline exists]
 
 Review the summary in aidlc-docs/construction/build-and-test/build-and-test-summary.md
 
