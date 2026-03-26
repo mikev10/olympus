@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.3] - 2026-03-26
+
+### Fixed
+
+- **Engine alignment** — Updated `validation.ts`, `alignment.ts`, `code-generation-executor.ts`, `engine.ts`, and `requirements-analysis.ts` to use `Success Criteria` section name matching the updated intent.md template
+- **Test fixtures** — Updated mock intent.md content in 7 test files to use `Success Criteria` section name
+- **Story naming** — Changed user story ID format from `US-NNN` to `S-NNN` in SKILL.md templates, consistent with the `S-NNN` convention in user-stories.md rule
+
+### Added
+
+- **Individual story files** — Conditional per-story files (`stories/S-NNN-slug.md`) with YAML frontmatter when workflows have >5 stories; `stories.md` becomes a summary index
+
 ## [4.5.2] - 2026-03-26
 
 ### Added
