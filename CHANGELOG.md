@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.6] - 2026-03-26
+
+### Added
+
+- **Discovery artifact review headers** — All 7 reverse engineering artifact templates now include a brief header explaining what the file contains and what the reviewer should validate
+- **Regression baseline coverage mapping (Step 6c)** — New conditional build-and-test step for brownfield/bugfix workflows that maps each regression baseline behavior to covering test(s) and flags coverage gaps
+- **In-session task list tracking** — `/plan` and `/continue` skills now create mandatory in-session task lists for real-time visual progress tracking in the terminal
+
 ## [4.5.5] - 2026-03-26
 
 ### Added
