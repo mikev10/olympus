@@ -80,8 +80,8 @@ const VALIDATION_QUESTIONS: Record<
 const TRANSITION_SOURCE_SECTIONS: Record<TransitionType | RootValidationType, string[]> = {
   'intent-to-unit': ['Business Requirements', 'Implementation Plan'],
   'unit-to-bolt': ['Acceptance Criteria', 'Target Files'],
-  'unit-to-intent': ['Problem Statement', 'Success Metrics'],
-  'bolt-to-intent': ['Problem Statement', 'Success Metrics'],
+  'unit-to-intent': ['Problem Statement', 'Success Criteria'],
+  'bolt-to-intent': ['Problem Statement', 'Success Criteria'],
 };
 
 /**

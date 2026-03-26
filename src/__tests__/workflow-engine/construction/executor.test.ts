@@ -153,7 +153,7 @@ title: "Test Idea"
 ## Problem Statement
 Test problem
 
-## Success Metrics
+## Success Criteria
 - Feature works
 `
     );

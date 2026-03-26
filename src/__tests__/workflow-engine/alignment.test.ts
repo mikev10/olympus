@@ -41,7 +41,7 @@ type: intent
 - UNIT-002: SSO connector for enterprise providers
 - UNIT-003: Session management and token validation
 
-## Success Metrics
+## Success Criteria
 - 99.9% uptime SLA
 - < 200ms authentication response time
 - Support 10,000 concurrent users
@@ -288,7 +288,7 @@ Solves Core problem to solve and achieves Key metric to achieve
 - Problem 2
 - Problem 3
 
-## Success Metrics
+## Success Criteria
 - Metric A
 - Metric B
 `;

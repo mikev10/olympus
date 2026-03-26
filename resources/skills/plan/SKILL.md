@@ -606,7 +606,7 @@ Generate 4 questions (scale up/down based on trust level):
 1. **Functional Requirements**: What specific capabilities must this feature deliver? (options: A. {list option}, B. {another}, etc.)
 2. **Non-Functional Requirements**: What performance, security, or reliability constraints apply? (options: A. High availability required, B. Security-sensitive data, C. Performance-critical path, D. Standard requirements, E. Other)
 3. **Constraints**: What technical or business constraints must the implementation respect? (options around timeline, compatibility, team skills, platform, budget, etc.)
-4. **Success Metrics**: How will we measure that this feature succeeded? (options around quantitative metrics, qualitative goals, user adoption, etc.)
+4. **Success Criteria**: How will we measure that this feature succeeded? (options around quantitative metrics, qualitative goals, user adoption, etc.)
 
 Update checkpoint: `inception_stages["requirements-analysis"].questions_file = "aidlc-docs/{workflowId}/inception/requirements/requirements-analysis-questions.md"`
 
@@ -650,7 +650,7 @@ created: "{ISO-8601}"
 - **FR-001**: {requirement from answers}
 
 ## User Stories
-- **US-001**: As a {persona}, I want {action} so that {benefit}
+- **S-001**: As a {persona}, I want {action} so that {benefit}
   - Acceptance: {testable criterion}
 
 ## Business Rules
@@ -775,7 +775,7 @@ Read `intent.md` and `requirements.md` for context.
 - **Goals**: {what they want to achieve}
 - **Pain Points**: {current frustrations}
 - **Technical Level**: {novice | intermediate | expert}
-- **Key User Stories**: US-001, US-002, ...
+- **Key User Stories**: S-001, S-002, ...
 ```
 
 **`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (Gherkin format):
@@ -783,7 +783,7 @@ Read `intent.md` and `requirements.md` for context.
 ```markdown
 # User Stories: {Title}
 
-## US-001: {Short title}
+## S-001: {Short title}
 **As a** {persona}, **I want** {action} **so that** {benefit}.
 
 ### Acceptance Criteria
@@ -797,7 +797,7 @@ Then {expected outcome}
 
 **Priority**: Must Have | Should Have | Nice to Have
 **Persona**: {persona name}
-**Dependencies**: {US-00X or none}
+**Dependencies**: {S-00X or none}
 ```
 
 ### 8b. Update state (triple write)
@@ -1167,7 +1167,7 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 - **Scope**: {one-sentence scope description}
 - **Phase**: construction
 - **Estimated Effort**: {N}
-- **User Stories**: US-001, US-002
+- **User Stories**: S-001, S-002
 - **NFRs**: SEC-001, PERF-001
 - **Components**: {component names}
 - **Folder**: `construction/UNIT-001-{module-name-kebab}/`
@@ -1207,9 +1207,9 @@ graph TD
 
 | User Story | Unit | Priority | Notes |
 |-----------|------|---------|-------|
-| US-001 | U-001: {Name A} | Must Have | |
-| US-002 | U-001: {Name A} | Should Have | |
-| US-003 | U-002: {Name B} | Must Have | |
+| S-001 | U-001: {Name A} | Must Have | |
+| S-002 | U-001: {Name A} | Should Have | |
+| S-003 | U-002: {Name B} | Must Have | |
 ```
 
 ### 11b. Update state (triple write)

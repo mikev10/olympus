@@ -269,7 +269,7 @@ describe('Cascade Invalidation System', () => {
 
       await fs.ensureDir(path.dirname(intentSourcePath));
 
-      const intentSourceContent = `# INTENT\n\n## Problem Statement\nSolve problem X\n\n## Success Metrics\n- Metric 1\n- Metric 2`;
+      const intentSourceContent = `# INTENT\n\n## Problem Statement\nSolve problem X\n\n## Success Criteria\n- Metric 1\n- Metric 2`;
       const intentContent = `# INTENT\n\nSolution for problem X with metric 1 and metric 2`;
 
       await fs.writeFile(intentSourcePath, intentSourceContent, 'utf-8');
@@ -334,7 +334,7 @@ describe('Cascade Invalidation System', () => {
 ## Problem Statement
 Users need a better authentication system with OAuth and SSO support.
 
-## Success Metrics
+## Success Criteria
 - 99.9% uptime
 - < 100ms login time
 - Support 10k concurrent users
@@ -485,7 +485,7 @@ This is a totally different feature about data visualization.`;
 
       await fs.ensureDir(path.dirname(intentSourcePath));
 
-      const intentV1 = `# INTENT\n\n## Problem Statement\nAuth problem\n\n## Success Metrics\n- 99% uptime`;
+      const intentV1 = `# INTENT\n\n## Problem Statement\nAuth problem\n\n## Success Criteria\n- 99% uptime`;
       const intentContent = `# INTENT\n\nSolve auth problem with 99% uptime`;
 
       await fs.writeFile(intentSourcePath, intentV1, 'utf-8');
@@ -524,7 +524,7 @@ This is a totally different feature about data visualization.`;
       saveManifest(manifestPath, manifest);
 
       // Act 1: Modify INTENT (simulate manual edit)
-      const intentV2 = `# INTENT\n\n## Problem Statement\nAuth problem v2\n\n## Success Metrics\n- 99% uptime\n- OAuth`;
+      const intentV2 = `# INTENT\n\n## Problem Statement\nAuth problem v2\n\n## Success Criteria\n- 99% uptime\n- OAuth`;
 
       await fs.writeFile(intentSourcePath, intentV2, 'utf-8');
 

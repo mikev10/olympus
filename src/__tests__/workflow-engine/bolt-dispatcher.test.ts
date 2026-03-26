@@ -58,7 +58,7 @@ describe('code-generation-executor', () => {
 ## Problem Statement
 Users need a new feature to solve problem X.
 
-## Success Metrics
+## Success Criteria
 - Metric 1: 90% success rate
 - Metric 2: Response time < 100ms
 
@@ -174,7 +174,7 @@ This is the problem.
 ## Solution
 This is the solution.
 
-## Success Metrics
+## Success Criteria
 Metric 1 and Metric 2.
 
 ## Other Section
@@ -183,7 +183,7 @@ Other content.
 
       const result = extractSections(content, [
         'Problem Statement',
-        'Success Metrics',
+        'Success Criteria',
       ]);
 
       expect(result).toContain('This is the problem');
@@ -198,7 +198,7 @@ Other content.
 ### Problem Statement
 This is the problem.
 
-### Success Metrics
+### Success Criteria
 These are the metrics.
 `;
 

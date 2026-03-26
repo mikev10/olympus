@@ -979,11 +979,11 @@ This feature addresses a specific need identified by stakeholders. The goal is t
 - **Developer**: Engineers who will integrate with, maintain, and extend this feature
 - **Administrator**: System administrators who will configure, monitor, and manage this feature
 
-## Success Metrics
+## Success Criteria
 
-- **Metric 1**: Successful implementation with all acceptance criteria met (target: 100% completion)
-- **Metric 2**: Zero critical bugs in production within first 30 days (target: 0 P0/P1 issues)
-- **Metric 3**: Positive user feedback and adoption rate (target: >80% user satisfaction)
+- **Criterion 1**: Successful implementation with all acceptance criteria met (target: 100% completion)
+- **Criterion 2**: Zero critical bugs in production within first 30 days (target: 0 P0/P1 issues)
+- **Criterion 3**: Positive user feedback and adoption rate (target: >80% user satisfaction)
 
 ## Constraints & Boundaries
 

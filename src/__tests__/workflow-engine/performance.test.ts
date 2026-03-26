@@ -212,7 +212,7 @@ This is a test problem statement with sufficient detail.
 ## Business Context
 Business context with relevant information about the feature.
 
-## Success Metrics
+## Success Criteria
 - Metric 1: Measure this thing
 - Metric 2: Measure that thing
 - Metric 3: Measure another thing
@@ -273,7 +273,7 @@ Test content
 ## Business Context
 Test content
 
-## Success Metrics
+## Success Criteria
 - Metric 1
 - Metric 2
 

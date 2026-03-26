@@ -46,7 +46,7 @@ export function clearFileCache(): void {
 const REQUIRED_SECTIONS = [
   'Problem Statement',
   'User Personas',
-  'Success Metrics',
+  'Success Criteria',
   'Business Constraints',
   'Out of Scope',
 ] as const;

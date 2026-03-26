@@ -423,7 +423,7 @@ Need basic logging.
 
 Internal developers.
 
-## Success Metrics
+## Success Criteria
 
 - Logs work
 
@@ -456,7 +456,7 @@ Users currently cannot securely access their accounts. We need a robust authenti
 - Developers: Need authentication service component and SDK integration layer
 - Compliance officers: Need GDPR-compliant PII handling module
 
-## Success Metrics
+## Success Criteria
 
 - Reduce account takeover incidents by 80%
 - Achieve 90%+ successful login rate
@@ -507,7 +507,7 @@ Users need a way to view and edit their profile information.
 
 Registered users who want to manage their account settings, update personal details, and customize their profile presentation.
 
-## Success Metrics
+## Success Criteria
 
 - 80% of users update profile within first week
 - Page load time under 2 seconds

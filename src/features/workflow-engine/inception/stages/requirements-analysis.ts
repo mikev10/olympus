@@ -222,7 +222,7 @@ function buildRequirementsMarkdown(
   }
   lines.push('');
 
-  lines.push('## Success Metrics\n');
+  lines.push('## Success Criteria\n');
   const metricsAnswers = answers.filter(a => a.category === 'success-metrics');
   for (const a of metricsAnswers) {
     lines.push(`- ${a.answer}`);

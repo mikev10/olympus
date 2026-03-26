@@ -200,7 +200,7 @@ export async function dispatchCodeGeneration(
 
   const intentSummary2 = extractSections(intentContent, [
     'Problem Statement',
-    'Success Metrics',
+    'Success Criteria',
   ]);
 
   const targetFiles = extractTargetFiles(unitSpec);

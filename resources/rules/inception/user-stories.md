@@ -160,18 +160,54 @@ For medium priority cases, execute user stories if ANY of these apply:
 
 ## Step 4: Include Mandatory Story Artifacts in Plan
 - **ALWAYS** include these mandatory artifacts in the story plan:
-  - [ ] Generate stories.md with user stories following INVEST criteria
-  - [ ] Generate personas.md with user archetypes and characteristics
+  - [ ] Generate `stories.md` with user stories following INVEST criteria
+  - [ ] Generate `personas.md` with user archetypes and characteristics
   - [ ] Ensure stories are Independent, Negotiable, Valuable, Estimable, Small, Testable
   - [ ] Include acceptance criteria for each story (Gherkin Given/When/Then format)
   - [ ] Include edge cases for non-trivial stories
   - [ ] Map personas to relevant user stories
+  - [ ] **Conditional** (> 5 stories): Generate individual story files in `stories/` subdirectory
 
 ### Story Naming Convention (MANDATORY)
 
 All stories MUST use `S-NNN` IDs (zero-padded to three digits, sequential within the workflow). This is consistent with `U-NNN` for units and `BOLT-NNN` for bolts.
 
-### Story Template (MANDATORY)
+### Story File Organization
+
+Story artifacts are placed in `aidlc-docs/{workflow-id}/inception/user-stories/`.
+
+**<= 5 stories**: All stories go in `stories.md` using the inline template below. No individual files needed.
+
+**> 5 stories**: `stories.md` becomes a **summary index** and individual story files are created:
+
+```
+aidlc-docs/{workflow-id}/inception/user-stories/
+├── stories.md              ← summary index (always present)
+├── personas.md             ← user personas (always present)
+└── stories/                ← individual files (> 5 stories only)
+    ├── S-001-{slug}.md
+    ├── S-002-{slug}.md
+    └── ...
+```
+
+### Stories Index Template (stories.md)
+
+When individual files exist (> 5 stories), `stories.md` serves as the overview:
+
+```markdown
+# User Stories
+
+Total: {N} stories | Must: {n} | Should: {n} | Could: {n}
+
+| ID | Title | Persona | Priority | Status | Dependencies |
+|----|-------|---------|----------|--------|--------------|
+| S-001 | {title} | {persona} | must | draft | None |
+| S-002 | {title} | {persona} | should | draft | Requires S-001 |
+```
+
+When all stories are inline (<= 5 stories), `stories.md` contains the full story details using the inline template below.
+
+### Inline Story Template (MANDATORY for <= 5 stories)
 
 Each story in `stories.md` MUST follow this structure:
 
@@ -197,11 +233,52 @@ Each story in `stories.md` MUST follow this structure:
 - Enables: {S-NNN or "None"}
 ```
 
-**Rules**:
+### Individual Story File Template (MANDATORY for > 5 stories)
+
+**Path**: `aidlc-docs/{workflow-id}/inception/user-stories/stories/{S-NNN}-{slug}.md`
+
+```markdown
+---
+id: "S-NNN"
+title: "{Story Title}"
+persona: "{persona name}"
+priority: "{must|should|could}"
+status: "draft"
+unit: "{U-NNN or unassigned}"
+created: "{ISO-8601}"
+---
+
+# S-NNN: {Story Title}
+
+> As a **{persona}**, I want **{capability}**, so that **{benefit}**.
+
+## Acceptance Criteria
+- **Given** {precondition}, **when** {action}, **then** {expected result}
+- **Given** {precondition}, **when** {action}, **then** {expected result}
+
+## Edge Cases
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| {edge case} | {what should happen} |
+
+## Dependencies
+- Requires: {S-NNN or "None"}
+- Enables: {S-NNN or "None"}
+
+## Technical Notes
+{Optional — implementation hints, API considerations, or constraints
+relevant to this story. Omit if not needed.}
+```
+
+### Story Rules
+
 - Every story MUST have at least one Given/When/Then acceptance criterion
 - Edge Cases table is MANDATORY for stories with priority `must`, optional for `should`/`could`
 - Dependencies track inter-story ordering — use "None" when the story is independent
 - Priority uses MoSCoW: `must` (required), `should` (important), `could` (nice-to-have)
+- Individual story files include YAML frontmatter with `status` and `unit` fields for traceability
+- The `unit` field links to the unit this story will be assigned to (set during Units Generation, `unassigned` until then)
+- When individual files exist, `stories.md` MUST be kept in sync as the index
 
 ## Step 5: Present Story Options
 - Include different approaches for story breakdown in the plan document:

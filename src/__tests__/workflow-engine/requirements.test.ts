@@ -31,7 +31,7 @@ Our users need better visibility into their data.
 - Budget: $10K maximum
 - Compliance: GDPR data handling required
 
-## Success Metrics
+## Success Criteria
 
 - Dashboard loads in < 2s
 `;
@@ -55,7 +55,7 @@ Internal tool for the team, used by customers occasionally.
 - Must integrate with existing database schema
 - Budget: $5K
 
-## Success Metrics
+## Success Criteria
 
 - Logs captured successfully
 `;
@@ -80,7 +80,7 @@ Users need to export their data.
 - Budget: $20K
 - Regulatory approval required
 
-## Success Metrics
+## Success Criteria
 
 - Exports work correctly
 `;
