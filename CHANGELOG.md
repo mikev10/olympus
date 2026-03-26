@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.5] - 2026-03-26
+
+### Added
+
+- **Mandatory documentation generation stage** — New AIDLC construction stage that runs after Build and Test, generating human-readable documentation drafts in `aidlc-docs/{workflowId}/construction/documentation/` from workflow artifacts. Delegated to `document-writer` agent with approval gate before generation.
+- **`docs_impact` field on bolt specs** — Planner assesses documentation needs per bolt: `none`, `readme`, `user-guide`, `config-reference`, `cli-reference`, `migration-guide`, `architecture`, `code-comments`
+- **Documentation quality in bolt review** — Reviewer checks inline comments, flags missed docs_impact on public APIs
+- **AIDLC artifact reference guide** — `docs/guide/aidlc-artifact-reference.md` documenting the complete workflow folder structure, all artifacts, and naming conventions
+
+### Changed
+
+- **Unit artifacts restructured** — Moved from `inception/application-design/` to `inception/units/`, separating unit decomposition from application design (which is a separate conditional stage)
+- Updated `units-generation.ts`, `artifacts.ts`, `state-file.ts`, and all rule/skill files referencing unit artifact paths
+
 ## [4.5.4] - 2026-03-26
 
 ### Added
