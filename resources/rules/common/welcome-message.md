@@ -47,8 +47,15 @@ AI-DLC is a structured yet flexible software development process that adapts to 
         ║   - NFR Requirements Assess (COND)    ║
         ║   - NFR Design (COND)                 ║
         ║   - Infrastructure Design (COND)      ║
+        ║   - Unit → Bolt Decomposition         ║
+        ║                                       ║
+        ║ • Per-Bolt Loop (for each bolt):      ║
+        ║   - Elaboration (COND)                ║
         ║   - Code Generation (ALWAYS)          ║
-        ║ • Build and Test (ALWAYS)             ║
+        ║   - Build and Test (ALWAYS)           ║
+        ║   - Review (ALWAYS)                   ║
+        ║                                       ║
+        ║ • Final Build and Test (ALWAYS)       ║
         ╚═══════════════════════════════════════╝
                               |
                               v
@@ -73,9 +80,11 @@ AI-DLC is a structured yet flexible software development process that adapts to 
 
 **CONSTRUCTION PHASE** - *Detailed Design, Implementation & Test*
 - **Purpose**: Determines HOW to build it
-- **Activities**: Detailed design (when needed), code generation, comprehensive testing
+- **Activities**: Detailed design (when needed), unit decomposition into bolts, per-bolt code generation and testing
 - **Output**: Working code, tests, build instructions
-- **Your Role**: Review designs, approve implementation plans, validate results
+- **Your Role**: Review designs, approve bolt plans, validate results
+
+> **What is a Bolt?** A bolt is the smallest unit of execution in AI-DLC — a focused implementation task (typically hours of work, not days). Each unit of work is decomposed into one or more bolts, and each bolt goes through its own lifecycle: **Elaboration** (detailed spec) → **Code Generation** → **Build and Test** → **Review**. Simple bolts run in *express mode*, skipping elaboration for faster delivery.
 
 **OPERATIONS PHASE** - *Deployment & Monitoring (Future)*
 - **Purpose**: How to DEPLOY and RUN it
