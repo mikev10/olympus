@@ -62,6 +62,12 @@ const LEADING_VERB_PHRASES = [
 export function deriveWorkflowSlug(featureName: string): string {
   let text = featureName.trim();
 
+  // If input looks like a file path, extract just the filename stem
+  if (text.includes('/') || text.includes('\\')) {
+    const basename = text.split(/[/\\]/).pop() || text;
+    text = basename;
+  }
+
   text = text.replace(/\.[a-z]{1,4}$/i, '');
 
   const sortedVerbs = [...LEADING_VERB_PHRASES].sort((a, b) => b.length - a.length);

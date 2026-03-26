@@ -130,6 +130,18 @@ describe('WorkflowEngine', () => {
       expect(deriveWorkflowSlug('requirements.md')).toBe('requirements');
     });
 
+    it('strips path components and uses only the filename stem', () => {
+      expect(deriveWorkflowSlug('.olympus/briefs/online-registration-iframe-migration.md')).toBe('online-registration-iframe-migration');
+    });
+
+    it('strips Windows-style path components', () => {
+      expect(deriveWorkflowSlug('.olympus\\briefs\\online-registration-iframe-migration.md')).toBe('online-registration-iframe-migration');
+    });
+
+    it('strips deep path prefixes', () => {
+      expect(deriveWorkflowSlug('docs/plans/briefs/my-feature.md')).toBe('my-feature');
+    });
+
     it('truncates long slugs at word boundary', () => {
       const result = deriveWorkflowSlug('comprehensive user authentication system management');
       expect(result.length).toBeLessThanOrEqual(40);
