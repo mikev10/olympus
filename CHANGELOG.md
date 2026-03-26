@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-03-26
+
+### Added
+
+- **Bolt lifecycle system** — New per-bolt construction execution pipeline that decomposes units into bolts (1-8 per unit, 50 max total) flowing through 4 stages: elaboration, code generation, build & test, and review
+- **BoltPlanner** — Agent-delegated decomposition service (`src/features/workflow-engine/bolts/bolt-planner.ts`) with coverage validation (>=95% pass, 80-94% warn+ack, <80% block)
+- **BoltExecutor** — Callback-based 4-stage pipeline (`src/features/workflow-engine/bolts/bolt-executor.ts`) with checkpoint persistence after every stage transition and failure tracking (2-attempt cap)
+- **BoltReviewer** — Mandatory review gate (`src/features/workflow-engine/bolts/bolt-reviewer.ts`) with two-tier alignment model: >=70% auto-approve, 50-69% advisory+ack, <50% hard block. Trust-based override at trust>=2
+- **BoltSpecValidator** — Stateless validation (`src/features/workflow-engine/bolts/bolt-spec-validator.ts`) enforcing max counts, required fields, ID format, and sequence constraints
+- **ExpressBoltFactory** — Express bolt creation (`src/features/workflow-engine/bolts/express-bolt-factory.ts`) for SHALLOW depth and bugfix pathways, skipping elaboration
+- **Bolt type system** — `BoltSpec` (extends `HierarchicalNode`), `BoltStatus`, `BoltExecutionStage`, `BoltStageProgress`, `ConstructionBoltProgress` types with checkpoint schema extensions
+- **Mid-bolt resume** — `getResumePoint()` in checkpoint.ts detects interrupted bolt execution and resumes at the correct stage
+- **Zero-bolt auto-fulfillment** — Units with 0 bolts after planning are automatically marked complete
+- **Per-bolt progress display** — `renderBoltProgress()` renders inline bolt status tables in aidlc-state.md
+- **Bolt rule files** — `bolt-planning.md` and `bolt-review.md` in `resources/rules/construction/`
+- **114 new tests** across 7 new test files
+
+### Changed
+
+- **Unit naming convention** — `slugifyUnitName()` now produces `UNIT-NNN-slug` prefix (was `u-NNN-slug`)
+- **Terminology standardization** — `estimated_code_generations` renamed to `estimated_bolts` across type system, serialization, and parser (backward-compatible: parser accepts both formats)
+- **Express bolt replaces executeShallow()** — SHALLOW depth path now uses ExpressBoltFactory + BoltExecutor pipeline; `executeShallow()` method removed
+
+### Fixed
+
+- **Silent failure reset** — `UnitStageRunner` catch block now tracks `failure_count` and `last_error` per stage instead of silently resetting to `not_started`. Caps retries at 2 before marking stage as `failed`
+
 ## [4.4.22] - 2026-03-25
 
 ### Fixed
