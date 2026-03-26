@@ -284,7 +284,7 @@ export class WorkflowEngine {
         await saveCheckpoint(this.projectPath, updatedCheckpoint);
       }
 
-      console.log(`[WorkflowEngine] Generated Workflow Routing: pathway=${pathwayType}, depth=${plan.estimated_depth}, code-generations=${plan.estimated_code_generations}`);
+      console.log(`[WorkflowEngine] Generated Workflow Routing: pathway=${pathwayType}, depth=${plan.estimated_depth}, bolts=${plan.estimated_bolts}`);
       if (plan.stages.some(s => !s.included)) {
         const skippedStages = plan.stages.filter(s => !s.included).map(s => `${s.phase}/${s.stage}`);
         console.log(`[WorkflowEngine] Stages excluded by plan: ${skippedStages.join(', ')}`);

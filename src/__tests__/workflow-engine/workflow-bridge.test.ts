@@ -16,6 +16,8 @@ import type {
   GateResult,
   PhaseState,
   ArtifactLink,
+  ConstructionBoltProgress,
+  BoltStageProgress,
 } from '../../features/workflow-engine/phase-types.js';
 import {
   detectActiveWorkflow,
@@ -27,6 +29,7 @@ import {
   getWorkflowProgress,
   generateWorkflowSummary,
   generateBoltExecutionPlan,
+  renderBoltProgress,
 } from '../../features/workflow-engine/workflow-bridge.js';
 import { clearCache } from '../../features/workflow-engine/checkpoint.js';
 
@@ -960,5 +963,165 @@ describe('Workflow Bridge', () => {
       expect(progress.total).toBe(5);
       expect(progress.percentage).toBe(40);
     });
+  });
+});
+
+function makeStageProgressForBridge(status: 'not_started' | 'in_progress' | 'completed' | 'skipped' | 'failed'): BoltStageProgress {
+  return {
+    status,
+    started_at: status !== 'not_started' ? '2024-01-01T00:00:00Z' : null,
+    completed_at: status === 'completed' || status === 'skipped' ? '2024-01-01T01:00:00Z' : null,
+    failure_count: 0,
+    last_error: null,
+    artifact_path: null,
+  };
+}
+
+function makeBoltForBridge(overrides: Partial<ConstructionBoltProgress> = {}): ConstructionBoltProgress {
+  return {
+    bolt_id: 'BOLT-001',
+    parent_unit_id: 'UNIT-001',
+    status: 'in_progress',
+    stages: {
+      elaboration: makeStageProgressForBridge('not_started'),
+      code_generation: makeStageProgressForBridge('not_started'),
+      build_and_test: makeStageProgressForBridge('not_started'),
+      review: makeStageProgressForBridge('not_started'),
+    },
+    failure_count: 0,
+    last_error: null,
+    review_score: null,
+    acknowledged_by: null,
+    acknowledged_at: null,
+    ...overrides,
+  };
+}
+
+function makeCheckpointForBridge(overrides: Partial<WorkflowCheckpointV3> = {}): WorkflowCheckpointV3 {
+  const ps: PhaseState = { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null };
+  return {
+    schema_version: '3.0.0',
+    workflow_id: 'progress-test',
+    feature_name: 'progress',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    current_phase: 'construction',
+    current_stage: 'code-generation',
+    status: 'in_progress',
+    phases: { discovery: { ...ps }, inception: { ...ps }, construction: { ...ps }, operations: { ...ps } },
+    manifest_path: 'test',
+    trust_state_path: 'test',
+    construction_bolts: {},
+    active_bolt_id: null,
+    active_bolt_stage: null,
+    ...overrides,
+  };
+}
+
+describe('renderBoltProgress', () => {
+  it('renders two units with bolts and correct headers and table rows', () => {
+    const checkpoint = makeCheckpointForBridge({
+      construction_bolts: {
+        'BOLT-001': makeBoltForBridge({
+          bolt_id: 'BOLT-001',
+          parent_unit_id: 'UNIT-001',
+          status: 'done',
+          stages: {
+            elaboration: makeStageProgressForBridge('completed'),
+            code_generation: makeStageProgressForBridge('completed'),
+            build_and_test: makeStageProgressForBridge('completed'),
+            review: makeStageProgressForBridge('completed'),
+          },
+          review_score: 85,
+        }),
+        'BOLT-002': makeBoltForBridge({
+          bolt_id: 'BOLT-002',
+          parent_unit_id: 'UNIT-002',
+          status: 'in_progress',
+          stages: {
+            elaboration: makeStageProgressForBridge('completed'),
+            code_generation: makeStageProgressForBridge('in_progress'),
+            build_and_test: makeStageProgressForBridge('not_started'),
+            review: makeStageProgressForBridge('not_started'),
+          },
+        }),
+      },
+    });
+
+    const result = renderBoltProgress(checkpoint);
+    expect(result).toContain('### UNIT-001');
+    expect(result).toContain('### UNIT-002');
+    expect(result).toContain('BOLT-001');
+    expect(result).toContain('BOLT-002');
+    expect(result).toContain('| Bolt ID |');
+  });
+
+  it('shows review_score as 85 when present', () => {
+    const checkpoint = makeCheckpointForBridge({
+      construction_bolts: {
+        'BOLT-001': makeBoltForBridge({
+          bolt_id: 'BOLT-001',
+          parent_unit_id: 'UNIT-001',
+          status: 'done',
+          stages: {
+            elaboration: makeStageProgressForBridge('completed'),
+            code_generation: makeStageProgressForBridge('completed'),
+            build_and_test: makeStageProgressForBridge('completed'),
+            review: makeStageProgressForBridge('completed'),
+          },
+          review_score: 85,
+        }),
+      },
+    });
+
+    const result = renderBoltProgress(checkpoint);
+    expect(result).toContain('| 85 |');
+  });
+
+  it('shows dash when review_score is null', () => {
+    const checkpoint = makeCheckpointForBridge({
+      construction_bolts: {
+        'BOLT-001': makeBoltForBridge({
+          bolt_id: 'BOLT-001',
+          parent_unit_id: 'UNIT-001',
+          status: 'in_progress',
+          review_score: null,
+        }),
+      },
+    });
+
+    const result = renderBoltProgress(checkpoint);
+    expect(result).toMatch(/\|\s*—\s*\|/);
+  });
+
+  it('shows correct summary line count', () => {
+    const checkpoint = makeCheckpointForBridge({
+      construction_bolts: {
+        'BOLT-001': makeBoltForBridge({
+          bolt_id: 'BOLT-001',
+          parent_unit_id: 'UNIT-001',
+          status: 'done',
+          stages: {
+            elaboration: makeStageProgressForBridge('completed'),
+            code_generation: makeStageProgressForBridge('completed'),
+            build_and_test: makeStageProgressForBridge('completed'),
+            review: makeStageProgressForBridge('completed'),
+          },
+        }),
+        'BOLT-002': makeBoltForBridge({
+          bolt_id: 'BOLT-002',
+          parent_unit_id: 'UNIT-001',
+          status: 'in_progress',
+        }),
+      },
+    });
+
+    const result = renderBoltProgress(checkpoint);
+    expect(result).toContain('1/2 bolts complete');
+  });
+
+  it('returns empty string when construction_bolts is empty', () => {
+    const checkpoint = makeCheckpointForBridge({ construction_bolts: {} });
+    expect(renderBoltProgress(checkpoint)).toBe('');
   });
 });

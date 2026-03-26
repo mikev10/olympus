@@ -48,9 +48,38 @@ export type {
   PathwayType,
   WorkflowRoutingStage,
   WorkflowRoutingPlan,
+  BoltSpec,
+  BoltStatus,
+  BoltExecutionStage,
+  BoltStageProgress,
+  ConstructionBoltProgress,
+  BoltValidationErrorCode,
 } from './phase-types.js';
 
-export { STAGE_PHASE_MAP } from './phase-types.js';
+export { STAGE_PHASE_MAP, BoltValidationError } from './phase-types.js';
+
+export type { ValidationContext } from './bolts/bolt-spec-validator.js';
+export { BoltSpecValidator } from './bolts/bolt-spec-validator.js';
+
+export type { CoverageResult, BoltPlannerErrorCode } from './bolts/bolt-planner.js';
+export {
+  BoltPlanner,
+  BoltPlannerError,
+  validateBoltCoverage,
+  writeBoltArtifacts,
+  registerBoltsInCheckpoint,
+  buildDecompositionPrompt,
+  parseAgentResponse,
+  finalizeBoltPlan,
+} from './bolts/bolt-planner.js';
+
+export type { StageResult, StageHandlers, BoltExecutionResult } from './bolts/bolt-executor.js';
+export { BoltExecutor } from './bolts/bolt-executor.js';
+
+export { isExpressBoltEligible, createExpressBolt } from './bolts/express-bolt-factory.js';
+
+export type { AgentReviewResult, ReviewDecision, EscalationEvent } from './bolts/bolt-reviewer.js';
+export { BoltReviewer, applyTierLogic } from './bolts/bolt-reviewer.js';
 
 // Checkpoint persistence
 export {
@@ -58,6 +87,7 @@ export {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
+  getResumePoint,
 } from './checkpoint.js';
 
 // Artifact management
@@ -79,6 +109,7 @@ export {
   loadManifest,
   saveManifest,
   registerArtifact,
+  addArtifactLink,
   linkArtifacts,
   computeChecksum,
   detectStaleArtifacts,
@@ -192,6 +223,7 @@ export {
   decomposeIntentToUnits,
   buildDecompositionTree,
   slugifyUnitName,
+  slugifyBoltName,
   getUnits,
 } from './construction/decomposition.js';
 export type {
@@ -381,6 +413,7 @@ export {
   getWorkflowProgress,
   generateWorkflowSummary,
   generateBoltExecutionPlan,
+  renderBoltProgress,
 } from './workflow-bridge.js';
 
 // Retro

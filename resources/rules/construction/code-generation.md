@@ -225,12 +225,12 @@ You may:
 - [ ] **MANDATORY**: Update `aidlc-docs/{workflow-id}/checkpoint.json` — update the unit entry using the `ConstructionUnitProgress` schema:
 
 ```json
-"u-nnn-unit-name": {
-  "unitId": "u-nnn-unit-name",
+"UNIT-NNN-unit-name": {
+  "unitId": "UNIT-NNN-unit-name",
   "stages": {
     "code-generation": { "status": "in_progress", "artifact_path": null, "completed_at": null }
   },
-  "code_plan_path": "construction/plans/u-nnn-unit-name-code-generation-plan.md",
+  "code_plan_path": "construction/plans/UNIT-NNN-unit-name-code-generation-plan.md",
   "code_generation_status": "awaiting_approval"
 }
 ```
@@ -329,9 +329,9 @@ This ensures the summary always exists regardless of agent compliance.
   2. Update `aidlc-docs/{workflow-id}/checkpoint.json` — update the unit entry:
 
 ```json
-"u-nnn-unit-name": {
+"UNIT-NNN-unit-name": {
   "stages": {
-    "code-generation": { "status": "completed", "artifact_path": "construction/u-nnn-unit-name/", "completed_at": "ISO-TIMESTAMP" }
+    "code-generation": { "status": "completed", "artifact_path": "construction/UNIT-NNN-unit-name/", "completed_at": "ISO-TIMESTAMP" }
   },
   "code_generation_status": "completed"
 }
@@ -378,9 +378,9 @@ This ensures the summary always exists regardless of agent compliance.
 
 ### Canonical Path Rules
 - **Code generation plans MUST be saved at**: `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`
-- Do NOT create code generation plans at any other path (e.g., `construction/u-nnn-{name}/`, `construction/{name}/`)
+- Do NOT create code generation plans at any other path (e.g., `construction/UNIT-NNN-{name}/`, `construction/{name}/`)
 - If a plan is found at a non-canonical path during Step 0, migrate it to the canonical location before proceeding
-- Per-unit directories (`construction/u-nnn-{name}/`) are reserved for construction output artifacts (code summaries, documentation), NOT plans
+- Per-unit directories (`construction/UNIT-NNN-{name}/`) are reserved for construction output artifacts (code summaries, documentation), NOT plans
 
 ### Automation Friendly Code Rules
 When generating UI code (web, mobile, desktop), ensure elements are automation-friendly:
@@ -399,3 +399,13 @@ When generating UI code (web, mobile, desktop), ensure elements are automation-f
   or Build & Test.
 - Deployment artifacts generated
 - Complete unit ready for build and verification
+
+## Bolt-Scoped Code Generation
+
+When a unit has been decomposed into bolts (see `resources/rules/construction/bolt-planning.md`), code generation is executed **per-bolt** rather than per-unit:
+
+- Each bolt has its own `spec.md` defining scope, acceptance criteria, and target files
+- The code generation agent receives one bolt spec at a time
+- After each bolt's code generation completes, **Bolt Review** runs before the next bolt begins (see `resources/rules/construction/bolt-review.md`)
+- The checkpoint tracks bolt state via `construction_bolts`, `active_bolt_id`, and `active_bolt_stage`
+- The unit-level code generation plan still governs overall unit scope; bolts decompose its execution into focused, reviewable increments

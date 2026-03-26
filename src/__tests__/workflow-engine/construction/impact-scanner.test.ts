@@ -46,7 +46,7 @@ describe('findDocFiles', () => {
 
   it('returns prior unit feature docs', () => {
     setupDir({
-      'aidlc-docs/wf-1/construction/u-001/documentation/feature-doc.md': '# Feature',
+      'aidlc-docs/wf-1/construction/UNIT-001/documentation/feature-doc.md': '# Feature',
     });
     const files = findDocFiles(TEST_DIR, 'wf-1');
     expect(files.some(f => f.endsWith('feature-doc.md'))).toBe(true);
@@ -109,14 +109,14 @@ describe('generateImpactReport', () => {
       reportPath: null,
     };
     const reportPath = generateImpactReport(result, {
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       workflowId: 'wf-1',
       outputDir,
     });
     expect(fs.existsSync(reportPath)).toBe(true);
     expect(reportPath).toMatch(/impact-scan\.md$/);
     const content = fs.readFileSync(reportPath, 'utf-8');
-    expect(content).toContain('u-005');
+    expect(content).toContain('UNIT-005');
     expect(content).toContain('wf-1');
     expect(content).toContain('my-module');
     expect(content).toContain('Check my-module references');
@@ -126,7 +126,7 @@ describe('generateImpactReport', () => {
     const outputDir = path.join(TEST_DIR, 'output-empty');
     const result: ImpactScanResult = { status: 'skipped', affectedDocs: [], reportPath: null };
     const reportPath = generateImpactReport(result, {
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       workflowId: 'wf-1',
       outputDir,
     });
@@ -140,7 +140,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: [],
     });
     expect(result.status).toBe('skipped');
@@ -153,7 +153,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: ['src/features/some-unique-zzz-module/index.ts'],
     });
     expect(result.status).toBe('skipped');
@@ -167,7 +167,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: ['src/construction/impact-scanner.ts'],
     });
     expect(result.status).toBe('completed');
@@ -182,7 +182,7 @@ describe('runImpactScan', () => {
       runImpactScan({
         projectPath: TEST_DIR,
         workflowId: 'wf-missing',
-        unitId: 'u-005',
+        unitId: 'UNIT-005',
         modifiedFiles: ['src/foo.ts'],
       })
     ).not.toThrow();
@@ -193,7 +193,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: ['a.ts'],
     });
     expect(result.status).toBe('skipped');
@@ -206,7 +206,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: ['src/construction/impact-scanner.ts'],
     });
     expect(result.status).toBe('completed');
@@ -221,7 +221,7 @@ describe('runImpactScan', () => {
     const result = runImpactScan({
       projectPath: TEST_DIR,
       workflowId: 'wf-1',
-      unitId: 'u-005',
+      unitId: 'UNIT-005',
       modifiedFiles: ['src/construction/impact-scanner.ts'],
     });
     expect(result.reportPath).not.toBeNull();

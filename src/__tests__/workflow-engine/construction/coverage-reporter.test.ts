@@ -26,7 +26,7 @@ function makeConfig(overrides: Partial<ValidatorConfig> = {}): ValidatorConfig {
     timeoutBudgetMs: 5000,
     allowFailures: false,
     workflowDepth: 2,
-    unitId: 'u-006',
+    unitId: 'UNIT-006',
     unitFiles: [],
     apiSurfaceFiles: [],
     projectPath: testDir,

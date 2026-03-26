@@ -83,10 +83,10 @@ describe('readFeatureDocSummaries', () => {
   }
 
   it('extracts Summary section from a feature doc', () => {
-    makeFeatureDoc('u-001', '# Feature\n\n## Summary\n\nAdds a new auth module.\n\n## Details\n\nMore info.');
-    const summaries = readFeatureDocSummaries(tmpDir, ['u-001']);
+    makeFeatureDoc('UNIT-001', '# Feature\n\n## Summary\n\nAdds a new auth module.\n\n## Details\n\nMore info.');
+    const summaries = readFeatureDocSummaries(tmpDir, ['UNIT-001']);
     expect(summaries).toHaveLength(1);
-    expect(summaries[0].unitId).toBe('u-001');
+    expect(summaries[0].unitId).toBe('UNIT-001');
     expect(summaries[0].summary).toBe('Adds a new auth module.');
   });
 
@@ -96,22 +96,22 @@ describe('readFeatureDocSummaries', () => {
   });
 
   it('skips units with no Summary section', () => {
-    makeFeatureDoc('u-002', '# Feature\n\n## Details\n\nOnly details here.');
-    const summaries = readFeatureDocSummaries(tmpDir, ['u-002']);
+    makeFeatureDoc('UNIT-002', '# Feature\n\n## Details\n\nOnly details here.');
+    const summaries = readFeatureDocSummaries(tmpDir, ['UNIT-002']);
     expect(summaries).toHaveLength(0);
   });
 
   it('handles multiple units', () => {
-    makeFeatureDoc('u-001', '# Feature\n\n## Summary\n\nFirst summary.\n\n## Details\n\ninfo.');
-    makeFeatureDoc('u-002', '# Feature\n\n## Summary\n\nSecond summary.\n\n## Details\n\ninfo.');
-    const summaries = readFeatureDocSummaries(tmpDir, ['u-001', 'u-002', 'u-003']);
+    makeFeatureDoc('UNIT-001', '# Feature\n\n## Summary\n\nFirst summary.\n\n## Details\n\ninfo.');
+    makeFeatureDoc('UNIT-002', '# Feature\n\n## Summary\n\nSecond summary.\n\n## Details\n\ninfo.');
+    const summaries = readFeatureDocSummaries(tmpDir, ['UNIT-001', 'UNIT-002', 'UNIT-003']);
     expect(summaries).toHaveLength(2);
-    expect(summaries.map(s => s.unitId)).toEqual(['u-001', 'u-002']);
+    expect(summaries.map(s => s.unitId)).toEqual(['UNIT-001', 'UNIT-002']);
   });
 
   it('skips summary sections that are empty after trim', () => {
-    makeFeatureDoc('u-003', '## Summary\n\n   \n\n## Next');
-    const summaries = readFeatureDocSummaries(tmpDir, ['u-003']);
+    makeFeatureDoc('UNIT-003', '## Summary\n\n   \n\n## Next');
+    const summaries = readFeatureDocSummaries(tmpDir, ['UNIT-003']);
     expect(summaries).toHaveLength(0);
   });
 });
@@ -389,7 +389,7 @@ describe('generateChangelogEntry', () => {
       projectPath: tmpDir,
       workflowId: 'wf-001',
       featureName: 'test',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
     });
     expect(result.status).toBe('skipped');
     expect(result.skipReason).toContain('conventional-changelog');
@@ -401,19 +401,19 @@ describe('generateChangelogEntry', () => {
       projectPath: tmpDir,
       workflowId: 'wf-001',
       featureName: 'test',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
     });
     expect(result.status).toBe('skipped');
     expect(result.skipReason).toContain('No feature doc summaries found');
   });
 
   it('creates a new CHANGELOG.md when none exists', () => {
-    makeWorkflowFeatureDoc('wf-001', 'u-001', 'Add new authentication module');
+    makeWorkflowFeatureDoc('wf-001', 'UNIT-001', 'Add new authentication module');
     const result = generateChangelogEntry({
       projectPath: tmpDir,
       workflowId: 'wf-001',
       featureName: 'test',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
     });
     expect(result.status).toBe('completed');
     expect(result.path).toBe(path.join(tmpDir, 'CHANGELOG.md'));
@@ -426,7 +426,7 @@ describe('generateChangelogEntry', () => {
   });
 
   it('prepends to an existing Keep a Changelog file', () => {
-    makeWorkflowFeatureDoc('wf-002', 'u-001', 'Implement search feature');
+    makeWorkflowFeatureDoc('wf-002', 'UNIT-001', 'Implement search feature');
     const changelogPath = path.join(tmpDir, 'CHANGELOG.md');
     fs.writeFileSync(changelogPath, '# Changelog\n\n## [1.0.0] - 2023-01-01\n\n### Added\n\n- Old feature\n');
 
@@ -434,7 +434,7 @@ describe('generateChangelogEntry', () => {
       projectPath: tmpDir,
       workflowId: 'wf-002',
       featureName: 'search',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
     });
 
     expect(result.status).toBe('completed');
@@ -445,7 +445,7 @@ describe('generateChangelogEntry', () => {
   });
 
   it('appends delimited section to a non-standard changelog', () => {
-    makeWorkflowFeatureDoc('wf-003', 'u-001', 'Fix null pointer in parser');
+    makeWorkflowFeatureDoc('wf-003', 'UNIT-001', 'Fix null pointer in parser');
     const changelogPath = path.join(tmpDir, 'CHANGELOG.md');
     fs.writeFileSync(changelogPath, 'My Custom Format\nRelease notes here\n');
 
@@ -453,7 +453,7 @@ describe('generateChangelogEntry', () => {
       projectPath: tmpDir,
       workflowId: 'wf-003',
       featureName: 'fix',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
     });
 
     expect(result.status).toBe('completed');
@@ -464,14 +464,14 @@ describe('generateChangelogEntry', () => {
   });
 
   it('derives entry content from actual feature doc summaries', () => {
-    makeWorkflowFeatureDoc('wf-004', 'u-001', 'Add rate limiting to API endpoints');
-    makeWorkflowFeatureDoc('wf-004', 'u-002', 'Fix memory leak in connection pool');
+    makeWorkflowFeatureDoc('wf-004', 'UNIT-001', 'Add rate limiting to API endpoints');
+    makeWorkflowFeatureDoc('wf-004', 'UNIT-002', 'Fix memory leak in connection pool');
 
     const result = generateChangelogEntry({
       projectPath: tmpDir,
       workflowId: 'wf-004',
       featureName: 'api-improvements',
-      unitIds: ['u-001', 'u-002'],
+      unitIds: ['UNIT-001', 'UNIT-002'],
     });
 
     expect(result.status).toBe('completed');
@@ -483,13 +483,13 @@ describe('generateChangelogEntry', () => {
   });
 
   it('categorizes all entries as Fixed for bugfix pathway', () => {
-    makeWorkflowFeatureDoc('wf-005', 'u-001', 'Resolve incorrect tax calculation');
+    makeWorkflowFeatureDoc('wf-005', 'UNIT-001', 'Resolve incorrect tax calculation');
 
     generateChangelogEntry({
       projectPath: tmpDir,
       workflowId: 'wf-005',
       featureName: 'bugfix-tax',
-      unitIds: ['u-001'],
+      unitIds: ['UNIT-001'],
       pathway: 'bugfix',
     });
 

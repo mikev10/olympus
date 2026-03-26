@@ -16,8 +16,8 @@ All units of work MUST follow a consistent naming scheme:
 - **Documentation headings**: Use `## U-NNN: Name` format
   - Example: `## U-001: Foundation`, `## U-002: API Layer`, `## U-003: Frontend`
   - Number is zero-padded to three digits (U-001, U-002, ... U-010, U-011)
-- **Construction folder names**: Use `u-nnn-name` kebab-case format
-  - Example: `u-001-foundation/`, `u-002-api-layer/`, `u-003-frontend/`
+- **Construction folder names**: Use `UNIT-NNN-name` kebab-case format
+  - Example: `UNIT-001-foundation/`, `UNIT-002-api-layer/`, `UNIT-003-frontend/`
   - This format is automatically enforced by the TypeScript engine via `slugifyUnitName()`
 - **AI-generated artifacts** (unit-of-work.md, unit-of-work-dependency.md, unit-of-work-story-map.md) MUST use `## U-NNN: Name` headings — not plain unit names
 

@@ -31,11 +31,11 @@ function writeConfig(mode: 'advisory' | 'blocking'): void {
 }
 
 const RICH_DOC = `---
-unit: u-001
+unit: UNIT-001
 workflow: wf-001
 ---
 
-# Feature Documentation: u-001
+# Feature Documentation: UNIT-001
 
 ## Summary
 
@@ -129,7 +129,7 @@ and src/__tests__/workflow-engine/construction/recreation-readiness.spec.ts.
 3. Run: npm run build
 `;
 
-const SPARSE_DOC = `# Feature Documentation: u-001
+const SPARSE_DOC = `# Feature Documentation: UNIT-001
 
 Just a brief summary with very little content and no structure.
 `;

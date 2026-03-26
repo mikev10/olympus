@@ -29,7 +29,7 @@ function makeCheckpoint(units: Record<string, ConstructionUnitProgress> = {}): W
 
 function makeUnit(overrides: Partial<ConstructionUnitProgress> = {}): ConstructionUnitProgress {
   return {
-    unitId: 'u-001',
+    unitId: 'UNIT-001',
     stages: {} as any,
     code_plan_path: null,
     code_generation_status: 'completed',
@@ -50,8 +50,8 @@ afterEach(() => {
 describe('collectScorecardData', () => {
   it('aggregates all fields from a fully populated checkpoint', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({
-        unitId: 'u-001',
+      'UNIT-001': makeUnit({
+        unitId: 'UNIT-001',
         tests_total: 100,
         tests_passed: 90,
         tests_failed: 10,
@@ -65,8 +65,8 @@ describe('collectScorecardData', () => {
         feature_doc_status: 'completed',
         recreation_readiness_score: 85,
       }),
-      'u-002': makeUnit({
-        unitId: 'u-002',
+      'UNIT-002': makeUnit({
+        unitId: 'UNIT-002',
         tests_total: 50,
         tests_passed: 50,
         tests_failed: 0,
@@ -131,16 +131,16 @@ describe('collectScorecardData', () => {
 
   it('handles partial data — some units missing optional fields', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({
-        unitId: 'u-001',
+      'UNIT-001': makeUnit({
+        unitId: 'UNIT-001',
         tests_total: 40,
         tests_passed: 35,
         tests_failed: 5,
         security_findings_critical: 2,
         code_generation_status: 'completed',
       }),
-      'u-002': makeUnit({
-        unitId: 'u-002',
+      'UNIT-002': makeUnit({
+        unitId: 'UNIT-002',
         code_generation_status: 'generating',
       }),
     });
@@ -159,9 +159,9 @@ describe('collectScorecardData', () => {
 
   it('averages coverage only across units that have coverage data', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001', coverage_percentage: 60 }),
-      'u-002': makeUnit({ unitId: 'u-002', coverage_percentage: 80 }),
-      'u-003': makeUnit({ unitId: 'u-003' }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001', coverage_percentage: 60 }),
+      'UNIT-002': makeUnit({ unitId: 'UNIT-002', coverage_percentage: 80 }),
+      'UNIT-003': makeUnit({ unitId: 'UNIT-003' }),
     });
 
     const data = collectScorecardData(checkpoint);
@@ -171,8 +171,8 @@ describe('collectScorecardData', () => {
 
   it('rounds coverage average to one decimal place', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001', coverage_percentage: 66.666 }),
-      'u-002': makeUnit({ unitId: 'u-002', coverage_percentage: 77.777 }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001', coverage_percentage: 66.666 }),
+      'UNIT-002': makeUnit({ unitId: 'UNIT-002', coverage_percentage: 77.777 }),
     });
 
     const data = collectScorecardData(checkpoint);
@@ -182,7 +182,7 @@ describe('collectScorecardData', () => {
 
   it('counts phases_completed from checkpoint phases', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001' }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001' }),
     });
     checkpoint.phases = {
       discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
@@ -198,8 +198,8 @@ describe('collectScorecardData', () => {
 
   it('computes regressions_fixed when regressions exist but tests pass', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001', regressions_count: 3, tests_failed: 0, tests_total: 10 }),
-      'u-002': makeUnit({ unitId: 'u-002', regressions_count: 1, tests_failed: 2, tests_total: 5 }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001', regressions_count: 3, tests_failed: 0, tests_total: 10 }),
+      'UNIT-002': makeUnit({ unitId: 'UNIT-002', regressions_count: 1, tests_failed: 2, tests_total: 5 }),
     });
 
     const data = collectScorecardData(checkpoint);
@@ -209,9 +209,9 @@ describe('collectScorecardData', () => {
 
   it('computes average_recreation_readiness_score across units', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001', recreation_readiness_score: 80 }),
-      'u-002': makeUnit({ unitId: 'u-002', recreation_readiness_score: 90 }),
-      'u-003': makeUnit({ unitId: 'u-003' }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001', recreation_readiness_score: 80 }),
+      'UNIT-002': makeUnit({ unitId: 'UNIT-002', recreation_readiness_score: 90 }),
+      'UNIT-003': makeUnit({ unitId: 'UNIT-003' }),
     });
 
     const data = collectScorecardData(checkpoint);
@@ -221,7 +221,7 @@ describe('collectScorecardData', () => {
 
   it('returns null average_recreation_readiness_score when no units have scores', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({ unitId: 'u-001' }),
+      'UNIT-001': makeUnit({ unitId: 'UNIT-001' }),
     });
 
     const data = collectScorecardData(checkpoint);
@@ -445,8 +445,8 @@ describe('writeScorecardReport', () => {
 describe('generateQualityScorecard', () => {
   it('returns data and reportPath for a fully populated checkpoint', () => {
     const checkpoint = makeCheckpoint({
-      'u-001': makeUnit({
-        unitId: 'u-001',
+      'UNIT-001': makeUnit({
+        unitId: 'UNIT-001',
         tests_total: 50,
         tests_passed: 48,
         tests_failed: 2,

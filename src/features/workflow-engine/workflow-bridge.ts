@@ -15,6 +15,8 @@ import type {
   WorkflowCheckpointV3,
   GateResult,
   ManifestArtifact,
+  ConstructionBoltProgress,
+  BoltExecutionStage,
 } from './phase-types.js';
 import type { WorkflowStage } from './types.js';
 import {
@@ -558,4 +560,58 @@ export async function generateBoltExecutionPlan(projectPath: string): Promise<st
     console.error('[WorkflowBridge] Failed to generate bolt execution plan:', error);
     return '';
   }
+}
+
+const BOLT_STAGE_DISPLAY_ORDER: BoltExecutionStage[] = ['elaboration', 'code_generation', 'build_and_test', 'review'];
+
+function getCurrentStage(bolt: ConstructionBoltProgress): string {
+  let lastCompleted: string = '—';
+
+  for (const stage of BOLT_STAGE_DISPLAY_ORDER) {
+    const progress = bolt.stages[stage];
+    if (progress.status === 'in_progress') return stage;
+    if (progress.status === 'completed') lastCompleted = stage;
+  }
+
+  return lastCompleted;
+}
+
+export function renderBoltProgress(checkpoint: WorkflowCheckpointV3): string {
+  const bolts = checkpoint.construction_bolts;
+  if (!bolts || Object.keys(bolts).length === 0) return '';
+
+  const groups = new Map<string, ConstructionBoltProgress[]>();
+  for (const bolt of Object.values(bolts)) {
+    const unitId = bolt.parent_unit_id;
+    if (!groups.has(unitId)) groups.set(unitId, []);
+    groups.get(unitId)!.push(bolt);
+  }
+
+  const sortedUnitIds = [...groups.keys()].sort();
+  const sections: string[] = [];
+  let totalDone = 0;
+  let totalBolts = 0;
+
+  for (const unitId of sortedUnitIds) {
+    const unitBolts = groups.get(unitId)!;
+    totalBolts += unitBolts.length;
+
+    const rows: string[] = [];
+    for (const bolt of unitBolts) {
+      if (bolt.status === 'done') totalDone++;
+      const currentStage = getCurrentStage(bolt);
+      const score = bolt.review_score != null ? String(bolt.review_score) : '—';
+      rows.push(`| ${bolt.bolt_id} | ${bolt.status} | ${currentStage} | ${score} |`);
+    }
+
+    sections.push(
+      `### ${unitId}\n` +
+      '| Bolt ID | Status | Current Stage | Score |\n' +
+      '|---------|--------|---------------|-------|\n' +
+      rows.join('\n')
+    );
+  }
+
+  sections.push(`${totalDone}/${totalBolts} bolts complete`);
+  return sections.join('\n');
 }

@@ -19,7 +19,7 @@ function makeConfig(overrides: Partial<ValidatorConfig> = {}): ValidatorConfig {
     timeoutBudgetMs: 5000,
     allowFailures: false,
     workflowDepth: 2,
-    unitId: 'u-001',
+    unitId: 'UNIT-001',
     unitFiles: [],
     apiSurfaceFiles: [],
     projectPath: testDir,
@@ -76,15 +76,15 @@ function makeCheckpointV3(workflowId: string): WorkflowCheckpointV3 {
     manifest_path: `aidlc-docs/${workflowId}/manifest.json`,
     trust_state_path: `aidlc-docs/${workflowId}/trust.json`,
     construction_units: {
-      'u-001': {
-        unitId: 'u-001',
+      'UNIT-001': {
+        unitId: 'UNIT-001',
         stages: {
-          'functional-design': { status: 'skipped', artifact_path: null, completed_at: null },
-          'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-          'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-          'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
-          'code-generation': { status: 'completed', artifact_path: null, completed_at: null },
-          'test-generation': { status: 'completed', artifact_path: null, completed_at: null },
+          'functional-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+          'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+          'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+          'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+          'code-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+          'test-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
         },
         code_plan_path: null,
         code_generation_status: 'completed',
@@ -284,50 +284,50 @@ describe('updateCheckpointForValidator', () => {
     const checkpoint = makeCheckpointV3(workflowId);
     await saveCheckpoint(testDir, checkpoint);
 
-    await updateCheckpointForValidator(testDir, workflowId, 'u-001', 'quality', 'completed');
+    await updateCheckpointForValidator(testDir, workflowId, 'UNIT-001', 'quality', 'completed');
 
     const { loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
     const loaded = await loadCheckpoint(testDir, workflowId);
-    expect(loaded?.construction_units?.['u-001'].quality_validation_status).toBe('completed');
+    expect(loaded?.construction_units?.['UNIT-001'].quality_validation_status).toBe('completed');
   });
 
   it('updates traceability_status when validator is traceability', async () => {
     const checkpoint = makeCheckpointV3(workflowId);
     await saveCheckpoint(testDir, checkpoint);
 
-    await updateCheckpointForValidator(testDir, workflowId, 'u-001', 'traceability', 'in_progress');
+    await updateCheckpointForValidator(testDir, workflowId, 'UNIT-001', 'traceability', 'in_progress');
 
     const { loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
     const loaded = await loadCheckpoint(testDir, workflowId);
-    expect(loaded?.construction_units?.['u-001'].traceability_status).toBe('in_progress');
+    expect(loaded?.construction_units?.['UNIT-001'].traceability_status).toBe('in_progress');
   });
 
   it('updates contract_validation_status when validator is contract', async () => {
     const checkpoint = makeCheckpointV3(workflowId);
     await saveCheckpoint(testDir, checkpoint);
 
-    await updateCheckpointForValidator(testDir, workflowId, 'u-001', 'contract', 'skipped');
+    await updateCheckpointForValidator(testDir, workflowId, 'UNIT-001', 'contract', 'skipped');
 
     const { loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
     const loaded = await loadCheckpoint(testDir, workflowId);
-    expect(loaded?.construction_units?.['u-001'].contract_validation_status).toBe('skipped');
+    expect(loaded?.construction_units?.['UNIT-001'].contract_validation_status).toBe('skipped');
   });
 
   it('updates coverage_status and coverage_percentage when validator is coverage', async () => {
     const checkpoint = makeCheckpointV3(workflowId);
     await saveCheckpoint(testDir, checkpoint);
 
-    await updateCheckpointForValidator(testDir, workflowId, 'u-001', 'coverage', 'completed', 87.5);
+    await updateCheckpointForValidator(testDir, workflowId, 'UNIT-001', 'coverage', 'completed', 87.5);
 
     const { loadCheckpoint } = await import('../../../features/workflow-engine/checkpoint.js');
     const loaded = await loadCheckpoint(testDir, workflowId);
-    expect(loaded?.construction_units?.['u-001'].coverage_status).toBe('completed');
-    expect(loaded?.construction_units?.['u-001'].coverage_percentage).toBe(87.5);
+    expect(loaded?.construction_units?.['UNIT-001'].coverage_status).toBe('completed');
+    expect(loaded?.construction_units?.['UNIT-001'].coverage_percentage).toBe(87.5);
   });
 
   it('does nothing when checkpoint does not exist', async () => {
     await expect(
-      updateCheckpointForValidator(testDir, 'nonexistent-wf', 'u-001', 'quality', 'completed')
+      updateCheckpointForValidator(testDir, 'nonexistent-wf', 'UNIT-001', 'quality', 'completed')
     ).resolves.not.toThrow();
   });
 
@@ -336,7 +336,7 @@ describe('updateCheckpointForValidator', () => {
     await saveCheckpoint(testDir, checkpoint);
 
     await expect(
-      updateCheckpointForValidator(testDir, workflowId, 'u-999', 'quality', 'completed')
+      updateCheckpointForValidator(testDir, workflowId, 'UNIT-999', 'quality', 'completed')
     ).resolves.not.toThrow();
   });
 });

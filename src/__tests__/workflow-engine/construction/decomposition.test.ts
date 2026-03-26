@@ -273,17 +273,17 @@ Build multiple components
     expect(result).not.toBeNull();
     expect(result!.proposedUnits).toHaveLength(3);
     expect(result!.proposedUnits[0]).toEqual({
-      id: 'u-001-database-layer',
+      id: 'UNIT-001-database-layer',
       title: 'Database Layer',
       description: 'Handle data persistence and migrations',
     });
     expect(result!.proposedUnits[1]).toEqual({
-      id: 'u-002-api-layer',
+      id: 'UNIT-002-api-layer',
       title: 'API Layer',
       description: 'REST endpoint implementation',
     });
     expect(result!.proposedUnits[2]).toEqual({
-      id: 'u-003-ui-layer',
+      id: 'UNIT-003-ui-layer',
       title: 'UI Layer',
       description: 'Frontend components and pages',
     });
@@ -307,8 +307,8 @@ title: "Explicit IDs"
     const result = await parseIntentFromFile(path.join(testDir, 'intent.md'));
 
     expect(result!.proposedUnits).toHaveLength(2);
-    expect(result!.proposedUnits[0].id).toBe('u-001-unit-001');
-    expect(result!.proposedUnits[1].id).toBe('u-002-unit-002');
+    expect(result!.proposedUnits[0].id).toBe('UNIT-001-unit-001');
+    expect(result!.proposedUnits[1].id).toBe('UNIT-002-unit-002');
   });
 
   it('should handle empty proposed UNITs section', async () => {
@@ -375,9 +375,9 @@ describe('decomposeIntentToUnits', () => {
     const units = decomposeIntentToUnits(intent, unitSpecs);
 
     expect(units).toHaveLength(3);
-    expect(units[0].id).toBe('u-001-unit-one');
-    expect(units[1].id).toBe('u-002-unit-two');
-    expect(units[2].id).toBe('u-003-unit-three');
+    expect(units[0].id).toBe('UNIT-001-unit-one');
+    expect(units[1].id).toBe('UNIT-002-unit-two');
+    expect(units[2].id).toBe('UNIT-003-unit-three');
   });
 
   it('should set parent_id to intent ID', () => {
@@ -420,7 +420,7 @@ describe('decomposeIntentToUnits', () => {
 
     decomposeIntentToUnits(intent, unitSpecs);
 
-    expect(intent.children_ids).toEqual(['u-001-unit-one', 'u-002-unit-two']);
+    expect(intent.children_ids).toEqual(['UNIT-001-unit-one', 'UNIT-002-unit-two']);
   });
 
   it('should create units with correct properties', () => {
@@ -442,7 +442,7 @@ describe('decomposeIntentToUnits', () => {
     const units = decomposeIntentToUnits(intent, unitSpecs);
 
     expect(units[0]).toMatchObject({
-      id: 'u-001-database-setup',
+      id: 'UNIT-001-database-setup',
       type: 'unit',
       title: 'Database Setup',
       parent_id: 'INTENT-001',
@@ -489,7 +489,7 @@ describe('decomposeIntentToUnits', () => {
 
     decomposeIntentToUnits(intent, unitSpecs);
 
-    expect(intent.children_ids).toEqual(['EXISTING-UNIT', 'u-001-new-unit']);
+    expect(intent.children_ids).toEqual(['EXISTING-UNIT', 'UNIT-001-new-unit']);
   });
 
   describe('limit enforcement', () => {
@@ -580,32 +580,32 @@ describe('decomposeIntentToUnits', () => {
 });
 
 describe('slugifyUnitName', () => {
-  it('should convert titles to lowercase hyphenated slugs with u-XXX- prefix', () => {
-    expect(slugifyUnitName('Auth Service', 1)).toBe('u-001-auth-service');
-    expect(slugifyUnitName('API Gateway', 2)).toBe('u-002-api-gateway');
-    expect(slugifyUnitName('User Onboarding', 3)).toBe('u-003-user-onboarding');
+  it('should convert titles to lowercase hyphenated slugs with UNIT-XXX- prefix', () => {
+    expect(slugifyUnitName('Auth Service', 1)).toBe('UNIT-001-auth-service');
+    expect(slugifyUnitName('API Gateway', 2)).toBe('UNIT-002-api-gateway');
+    expect(slugifyUnitName('User Onboarding', 3)).toBe('UNIT-003-user-onboarding');
   });
 
   it('should return fallback for empty titles', () => {
-    expect(slugifyUnitName('', 1)).toBe('u-001-untitled');
-    expect(slugifyUnitName('  ', 2)).toBe('u-002-untitled');
+    expect(slugifyUnitName('', 1)).toBe('UNIT-001-untitled');
+    expect(slugifyUnitName('  ', 2)).toBe('UNIT-002-untitled');
   });
 
   it('should strip non-alphanumeric characters', () => {
-    expect(slugifyUnitName('Hello World!@#', 1)).toBe('u-001-hello-world');
+    expect(slugifyUnitName('Hello World!@#', 1)).toBe('UNIT-001-hello-world');
   });
 
   it('should truncate slugs longer than 60 characters', () => {
     const longTitle = 'a'.repeat(80);
     const result = slugifyUnitName(longTitle, 1);
-    const prefixLength = 'u-001-'.length;
+    const prefixLength = 'UNIT-001-'.length;
     expect(result.length).toBeLessThanOrEqual(prefixLength + 60);
   });
 
   it('should use zero-padded 3-digit index', () => {
-    expect(slugifyUnitName('Foundation', 1)).toBe('u-001-foundation');
-    expect(slugifyUnitName('API Gateway', 2)).toBe('u-002-api-gateway');
-    expect(slugifyUnitName('Tenth Unit', 10)).toBe('u-010-tenth-unit');
+    expect(slugifyUnitName('Foundation', 1)).toBe('UNIT-001-foundation');
+    expect(slugifyUnitName('API Gateway', 2)).toBe('UNIT-002-api-gateway');
+    expect(slugifyUnitName('Tenth Unit', 10)).toBe('UNIT-010-tenth-unit');
   });
 });
 

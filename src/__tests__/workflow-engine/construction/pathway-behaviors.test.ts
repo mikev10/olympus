@@ -27,7 +27,7 @@ vi.mock('../../../hooks/registry.js', () => ({
 describe('Pathway dispatch — validateBugfixTestRequirement', () => {
   const testDir = path.join(process.cwd(), '.test-pathway-behaviors');
   const workflowId = 'pathway-workflow';
-  const unitId = 'u-001-unit';
+  const unitId = 'UNIT-001-unit';
 
   function makeCheckpoint(pathwayType: string) {
     return {
@@ -47,10 +47,10 @@ describe('Pathway dispatch — validateBugfixTestRequirement', () => {
         [unitId]: {
           unitId,
           stages: {
-            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
+            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             'code-generation': { status: 'completed', artifact_path: null, completed_at: '2026-01-01T00:00:00.000Z' },
             'test-generation': { status: 'completed', artifact_path: null, completed_at: '2026-01-01T00:00:00.000Z' },
           },

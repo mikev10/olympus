@@ -6,7 +6,7 @@
  * 2. Engine gating
  * 3. Artifact creation
  * 4. Checkpoint persistence
- * 5. executeShallow() integration
+ * 5. SHALLOW depth integration (express bolt path)
  * 6. Framework detection
  * 7. Validation pipeline integration
  * 8. Smoke test coverage report
@@ -54,7 +54,7 @@ vi.mock('../../../features/workflow-engine/construction/validators/index.js', ()
 describe('ConstructionExecutor.executeTestGeneration()', () => {
   const testDir = path.join(process.cwd(), '.test-test-generation');
   const workflowId = 'tg-workflow';
-  const unitId = 'u-001-feature';
+  const unitId = 'UNIT-001-feature';
 
   function makeCheckpoint(overrides: Record<string, unknown> = {}) {
     return {
@@ -266,7 +266,7 @@ describe('ConstructionExecutor.executeTestGeneration()', () => {
     });
   });
 
-  describe('Group 5: executeShallow() integration', () => {
+  describe('Group 5: SHALLOW depth integration (express bolt path)', () => {
     async function createIntentFile(title: string, effort: number): Promise<void> {
       const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
       await fs.ensureDir(intentDir);
@@ -290,43 +290,27 @@ Implement ${title}
       );
     }
 
-    it('execute() with depth SHALLOW calls executeTestGeneration for shallow-impl unit', async () => {
-      mockLoadCheckpoint.mockResolvedValue(null);
+    it('execute() with depth SHALLOW returns passed: true via express bolt pipeline', async () => {
+      mockLoadCheckpoint.mockResolvedValue(makeCheckpoint());
 
       await createIntentFile('Quick Fix', 2);
 
       const executor = new ConstructionExecutor(testDir, workflowId);
-      const spy = vi.spyOn(executor, 'executeTestGeneration');
-      spy.mockResolvedValue({
-        status: 'completed',
-        unitId: 'shallow-impl',
-        tests_total: 0,
-        tests_passed: 0,
-        tests_failed: 0,
-        test_framework: 'unknown',
-        reportPath: '/fake/path',
-        regressions_count: 0,
-        flaky_count: 0,
-      });
-
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
       expect(result.passed).toBe(true);
-      expect(spy).toHaveBeenCalledWith('shallow-impl');
     });
 
-    it('SHALLOW result is passed: true even if executeTestGeneration throws', async () => {
+    it('SHALLOW returns passed: false when no checkpoint exists', async () => {
       mockLoadCheckpoint.mockResolvedValue(null);
 
-      await createIntentFile('Resilient Feature', 2);
+      await createIntentFile('No Checkpoint', 2);
 
       const executor = new ConstructionExecutor(testDir, workflowId);
-      const spy = vi.spyOn(executor, 'executeTestGeneration');
-      spy.mockRejectedValue(new Error('test generation exploded'));
-
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
-      expect(result.passed).toBe(true);
+      expect(result.passed).toBe(false);
+      expect(result.blocking_issues).toContain('No checkpoint found for SHALLOW construction');
     });
   });
 

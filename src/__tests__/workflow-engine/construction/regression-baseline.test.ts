@@ -230,7 +230,7 @@ describe('regression-baseline.ts', () => {
     function makeReport(overrides: Partial<RegressionReport> = {}): RegressionReport {
       return {
         workflow_id: workflowId,
-        unit_id: 'u-001-core',
+        unit_id: 'UNIT-001-core',
         baseline_captured_at: '2026-01-01T00:00:00.000Z',
         compared_at: '2026-01-02T00:00:00.000Z',
         total_regressions: 2,
@@ -248,18 +248,18 @@ describe('regression-baseline.ts', () => {
     }
 
     it('creates the testing/ directory if it does not exist', async () => {
-      await writeRegressionReport(testDir, workflowId, 'u-001-core', makeReport());
+      await writeRegressionReport(testDir, workflowId, 'UNIT-001-core', makeReport());
       const testingDir = path.join(
-        testDir, 'aidlc-docs', workflowId, 'construction', 'u-001-core', 'testing'
+        testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-001-core', 'testing'
       );
       const exists = await fs.pathExists(testingDir);
       expect(exists).toBe(true);
     });
 
     it('writes the markdown file at the expected path', async () => {
-      await writeRegressionReport(testDir, workflowId, 'u-001-core', makeReport());
+      await writeRegressionReport(testDir, workflowId, 'UNIT-001-core', makeReport());
       const reportPath = path.join(
-        testDir, 'aidlc-docs', workflowId, 'construction', 'u-001-core', 'testing', 'regression-report.md'
+        testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-001-core', 'testing', 'regression-report.md'
       );
       const exists = await fs.pathExists(reportPath);
       expect(exists).toBe(true);
@@ -267,13 +267,13 @@ describe('regression-baseline.ts', () => {
 
     it('file content includes workflow_id, unit_id, and failure count', async () => {
       const report = makeReport({ total_regressions: 3 });
-      await writeRegressionReport(testDir, workflowId, 'u-001-core', report);
+      await writeRegressionReport(testDir, workflowId, 'UNIT-001-core', report);
       const reportPath = path.join(
-        testDir, 'aidlc-docs', workflowId, 'construction', 'u-001-core', 'testing', 'regression-report.md'
+        testDir, 'aidlc-docs', workflowId, 'construction', 'UNIT-001-core', 'testing', 'regression-report.md'
       );
       const content = await fs.readFile(reportPath, 'utf-8');
       expect(content).toContain(workflowId);
-      expect(content).toContain('u-001-core');
+      expect(content).toContain('UNIT-001-core');
       expect(content).toContain('3');
     });
   });

@@ -14,12 +14,12 @@ function makeCheckpoint(units: Record<string, Partial<ConstructionUnitProgress>>
     construction_units[id] = {
       unitId: id,
       stages: {
-        'functional-design': { status: 'completed', artifact_path: null, completed_at: null },
-        'nfr-requirements': { status: 'completed', artifact_path: null, completed_at: null },
-        'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-        'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
-        'code-generation': { status: 'completed', artifact_path: null, completed_at: null },
-        'test-generation': { status: 'completed', artifact_path: null, completed_at: null },
+        'functional-design': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-requirements': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'code-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'test-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
       },
       code_plan_path: null,
       code_generation_status: 'completed',

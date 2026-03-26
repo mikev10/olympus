@@ -96,7 +96,7 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 
 Load ALL inception artifacts PLUS:
 - `inception/application-design/unit-of-work.md` (unit decomposition)
-- For the active unit: `construction/u-nnn-name/functional-design.md`, `nfr-requirements.md`, `nfr-design.md`, `infrastructure-design.md`, `code-generation.md` (e.g., `construction/u-001-foundation/functional-design.md`)
+- For the active unit: `construction/UNIT-NNN-name/functional-design.md`, `nfr-requirements.md`, `nfr-design.md`, `infrastructure-design.md`, `code-generation.md` (e.g., `construction/UNIT-001-foundation/functional-design.md`)
 - All completed units' artifacts
 
 ### Read `aidlc-state.md`
@@ -140,6 +140,7 @@ If `current_phase === 'construction'`:
 - Resume from that point
 - If a `construction_units` entry has `stages['test-generation'].status === 'in_progress'` or `test_generation_status === 'in_progress'`, resume at test-generation for that unit
 - Note: test-generation runs after code-generation for each unit; check `test_generation_status` in the unit progress
+- **Mid-bolt resume**: If the checkpoint has `active_bolt_id` set (non-null), a bolt execution was interrupted. Resume from `active_bolt_stage` for that bolt. Load the bolt spec at `construction/bolts/{active_bolt_id}/spec.md` and continue execution from the interrupted stage (`elaboration`, `code_generation`, `build_and_test`, or `review`). Do not re-run completed bolt stages.
 
 ### 4d. Other Phases
 

@@ -269,6 +269,23 @@ export function linkArtifacts(manifestPath: string, link: ArtifactLink): void {
   }
 }
 
+export function addArtifactLink(
+  manifest: ManifestSchema,
+  sourceId: string,
+  targetId: string,
+  linkType: ArtifactLink['link_type']
+): void {
+  const duplicate = manifest.links.some(
+    (l) =>
+      l.source_id === sourceId &&
+      l.target_id === targetId &&
+      l.link_type === linkType
+  );
+  if (!duplicate) {
+    manifest.links.push({ source_id: sourceId, target_id: targetId, link_type: linkType });
+  }
+}
+
 /**
  * Detects artifacts whose checksums have changed compared to stored values.
  *

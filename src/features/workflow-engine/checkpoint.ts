@@ -12,7 +12,7 @@
 
 import fs from 'fs-extra';
 import { join } from 'path';
-import type { WorkflowCheckpointV3, ConstructionUnitProgress } from './phase-types.js';
+import type { WorkflowCheckpointV3, ConstructionUnitProgress, BoltExecutionStage } from './phase-types.js';
 
 const WORKFLOW_DIR = 'aidlc-docs';
 const CHECKPOINT_FILENAME = 'checkpoint.json';
@@ -50,6 +50,11 @@ function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
     checkpoint.current_stage = 'intent';
   }
 
+  // Bolt-level field migration (U-006)
+  if (checkpoint.construction_bolts === undefined) checkpoint.construction_bolts = {};
+  if (checkpoint.active_bolt_id === undefined) checkpoint.active_bolt_id = null;
+  if (checkpoint.active_bolt_stage === undefined) checkpoint.active_bolt_stage = null;
+
   if (!checkpoint.construction_units || Array.isArray(checkpoint.construction_units)) return;
 
   for (const unit of Object.values(checkpoint.construction_units) as ConstructionUnitProgress[]) {
@@ -62,7 +67,15 @@ function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
         status: isComplete ? 'skipped' : 'not_started',
         artifact_path: null,
         completed_at: null,
+        failure_count: 0,
+        last_error: null,
       };
+    }
+
+    // Backward compat: add failure_count and last_error to all stages
+    for (const stage of Object.values(unit.stages) as Array<{ failure_count?: number; last_error?: string | null }>) {
+      if (stage.failure_count === undefined) stage.failure_count = 0;
+      if (stage.last_error === undefined) stage.last_error = null;
     }
 
     if (unit.quality_validation_status === undefined) unit.quality_validation_status = 'not_started';
@@ -83,6 +96,31 @@ function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
     if (unit.adr_count === undefined) unit.adr_count = 0;
     if (unit.impact_scan_status === undefined) unit.impact_scan_status = 'not_started';
   }
+}
+
+const BOLT_STAGE_ORDER: BoltExecutionStage[] = ['elaboration', 'code_generation', 'build_and_test', 'review'];
+
+export function getResumePoint(
+  checkpoint: WorkflowCheckpointV3
+): { boltId: string; stage: BoltExecutionStage } | null {
+  const activeBoltId = checkpoint.active_bolt_id;
+  if (activeBoltId == null) return null;
+
+  if (checkpoint.active_bolt_stage != null) {
+    return { boltId: activeBoltId, stage: checkpoint.active_bolt_stage };
+  }
+
+  const boltProgress = checkpoint.construction_bolts?.[activeBoltId];
+  if (!boltProgress) return null;
+
+  for (const stage of BOLT_STAGE_ORDER) {
+    const stageProgress = boltProgress.stages[stage];
+    if (stageProgress.status !== 'completed' && stageProgress.status !== 'skipped') {
+      return { boltId: activeBoltId, stage };
+    }
+  }
+
+  return null;
 }
 
 /**

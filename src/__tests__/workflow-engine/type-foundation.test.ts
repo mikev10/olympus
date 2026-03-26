@@ -118,15 +118,15 @@ describe('Group 1D Type Foundation', () => {
         created: new Date().toISOString(),
         updated: new Date().toISOString(),
         construction_units: {
-          'u-001-test': {
-            unitId: 'u-001-test',
+          'UNIT-001-test': {
+            unitId: 'UNIT-001-test',
             stages: {
-              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'code-generation': { status: 'completed', artifact_path: null, completed_at: null },
-              'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             },
             code_plan_path: null,
             code_generation_status: 'completed',
@@ -142,7 +142,7 @@ describe('Group 1D Type Foundation', () => {
       const loaded = await loadCheckpoint(testDir, workflowId);
       expect(loaded).not.toBeNull();
 
-      const unit = loaded!.construction_units!['u-001-test'] as ConstructionUnitProgress;
+      const unit = loaded!.construction_units!['UNIT-001-test'] as ConstructionUnitProgress;
 
       expect(unit.security_scan_status).toBe('not_started');
       expect(unit.security_findings_critical).toBe(0);
@@ -167,15 +167,15 @@ describe('Group 1D Type Foundation', () => {
         created: new Date().toISOString(),
         updated: new Date().toISOString(),
         construction_units: {
-          'u-001-test': {
-            unitId: 'u-001-test',
+          'UNIT-001-test': {
+            unitId: 'UNIT-001-test',
             stages: {
-              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'code-generation': { status: 'completed', artifact_path: null, completed_at: null },
-              'test-generation': { status: 'completed', artifact_path: null, completed_at: null },
+              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'completed', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             },
             code_plan_path: null,
             code_generation_status: 'completed',
@@ -195,7 +195,7 @@ describe('Group 1D Type Foundation', () => {
       );
 
       const loaded = await loadCheckpoint(testDir, workflowId);
-      const unit = loaded!.construction_units!['u-001-test'] as ConstructionUnitProgress;
+      const unit = loaded!.construction_units!['UNIT-001-test'] as ConstructionUnitProgress;
 
       expect(unit.security_scan_status).toBe('completed');
       expect(unit.security_findings_critical).toBe(2);

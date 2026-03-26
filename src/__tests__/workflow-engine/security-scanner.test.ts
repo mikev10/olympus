@@ -166,7 +166,7 @@ describe('discoverFiles', () => {
     return {
       projectPath: TEST_DIR,
       workflowId: 'wf-001',
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       ...overrides,
     };
   }
@@ -329,14 +329,14 @@ describe('generateSecurityReport', () => {
 
   it('includes YAML frontmatter', () => {
     const report = generateSecurityReport([baseFinding], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 10,
       scanDate: '2024-01-01T00:00:00.000Z',
     });
     expect(report).toContain('---');
-    expect(report).toContain('unit: u-001');
+    expect(report).toContain('unit: UNIT-001');
     expect(report).toContain('workflow: wf-test');
     expect(report).toContain('scan_date: 2024-01-01T00:00:00.000Z');
     expect(report).toContain('files_scanned: 10');
@@ -344,7 +344,7 @@ describe('generateSecurityReport', () => {
 
   it('sets status to failed when critical findings exist', () => {
     const report = generateSecurityReport([baseFinding], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 5,
@@ -355,7 +355,7 @@ describe('generateSecurityReport', () => {
   it('sets status to passed when no critical findings', () => {
     const warning: SecurityFinding = { ...baseFinding, severity: 'warning', category: 'xss' };
     const report = generateSecurityReport([warning], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 5,
@@ -366,7 +366,7 @@ describe('generateSecurityReport', () => {
   it('counts findings by severity in frontmatter', () => {
     const warning: SecurityFinding = { ...baseFinding, id: 'sec-002', severity: 'warning', category: 'xss' };
     const report = generateSecurityReport([baseFinding, warning], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 3,
@@ -383,7 +383,7 @@ describe('generateSecurityReport', () => {
       suppress_reason: 'test only',
     };
     const report = generateSecurityReport([suppressed], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 1,
@@ -401,7 +401,7 @@ describe('generateSecurityReport', () => {
       suppress_reason: 'intentional',
     };
     const report = generateSecurityReport([suppressed], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 1,
@@ -412,7 +412,7 @@ describe('generateSecurityReport', () => {
 
   it('produces clean report for empty findings', () => {
     const report = generateSecurityReport([], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 0,
@@ -424,7 +424,7 @@ describe('generateSecurityReport', () => {
   it('groups findings by category', () => {
     const xss: SecurityFinding = { ...baseFinding, id: 'sec-xss', category: 'xss', severity: 'warning', message: 'eval usage detected' };
     const report = generateSecurityReport([baseFinding, xss], {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       outputDir: TEST_DIR,
       filesScanned: 2,

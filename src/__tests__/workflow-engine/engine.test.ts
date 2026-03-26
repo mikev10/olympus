@@ -697,7 +697,7 @@ describe('WorkflowEngine', () => {
       expect(plan).not.toBeNull();
       expect(plan!.pathway).toBeDefined();
       expect(plan!.risk_assessment).toMatch(/^(LOW|MEDIUM|HIGH)$/);
-      expect(typeof plan!.estimated_code_generations).toBe('number');
+      expect(typeof plan!.estimated_bolts).toBe('number');
       expect(['minimal', 'standard', 'comprehensive']).toContain(plan!.estimated_depth);
       expect(plan!.phases).toBeDefined();
       expect(Array.isArray(plan!.stages)).toBe(true);

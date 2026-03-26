@@ -172,7 +172,7 @@ Evaluate risk level:
 
 1. **Assign `U-NNN` IDs** to each unit identified in requirements/stories, following the naming convention in `units-generation.md`:
    - Documentation headings: `## U-NNN: Name`
-   - Construction folder names: `u-nnn-name` (kebab-case)
+   - Construction folder names: `UNIT-NNN-name` (kebab-case)
 
 2. **Create `aidlc-docs/{workflow-id}/inception/application-design/unit-of-work.md`** (MANDATORY):
    ```markdown

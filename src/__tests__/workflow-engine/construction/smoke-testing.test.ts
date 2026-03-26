@@ -27,7 +27,7 @@ vi.mock('../../../hooks/registry.js', () => ({
 describe('ConstructionExecutor.validateBugfixTestRequirement()', () => {
   const testDir = path.join(process.cwd(), '.test-smoke-testing');
   const workflowId = 'smoke-workflow';
-  const unitId = 'u-001-bugfix';
+  const unitId = 'UNIT-001-bugfix';
 
   function makeCheckpoint(overrides: Record<string, unknown> = {}) {
     return {
@@ -51,10 +51,10 @@ describe('ConstructionExecutor.validateBugfixTestRequirement()', () => {
     return {
       unitId,
       stages: {
-        'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
-        'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
-        'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
-        'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
+        'functional-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
         'code-generation': { status: 'completed', artifact_path: null, completed_at: '2026-01-01T00:00:00.000Z' },
         'test-generation': { status: tgStatus, artifact_path: null, completed_at: tgStatus === 'completed' ? '2026-01-01T00:00:00.000Z' : null },
       },

@@ -91,7 +91,7 @@ Global error boundary catches unhandled exceptions.
 **Pathway:** brownfield-enhancement
 **Risk Assessment:** MEDIUM
 **Risk Tier:** 2
-**Estimated Code Generations:** 3
+**Estimated Bolts:** 3
 **Estimated Depth:** standard
 **Generated:** 2026-01-15T00:00:00.000Z
 **Approved:** Pending

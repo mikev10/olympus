@@ -1134,8 +1134,8 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 
 **Unit Naming Convention** (MANDATORY):
 - Documentation headings use `## U-NNN: Name` format (e.g., `## U-001: Foundation`, `## U-002: API Layer`)
-- Construction folder names use `u-nnn-name` kebab-case format (e.g., `u-001-foundation/`, `u-002-api-layer/`)
-- The TypeScript engine enforces `u-nnn-name` folder format automatically via `slugifyUnitName()`
+- Construction folder names use `UNIT-NNN-name` kebab-case format (e.g., `UNIT-001-foundation/`, `UNIT-002-api-layer/`)
+- The TypeScript engine enforces `UNIT-NNN-name` folder format automatically via `slugifyUnitName()`
 - Numbering is zero-padded to three digits: U-001, U-002, ... U-010, U-011, etc.
 
 **`aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`**:
@@ -1150,7 +1150,7 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 - **User Stories**: US-001, US-002
 - **NFRs**: SEC-001, PERF-001
 - **Components**: {component names}
-- **Folder**: `construction/u-001-{module-name-kebab}/`
+- **Folder**: `construction/UNIT-001-{module-name-kebab}/`
 
 ## U-002: {Module Name}
 ...

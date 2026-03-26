@@ -377,4 +377,41 @@ describe('UnitStageRunner', () => {
       expect(await fs.pathExists(auditPath)).toBe(false);
     });
   });
+
+  describe('failure tracking', () => {
+    it('initializes failure_count to 0 for all stages', async () => {
+      const unitId = 'UNIT-050';
+      await createUnitSpec(unitId);
+      const runner = new UnitStageRunner(testDir, workflowId);
+
+      const progress = await runner.executeForUnit(unitId, 'SHALLOW', 'Intent');
+
+      for (const stage of Object.values(progress.stages)) {
+        expect(stage.failure_count).toBe(0);
+      }
+    });
+
+    it('initializes last_error to null for all stages', async () => {
+      const unitId = 'UNIT-051';
+      await createUnitSpec(unitId);
+      const runner = new UnitStageRunner(testDir, workflowId);
+
+      const progress = await runner.executeForUnit(unitId, 'SHALLOW', 'Intent');
+
+      for (const stage of Object.values(progress.stages)) {
+        expect(stage.last_error).toBeNull();
+      }
+    });
+
+    it('last_error is null when no failure occurs', async () => {
+      const unitId = 'UNIT-052';
+      await createUnitSpec(unitId);
+      const runner = new UnitStageRunner(testDir, workflowId);
+
+      const progress = await runner.executeForUnit(unitId, 'MEDIUM', 'Intent');
+
+      expect(progress.stages['functional-design'].last_error).toBeNull();
+      expect(progress.stages['functional-design'].failure_count).toBe(0);
+    });
+  });
 });

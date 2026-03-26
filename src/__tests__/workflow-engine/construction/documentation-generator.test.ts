@@ -14,7 +14,7 @@ const TEST_DIR = path.join(process.cwd(), '.test-documentation-generator');
 
 function makeOptions(overrides: Partial<Parameters<typeof generateDocumentation>[0]> = {}) {
   return {
-    unitId: 'u-001',
+    unitId: 'UNIT-001',
     workflowId: 'wf-test',
     projectPath: TEST_DIR,
     depth: 'standard' as const,
@@ -100,7 +100,7 @@ describe('writeFeatureDoc', () => {
     fs.mkdirSync(outputDir, { recursive: true });
 
     const filePath = writeFeatureDoc('# Content\n', {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       depth: 'standard',
       pathway: 'brownfield-enhancement',
@@ -110,7 +110,7 @@ describe('writeFeatureDoc', () => {
 
     expect(fs.existsSync(filePath)).toBe(true);
     const content = fs.readFileSync(filePath, 'utf-8');
-    expect(content).toContain('unit: u-001');
+    expect(content).toContain('unit: UNIT-001');
     expect(content).toContain('workflow: wf-test');
     expect(content).toContain('depth: standard');
     expect(content).toContain('pathway: brownfield-enhancement');
@@ -123,7 +123,7 @@ describe('writeFeatureDoc', () => {
   it('creates documentation subdirectory automatically', () => {
     const outputDir = path.join(TEST_DIR, 'auto-dir-test');
     const filePath = writeFeatureDoc('', {
-      unitId: 'u-001',
+      unitId: 'UNIT-001',
       workflowId: 'wf-test',
       depth: 'minimal',
       pathway: 'bugfix',
@@ -188,7 +188,7 @@ describe('generateDocumentation', () => {
     const result = generateDocumentation(makeOptions());
     expect(result.path).toContain('aidlc-docs');
     expect(result.path).toContain('wf-test');
-    expect(result.path).toContain('u-001');
+    expect(result.path).toContain('UNIT-001');
     expect(result.path).toContain('documentation');
     expect(result.path).toContain('feature-doc.md');
   });
@@ -200,8 +200,8 @@ describe('generateDocumentation', () => {
 
   it('section count varies correctly by depth', () => {
     const minimal = generateDocumentation(makeOptions({ depth: 'minimal' }));
-    const standard = generateDocumentation(makeOptions({ depth: 'standard', unitId: 'u-002' }));
-    const comprehensive = generateDocumentation(makeOptions({ depth: 'comprehensive', unitId: 'u-003' }));
+    const standard = generateDocumentation(makeOptions({ depth: 'standard', unitId: 'UNIT-002' }));
+    const comprehensive = generateDocumentation(makeOptions({ depth: 'comprehensive', unitId: 'UNIT-003' }));
 
     expect(minimal.sections).toHaveLength(3);
     expect(standard.sections).toHaveLength(9);
@@ -235,7 +235,7 @@ describe('generateDocumentation', () => {
 describe('ConstructionExecutor.executeDocumentationGeneration', () => {
   it('returns a completed featureDoc result', async () => {
     const executor = new ConstructionExecutor(TEST_DIR, 'wf-exec-test');
-    const result = await executor.executeDocumentationGeneration('u-001');
+    const result = await executor.executeDocumentationGeneration('UNIT-001');
     expect(result.featureDoc.status).toBe('completed');
     expect(result.featureDoc.path).not.toBeNull();
     expect(result.featureDoc.sections.length).toBeGreaterThan(0);
@@ -243,7 +243,7 @@ describe('ConstructionExecutor.executeDocumentationGeneration', () => {
 
   it('uses projectPath and workflowId overrides', async () => {
     const executor = new ConstructionExecutor('/wrong/path', 'wrong-wf');
-    const result = await executor.executeDocumentationGeneration('u-001', {
+    const result = await executor.executeDocumentationGeneration('UNIT-001', {
       projectPath: TEST_DIR,
       workflowId: 'wf-override',
     });
@@ -270,12 +270,12 @@ describe('ConstructionExecutor.executeDocumentationGeneration', () => {
         'u-cp': {
           unitId: 'u-cp',
           stages: {
-            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
-            'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'code-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'test-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
           },
           code_plan_path: null,
           code_generation_status: 'not_started',
@@ -322,12 +322,12 @@ describe('ConstructionExecutor.executeDocumentationGeneration', () => {
         'u-dispatch': {
           unitId: 'u-dispatch',
           stages: {
-            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
-            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
-            'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
-            'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+            'functional-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'code-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            'test-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
           },
           code_plan_path: null,
           code_generation_status: 'not_started',
@@ -360,14 +360,14 @@ describe('ConstructionExecutor.executeDocumentationGeneration', () => {
 describe('ConstructionExecutor.executeUnitCompletion', () => {
   it('returns testGeneration result', async () => {
     const executor = new ConstructionExecutor(TEST_DIR, 'wf-unit-completion');
-    const result = await executor.executeUnitCompletion('u-001', { allowFailures: true });
+    const result = await executor.executeUnitCompletion('UNIT-001', { allowFailures: true });
     expect(result.testGeneration).toBeDefined();
-    expect(result.testGeneration.unitId).toBe('u-001');
+    expect(result.testGeneration.unitId).toBe('UNIT-001');
   });
 
   it('runs doc generation when test gen completes successfully', async () => {
     const executor = new ConstructionExecutor(TEST_DIR, 'wf-uc-doc');
-    const result = await executor.executeUnitCompletion('u-001', {
+    const result = await executor.executeUnitCompletion('UNIT-001', {
       allowFailures: true,
     });
     if (result.testGeneration.status === 'completed') {
@@ -378,7 +378,7 @@ describe('ConstructionExecutor.executeUnitCompletion', () => {
 
   it('skips doc gen when skipDocumentation is true', async () => {
     const executor = new ConstructionExecutor(TEST_DIR, 'wf-uc-skip');
-    const result = await executor.executeUnitCompletion('u-001', {
+    const result = await executor.executeUnitCompletion('UNIT-001', {
       allowFailures: true,
       skipDocumentation: true,
     });

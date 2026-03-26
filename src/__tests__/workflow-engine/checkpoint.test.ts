@@ -12,8 +12,10 @@ import {
   loadCheckpoint,
   listWorkflows,
   deleteWorkflow,
+  clearCache,
+  getResumePoint,
 } from '../../features/workflow-engine/checkpoint.js';
-import type { WorkflowCheckpointV3 } from '../../features/workflow-engine/phase-types.js';
+import type { WorkflowCheckpointV3, ConstructionBoltProgress, BoltStageProgress } from '../../features/workflow-engine/phase-types.js';
 
 describe('Checkpoint Persistence', () => {
   let tmpDir: string;
@@ -563,5 +565,233 @@ describe('Checkpoint Persistence', () => {
     });
   });
 
+  describe('bolt field migration', () => {
+    afterEach(() => {
+      clearCache();
+    });
+
+    it('migrates v3 checkpoint without bolt fields to defaults', async () => {
+      const workflowDir = join(tmpDir, 'aidlc-docs/migration-bolt-test');
+      await fs.ensureDir(workflowDir);
+      await fs.writeJson(join(workflowDir, 'checkpoint.json'), {
+        schema_version: '3.0.0',
+        workflow_id: 'migration-bolt-test',
+        feature_name: 'migration test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction',
+        current_stage: 'code-generation',
+        status: 'in_progress',
+        phases: {
+          discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+      });
+
+      const loaded = await loadCheckpoint(tmpDir, 'migration-bolt-test');
+      expect(loaded).not.toBeNull();
+      expect(loaded!.construction_bolts).toEqual({});
+      expect(loaded!.active_bolt_id).toBeNull();
+      expect(loaded!.active_bolt_stage).toBeNull();
+    });
+
+    it('preserves already-migrated bolt fields (idempotent)', async () => {
+      const checkpoint: WorkflowCheckpointV3 = {
+        schema_version: '3.0.0',
+        workflow_id: 'idempotent-bolt-test',
+        feature_name: 'idempotent test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction',
+        current_stage: 'code-generation',
+        status: 'in_progress',
+        phases: {
+          discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+        construction_bolts: { 'BOLT-001': { bolt_id: 'BOLT-001', parent_unit_id: 'UNIT-001', status: 'in_progress' as any, stages: {} as any, failure_count: 0, last_error: null, review_score: null, acknowledged_by: null, acknowledged_at: null } },
+        active_bolt_id: 'BOLT-001',
+        active_bolt_stage: 'elaboration',
+      };
+
+      await saveCheckpoint(tmpDir, checkpoint);
+      clearCache();
+      const loaded = await loadCheckpoint(tmpDir, 'idempotent-bolt-test');
+
+      expect(loaded).not.toBeNull();
+      expect(Object.keys(loaded!.construction_bolts!)).toEqual(['BOLT-001']);
+      expect(loaded!.active_bolt_id).toBe('BOLT-001');
+      expect(loaded!.active_bolt_stage).toBe('elaboration');
+    });
+
+    it('initializes failure_count and last_error on unit stages (regression guard)', async () => {
+      const workflowDir = join(tmpDir, 'aidlc-docs/stage-fields-test');
+      await fs.ensureDir(workflowDir);
+      await fs.writeJson(join(workflowDir, 'checkpoint.json'), {
+        schema_version: '3.0.0',
+        workflow_id: 'stage-fields-test',
+        feature_name: 'stage fields test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction',
+        current_stage: 'code-generation',
+        status: 'in_progress',
+        phases: {
+          discovery: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+        construction_units: {
+          'UNIT-001': {
+            unitId: 'UNIT-001',
+            stages: {
+              'functional-design': { status: 'completed', artifact_path: null, completed_at: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
+              'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'not_started',
+          },
+        },
+      });
+
+      const loaded = await loadCheckpoint(tmpDir, 'stage-fields-test');
+      expect(loaded).not.toBeNull();
+
+      const unit = loaded!.construction_units!['UNIT-001'];
+      for (const stage of Object.values(unit.stages)) {
+        expect((stage as any).failure_count).toBe(0);
+        expect((stage as any).last_error).toBeNull();
+      }
+    });
+  });
+
+});
+
+function makeStageProgress(status: 'not_started' | 'in_progress' | 'completed' | 'skipped' | 'failed'): BoltStageProgress {
+  return {
+    status,
+    started_at: status !== 'not_started' ? '2024-01-01T00:00:00Z' : null,
+    completed_at: status === 'completed' || status === 'skipped' ? '2024-01-01T01:00:00Z' : null,
+    failure_count: 0,
+    last_error: null,
+    artifact_path: null,
+  };
+}
+
+function makeBoltProgress(overrides: Partial<ConstructionBoltProgress> = {}): ConstructionBoltProgress {
+  return {
+    bolt_id: 'BOLT-001',
+    parent_unit_id: 'UNIT-001',
+    status: 'in_progress',
+    stages: {
+      elaboration: makeStageProgress('not_started'),
+      code_generation: makeStageProgress('not_started'),
+      build_and_test: makeStageProgress('not_started'),
+      review: makeStageProgress('not_started'),
+    },
+    failure_count: 0,
+    last_error: null,
+    review_score: null,
+    acknowledged_by: null,
+    acknowledged_at: null,
+    ...overrides,
+  };
+}
+
+function makeMinimalCheckpoint(overrides: Partial<WorkflowCheckpointV3> = {}): WorkflowCheckpointV3 {
+  const ps = { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null };
+  return {
+    schema_version: '3.0.0',
+    workflow_id: 'resume-test',
+    feature_name: 'resume',
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+    current_phase: 'construction',
+    current_stage: 'code-generation',
+    status: 'in_progress',
+    phases: { discovery: { ...ps }, inception: { ...ps }, construction: { ...ps }, operations: { ...ps } },
+    manifest_path: 'test',
+    trust_state_path: 'test',
+    construction_bolts: {},
+    active_bolt_id: null,
+    active_bolt_stage: null,
+    ...overrides,
+  };
+}
+
+describe('getResumePoint', () => {
+  it('returns both boltId and stage when active_bolt_id and active_bolt_stage are set', () => {
+    const checkpoint = makeMinimalCheckpoint({
+      active_bolt_id: 'BOLT-001',
+      active_bolt_stage: 'code_generation',
+      construction_bolts: { 'BOLT-001': makeBoltProgress() },
+    });
+
+    const result = getResumePoint(checkpoint);
+    expect(result).toEqual({ boltId: 'BOLT-001', stage: 'code_generation' });
+  });
+
+  it('returns first incomplete stage when active_bolt_stage is null', () => {
+    const bolt = makeBoltProgress({
+      stages: {
+        elaboration: makeStageProgress('completed'),
+        code_generation: makeStageProgress('not_started'),
+        build_and_test: makeStageProgress('not_started'),
+        review: makeStageProgress('not_started'),
+      },
+    });
+    const checkpoint = makeMinimalCheckpoint({
+      active_bolt_id: 'BOLT-001',
+      active_bolt_stage: null,
+      construction_bolts: { 'BOLT-001': bolt },
+    });
+
+    const result = getResumePoint(checkpoint);
+    expect(result).toEqual({ boltId: 'BOLT-001', stage: 'code_generation' });
+  });
+
+  it('returns null when all stages are completed or skipped', () => {
+    const bolt = makeBoltProgress({
+      stages: {
+        elaboration: makeStageProgress('completed'),
+        code_generation: makeStageProgress('completed'),
+        build_and_test: makeStageProgress('skipped'),
+        review: makeStageProgress('completed'),
+      },
+    });
+    const checkpoint = makeMinimalCheckpoint({
+      active_bolt_id: 'BOLT-001',
+      active_bolt_stage: null,
+      construction_bolts: { 'BOLT-001': bolt },
+    });
+
+    const result = getResumePoint(checkpoint);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when active_bolt_id is null', () => {
+    const checkpoint = makeMinimalCheckpoint({ active_bolt_id: null });
+    expect(getResumePoint(checkpoint)).toBeNull();
+  });
+
+  it('returns null when active_bolt_id is undefined', () => {
+    const checkpoint = makeMinimalCheckpoint();
+    delete (checkpoint as any).active_bolt_id;
+    expect(getResumePoint(checkpoint)).toBeNull();
+  });
 });
 

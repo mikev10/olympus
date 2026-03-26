@@ -21,6 +21,7 @@ import {
   CONSTRUCTION_STAGE_AGENT_MAP,
 } from '../../../features/workflow-engine/construction/executor.js';
 import { createManifest, loadManifest } from '../../../features/workflow-engine/manifest.js';
+import { clearCache as clearCheckpointCache, saveCheckpoint, loadCheckpoint } from '../../../features/workflow-engine/checkpoint.js';
 
 describe('CONSTRUCTION_STAGE_AGENT_MAP', () => {
   it('should map all stages to olympian agent', () => {
@@ -49,6 +50,7 @@ describe('ConstructionExecutor', () => {
   });
 
   afterEach(async () => {
+    clearCheckpointCache();
     await fs.remove(testDir);
   });
 
@@ -162,6 +164,30 @@ Test problem
    */
   async function createTestManifest(): Promise<string> {
     return createManifest(workflowId, 'Test Feature', testDir);
+  }
+
+  async function createCheckpointFile(): Promise<void> {
+    const checkpointDir = path.join(testDir, 'aidlc-docs', workflowId);
+    await fs.ensureDir(checkpointDir);
+    await fs.writeJson(path.join(checkpointDir, 'checkpoint.json'), {
+      schema_version: '3.0.0',
+      workflow_id: workflowId,
+      feature_name: 'test',
+      current_phase: 'construction',
+      current_stage: 'unit',
+      status: 'in_progress',
+      phases: {
+        discovery: { status: 'completed', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        inception: { status: 'completed', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        construction: { status: 'in_progress', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        operations: { status: 'not_started', started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+      },
+      manifest_path: '',
+      trust_state_path: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      construction_bolts: {},
+    });
   }
 
   describe('execute() with new-style intent.md', () => {
@@ -376,46 +402,47 @@ Test problem
   });
 
   describe('SHALLOW depth', () => {
-    it('should create a single unit (shallow-impl) with spec.md when depth is SHALLOW', async () => {
+    it('should return passed=true via express bolt pipeline when depth is SHALLOW', async () => {
       await createIntentFile('Quick Fix', 2);
+      await createCheckpointFile();
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
       expect(result.passed).toBe(true);
       expect(result.reviewer).toBe('construction-executor');
-
-      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      expect(await fs.pathExists(path.join(constructionDir, 'shallow-impl', 'spec.md'))).toBe(true);
-
-      expect(await fs.pathExists(path.join(constructionDir, 'design'))).toBe(false);
     });
 
     it('should fall back to legacy intents for SHALLOW mode', async () => {
       await createLegacyIntentFile('Legacy Quick Fix', 3);
+      await createCheckpointFile();
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
       expect(result.passed).toBe(true);
-
-      const constructionDir = path.join(testDir, 'aidlc-docs', workflowId, 'construction');
-      const specContent = await fs.readFile(
-        path.join(constructionDir, 'shallow-impl', 'spec.md'),
-        'utf-8'
-      );
-      expect(specContent).toContain('Legacy Quick Fix');
     });
 
     it('should fail in SHALLOW mode if no intent found', async () => {
       const intentDir = path.join(testDir, 'aidlc-docs', workflowId, 'inception');
       await fs.ensureDir(intentDir);
+      await createCheckpointFile();
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
       expect(result.passed).toBe(false);
       expect(result.blocking_issues).toContain('No intent found for SHALLOW construction');
+    });
+
+    it('should fail in SHALLOW mode if no checkpoint exists', async () => {
+      await createIntentFile('No Checkpoint', 2);
+
+      const executor = new ConstructionExecutor(projectPath, workflowId);
+      const result = await executor.execute(undefined, { depth: 'SHALLOW' });
+
+      expect(result.passed).toBe(false);
+      expect(result.blocking_issues).toContain('No checkpoint found for SHALLOW construction');
     });
   });
 
@@ -627,22 +654,15 @@ Test problem
       expect(intentToUnitLinks.length).toBeGreaterThan(0);
     });
 
-    it('should register unit artifact in manifest during SHALLOW mode', async () => {
+    it('should complete express bolt pipeline during SHALLOW mode', async () => {
       await createIntentFile('Shallow Manifest Test', 2);
-      const manifestPath = await createTestManifest();
+      await createCheckpointFile();
 
       const executor = new ConstructionExecutor(projectPath, workflowId);
       const result = await executor.execute(undefined, { depth: 'SHALLOW' });
 
       expect(result.passed).toBe(true);
-
-      const manifest = loadManifest(manifestPath);
-      expect(manifest).not.toBeNull();
-
-      const unitArtifacts = manifest!.artifacts.filter(a => a.id === 'shallow-impl');
-      expect(unitArtifacts.length).toBe(1);
-      expect(unitArtifacts[0].phase).toBe('construction');
-      expect(unitArtifacts[0].stage).toBe('unit');
+      expect(result.reviewer).toBe('construction-executor');
     });
 
     it('should register artifacts during legacy intent execution', async () => {
@@ -819,15 +839,15 @@ Test problem
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         construction_units: {
-          'u-001': {
-            unitId: 'u-001',
+          'UNIT-001': {
+            unitId: 'UNIT-001',
             stages: {
-              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null },
-              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
-              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             },
             code_plan_path: null,
             code_generation_status: 'completed' as const,
@@ -877,12 +897,12 @@ Test problem
           [unitId]: {
             unitId,
             stages: {
-              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null },
-              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null },
-              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
-              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null },
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             },
             code_plan_path: null,
             code_generation_status: 'completed' as const,
@@ -899,6 +919,171 @@ Test problem
       expect(unit).toBeDefined();
       expect(unit?.feature_doc_status).toBeDefined();
       expect('impact_scan_report_path' in (unit ?? {})).toBe(true);
+    });
+  });
+
+  describe('handleZeroBoltUnit', () => {
+    const unitId = 'UNIT-ZERO';
+
+    it('marks unit as completed when it has 0 bolts', async () => {
+      const checkpoint = {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: 'zero-bolt-test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {
+          discovery: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+        construction_bolts: {},
+        construction_units: {
+          [unitId]: {
+            unitId,
+            stages: {
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'not_started' as const,
+          },
+        },
+      };
+      await saveCheckpoint(testDir, checkpoint as any);
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.handleZeroBoltUnit(unitId);
+
+      expect(result).toBe(true);
+
+      const loaded = await loadCheckpoint(testDir, workflowId);
+      expect(loaded?.construction_units?.[unitId]?.code_generation_status).toBe('completed');
+    });
+
+    it('returns false when unit has 1+ bolts (normal execution path)', async () => {
+      const checkpoint = {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: 'nonzero-bolt-test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {
+          discovery: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+        construction_bolts: {
+          'BOLT-001': {
+            bolt_id: 'BOLT-001',
+            parent_unit_id: unitId,
+            status: 'pending',
+            stages: {
+              elaboration: { status: 'not_started', started_at: null, completed_at: null, failure_count: 0, last_error: null, artifact_path: null },
+              code_generation: { status: 'not_started', started_at: null, completed_at: null, failure_count: 0, last_error: null, artifact_path: null },
+              build_and_test: { status: 'not_started', started_at: null, completed_at: null, failure_count: 0, last_error: null, artifact_path: null },
+              review: { status: 'not_started', started_at: null, completed_at: null, failure_count: 0, last_error: null, artifact_path: null },
+            },
+            failure_count: 0,
+            last_error: null,
+            review_score: null,
+            acknowledged_by: null,
+            acknowledged_at: null,
+          },
+        },
+        construction_units: {
+          [unitId]: {
+            unitId,
+            stages: {
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'not_started' as const,
+          },
+        },
+      };
+      await saveCheckpoint(testDir, checkpoint as any);
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      const result = await executor.handleZeroBoltUnit(unitId);
+
+      expect(result).toBe(false);
+
+      const loaded = await loadCheckpoint(testDir, workflowId);
+      expect(loaded?.construction_units?.[unitId]?.code_generation_status).toBe('not_started');
+    });
+
+    it('writes audit log entry on auto-fulfillment', async () => {
+      const checkpoint = {
+        schema_version: '3.0.0' as const,
+        workflow_id: workflowId,
+        feature_name: 'audit-bolt-test',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+        current_phase: 'construction' as const,
+        current_stage: 'code-generation' as const,
+        status: 'in_progress' as const,
+        phases: {
+          discovery: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          inception: { status: 'complete' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          construction: { status: 'in_progress' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+          operations: { status: 'not_started' as const, started_at: null, completed_at: null, gate_result: null, gate_bypassed: false, bypass_reason: null },
+        },
+        manifest_path: 'test',
+        trust_state_path: 'test',
+        construction_bolts: {},
+        construction_units: {
+          [unitId]: {
+            unitId,
+            stages: {
+              'functional-design': { status: 'completed' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'test-generation': { status: 'not_started' as const, artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+            },
+            code_plan_path: null,
+            code_generation_status: 'not_started' as const,
+          },
+        },
+      };
+      await saveCheckpoint(testDir, checkpoint as any);
+
+      const auditDir = path.join(testDir, 'aidlc-docs', workflowId);
+      await fs.ensureDir(auditDir);
+
+      const executor = new ConstructionExecutor(testDir, workflowId);
+      await executor.handleZeroBoltUnit(unitId);
+
+      const auditPath = path.join(auditDir, 'audit.md');
+      const auditExists = await fs.pathExists(auditPath);
+      expect(auditExists).toBe(true);
+
+      const auditContent = await fs.readFile(auditPath, 'utf-8');
+      expect(auditContent).toContain('auto-fulfilled');
+      expect(auditContent).toContain(unitId);
     });
   });
 });

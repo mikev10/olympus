@@ -31,17 +31,55 @@ const DEFAULT_MAX_UNITS = 10;
  * Converts a unit title into a prefixed slug suitable for directory names.
  *
  * Examples:
- *   "Auth Service", 1      -> "u-001-auth-service"
- *   "API Gateway", 2       -> "u-002-api-gateway"
- *   "User Onboarding", 3   -> "u-003-user-onboarding"
- *   "", 1                  -> "u-001-untitled" (fallback)
+ *   "Auth Service", 1      -> "UNIT-001-auth-service"
+ *   "API Gateway", 2       -> "UNIT-002-api-gateway"
+ *   "User Onboarding", 3   -> "UNIT-003-user-onboarding"
+ *   "", 1                  -> "UNIT-001-untitled" (fallback)
  *
  * @param title - The human-readable unit title
- * @param index - 1-based unit index for the u-XXX prefix
- * @returns A prefixed, lowercase, hyphen-separated slug (e.g., "u-001-auth-service")
+ * @param index - 1-based unit index for the UNIT-XXX prefix
+ * @returns A prefixed, lowercase, hyphen-separated slug (e.g., "UNIT-001-auth-service")
  */
 export function slugifyUnitName(title: string, index: number): string {
-  const prefix = `u-${String(index).padStart(3, '0')}`;
+  const prefix = `UNIT-${String(index).padStart(3, '0')}`;
+
+  if (!title || !title.trim()) {
+    return `${prefix}-untitled`;
+  }
+
+  const slug = title
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  if (!slug) {
+    return `${prefix}-untitled`;
+  }
+
+  // Truncate overly long slugs (limit applies to slug portion only)
+  if (slug.length > 60) {
+    return `${prefix}-${slug.substring(0, 60).replace(/-$/, '')}`;
+  }
+
+  return `${prefix}-${slug}`;
+}
+
+/**
+ * Converts a bolt title into a prefixed slug suitable for directory names.
+ *
+ * Examples:
+ *   "Add Auth Middleware", 1   -> "BOLT-001-add-auth-middleware"
+ *   "Database Schema", 12     -> "BOLT-012-database-schema"
+ *   "", 3                     -> "BOLT-003-untitled" (fallback)
+ *
+ * @param title - The human-readable bolt title
+ * @param globalIndex - 1-based global bolt index for the BOLT-XXX prefix
+ * @returns A prefixed, lowercase, hyphen-separated slug (e.g., "BOLT-001-add-auth-middleware")
+ */
+export function slugifyBoltName(title: string, globalIndex: number): string {
+  const prefix = `BOLT-${String(globalIndex).padStart(3, '0')}`;
 
   if (!title || !title.trim()) {
     return `${prefix}-untitled`;

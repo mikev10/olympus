@@ -44,6 +44,11 @@ import { validateUnits } from './validation.js';
 import { runDualValidation } from '../alignment.js';
 import { registerArtifact, linkArtifacts } from '../manifest.js';
 import type { ArtifactLink } from '../phase-types.js';
+import { createExpressBolt } from '../bolts/express-bolt-factory.js';
+import { registerBoltsInCheckpoint } from '../bolts/bolt-planner.js';
+import { BoltExecutor } from '../bolts/bolt-executor.js';
+import type { StageHandlers } from '../bolts/bolt-executor.js';
+import { appendToAudit } from '../audit-generator.js';
 
 /**
  * Agent map for Construction stages. v1: all stages use generic 'olympian' agent.
@@ -201,9 +206,9 @@ export class ConstructionExecutor {
       }
     }
 
-    // SHALLOW depth: single BOLT from INTENT, skip everything else
+    // SHALLOW depth: single express BOLT from INTENT, skip decomposition
     if (depth === 'SHALLOW') {
-      return this.executeShallow();
+      return this.executeShallowViaBolt();
     }
 
     // MEDIUM / DEEP: full decomposition pipeline
@@ -294,6 +299,42 @@ export class ConstructionExecutor {
       codeGenerations: this.totalCodeGenerations,
       totalEffort: this.totalEffort,
     };
+  }
+
+  async handleZeroBoltUnit(
+    unitId: string,
+    options: { projectPath?: string; workflowId?: string } = {}
+  ): Promise<boolean> {
+    const projectPath = options.projectPath || this.projectPath;
+    const workflowId = options.workflowId || this.workflowId;
+
+    const checkpoint = await loadCheckpoint(projectPath, workflowId);
+    if (!checkpoint) return false;
+
+    const unitBoltCount = Object.values(checkpoint.construction_bolts ?? {})
+      .filter(b => b.parent_unit_id === unitId).length;
+
+    if (unitBoltCount > 0) return false;
+
+    if (!checkpoint.construction_units) {
+      checkpoint.construction_units = {} as Record<string, ConstructionUnitProgress>;
+    }
+
+    if (checkpoint.construction_units[unitId]) {
+      checkpoint.construction_units[unitId].code_generation_status = 'completed';
+    }
+
+    appendToAudit(projectPath, workflowId, {
+      timestamp: new Date().toISOString(),
+      phase: 'construction',
+      action: `Unit ${unitId} auto-fulfilled (zero bolts)`,
+      actor: 'construction-executor',
+      reason: null,
+    });
+
+    await saveCheckpoint(projectPath, checkpoint);
+    console.log(`[ConstructionExecutor] Unit ${unitId} auto-fulfilled: 0 bolts registered`);
+    return true;
   }
 
   async executeCodeGenerationWithPlanApproval(
@@ -433,12 +474,12 @@ export class ConstructionExecutor {
     let unitProgress: ConstructionUnitProgress = checkpoint.construction_units[unitId] ?? {
       unitId,
       stages: {
-        'functional-design': { status: 'not_started', artifact_path: null, completed_at: null },
-        'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null },
-        'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null },
-        'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null },
-        'code-generation': { status: 'not_started', artifact_path: null, completed_at: null },
-        'test-generation': { status: 'not_started', artifact_path: null, completed_at: null },
+        'functional-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-requirements': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'nfr-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'infrastructure-design': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'code-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+        'test-generation': { status: 'not_started', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
       },
       code_plan_path: null,
       code_generation_status: 'not_started',
@@ -1222,11 +1263,9 @@ _allowFailures was not set._
 `;
   }
 
-  private async executeShallow(): Promise<ValidationResult> {
+  private async executeShallowViaBolt(): Promise<ValidationResult> {
     const intentPath = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception', 'intent.md');
-    const constructionDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction');
 
-    // Try new-style intent.md first, fall back to old INTENT-*.md
     let intentTitle = 'Shallow Implementation';
     let intentEffort = 2;
     let intentContent = '';
@@ -1234,7 +1273,6 @@ _allowFailures was not set._
     const parsed = await parseIntentFromFile(intentPath);
     if (parsed) {
       intentContent = parsed.content;
-      // Extract title from frontmatter
       const titleMatch = intentContent.match(/^title:\s*(.+)$/m);
       if (titleMatch) {
         intentTitle = titleMatch[1].trim().replace(/^["']|["']$/g, '');
@@ -1244,7 +1282,6 @@ _allowFailures was not set._
         intentEffort = Number(effortMatch[1]);
       }
     } else {
-      // Fall back to old-style parsing
       const intentDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'inception');
       const intents = await parseIntentsFromDisk(intentDir);
       if (intents.length === 0) {
@@ -1260,48 +1297,50 @@ _allowFailures was not set._
       intentEffort = intents[0].estimated_effort;
     }
 
-    await fs.ensureDir(constructionDir);
-    const unitName = 'shallow-impl';
-    const unitDir = path.join(constructionDir, unitName);
-    await fs.ensureDir(unitDir);
-    const now = new Date().toISOString();
+    const unit: HierarchicalNode = {
+      id: 'shallow-impl',
+      type: 'unit',
+      title: intentTitle,
+      parent_id: null,
+      children_ids: [],
+      status: 'pending',
+      assigned_agent: null,
+      estimated_effort: intentEffort,
+    };
 
-    const unitContent = this.formatUnitMarkdown(
-      {
-        id: unitName,
-        type: 'unit',
-        title: intentTitle,
-        parent_id: null,
-        children_ids: [],
-        status: 'pending',
-        assigned_agent: null,
-        estimated_effort: intentEffort,
-      },
-      'none',
-      intentContent
-    );
-
-    await fs.writeFile(path.join(unitDir, 'spec.md'), unitContent, 'utf-8');
-
-    this.registerConstructionArtifact(unitName, 'unit', 'unit', path.join(unitDir, 'spec.md'));
-
-    this.totalCodeGenerations = 1;
-    this.totalEffort = intentEffort;
-
-    console.log('[ConstructionExecutor] SHALLOW mode: created single unit for code generation from INTENT');
-
-    try {
-      await this.executeTestGeneration('shallow-impl');
-    } catch (err) {
-      console.error('[ConstructionExecutor] Test generation failed for shallow-impl:', err);
+    const checkpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+    if (!checkpoint) {
+      return {
+        passed: false,
+        coverage_percentage: 0,
+        blocking_issues: ['No checkpoint found for SHALLOW construction'],
+        reviewer: 'construction-executor',
+        timestamp: new Date().toISOString(),
+      };
     }
 
+    const expressBolt = createExpressBolt(unit, intentContent, checkpoint);
+    registerBoltsInCheckpoint([expressBolt], checkpoint);
+
+    const handlers: StageHandlers = {
+      onElaboration: async () => ({ success: true }),
+      onCodeGeneration: async () => ({ success: true }),
+      onBuildAndTest: async () => ({ success: true }),
+      onReview: async () => ({ success: true }),
+    };
+
+    const result = await BoltExecutor.execute(
+      expressBolt, checkpoint, this.projectPath, this.workflowId, handlers,
+    );
+
+    console.log(`[ConstructionExecutor] SHALLOW express bolt completed with status: ${result.status}`);
+
     return {
-      passed: true,
-      coverage_percentage: 100,
-      blocking_issues: [],
+      passed: result.status === 'done',
+      coverage_percentage: result.status === 'done' ? 100 : 0,
+      blocking_issues: result.status === 'done' ? [] : [`Express bolt failed with status: ${result.status}`],
       reviewer: 'construction-executor',
-      timestamp: now,
+      timestamp: new Date().toISOString(),
     };
   }
 

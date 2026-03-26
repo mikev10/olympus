@@ -40,7 +40,7 @@ export class UnitStageRunner {
 
     const progress: ConstructionUnitProgress = {
       unitId,
-      stages: {} as Record<ConstructionDesignStage, { status: 'not_started' | 'in_progress' | 'completed' | 'skipped'; artifact_path: string | null; completed_at: string | null }>,
+      stages: {} as Record<ConstructionDesignStage, { status: 'not_started' | 'in_progress' | 'completed' | 'skipped' | 'failed'; artifact_path: string | null; completed_at: string | null; failure_count: number; last_error: string | null }>,
       code_plan_path: null,
       code_generation_status: 'not_started',
     };
@@ -50,6 +50,8 @@ export class UnitStageRunner {
         status: stages.includes(stage) ? 'not_started' : 'skipped',
         artifact_path: null,
         completed_at: null,
+        failure_count: 0,
+        last_error: null,
       };
     }
 
@@ -81,8 +83,16 @@ export class UnitStageRunner {
 
         console.log(`[UnitStageRunner] ${unitId}/${stage} completed -> ${artifactPath}`);
       } catch (err) {
-        console.error(`[UnitStageRunner] ${unitId}/${stage} failed:`, err);
-        progress.stages[stage].status = 'not_started';
+        progress.stages[stage].failure_count += 1;
+        progress.stages[stage].last_error = err instanceof Error ? err.message : String(err);
+        if (progress.stages[stage].failure_count >= 2) {
+          progress.stages[stage].status = 'failed';
+          console.error(`[UnitStageRunner] ${unitId}/${stage} failed after ${progress.stages[stage].failure_count} attempts — escalating`);
+          break;
+        } else {
+          progress.stages[stage].status = 'not_started';
+          console.warn(`[UnitStageRunner] ${unitId}/${stage} failed (attempt ${progress.stages[stage].failure_count}/2), will retry`);
+        }
       }
     }
 

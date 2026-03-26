@@ -228,7 +228,7 @@ export interface RiskEntry {
 
 export interface HierarchicalNode {
   id: string;
-  type: 'intent' | 'unit' | 'code-generation';
+  type: 'intent' | 'unit' | 'code-generation' | 'bolt';
   title: string;
   parent_id: string | null;
   children_ids: string[];
@@ -367,6 +367,12 @@ export interface WorkflowCheckpointV3 {
   inception_stages?: Record<InceptionStage, InceptionStageState>;
   current_inception_stage?: InceptionStage;
   construction_units?: Record<string, ConstructionUnitProgress>;
+  /** All bolt progress records, keyed by bolt ID (e.g. 'BOLT-001'). */
+  construction_bolts?: Record<string, ConstructionBoltProgress>;
+  /** ID of the bolt currently executing. Null when no bolt is active. */
+  active_bolt_id?: string | null;
+  /** Stage within the active bolt currently executing. Null when no bolt is active. */
+  active_bolt_stage?: BoltExecutionStage | null;
   deepinit_status?: 'skipped' | 'completed' | 'pre-existing' | 'suggested' | 'not_applicable' | 'not_detected' | 'detected';
   original_pathway_type?: PathwayType;
   original_depth_score?: number;
@@ -390,7 +396,7 @@ export interface WorkflowRoutingPlan {
   risk_tier: RiskTier;
   phases: Record<WorkflowPhase, { included: boolean; rationale: string }>;
   stages: WorkflowRoutingStage[];
-  estimated_code_generations: number;
+  estimated_bolts: number;
   estimated_depth: 'minimal' | 'standard' | 'comprehensive';
   generated_at: string;
   approved_at: string | null;
@@ -411,6 +417,163 @@ export type ConstructionDesignStage =
   | 'infrastructure-design'
   | 'code-generation'
   | 'test-generation';
+
+/** Lifecycle state machine for a bolt (BR-003). */
+export type BoltStatus =
+  | 'planned'
+  | 'in_progress'
+  | 'built'
+  | 'in_review'
+  | 'done'
+  | 'failed';
+
+/** The four sequential stages within a bolt's execution lifecycle. */
+export type BoltExecutionStage =
+  | 'elaboration'
+  | 'code_generation'
+  | 'build_and_test'
+  | 'review';
+
+/** Per-stage tracking within a bolt. Adds started_at for duration tracking. */
+export interface BoltStageProgress {
+  /** Execution state of this stage. */
+  status: 'not_started' | 'in_progress' | 'completed' | 'skipped' | 'failed';
+
+  /** ISO 8601 timestamp when the stage began. Null if not yet started. */
+  started_at: string | null;
+
+  /** ISO 8601 timestamp when the stage finished. Null if not yet completed. */
+  completed_at: string | null;
+
+  /** Number of times this stage has failed and been retried. */
+  failure_count: number;
+
+  /** Last error message if status is 'failed'. Null otherwise. */
+  last_error: string | null;
+
+  /** Relative path to the stage's primary artifact (e.g. spec.md). Null if not produced. */
+  artifact_path: string | null;
+}
+
+/** Union of all error codes thrown by BoltSpecValidator. */
+export type BoltValidationErrorCode =
+  | 'MAX_PER_UNIT_EXCEEDED'
+  | 'MAX_TOTAL_EXCEEDED'
+  | 'MISSING_REQUIRED_FIELD'
+  | 'INVALID_ID_FORMAT'
+  | 'INVALID_SEQUENCE';
+
+/**
+ * The primary bolt definition. Extends HierarchicalNode using the 'bolt'
+ * discriminant, adding bolt-specific fields (FR-016).
+ */
+export interface BoltSpec extends HierarchicalNode {
+  /** Discriminant — always 'bolt'. Narrows HierarchicalNode.type. */
+  type: 'bolt';
+
+  /** ID of the parent unit (e.g. 'UNIT-001'). Links bolt to its unit. */
+  parent_unit_id: string;
+
+  /** Execution order within the parent unit. Must be a positive integer. */
+  sequence: number;
+
+  /** Human-readable description of what this bolt accomplishes. Required. */
+  scope: string;
+
+  /**
+   * Verifiable outcomes that define bolt completion. Minimum 1 required.
+   * Each entry is a complete, testable statement.
+   */
+  acceptance_criteria: string[];
+
+  /**
+   * Relative project paths this bolt is expected to modify or create.
+   * Used for impact analysis and reviewer guidance.
+   */
+  target_files: string[];
+
+  /**
+   * IDs of bolts that must complete before this bolt begins.
+   * Defined here but not enforced for parallel execution — informational only
+   * in the current implementation.
+   */
+  dependencies: string[];
+
+  /**
+   * Elaboration depth target on the 1-11 scale, inherited from the parent unit.
+   * Determines how many elaboration stages are executed:
+   * SHALLOW (0 stages) = depth_target 1-4,
+   * MEDIUM (2 stages) = depth_target 5-7,
+   * DEEP (4 stages) = depth_target 8-11.
+   */
+  depth_target: number;
+
+  /**
+   * When true, the elaboration stage is skipped for this bolt.
+   * Eligible when depth_target <= 4 or pathway is 'bugfix'.
+   */
+  express_mode: boolean;
+
+  /** Estimated duration in hours. Sourced from bolt spec frontmatter. */
+  estimated_effort_hours: number;
+}
+
+/**
+ * Runtime tracking record for a bolt's execution. Stored in
+ * WorkflowCheckpointV3.construction_bolts keyed by bolt ID (FR-022).
+ */
+export interface ConstructionBoltProgress {
+  /** Global bolt identifier (e.g. 'BOLT-001'). */
+  bolt_id: string;
+
+  /** ID of the parent unit this bolt belongs to. */
+  parent_unit_id: string;
+
+  /** Fine-grained lifecycle status (BR-003). */
+  status: BoltStatus;
+
+  /** Per-stage execution state. All four stages are always present. */
+  stages: Record<BoltExecutionStage, BoltStageProgress>;
+
+  /** Total number of times this bolt has failed across all attempts. */
+  failure_count: number;
+
+  /** Most recent error message. Null if no failure has occurred. */
+  last_error: string | null;
+
+  /**
+   * Quality score from the review stage (0-100). Null until review completes.
+   * Populated by the review agent after the 'review' stage finishes.
+   */
+  review_score: number | null;
+
+  /**
+   * Agent or user identifier who acknowledged a failed bolt (FR-020).
+   * Null until acknowledgment occurs.
+   */
+  acknowledged_by: string | null;
+
+  /**
+   * ISO 8601 timestamp of failure acknowledgment (FR-020).
+   * Null until acknowledgment occurs.
+   */
+  acknowledged_at: string | null;
+}
+
+/**
+ * Typed error thrown by BoltSpecValidator.validate(). Extends the built-in
+ * Error class so it is caught by generic catch (e: Error) handlers while
+ * still carrying a machine-readable code.
+ */
+export class BoltValidationError extends Error {
+  readonly code: BoltValidationErrorCode;
+
+  constructor(code: BoltValidationErrorCode, message: string) {
+    super(message);
+    this.name = 'BoltValidationError';
+    this.code = code;
+  }
+}
 
 export type ValidatorStatus = 'not_started' | 'in_progress' | 'completed' | 'skipped';
 
@@ -439,9 +602,11 @@ export interface ValidatorResult {
 export interface ConstructionUnitProgress {
   unitId: string;
   stages: Record<ConstructionDesignStage, {
-    status: 'not_started' | 'in_progress' | 'completed' | 'skipped';
+    status: 'not_started' | 'in_progress' | 'completed' | 'skipped' | 'failed';
     artifact_path: string | null;
     completed_at: string | null;
+    failure_count: number;
+    last_error: string | null;
   }>;
   code_plan_path: string | null;
   code_generation_status: 'not_started' | 'planning' | 'awaiting_approval' | 'generating' | 'completed';

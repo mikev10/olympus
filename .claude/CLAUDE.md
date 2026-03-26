@@ -67,3 +67,25 @@ When bumping versions, always update the version number in ALL of these files:
 - `.claude/CLAUDE.md` (current version in PROJECT CONTEXT)
 
 Then run the full build, run all tests, and create a single atomic commit with the format 'chore: bump version to X.Y.Z'.
+
+## Key Patterns
+
+### Bolt Lifecycle
+- **Folder structure**: `{workflowId}/construction/bolts/BOLT-NNN-slug/spec.md` (spec) and `review.md` (review artifact)
+- **Bolt plan summary**: `{workflowId}/construction/plans/{unitId}-bolt-plan.md`
+- **Naming convention**: `BOLT-NNN-slug` — global sequential numbering across ALL units (not per-unit)
+- **Lifecycle states**: `planned` → `in_progress` → `built` → `in_review` → `done` | `failed`
+- **Execution stages** (per bolt): `elaboration` → `code_generation` → `build_and_test` → `review`
+- **Express bolt**: `depth_target <= 4` OR pathway is `bugfix` — skips elaboration stage; `express_mode: true` in frontmatter
+- **Key modules** (all in `src/features/workflow-engine/bolts/`):
+  - `bolt-planner.ts` — decomposes units into bolts, validates coverage
+  - `bolt-executor.ts` — drives per-bolt execution stages
+  - `bolt-reviewer.ts` — quality gate, returns decision objects via `reviewCallback`
+  - `express-bolt-factory.ts` — creates express bolts, sets `express_mode: true`
+  - `bolt-spec-validator.ts` — validates spec frontmatter and required sections
+- **Checkpoint fields**:
+  - `construction_bolts`: map of bolt IDs to `ConstructionBoltProgress` objects
+  - `active_bolt_id`: bolt currently in execution (`null` when idle)
+  - `active_bolt_stage`: current execution stage of the active bolt
+- **Coverage thresholds**: >=95% pass, 80-94% warn + mandatory acknowledgment, <80% hard block
+- **Review thresholds**: >=70% auto-approve, 50-69% advisory + acknowledgment, <50% hard block (never overridden by trust level)

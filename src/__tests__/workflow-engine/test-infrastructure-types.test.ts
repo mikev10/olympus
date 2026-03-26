@@ -90,7 +90,7 @@ describe('Test infrastructure types', () => {
     it('RegressionReport has correct shape with failures array', () => {
       const report: RegressionReport = {
         workflow_id: 'wf-001',
-        unit_id: 'u-001',
+        unit_id: 'UNIT-001',
         baseline_captured_at: '2024-01-15T10:00:00Z',
         compared_at: '2024-01-15T12:00:00Z',
         failures: [
@@ -151,14 +151,14 @@ describe('Test infrastructure types', () => {
     it('adds not_started for a unit with code_generation_status not completed', async () => {
       const checkpoint = makeMinimalCheckpoint({
         construction_units: {
-          'u-001': {
-            unitId: 'u-001',
+          'UNIT-001': {
+            unitId: 'UNIT-001',
             stages: {
               'functional-design': { status: 'completed', artifact_path: 'a.md', completed_at: '2024-01-15T10:00:00Z' },
-              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'code-generation': { status: 'in_progress', artifact_path: null, completed_at: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'code-generation': { status: 'in_progress', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
             } as any,
             code_plan_path: null,
             code_generation_status: 'generating',
@@ -171,7 +171,7 @@ describe('Test infrastructure types', () => {
 
       const loaded = await loadCheckpoint(tmpDir, 'test-infra-types');
       expect(loaded).not.toBeNull();
-      const unit = loaded!.construction_units!['u-001'];
+      const unit = loaded!.construction_units!['UNIT-001'];
       expect(unit.stages['test-generation']).toBeDefined();
       expect(unit.stages['test-generation'].status).toBe('not_started');
       expect(unit.stages['test-generation'].artifact_path).toBeNull();
@@ -181,13 +181,13 @@ describe('Test infrastructure types', () => {
     it('adds skipped for a unit with code_generation_status completed', async () => {
       const checkpoint = makeMinimalCheckpoint({
         construction_units: {
-          'u-002': {
-            unitId: 'u-002',
+          'UNIT-002': {
+            unitId: 'UNIT-002',
             stages: {
               'functional-design': { status: 'completed', artifact_path: 'b.md', completed_at: '2024-01-15T10:00:00Z' },
-              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
               'code-generation': { status: 'completed', artifact_path: 'code.md', completed_at: '2024-01-15T12:00:00Z' },
             } as any,
             code_plan_path: null,
@@ -201,22 +201,22 @@ describe('Test infrastructure types', () => {
 
       const loaded = await loadCheckpoint(tmpDir, 'test-infra-types');
       expect(loaded).not.toBeNull();
-      const unit = loaded!.construction_units!['u-002'];
+      const unit = loaded!.construction_units!['UNIT-002'];
       expect(unit.stages['test-generation'].status).toBe('skipped');
     });
 
     it('does not overwrite an existing test-generation stage', async () => {
       const checkpoint = makeMinimalCheckpoint({
         construction_units: {
-          'u-003': {
-            unitId: 'u-003',
+          'UNIT-003': {
+            unitId: 'UNIT-003',
             stages: {
-              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null },
-              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null },
-              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null },
+              'functional-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-requirements': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'nfr-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
+              'infrastructure-design': { status: 'skipped', artifact_path: null, completed_at: null, failure_count: 0, last_error: null },
               'code-generation': { status: 'completed', artifact_path: 'c.md', completed_at: '2024-01-15T10:00:00Z' },
-              'test-generation': { status: 'in_progress', artifact_path: 'tests.md', completed_at: null },
+              'test-generation': { status: 'in_progress', artifact_path: 'tests.md', completed_at: null, failure_count: 0, last_error: null },
             },
             code_plan_path: null,
             code_generation_status: 'completed',
@@ -229,7 +229,7 @@ describe('Test infrastructure types', () => {
 
       const loaded = await loadCheckpoint(tmpDir, 'test-infra-types');
       expect(loaded).not.toBeNull();
-      const unit = loaded!.construction_units!['u-003'];
+      const unit = loaded!.construction_units!['UNIT-003'];
       expect(unit.stages['test-generation'].status).toBe('in_progress');
       expect(unit.stages['test-generation'].artifact_path).toBe('tests.md');
     });

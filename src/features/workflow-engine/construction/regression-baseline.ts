@@ -175,7 +175,7 @@ export function compareAgainstBaseline(
  *
  * @param projectPath - Absolute path to the project root.
  * @param workflowId  - AIDLC workflow identifier.
- * @param unitId      - Unit identifier (e.g. `u-001-core-types`).
+ * @param unitId      - Unit identifier (e.g. `UNIT-001-core-types`).
  * @param report      - The RegressionReport object to render.
  */
 export async function writeRegressionReport(
