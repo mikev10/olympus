@@ -67,3 +67,4 @@ docs/build/
 lancedb/
 models/
 .mcp.json
+.mcp.local.json
