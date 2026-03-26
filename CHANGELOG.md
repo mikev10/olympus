@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.2] - 2026-03-26
+
+### Added
+
+- **AIDLC inception alignment** — Aligned intent.md, requirements.md, user stories, and units generation artifacts with AWS AI-DLC reference implementation and specs.md framework
+- **Intent template v2** — Added `pathway`, `scope`, `complexity`, `priority` frontmatter; new Business Context and Technical Context sections; renamed Success Metrics to Success Criteria with verifiable checkboxes
+- **Requirements coverage checklist** — Mandatory 6-area coverage verification table (Functional, Non-Functional, Scenarios, Business Context, Technical Context, Quality Attributes) in requirements.md
+- **Adaptive depth guidance** — Depth-specific content guidance (Minimal/Standard/Comprehensive) for requirements.md generation
+- **Story template** — Structured `S-NNN` naming convention with mandatory Gherkin Given/When/Then acceptance criteria, edge cases table, inter-story dependencies, and MoSCoW priority
+- **Unit briefs** — Conditional per-unit `unit-brief.md` artifacts (when complexity >= moderate and 3+ units) with requirements mapping, domain entities, dependencies, and success criteria
+- **Interview improvements** — Business context, technical context, and priority added to Prometheus interview context extraction and trust-level question topics
+
 ## [4.5.1] - 2026-03-26
 
 ### Fixed
