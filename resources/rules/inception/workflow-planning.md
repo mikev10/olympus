@@ -136,7 +136,7 @@ Evaluate risk level:
 - No new components or methods
 - Pure implementation changes
 
-> **Note**: When Application Design is skipped, the `inception/application-design/` directory will still be created by the Mandatory Unit Registration step (3.5) to house the unit artifacts.
+> **Note**: When Application Design is skipped, the `inception/units/` directory will still be created by the Mandatory Unit Registration step (3.5) to house the unit artifacts.
 
 ### 3.3 Units Planning/Generation - Execute IF:
 - New data models or schemas
@@ -178,7 +178,7 @@ Evaluate risk level:
    - Documentation headings: `## U-NNN: Name`
    - Construction folder names: `UNIT-NNN-name` (kebab-case)
 
-2. **Create `aidlc-docs/{workflow-id}/inception/application-design/unit-of-work.md`** (MANDATORY):
+2. **Create `aidlc-docs/{workflow-id}/inception/units/unit-of-work.md`** (MANDATORY):
    ```markdown
    # Units of Work
 

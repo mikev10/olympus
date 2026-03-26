@@ -32,7 +32,7 @@ The Unit Registration is defined in `workflow-planning.md` (Step 3.5) and execut
 - `unit-of-work-dependency.md` (CONDITIONAL) — only when units have actual blocking dependencies
 - `unit-of-work-story-map.md` (CONDITIONAL) — only when stories exist and aren't already mapped to units elsewhere
 
-All artifacts are placed in `aidlc-docs/{workflow-id}/inception/application-design/` and follow the **Unit Naming Convention** defined below.
+All artifacts are placed in `aidlc-docs/{workflow-id}/inception/units/` and follow the **Unit Naming Convention** defined below.
 
 When the full Units Generation stage executes (PART 1 + PART 2 below), these lightweight artifacts are not needed — the full process produces comprehensive versions instead.
 
@@ -71,10 +71,10 @@ Unit boundaries define the scope of all subsequent design and code generation wo
 
 ## Step 2: Include Mandatory Unit Artifacts in Plan
 **ALWAYS** include these mandatory artifacts in the unit plan (when executing the full stage — if the stage is skipped, the Skip Pathway above handles these):
-- [ ] Generate `aidlc-docs/inception/application-design/unit-of-work.md` with unit definitions and responsibilities
-- [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-dependency.md` with dependency matrix
-- [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-story-map.md` mapping stories to units
-- [ ] **Conditional** (complexity >= moderate AND units >= 3): Generate per-unit briefs in `aidlc-docs/inception/application-design/units/{unit-slug}/unit-brief.md`
+- [ ] Generate `aidlc-docs/inception/units/unit-of-work.md` with unit definitions and responsibilities
+- [ ] Generate `aidlc-docs/inception/units/unit-of-work-dependency.md` with dependency matrix
+- [ ] Generate `aidlc-docs/inception/units/unit-of-work-story-map.md` mapping stories to units
+- [ ] **Conditional** (complexity >= moderate AND units >= 3): Generate per-unit briefs in `aidlc-docs/inception/units/{unit-slug}/unit-brief.md`
 - [ ] **Greenfield only**: Document code organization strategy in `unit-of-work.md` (see code-generation.md for structure patterns)
 - [ ] Validate unit boundaries and dependencies
 - [ ] Ensure all stories are assigned to units
@@ -170,7 +170,7 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 
 For each unit defined in `unit-of-work.md`, create a per-unit brief file:
 
-**Path**: `aidlc-docs/{workflowId}/inception/application-design/units/{unit-slug}/unit-brief.md`
+**Path**: `aidlc-docs/{workflowId}/inception/units/{unit-slug}/unit-brief.md`
 
 Where `{unit-slug}` follows the existing convention (e.g., `UNIT-001-foundation`).
 
@@ -235,7 +235,7 @@ Reference existing system components if brownfield.}
 ⚠️ **REVIEW REQUIRED**
 
 > Please examine the units generation artifacts at:
-> `aidlc-docs/{workflow-id}/inception/application-design/`
+> `aidlc-docs/{workflow-id}/inception/units/`
 
 **You may:**
 - 🔧 **Request Changes** — Ask for modifications to the units generation if required

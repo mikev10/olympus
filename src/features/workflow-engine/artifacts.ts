@@ -197,11 +197,11 @@ export function getArtifactPath(
     case 'execution-plan':
       return path.join(workflowDir, 'inception', 'plans', 'execution-plan.md');
     case 'units-generation':
-      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work.md');
+      return path.join(workflowDir, 'inception', 'units', 'unit-of-work.md');
     case 'unit-dependency':
-      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work-dependency.md');
+      return path.join(workflowDir, 'inception', 'units', 'unit-of-work-dependency.md');
     case 'unit-story-map':
-      return path.join(workflowDir, 'inception', 'application-design', 'unit-of-work-story-map.md');
+      return path.join(workflowDir, 'inception', 'units', 'unit-of-work-story-map.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }
@@ -430,7 +430,7 @@ This feature was developed using the structured workflow system:
 - [Non-Functional Requirements](aidlc-docs/${workflowId}/inception/requirements/nfr.md)
 - [User Stories](aidlc-docs/${workflowId}/inception/user-stories/stories.md)
 - [Personas](aidlc-docs/${workflowId}/inception/user-stories/personas.md)
-- [Unit Definitions](aidlc-docs/${workflowId}/inception/application-design/unit-of-work.md)
+- [Unit Definitions](aidlc-docs/${workflowId}/inception/units/unit-of-work.md)
 
 ### Construction Phase
 - [Units](aidlc-docs/${workflowId}/construction/) - Per-unit directories (UNIT-001/, UNIT-002/, etc.)

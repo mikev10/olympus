@@ -15,7 +15,7 @@ Determine the artifact type from the file path provided in `$ARGUMENTS`:
 | `.olympus/plans/*` | Plan |
 | `*/inception/intent.md` | Intent |
 | `*/inception/user-stories/*` | User Stories |
-| `*/inception/application-design/unit-of-work*.md` | Unit Decomposition |
+| `*/inception/units/unit-of-work*.md` | Unit Decomposition |
 | `*/construction/*-code-generation-plan.md` | Code-Generation Plan |
 | `*/inception/application-design/components.md` or `*/inception/application-design/services.md` | Design Docs |
 | `*/audit.md` | Audit Trail |

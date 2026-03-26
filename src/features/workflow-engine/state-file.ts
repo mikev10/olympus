@@ -136,8 +136,8 @@ function buildArtifactsSection(
     { name: 'User Stories', path: 'inception/user-stories/stories.md' },
     { name: 'Personas', path: 'inception/user-stories/personas.md' },
     { name: 'Workflow Plan', path: 'inception/workflow-plan.md' },
-    { name: 'Unit Definitions', path: 'inception/application-design/unit-of-work.md' },
-    { name: 'Dependency Matrix', path: 'inception/application-design/unit-of-work-dependency.md' },
+    { name: 'Unit Definitions', path: 'inception/units/unit-of-work.md' },
+    { name: 'Dependency Matrix', path: 'inception/units/unit-of-work-dependency.md' },
   ];
 
   for (const artifact of artifacts) {

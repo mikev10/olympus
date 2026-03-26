@@ -1158,7 +1158,7 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 - The TypeScript engine enforces `UNIT-NNN-name` folder format automatically via `slugifyUnitName()`
 - Numbering is zero-padded to three digits: U-001, U-002, ... U-010, U-011, etc.
 
-**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`**:
+**`aidlc-docs/{workflowId}/inception/units/unit-of-work.md`**:
 
 ```markdown
 # Units of Work: {Title}
@@ -1179,7 +1179,7 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 
 > **Note**: The `Requirements` field lists the FR-N IDs from `requirements.md` that this unit addresses. These IDs flow directly into bolt planning — the bolt planner reads them to populate the `requirements` frontmatter field and `## Traceability` section of each bolt spec. Establish requirement IDs during Requirements Analysis so they are available here.
 
-**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work-dependency.md`**:
+**`aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`**:
 
 ```markdown
 # Unit Dependency Map: {Title}
@@ -1201,7 +1201,7 @@ graph TD
 ```
 ```
 
-**`aidlc-docs/{workflowId}/inception/application-design/unit-of-work-story-map.md`**:
+**`aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md`**:
 
 ```markdown
 # Story Map: {Title}
@@ -1233,9 +1233,9 @@ graph TD
 - **Units Generation**: Decomposed requirements into implementation units with dependency mapping
 
 ### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work.md`
-- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work-dependency.md`
-- `aidlc-docs/{workflowId}/inception/application-design/unit-of-work-story-map.md`
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work.md`
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md`
 
 ### What needs your review
 - [ ] Units correctly partition the work into manageable implementation chunks

@@ -37,8 +37,8 @@ Design detailed business logic for the unit, technology-agnostic and focused pur
 ## Steps to Execute
 
 ### Step 1: Analyze Unit Context
-- Read unit definition from `aidlc-docs/inception/application-design/unit-of-work.md`
-- Read assigned stories from `aidlc-docs/inception/application-design/unit-of-work-story-map.md`
+- Read unit definition from `aidlc-docs/inception/units/unit-of-work.md`
+- Read assigned stories from `aidlc-docs/inception/units/unit-of-work-story-map.md`
 - Understand unit responsibilities and boundaries
 
 ### Step 2: Create Functional Design Plan

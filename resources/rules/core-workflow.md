@@ -126,7 +126,8 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 │   │   ├── reverse-engineering/    # Brownfield only
 │   │   ├── requirements/
 │   │   ├── user-stories/
-│   │   └── application-design/
+│   │   ├── application-design/
+│   │   └── units/
 │   ├── construction/
 │   │   ├── plans/
 │   │   ├── {unit-name}/
