@@ -182,16 +182,74 @@ When done, let me know and I will incorporate your approved findings into the re
 ### Step 7: Generate Requirements Document
    - **PREREQUISITE**: Step 6 gate must be passed — all answers received and analyzed. If Step 6b applied, supplementary findings must also be reviewed.
    - Create `aidlc-docs/{workflow-id}/inception/requirements/requirements.md`
-   - Include intent analysis summary at the top:
-     - User request
-     - Request type
+   - Begin with YAML frontmatter mirroring intent.md classification:
+
+```yaml
+---
+workflow: "{workflow-id}"
+pathway: "{greenfield|brownfield-enhancement|brownfield-refactor|bugfix|migration}"
+scope: "{single-file|single-component|multi-component|system-wide|cross-system}"
+complexity: "{trivial|simple|moderate|complex}"
+depth: "{minimal|standard|comprehensive}"
+status: draft
+created: "{ISO-8601}"
+---
+```
+
+   - Include intent analysis summary after frontmatter:
+     - User request (verbatim or paraphrased)
+     - Request type classification
      - Scope estimate
      - Complexity estimate
-   - Include both functional and non-functional requirements
-   - Include scenario coverage when relevant (use cases, edge cases, error scenarios)
-   - Incorporate user's answers to clarifying questions
-   - Provide brief summary of key requirements
    - **Do NOT include a User Stories section** — user stories with personas and acceptance criteria are generated in the dedicated User Stories stage
+   - Incorporate user's answers to clarifying questions
+   - If the requirements introduce 3+ domain-specific terms that aren't self-explanatory, append a `## Glossary` section defining them
+
+#### Depth-Specific Content Guidance
+
+The depth determined in Step 3 controls which sections to include and how much detail each receives:
+
+**Minimal** (clear, simple requests):
+- Intent analysis summary
+- Functional requirements (concise list)
+- Brief key requirements summary
+- Coverage verification (expect most areas N/A with justification)
+
+**Standard** (normal complexity):
+- All Minimal sections, plus:
+- Non-functional requirements
+- Scenario coverage (key use cases and error scenarios)
+- Coverage verification (expect most areas Covered)
+
+**Comprehensive** (complex, high-risk):
+- All Standard sections, plus:
+- Detailed scenario coverage with edge cases and error scenarios
+- Dedicated Business Context section
+- Dedicated Technical Context section
+- Coverage verification (ALL areas must be Covered or have justified Partial status)
+
+#### 7b. Coverage Verification (MANDATORY)
+
+Include a **Coverage Verification** section at the end of `requirements.md`. This maps directly to the six coverage areas evaluated in Step 5. Every area must be accounted for:
+
+```markdown
+## Coverage Verification
+
+| Area | Status | Section | Notes |
+|------|--------|---------|-------|
+| Functional Requirements | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+| Non-Functional Requirements | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+| Scenario Coverage | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+| Business Context | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+| Technical Context | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+| Quality Attributes | {Covered/Partial/N-A} | {§ section ref} | {justification if Partial or N-A} |
+```
+
+**Rules**:
+- **Covered**: The area has a dedicated section with substantive content
+- **Partial**: The area is addressed but incomplete — the Notes column MUST explain what is missing and why
+- **N-A**: The area does not apply to this workflow — the Notes column MUST justify the exclusion
+- If any area is Partial, consider whether follow-up questions are needed before finalizing
 
 ### Step 8: MANDATORY: Update State Tracking
 

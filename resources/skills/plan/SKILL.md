@@ -121,6 +121,9 @@ Before generating questions, analyze the `/plan` input and extract what is alrea
 - Infer the problem being solved
 - Identify any mentioned personas or user types
 - Note any explicit constraints or success criteria
+- Infer business context (why now? what motivates this work?)
+- Infer technical context (current system state, relevant technologies, integrations)
+- Estimate priority (must/should/could) and complexity (trivial/simple/moderate/complex)
 - Determine what is genuinely unclear or missing
 
 ### 3b. Generate intent-questions.md
@@ -137,7 +140,10 @@ Based on your description, I've inferred the following. Please correct anything 
 - **Problem**: {inferred problem statement}
 - **Primary users**: {inferred personas}
 - **Scope**: {inferred scope}
+- **Business context**: {inferred motivation, else "unclear"}
+- **Technical context**: {inferred current state, else "unclear"}
 - **Success criteria**: {inferred if present, else "unclear"}
+- **Priority**: {inferred must/should/could, else "unclear"}
 
 ---
 
@@ -164,9 +170,9 @@ Z) Other: please specify
 ```
 
 **Question count based on trust level:**
-- Trust 0: 5+ questions (Problem, Personas, Success Metrics, Constraints, Priorities)
-- Trust 1: 3-4 questions (Problem, Personas, Success Metrics, and one more if needed)
-- Trust 2: 2-3 questions (Problem + Success Metrics, omit if clearly answered in input)
+- Trust 0: 6+ questions (Problem, Personas, Business Context, Technical Context, Success Criteria, Constraints, Priority)
+- Trust 1: 4-5 questions (Problem, Personas, Success Criteria, Business Context, and one more if needed)
+- Trust 2: 2-3 questions (Problem + Success Criteria + Business Context, omit if clearly answered in input)
 - Trust 3: 1-2 questions, or 0 if the feature description is comprehensive
 
 **Question format rules:**
@@ -230,6 +236,10 @@ title: "{title}"
 status: draft
 created: "{ISO-8601}"
 author: "prometheus"
+pathway: "{greenfield|brownfield-enhancement|brownfield-refactor|bugfix|migration}"
+scope: "{single-file|single-component|multi-component|system-wide|cross-system}"
+complexity: "{trivial|simple|moderate|complex}"
+priority: "{must|should|could}"
 ---
 
 # INTENT: {Title}
@@ -237,20 +247,30 @@ author: "prometheus"
 ## Problem Statement
 {What problem does this solve? Who is affected? Why does it matter now?}
 
-## User Personas
-- **{Persona 1}**: {Description — role, goals, pain points}
+## Business Context
+{Why is this work happening now? What business driver, compliance requirement,
+user feedback, or strategic goal motivates it? What happens if we don't do this?}
 
-## Success Metrics
-- {Measurable outcome 1}
+## User Personas
+- **{Persona 1}**: {Role, goals, pain points — 1-2 sentences}
+
+## Technical Context
+{Current system state relevant to this intent. Key technologies, integrations,
+and architectural constraints that shape the solution space. NOT the design —
+just what exists today that matters.}
+
+## Success Criteria
+- [ ] {Measurable, verifiable outcome 1}
+- [ ] {Measurable, verifiable outcome 2}
 
 ## Business Constraints
-- {Constraint 1}
+- {Constraint 1 — e.g., timeline, budget, compliance, backwards compatibility}
 
 ## Out of Scope
-- {Explicit exclusion 1}
+- {Explicit exclusion 1 — prevents scope creep during construction}
 ```
 
-Fill all sections from interview answers. Include multiple personas, metrics, constraints, and exclusions as appropriate.
+Fill all sections from interview answers. Include multiple personas, metrics, constraints, and exclusions as appropriate. The frontmatter `pathway`, `scope`, and `complexity` values must align with the classifications determined during the interview. User stories do NOT belong in intent.md — capture personas here; full stories are generated in the User Stories stage.
 
 ### 4b. Initialize checkpoint with inception_stages
 

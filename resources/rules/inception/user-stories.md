@@ -163,8 +163,45 @@ For medium priority cases, execute user stories if ANY of these apply:
   - [ ] Generate stories.md with user stories following INVEST criteria
   - [ ] Generate personas.md with user archetypes and characteristics
   - [ ] Ensure stories are Independent, Negotiable, Valuable, Estimable, Small, Testable
-  - [ ] Include acceptance criteria for each story
+  - [ ] Include acceptance criteria for each story (Gherkin Given/When/Then format)
+  - [ ] Include edge cases for non-trivial stories
   - [ ] Map personas to relevant user stories
+
+### Story Naming Convention (MANDATORY)
+
+All stories MUST use `S-NNN` IDs (zero-padded to three digits, sequential within the workflow). This is consistent with `U-NNN` for units and `BOLT-NNN` for bolts.
+
+### Story Template (MANDATORY)
+
+Each story in `stories.md` MUST follow this structure:
+
+```markdown
+### S-NNN: {Story Title}
+
+**Persona**: {persona name from personas.md}
+**Priority**: {must | should | could}
+
+> As a **{persona}**, I want **{capability}**, so that **{benefit}**.
+
+#### Acceptance Criteria
+- **Given** {precondition}, **when** {action}, **then** {expected result}
+- **Given** {precondition}, **when** {action}, **then** {expected result}
+
+#### Edge Cases
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| {edge case} | {what should happen} |
+
+#### Dependencies
+- Requires: {S-NNN or "None"}
+- Enables: {S-NNN or "None"}
+```
+
+**Rules**:
+- Every story MUST have at least one Given/When/Then acceptance criterion
+- Edge Cases table is MANDATORY for stories with priority `must`, optional for `should`/`could`
+- Dependencies track inter-story ordering — use "None" when the story is independent
+- Priority uses MoSCoW: `must` (required), `should` (important), `could` (nice-to-have)
 
 ## Step 5: Present Story Options
 - Include different approaches for story breakdown in the plan document:

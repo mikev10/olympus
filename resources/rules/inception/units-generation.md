@@ -74,6 +74,7 @@ Unit boundaries define the scope of all subsequent design and code generation wo
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work.md` with unit definitions and responsibilities
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-dependency.md` with dependency matrix
 - [ ] Generate `aidlc-docs/inception/application-design/unit-of-work-story-map.md` mapping stories to units
+- [ ] **Conditional** (complexity >= moderate AND units >= 3): Generate per-unit briefs in `aidlc-docs/inception/application-design/units/{unit-slug}/unit-brief.md`
 - [ ] **Greenfield only**: Document code organization strategy in `unit-of-work.md` (see code-generation.md for structure patterns)
 - [ ] Validate unit boundaries and dependencies
 - [ ] Ensure all stories are assigned to units
@@ -163,9 +164,63 @@ If the analysis in step 7 reveals ANY ambiguous answers, you MUST:
 - [ ] Save all generated artifacts
 - **Do NOT proceed without completing state updates**
 
+## Step 14b: Generate Unit Briefs (CONDITIONAL)
+
+**Condition**: Generate unit briefs when complexity is `moderate` or `complex` AND the decomposition produced 3 or more units. If the condition is not met, skip to Step 15.
+
+For each unit defined in `unit-of-work.md`, create a per-unit brief file:
+
+**Path**: `aidlc-docs/{workflowId}/inception/application-design/units/{unit-slug}/unit-brief.md`
+
+Where `{unit-slug}` follows the existing convention (e.g., `UNIT-001-foundation`).
+
+```markdown
+---
+unit: "U-NNN"
+intent: "{workflow-id}"
+complexity: "{S|M|L|XL}"
+status: draft
+created: "{ISO-8601}"
+---
+
+# Unit Brief: U-NNN — {Name}
+
+## Purpose and Scope
+{What this unit handles. Explicit boundary — what is IN vs OUT of this unit relative to other units.}
+
+## Requirements Mapping
+| Requirement | Description | Coverage |
+|-------------|-------------|----------|
+| FR-1 | {description} | Covered / Partial |
+
+## Key Domain Entities
+| Entity | Description | Owned by this unit? |
+|--------|-------------|---------------------|
+| {Entity} | {description} | Yes / Shared with U-NNN |
+
+## Technical Context
+{Tech stack, integration points, data storage, and APIs relevant to this unit.
+Reference existing system components if brownfield.}
+
+## Dependencies
+- **Depends on**: {list units this unit requires to be built first, or "None"}
+- **Depended on by**: {list units that require this unit, or "None"}
+
+## Success Criteria
+- [ ] {Verifiable outcome specific to this unit}
+- [ ] {Verifiable outcome specific to this unit}
+```
+
+**Rules**:
+- Unit briefs supplement, not replace, `unit-of-work.md` — the overview document remains the single index of all units
+- Requirements Mapping must trace back to FRs in `requirements.md`
+- Dependencies must be consistent with `unit-of-work-dependency.md`
+- Keep briefs concise — detailed functional design happens in the Construction phase
+
 ## Step 15: Continue or Complete
 - [ ] If more steps remain, return to Step 12
 - [ ] If all steps complete, verify units are ready for design stages
+- [ ] If unit briefs were generated (Step 14b), verify consistency across all briefs
 - [ ] Mark Units Generation stage as complete
 
 ## Step 16: Present Completion Message
