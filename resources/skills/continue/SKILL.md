@@ -105,6 +105,35 @@ Always read `aidlc-docs/{workflow_id}/aidlc-state.md` to get the human-readable 
 
 After loading, provide a brief summary: "Loaded N artifacts from previous stages: [list artifact names]."
 
+### 3b. MANDATORY: Create In-Session Task List
+
+**CRITICAL**: After loading artifacts, you MUST create an in-session task list (using TodoWrite/TaskCreate) with all pipeline stages as items. This provides real-time visual progress tracking in the terminal.
+
+**For Inception Phase resumption**, create tasks for:
+
+- Workspace Detection (Step 5)
+- Reverse Engineering (Step 6)
+- Requirements Analysis (Step 7)
+- User Stories (Step 8)
+- Workflow Planning (Step 9)
+- Application Design (Step 10)
+- Units Generation (Step 11)
+- Inception Complete — Final Audit and Mode Choice (Step 12)
+
+**For Construction Phase resumption**, create tasks for:
+
+- Each remaining unit of work (by name/ID)
+- Build and Test
+- Documentation
+- Construction Complete
+
+**Rules**:
+- Mark already-completed stages as **completed** immediately when creating the list
+- Mark the current resumption stage as **in_progress**
+- Mark remaining stages as **pending**
+- Update task status in real-time as you progress through stages
+- This is IN ADDITION TO the file-based tracking (`aidlc-state.md`, `checkpoint.json`) — both must be updated
+
 ---
 
 ## Step 4: Determine Resume Point
