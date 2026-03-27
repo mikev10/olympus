@@ -263,6 +263,15 @@ describe('writeBoltArtifacts', () => {
     expect(content).toContain('## Acceptance Criteria');
     expect(content).toContain('## Target Files');
     expect(content).toContain('## Dependencies');
+    expect(content).toContain('## Stories Included');
+    expect(content).toContain('## Expected Outputs');
+    expect(content).toContain('## Stages');
+    expect(content).toContain('## Success Criteria');
+    expect(content).toContain('status: planned');
+    expect(content).toContain('intent: test-wf');
+    expect(content).toContain('current_stage: null');
+    expect(content).toContain('stages_completed: []');
+    expect(content).toContain('complexity:');
   });
 
   it('does not create a bolt plan summary file', async () => {

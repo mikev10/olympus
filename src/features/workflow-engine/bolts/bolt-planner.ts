@@ -121,7 +121,14 @@ export async function writeBoltArtifacts(
         `id: ${bolt.id}`,
         `title: "${bolt.title}"`,
         `parent_unit_id: ${bolt.parent_unit_id}`,
+        `intent: ${workflowId}`,
         `sequence: ${bolt.sequence}`,
+        `status: planned`,
+        `created: "${new Date().toISOString()}"`,
+        `started: null`,
+        `completed: null`,
+        `current_stage: null`,
+        `stages_completed: []`,
         `depth_target: ${bolt.depth_target}`,
         `express_mode: ${bolt.express_mode}`,
         `estimated_effort_hours: ${bolt.estimated_effort_hours}`,
@@ -132,18 +139,14 @@ export async function writeBoltArtifacts(
         `enables_bolts: ${JSON.stringify(bolt.enables_bolts ?? [])}`,
         `requires_units: ${JSON.stringify(bolt.requires_units ?? [])}`,
         `blocked: ${bolt.blocked ?? false}`,
+        'complexity:',
+        '  avg_complexity: 2',
+        '  avg_uncertainty: 1',
+        '  max_dependencies: 1',
+        '  testing_scope: 1',
         '---',
       ].join('\n');
 
-      const acList = bolt.acceptance_criteria.map((c) => `- ${c}`).join('\n');
-      const filesList =
-        bolt.target_files.length > 0
-          ? bolt.target_files.map((f) => `- ${f}`).join('\n')
-          : 'None';
-      const depsList =
-        bolt.dependencies.length > 0
-          ? bolt.dependencies.map((d) => `- ${d}`).join('\n')
-          : 'None';
       const reqList =
         (bolt.requirements ?? []).length > 0
           ? (bolt.requirements ?? []).join(', ')
@@ -152,6 +155,46 @@ export async function writeBoltArtifacts(
         (bolt.stories ?? []).length > 0
           ? (bolt.stories ?? []).join(', ')
           : 'None';
+
+      const storiesCheckboxes = (bolt.stories ?? []).length > 0
+        ? (bolt.stories ?? []).map((s: string) => `- [ ] **${s}**`).join('\n')
+        : '- [ ] (no stories assigned)';
+
+      const acCheckboxes = bolt.acceptance_criteria.map((c) => `- [ ] ${c}`).join('\n');
+
+      const expectedOutputs = bolt.target_files.length > 0
+        ? bolt.target_files.map((f) => `- ${f}`).join('\n')
+        : '- (derived from scope during elaboration)';
+
+      const targetFilesList = bolt.target_files.length > 0
+        ? bolt.target_files.map((f) => `- \`${f}\``).join('\n')
+        : 'None';
+
+      const stagesSection = bolt.express_mode
+        ? [
+            '- ⊘ **1. elaboration**: Skipped (express mode)',
+            '- [ ] **2. code_generation**: Pending',
+            '- [ ] **3. build_and_test**: Pending',
+            '- [ ] **4. review**: Pending',
+          ].join('\n')
+        : [
+            '- [ ] **1. elaboration**: Pending',
+            '- [ ] **2. code_generation**: Pending',
+            '- [ ] **3. build_and_test**: Pending',
+            '- [ ] **4. review**: Pending',
+          ].join('\n');
+
+      const boltDepsSection = (bolt.requires_bolts ?? []).length > 0
+        ? (bolt.requires_bolts ?? []).map((b: string) => `- **${b}** (Required): Planned`).join('\n')
+        : '- None';
+
+      const unitDepsSection = (bolt.requires_units ?? []).length > 0
+        ? (bolt.requires_units ?? []).map((u: string) => `- **${u}**`).join('\n')
+        : '- None';
+
+      const enablesSection = (bolt.enables_bolts ?? []).length > 0
+        ? (bolt.enables_bolts ?? []).map((b: string) => `- ${b}`).join('\n')
+        : '- None';
 
       const specContent = [
         frontmatter,
@@ -162,35 +205,43 @@ export async function writeBoltArtifacts(
         '',
         bolt.scope,
         '',
+        '## Stories Included',
+        '',
+        storiesCheckboxes,
+        '',
         '## Acceptance Criteria',
         '',
-        acList,
+        acCheckboxes,
+        '',
+        '## Expected Outputs',
+        '',
+        expectedOutputs,
         '',
         '## Target Files',
         '',
-        filesList,
+        targetFilesList,
+        '',
+        '## Stages',
+        '',
+        stagesSection,
         '',
         '## Dependencies',
         '',
-        depsList,
+        '### Bolt Dependencies (within unit)',
+        boltDepsSection,
         '',
-        '## Requires Bolts',
+        '### Unit Dependencies (cross-unit)',
+        unitDepsSection,
         '',
-        (bolt.requires_bolts ?? []).length > 0
-          ? (bolt.requires_bolts ?? []).map((b: string) => `- ${b}`).join('\n')
-          : 'None',
+        '### Enables (bolts waiting on this)',
+        enablesSection,
         '',
-        '## Enables Bolts',
+        '## Success Criteria',
         '',
-        (bolt.enables_bolts ?? []).length > 0
-          ? (bolt.enables_bolts ?? []).map((b: string) => `- ${b}`).join('\n')
-          : 'None',
-        '',
-        '## Requires Units',
-        '',
-        (bolt.requires_units ?? []).length > 0
-          ? (bolt.requires_units ?? []).map((u: string) => `- ${u}`).join('\n')
-          : 'None',
+        '- [ ] All stories implemented',
+        '- [ ] All acceptance criteria met',
+        '- [ ] Tests passing',
+        '- [ ] Code reviewed and approved',
         '',
         '## Traceability',
         '',

@@ -16,55 +16,29 @@ Each bolt is described by a spec file written during this stage.
 
 Example: `{workflowId}/construction/UNIT-001-foundation/bolts/BOLT-001-data-model/spec.md`
 
-### Frontmatter Fields
+### Spec Template
 
-```yaml
----
-id: BOLT-NNN-slug
-title: "Short descriptive title"
-parent_unit_id: UNIT-NNN-unit-name
-sequence: 1
-depth_target: 6
-express_mode: false
-estimated_effort_hours: 4
-requirements: ["FR-1", "FR-3"]
-stories: ["S-001"]
-docs_impact: ["none"]
-requires_bolts: []
-enables_bolts: []
-requires_units: []
-blocked: false
----
-```
+The canonical bolt spec template is defined at:
 
-| Field | Description |
-|-------|-------------|
-| `id` | Globally unique bolt identifier (see Naming Convention) |
-| `title` | Short human-readable title |
-| `parent_unit_id` | ID of the parent construction unit |
-| `sequence` | Execution order within the unit (1-based) |
-| `depth_target` | Reasoning depth (1-10). Express mode threshold: <= 4 |
-| `express_mode` | `true` if eligible for express execution (skips elaboration) |
-| `estimated_effort_hours` | Rough hours estimate for human review |
-| `requirements` | Requirement IDs from `requirements.md` that this bolt satisfies (e.g., `["FR-1", "FR-3"]`) |
-| `stories` | Story IDs from `stories.md` that this bolt addresses (e.g., `["S-001"]`). Optional but recommended. |
-| `docs_impact` | Array of strings indicating documentation types this bolt impacts: `none`, `readme`, `user-guide`, `config-reference`, `cli-reference`, `migration-guide`, `architecture`, `code-comments`. Used by the Documentation Generation stage to determine which docs to produce. |
+**Template file**: `resources/templates/construction/bolt-spec-template.md`
 
-### Required Sections
+When creating bolt specs, agents MUST read this template file and follow its structure exactly. The template defines all required frontmatter fields (including runtime state fields), all required body sections, status values, and stage status symbols.
 
-Every bolt spec must contain all five sections:
+> **CRITICAL**: Do NOT invent your own spec format. Read and follow the template.
 
-**Scope** — What this bolt implements. A focused description of the functionality delivered by this bolt alone.
+### Required Body Sections
 
-**Acceptance Criteria** — At least one measurable criterion. Each criterion must be verifiable (observable output, passing test, or explicit behavior).
+Every bolt spec must contain ALL of the following sections (10 total):
 
-**Target Files** — List of files to be created or modified. Paths are relative to the project root.
-
-**Dependencies** — Other bolts that must complete before this bolt can begin. Use bolt IDs (e.g., `BOLT-001-data-model`). Leave empty if no dependencies.
-
-**Traceability** — Which requirements and stories this bolt satisfies:
-- **Requirements**: {comma-separated requirement IDs from requirements.md}
-- **Stories**: {comma-separated story IDs from stories.md}
+1. **Scope** — What this bolt implements
+2. **Stories Included** — Checkbox list of stories with priorities (`- [ ] **S-001**: title -- Priority: Must`)
+3. **Acceptance Criteria** — Checkbox list of verifiable criteria (`- [ ] criterion`)
+4. **Expected Outputs** — Concrete deliverables this bolt produces
+5. **Target Files** — Files to create or modify (backtick-wrapped paths)
+6. **Stages** — 4-stage execution checklist (elaboration, code_generation, build_and_test, review)
+7. **Dependencies** — Three subsections: Bolt Dependencies (within unit), Unit Dependencies (cross-unit), Enables (bolts waiting on this)
+8. **Success Criteria** — Completion checklist (all stories implemented, tests passing, code reviewed)
+9. **Traceability** — Requirement and story ID references
 
 ---
 
