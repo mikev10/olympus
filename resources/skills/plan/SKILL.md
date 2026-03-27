@@ -1198,26 +1198,9 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 - The TypeScript engine enforces `UNIT-NNN-name` folder format automatically via `slugifyUnitName()`
 - Numbering is zero-padded to three digits: U-001, U-002, ... U-010, U-011, etc.
 
-**`aidlc-docs/{workflowId}/inception/units/unit-of-work.md`**:
+> **CRITICAL**: Generate `unit-of-work.md` following the canonical template at `resources/templates/inception/units-template.md`. Do NOT use inline format examples. Read the template file and follow its structure exactly.
 
-```markdown
-# Units of Work: {Title}
-
-## U-001: {Module Name}
-- **Scope**: {one-sentence scope description}
-- **Phase**: construction
-- **Estimated Effort**: {N}
-- **Requirements**: FR-001, FR-002
-- **User Stories**: S-001, S-002
-- **NFRs**: SEC-001, PERF-001
-- **Components**: {component names}
-- **Folder**: `construction/UNIT-001-{module-name-kebab}/`
-
-## U-002: {Module Name}
-...
-```
-
-> **Note**: The `Requirements` field lists the FR-N IDs from `requirements.md` that this unit addresses. These IDs flow directly into bolt planning — the bolt planner reads them to populate the `requirements` frontmatter field and `## Traceability` section of each bolt spec. Establish requirement IDs during Requirements Analysis so they are available here.
+> **Note**: The `Assigned Requirements` field lists the FR-N IDs from `requirements.md` that each unit addresses. These IDs flow directly into bolt planning — the bolt planner reads them to populate the `requirements` frontmatter field and `## Traceability` section of each bolt spec. Establish requirement IDs during Requirements Analysis so they are available here.
 
 **`aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`**:
 
@@ -1276,6 +1259,7 @@ graph TD
 - `aidlc-docs/{workflowId}/inception/units/unit-of-work.md`
 - `aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`
 - `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md`
+- `aidlc-docs/{workflowId}/inception/units/{UNIT-NNN-slug}/unit-brief.md` (per-unit briefs, when 2+ units)
 
 ### What needs your review
 - [ ] Units correctly partition the work into manageable implementation chunks
@@ -1283,6 +1267,7 @@ graph TD
 - [ ] Story-to-unit mapping covers all user stories
 - [ ] Each unit has single responsibility and clear boundaries
 - [ ] Units can be developed independently by separate teams
+- [ ] Unit briefs complete and consistent (when 2+ units)
 
 ---
 

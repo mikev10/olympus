@@ -111,7 +111,7 @@ aidlc-docs/{workflowId}/construction/UNIT-002-frontend/bolts/BOLT-003-dashboard-
 
 For each unit defined in `inception/units/unit-of-work.md`:
 
-1. Read the unit definition (ID, title, acceptance criteria, estimated effort)
+1. Read the unit definition (ID, title, success criteria and requirements, estimated effort)
 2. Read the unit brief at `inception/units/{unit-slug}/unit-brief.md`
 3. Read the assigned stories from `inception/units/unit-of-work-story-map.md`
 4. Resolve each story's full definition from `inception/user-stories/stories.md`
