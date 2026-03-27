@@ -246,7 +246,7 @@ You may:
 # PART 2: GENERATION
 
 ## Step 10: Load Unit Code Generation Plan
-- [ ] Read the complete plan from `aidlc-docs/construction/plans/{unit-name}-code-generation-plan.md`
+- [ ] Read the complete plan from `aidlc-docs/{workflow-id}/construction/plans/{unit-name}-code-generation-plan.md`
 - [ ] Identify the next uncompleted step (first [ ] checkbox)
 - [ ] Load the context for that step (unit, dependencies, stories)
 

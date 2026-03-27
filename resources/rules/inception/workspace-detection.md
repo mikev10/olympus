@@ -4,8 +4,8 @@
 
 ## Step 1: Check for Existing AI-DLC Project
 
-Check if `aidlc-docs/aidlc-state.md` exists:
-- **If exists**: Resume from last phase (load context from previous phases)
+Check if any `aidlc-docs/*/aidlc-state.md` exists (glob for workflow subdirectories):
+- **If exists**: Resume the most recent workflow (load context from previous phases)
 - **If not exists**: Continue with new project assessment
 
 ## Step 2: Scan Workspace for Existing Code
@@ -40,7 +40,7 @@ Check if `aidlc-docs/aidlc-state.md` exists:
 
 ## Step 4: Create Initial State File
 
-Create `aidlc-docs/aidlc-state.md`:
+Create `aidlc-docs/{workflowId}/aidlc-state.md`:
 
 ```markdown
 # AI-DLC State Tracking

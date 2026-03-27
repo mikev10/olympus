@@ -163,7 +163,9 @@ export {
   METIS_PROMPT_METADATA,
   // orchestrator-olympus: DEPRECATED - merged into default mode
   prometheusAgent,
-  PROMETHEUS_PROMPT_METADATA
+  PROMETHEUS_PROMPT_METADATA,
+  qaTesterAgent,
+  QA_TESTER_PROMPT_METADATA
 } from './agents/index.js';
 
 // Command expansion utilities for SDK integration

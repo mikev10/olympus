@@ -349,6 +349,40 @@ function installSkills(
 }
 
 /**
+ * Install template files from resources/templates/ to ~/.claude/olympus/templates/.
+ *
+ * Templates ALWAYS overwrite (no existsSync guard). This is intentional --
+ * template files are managed by Olympus and should stay in sync.
+ */
+function installTemplates(
+  templatesDir: string,
+  isLocal: boolean,
+  log: (msg: string) => void
+): number {
+  const templatesContentDir = join(CONTENT_DIR, 'templates');
+  const subDirs = readdirSync(templatesContentDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => d.name);
+
+  let fileCount = 0;
+  for (const subDir of subDirs) {
+    const subContentDir = join(templatesContentDir, subDir);
+    const subDestDir = join(templatesDir, subDir);
+    mkdirSync(subDestDir, { recursive: true });
+
+    const templateFiles = readdirSync(subContentDir).filter(f => f.endsWith('.md'));
+    for (const templateFile of templateFiles) {
+      const content = localizeContent(readContent(`templates/${subDir}/${templateFile}`), isLocal);
+      writeFileSync(join(subDestDir, templateFile), content);
+      fileCount++;
+    }
+  }
+
+  log(`  Installed ${fileCount} template file(s) to ${templatesDir}`);
+  return fileCount;
+}
+
+/**
  * Install individual rule files from resources/rules/ to ~/.claude/olympus/rules/.
  *
  * Rules ALWAYS overwrite (no existsSync guard). This is intentional --
@@ -580,6 +614,12 @@ export function install(options: InstallOptions = {}): InstallResult {
     // Install individual rule files (always overwrite)
     log('Installing AI-DLC rule files...');
     installRules(rulesDir, !!options.local, log);
+
+    // Install template files (always overwrite)
+    log('Installing AI-DLC template files...');
+    const templatesDir = join(baseDir, 'olympus', 'templates');
+    mkdirSync(templatesDir, { recursive: true });
+    const installedTemplateCount = installTemplates(templatesDir, !!options.local, log);
 
     // Install CLAUDE.md with smart detection
     log('Installing CLAUDE.md...');
@@ -894,7 +934,7 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     result.success = true;
     const hookCount = Object.keys(HOOK_SCRIPTS).length;
-    result.message = `Successfully installed ${result.installedAgents.length} agents, ${result.installedSkills.length} skills, and ${hookCount} hooks`;
+    result.message = `Successfully installed ${result.installedAgents.length} agents, ${result.installedSkills.length} skills, ${hookCount} hooks, and ${installedTemplateCount} templates`;
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

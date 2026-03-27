@@ -130,7 +130,7 @@ export const WORKSPACE_SCAN_SCHEMA = `WorkspaceScanResult JSON schema:
   "entryPoints": ["path/to/index.ts", ...],
   "largestFilesByDirectory": { "src": ["largest.ts", "second.ts", "third.ts"], ... },
   "configFiles": ["package.json", "tsconfig.json", ...],
-  "agentsMdEntries": [{ "filePath": string, "entries": [{ "path": string, "description": string }] }] (optional)
+  "agentsMdEntries": [{ "relativeFilePath": string, "pathDescriptionPairs": [{ "path": string, "description": string }] }] (optional)
 }`;
 
 function countLines(filePath: string): number {

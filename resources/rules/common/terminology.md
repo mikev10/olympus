@@ -34,8 +34,7 @@
 - Requirements Analysis (ALWAYS - Adaptive depth)
 - User Stories (CONDITIONAL)
 - Workflow Planning (ALWAYS)
-- Application Design (CONDITIONAL)
-- Design - Units Planning/Generation (CONDITIONAL)
+- Units Generation (CONDITIONAL)
 
 **Outputs**: Requirements, user stories, architectural decisions, unit definitions
 
@@ -80,14 +79,15 @@
 ### Conditional Stages
 - **Reverse Engineering**: Analyzing existing codebase (brownfield projects only)
 - **User Stories**: Creating user stories and personas (includes Story Planning and Story Generation)
-- **Application Design**: Designing application components, methods, business rules, and services
-- **Design**: Designing system components (includes Units Planning, Units Generation, per-unit design)
+- **Units Generation**: Decomposing the system into independent domain units
 - **Functional Design**: Technology-agnostic business logic design (per-unit)
 - **NFR Requirements**: Determining NFRs and selecting tech stack (per-unit)
 - **NFR Design**: Incorporating NFR patterns and logical components (per-unit)
 - **Infrastructure Design**: Mapping to actual infrastructure services (per-unit)
 
-## Application Design Terms
+## Domain Design Terms
+
+_Application Design stage was merged into Units Generation (INCEPTION phase)._
 
 - **Component**: A functional unit with specific responsibilities
 - **Method**: A function or operation within a component with defined business rules

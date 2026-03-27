@@ -32,7 +32,8 @@ import {
   install as installOlympus,
   uninstall as uninstallOlympus,
   isInstalled,
-  getInstallInfo
+  getInstallInfo,
+  VERSION as INSTALLER_VERSION
 } from '../installer/index.js';
 import {
   readFeedbackLog,
@@ -71,14 +72,13 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Try to load package.json for version
-let version = '1.0.0';
+let version = INSTALLER_VERSION;
 try {
   const pkgPath = join(__dirname, '../../package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   version = pkg.version;
 } catch {
-  // Use default version
+  // package.json not available in npm installs — use installer VERSION constant
 }
 
 const program = new Command();
@@ -118,7 +118,7 @@ program
 
     // Generate config content
     const configContent = `// Olympus Configuration
-// See: https://github.com/your-repo/olympus for documentation
+// See: https://github.com/mikev10/olympus for documentation
 {
   "$schema": "./olympus-schema.json",
 
