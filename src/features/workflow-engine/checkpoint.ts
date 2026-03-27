@@ -124,7 +124,10 @@ export function getResumePoint(
   if (!boltProgress) return null;
 
   for (const stage of BOLT_STAGE_ORDER) {
-    const stageProgress = boltProgress.stages[stage];
+    const stageProgress = boltProgress.stages?.[stage];
+    if (!stageProgress) {
+      return { boltId: activeBoltId, stage };
+    }
     if (stageProgress.status !== 'completed' && stageProgress.status !== 'skipped') {
       return { boltId: activeBoltId, stage };
     }

@@ -604,6 +604,18 @@ export class WorkflowEngine {
           console.log(`[WorkflowEngine] Discovery Gate: Review findings in aidlc-docs/${this.workflowId}/discovery/ before proceeding to Inception`);
         }
 
+        // Persist discovery phase completion to checkpoint
+        try {
+          const discoveryCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+          if (discoveryCheckpoint) {
+            discoveryCheckpoint.phases.discovery.status = 'complete';
+            discoveryCheckpoint.phases.discovery.completed_at = new Date().toISOString();
+            await saveCheckpoint(this.projectPath, discoveryCheckpoint);
+          }
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to persist discovery phase completion:', error);
+        }
+
         // CCR-3: Capture discovery phase completion
         try {
           const phaseEvent: WorkflowEvent = {
@@ -707,6 +719,17 @@ export class WorkflowEngine {
         if (!result.passed) {
           console.error(`[WorkflowEngine] Construction phase validation failed:`, result.blocking_issues);
           throw new Error(`Construction phase validation failed: ${result.blocking_issues.join(', ')}`);
+        }
+
+        try {
+          const constructionDoneCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+          if (constructionDoneCheckpoint) {
+            constructionDoneCheckpoint.phases.construction.status = 'complete';
+            constructionDoneCheckpoint.phases.construction.completed_at = new Date().toISOString();
+            await saveCheckpoint(this.projectPath, constructionDoneCheckpoint);
+          }
+        } catch (error) {
+          console.error('[WorkflowEngine] Failed to persist construction phase completion:', error);
         }
 
         // CCR-3: Capture construction phase completion
@@ -1201,15 +1224,14 @@ created: ${timestamp}
    *
    * Generates the UNIT artifacts for the feature.
    */
-  private async executeUnitStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing UNIT stage for feature: ${this.featureName}`);
-    // TODO: Implement UNIT stage execution
-    throw new Error('UNIT stage execution not yet implemented');
+  private async executeUnitStage(_checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] UNIT stage delegated to construction phase executor`);
+    await this.executePhase('construction');
   }
 
-  private async executeCodeGenerationStage(checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
-    console.log(`[WorkflowEngine] Executing CODE-GENERATION stage for feature: ${this.featureName}`);
-    throw new Error('Code generation stage execution not yet implemented');
+  private async executeCodeGenerationStage(_checkpoint: WorkflowCheckpoint | WorkflowCheckpointV3): Promise<void> {
+    console.log(`[WorkflowEngine] CODE-GENERATION stage delegated to construction phase executor`);
+    await this.executePhase('construction');
   }
 
 }

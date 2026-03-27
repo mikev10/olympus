@@ -28,14 +28,15 @@ export class UnitStageRunner {
     unitId: string,
     depth: ConstructionDepth,
     intentContent: string,
-    nfrContent?: string
+    nfrContent?: string,
+    onProgress?: (unitId: string, progress: ConstructionUnitProgress) => Promise<void>
   ): Promise<ConstructionUnitProgress> {
     const stages = DEPTH_STAGES[depth];
     const unitDir = path.join(this.projectPath, 'aidlc-docs', this.workflowId, 'construction', unitId);
 
     const allStages: ConstructionDesignStage[] = [
       'functional-design', 'nfr-requirements',
-      'nfr-design', 'infrastructure-design', 'code-generation'
+      'nfr-design', 'infrastructure-design', 'code-generation', 'test-generation'
     ];
 
     const progress: ConstructionUnitProgress = {
@@ -82,12 +83,18 @@ export class UnitStageRunner {
         progress.stages[stage].completed_at = new Date().toISOString();
 
         console.log(`[UnitStageRunner] ${unitId}/${stage} completed -> ${artifactPath}`);
+        if (onProgress) {
+          try { await onProgress(unitId, progress); } catch { /* best effort */ }
+        }
       } catch (err) {
         progress.stages[stage].failure_count += 1;
         progress.stages[stage].last_error = err instanceof Error ? err.message : String(err);
         if (progress.stages[stage].failure_count >= 2) {
           progress.stages[stage].status = 'failed';
           console.error(`[UnitStageRunner] ${unitId}/${stage} failed after ${progress.stages[stage].failure_count} attempts — escalating`);
+          if (onProgress) {
+            try { await onProgress(unitId, progress); } catch { /* best effort */ }
+          }
           break;
         } else {
           progress.stages[stage].status = 'not_started';

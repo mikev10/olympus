@@ -625,7 +625,7 @@ export class ConstructionExecutor {
         console.error(`[ConstructionExecutor] Architecture model update failed for ${unitId} (non-blocking):`, err);
         unitProgress.architecture_model_status = 'failed';
         checkpoint.construction_units[unitId] = unitProgress;
-        try { await saveCheckpoint(projectPath, checkpoint); } catch {}
+        try { await saveCheckpoint(projectPath, checkpoint); } catch (saveErr) { console.warn('[ConstructionExecutor] Failed to save checkpoint after architecture model failure:', saveErr); }
       }
     }
 
@@ -1509,8 +1509,16 @@ Generated from inception/intent.md
       // Per-unit design stages (AWS AI-DLC alignment)
       try {
         const { UnitStageRunner } = await import('./unit-stage-runner.js');
+        const { loadCheckpoint: loadCp, saveCheckpoint: saveCp } = await import('../checkpoint.js');
         const stageRunner = new UnitStageRunner(this.projectPath, this.workflowId);
-        await stageRunner.executeForUnit(unit.id, depth, rootIntentContent);
+        await stageRunner.executeForUnit(unit.id, depth, rootIntentContent, undefined, async (uid, prog) => {
+          const cp = await loadCp(this.projectPath, this.workflowId);
+          if (cp) {
+            if (!cp.construction_units) cp.construction_units = {};
+            cp.construction_units[uid] = prog;
+            await saveCp(this.projectPath, cp);
+          }
+        });
       } catch (err) {
         console.error(`[ConstructionExecutor] Unit stage runner failed for ${unit.id}:`, err);
       }
