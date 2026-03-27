@@ -285,4 +285,21 @@ Reference existing system components if brownfield.}
   - `unit-of-work.md` with unit definitions
   - `unit-of-work-dependency.md` with dependency matrix
   - `unit-of-work-story-map.md` with story mappings
-- Units verified and ready for per-unit design stages
+- Units verified and ready for bolt planning
+- Unit independence validated (see criteria below)
+
+## Unit Independence Validation
+
+Before marking Units Generation complete, verify each unit satisfies these independence criteria:
+
+- **Single responsibility**: The unit handles one bounded domain area. A unit that spans multiple unrelated domains must be split.
+- **Clear interfaces**: Any cross-unit interaction is expressed through an explicit interface (API contract, event schema, shared type definition). Units must not access each other's internal implementation.
+- **No circular unit dependencies**: The dependency matrix in `unit-of-work-dependency.md` must be a DAG (directed acyclic graph). Circular dependencies are a hard block.
+- **Independent buildability**: Each unit can be developed and tested by a separate team without requiring runtime access to another unit's unbuilt code.
+- **Explicit cross-unit dependencies**: Every dependency a unit has on another unit must be documented in `unit-of-work-dependency.md`. Undocumented implicit dependencies are not allowed.
+
+If any criterion fails, revise the unit decomposition before proceeding to bolt planning.
+
+## Next Stage: Bolt Planning
+
+After units are approved, the workflow proceeds to **Bolt Planning** — a separate inception stage that decomposes each unit's stories into bolt spec files. Bolt creation does NOT happen during Units Generation. The `unit-of-work.md` artifacts produced here are the inputs to bolt planning.

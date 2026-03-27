@@ -79,6 +79,17 @@ export async function execute(
   const boltProgress = checkpoint.construction_bolts![boltSpec.id];
 
   checkpoint.active_bolt_id = boltSpec.id;
+
+  // Dependency enforcement: skip execution if bolt is blocked (v3.1.0)
+  if (boltProgress.blocked) {
+    checkpoint.active_bolt_id = null;
+    await saveCheckpoint(projectPath, checkpoint);
+    return {
+      status: boltProgress.status,
+      stages: { ...boltProgress.stages },
+    };
+  }
+
   boltProgress.status = 'in_progress';
   await saveCheckpoint(projectPath, checkpoint);
 
@@ -140,6 +151,32 @@ export async function execute(
   }
 
   checkpoint.active_bolt_id = null;
+
+  // Unblock dependent bolts when this bolt completes successfully (v3.1.0)
+  if (boltProgress.status === 'done' && checkpoint.construction_bolts) {
+    const completedBoltId = boltSpec.id;
+    for (const depBolt of Object.values(checkpoint.construction_bolts)) {
+      if (depBolt.requires_bolts?.includes(completedBoltId)) {
+        // Check if ALL requires_bolts are now done
+        const allDepsComplete = depBolt.requires_bolts.every((reqId) => {
+          const reqBolt = checkpoint.construction_bolts![reqId];
+          return reqBolt && reqBolt.status === 'done';
+        });
+        // Check if ALL requires_units are complete
+        const allUnitsDone = (depBolt.requires_units ?? []).every((unitId) => {
+          const unit = checkpoint.construction_units?.[unitId];
+          if (!unit) return false;
+          return Object.values(unit.stages).every(
+            (s) => s.status === 'completed' || s.status === 'skipped'
+          );
+        });
+        if (allDepsComplete && allUnitsDone) {
+          depBolt.blocked = false;
+        }
+      }
+    }
+  }
+
   checkpoint.active_bolt_stage = null;
   await saveCheckpoint(projectPath, checkpoint);
 

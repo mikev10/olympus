@@ -250,6 +250,7 @@ describe('writeBoltArtifacts', () => {
       'aidlc-docs',
       'test-wf',
       'construction',
+      'UNIT-001-test',
       'bolts',
       'BOLT-001-write-test',
       'spec.md'
@@ -264,7 +265,7 @@ describe('writeBoltArtifacts', () => {
     expect(content).toContain('## Dependencies');
   });
 
-  it('creates bolt plan summary', async () => {
+  it('does not create a bolt plan summary file', async () => {
     const bolt = makeBoltSpec({ parent_unit_id: 'UNIT-002-summary' });
     await writeBoltArtifacts([bolt], TEST_DIR, 'test-wf');
 
@@ -276,11 +277,11 @@ describe('writeBoltArtifacts', () => {
       'plans',
       'UNIT-002-summary-bolt-plan.md'
     );
-    expect(await fs.pathExists(summaryPath)).toBe(true);
+    expect(await fs.pathExists(summaryPath)).toBe(false);
   });
 
   it('creates directories if missing (ensureDir)', async () => {
-    const bolt = makeBoltSpec({ id: 'BOLT-003-new-dir' });
+    const bolt = makeBoltSpec({ id: 'BOLT-003-new-dir', parent_unit_id: 'UNIT-001-test' });
     const deepPath = path.join(TEST_DIR, 'deep', 'nested');
     await writeBoltArtifacts([bolt], deepPath, 'test-wf');
 
@@ -289,6 +290,7 @@ describe('writeBoltArtifacts', () => {
       'aidlc-docs',
       'test-wf',
       'construction',
+      'UNIT-001-test',
       'bolts',
       'BOLT-003-new-dir',
       'spec.md'

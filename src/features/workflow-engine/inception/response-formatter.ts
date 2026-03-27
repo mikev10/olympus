@@ -8,6 +8,7 @@ const STAGE_LABELS: Record<InceptionStage, string> = {
   'workflow-planning': 'Workflow Planning',
   'application-design': 'Application Design',
   'units-generation': 'Units Generation',
+  'bolt-planning': 'Bolt Planning',
 };
 
 const STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
@@ -18,6 +19,7 @@ const STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
   'workflow-planning': 'Created execution plan with Mermaid workflow diagram',
   'application-design': 'Designed component architecture, services, and dependency graph',
   'units-generation': 'Decomposed requirements into implementation units with dependency mapping',
+  'bolt-planning': 'Decompose units into executable bolts with dependency tracking',
 };
 
 const NEXT_STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
@@ -28,6 +30,7 @@ const NEXT_STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
   'workflow-planning': 'Designs the component architecture, services, and dependency relationships',
   'application-design': 'Decomposes requirements into implementation units (UNITs) with dependency mapping',
   'units-generation': 'Inception is complete — proceed to Construction phase for design and implementation',
+  'bolt-planning': 'Bolts are planned — proceed to Construction phase to execute each bolt',
 };
 
 const STAGE_TIME_HINTS: Record<InceptionStage, Record<string, string>> = {
@@ -38,6 +41,7 @@ const STAGE_TIME_HINTS: Record<InceptionStage, Record<string, string>> = {
   'workflow-planning': { minimal: '1-3 min', standard: '3-5 min', comprehensive: '5-10 min' },
   'application-design': { minimal: '3-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
   'units-generation': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
+  'bolt-planning': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
 };
 
 export function formatStageCompletion(

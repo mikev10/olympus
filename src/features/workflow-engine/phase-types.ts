@@ -24,7 +24,8 @@ export type InceptionStage =
   | 'user-stories'             // conditional — personas.md + stories.md
   | 'workflow-planning'        // execution plan with Mermaid diagram
   | 'application-design'       // conditional — 4 design artifacts
-  | 'units-generation';        // conditional — unit-of-work artifacts
+  | 'units-generation'         // conditional — unit-of-work artifacts
+  | 'bolt-planning';           // conditional — bolt decomposition per unit
 
 export interface InceptionStageState {
   stage: InceptionStage;
@@ -331,7 +332,7 @@ export interface WorkflowCheckpointV2 {
 
 // Checkpoint v3 type
 export interface WorkflowCheckpointV3 {
-  schema_version: '3.0.0';
+  schema_version: '3.0.0' | '3.1.0';
   workflow_id: string;
   feature_name: string;
   current_phase: WorkflowPhase;
@@ -461,7 +462,8 @@ export type BoltValidationErrorCode =
   | 'MAX_TOTAL_EXCEEDED'
   | 'MISSING_REQUIRED_FIELD'
   | 'INVALID_ID_FORMAT'
-  | 'INVALID_SEQUENCE';
+  | 'INVALID_SEQUENCE'
+  | 'CIRCULAR_DEPENDENCY';
 
 /**
  * The primary bolt definition. Extends HierarchicalNode using the 'bolt'
@@ -498,6 +500,30 @@ export interface BoltSpec extends HierarchicalNode {
    * in the current implementation.
    */
   dependencies: string[];
+
+  /**
+   * IDs of bolts that must complete before this bolt can start.
+   * Used for dependency enforcement during execution scheduling.
+   */
+  requires_bolts: string[];
+
+  /**
+   * IDs of bolts that become unblocked when this bolt completes.
+   * Inverse of requires_bolts — maintained for efficient graph traversal.
+   */
+  enables_bolts: string[];
+
+  /**
+   * IDs of units that must be fully complete before this bolt can start.
+   * Enables cross-unit dependency tracking for multi-team workflows.
+   */
+  requires_units: string[];
+
+  /**
+   * Computed flag: true when any entry in requires_bolts or requires_units
+   * references an incomplete dependency. Set by the executor before scheduling.
+   */
+  blocked: boolean;
 
   /**
    * Elaboration depth target on the 1-11 scale, inherited from the parent unit.
@@ -567,6 +593,18 @@ export interface ConstructionBoltProgress {
    * Null until acknowledgment occurs.
    */
   acknowledged_at: string | null;
+
+  /** Bolt IDs that must complete before this bolt can start. */
+  requires_bolts: string[];
+
+  /** Bolt IDs that become unblocked when this bolt completes. */
+  enables_bolts: string[];
+
+  /** Unit IDs that must be fully complete before this bolt can start. */
+  requires_units: string[];
+
+  /** True when any dependency is incomplete. */
+  blocked: boolean;
 }
 
 /**

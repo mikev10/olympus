@@ -58,6 +58,7 @@ const ALL_STAGES: InceptionStage[] = [
   'workflow-planning',
   'application-design',
   'units-generation',
+  'bolt-planning',
 ];
 
 function makeInceptionStageState(stage: InceptionStage): InceptionStageState {

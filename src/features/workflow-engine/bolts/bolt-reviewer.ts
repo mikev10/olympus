@@ -79,6 +79,7 @@ export class BoltReviewer {
       { score: result.score, tier, approved, feedback: result.feedback, concerns: result.concerns, escalation },
       projectPath,
       workflowId,
+      boltSpec.parent_unit_id,
     );
 
     if (checkpoint.construction_bolts?.[boltSpec.id]) {
@@ -110,8 +111,9 @@ export class BoltReviewer {
     },
     projectPath: string,
     workflowId: string,
+    parentUnitId: string,
   ): Promise<string> {
-    const relativePath = join('aidlc-docs', workflowId, 'construction', 'bolts', boltId, 'review.md');
+    const relativePath = join('aidlc-docs', workflowId, 'construction', parentUnitId, 'bolts', boltId, 'review.md');
     const absolutePath = join(projectPath, relativePath);
 
     const lines: string[] = [];

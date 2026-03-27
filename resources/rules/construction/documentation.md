@@ -27,7 +27,7 @@
 
 ## Step 1: Analyze Documentation Impact
 
-Scan ALL bolt specs in `aidlc-docs/{workflowId}/construction/bolts/` and collect `docs_impact` values from frontmatter. Also analyze:
+Scan ALL bolt specs under `aidlc-docs/{workflowId}/construction/` using the nested path pattern `construction/{UNIT-NNN-slug}/bolts/{BOLT-NNN-slug}/spec.md` and collect `docs_impact` values from frontmatter. Also analyze:
 
 - The intent.md (problem statement, business context)
 - The requirements.md (functional/non-functional requirements)

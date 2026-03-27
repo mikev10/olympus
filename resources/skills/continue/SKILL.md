@@ -91,6 +91,7 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 | workflow-planning | All above + inception/user-stories/stories.md, inception/user-stories/personas.md |
 | application-design | All above + inception/plans/workflow-routing.md |
 | units-generation | All above + inception/units/ artifacts |
+| bolt-planning | All above + construction/{UNIT-NNN}/bolts/ spec.md files (if any exist) |
 
 ### Construction Phase Artifacts
 
@@ -118,6 +119,7 @@ After loading, provide a brief summary: "Loaded N artifacts from previous stages
 - Workflow Planning (Step 9)
 - Application Design (Step 10)
 - Units Generation (Step 11)
+- Bolt Planning (Step 11b)
 - Inception Complete — Final Audit and Mode Choice (Step 12)
 
 **For Construction Phase resumption**, create tasks for:
@@ -150,6 +152,7 @@ If `current_phase === 'inception'` and `inception_stages` exists:
    - workflow-planning
    - application-design
    - units-generation
+   - bolt-planning
 
 2. If a stage is `in_progress` with `questions_file` set: resume Q&A for that stage (do NOT regenerate the questions file - read the existing one and check for unanswered [Answer]: tags).
 
@@ -169,7 +172,7 @@ If `current_phase === 'construction'`:
 - Resume from that point
 - If a `construction_units` entry has `stages['test-generation'].status === 'in_progress'` or `test_generation_status === 'in_progress'`, resume at test-generation for that unit
 - Note: test-generation runs after code-generation for each unit; check `test_generation_status` in the unit progress
-- **Mid-bolt resume**: If the checkpoint has `active_bolt_id` set (non-null), a bolt execution was interrupted. Resume from `active_bolt_stage` for that bolt. Load the bolt spec at `construction/bolts/{active_bolt_id}/spec.md` and continue execution from the interrupted stage (`elaboration`, `code_generation`, `build_and_test`, or `review`). Do not re-run completed bolt stages.
+- **Mid-bolt resume**: If the checkpoint has `active_bolt_id` set (non-null), a bolt execution was interrupted. Resume from `active_bolt_stage` for that bolt. Determine the parent unit from the bolt's `parent_unit` field in `construction_bolts`, then load the bolt spec at `construction/{parent_unit_id}/bolts/{active_bolt_id}/spec.md` and continue execution from the interrupted stage (`elaboration`, `code_generation`, `build_and_test`, or `review`). Do not re-run completed bolt stages.
 
 ### 4d. Other Phases
 
@@ -190,6 +193,7 @@ Based on the resume point determined in Step 4, read the corresponding rule file
 | workflow-planning | `~/.claude/olympus/rules/inception/workflow-planning.md` |
 | application-design | `~/.claude/olympus/rules/inception/application-design.md` |
 | units-generation | `~/.claude/olympus/rules/inception/units-generation.md` |
+| bolt-planning | `~/.claude/olympus/rules/inception/bolt-planning.md` |
 | functional-design | `~/.claude/olympus/rules/construction/functional-design.md` |
 | nfr-requirements | `~/.claude/olympus/rules/construction/nfr-requirements.md` |
 | nfr-design | `~/.claude/olympus/rules/construction/nfr-design.md` |

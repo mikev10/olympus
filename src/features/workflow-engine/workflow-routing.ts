@@ -241,6 +241,7 @@ function buildDefaultStagesForPhase(phase: WorkflowPhase, pathway: PathwayType):
         'workflow-planning',
         'application-design',
         'units-generation',
+        'bolt-planning',
       ];
     case 'construction':
       if (pathway === 'bugfix') {
@@ -269,6 +270,7 @@ function getStageRationale(phase: WorkflowPhase, stage: string, _pathway: Pathwa
     'inception:workflow-planning': 'Generate execution plan with Mermaid visualization and live checkboxes',
     'inception:application-design': 'High-level component identification, service boundaries, and dependencies',
     'inception:units-generation': 'Define units of work with inter-unit dependencies and story mapping',
+    'inception:bolt-planning': 'Decompose units into executable bolts with dependency tracking',
     'construction:unit-decomposition': 'Break intent into implementable units',
     'construction:bolt-execution': 'Execute implementation bolts with validation gates',
     'operations:deployment': 'Generate deployment guide and release notes',

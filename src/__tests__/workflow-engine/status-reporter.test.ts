@@ -1275,6 +1275,7 @@ function makeAllStages(
     'workflow-planning': makeStageState('not_started'),
     'application-design': makeStageState('not_started'),
     'units-generation': makeStageState('not_started'),
+    'bolt-planning': makeStageState('not_started'),
   };
   return { ...defaults, ...overrides };
 }
@@ -1284,10 +1285,10 @@ describe('buildInceptionSubStageProgress', () => {
     const stages = makeAllStages();
     const result = buildInceptionSubStageProgress(stages, 'workspace-detection');
     expect(result).toContain('0%');
-    expect(result).toContain('(0/7 stages)');
+    expect(result).toContain('(0/8 stages)');
   });
 
-  it('shows correct percentage for 4 of 7 stages complete', () => {
+  it('shows correct percentage for 4 of 8 stages complete', () => {
     const stages = makeAllStages({
       'workspace-detection': makeStageState('completed'),
       'reverse-engineering': makeStageState('completed'),
@@ -1295,8 +1296,8 @@ describe('buildInceptionSubStageProgress', () => {
       'user-stories': makeStageState('completed'),
     });
     const result = buildInceptionSubStageProgress(stages, 'workflow-planning');
-    expect(result).toContain('57%');
-    expect(result).toContain('(4/7 stages)');
+    expect(result).toContain('50%');
+    expect(result).toContain('(4/8 stages)');
   });
 
   it('shows 100% when all stages complete', () => {
@@ -1308,10 +1309,11 @@ describe('buildInceptionSubStageProgress', () => {
       'workflow-planning': makeStageState('completed'),
       'application-design': makeStageState('completed'),
       'units-generation': makeStageState('completed'),
+      'bolt-planning': makeStageState('completed'),
     });
     const result = buildInceptionSubStageProgress(stages, undefined);
     expect(result).toContain('100%');
-    expect(result).toContain('(7/7 stages)');
+    expect(result).toContain('(8/8 stages)');
   });
 
   it('marks completed stages with [x]', () => {
@@ -1358,7 +1360,7 @@ describe('buildInceptionSubStageProgress', () => {
     expect(line).toContain('<- current');
   });
 
-  it('shows all 7 stage names', () => {
+  it('shows all 8 stage names', () => {
     const stages = makeAllStages();
     const result = buildInceptionSubStageProgress(stages, undefined);
     expect(result).toContain('Workspace Detection');
@@ -1368,6 +1370,7 @@ describe('buildInceptionSubStageProgress', () => {
     expect(result).toContain('Workflow Planning');
     expect(result).toContain('Application Design');
     expect(result).toContain('Units Generation');
+    expect(result).toContain('Bolt Planning');
   });
 
   it('shows Inception header line', () => {

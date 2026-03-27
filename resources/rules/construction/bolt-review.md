@@ -69,7 +69,9 @@ The orchestrator surfaces the escalation to the user and halts further attempts 
 
 After each review, BoltReviewer writes a structured artifact:
 
-**Path**: `{workflowId}/construction/bolts/{boltId}/review.md`
+**Path**: `{workflowId}/construction/{parent_unit_id}/bolts/{boltId}/review.md`
+
+Example: `{workflowId}/construction/UNIT-001-foundation/bolts/BOLT-001-data-model/review.md`
 
 ### Required Sections
 

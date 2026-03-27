@@ -425,7 +425,7 @@ describe('End-to-End Workflow Tests', () => {
       const checkpoint = await loadCheckpoint(tmpDir, 'schema-version-test');
 
       // Verify schema version is set to V3
-      expect(checkpoint?.schema_version).toBe('3.0.0');
+      expect(checkpoint?.schema_version).toBe('3.1.0');
     });
 
     it('handles checkpoint without schema_version as invalid', async () => {

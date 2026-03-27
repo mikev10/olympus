@@ -57,6 +57,7 @@ const INCEPTION_STAGE_ORDER: InceptionStage[] = [
   'workflow-planning',
   'application-design',
   'units-generation',
+  'bolt-planning',
 ];
 
 function buildInitialStageState(

@@ -20,6 +20,10 @@ function makeValidBoltSpec(overrides?: Partial<BoltSpec>): BoltSpec {
     acceptance_criteria: ['Criterion 1'],
     target_files: ['src/test.ts'],
     dependencies: [],
+    requires_bolts: [],
+    enables_bolts: [],
+    requires_units: [],
+    blocked: false,
     depth_target: 5,
     express_mode: false,
     estimated_effort_hours: 2,
@@ -257,6 +261,46 @@ describe('BoltSpecValidator', () => {
         makeContext(),
       ),
     ).not.toThrow();
+  });
+
+  describe('validateNoCycles', () => {
+    it('passes with no cycles', () => {
+      const boltA = makeValidBoltSpec({ id: 'BOLT-001-a', requires_bolts: [] });
+      const boltB = makeValidBoltSpec({ id: 'BOLT-002-b', requires_bolts: ['BOLT-001-a'] });
+      const boltC = makeValidBoltSpec({ id: 'BOLT-003-c', requires_bolts: ['BOLT-002-b'] });
+      expect(() => BoltSpecValidator.validateNoCycles([boltA, boltB, boltC])).not.toThrow();
+    });
+
+    it('detects direct cycle A→B→A', () => {
+      const boltA = makeValidBoltSpec({ id: 'BOLT-001-a', requires_bolts: ['BOLT-002-b'] });
+      const boltB = makeValidBoltSpec({ id: 'BOLT-002-b', requires_bolts: ['BOLT-001-a'] });
+      expect(() => BoltSpecValidator.validateNoCycles([boltA, boltB])).toThrow(BoltValidationError);
+      try {
+        BoltSpecValidator.validateNoCycles([boltA, boltB]);
+      } catch (err) {
+        expect(err).toBeInstanceOf(BoltValidationError);
+        expect((err as BoltValidationError).code).toBe('CIRCULAR_DEPENDENCY');
+      }
+    });
+
+    it('detects transitive cycle A→B→C→A', () => {
+      const boltA = makeValidBoltSpec({ id: 'BOLT-001-a', requires_bolts: ['BOLT-003-c'] });
+      const boltB = makeValidBoltSpec({ id: 'BOLT-002-b', requires_bolts: ['BOLT-001-a'] });
+      const boltC = makeValidBoltSpec({ id: 'BOLT-003-c', requires_bolts: ['BOLT-002-b'] });
+      expect(() => BoltSpecValidator.validateNoCycles([boltA, boltB, boltC])).toThrow(BoltValidationError);
+      try {
+        BoltSpecValidator.validateNoCycles([boltA, boltB, boltC]);
+      } catch (err) {
+        expect(err).toBeInstanceOf(BoltValidationError);
+        expect((err as BoltValidationError).code).toBe('CIRCULAR_DEPENDENCY');
+      }
+    });
+
+    it('passes with empty requires_bolts', () => {
+      const boltA = makeValidBoltSpec({ id: 'BOLT-001-a', requires_bolts: [] });
+      const boltB = makeValidBoltSpec({ id: 'BOLT-002-b', requires_bolts: [] });
+      expect(() => BoltSpecValidator.validateNoCycles([boltA, boltB])).not.toThrow();
+    });
   });
 
   it('boundary cases: exactly 8 bolts blocks, 7 passes; exactly 50 total blocks, 49 passes', () => {

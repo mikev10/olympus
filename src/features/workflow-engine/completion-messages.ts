@@ -38,6 +38,11 @@ export const INCEPTION_STAGE_REVIEW_ITEMS: Record<InceptionStage, string[]> = {
     'Verify unit dependencies are correctly mapped',
     'Confirm story-to-unit mapping covers all user stories',
   ],
+  'bolt-planning': [
+    'Review each bolt for clear scope and estimated effort',
+    'Verify bolt dependencies and sequencing are correct',
+    'Confirm all units are fully decomposed into executable bolts',
+  ],
 };
 
 export function buildInceptionStageCompletionMessage(

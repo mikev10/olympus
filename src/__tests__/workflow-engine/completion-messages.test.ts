@@ -62,7 +62,7 @@ describe('completion-messages', () => {
 });
 
 describe('INCEPTION_STAGE_REVIEW_ITEMS', () => {
-  it('has review items for all 7 inception stages', () => {
+  it('has review items for all 8 inception stages', () => {
     const stages: InceptionStage[] = [
       'workspace-detection',
       'reverse-engineering',
@@ -71,6 +71,7 @@ describe('INCEPTION_STAGE_REVIEW_ITEMS', () => {
       'workflow-planning',
       'application-design',
       'units-generation',
+      'bolt-planning',
     ];
     for (const stage of stages) {
       expect(INCEPTION_STAGE_REVIEW_ITEMS[stage]).toBeDefined();
@@ -163,6 +164,7 @@ describe('buildInceptionStageCompletionMessage', () => {
       'workflow-planning',
       'application-design',
       'units-generation',
+      'bolt-planning',
     ];
     for (const stage of stages) {
       expect(() =>

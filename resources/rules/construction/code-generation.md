@@ -12,6 +12,7 @@ This stage generates code for each unit of work through two integrated parts:
 - NFR Implementation (if executed) must be complete for the unit
 - All unit design artifacts must be available
 - Unit is ready for code generation
+- Bolt specs (pre-planned during Inception) must exist at `aidlc-docs/{workflow-id}/construction/{UNIT-NNN-slug}/bolts/` — code generation executes against these pre-planned bolts rather than creating new ones
 
 ## Agent Delegation Strategy
 
@@ -307,7 +308,7 @@ This ensures the summary always exists regardless of agent compliance.
 
 > Please examine the generated code at:
 > - **Application Code**: `[actual-workspace-path]`
-> - **Documentation**: `aidlc-docs/construction/[unit-name]/code/`
+> - **Documentation**: `aidlc-docs/{workflow-id}/construction/{unit-name}/code/`
 
 **You may:**
 - 🔧 **Request Changes** — Ask for modifications to the generated code based on your review

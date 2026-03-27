@@ -11,7 +11,7 @@ You are running an end-to-end test of the Olympus structured workflow engine.
 ### Complete Pipeline
 
 ```
-INCEPTION (7 stages) → CONSTRUCTION (per-unit design + bolts) → OPERATIONS
+INCEPTION (8 stages) → CONSTRUCTION (per-unit design + bolts) → OPERATIONS
 ```
 
 ### What This Does

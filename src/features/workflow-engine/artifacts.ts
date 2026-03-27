@@ -32,7 +32,9 @@ export type ArtifactType =
   | 'execution-plan'
   | 'units-generation'
   | 'unit-dependency'
-  | 'unit-story-map';
+  | 'unit-story-map'
+  | 'bolt-spec'
+  | 'bolt-review';
 
 /**
  * Ensures the workflow directory structure exists.
@@ -202,6 +204,22 @@ export function getArtifactPath(
       return path.join(workflowDir, 'inception', 'units', 'unit-of-work-dependency.md');
     case 'unit-story-map':
       return path.join(workflowDir, 'inception', 'units', 'unit-of-work-story-map.md');
+    case 'bolt-spec':
+      if (!artifactId) {
+        throw new Error('artifactId (boltId) is required for bolt-spec artifacts');
+      }
+      if (!unitId) {
+        throw new Error('unitId is required for bolt-spec artifacts');
+      }
+      return path.join(workflowDir, 'construction', unitId, 'bolts', artifactId, 'spec.md');
+    case 'bolt-review':
+      if (!artifactId) {
+        throw new Error('artifactId (boltId) is required for bolt-review artifacts');
+      }
+      if (!unitId) {
+        throw new Error('unitId is required for bolt-review artifacts');
+      }
+      return path.join(workflowDir, 'construction', unitId, 'bolts', artifactId, 'review.md');
     default:
       throw new Error(`Unknown artifact type: ${artifactType}`);
   }

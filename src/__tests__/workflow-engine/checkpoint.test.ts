@@ -382,7 +382,7 @@ describe('Checkpoint Persistence', () => {
       const loaded = await loadCheckpoint(tmpDir, 'load-test');
 
       expect(loaded).not.toBeNull();
-      expect(loaded?.schema_version).toBe('3.0.0');
+      expect(loaded?.schema_version).toBe('3.1.0');
       expect(loaded?.workflow_id).toBe('load-test');
       expect(loaded?.feature_name).toBe('load-feature');
       expect(loaded?.current_phase).toBe('inception');

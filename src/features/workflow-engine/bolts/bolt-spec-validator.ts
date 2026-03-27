@@ -72,6 +72,27 @@ export class BoltSpecValidator {
       );
     }
 
+    // Validate dependency fields (v3.1.0)
+    if (spec.requires_bolts && spec.requires_bolts.length > 0) {
+      // Self-reference check
+      if (spec.requires_bolts.includes(spec.id)) {
+        throw new BoltValidationError(
+          'MISSING_REQUIRED_FIELD',
+          `Bolt ${spec.id} cannot depend on itself in requires_bolts.`,
+        );
+      }
+    }
+
+    if (spec.requires_units && spec.requires_units.length > 0) {
+      // Cannot require own parent unit (that would be circular)
+      if (spec.requires_units.includes(spec.parent_unit_id)) {
+        throw new BoltValidationError(
+          'MISSING_REQUIRED_FIELD',
+          `Bolt ${spec.id} cannot require its own parent unit ${spec.parent_unit_id} in requires_units.`,
+        );
+      }
+    }
+
     const warnings: string[] = [];
 
     if (spec.requirements !== undefined && spec.requirements.length === 0) {
@@ -91,5 +112,49 @@ export class BoltSpecValidator {
     }
 
     return warnings;
+  }
+
+  /**
+   * Validates that a set of bolts has no circular dependencies.
+   * Uses depth-first search to detect cycles in the requires_bolts graph.
+   *
+   * @throws BoltValidationError with code MISSING_REQUIRED_FIELD if cycle detected
+   */
+  static validateNoCycles(bolts: BoltSpec[]): void {
+    const graph = new Map<string, string[]>();
+    for (const bolt of bolts) {
+      graph.set(bolt.id, bolt.requires_bolts ?? []);
+    }
+
+    const visited = new Set<string>();
+    const inStack = new Set<string>();
+
+    function dfs(nodeId: string, path: string[]): void {
+      if (inStack.has(nodeId)) {
+        const cycleStart = path.indexOf(nodeId);
+        const cycle = path.slice(cycleStart).concat(nodeId);
+        throw new BoltValidationError(
+          'CIRCULAR_DEPENDENCY',
+          `Circular dependency detected: ${cycle.join(' → ')}`,
+        );
+      }
+      if (visited.has(nodeId)) return;
+
+      visited.add(nodeId);
+      inStack.add(nodeId);
+
+      const deps = graph.get(nodeId) ?? [];
+      for (const dep of deps) {
+        dfs(dep, [...path, nodeId]);
+      }
+
+      inStack.delete(nodeId);
+    }
+
+    for (const bolt of bolts) {
+      if (!visited.has(bolt.id)) {
+        dfs(bolt.id, []);
+      }
+    }
   }
 }

@@ -34,6 +34,7 @@ const ALL_STAGES: InceptionStage[] = [
   'workflow-planning',
   'application-design',
   'units-generation',
+  'bolt-planning',
 ];
 
 function makePhaseState(status = 'not_started') {

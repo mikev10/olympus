@@ -65,6 +65,7 @@ const ALL_STAGES: InceptionStage[] = [
   'workflow-planning',
   'application-design',
   'units-generation',
+  'bolt-planning',
 ];
 
 function makePhaseState(status: string = 'not_started') {
@@ -153,7 +154,7 @@ describe('InceptionOrchestrator', () => {
       expect(mockSaveCheckpoint).toHaveBeenCalledOnce();
       const saved = mockSaveCheckpoint.mock.calls[0][1];
       expect(saved.inception_stages).toBeDefined();
-      expect(Object.keys(saved.inception_stages)).toHaveLength(7);
+      expect(Object.keys(saved.inception_stages)).toHaveLength(8);
     });
 
     it('skips reverse-engineering for greenfield', async () => {
@@ -394,12 +395,13 @@ describe('InceptionOrchestrator', () => {
         'workflow-planning': 'not_started',
         'application-design': 'not_started',
         'units-generation': 'not_started',
+        'bolt-planning': 'not_started',
       }, 'requirements-analysis');
       mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
 
       const progress = await orchestrator.getProgress(projectPath, workflowId);
 
-      expect(progress.total_stages).toBe(7);
+      expect(progress.total_stages).toBe(8);
       expect(progress.completed_stages).toBe(1);
       expect(progress.skipped_stages).toBe(1);
       expect(progress.current_stage).toBe('requirements-analysis');
@@ -425,6 +427,7 @@ describe('InceptionOrchestrator', () => {
         'workflow-planning': 'completed',
         'application-design': 'skipped',
         'units-generation': 'completed',
+        'bolt-planning': 'completed',
       };
       const cp = createCheckpointWithStages(allDone as any);
       mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));

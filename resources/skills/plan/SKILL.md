@@ -111,6 +111,7 @@ Create tasks for each step:
 - Workflow Planning (Step 9)
 - Application Design (Step 10)
 - Units Generation (Step 11)
+- Bolt Planning (Step 11b)
 - Inception Complete — Final Audit and Mode Choice (Step 12)
 
 **Rules**:
@@ -118,6 +119,17 @@ Create tasks for each step:
 - Mark each task as **completed** immediately when the step finishes (including skipped stages)
 - This is IN ADDITION TO the file-based tracking (`aidlc-state.md`, `checkpoint.json`) — both must be updated
 - When resuming a workflow, mark already-completed steps as **completed** immediately
+
+### 1e. Display Welcome Message (new workflows only)
+
+**For new workflows only** (not resumed workflows), you MUST read and display the welcome message:
+
+1. Read the file `~/.claude/olympus/rules/common/welcome-message.md`
+2. Display its FULL content verbatim starting from the `---` separator (skip the frontmatter paragraph)
+3. Do NOT paraphrase, summarize, or regenerate the welcome message from memory — display the EXACT file content
+4. This must be displayed ONCE per workflow, immediately after confirming the workflow name
+
+**Why this matters**: The welcome message contains the complete lifecycle diagram with all three phases (Inception, Construction, Operations), phase breakdowns, key principles, and next-steps guidance. Generating it from memory produces an incomplete version.
 
 ---
 
@@ -322,7 +334,8 @@ Create or update `aidlc-docs/{workflowId}/checkpoint.json` with the full incepti
     "user-stories": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "workflow-planning": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "application-design": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
-    "units-generation": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] }
+    "units-generation": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "bolt-planning": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] }
   },
   "current_inception_stage": "workspace-detection"
 }
@@ -351,6 +364,7 @@ Updated: {ISO-8601}
 | Workflow Planning | not_started |
 | Application Design | not_started |
 | Units Generation | not_started |
+| Bolt Planning | not_started |
 ```
 
 Write `aidlc-docs/{workflowId}/audit.md`:
@@ -972,6 +986,7 @@ Approved: —
 | 5 | inception | workflow-planning | Yes | Always |
 | 6 | inception | application-design | Yes/No | {rationale} |
 | 7 | inception | units-generation | Yes/No | {rationale} |
+| 8 | inception | bolt-planning | Yes/No | {rationale} |
 ```
 
 ### 9d. Optional PRFAQ (not for bugfix or brownfield-refactor pathways)
@@ -1243,8 +1258,8 @@ graph TD
 ### 11b. Update state (triple write)
 
 1. Update `inception_stages["units-generation"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
-2. Update checkpoint.json: `current_inception_stage` cleared (or set to null), `status: "awaiting_mode_selection"` after step 12
-3. Update `aidlc-state.md` — all stages complete
+2. Update `current_inception_stage: "bolt-planning"` in checkpoint.json
+3. Update `aidlc-state.md`
 4. Append to `audit.md`
 
 ### 11c. Output REVIEW REQUIRED
@@ -1266,6 +1281,84 @@ graph TD
 - [ ] Units correctly partition the work into manageable implementation chunks
 - [ ] Unit dependencies are accurate and there are no circular dependencies
 - [ ] Story-to-unit mapping covers all user stories
+- [ ] Each unit has single responsibility and clear boundaries
+- [ ] Units can be developed independently by separate teams
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **Bolt Planning**
+- Decomposes each unit's stories into bolts and creates bolt spec files for team review before construction
+
+To proceed: `continue` or `approve`
+To request changes: `revise [specific feedback]`
+---
+```
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 11b: Stage 8 — Bolt Planning
+
+> **Rule file**: Read `~/.claude/olympus/rules/inception/bolt-planning.md` before executing this stage.
+
+**Resume check**: If `inception_stages["bolt-planning"].status` is `completed` or `skipped`, skip to Step 12.
+
+**Skip condition**: If `depth_score <= 4` AND the pathway is NOT `bugfix`, AND there is only one unit, mark `inception_stages["bolt-planning"]` as `skipped` (skip_reason: "Single shallow unit — bolt planning not required") and skip to Step 12.
+
+Mark `inception_stages["bolt-planning"].status = "in_progress"`. Update checkpoint.
+
+### 11b-a. Generate bolt spec files
+
+Read `inception/units/unit-of-work.md`, `inception/units/unit-of-work-story-map.md`, and all available `inception/units/{unit-slug}/unit-brief.md` files for context.
+
+Follow all rules in `~/.claude/olympus/rules/inception/bolt-planning.md` to decompose each unit into bolts and create bolt spec files.
+
+**Bolt spec paths** (MANDATORY — no other structure):
+```
+aidlc-docs/{workflowId}/construction/{UNIT-NNN-slug}/bolts/{BOLT-NNN-slug}/spec.md
+```
+
+Example:
+```
+aidlc-docs/{workflowId}/construction/UNIT-001-foundation/bolts/BOLT-001-data-layer/spec.md
+aidlc-docs/{workflowId}/construction/UNIT-001-foundation/bolts/BOLT-002-api-endpoints/spec.md
+aidlc-docs/{workflowId}/construction/UNIT-002-frontend/bolts/BOLT-003-dashboard/spec.md
+```
+
+**Key rules**:
+- Global sequential bolt numbering across ALL units (BOLT-001, BOLT-002, BOLT-003 — not per-unit)
+- No `bolt-plan.md` summary document — individual `spec.md` files ARE the plan
+- Maximum 8 bolts per unit, 50 bolts total
+- Each spec must include `requires_bolts`, `enables_bolts`, `requires_units`, and `blocked` dependency fields
+
+### 11b-b. Update state (triple write)
+
+1. Update `inception_stages["bolt-planning"]`: `status: "completed"`, `completed_at`, `artifacts_generated` (list all spec.md paths)
+2. Update checkpoint.json: `current_inception_stage` cleared (or set to null), `status: "awaiting_mode_selection"` after step 12
+3. Update `aidlc-state.md` — set Bolt Planning row to `completed`
+4. Append to `audit.md`
+
+### 11b-c. Output REVIEW REQUIRED
+
+```
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Bolt Planning**: Decomposed all units into bolts with dependency tracking
+
+### Artifacts generated
+- `aidlc-docs/{workflowId}/construction/{UNIT-NNN-slug}/bolts/{BOLT-NNN-slug}/spec.md` (one per bolt)
+
+### What needs your review
+- [ ] Bolt decomposition covers all acceptance criteria for each unit
+- [ ] Bolt scopes are achievable (max 8 bolts per unit)
+- [ ] Cross-unit dependencies (`requires_units`) are correct and minimal
+- [ ] No circular dependencies within or across units
+- [ ] Express bolts (depth_target <= 4 or bugfix) are correctly identified
 
 ---
 
@@ -1309,6 +1402,7 @@ Trust Level: {0-3}
 | Workflow Planning | completed | {time} | {time} | {count} |
 | Application Design | completed/skipped | {time} | {time} | {count} |
 | Units Generation | completed/skipped | {time} | {time} | {count} |
+| Bolt Planning | completed/skipped | {time} | {time} | {count} |
 
 ## Total Artifacts Generated
 {N} artifacts in `aidlc-docs/{workflowId}/`
@@ -1376,7 +1470,8 @@ Update `aidlc-docs/{workflowId}/checkpoint.json`:
     "user-stories": { "status": "completed|skipped", ... },
     "workflow-planning": { "status": "completed", ... },
     "application-design": { "status": "completed|skipped", ... },
-    "units-generation": { "status": "completed|skipped", ... }
+    "units-generation": { "status": "completed|skipped", ... },
+    "bolt-planning": { "status": "completed|skipped", ... }
   }
 }
 ```

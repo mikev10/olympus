@@ -71,8 +71,7 @@ Then run the full build, run all tests, and create a single atomic commit with t
 ## Key Patterns
 
 ### Bolt Lifecycle
-- **Folder structure**: `{workflowId}/construction/bolts/BOLT-NNN-slug/spec.md` (spec) and `review.md` (review artifact)
-- **Bolt plan summary**: `{workflowId}/construction/plans/{unitId}-bolt-plan.md`
+- **Folder structure**: `{workflowId}/construction/{UNIT-NNN-slug}/bolts/BOLT-NNN-slug/spec.md` (spec) and `review.md` (review artifact)
 - **Naming convention**: `BOLT-NNN-slug` — global sequential numbering across ALL units (not per-unit)
 - **Lifecycle states**: `planned` → `in_progress` → `built` → `in_review` → `done` | `failed`
 - **Execution stages** (per bolt): `elaboration` → `code_generation` → `build_and_test` → `review`

@@ -44,6 +44,10 @@ function makeBoltSpec(overrides: Partial<BoltSpec> = {}): BoltSpec {
     acceptance_criteria: ['It works'],
     target_files: ['src/foo.ts'],
     dependencies: [],
+    requires_bolts: [],
+    enables_bolts: [],
+    requires_units: [],
+    blocked: false,
     depth_target: 3,
     express_mode: false,
     estimated_effort_hours: 2,
@@ -67,6 +71,10 @@ function makeBoltProgress(boltId = 'BOLT-001-test'): ConstructionBoltProgress {
     review_score: null,
     acknowledged_by: null,
     acknowledged_at: null,
+    requires_bolts: [],
+    enables_bolts: [],
+    requires_units: [],
+    blocked: false,
   };
 }
 
@@ -238,5 +246,91 @@ describe('BoltExecutor', () => {
     expect(handlers.onBuildAndTest).toHaveBeenCalledWith(
       bolt, '/project', ['src/a.ts', 'src/b.ts'],
     );
+  });
+
+  describe('dependency enforcement', () => {
+    it('returns early without executing stages when bolt is blocked', async () => {
+      const bolt = makeBoltSpec();
+      const checkpoint = makeCheckpoint();
+      checkpoint.construction_bolts!['BOLT-001-test'].blocked = true;
+      const originalStatus = checkpoint.construction_bolts!['BOLT-001-test'].status;
+      const handlers = makeSuccessHandlers();
+
+      const result = await BoltExecutor.execute(bolt, checkpoint, '/project', 'test-wf', handlers);
+
+      expect(result.status).toBe(originalStatus);
+      expect(handlers.onElaboration).not.toHaveBeenCalled();
+      expect(handlers.onCodeGeneration).not.toHaveBeenCalled();
+      expect(handlers.onBuildAndTest).not.toHaveBeenCalled();
+      expect(handlers.onReview).not.toHaveBeenCalled();
+      expect(checkpoint.active_bolt_id).toBeNull();
+    });
+
+    it('unblocks dependent bolt when completing', async () => {
+      mockedSaveCheckpoint.mockResolvedValue(undefined);
+      const bolt001 = makeBoltSpec({ id: 'BOLT-001-main', requires_bolts: [], enables_bolts: ['BOLT-002-dep'] });
+      const checkpoint: WorkflowCheckpointV3 = {
+        schema_version: '3.0.0',
+        workflow_id: 'test-wf',
+        feature_name: 'test',
+        current_phase: 'construction',
+        current_stage: 'unit',
+        status: 'in_progress',
+        phases: {} as any,
+        manifest_path: '',
+        trust_state_path: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        construction_bolts: {
+          'BOLT-001-main': {
+            bolt_id: 'BOLT-001-main',
+            parent_unit_id: 'UNIT-001-test',
+            status: 'planned',
+            stages: {
+              elaboration: makeStageProgress(),
+              code_generation: makeStageProgress(),
+              build_and_test: makeStageProgress(),
+              review: makeStageProgress(),
+            },
+            failure_count: 0,
+            last_error: null,
+            review_score: null,
+            acknowledged_by: null,
+            acknowledged_at: null,
+            requires_bolts: [],
+            enables_bolts: ['BOLT-002-dep'],
+            requires_units: [],
+            blocked: false,
+          },
+          'BOLT-002-dep': {
+            bolt_id: 'BOLT-002-dep',
+            parent_unit_id: 'UNIT-001-test',
+            status: 'planned',
+            stages: {
+              elaboration: makeStageProgress(),
+              code_generation: makeStageProgress(),
+              build_and_test: makeStageProgress(),
+              review: makeStageProgress(),
+            },
+            failure_count: 0,
+            last_error: null,
+            review_score: null,
+            acknowledged_by: null,
+            acknowledged_at: null,
+            requires_bolts: ['BOLT-001-main'],
+            enables_bolts: [],
+            requires_units: [],
+            blocked: true,
+          },
+        },
+        active_bolt_id: null,
+        active_bolt_stage: null,
+      };
+      const handlers = makeSuccessHandlers();
+
+      await BoltExecutor.execute(bolt001, checkpoint, '/project', 'test-wf', handlers);
+
+      expect(checkpoint.construction_bolts!['BOLT-002-dep'].blocked).toBe(false);
+    });
   });
 });

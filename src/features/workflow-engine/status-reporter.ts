@@ -346,6 +346,7 @@ const INCEPTION_STAGE_ORDER: InceptionStage[] = [
   'workflow-planning',
   'application-design',
   'units-generation',
+  'bolt-planning',
 ];
 
 const INCEPTION_STAGE_LABELS: Record<InceptionStage, string> = {
@@ -356,6 +357,7 @@ const INCEPTION_STAGE_LABELS: Record<InceptionStage, string> = {
   'workflow-planning': 'Workflow Planning',
   'application-design': 'Application Design',
   'units-generation': 'Units Generation',
+  'bolt-planning': 'Bolt Planning',
 };
 
 export function buildInceptionSubStageProgress(

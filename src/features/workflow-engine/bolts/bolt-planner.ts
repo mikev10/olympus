@@ -107,6 +107,7 @@ export async function writeBoltArtifacts(
         'aidlc-docs',
         workflowId,
         'construction',
+        bolt.parent_unit_id,
         'bolts',
         bolt.id
       );
@@ -127,6 +128,10 @@ export async function writeBoltArtifacts(
         `requirements: ${reqYaml}`,
         `stories: ${storiesYaml}`,
         `docs_impact: ${docsImpactYaml}`,
+        `requires_bolts: ${JSON.stringify(bolt.requires_bolts ?? [])}`,
+        `enables_bolts: ${JSON.stringify(bolt.enables_bolts ?? [])}`,
+        `requires_units: ${JSON.stringify(bolt.requires_units ?? [])}`,
+        `blocked: ${bolt.blocked ?? false}`,
         '---',
       ].join('\n');
 
@@ -169,6 +174,24 @@ export async function writeBoltArtifacts(
         '',
         depsList,
         '',
+        '## Requires Bolts',
+        '',
+        (bolt.requires_bolts ?? []).length > 0
+          ? (bolt.requires_bolts ?? []).map((b: string) => `- ${b}`).join('\n')
+          : 'None',
+        '',
+        '## Enables Bolts',
+        '',
+        (bolt.enables_bolts ?? []).length > 0
+          ? (bolt.enables_bolts ?? []).map((b: string) => `- ${b}`).join('\n')
+          : 'None',
+        '',
+        '## Requires Units',
+        '',
+        (bolt.requires_units ?? []).length > 0
+          ? (bolt.requires_units ?? []).map((u: string) => `- ${u}`).join('\n')
+          : 'None',
+        '',
         '## Traceability',
         '',
         `- **Requirements**: ${reqList}`,
@@ -177,44 +200,6 @@ export async function writeBoltArtifacts(
       ].join('\n');
 
       await fs.writeFile(path.join(boltDir, 'spec.md'), specContent, 'utf-8');
-    }
-
-    if (bolts.length > 0) {
-      const parentUnitId = bolts[0].parent_unit_id;
-      const planDir = path.join(
-        projectPath,
-        'aidlc-docs',
-        workflowId,
-        'construction',
-        'plans'
-      );
-      await fs.ensureDir(planDir);
-
-      const summaryLines = [
-        `# Bolt Plan: ${parentUnitId}`,
-        '',
-        `Generated: ${new Date().toISOString()}`,
-        '',
-        '## Bolts',
-        '',
-      ];
-      for (const bolt of bolts) {
-        summaryLines.push(
-          `### ${bolt.id}: ${bolt.title}`,
-          '',
-          `- **Sequence**: ${bolt.sequence}`,
-          `- **Depth**: ${bolt.depth_target}`,
-          `- **Express**: ${bolt.express_mode}`,
-          `- **Effort**: ${bolt.estimated_effort_hours}h`,
-          ''
-        );
-      }
-
-      await fs.writeFile(
-        path.join(planDir, `${parentUnitId}-bolt-plan.md`),
-        summaryLines.join('\n'),
-        'utf-8'
-      );
     }
   } catch (error) {
     throw new BoltPlannerError(
@@ -259,6 +244,10 @@ export function registerBoltsInCheckpoint(
       review_score: null,
       acknowledged_by: null,
       acknowledged_at: null,
+      requires_bolts: bolt.requires_bolts ?? [],
+      enables_bolts: bolt.enables_bolts ?? [],
+      requires_units: bolt.requires_units ?? [],
+      blocked: bolt.blocked ?? false,
     };
     checkpoint.construction_bolts[bolt.id] = progress;
   }
@@ -306,6 +295,9 @@ export function buildDecompositionPrompt(
     '- `acceptance_criteria` (string[]): Verifiable outcomes (min 1)',
     '- `target_files` (string[]): Relative file paths to modify/create',
     '- `dependencies` (string[]): IDs of preceding bolts (or empty array)',
+    '- `requires_bolts` (string[]): IDs of bolts that must complete before this bolt can start',
+    '- `enables_bolts` (string[]): IDs of bolts that this bolt unblocks upon completion',
+    '- `requires_units` (string[]): IDs of units from other teams that must be complete before this bolt starts (empty array if none)',
     '- `estimated_effort_hours` (number): Estimated duration in hours',
     '- `requirements` (string[]): requirement IDs from requirements.md that this bolt addresses (e.g. ["FR-1", "FR-3"])',
     '- `stories` (string[]): story IDs from stories.md that this bolt addresses (e.g. ["S-001"])',
@@ -325,6 +317,9 @@ interface RawBoltFromAgent {
   requirements?: string[];
   stories?: string[];
   docs_impact?: string[];
+  requires_bolts?: string[];
+  enables_bolts?: string[];
+  requires_units?: string[];
 }
 
 export function parseAgentResponse(
@@ -382,6 +377,10 @@ export function parseAgentResponse(
       requirements: raw.requirements ?? [],
       stories: raw.stories ?? [],
       docs_impact: raw.docs_impact ?? ['none'],
+      requires_bolts: raw.requires_bolts ?? [],
+      enables_bolts: raw.enables_bolts ?? [],
+      requires_units: raw.requires_units ?? [],
+      blocked: false,
     };
   });
 
@@ -438,6 +437,8 @@ export async function finalizeBoltPlan(
       `Bolt coverage is ${coverage.coverage_percent}% (below 80% threshold). Uncovered: ${coverage.uncovered_criteria.join(', ')}`
     );
   }
+
+  BoltSpecValidator.validateNoCycles(bolts);
 
   await writeBoltArtifacts(bolts, projectPath, workflowId);
   registerBoltsInCheckpoint(bolts, checkpoint);

@@ -503,7 +503,7 @@ describe('isStageIncluded', () => {
 });
 
 describe('inception sub-stages', () => {
-  it('inception phase contains all 7 sub-stages for greenfield', async () => {
+  it('inception phase contains all 8 sub-stages for greenfield', async () => {
     const plan = await buildPlan('greenfield');
     const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
     const stageNames = inceptionStages.map((s) => s.stage);
@@ -515,6 +515,7 @@ describe('inception sub-stages', () => {
       'workflow-planning',
       'application-design',
       'units-generation',
+      'bolt-planning',
     ]);
   });
 
@@ -524,10 +525,10 @@ describe('inception sub-stages', () => {
     expect(inceptionStages[0].stage).toBe('workspace-detection');
   });
 
-  it('units-generation is the last inception stage', async () => {
+  it('bolt-planning is the last inception stage', async () => {
     const plan = await buildPlan('greenfield');
     const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
-    expect(inceptionStages[inceptionStages.length - 1].stage).toBe('units-generation');
+    expect(inceptionStages[inceptionStages.length - 1].stage).toBe('bolt-planning');
   });
 
   it('getStageRationale: workspace-detection has correct rationale', async () => {
@@ -616,7 +617,7 @@ describe('inception sub-stages', () => {
   it('all inception stages included for standard brownfield-enhancement', async () => {
     const plan = await buildPlan('brownfield-enhancement', { recommended_depth: 'standard' });
     const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
-    expect(inceptionStages).toHaveLength(7);
+    expect(inceptionStages).toHaveLength(8);
     for (const stage of inceptionStages) {
       expect(stage.included).toBe(true);
     }

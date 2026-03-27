@@ -64,6 +64,10 @@ function makeBoltSpec(overrides: Partial<BoltSpec> = {}): BoltSpec {
     acceptance_criteria: ['It works'],
     target_files: ['src/foo.ts'],
     dependencies: [],
+    requires_bolts: [],
+    enables_bolts: [],
+    requires_units: [],
+    blocked: false,
     depth_target: 3,
     express_mode: false,
     estimated_effort_hours: 2,
@@ -91,6 +95,10 @@ function makeCheckpointWithBolt(
     review_score: null,
     acknowledged_by: null,
     acknowledged_at: null,
+    requires_bolts: [],
+    enables_bolts: [],
+    requires_units: [],
+    blocked: false,
   };
 
   return {
@@ -312,7 +320,7 @@ describe('artifacts and checkpoint', () => {
 
     const decision = await reviewer.review(bolt, ['src/foo.ts'], tmpDir, 'test-wf', checkpoint, callback);
 
-    const expectedRelative = join('aidlc-docs', 'test-wf', 'construction', 'bolts', 'BOLT-001', 'review.md');
+    const expectedRelative = join('aidlc-docs', 'test-wf', 'construction', 'UNIT-001', 'bolts', 'BOLT-001', 'review.md');
     expect(decision.artifact_path).toBe(expectedRelative);
 
     const absolutePath = join(tmpDir, expectedRelative);

@@ -55,6 +55,16 @@ function applyMigrations(checkpoint: WorkflowCheckpointV3): void {
   if (checkpoint.active_bolt_id === undefined) checkpoint.active_bolt_id = null;
   if (checkpoint.active_bolt_stage === undefined) checkpoint.active_bolt_stage = null;
 
+  // Bolt dependency field migration (v3.1.0)
+  if (checkpoint.construction_bolts) {
+    for (const bolt of Object.values(checkpoint.construction_bolts)) {
+      if ((bolt as any).requires_bolts === undefined) (bolt as any).requires_bolts = [];
+      if ((bolt as any).enables_bolts === undefined) (bolt as any).enables_bolts = [];
+      if ((bolt as any).requires_units === undefined) (bolt as any).requires_units = [];
+      if ((bolt as any).blocked === undefined) (bolt as any).blocked = false;
+    }
+  }
+
   if (!checkpoint.construction_units || Array.isArray(checkpoint.construction_units)) return;
 
   for (const unit of Object.values(checkpoint.construction_units) as ConstructionUnitProgress[]) {
@@ -163,7 +173,7 @@ export async function saveCheckpoint(
   try {
     // Update timestamp and schema version
     checkpoint.updated_at = new Date().toISOString();
-    checkpoint.schema_version = '3.0.0';
+    checkpoint.schema_version = '3.1.0';
 
     // Ensure directory exists (cached by fs-extra)
     await fs.ensureDir(workflowDir);
@@ -279,7 +289,7 @@ export async function loadCheckpoint(
     }
 
     // Validate it's v3
-    if (checkpoint.schema_version !== '3.0.0') {
+    if (checkpoint.schema_version !== '3.0.0' && checkpoint.schema_version !== '3.1.0') {
       console.warn(`[Checkpoint] Unknown checkpoint schema version ${checkpoint.schema_version} for workflow ${workflowId}`);
       console.warn(`[Checkpoint] Expected 3.0.0`);
       return null;
@@ -494,7 +504,7 @@ export async function findActiveWorkflow(projectPath: string): Promise<{ workflo
       try {
         const content = await fs.readFile(cpPath, 'utf-8');
         const data = JSON.parse(content);
-        if (data.schema_version === '3.0.0' &&
+        if ((data.schema_version === '3.0.0' || data.schema_version === '3.1.0') &&
             data.status !== 'complete' &&
             data.status !== 'archived' &&
             data.status !== 'deferred') {

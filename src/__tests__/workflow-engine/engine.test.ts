@@ -827,6 +827,7 @@ describe('WorkflowEngine', () => {
         'workflow-planning': { stage: 'workflow-planning', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
         'application-design': { stage: 'application-design', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
         'units-generation': { stage: 'units-generation', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'bolt-planning': { stage: 'bolt-planning', status: 'completed', started_at: null, completed_at: new Date().toISOString(), skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
       };
       await saveCheckpoint(tmpDir, cp);
 
@@ -873,6 +874,7 @@ describe('WorkflowEngine', () => {
         'workflow-planning': { stage: 'workflow-planning', status: 'in_progress', started_at: new Date().toISOString(), completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
         'application-design': { stage: 'application-design', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
         'units-generation': { stage: 'units-generation', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
+        'bolt-planning': { stage: 'bolt-planning', status: 'not_started', started_at: null, completed_at: null, skip_reason: null, artifacts_generated: [], questions_file: null, answers_received: false },
       };
       await saveCheckpoint(tmpDir, cp);
 

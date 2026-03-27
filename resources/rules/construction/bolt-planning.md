@@ -12,7 +12,9 @@ Bolts are the smallest execution loop in the AIDLC construction pipeline. Each b
 
 Each bolt is described by a spec file written during this stage.
 
-**Path**: `{workflowId}/construction/bolts/BOLT-NNN-slug/spec.md`
+**Path**: `{workflowId}/construction/{parent_unit_id}/bolts/BOLT-NNN-slug/spec.md`
+
+Example: `{workflowId}/construction/UNIT-001-foundation/bolts/BOLT-001-data-model/spec.md`
 
 ### Frontmatter Fields
 
@@ -28,6 +30,10 @@ estimated_effort_hours: 4
 requirements: ["FR-1", "FR-3"]
 stories: ["S-001"]
 docs_impact: ["none"]
+requires_bolts: []
+enables_bolts: []
+requires_units: []
+blocked: false
 ---
 ```
 
@@ -157,16 +163,6 @@ A bolt is eligible for express mode (skips the elaboration stage) if either cond
 - Parent unit's pathway is `bugfix`
 
 Express bolts go directly from `planned` to code generation. The `express_mode: true` flag must be set in the bolt spec frontmatter.
-
----
-
-## Bolt Plan Summary Artifact
-
-After decomposing all bolts for a unit, the BoltPlanner writes a summary artifact:
-
-**Path**: `{workflowId}/construction/plans/{unitId}-bolt-plan.md`
-
-This file lists all bolts for the unit, their sequence, estimated effort, express mode status, and inter-bolt dependencies. It serves as the human-readable plan approved before execution begins.
 
 ---
 
