@@ -40,7 +40,6 @@ function stageKeyToDisplayName(key: string): string {
     'requirements-analysis': 'Requirements Analysis',
     'user-stories': 'User Stories',
     'workflow-planning': 'Workflow Planning',
-    'application-design': 'Application Design',
     'units-generation': 'Units Generation',
     'code-generation': 'Code Generation',
     'build-and-test': 'Build and Test',
