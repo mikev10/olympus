@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.9] - 2026-03-27
+
+### Changed
+
+- **Per-unit story storage** — User stories now stored in per-unit directories under `units/` instead of a flat `user-stories/` folder
+
+### Fixed
+
+- **Core workflow inception table** — Updated `core-workflow.md` to reflect simplified 7-stage inception pipeline (removed application-design, reordered stories after units)
+- **Deprecated application-design story path** — Fixed `application-design.md` to reference per-unit story pattern instead of removed flat path
+
 ## [4.5.8] - 2026-03-27
 
 ### Changed
