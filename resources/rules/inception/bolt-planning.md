@@ -517,7 +517,7 @@ by this bolt alone. Include internal story ordering if relevant.}
 
 | Steps | Owner | Rationale |
 |-------|-------|-----------|
-| 1-3 (Load inputs, assess complexity, group stories) | **Orchestrator** | Requires reading multiple artifacts and making decomposition decisions |
+| 1-3 (Load inputs, assess complexity, decompose into bolts) | **Orchestrator** | Requires reading multiple artifacts and making decomposition decisions |
 | 4-7 (Express mode, dependency analysis, visualization, spec creation) | **Delegated to `olympian`** | Writes spec.md files to disk, performs dependency analysis |
 | 8-11 (Frontmatter validation, coverage, unit independence, checkpoint) | **Orchestrator** | Final validation gates and checkpoint registration |
 

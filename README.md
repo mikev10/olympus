@@ -162,6 +162,7 @@ Olympus includes a structured development workflow inspired by [AWS AI-DLC](http
 - Workflow Planning (always) — determines which construction stages to execute
 - Application Design (conditional) — component and service design
 - Units Generation (conditional) — decomposes work into implementable units
+- Bolt Planning (conditional) — decomposes units into executable bolts with dependency tracking
 
 **Construction** — determine how to build it:
 - Per-unit loop (for each unit of work):

@@ -35,7 +35,7 @@ INCEPTION (8 stages) → CONSTRUCTION (per-unit design + bolts) → OPERATIONS
 
 ### Arguments
 - No args: Full test (all 6 stages)
-- `inception`: Inception phase only (7 inception stages)
+- `inception`: Inception phase only (8 inception stages)
 - `construction`: Construction phase only (per-unit design + bolt execution)
 - `cleanup`: Delete leftover test artifacts
 

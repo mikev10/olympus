@@ -86,6 +86,7 @@ function createMockCheckpoint(overrides?: Partial<WorkflowCheckpointV3>): Workfl
       'workflow-planning': makeInceptionStageState('workflow-planning'),
       'application-design': makeInceptionStageState('application-design'),
       'units-generation': makeInceptionStageState('units-generation'),
+      'bolt-planning': makeInceptionStageState('bolt-planning'),
     },
     ...overrides,
   };
