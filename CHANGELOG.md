@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.12] - 2026-03-27
+
+### Fixed
+
+- **Distribution audit warnings (Tier 2)** — Persist inception/operations phase completion to checkpoint, write depth_score to checkpoint, replace `as any` casts with proper types in CLI, add logging to silent empty catches in code-generation-executor, fix stub TODO text in inception orchestrator
+
 ## [4.5.11] - 2026-03-27
 
 ### Fixed
