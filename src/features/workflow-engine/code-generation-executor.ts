@@ -216,7 +216,7 @@ export async function dispatchCodeGeneration(
     if (touchedComponents.length > 0) {
       architectureContext = await getArchitectureContext(projectPath, touchedComponents);
     }
-  } catch {}
+  } catch (err) { console.warn('[CodeGenExecutor] Architecture context loading failed:', err); }
 
   let pathwayRulesContext = '';
   try {
@@ -231,7 +231,7 @@ export async function dispatchCodeGeneration(
         pathwayRulesContext = `\n## Pathway Rules (${checkpoint.pathway_type})\n${rulesText}\n\n### Quality Checklist\n${checklistText}`;
       }
     }
-  } catch {}
+  } catch (err) { console.warn('[CodeGenExecutor] Pathway rules loading failed:', err); }
 
   let designSystemRule = '';
   try {
@@ -241,7 +241,7 @@ export async function dispatchCodeGeneration(
       const systemNames = archModel.designSystem.systems.map(s => s.name).join(', ');
       designSystemRule = `\n## Design System Enforcement\nThis project uses: ${systemNames}. You MUST:\n- Use existing components from the detected design system before creating new ones\n- If you must create a new component, include a justification comment explaining why no existing component suffices\n- Do NOT duplicate functionality already provided by ${systemNames}`;
     }
-  } catch {}
+  } catch (err) { console.warn('[CodeGenExecutor] Design system detection failed:', err); }
 
   const combinedContext = [architectureContext, pathwayRulesContext, designSystemRule].filter(Boolean).join('\n\n');
 

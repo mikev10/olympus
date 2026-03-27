@@ -60,7 +60,7 @@ import { getSessionBaseline, getWarningThreshold } from '../learning/baselines.j
 import { calculateCost, DEFAULT_PRICING } from '../learning/pricing.js';
 import { getTokenUsage, hasEfficiencyMetrics, safeTokenTotal } from '../learning/utils.js';
 import { getSessionStatePath } from '../learning/session-state.js';
-import type { UserPreferences, AgentPerformance, SessionSummary, TaskPattern } from '../learning/types.js';
+import type { UserPreferences, AgentPerformance, SessionSummary, TaskPattern, DiscoveryCategory } from '../learning/types.js';
 import { randomUUID } from 'crypto';
 import { rmSync, appendFileSync, readdirSync, statSync } from 'fs';
 import {
@@ -1535,13 +1535,13 @@ program
 
     try {
       const discovery = recordDiscovery({
-        category: category as any,
+        category: category as DiscoveryCategory,
         summary: summary.substring(0, 100), // Limit to 100 chars
         details: details,
         agent_name: options.agent,
         project_path: cwd,
         confidence: confidence,
-        scope: options.scope as any,
+        scope: options.scope as 'global' | 'project',
         session_id: process.env.CLAUDE_SESSION_ID || 'cli',
       });
 
@@ -1682,7 +1682,7 @@ program
     }
 
     const trustState = loadTrustState(directory);
-    const report = generateWorkflowReport(manifest, trustState, checkpoint as any);
+    const report = generateWorkflowReport(manifest, trustState, checkpoint);
     console.log(report.fullReport);
   });
 

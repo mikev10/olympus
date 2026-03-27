@@ -285,6 +285,7 @@ export class WorkflowEngine {
       if (updatedCheckpoint) {
         (updatedCheckpoint as WorkflowCheckpointV3).workflow_routing_path = planPath;
         (updatedCheckpoint as WorkflowCheckpointV3).pathway_type = pathwayType;
+        (updatedCheckpoint as WorkflowCheckpointV3).depth_score = depthAssessment.total_score;
         const allPhases: WorkflowPhase[] = ['discovery', 'inception', 'construction', 'operations'];
         (updatedCheckpoint as WorkflowCheckpointV3).skipped_phases = allPhases.filter(p => !isPhaseIncluded(plan, p));
         await saveCheckpoint(this.projectPath, updatedCheckpoint);
@@ -673,6 +674,19 @@ export class WorkflowEngine {
           }
         }
 
+        if (await orchestrator.isComplete(this.projectPath, this.workflowId)) {
+          try {
+            const inceptionDoneCheckpoint = await loadCheckpoint(this.projectPath, this.workflowId);
+            if (inceptionDoneCheckpoint) {
+              inceptionDoneCheckpoint.phases.inception.status = 'complete';
+              inceptionDoneCheckpoint.phases.inception.completed_at = new Date().toISOString();
+              await saveCheckpoint(this.projectPath, inceptionDoneCheckpoint);
+            }
+          } catch (error) {
+            console.error('[WorkflowEngine] Failed to persist inception phase completion:', error);
+          }
+        }
+
         // CCR-3: Capture inception phase completion
         try {
           const phaseEvent: WorkflowEvent = {
@@ -813,9 +827,10 @@ export class WorkflowEngine {
           }
         }
 
-        // CCR-1: Save checkpoint after Operations artifact generation
         if (opsCheckpoint) {
           opsCheckpoint.current_phase = 'operations' as WorkflowPhase;
+          opsCheckpoint.phases.operations.status = 'complete';
+          opsCheckpoint.phases.operations.completed_at = new Date().toISOString();
           opsCheckpoint.updated_at = new Date().toISOString();
           await saveCheckpoint(this.projectPath, opsCheckpoint);
         }

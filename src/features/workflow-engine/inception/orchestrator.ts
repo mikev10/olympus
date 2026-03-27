@@ -374,7 +374,7 @@ export class InceptionOrchestrator {
         requires_approval: true,
         artifacts_generated: [],
         review_summary: `Stage '${stage}' has no handler registered yet.`,
-        whats_next: 'This stage will be implemented in a future TODO.',
+        whats_next: 'This stage has no registered handler — skipping to next stage.',
       };
     }
 
@@ -430,7 +430,7 @@ export class InceptionOrchestrator {
         requires_approval: true,
         artifacts_generated: [],
         review_summary: `Stage '${stage}' has no handler registered yet.`,
-        whats_next: 'This stage will be implemented in a future TODO.',
+        whats_next: 'This stage has no registered handler — skipping to next stage.',
       };
     }
 
