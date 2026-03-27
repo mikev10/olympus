@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.7] - 2026-03-27
+
+### Added
+
+- **Canonical unit templates** — Units generation rule now includes standardized unit templates with required fields and structure
+- **Canonical bolt spec template** — Bolt specs include runtime state fields and a 10-section body format
+- **Bolt-planning inception stage** — New inception stage that nests bolts under units with cross-unit dependency enforcement
+
+### Fixed
+
+- **Bolt-planning stage lists** — Added bolt-planning to all remaining stage lists for consistent workflow routing
+- **Units decomposition framing** — Clarified that units decompose architecture decisions, not group user stories
+
 ## [4.5.6] - 2026-03-26
 
 ### Added
