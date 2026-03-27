@@ -41,7 +41,7 @@ Application Design artifacts are the foundation for all construction work. Desig
 ## Step-by-Step Execution
 
 ### 1. Analyze Context
-- Read `aidlc-docs/inception/requirements/requirements.md` and `aidlc-docs/inception/user-stories/stories.md`
+- Read `aidlc-docs/inception/requirements/requirements.md` and per-unit stories at `aidlc-docs/inception/units/{UNIT-NNN-slug}/stories/` (or fallback `aidlc-docs/inception/user-stories/stories.md`)
 - Identify key business capabilities and functional areas
 - Determine design scope and complexity
 
