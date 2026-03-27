@@ -43,6 +43,8 @@ At workflow start, load and display `~/.claude/olympus/rules/common/welcome-mess
 
 # INCEPTION PHASE — Determine WHAT to build and WHY
 
+Core decomposition flow: **Intent -> Units -> Stories -> Bolts -> Done**
+
 Each stage: load its rule file BEFORE executing, log all interactions in audit.md, wait for explicit user approval before proceeding (do not auto-advance).
 
 | Stage | Condition | Rule File |
@@ -50,10 +52,10 @@ Each stage: load its rule file BEFORE executing, log all interactions in audit.m
 | Workspace Detection | ALWAYS | `~/.claude/olympus/rules/inception/workspace-detection.md` |
 | Reverse Engineering | Brownfield only (no prior artifacts) | `~/.claude/olympus/rules/inception/reverse-engineering.md` |
 | Requirements Analysis | ALWAYS (adaptive depth) | `~/.claude/olympus/rules/inception/requirements-analysis.md` |
-| User Stories | Conditional (new user-facing features, multiple personas, complex requirements) | `~/.claude/olympus/rules/inception/user-stories.md` |
 | Workflow Planning | ALWAYS | `~/.claude/olympus/rules/inception/workflow-planning.md` |
-| Application Design | Conditional (new components/services needed) | `~/.claude/olympus/rules/inception/application-design.md` |
-| Units Generation | Conditional (multiple units of work needed) | `~/.claude/olympus/rules/inception/units-generation.md` |
+| Units Generation | Conditional (decomposes intent into independent domain units; includes domain analysis — subsumes former Application Design stage) | `~/.claude/olympus/rules/inception/units-generation.md` |
+| User Stories | Conditional (creates stories per-unit from each unit's assigned requirements; falls back to requirements-based when units skipped) | `~/.claude/olympus/rules/inception/user-stories.md` |
+| Bolt Planning | Conditional (decomposes each unit's stories into executable bolts with dependency tracking) | `~/.claude/olympus/rules/inception/bolt-planning.md` |
 
 ---
 
@@ -125,17 +127,26 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 │   │   ├── plans/
 │   │   ├── reverse-engineering/    # Brownfield only
 │   │   ├── requirements/
-│   │   ├── user-stories/
-│   │   ├── application-design/
-│   │   └── units/
+│   │   ├── units/
+│   │   │   └── {UNIT-NNN-slug}/
+│   │   │       ├── unit-brief.md
+│   │   │       └── stories/        # Per-unit stories (created during User Stories stage)
+│   │   │           ├── S-001-{slug}.md
+│   │   │           └── S-002-{slug}.md
+│   │   └── user-stories/
+│   │       └── personas.md         # Project-wide personas (not per-unit)
 │   ├── construction/
-│   │   ├── plans/
-│   │   ├── {unit-name}/
+│   │   ├── {UNIT-NNN-slug}/
 │   │   │   ├── functional-design/
 │   │   │   ├── nfr-requirements/
 │   │   │   ├── nfr-design/
 │   │   │   ├── infrastructure-design/
-│   │   │   └── code/               # Markdown summaries only
+│   │   │   ├── code/               # Markdown summaries only
+│   │   │   └── bolts/              # Per-unit bolt specs (created during Bolt Planning)
+│   │   │       └── BOLT-NNN-{slug}/
+│   │   │           ├── spec.md
+│   │   │           └── review.md
+│   │   ├── design/
 │   │   ├── build-and-test/
 │   │   └── documentation/
 │   ├── operations/                 # Placeholder
@@ -145,14 +156,25 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 
 Application code: workspace root (NEVER in aidlc-docs/). Documentation: aidlc-docs/ only.
 
+## Canonical Templates
+
+Agents MUST read and follow these template files when creating artifacts:
+
+| Template | Path | Used By |
+|----------|------|---------|
+| Units overview | `resources/templates/inception/units-template.md` | Units Generation |
+| Unit brief | `resources/templates/inception/unit-brief-template.md` | Units Generation |
+| Bolt spec | `resources/templates/construction/bolt-spec-template.md` | Bolt Planning |
+
 ## Olympus Agent Delegation
 
 | Stage | Agent | Purpose |
 |-------|-------|---------|
 | Discovery/Reverse Engineering | `explore-medium` | Codebase analysis |
 | Intent/Requirements | `prometheus` | Strategic planning with interview |
-| User Stories | `oracle-medium` | Story and persona generation |
-| Application Design | `oracle` | Architecture decisions |
+| Units Generation | `olympian` + `momus` (optional) | Domain decomposition with optional review |
+| User Stories | `oracle-medium` | Per-unit story and persona generation |
+| Bolt Planning | `olympian` + `momus` (optional) | Bolt decomposition with optional review |
 | Functional/NFR/Infrastructure Design | `oracle-medium` | Design decisions |
 | Code Generation (backend) | `olympian` or `olympian-high` | Implementation |
 | Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI implementation |
