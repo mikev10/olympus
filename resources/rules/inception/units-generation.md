@@ -6,9 +6,9 @@ This stage decomposes the system into manageable units of work through two integ
 - **Part 1 - Planning**: Perform domain analysis, apply decomposition criteria, create decomposition plan with questions, collect answers, analyze for ambiguities, get approval
 - **Part 2 - Generation**: Execute approved plan to generate unit artifacts following canonical templates
 
-**Goal**: Produce a complete, traceable decomposition of all functional requirements into independent units of work, each with clear boundaries, ownership of specific requirements and stories, and sufficient detail for Bolt Planning to begin without re-reading the full requirements.
+**Goal**: Decompose the intent into independently deployable units of work based on domain boundaries and architectural concerns. Each unit should represent a cohesive bounded context with clear interfaces. Requirements and stories are then *assigned* to units for traceability — but units are defined by domain boundaries, not by story grouping. Story grouping into execution sessions is Bolt Planning's job.
 
-**DEFINITION**: A unit of work is a logical grouping of stories for development purposes. For microservices, each unit becomes an independently deployable service. For monoliths, the single unit represents the entire application with logical modules.
+**DEFINITION**: A unit of work is an independently deployable domain boundary derived from the intent. For microservices, each unit becomes a separate service. For monoliths, each unit is a logically independent module with explicit interfaces. Units are NOT defined as "groupings of stories" — that is what bolts do. Units decompose the *system architecture*; bolts decompose the *execution plan*.
 
 **Terminology**: Use "Service" for independently deployable components, "Module" for logical groupings within a service, "Unit of Work" for planning context.
 
@@ -161,7 +161,7 @@ This draft mapping will be refined based on Q&A answers but serves as the baseli
 - Reference the domain analysis findings when framing questions
 
 **Example question categories** (adapt as needed):
-- **Story Grouping** - Only if multiple stories exist and grouping strategy is unclear
+- **Domain Boundaries** - Only if bounded context boundaries are ambiguous or overlapping
 - **Dependencies** - Only if multiple units likely and integration approach is ambiguous
 - **Team Alignment** - Only if team structure or ownership is unclear
 - **Technical Considerations** - Only if scalability/deployment requirements differ across units
@@ -187,7 +187,7 @@ This draft mapping will be refined based on Q&A answers but serves as the baseli
 - [ ] **Greenfield only**: Document code organization strategy in `unit-of-work.md` (see code-generation.md for structure patterns)
 - [ ] Validate unit boundaries and dependencies
 - [ ] Ensure all requirements are assigned to units (100% coverage)
-- [ ] Ensure all stories are assigned to units
+- [ ] Assign existing stories to units for traceability (stories do not drive decomposition — domain boundaries do)
 
 ## Step 8: Request User Input
 
