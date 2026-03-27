@@ -90,7 +90,7 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 | workflow-planning | inception/intent.md, inception/requirements/requirements.md, inception/requirements/requirements-analysis-questions.md |
 | units-generation | All above + inception/plans/workflow-routing.md |
 | user-stories | All above + inception/units/unit-of-work.md, inception/units/{UNIT-NNN-slug}/unit-brief.md (per-unit briefs) |
-| bolt-planning | All above + inception/user-stories/stories.md, inception/user-stories/personas.md, inception/units/unit-of-work-story-map.md, construction/{UNIT-NNN}/bolts/ spec.md files (if any exist) |
+| bolt-planning | All above + inception/units/{UNIT-NNN-slug}/stories/ (per-unit story files) or inception/user-stories/stories.md (fallback), inception/user-stories/personas.md, inception/units/unit-of-work-story-map.md, construction/{UNIT-NNN}/bolts/ spec.md files (if any exist) |
 
 ### Construction Phase Artifacts
 

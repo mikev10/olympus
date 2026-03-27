@@ -19,13 +19,15 @@ User Stories focus on:
 
 When units exist (units-generation has completed):
 - For each unit, read its assigned requirements from the unit brief
-- Create stories scoped to that unit
+- Create stories scoped to that unit at `inception/units/{UNIT-NNN-slug}/stories/{S-NNN}-{slug}.md`
+- Each unit folder gets its own `stories/` subdirectory containing individual story files
 - Each story references its parent unit ID in its `unit` field
+- No central `stories.md` is needed — each unit brief's "Stories Assigned" table serves as the story index for that unit
 - After all stories are created, update each unit brief's "Stories Assigned" section with the actual story data
-- Generate `inception/units/unit-of-work-story-map.md` mapping stories to units
+- Generate `inception/units/unit-of-work-story-map.md` as a cross-unit story reference
 
 When units do not exist (units-generation was skipped):
-- Create stories from requirements.md directly (current behavior)
+- Fall back to `inception/user-stories/stories.md` (flat file, backward compatibility)
 - Stories are not unit-scoped (the `unit` field is set to "unassigned")
 
 ## Agent Delegation Strategy
@@ -179,7 +181,8 @@ For medium priority cases, execute user stories if ANY of these apply:
   - [ ] Include acceptance criteria for each story (Gherkin Given/When/Then format)
   - [ ] Include edge cases for non-trivial stories
   - [ ] Map personas to relevant user stories
-  - [ ] **Conditional** (> 5 stories): Generate individual story files in `stories/` subdirectory
+  - [ ] **When units exist**: Generate individual story files in `inception/units/{UNIT-NNN-slug}/stories/` per-unit directories
+  - [ ] **When units skipped, > 5 stories**: Generate individual story files in `inception/user-stories/stories/` subdirectory
 
 ### Story Naming Convention (MANDATORY)
 
@@ -187,21 +190,41 @@ All stories MUST use `S-NNN` IDs (zero-padded to three digits, sequential within
 
 ### Story File Organization
 
-Story artifacts are placed in `aidlc-docs/{workflow-id}/inception/user-stories/`.
+Story placement depends on whether units exist:
 
-**<= 5 stories**: All stories go in `stories.md` using the inline template below. No individual files needed.
+**Per-unit (primary -- when units exist):**
 
-**> 5 stories**: `stories.md` becomes a **summary index** and individual story files are created:
+Stories are placed in each unit's `stories/` subdirectory as individual files:
+
+```
+aidlc-docs/{workflow-id}/inception/units/{UNIT-NNN-slug}/stories/
+├── S-001-{slug}.md
+├── S-002-{slug}.md
+└── ...
+```
+
+Project-wide personas always remain at:
 
 ```
 aidlc-docs/{workflow-id}/inception/user-stories/
-├── stories.md              ← summary index (always present)
-├── personas.md             ← user personas (always present)
-└── stories/                ← individual files (> 5 stories only)
-    ├── S-001-{slug}.md
-    ├── S-002-{slug}.md
-    └── ...
+├── personas.md                    ← always here (project-wide)
 ```
+
+When stories are per-unit, no central `stories.md` index is created. Each unit brief's "Stories Assigned" table serves as the story index for that unit. The cross-unit story reference is maintained in `inception/units/unit-of-work-story-map.md`.
+
+**Fallback (when units skipped):**
+
+Stories fall back to the flat file structure:
+
+```
+aidlc-docs/{workflow-id}/inception/user-stories/
+├── stories.md                     ← flat file, only when no units
+├── personas.md                    ← always here
+```
+
+**<= 5 stories (fallback only)**: All stories go in `stories.md` using the inline template below. No individual files needed.
+
+**> 5 stories (fallback only)**: `stories.md` becomes a **summary index** and individual story files are created in `inception/user-stories/stories/`.
 
 ### Stories Index Template (stories.md)
 
@@ -246,18 +269,19 @@ Each story in `stories.md` MUST follow this structure:
 - Enables: {S-NNN or "None"}
 ```
 
-### Individual Story File Template (MANDATORY for > 5 stories)
+### Individual Story File Template (MANDATORY for per-unit stories; also used for > 5 stories in fallback mode)
 
-**Path**: `aidlc-docs/{workflow-id}/inception/user-stories/stories/{S-NNN}-{slug}.md`
+**Path (per-unit)**: `aidlc-docs/{workflow-id}/inception/units/{UNIT-NNN-slug}/stories/{S-NNN}-{slug}.md`
+**Path (fallback)**: `aidlc-docs/{workflow-id}/inception/user-stories/stories/{S-NNN}-{slug}.md`
 
 ```markdown
 ---
 id: "S-NNN"
+unit: "{UNIT-NNN-slug or unassigned}"
 title: "{Story Title}"
 persona: "{persona name}"
 priority: "{must|should|could}"
 status: "draft"
-unit: "{U-NNN or unassigned}"
 created: "{ISO-8601}"
 ---
 
@@ -290,8 +314,9 @@ relevant to this story. Omit if not needed.}
 - Dependencies track inter-story ordering — use "None" when the story is independent
 - Priority uses MoSCoW: `must` (required), `should` (important), `could` (nice-to-have)
 - Individual story files include YAML frontmatter with `status` and `unit` fields for traceability
-- The `unit` field links to the unit this story will be assigned to (set during Units Generation, `unassigned` until then)
-- When individual files exist, `stories.md` MUST be kept in sync as the index
+- The `unit` field links to the parent unit (set to the unit slug when per-unit, `unassigned` when units were skipped)
+- When per-unit stories are used, no central `stories.md` index is created. Each unit brief's "Stories Assigned" table serves as the story index for that unit. The cross-unit story reference is maintained in `inception/units/unit-of-work-story-map.md`
+- When individual files exist in fallback mode, `stories.md` MUST be kept in sync as the index
 
 ## Step 5: Present Story Options
 - Include different approaches for story breakdown in the plan document:
@@ -415,7 +440,7 @@ After all answers are collected and ambiguities resolved, you MUST update the st
 
 ### MANDATORY: Post-Generation Consistency Validation
 
-After the agent generates stories.md and personas.md, the orchestrator MUST validate before presenting to the user:
+After the agent generates story artifacts (per-unit story files or fallback stories.md) and personas.md, the orchestrator MUST validate before presenting to the user:
 
 1. **Load decision registry**: Read `aidlc-docs/{workflow-id}/inception/decisions.md` if it exists
 2. **Verify acceptance criteria paths**: Grep stories for file path references. All paths must match decisions in requirements.md BRs
@@ -448,7 +473,9 @@ After the agent generates stories.md and personas.md, the orchestrator MUST vali
 ⚠️ **REVIEW REQUIRED**
 
 > Please examine the user stories and personas at:
-> `aidlc-docs/{workflow-id}/inception/user-stories/stories.md` and `personas.md`
+> Per-unit stories: `aidlc-docs/{workflow-id}/inception/units/{UNIT-NNN-slug}/stories/`
+> Fallback stories: `aidlc-docs/{workflow-id}/inception/user-stories/stories.md`
+> Personas: `aidlc-docs/{workflow-id}/inception/user-stories/personas.md`
 
 **You may:**
 - 🔧 **Request Changes** — Ask for modifications to the stories or personas based on your review
@@ -495,6 +522,6 @@ After the agent generates stories.md and personas.md, the orchestrator MUST vali
 - All planning questions answered and ambiguities resolved
 - Story plan explicitly approved by user
 - All steps in story generation plan marked [x]
-- All story artifacts generated according to plan (stories.md, personas.md)
+- All story artifacts generated according to plan (per-unit story files or fallback stories.md, plus personas.md)
 - Generated stories explicitly approved by user
 - Stories verified and ready for next stage

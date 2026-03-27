@@ -61,7 +61,7 @@ updated: "{YYYY-MM-DDTHH:MM:SSZ}"
 - **Responsibility**: {Single responsibility description}
 - **Scope**: {What is IN this unit}
 - **Assigned Requirements**: FR-1, FR-2
-- **Assigned Stories**: S-001, S-002, S-003
+- **Assigned Stories**: S-001, S-002, S-003 (stories will be created at `inception/units/{UNIT-NNN-slug}/stories/` during the User Stories stage)
 - **Dependencies**: None | {U-NNN: reason}
 - **Estimated Complexity**: S | M | L | XL
 - **Estimated Effort**: {hours}

@@ -19,7 +19,7 @@ Before bolt planning can begin, ALL of the following must exist and be loaded:
 | **Unit definitions** | `inception/units/unit-of-work.md` | Unit IDs, titles, acceptance criteria |
 | **Unit briefs** | `inception/units/{unit-slug}/unit-brief.md` | Detailed scope per unit |
 | **Story-to-unit map** | `inception/units/unit-of-work-story-map.md` | Which stories belong to which unit |
-| **Stories** | `inception/user-stories/stories.md` | Full story definitions with IDs and priorities |
+| **Stories** | `inception/units/{UNIT-NNN-slug}/stories/` (per-unit) or `inception/user-stories/stories.md` (fallback) | Per-unit story files with IDs and priorities |
 | **Requirements** | `inception/requirements/requirements.md` | FR-N requirement IDs and priorities |
 
 All paths are relative to `aidlc-docs/{workflowId}/`.
@@ -114,7 +114,7 @@ For each unit defined in `inception/units/unit-of-work.md`:
 1. Read the unit definition (ID, title, success criteria and requirements, estimated effort)
 2. Read the unit brief at `inception/units/{unit-slug}/unit-brief.md`
 3. Read the assigned stories from `inception/units/unit-of-work-story-map.md`
-4. Resolve each story's full definition from `inception/user-stories/stories.md`
+4. Resolve each story's full definition from `inception/units/{unit-slug}/stories/` (per-unit story files) or fall back to `inception/user-stories/stories.md`
 5. Resolve each story's requirement references from `inception/requirements/requirements.md`
 6. Confirm every story has an ID (`S-NNN`), a priority (`Must`, `Should`, `Could`), and at least one requirement reference (`FR-N`)
 

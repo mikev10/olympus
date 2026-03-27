@@ -1078,7 +1078,7 @@ Mark `inception_stages["user-stories"].status = "in_progress"`. Update checkpoin
 
 Read `intent.md`, `requirements.md`, and unit artifacts (`inception/units/unit-of-work.md`, per-unit briefs) for context.
 
-When units exist (units-generation has completed), create stories scoped to each unit — reading each unit's assigned requirements from the unit brief and creating stories that reference their parent unit ID. When units do not exist (units-generation was skipped), create stories from requirements.md directly without unit scoping.
+When units exist (units-generation has completed), create stories scoped to each unit as individual files at `inception/units/{UNIT-NNN-slug}/stories/{S-NNN}-{slug}.md` — reading each unit's assigned requirements from the unit brief and creating stories that reference their parent unit ID. When units do not exist (units-generation was skipped), fall back to creating stories in `inception/user-stories/stories.md` without unit scoping.
 
 **`aidlc-docs/{workflowId}/inception/user-stories/personas.md`**:
 
@@ -1093,7 +1093,7 @@ When units exist (units-generation has completed), create stories scoped to each
 - **Key User Stories**: S-001, S-002, ...
 ```
 
-**`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (Gherkin format):
+**`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (fallback when units skipped — Gherkin format):
 
 ```markdown
 # User Stories: {Title}
@@ -1151,8 +1151,9 @@ After stories are created, if units exist, generate the story-to-unit mapping an
 
 ### Artifacts generated
 - `aidlc-docs/{workflowId}/inception/user-stories/personas.md`
-- `aidlc-docs/{workflowId}/inception/user-stories/stories.md`
-- `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md` (when units exist)
+- `aidlc-docs/{workflowId}/inception/units/{UNIT-NNN-slug}/stories/` — per-unit story files (when units exist)
+- `aidlc-docs/{workflowId}/inception/user-stories/stories.md` — flat file (fallback when units skipped)
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md` (cross-unit story reference, when units exist)
 
 ### What needs your review
 - [ ] Personas accurately represent the intended users

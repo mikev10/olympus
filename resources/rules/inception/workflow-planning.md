@@ -23,10 +23,10 @@
 > **Traceability prerequisite**: Verify that `requirements.md` contains named requirement IDs in `FR-NNN` format (e.g., `FR-001`, `FR-002`). These IDs are referenced throughout construction — bolt specs cite them in `requirements` frontmatter and `## Traceability` sections, and the bolt planner performs coverage checks against `must`-priority requirements. If requirements exist but lack explicit IDs, add them before proceeding to construction.
 
 ### 1.3 Load User Stories (if executed)
-- stories.md
+- Per-unit stories from `inception/units/{UNIT-NNN-slug}/stories/` (when units exist) or fallback `stories.md`
 - personas.md
 
-> **Traceability prerequisite**: Verify that `stories.md` contains named story IDs in `S-NNN` format (e.g., `S-001`, `S-002`). These IDs are referenced in bolt specs and coverage validation. If stories exist but lack explicit IDs, add them before proceeding to construction.
+> **Note**: User stories and their `S-NNN` IDs are created during the User Stories stage, which runs after units are defined. If Workflow Planning runs before User Stories, this section will have no artifacts to load. Story IDs (S-NNN) are created during the User Stories stage which runs after units are defined.
 
 ## Step 2: Detailed Scope and Impact Analysis
 
@@ -196,7 +196,7 @@ Evaluate risk level:
 
 3. **Conditionally create `unit-of-work-dependency.md`** — ONLY if units have actual blocking dependencies between them. Skip this file when all units are independent or can execute in any order.
 
-4. **Conditionally create `unit-of-work-story-map.md`** — ONLY if user stories exist AND are not already mapped to units within `stories.md`. Skip this file when story-to-unit mappings are already recorded elsewhere.
+4. **Conditionally create `unit-of-work-story-map.md`** — Created during the User Stories stage, not during Workflow Planning or Unit Registration. Do NOT create this file here.
 
 5. **Update `checkpoint.json`**: Record units in `construction_units` array using the `U-NNN` IDs. Set units-generation status to `"skipped"` with `unit_registration_completed: true`.
 

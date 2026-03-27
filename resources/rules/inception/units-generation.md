@@ -37,7 +37,7 @@ This stage produces the following artifacts in `aidlc-docs/{workflowId}/inceptio
 |----------|------|-----------|-------------|
 | Unit overview | `inception/units/unit-of-work.md` | ALWAYS | Unit definitions, requirement mapping, dependency graph |
 | Dependency matrix | `inception/units/unit-of-work-dependency.md` | When 2+ units | Cross-unit dependency analysis |
-| Story map | `inception/units/unit-of-work-story-map.md` | After User Stories stage | Story-to-unit assignment mapping (created during User Stories, not during Units Generation) |
+| Story map | `inception/units/unit-of-work-story-map.md` | After User Stories stage | Cross-unit story reference (created during User Stories stage, not during Units Generation) |
 | Per-unit briefs | `inception/units/{UNIT-NNN-slug}/unit-brief.md` | When 2+ units | Detailed per-unit brief for Bolt Planning |
 
 ### Canonical Templates
@@ -183,12 +183,13 @@ This draft mapping will be refined based on Q&A answers but serves as the baseli
 **ALWAYS** include these mandatory artifacts in the unit plan (when executing the full stage — if the stage is skipped, the Skip Pathway above handles these):
 - [ ] Generate `aidlc-docs/inception/units/unit-of-work.md` with unit definitions and responsibilities — following `resources/templates/inception/units-template.md`
 - [ ] Generate `aidlc-docs/inception/units/unit-of-work-dependency.md` with dependency matrix (when 2+ units)
-- [ ] Generate `aidlc-docs/inception/units/unit-of-work-story-map.md` mapping stories to units (when stories exist)
+- [ ] ~~Generate `aidlc-docs/inception/units/unit-of-work-story-map.md`~~ — Created during User Stories stage, not here. Do NOT generate this artifact during Units Generation.
 - [ ] Generate per-unit briefs in `aidlc-docs/inception/units/{unit-slug}/unit-brief.md` (when 2+ units) — following `resources/templates/inception/unit-brief-template.md`
 - [ ] **Greenfield only**: Document code organization strategy in `unit-of-work.md` (see code-generation.md for structure patterns)
 - [ ] Validate unit boundaries and dependencies
 - [ ] Ensure all requirements are assigned to units (100% coverage)
 - [ ] Prepare unit briefs with placeholder story sections (populated during User Stories stage)
+- [ ] Create `stories/` subdirectory in each unit folder as a placeholder for per-unit stories created in the User Stories stage
 
 ## Step 8: Request User Input
 
@@ -438,7 +439,7 @@ inception/units/UNIT-002-{slug}/unit-brief.md
 
 ```yaml
 input: Requirements (FR-N IDs), application design (if available from brownfield analysis)
-output: unit-of-work.md, unit-of-work-dependency.md, unit-of-work-story-map.md, per-unit briefs
+output: unit-of-work.md, unit-of-work-dependency.md, per-unit briefs (unit-of-work-story-map.md created during User Stories stage)
 constraints:
   requirement_coverage: 100% (every FR assigned to a unit)
   must_requirement_coverage: 100%
@@ -501,4 +502,4 @@ checkpoints: 0 (part of inception review gate)
 
 ## Next Stage: User Stories
 
-After units are approved, the workflow proceeds to **User Stories** — a separate inception stage that creates per-unit user stories from each unit's assigned requirements. Stories are scoped to their parent unit and reference the unit ID. After stories are created, the workflow proceeds to **Bolt Planning**, which decomposes each unit's stories into bolt spec files.
+After units are approved, the workflow proceeds to **User Stories** — a separate inception stage that creates per-unit user stories in each unit's `stories/` directory (e.g., `inception/units/{UNIT-NNN-slug}/stories/S-001-{slug}.md`). Stories are scoped to their parent unit and reference the unit ID. Personas remain project-wide at `inception/user-stories/personas.md`. After stories are created, the workflow proceeds to **Bolt Planning**, which decomposes each unit's stories into bolt spec files.

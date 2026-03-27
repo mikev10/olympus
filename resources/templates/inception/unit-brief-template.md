@@ -91,12 +91,12 @@ updated: "{YYYY-MM-DDTHH:MM:SSZ}"
 
 ### Stories Assigned
 
-> **Note**: This section is initially created with placeholder content during Units Generation. It is populated with actual story data when the User Stories stage runs after units are defined.
+> **Note**: This section is initially created with placeholder content during Units Generation. It is populated with actual story data when the User Stories stage runs after units are defined. Stories for this unit are stored at `inception/units/{UNIT-NNN-slug}/stories/`. Each story is an individual markdown file following the per-unit story template.
 
-| Story ID | Title | Priority | Status |
-|----------|-------|----------|--------|
-| S-001 | {Title} | Must | Planned |
-| S-002 | {Title} | Should | Planned |
+| Story ID | Title | Priority | Status | File |
+|----------|-------|----------|--------|------|
+| S-001 | {Title} | Must | Planned | `stories/S-001-{slug}.md` |
+| S-002 | {Title} | Should | Planned | `stories/S-002-{slug}.md` |
 
 ## Dependencies
 
