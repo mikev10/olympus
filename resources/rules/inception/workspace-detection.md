@@ -8,23 +8,15 @@ Check if any `aidlc-docs/*/aidlc-state.md` exists (glob for workflow subdirector
 - **If exists**: Resume the most recent workflow (load context from previous phases)
 - **If not exists**: Continue with new project assessment
 
-## Step 2: Scan Workspace for Existing Code
+## Step 2: Count Source Files
 
-**Determine if workspace has existing code:**
-- Scan workspace for source code files (.java, .py, .js, .ts, .jsx, .tsx, .kt, .kts, .scala, .groovy, .go, .rs, .rb, .php, .c, .h, .cpp, .hpp, .cc, .cs, .fs, etc.)
-- Check for build files (pom.xml, package.json, build.gradle, etc.)
-- Look for project structure indicators
-- Identify workspace root directory (NOT aidlc-docs/)
+Count source files in the workspace to determine brownfield vs greenfield classification.
+Skip `node_modules`, `.git`, `dist`, `build`, and other common non-source directories.
 
-**Record findings:**
-```markdown
-## Workspace State
-- **Existing Code**: [Yes/No]
-- **Programming Languages**: [List if found]
-- **Build System**: [Maven/Gradle/npm/etc. if found]
-- **Project Structure**: [Monolith/Microservices/Library/Empty]
-- **Workspace Root**: [Absolute path]
-```
+- **3+ source files** → Brownfield
+- **< 3 source files** → Greenfield
+
+Do NOT analyze languages, build systems, or project structure here — Reverse Engineering handles that in depth for brownfield projects.
 
 ## Step 3: Determine Next Phase
 
@@ -51,9 +43,8 @@ Create `aidlc-docs/{workflowId}/aidlc-state.md`:
 - **Current Stage**: INCEPTION - Workspace Detection
 
 ## Workspace State
-- **Existing Code**: [Yes/No]
+- **Source File Count**: [Number]
 - **Reverse Engineering Needed**: [Yes/No]
-- **Workspace Root**: [Absolute path]
 
 ## Code Location Rules
 - **Application Code**: Workspace root (NEVER in aidlc-docs/)
@@ -70,9 +61,7 @@ Create `aidlc-docs/{workflowId}/aidlc-state.md`:
 ```markdown
 # 🔍 Workspace Detection Complete
 
-Workspace analysis findings:
-• **Project Type**: Brownfield project
-• [AI-generated summary of workspace findings in bullet points]
+• **Project Type**: Brownfield ([N] source files detected)
 • **Next Step**: Proceeding to **Reverse Engineering** to analyze existing codebase...
 ```
 
