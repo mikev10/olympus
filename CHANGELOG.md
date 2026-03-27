@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.10] - 2026-03-27
+
+### Fixed
+
+- **Stale application-design references** — Removed leftover application-design references from tests and updater after stage was removed from inception pipeline
+
 ## [4.5.9] - 2026-03-27
 
 ### Changed
