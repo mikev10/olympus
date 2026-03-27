@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.13] - 2026-03-27
+
+### Changed
+
+- **Workspace detection simplified** — Removed redundant source code scanning (languages, build systems, project structure) from workspace detection rule; Reverse Engineering already handles this in depth
+
 ## [4.5.12] - 2026-03-27
 
 ### Fixed
