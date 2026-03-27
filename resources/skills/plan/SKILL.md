@@ -107,11 +107,10 @@ Create tasks for each step:
 - Workspace Detection (Step 5)
 - Reverse Engineering (Step 6)
 - Requirements Analysis (Step 7)
-- User Stories (Step 8)
-- Workflow Planning (Step 9)
-- Application Design (Step 10)
-- Units Generation (Step 11)
-- Bolt Planning (Step 11b)
+- Workflow Planning (Step 8)
+- Units Generation (Step 9)
+- User Stories (Step 10)
+- Bolt Planning (Step 11)
 - Inception Complete — Final Audit and Mode Choice (Step 12)
 
 **Rules**:
@@ -331,10 +330,9 @@ Create or update `aidlc-docs/{workflowId}/checkpoint.json` with the full incepti
     "workspace-detection": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "reverse-engineering": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "requirements-analysis": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [], "questions_file": null, "answers_received": false },
-    "user-stories": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "workflow-planning": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
-    "application-design": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "units-generation": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
+    "user-stories": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] },
     "bolt-planning": { "status": "not_started", "started_at": null, "completed_at": null, "skip_reason": null, "artifacts_generated": [] }
   },
   "current_inception_stage": "workspace-detection"
@@ -360,10 +358,9 @@ Updated: {ISO-8601}
 | Workspace Detection | not_started |
 | Reverse Engineering | not_started |
 | Requirements Analysis | not_started |
-| User Stories | not_started |
 | Workflow Planning | not_started |
-| Application Design | not_started |
 | Units Generation | not_started |
+| User Stories | not_started |
 | Bolt Planning | not_started |
 ```
 
@@ -488,8 +485,8 @@ Update `inception_stages` in checkpoint with `status: "skipped"` and `skip_reaso
 | Pathway | Stages Skipped |
 |---------|----------------|
 | greenfield | reverse-engineering |
-| bugfix | user-stories, application-design |
-| optimization | user-stories, application-design |
+| bugfix | user-stories |
+| optimization | user-stories |
 
 ### 5d. Update state (triple write)
 
@@ -749,7 +746,7 @@ Do not silently incorporate findings. The user must review the file and respond 
 ### 7d. Update state (triple write)
 
 1. Update `inception_stages["requirements-analysis"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
-2. Update `current_inception_stage: "user-stories"` in checkpoint.json
+2. Update `current_inception_stage: "workflow-planning"` in checkpoint.json
 3. Update `aidlc-state.md`
 4. Append to `audit.md`
 
@@ -778,96 +775,6 @@ Do not silently incorporate findings. The user must review the file and respond 
 ---
 
 ## WHAT'S NEXT
-After your review, the workflow will proceed to: **User Stories**
-- Generates user personas and user stories with acceptance criteria from requirements
-
-To proceed: `continue` or `approve`
-To request changes: `revise [specific feedback]`
----
-```
-
-Wait for user approval before proceeding (unless Trust Level 3).
-
----
-
-## Step 8: Stage 4 — User Stories
-
-> **Rule file**: Read `~/.claude/olympus/rules/inception/user-stories.md` before executing this stage.
-
-**Resume check**: If `inception_stages["user-stories"].status` is `completed` or `skipped`, skip to Step 9.
-
-If pathway is `bugfix` or `optimization`, mark `inception_stages["user-stories"]` as `skipped` (skip_reason: "{pathway} pathway does not require user-stories") and skip to Step 9.
-
-Mark `inception_stages["user-stories"].status = "in_progress"`. Update checkpoint.
-
-### 8a. Generate personas and stories
-
-Read `intent.md` and `requirements.md` for context.
-
-**`aidlc-docs/{workflowId}/inception/user-stories/personas.md`**:
-
-```markdown
-# User Personas: {Title}
-
-## {Persona Name}
-- **Role**: {job title / type of user}
-- **Goals**: {what they want to achieve}
-- **Pain Points**: {current frustrations}
-- **Technical Level**: {novice | intermediate | expert}
-- **Key User Stories**: S-001, S-002, ...
-```
-
-**`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (Gherkin format):
-
-```markdown
-# User Stories: {Title}
-
-## S-001: {Short title}
-**As a** {persona}, **I want** {action} **so that** {benefit}.
-
-### Acceptance Criteria
-
-**Scenario**: {scenario name}
-```
-Given {initial context}
-When {action taken}
-Then {expected outcome}
-```
-
-**Priority**: Must Have | Should Have | Nice to Have
-**Persona**: {persona name}
-**Dependencies**: {S-00X or none}
-```
-
-### 8b. Update state (triple write)
-
-1. Update `inception_stages["user-stories"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
-2. Update `current_inception_stage: "workflow-planning"` in checkpoint.json
-3. Update `aidlc-state.md`
-4. Append to `audit.md`
-
-### 8c. Output REVIEW REQUIRED
-
-```
----
-
-## REVIEW REQUIRED
-
-### What was completed
-- **User Stories**: Generated user personas and user stories with acceptance criteria
-
-### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/user-stories/personas.md`
-- `aidlc-docs/{workflowId}/inception/user-stories/stories.md`
-
-### What needs your review
-- [ ] Personas accurately represent the intended users
-- [ ] User stories cover all key capabilities
-- [ ] Acceptance criteria are testable and complete
-
----
-
-## WHAT'S NEXT
 After your review, the workflow will proceed to: **Workflow Planning**
 - Creates an execution plan with workflow diagram showing stage dependencies
 
@@ -880,15 +787,15 @@ Wait for user approval before proceeding (unless Trust Level 3).
 
 ---
 
-## Step 9: Stage 5 — Workflow Planning
+## Step 8: Stage 4 — Workflow Planning
 
 > **Rule file**: Read `~/.claude/olympus/rules/inception/workflow-planning.md` before executing this stage.
 
-**Resume check**: If `inception_stages["workflow-planning"].status` is `completed` or `skipped`, skip to Step 10.
+**Resume check**: If `inception_stages["workflow-planning"].status` is `completed` or `skipped`, skip to Step 9.
 
 Mark `inception_stages["workflow-planning"].status = "in_progress"`. Update checkpoint.
 
-### 9a. Depth assessment (if not set by --depth flag)
+### 8a. Depth assessment (if not set by --depth flag)
 
 If depth is not already set, score three dimensions (each 1-10):
 
@@ -908,7 +815,7 @@ Risk tier:
 
 Update checkpoint with `depth_score` and `risk_tier`.
 
-### 9b. Generate execution-plan.md
+### 8b. Generate execution-plan.md
 
 **`aidlc-docs/{workflowId}/inception/plans/execution-plan.md`**:
 
@@ -924,10 +831,10 @@ Generated: {ISO-8601}
 
 ```mermaid
 graph TD
-    A[Requirements Analysis] --> B[User Stories]
-    B --> C[Workflow Planning]
-    C --> D[Application Design]
-    D --> E[Units Generation]
+    A[Requirements Analysis] --> B[Workflow Planning]
+    B --> C[Units Generation]
+    C --> D[User Stories]
+    D --> E[Bolt Planning]
     E --> F[Construction]
 ```
 
@@ -941,7 +848,7 @@ graph TD
 
 ### Pre-Construction
 - [ ] All inception artifacts reviewed and approved
-- [ ] Design-time NFRs addressed in application design
+- [ ] Design-time NFRs addressed in unit domain analysis
 
 ### Construction
 - [ ] {U-NNN: Name} (e.g., `U-001: Foundation`): {description}
@@ -951,7 +858,7 @@ graph TD
 - [ ] NFR validation complete
 ```
 
-### 9c. Generate workflow-routing.md (L1 Plan)
+### 8c. Generate workflow-routing.md (L1 Plan)
 
 **`aidlc-docs/{workflowId}/inception/plans/workflow-routing.md`**:
 
@@ -982,14 +889,13 @@ Approved: —
 | 1 | inception | workspace-detection | Yes | Always |
 | 2 | inception | reverse-engineering | Yes/No | {rationale} |
 | 3 | inception | requirements-analysis | Yes | Always |
-| 4 | inception | user-stories | Yes/No | {rationale} |
-| 5 | inception | workflow-planning | Yes | Always |
-| 6 | inception | application-design | Yes/No | {rationale} |
-| 7 | inception | units-generation | Yes/No | {rationale} |
-| 8 | inception | bolt-planning | Yes/No | {rationale} |
+| 4 | inception | workflow-planning | Yes | Always |
+| 5 | inception | units-generation | Yes/No | {rationale} |
+| 6 | inception | user-stories | Yes/No | {rationale} |
+| 7 | inception | bolt-planning | Yes/No | {rationale} |
 ```
 
-### 9d. Optional PRFAQ (not for bugfix or brownfield-refactor pathways)
+### 8d. Optional PRFAQ (not for bugfix or brownfield-refactor pathways)
 
 If pathway is not `bugfix` or `brownfield-refactor`:
 
@@ -999,7 +905,7 @@ Task(subagent_type="olympian", description="Generate PRFAQ", prompt="Generate an
 
 Write result to `aidlc-docs/{workflowId}/inception/prfaq.md`. If generation fails, log a warning and continue — PRFAQ is non-blocking.
 
-### 9e. Momus review
+### 8e. Momus review
 
 - **Trust 0-1 or Risk Tier 3**: Momus review is AUTOMATIC:
   ```
@@ -1022,14 +928,14 @@ Write result to `aidlc-docs/{workflowId}/inception/prfaq.md`. If generation fail
 
 - **Trust 2+** (and not Risk Tier 3): Tell the user: "Optional: Run `/review` for Momus feedback on the inception plan."
 
-### 9f. Update state (triple write)
+### 8f. Update state (triple write)
 
 1. Update `inception_stages["workflow-planning"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
-2. Update `current_inception_stage: "application-design"`, `depth_score`, `risk_tier` in checkpoint.json
+2. Update `current_inception_stage: "units-generation"`, `depth_score`, `risk_tier` in checkpoint.json
 3. Update `aidlc-state.md`
 4. Append to `audit.md`
 
-### 9g. Output REVIEW REQUIRED
+### 8g. Output REVIEW REQUIRED
 
 ```
 ---
@@ -1054,120 +960,8 @@ Write result to `aidlc-docs/{workflowId}/inception/prfaq.md`. If generation fail
 ---
 
 ## WHAT'S NEXT
-After your review, the workflow will proceed to: **Application Design**
-- Designs the component architecture, services, and dependency relationships
-
-To proceed: `continue` or `approve`
-To request changes: `revise [specific feedback]`
----
-```
-
-Wait for user approval before proceeding (unless Trust Level 3).
-
----
-
-## Step 10: Stage 6 — Application Design
-
-> **Rule file**: Read `~/.claude/olympus/rules/inception/application-design.md` before executing this stage.
-
-**Resume check**: If `inception_stages["application-design"].status` is `completed` or `skipped`, skip to Step 11.
-
-If pathway is `bugfix` or `optimization`, mark `inception_stages["application-design"]` as `skipped` (skip_reason: "{pathway} pathway does not require application-design") and skip to Step 11.
-
-Mark `inception_stages["application-design"].status = "in_progress"`. Update checkpoint.
-
-### 10a. Generate application design artifacts
-
-Create directory `aidlc-docs/{workflowId}/inception/application-design/`.
-
-**`application-design/components.md`**:
-
-```markdown
-# Component Design: {Title}
-
-## Components
-
-| Name | Type | Responsibility | Interfaces |
-|------|------|----------------|-----------|
-| {component} | {service|module|UI|data} | {what it does} | {APIs it exposes} |
-
-## Component Diagram
-
-```mermaid
-graph LR
-    A[{Component A}] --> B[{Component B}]
-    B --> C[{Component C}]
-```
-```
-
-**`application-design/services.md`**:
-
-```markdown
-# Service Design: {Title}
-
-## Services
-
-### {Service Name}
-- **Purpose**: {what this service does}
-- **Inputs**: {data/events it receives}
-- **Outputs**: {data/events it produces}
-- **Dependencies**: {other services or systems}
-- **NFR considerations**: {relevant security, performance, availability constraints}
-```
-
-**`application-design/dependencies.md`**:
-
-```markdown
-# Dependency Graph: {Title}
-
-## Internal Dependencies
-- {Module A} depends on {Module B}: {reason}
-
-## External Dependencies
-| Dependency | Version | Purpose | Risk |
-|-----------|---------|---------|------|
-| {library} | {version} | {purpose} | {Low|Med|High} |
-
-## Dependency Diagram
-
-```mermaid
-graph TD
-    A[{Internal Module}] --> B[{External Library}]
-```
-```
-
-### 10b. Update state (triple write)
-
-1. Update `inception_stages["application-design"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
-2. Update `current_inception_stage: "units-generation"` in checkpoint.json
-3. Update `aidlc-state.md`
-4. Append to `audit.md`
-
-### 10c. Output REVIEW REQUIRED
-
-```
----
-
-## REVIEW REQUIRED
-
-### What was completed
-- **Application Design**: Designed component architecture, services, and dependency graph
-
-### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/application-design/components.md`
-- `aidlc-docs/{workflowId}/inception/application-design/services.md`
-- `aidlc-docs/{workflowId}/inception/application-design/dependencies.md`
-
-### What needs your review
-- [ ] Component boundaries are correct and responsibilities are clear
-- [ ] Service interfaces are well-defined
-- [ ] External dependencies are identified and risks assessed
-
----
-
-## WHAT'S NEXT
 After your review, the workflow will proceed to: **Units Generation**
-- Decomposes requirements into implementation units (UNITs) with dependency mapping
+- Decomposes requirements into implementation units (UNITs) with domain analysis and dependency mapping
 
 To proceed: `continue` or `approve`
 To request changes: `revise [specific feedback]`
@@ -1178,19 +972,19 @@ Wait for user approval before proceeding (unless Trust Level 3).
 
 ---
 
-## Step 11: Stage 7 — Units Generation
+## Step 9: Stage 5 — Units Generation
 
 > **Rule file**: Read `~/.claude/olympus/rules/inception/units-generation.md` before executing this stage.
 
-**Resume check**: If `inception_stages["units-generation"].status` is `completed` or `skipped`, skip to Step 12.
+**Resume check**: If `inception_stages["units-generation"].status` is `completed` or `skipped`, skip to Step 10.
 
-If `depth_score` is set and `depth_score <= 12` (SHALLOW), mark `inception_stages["units-generation"]` as `skipped` (skip_reason: "depth_score <= 12 — shallow pathway uses single unit directly") and skip to Step 12.
+If `depth_score` is set and `depth_score <= 12` (SHALLOW), mark `inception_stages["units-generation"]` as `skipped` (skip_reason: "depth_score <= 12 — shallow pathway uses single unit directly") and skip to Step 10.
 
 Mark `inception_stages["units-generation"].status = "in_progress"`. Update checkpoint.
 
-### 11a. Generate unit artifacts
+### 9a. Generate unit artifacts
 
-Read `requirements/requirements.md`, `user-stories/stories.md`, and `application-design/components.md` for context.
+Read `requirements/requirements.md` for context. If prior application design artifacts exist (from brownfield analysis or earlier workflows), they may inform domain analysis but are not a prerequisite.
 
 **Unit Naming Convention** (MANDATORY):
 - Documentation headings use `## U-NNN: Name` format (e.g., `## U-001: Foundation`, `## U-002: API Layer`)
@@ -1201,6 +995,8 @@ Read `requirements/requirements.md`, `user-stories/stories.md`, and `application
 > **CRITICAL**: Generate `unit-of-work.md` following the canonical template at `resources/templates/inception/units-template.md`. Do NOT use inline format examples. Read the template file and follow its structure exactly.
 
 > **Note**: The `Assigned Requirements` field lists the FR-N IDs from `requirements.md` that each unit addresses. These IDs flow directly into bolt planning — the bolt planner reads them to populate the `requirements` frontmatter field and `## Traceability` section of each bolt spec. Establish requirement IDs during Requirements Analysis so they are available here.
+
+> **Note**: User stories do not exist yet at this point — they are created in the User Stories stage after units are defined. Unit briefs should include placeholder story sections that will be populated during the User Stories stage.
 
 **`aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`**:
 
@@ -1224,12 +1020,110 @@ graph TD
 ```
 ```
 
+### 9b. Update state (triple write)
+
+1. Update `inception_stages["units-generation"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
+2. Update `current_inception_stage: "user-stories"` in checkpoint.json
+3. Update `aidlc-state.md`
+4. Append to `audit.md`
+
+### 9c. Output REVIEW REQUIRED
+
+```
+---
+
+## REVIEW REQUIRED
+
+### What was completed
+- **Units Generation**: Decomposed requirements into implementation units with domain analysis and dependency mapping
+
+### Artifacts generated
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work.md`
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`
+- `aidlc-docs/{workflowId}/inception/units/{UNIT-NNN-slug}/unit-brief.md` (per-unit briefs, when 2+ units)
+
+### What needs your review
+- [ ] Units correctly partition the work into manageable implementation chunks
+- [ ] Unit dependencies are accurate and there are no circular dependencies
+- [ ] Each unit has single responsibility and clear boundaries
+- [ ] Units can be developed independently by separate teams
+- [ ] Unit briefs complete and consistent (when 2+ units)
+
+---
+
+## WHAT'S NEXT
+After your review, the workflow will proceed to: **User Stories**
+- Creates per-unit user stories from each unit's assigned requirements
+
+To proceed: `continue` or `approve`
+To request changes: `revise [specific feedback]`
+---
+```
+
+Wait for user approval before proceeding (unless Trust Level 3).
+
+---
+
+## Step 10: Stage 6 — User Stories
+
+> **Rule file**: Read `~/.claude/olympus/rules/inception/user-stories.md` before executing this stage.
+
+**Resume check**: If `inception_stages["user-stories"].status` is `completed` or `skipped`, skip to Step 11.
+
+If pathway is `bugfix` or `optimization`, mark `inception_stages["user-stories"]` as `skipped` (skip_reason: "{pathway} pathway does not require user-stories") and skip to Step 11.
+
+Mark `inception_stages["user-stories"].status = "in_progress"`. Update checkpoint.
+
+### 10a. Generate personas and stories
+
+Read `intent.md`, `requirements.md`, and unit artifacts (`inception/units/unit-of-work.md`, per-unit briefs) for context.
+
+When units exist (units-generation has completed), create stories scoped to each unit — reading each unit's assigned requirements from the unit brief and creating stories that reference their parent unit ID. When units do not exist (units-generation was skipped), create stories from requirements.md directly without unit scoping.
+
+**`aidlc-docs/{workflowId}/inception/user-stories/personas.md`**:
+
+```markdown
+# User Personas: {Title}
+
+## {Persona Name}
+- **Role**: {job title / type of user}
+- **Goals**: {what they want to achieve}
+- **Pain Points**: {current frustrations}
+- **Technical Level**: {novice | intermediate | expert}
+- **Key User Stories**: S-001, S-002, ...
+```
+
+**`aidlc-docs/{workflowId}/inception/user-stories/stories.md`** (Gherkin format):
+
+```markdown
+# User Stories: {Title}
+
+## S-001: {Short title}
+**As a** {persona}, **I want** {action} **so that** {benefit}.
+**Unit**: U-NNN: {unit name} (or "unassigned" if units were skipped)
+
+### Acceptance Criteria
+
+**Scenario**: {scenario name}
+```
+Given {initial context}
+When {action taken}
+Then {expected outcome}
+```
+
+**Priority**: Must Have | Should Have | Nice to Have
+**Persona**: {persona name}
+**Dependencies**: {S-00X or none}
+```
+
+After stories are created, if units exist, generate the story-to-unit mapping and update each unit brief's Stories Assigned section:
+
 **`aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md`**:
 
 ```markdown
 # Story Map: {Title}
 
-## Story → Unit Mapping
+## Story -> Unit Mapping
 
 | User Story | Unit | Priority | Notes |
 |-----------|------|---------|-------|
@@ -1238,14 +1132,14 @@ graph TD
 | S-003 | U-002: {Name B} | Must Have | |
 ```
 
-### 11b. Update state (triple write)
+### 10b. Update state (triple write)
 
-1. Update `inception_stages["units-generation"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
+1. Update `inception_stages["user-stories"]`: `status: "completed"`, `completed_at`, `artifacts_generated`
 2. Update `current_inception_stage: "bolt-planning"` in checkpoint.json
 3. Update `aidlc-state.md`
 4. Append to `audit.md`
 
-### 11c. Output REVIEW REQUIRED
+### 10c. Output REVIEW REQUIRED
 
 ```
 ---
@@ -1253,21 +1147,18 @@ graph TD
 ## REVIEW REQUIRED
 
 ### What was completed
-- **Units Generation**: Decomposed requirements into implementation units with dependency mapping
+- **User Stories**: Generated user personas and per-unit user stories with acceptance criteria
 
 ### Artifacts generated
-- `aidlc-docs/{workflowId}/inception/units/unit-of-work.md`
-- `aidlc-docs/{workflowId}/inception/units/unit-of-work-dependency.md`
-- `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md`
-- `aidlc-docs/{workflowId}/inception/units/{UNIT-NNN-slug}/unit-brief.md` (per-unit briefs, when 2+ units)
+- `aidlc-docs/{workflowId}/inception/user-stories/personas.md`
+- `aidlc-docs/{workflowId}/inception/user-stories/stories.md`
+- `aidlc-docs/{workflowId}/inception/units/unit-of-work-story-map.md` (when units exist)
 
 ### What needs your review
-- [ ] Units correctly partition the work into manageable implementation chunks
-- [ ] Unit dependencies are accurate and there are no circular dependencies
-- [ ] Story-to-unit mapping covers all user stories
-- [ ] Each unit has single responsibility and clear boundaries
-- [ ] Units can be developed independently by separate teams
-- [ ] Unit briefs complete and consistent (when 2+ units)
+- [ ] Personas accurately represent the intended users
+- [ ] User stories cover all key capabilities
+- [ ] Acceptance criteria are testable and complete
+- [ ] Story-to-unit mapping covers all user stories (when units exist)
 
 ---
 
@@ -1284,7 +1175,7 @@ Wait for user approval before proceeding (unless Trust Level 3).
 
 ---
 
-## Step 11b: Stage 8 — Bolt Planning
+## Step 11: Stage 7 — Bolt Planning
 
 > **Rule file**: Read `~/.claude/olympus/rules/inception/bolt-planning.md` before executing this stage.
 
@@ -1294,7 +1185,7 @@ Wait for user approval before proceeding (unless Trust Level 3).
 
 Mark `inception_stages["bolt-planning"].status = "in_progress"`. Update checkpoint.
 
-### 11b-a. Generate bolt spec files
+### 11a. Generate bolt spec files
 
 Read `inception/units/unit-of-work.md`, `inception/units/unit-of-work-story-map.md`, and all available `inception/units/{unit-slug}/unit-brief.md` files for context.
 
@@ -1318,14 +1209,14 @@ aidlc-docs/{workflowId}/construction/UNIT-002-frontend/bolts/BOLT-003-dashboard/
 - Maximum 8 bolts per unit, 50 bolts total
 - Each spec must include `requires_bolts`, `enables_bolts`, `requires_units`, and `blocked` dependency fields
 
-### 11b-b. Update state (triple write)
+### 11b. Update state (triple write)
 
 1. Update `inception_stages["bolt-planning"]`: `status: "completed"`, `completed_at`, `artifacts_generated` (list all spec.md paths)
 2. Update checkpoint.json: `current_inception_stage` cleared (or set to null), `status: "awaiting_mode_selection"` after step 12
 3. Update `aidlc-state.md` — set Bolt Planning row to `completed`
 4. Append to `audit.md`
 
-### 11b-c. Output REVIEW REQUIRED
+### 11c. Output REVIEW REQUIRED
 
 ```
 ---
@@ -1383,10 +1274,9 @@ Trust Level: {0-3}
 | Workspace Detection | completed/skipped | {time} | {time} | {count} |
 | Reverse Engineering | completed/skipped | {time} | {time} | {count} |
 | Requirements Analysis | completed | {time} | {time} | {count} |
-| User Stories | completed/skipped | {time} | {time} | {count} |
 | Workflow Planning | completed | {time} | {time} | {count} |
-| Application Design | completed/skipped | {time} | {time} | {count} |
 | Units Generation | completed/skipped | {time} | {time} | {count} |
+| User Stories | completed/skipped | {time} | {time} | {count} |
 | Bolt Planning | completed/skipped | {time} | {time} | {count} |
 
 ## Total Artifacts Generated
@@ -1452,10 +1342,9 @@ Update `aidlc-docs/{workflowId}/checkpoint.json`:
     "workspace-detection": { "status": "completed", ... },
     "reverse-engineering": { "status": "completed|skipped", ... },
     "requirements-analysis": { "status": "completed", ... },
-    "user-stories": { "status": "completed|skipped", ... },
     "workflow-planning": { "status": "completed", ... },
-    "application-design": { "status": "completed|skipped", ... },
     "units-generation": { "status": "completed|skipped", ... },
+    "user-stories": { "status": "completed|skipped", ... },
     "bolt-planning": { "status": "completed|skipped", ... }
   }
 }

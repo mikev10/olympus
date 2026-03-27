@@ -15,6 +15,19 @@ User Stories focus on:
 - Requirements Analysis recommended (can reference requirements if available)
 - Workflow Planning must indicate User Stories stage should execute
 
+## Per-Unit Story Creation
+
+When units exist (units-generation has completed):
+- For each unit, read its assigned requirements from the unit brief
+- Create stories scoped to that unit
+- Each story references its parent unit ID in its `unit` field
+- After all stories are created, update each unit brief's "Stories Assigned" section with the actual story data
+- Generate `inception/units/unit-of-work-story-map.md` mapping stories to units
+
+When units do not exist (units-generation was skipped):
+- Create stories from requirements.md directly (current behavior)
+- Stories are not unit-scoped (the `unit` field is set to "unassigned")
+
 ## Agent Delegation Strategy
 
 **MANDATORY**: Delegate story and persona generation (Part 2) to `oracle-medium`. Do NOT generate user stories and personas directly.
@@ -440,7 +453,7 @@ After the agent generates stories.md and personas.md, the orchestrator MUST vali
 **You may:**
 - 🔧 **Request Changes** — Ask for modifications to the stories or personas based on your review
 - ➕ **Add Skipped Stage** — Include a previously excluded stage in the workflow
-- ✅ **Approve & Continue** — Approve user stories and proceed to **Workflow Planning**
+- ✅ **Approve & Continue** — Approve user stories and proceed to **Bolt Planning**
 
 ---
 ```

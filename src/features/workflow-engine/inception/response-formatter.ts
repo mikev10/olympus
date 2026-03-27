@@ -4,10 +4,9 @@ const STAGE_LABELS: Record<InceptionStage, string> = {
   'workspace-detection': 'Workspace Detection',
   'reverse-engineering': 'Reverse Engineering',
   'requirements-analysis': 'Requirements Analysis',
-  'user-stories': 'User Stories',
   'workflow-planning': 'Workflow Planning',
-  'application-design': 'Application Design',
   'units-generation': 'Units Generation',
+  'user-stories': 'User Stories',
   'bolt-planning': 'Bolt Planning',
 };
 
@@ -15,21 +14,19 @@ const STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
   'workspace-detection': 'Detected project type and pathway (greenfield/brownfield) and set up workspace configuration',
   'reverse-engineering': 'Analyzed existing codebase structure, components, and technology stack',
   'requirements-analysis': 'Captured structured requirements from Q&A interaction',
-  'user-stories': 'Generated user personas and user stories with acceptance criteria',
   'workflow-planning': 'Created execution plan with Mermaid workflow diagram',
-  'application-design': 'Designed component architecture, services, and dependency graph',
   'units-generation': 'Decomposed requirements into implementation units with dependency mapping',
-  'bolt-planning': 'Decompose units into executable bolts with dependency tracking',
+  'user-stories': 'Generated user personas and user stories per-unit with acceptance criteria',
+  'bolt-planning': 'Decomposed units into executable bolts with dependency tracking',
 };
 
 const NEXT_STAGE_DESCRIPTIONS: Record<InceptionStage, string> = {
   'workspace-detection': 'Analyzes your existing codebase to understand current architecture and components',
   'reverse-engineering': 'Captures structured requirements from Q&A interaction with you',
-  'requirements-analysis': 'Generates user personas and user stories with acceptance criteria from requirements',
-  'user-stories': 'Creates an execution plan with workflow diagram showing stage dependencies',
-  'workflow-planning': 'Designs the component architecture, services, and dependency relationships',
-  'application-design': 'Decomposes requirements into implementation units (UNITs) with dependency mapping',
-  'units-generation': 'Inception is complete — proceed to Construction phase for design and implementation',
+  'requirements-analysis': 'Creates an execution plan with workflow diagram showing stage dependencies',
+  'workflow-planning': 'Decomposes the intent into independent units of work with domain analysis and dependency mapping',
+  'units-generation': 'Creates user stories per-unit from each unit\'s assigned requirements',
+  'user-stories': 'Decomposes each unit\'s stories into executable bolts with dependency tracking',
   'bolt-planning': 'Bolts are planned — proceed to Construction phase to execute each bolt',
 };
 
@@ -37,10 +34,9 @@ const STAGE_TIME_HINTS: Record<InceptionStage, Record<string, string>> = {
   'workspace-detection': { minimal: '< 1 min', standard: '< 1 min', comprehensive: '1-2 min' },
   'reverse-engineering': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
   'requirements-analysis': { minimal: '5-10 min', standard: '10-20 min', comprehensive: '20-40 min' },
-  'user-stories': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
   'workflow-planning': { minimal: '1-3 min', standard: '3-5 min', comprehensive: '5-10 min' },
-  'application-design': { minimal: '3-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
   'units-generation': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
+  'user-stories': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
   'bolt-planning': { minimal: '2-5 min', standard: '5-10 min', comprehensive: '10-20 min' },
 };
 

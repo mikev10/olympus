@@ -1,3 +1,5 @@
+// Application Design stage has been folded into Units Generation (domain analysis).
+// These tests are retained but skipped for backward compatibility.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import * as fsExtra from 'fs-extra';
@@ -93,7 +95,7 @@ function createMockCheckpoint(overrides?: Partial<WorkflowCheckpointV3>): Workfl
   };
 }
 
-describe('executeApplicationDesign', () => {
+describe.skip('executeApplicationDesign (DEPRECATED - folded into Units Generation)', () => {
   const projectPath = '/test/project';
   const workflowId = 'test-wf';
 
@@ -304,7 +306,7 @@ describe('executeApplicationDesign', () => {
   });
 });
 
-describe('application-design integration', () => {
+describe.skip('application-design integration (DEPRECATED - folded into Units Generation)', () => {
   let tmpDir: string;
 
   beforeEach(() => {

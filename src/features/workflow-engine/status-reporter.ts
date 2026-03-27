@@ -342,10 +342,9 @@ const INCEPTION_STAGE_ORDER: InceptionStage[] = [
   'workspace-detection',
   'reverse-engineering',
   'requirements-analysis',
-  'user-stories',
   'workflow-planning',
-  'application-design',
   'units-generation',
+  'user-stories',
   'bolt-planning',
 ];
 
@@ -353,10 +352,9 @@ const INCEPTION_STAGE_LABELS: Record<InceptionStage, string> = {
   'workspace-detection': 'Workspace Detection',
   'reverse-engineering': 'Reverse Engineering',
   'requirements-analysis': 'Requirements Analysis',
-  'user-stories': 'User Stories',
   'workflow-planning': 'Workflow Planning',
-  'application-design': 'Application Design',
   'units-generation': 'Units Generation',
+  'user-stories': 'User Stories',
   'bolt-planning': 'Bolt Planning',
 };
 

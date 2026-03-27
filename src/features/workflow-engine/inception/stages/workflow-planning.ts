@@ -108,10 +108,10 @@ export function generateExecutionPlan(
     { id: 'WD', name: 'Workspace Detection', phase: 'inception' },
     { id: 'RE', name: 'Reverse Engineering', phase: 'inception' },
     { id: 'RA', name: 'Requirements Analysis', phase: 'inception' },
-    { id: 'US', name: 'User Stories', phase: 'inception' },
     { id: 'WP', name: 'Workflow Planning', phase: 'inception' },
-    { id: 'AD', name: 'Application Design', phase: 'inception' },
     { id: 'UG', name: 'Units Generation', phase: 'inception' },
+    { id: 'US', name: 'User Stories', phase: 'inception' },
+    { id: 'BP', name: 'Bolt Planning', phase: 'inception' },
     { id: 'CG', name: 'Code Generation', phase: 'construction' },
     { id: 'BT', name: 'Build and Test', phase: 'construction' },
   ];
@@ -120,10 +120,10 @@ export function generateExecutionPlan(
     'WD': 'workspace-detection',
     'RE': 'reverse-engineering',
     'RA': 'requirements-analysis',
-    'US': 'user-stories',
     'WP': 'workflow-planning',
-    'AD': 'application-design',
     'UG': 'units-generation',
+    'US': 'user-stories',
+    'BP': 'bolt-planning',
   };
 
   for (const s of allStages) {
@@ -146,7 +146,7 @@ export function generateExecutionPlan(
     lines.push(`  ${s.id}["${s.name}"]${style}`);
   }
 
-  lines.push('  WD --> RE --> RA --> US --> WP --> AD --> UG --> CG --> BT');
+  lines.push('  WD --> RE --> RA --> WP --> UG --> US --> BP --> CG --> BT');
 
   lines.push('  classDef completed fill:#4CAF50,color:white');
   lines.push('  classDef skipped fill:#9E9E9E,color:white');
@@ -161,10 +161,10 @@ export function generateExecutionPlan(
     { key: 'workspace-detection', name: 'Workspace Detection' },
     { key: 'reverse-engineering', name: 'Reverse Engineering' },
     { key: 'requirements-analysis', name: 'Requirements Analysis' },
-    { key: 'user-stories', name: 'User Stories' },
     { key: 'workflow-planning', name: 'Workflow Planning' },
-    { key: 'application-design', name: 'Application Design' },
     { key: 'units-generation', name: 'Units Generation' },
+    { key: 'user-stories', name: 'User Stories' },
+    { key: 'bolt-planning', name: 'Bolt Planning' },
   ];
 
   for (const s of inceptionStages) {

@@ -1,3 +1,7 @@
+> **DEPRECATED**: This stage has been folded into Units Generation (domain analysis step). The application design work -- identifying components, services, and dependencies -- now happens as part of units-generation.md Step 2: Domain Analysis. This file is retained for backward compatibility with existing workflows but should not be executed as a separate stage.
+
+---
+
 # Application Design - Detailed Steps
 
 ## Purpose

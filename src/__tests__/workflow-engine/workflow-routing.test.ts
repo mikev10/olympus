@@ -503,7 +503,7 @@ describe('isStageIncluded', () => {
 });
 
 describe('inception sub-stages', () => {
-  it('inception phase contains all 8 sub-stages for greenfield', async () => {
+  it('inception phase contains all 7 sub-stages for greenfield', async () => {
     const plan = await buildPlan('greenfield');
     const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
     const stageNames = inceptionStages.map((s) => s.stage);
@@ -511,10 +511,9 @@ describe('inception sub-stages', () => {
       'workspace-detection',
       'reverse-engineering',
       'requirements-analysis',
-      'user-stories',
       'workflow-planning',
-      'application-design',
       'units-generation',
+      'user-stories',
       'bolt-planning',
     ]);
   });
@@ -561,12 +560,6 @@ describe('inception sub-stages', () => {
     expect(stage?.rationale).toBe('Generate execution plan with Mermaid visualization and live checkboxes');
   });
 
-  it('getStageRationale: application-design has correct rationale', async () => {
-    const plan = await buildPlan('greenfield');
-    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'application-design');
-    expect(stage?.rationale).toBe('High-level component identification, service boundaries, and dependencies');
-  });
-
   it('getStageRationale: units-generation has correct rationale', async () => {
     const plan = await buildPlan('greenfield');
     const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'units-generation');
@@ -600,13 +593,6 @@ describe('inception sub-stages', () => {
     expect(stage!.included).toBe(false);
   });
 
-  it('application-design is excluded for optimization', async () => {
-    const plan = await buildPlan('optimization');
-    const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'application-design');
-    expect(stage).toBeDefined();
-    expect(stage!.included).toBe(false);
-  });
-
   it('units-generation is excluded for minimal depth', async () => {
     const plan = await buildPlan('greenfield', { recommended_depth: 'minimal', total_score: 8, skip_units: true });
     const stage = plan.stages.find((s) => s.phase === 'inception' && s.stage === 'units-generation');
@@ -617,7 +603,7 @@ describe('inception sub-stages', () => {
   it('all inception stages included for standard brownfield-enhancement', async () => {
     const plan = await buildPlan('brownfield-enhancement', { recommended_depth: 'standard' });
     const inceptionStages = plan.stages.filter((s) => s.phase === 'inception');
-    expect(inceptionStages).toHaveLength(8);
+    expect(inceptionStages).toHaveLength(7);
     for (const stage of inceptionStages) {
       expect(stage.included).toBe(true);
     }

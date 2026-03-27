@@ -1271,10 +1271,9 @@ function makeAllStages(
     'workspace-detection': makeStageState('not_started'),
     'reverse-engineering': makeStageState('not_started'),
     'requirements-analysis': makeStageState('not_started'),
-    'user-stories': makeStageState('not_started'),
     'workflow-planning': makeStageState('not_started'),
-    'application-design': makeStageState('not_started'),
     'units-generation': makeStageState('not_started'),
+    'user-stories': makeStageState('not_started'),
     'bolt-planning': makeStageState('not_started'),
   };
   return { ...defaults, ...overrides };
@@ -1285,19 +1284,19 @@ describe('buildInceptionSubStageProgress', () => {
     const stages = makeAllStages();
     const result = buildInceptionSubStageProgress(stages, 'workspace-detection');
     expect(result).toContain('0%');
-    expect(result).toContain('(0/8 stages)');
+    expect(result).toContain('(0/7 stages)');
   });
 
-  it('shows correct percentage for 4 of 8 stages complete', () => {
+  it('shows correct percentage for 4 of 7 stages complete', () => {
     const stages = makeAllStages({
       'workspace-detection': makeStageState('completed'),
       'reverse-engineering': makeStageState('completed'),
       'requirements-analysis': makeStageState('completed'),
-      'user-stories': makeStageState('completed'),
+      'workflow-planning': makeStageState('completed'),
     });
-    const result = buildInceptionSubStageProgress(stages, 'workflow-planning');
-    expect(result).toContain('50%');
-    expect(result).toContain('(4/8 stages)');
+    const result = buildInceptionSubStageProgress(stages, 'units-generation');
+    expect(result).toContain('57%');
+    expect(result).toContain('(4/7 stages)');
   });
 
   it('shows 100% when all stages complete', () => {
@@ -1305,15 +1304,14 @@ describe('buildInceptionSubStageProgress', () => {
       'workspace-detection': makeStageState('completed'),
       'reverse-engineering': makeStageState('completed'),
       'requirements-analysis': makeStageState('completed'),
-      'user-stories': makeStageState('completed'),
       'workflow-planning': makeStageState('completed'),
-      'application-design': makeStageState('completed'),
       'units-generation': makeStageState('completed'),
+      'user-stories': makeStageState('completed'),
       'bolt-planning': makeStageState('completed'),
     });
     const result = buildInceptionSubStageProgress(stages, undefined);
     expect(result).toContain('100%');
-    expect(result).toContain('(8/8 stages)');
+    expect(result).toContain('(7/7 stages)');
   });
 
   it('marks completed stages with [x]', () => {
@@ -1360,16 +1358,15 @@ describe('buildInceptionSubStageProgress', () => {
     expect(line).toContain('<- current');
   });
 
-  it('shows all 8 stage names', () => {
+  it('shows all 7 stage names', () => {
     const stages = makeAllStages();
     const result = buildInceptionSubStageProgress(stages, undefined);
     expect(result).toContain('Workspace Detection');
     expect(result).toContain('Reverse Engineering');
     expect(result).toContain('Requirements Analysis');
-    expect(result).toContain('User Stories');
     expect(result).toContain('Workflow Planning');
-    expect(result).toContain('Application Design');
     expect(result).toContain('Units Generation');
+    expect(result).toContain('User Stories');
     expect(result).toContain('Bolt Planning');
   });
 

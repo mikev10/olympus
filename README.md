@@ -158,10 +158,9 @@ Olympus includes a structured development workflow inspired by [AWS AI-DLC](http
 - Workspace Detection (always) — scans for existing code, resumes prior workflows
 - Reverse Engineering (brownfield only) — analyzes existing codebase
 - Requirements Analysis (always) — gathers functional and non-functional requirements
-- User Stories (conditional) — generates personas and acceptance criteria
 - Workflow Planning (always) — determines which construction stages to execute
-- Application Design (conditional) — component and service design
 - Units Generation (conditional) — decomposes work into implementable units
+- User Stories (conditional) — generates per-unit personas and acceptance criteria
 - Bolt Planning (conditional) — decomposes units into executable bolts with dependency tracking
 
 **Construction** — determine how to build it:

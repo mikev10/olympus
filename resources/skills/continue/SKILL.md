@@ -87,11 +87,10 @@ Follow the artifact loading rules from `session-continuity.md`. Based on the cur
 | workspace-detection | (none needed) |
 | reverse-engineering | inception/intent.md (if exists) |
 | requirements-analysis | inception/intent.md, reverse-engineering artifacts (if brownfield) |
-| user-stories | inception/intent.md, inception/requirements/requirements.md, inception/requirements/requirements-analysis-questions.md |
-| workflow-planning | All above + inception/user-stories/stories.md, inception/user-stories/personas.md |
-| application-design | All above + inception/plans/workflow-routing.md |
-| units-generation | All above + inception/units/ artifacts |
-| bolt-planning | All above + construction/{UNIT-NNN}/bolts/ spec.md files (if any exist) |
+| workflow-planning | inception/intent.md, inception/requirements/requirements.md, inception/requirements/requirements-analysis-questions.md |
+| units-generation | All above + inception/plans/workflow-routing.md |
+| user-stories | All above + inception/units/unit-of-work.md, inception/units/{UNIT-NNN-slug}/unit-brief.md (per-unit briefs) |
+| bolt-planning | All above + inception/user-stories/stories.md, inception/user-stories/personas.md, inception/units/unit-of-work-story-map.md, construction/{UNIT-NNN}/bolts/ spec.md files (if any exist) |
 
 ### Construction Phase Artifacts
 
@@ -115,11 +114,10 @@ After loading, provide a brief summary: "Loaded N artifacts from previous stages
 - Workspace Detection (Step 5)
 - Reverse Engineering (Step 6)
 - Requirements Analysis (Step 7)
-- User Stories (Step 8)
-- Workflow Planning (Step 9)
-- Application Design (Step 10)
-- Units Generation (Step 11)
-- Bolt Planning (Step 11b)
+- Workflow Planning (Step 8)
+- Units Generation (Step 9)
+- User Stories (Step 10)
+- Bolt Planning (Step 11)
 - Inception Complete — Final Audit and Mode Choice (Step 12)
 
 **For Construction Phase resumption**, create tasks for:
@@ -148,10 +146,9 @@ If `current_phase === 'inception'` and `inception_stages` exists:
    - workspace-detection
    - reverse-engineering (brownfield only)
    - requirements-analysis
-   - user-stories
    - workflow-planning
-   - application-design
    - units-generation
+   - user-stories
    - bolt-planning
 
 2. If a stage is `in_progress` with `questions_file` set: resume Q&A for that stage (do NOT regenerate the questions file - read the existing one and check for unanswered [Answer]: tags).
@@ -189,10 +186,9 @@ Based on the resume point determined in Step 4, read the corresponding rule file
 | workspace-detection | `~/.claude/olympus/rules/inception/workspace-detection.md` |
 | reverse-engineering | `~/.claude/olympus/rules/inception/reverse-engineering.md` |
 | requirements-analysis | `~/.claude/olympus/rules/inception/requirements-analysis.md` |
-| user-stories | `~/.claude/olympus/rules/inception/user-stories.md` |
 | workflow-planning | `~/.claude/olympus/rules/inception/workflow-planning.md` |
-| application-design | `~/.claude/olympus/rules/inception/application-design.md` |
 | units-generation | `~/.claude/olympus/rules/inception/units-generation.md` |
+| user-stories | `~/.claude/olympus/rules/inception/user-stories.md` |
 | bolt-planning | `~/.claude/olympus/rules/inception/bolt-planning.md` |
 | functional-design | `~/.claude/olympus/rules/construction/functional-design.md` |
 | nfr-requirements | `~/.claude/olympus/rules/construction/nfr-requirements.md` |
@@ -245,9 +241,8 @@ Wait for user response before proceeding.
 |---|---|
 | reverse-engineering | `explore-medium` + `multimodal-looker` (optional, for diagrams) |
 | requirements-analysis | `metis` (optional blind spot analysis) |
-| user-stories | `oracle-medium` |
-| application-design | `oracle` + `momus` (optional review gate) |
 | units-generation | `olympian` + `momus` (optional review gate) |
+| user-stories | `oracle-medium` |
 | functional-design | `oracle-medium` |
 | nfr-requirements | `oracle-medium` + `librarian` (optional tech validation) |
 | nfr-design | `oracle-medium` |

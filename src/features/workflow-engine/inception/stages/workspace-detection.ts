@@ -25,10 +25,6 @@ function getSkippedStagesForPathway(
       {
         stage: 'user-stories',
         reason: `${pathwayType} pathway does not require user-stories`,
-      },
-      {
-        stage: 'application-design',
-        reason: `${pathwayType} pathway does not require application-design`,
       }
     );
   }

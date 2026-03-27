@@ -21,11 +21,11 @@ The following artifacts MUST be available before Units Generation begins. The ag
 | Artifact | Path | Required | Purpose |
 |----------|------|----------|---------|
 | Requirements | `inception/requirements/requirements.md` | YES | FR-N requirement IDs, priorities, and descriptions |
-| User Stories | `inception/user-stories/stories.md` | CONDITIONAL | Story definitions with S-NNN IDs (if User Stories stage ran) |
-| Application Design | `inception/application-design/` | CONDITIONAL | Component/service definitions (if Application Design ran) |
 | Execution Plan | `inception/plans/execution-plan.md` | YES | Workflow routing and stage decisions |
 
 **Hard block**: If `requirements.md` is missing or contains no FR-N requirement IDs, Units Generation cannot proceed. Abort and direct the user to complete Requirements Analysis first.
+
+> **Note**: Stories do not exist yet at this point -- they are created in the User Stories stage after units are defined. If prior application design artifacts exist (from brownfield analysis or earlier workflows), they may inform domain analysis but are not a prerequisite.
 
 ---
 
@@ -37,7 +37,7 @@ This stage produces the following artifacts in `aidlc-docs/{workflowId}/inceptio
 |----------|------|-----------|-------------|
 | Unit overview | `inception/units/unit-of-work.md` | ALWAYS | Unit definitions, requirement mapping, dependency graph |
 | Dependency matrix | `inception/units/unit-of-work-dependency.md` | When 2+ units | Cross-unit dependency analysis |
-| Story map | `inception/units/unit-of-work-story-map.md` | When stories exist | Story-to-unit assignment mapping |
+| Story map | `inception/units/unit-of-work-story-map.md` | After User Stories stage | Story-to-unit assignment mapping (created during User Stories, not during Units Generation) |
 | Per-unit briefs | `inception/units/{UNIT-NNN-slug}/unit-brief.md` | When 2+ units | Detailed per-unit brief for Bolt Planning |
 
 ### Canonical Templates
@@ -106,11 +106,12 @@ Unit boundaries define the scope of all subsequent design and code generation wo
 ## Step 1: Read Input Artifacts
 
 - [ ] Read `inception/requirements/requirements.md` — extract all FR-N IDs, descriptions, and priorities
-- [ ] Read `inception/user-stories/stories.md` (if exists) — extract all S-NNN IDs and titles
-- [ ] Read `inception/application-design/` artifacts (if exist) — extract component/service definitions
+- [ ] Read `inception/application-design/` artifacts (if exist from brownfield analysis) — extract component/service definitions to inform domain analysis
 - [ ] Verify `requirements.md` contains at least one FR-N requirement (hard block if missing)
 
 ## Step 2: Domain Analysis
+
+This step subsumes the former Application Design stage. Identify components, services, and their dependencies as part of bounded context analysis.
 
 Before generating questions or decomposing units, perform domain analysis on the input artifacts. This analysis informs the decomposition approach and ensures questions target real ambiguities rather than generic categories.
 
@@ -153,7 +154,7 @@ This draft mapping will be refined based on Q&A answers but serves as the baseli
 
 ## Step 5: Generate Context-Appropriate Questions
 
-**DIRECTIVE**: Analyze the requirements, stories, and application design to generate ONLY questions relevant to THIS specific decomposition problem. Use the categories below as inspiration, NOT as a mandatory checklist. Skip entire categories if not applicable.
+**DIRECTIVE**: Analyze the requirements and any available application design artifacts to generate ONLY questions relevant to THIS specific decomposition problem. Use the categories below as inspiration, NOT as a mandatory checklist. Skip entire categories if not applicable.
 
 - EMBED questions using [Answer]: tag format
 - Focus on ambiguities and missing information specific to this context
@@ -187,7 +188,7 @@ This draft mapping will be refined based on Q&A answers but serves as the baseli
 - [ ] **Greenfield only**: Document code organization strategy in `unit-of-work.md` (see code-generation.md for structure patterns)
 - [ ] Validate unit boundaries and dependencies
 - [ ] Ensure all requirements are assigned to units (100% coverage)
-- [ ] Assign existing stories to units for traceability (stories do not drive decomposition — domain boundaries do)
+- [ ] Prepare unit briefs with placeholder story sections (populated during User Stories stage)
 
 ## Step 8: Request User Input
 
@@ -229,7 +230,6 @@ After Q&A is complete, finalize the requirement-to-unit mapping based on user an
 - [ ] Update the draft mapping with any changes from user feedback
 - [ ] Verify 100% FR coverage — every FR in `requirements.md` is assigned to exactly one unit
 - [ ] Verify 100% must-priority coverage — every Must FR is assigned
-- [ ] If stories exist, verify every story is assigned to a unit
 - [ ] Resolve any mapping conflicts surfaced during Q&A
 
 **Hard block**: If any FR remains unassigned after Q&A, do not proceed to approval. Either assign it to an existing unit or create a new unit.
@@ -305,7 +305,7 @@ The agent MUST read the template file and produce a brief with ALL required sect
 - Unit briefs supplement, not replace, `unit-of-work.md` — the overview document remains the single index of all units
 - Assigned Requirements must trace back to FRs in `requirements.md` and match the Requirement-to-Unit Mapping
 - Dependencies must be consistent with `unit-of-work-dependency.md`
-- Every story assigned to this unit must appear in the Stories Assigned table
+- Stories Assigned table should contain placeholder content (stories are created in the User Stories stage after units are defined)
 - Keep domain-level detail appropriate — detailed functional design happens in the Construction phase
 
 ## Step 18b: Continue or Complete Generation
@@ -355,8 +355,8 @@ Validation results:
 [AI-generated summary of units and decomposition approach]
 
 ## Units Created
-- U-001: {name} — {n} stories, {n} requirements, complexity: {S/M/L/XL}
-- U-002: {name} — {n} stories, {n} requirements, complexity: {S/M/L/XL}
+- U-001: {name} — {n} requirements, complexity: {S/M/L/XL}
+- U-002: {name} — {n} requirements, complexity: {S/M/L/XL}
 
 ## Dependency Graph
 [U-001: {name}] --> [U-002: {name}] --> [U-003: {name}]
@@ -364,7 +364,6 @@ Validation results:
 ## Requirement Coverage
 - FR assigned: {n}/{total} (must be 100%)
 - Must-priority covered: {n}/{n}
-- Story coverage: {n}/{total}
 
 ## Independence Validation
 All units passed 5/5 independence criteria.
@@ -372,7 +371,6 @@ All units passed 5/5 independence criteria.
 ## Artifacts Created
 - inception/units/unit-of-work.md
 - inception/units/unit-of-work-dependency.md
-- inception/units/unit-of-work-story-map.md
 - inception/units/UNIT-001-{slug}/unit-brief.md
 - inception/units/UNIT-002-{slug}/unit-brief.md
 
@@ -385,7 +383,7 @@ All units passed 5/5 independence criteria.
 
 **You may:**
 - **Request Changes** — Ask for modifications to the units generation if required
-- **Approve & Continue** — Approve units and proceed to **CONSTRUCTION PHASE**
+- **Approve & Continue** — Approve units and proceed to **User Stories**
 ```
 
 ## Step 20: Wait for Explicit Approval
@@ -417,8 +415,8 @@ After approval, present the final summary in this structured format:
 ## Units Generation Complete
 
 ### Units Created
-- U-001: {name} — {n} stories, {n} requirements, complexity: {S/M/L/XL}
-- U-002: {name} — {n} stories, {n} requirements, complexity: {S/M/L/XL}
+- U-001: {name} — {n} requirements, complexity: {S/M/L/XL}
+- U-002: {name} — {n} requirements, complexity: {S/M/L/XL}
 
 ### Dependency Graph
 [U-001] --> [U-002] --> [U-003]
@@ -430,7 +428,6 @@ After approval, present the final summary in this structured format:
 ### Artifacts Created
 inception/units/unit-of-work.md
 inception/units/unit-of-work-dependency.md
-inception/units/unit-of-work-story-map.md
 inception/units/UNIT-001-{slug}/unit-brief.md
 inception/units/UNIT-002-{slug}/unit-brief.md
 ```
@@ -440,7 +437,7 @@ inception/units/UNIT-002-{slug}/unit-brief.md
 ## Test Contract
 
 ```yaml
-input: Requirements (FR-N IDs), stories (S-N IDs), application design (if available)
+input: Requirements (FR-N IDs), application design (if available from brownfield analysis)
 output: unit-of-work.md, unit-of-work-dependency.md, unit-of-work-story-map.md, per-unit briefs
 constraints:
   requirement_coverage: 100% (every FR assigned to a unit)
@@ -494,15 +491,14 @@ checkpoints: 0 (part of inception review gate)
 - All unit artifacts generated according to plan and canonical templates:
   - `unit-of-work.md` with unit definitions and Requirement-to-Unit Mapping
   - `unit-of-work-dependency.md` with dependency matrix (when 2+ units)
-  - `unit-of-work-story-map.md` with story mappings (when stories exist)
-  - Per-unit briefs (when 2+ units)
+  - Per-unit briefs with placeholder story sections (when 2+ units)
 - 100% requirement coverage (every FR assigned to a unit)
 - 100% must-priority coverage
 - All units pass independence validation (5/5 criteria)
-- Units verified and ready for bolt planning
+- Units verified and ready for User Stories stage
 
 ---
 
-## Next Stage: Bolt Planning
+## Next Stage: User Stories
 
-After units are approved, the workflow proceeds to **Bolt Planning** — a separate inception stage that decomposes each unit's stories into bolt spec files. Bolt creation does NOT happen during Units Generation. The `unit-of-work.md` artifacts and per-unit briefs produced here are the primary inputs to bolt planning.
+After units are approved, the workflow proceeds to **User Stories** — a separate inception stage that creates per-unit user stories from each unit's assigned requirements. Stories are scoped to their parent unit and reference the unit ID. After stories are created, the workflow proceeds to **Bolt Planning**, which decomposes each unit's stories into bolt spec files.

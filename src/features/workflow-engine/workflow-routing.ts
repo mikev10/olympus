@@ -237,10 +237,9 @@ function buildDefaultStagesForPhase(phase: WorkflowPhase, pathway: PathwayType):
         'workspace-detection',
         'reverse-engineering',
         'requirements-analysis',
-        'user-stories',
         'workflow-planning',
-        'application-design',
         'units-generation',
+        'user-stories',
         'bolt-planning',
       ];
     case 'construction':
@@ -268,7 +267,6 @@ function getStageRationale(phase: WorkflowPhase, stage: string, _pathway: Pathwa
     'inception:requirements-analysis': 'Structured Q&A to capture functional and non-functional requirements',
     'inception:user-stories': 'Generate user personas and stories with Given/When/Then acceptance criteria',
     'inception:workflow-planning': 'Generate execution plan with Mermaid visualization and live checkboxes',
-    'inception:application-design': 'High-level component identification, service boundaries, and dependencies',
     'inception:units-generation': 'Define units of work with inter-unit dependencies and story mapping',
     'inception:bolt-planning': 'Decompose units into executable bolts with dependency tracking',
     'construction:unit-decomposition': 'Break intent into implementable units',
@@ -313,7 +311,6 @@ export async function generateWorkflowRouting(options: WorkflowRoutingOptions): 
       const isUnitDecomposition = phase === 'construction' && stage === 'unit-decomposition';
       const isReverseEngineering = phase === 'inception' && stage === 'reverse-engineering';
       const isUserStories = phase === 'inception' && stage === 'user-stories';
-      const isAppDesign = phase === 'inception' && stage === 'application-design';
       const isUnitsGeneration = phase === 'inception' && stage === 'units-generation';
 
       let included = true;
@@ -323,7 +320,7 @@ export async function generateWorkflowRouting(options: WorkflowRoutingOptions): 
       if (isReverseEngineering && pathwayType === 'greenfield') {
         included = false;
       }
-      if ((isUserStories || isAppDesign) && (pathwayType === 'bugfix' || pathwayType === 'optimization')) {
+      if (isUserStories && (pathwayType === 'bugfix' || pathwayType === 'optimization')) {
         included = false;
       }
       if (isUnitsGeneration && recommended_depth === 'minimal') {

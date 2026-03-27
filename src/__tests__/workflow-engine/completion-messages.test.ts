@@ -62,15 +62,14 @@ describe('completion-messages', () => {
 });
 
 describe('INCEPTION_STAGE_REVIEW_ITEMS', () => {
-  it('has review items for all 8 inception stages', () => {
+  it('has review items for all 7 inception stages', () => {
     const stages: InceptionStage[] = [
       'workspace-detection',
       'reverse-engineering',
       'requirements-analysis',
-      'user-stories',
       'workflow-planning',
-      'application-design',
       'units-generation',
+      'user-stories',
       'bolt-planning',
     ];
     for (const stage of stages) {
@@ -160,10 +159,9 @@ describe('buildInceptionStageCompletionMessage', () => {
       'workspace-detection',
       'reverse-engineering',
       'requirements-analysis',
-      'user-stories',
       'workflow-planning',
-      'application-design',
       'units-generation',
+      'user-stories',
       'bolt-planning',
     ];
     for (const stage of stages) {

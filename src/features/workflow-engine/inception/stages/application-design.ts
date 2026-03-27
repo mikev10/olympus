@@ -5,15 +5,20 @@ import {
   writeApplicationDesignArtifacts,
 } from '../../application-design.js';
 import type { ApplicationDesignArtifacts } from '../../application-design.js';
-import { registerStageHandler } from '../orchestrator.js';
 import type { InceptionStageResult } from '../orchestrator.js';
 import type { WorkflowCheckpointV3 } from '../../phase-types.js';
 
+/**
+ * Legacy application-design stage handler. This stage has been removed from
+ * the InceptionStage pipeline (replaced by per-unit design in Construction).
+ * The function is preserved for backward compatibility but is no longer
+ * registered as a stage handler.
+ */
 export async function executeApplicationDesign(
   projectPath: string,
   workflowId: string,
   checkpoint: WorkflowCheckpointV3
-): Promise<InceptionStageResult> {
+): Promise<Omit<InceptionStageResult, 'stage'> & { stage: string }> {
   const pathwayType = checkpoint.pathway_type ?? 'greenfield';
   if (pathwayType === 'bugfix' || pathwayType === 'optimization') {
     return {
@@ -88,5 +93,3 @@ export async function executeApplicationDesign(
     ].join('\n'),
   };
 }
-
-registerStageHandler('application-design', executeApplicationDesign);

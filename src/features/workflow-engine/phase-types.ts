@@ -21,10 +21,9 @@ export type InceptionStage =
   | 'workspace-detection'      // greenfield/brownfield auto-detect
   | 'reverse-engineering'      // brownfield only — 6 artifacts
   | 'requirements-analysis'    // structured Q&A -> requirements.md
-  | 'user-stories'             // conditional — personas.md + stories.md
   | 'workflow-planning'        // execution plan with Mermaid diagram
-  | 'application-design'       // conditional — 4 design artifacts
   | 'units-generation'         // conditional — unit-of-work artifacts
+  | 'user-stories'             // conditional — personas.md + stories.md (per-unit)
   | 'bolt-planning';           // conditional — bolt decomposition per unit
 
 export interface InceptionStageState {

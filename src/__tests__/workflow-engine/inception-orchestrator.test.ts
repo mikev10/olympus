@@ -61,10 +61,9 @@ const ALL_STAGES: InceptionStage[] = [
   'workspace-detection',
   'reverse-engineering',
   'requirements-analysis',
-  'user-stories',
   'workflow-planning',
-  'application-design',
   'units-generation',
+  'user-stories',
   'bolt-planning',
 ];
 
@@ -154,7 +153,7 @@ describe('InceptionOrchestrator', () => {
       expect(mockSaveCheckpoint).toHaveBeenCalledOnce();
       const saved = mockSaveCheckpoint.mock.calls[0][1];
       expect(saved.inception_stages).toBeDefined();
-      expect(Object.keys(saved.inception_stages)).toHaveLength(8);
+      expect(Object.keys(saved.inception_stages)).toHaveLength(7);
     });
 
     it('skips reverse-engineering for greenfield', async () => {
@@ -168,7 +167,7 @@ describe('InceptionOrchestrator', () => {
       expect(saved.inception_stages['workspace-detection'].status).toBe('not_started');
     });
 
-    it('skips user-stories and application-design for bugfix', async () => {
+    it('skips user-stories for bugfix', async () => {
       const cp = createMockCheckpoint();
       mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
 
@@ -176,10 +175,9 @@ describe('InceptionOrchestrator', () => {
 
       const saved = mockSaveCheckpoint.mock.calls[0][1];
       expect(saved.inception_stages['user-stories'].status).toBe('skipped');
-      expect(saved.inception_stages['application-design'].status).toBe('skipped');
     });
 
-    it('skips user-stories and application-design for optimization', async () => {
+    it('skips user-stories for optimization', async () => {
       const cp = createMockCheckpoint();
       mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
 
@@ -187,7 +185,6 @@ describe('InceptionOrchestrator', () => {
 
       const saved = mockSaveCheckpoint.mock.calls[0][1];
       expect(saved.inception_stages['user-stories'].status).toBe('skipped');
-      expect(saved.inception_stages['application-design'].status).toBe('skipped');
     });
 
     it('respects plan exclusions via isStageIncluded()', async () => {
@@ -391,17 +388,16 @@ describe('InceptionOrchestrator', () => {
         'workspace-detection': 'completed',
         'reverse-engineering': 'skipped',
         'requirements-analysis': 'not_started',
-        'user-stories': 'not_started',
         'workflow-planning': 'not_started',
-        'application-design': 'not_started',
         'units-generation': 'not_started',
+        'user-stories': 'not_started',
         'bolt-planning': 'not_started',
       }, 'requirements-analysis');
       mockLoadCheckpoint.mockResolvedValueOnce(structuredClone(cp));
 
       const progress = await orchestrator.getProgress(projectPath, workflowId);
 
-      expect(progress.total_stages).toBe(8);
+      expect(progress.total_stages).toBe(7);
       expect(progress.completed_stages).toBe(1);
       expect(progress.skipped_stages).toBe(1);
       expect(progress.current_stage).toBe('requirements-analysis');
@@ -423,10 +419,9 @@ describe('InceptionOrchestrator', () => {
         'workspace-detection': 'completed',
         'reverse-engineering': 'skipped',
         'requirements-analysis': 'completed',
-        'user-stories': 'skipped',
         'workflow-planning': 'completed',
-        'application-design': 'skipped',
         'units-generation': 'completed',
+        'user-stories': 'skipped',
         'bolt-planning': 'completed',
       };
       const cp = createCheckpointWithStages(allDone as any);

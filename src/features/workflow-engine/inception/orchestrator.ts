@@ -53,10 +53,9 @@ const INCEPTION_STAGE_ORDER: InceptionStage[] = [
   'workspace-detection',
   'reverse-engineering',
   'requirements-analysis',
-  'user-stories',
   'workflow-planning',
-  'application-design',
   'units-generation',
+  'user-stories',
   'bolt-planning',
 ];
 
@@ -92,7 +91,7 @@ function determineInitialStatus(
 
   if (
     (pathwayType === 'bugfix' || pathwayType === 'optimization') &&
-    (stage === 'user-stories' || stage === 'application-design')
+    stage === 'user-stories'
   ) {
     return {
       status: 'skipped',

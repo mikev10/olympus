@@ -54,10 +54,9 @@ const ALL_STAGES: InceptionStage[] = [
   'workspace-detection',
   'reverse-engineering',
   'requirements-analysis',
-  'user-stories',
   'workflow-planning',
-  'application-design',
   'units-generation',
+  'user-stories',
   'bolt-planning',
 ];
 

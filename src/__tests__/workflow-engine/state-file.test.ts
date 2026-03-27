@@ -595,10 +595,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection', status: 'completed', completed_at: '2026-02-28T10:00:00.000Z' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering', status: 'completed', completed_at: '2026-02-28T11:00:00.000Z' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis', status: 'in_progress' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories', status: 'not_started' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning', status: 'not_started' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design', status: 'skipped', skip_reason: 'greenfield' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation', status: 'not_started' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories', status: 'not_started' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning', status: 'not_started' }),
       },
       current_inception_stage: 'requirements-analysis',
     });
@@ -607,10 +607,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
     expect(content).toContain('  - [x] Workspace Detection (completed 2026-02-28T10:00:00.000Z)');
     expect(content).toContain('  - [x] Reverse Engineering (completed 2026-02-28T11:00:00.000Z)');
     expect(content).toContain('  - [ ] Requirements Analysis <- CURRENT');
-    expect(content).toContain('  - [ ] User Stories');
     expect(content).toContain('  - [ ] Workflow Planning');
-    expect(content).toContain('  - [ ] Application Design (skipped -- greenfield)');
     expect(content).toContain('  - [ ] Units Generation');
+    expect(content).toContain('  - [ ] User Stories');
+    expect(content).toContain('  - [ ] Bolt Planning');
   });
 
   it('does not render inception sub-stages when inception_stages is undefined', () => {
@@ -628,10 +628,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection', status: 'completed', completed_at: '2026-02-28T10:00:00.000Z' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
       current_inception_stage: 'workspace-detection',
     });
@@ -650,10 +650,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design', status: 'skipped', skip_reason: 'brownfield' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation', status: 'skipped', skip_reason: 'no units needed' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories', status: 'skipped', skip_reason: 'brownfield' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
     });
     const filePath = generateStateFile(tmpDir, 'wf-skipped', checkpoint);
@@ -669,15 +669,15 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design', status: 'skipped', skip_reason: null }),
-        'units-generation': makeInceptionStageState({ stage: 'units-generation' }),
+        'units-generation': makeInceptionStageState({ stage: 'units-generation', status: 'skipped', skip_reason: null }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
     });
     const filePath = generateStateFile(tmpDir, 'wf-skipped-noreason', checkpoint);
     const content = fs.readFileSync(filePath, 'utf-8');
-    expect(content).toContain('  - [ ] Application Design (skipped)');
+    expect(content).toContain('  - [ ] Units Generation (skipped)');
   });
 
   it('current inception stage marker only appears once', () => {
@@ -687,10 +687,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection', status: 'completed', completed_at: '2026-02-28T10:00:00.000Z' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering', status: 'in_progress' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
       current_inception_stage: 'reverse-engineering',
     });
@@ -708,10 +708,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
     });
     const filePath = generateStateFile(tmpDir, 'wf-titlecase', checkpoint);
@@ -719,10 +719,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
     expect(content).toContain('Workspace Detection');
     expect(content).toContain('Reverse Engineering');
     expect(content).toContain('Requirements Analysis');
-    expect(content).toContain('User Stories');
     expect(content).toContain('Workflow Planning');
-    expect(content).toContain('Application Design');
     expect(content).toContain('Units Generation');
+    expect(content).toContain('User Stories');
+    expect(content).toContain('Bolt Planning');
   });
 
   it('other phases are not affected when inception_stages is populated', () => {
@@ -738,10 +738,10 @@ describe('buildPhaseProgress inception sub-stages', () => {
         'workspace-detection': makeInceptionStageState({ stage: 'workspace-detection', status: 'completed', completed_at: '2026-02-28T10:00:00.000Z' }),
         'reverse-engineering': makeInceptionStageState({ stage: 'reverse-engineering' }),
         'requirements-analysis': makeInceptionStageState({ stage: 'requirements-analysis' }),
-        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
         'workflow-planning': makeInceptionStageState({ stage: 'workflow-planning' }),
-        'application-design': makeInceptionStageState({ stage: 'application-design' }),
         'units-generation': makeInceptionStageState({ stage: 'units-generation' }),
+        'user-stories': makeInceptionStageState({ stage: 'user-stories' }),
+        'bolt-planning': makeInceptionStageState({ stage: 'bolt-planning' }),
       },
     });
     const filePath = generateStateFile(tmpDir, 'wf-other-phases', checkpoint);

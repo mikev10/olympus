@@ -207,7 +207,7 @@ Would you like me to generate structured artifacts for this plan?
 
 **Option 1: Yes - Full Workflow**
 I'll run you through the complete structured workflow:
-- 8-stage inception pipeline (workspace detection → requirements → user stories → workflow planning → application design → units generation → bolt planning)
+- 7-stage inception pipeline (workspace detection → requirements → workflow planning → units generation → user stories → bolt planning)
 - Each stage generates structured artifacts with REVIEW REQUIRED gates
 - Q&A file-based interaction with [Answer]: tags
 - Checkpoint-based (can pause/resume)
@@ -243,7 +243,7 @@ When user confirms they want structured artifacts:
    Starting structured workflow with interview context...
 
    Starting inception pipeline...
-   [8-stage progress will be displayed as stages execute]
+   [7-stage progress will be displayed as stages execute]
 
    Your progress is checkpointed at: \`aidlc-docs/{workflow-id}/checkpoint.json\`
    Resume anytime with: \`/continue\` (auto-detects and resumes active workflow)

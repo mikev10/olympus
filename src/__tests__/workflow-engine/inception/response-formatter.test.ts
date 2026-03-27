@@ -102,10 +102,10 @@ describe('formatStageCompletion', () => {
       'requirements-analysis',
       [],
       [],
-      'application-design',
+      'workflow-planning',
       '',
     );
-    expect(result).toContain('**Application Design**');
+    expect(result).toContain('**Workflow Planning**');
   });
 
   it('includes action prompts for user', () => {
@@ -181,10 +181,10 @@ describe('formatStageCompletion', () => {
       'workspace-detection',
       'reverse-engineering',
       'requirements-analysis',
-      'user-stories',
       'workflow-planning',
-      'application-design',
       'units-generation',
+      'user-stories',
+      'bolt-planning',
     ] as const;
 
     for (const stage of stages) {

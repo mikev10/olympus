@@ -2,7 +2,7 @@
  * Workflow Engine Module
  *
  * Provides structured workflow system for plan execution with:
- * - 8-stage inception pipeline with adaptive depth
+ * - 7-stage inception pipeline with adaptive depth
  * - Checkpoint persistence and resume capability
  * - Validation gates (Momus, Metis reviews)
  * - Artifact generation and management

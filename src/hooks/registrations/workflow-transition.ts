@@ -127,7 +127,7 @@ export function registerWorkflowTransitionHooks(): void {
           const stageState = inceptionStages[currentStage];
 
           if (stageState?.status === 'completed') {
-            const totalStages = 8;
+            const totalStages = 7;
             const completedCount = Object.values(inceptionStages).filter(
               (s: { status: string }) => s.status === 'completed'
             ).length;

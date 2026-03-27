@@ -91,6 +91,8 @@ updated: "{YYYY-MM-DDTHH:MM:SSZ}"
 
 ### Stories Assigned
 
+> **Note**: This section is initially created with placeholder content during Units Generation. It is populated with actual story data when the User Stories stage runs after units are defined.
+
 | Story ID | Title | Priority | Status |
 |----------|-------|----------|--------|
 | S-001 | {Title} | Must | Planned |

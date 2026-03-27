@@ -11,10 +11,9 @@ const INCEPTION_STAGE_ORDER: InceptionStage[] = [
   'workspace-detection',
   'reverse-engineering',
   'requirements-analysis',
-  'user-stories',
   'workflow-planning',
-  'application-design',
   'units-generation',
+  'user-stories',
   'bolt-planning',
 ];
 

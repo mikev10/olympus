@@ -28,11 +28,6 @@ export const INCEPTION_STAGE_REVIEW_ITEMS: Record<InceptionStage, string[]> = {
     'Verify stage dependencies in the workflow diagram are correct',
     'Confirm estimated effort aligns with your expectations',
   ],
-  'application-design': [
-    'Review component design for architectural soundness',
-    'Verify service boundaries and responsibilities are clear',
-    'Check component dependency graph for circular dependencies',
-  ],
   'units-generation': [
     'Review each unit of work for clear scope and boundaries',
     'Verify unit dependencies are correctly mapped',

@@ -82,10 +82,9 @@ function createMockCheckpoint(overrides?: Partial<WorkflowCheckpointV3>): Workfl
       'workspace-detection': makeInceptionStageState('workspace-detection', 'in_progress'),
       'reverse-engineering': makeInceptionStageState('reverse-engineering'),
       'requirements-analysis': makeInceptionStageState('requirements-analysis'),
-      'user-stories': makeInceptionStageState('user-stories'),
       'workflow-planning': makeInceptionStageState('workflow-planning'),
-      'application-design': makeInceptionStageState('application-design'),
       'units-generation': makeInceptionStageState('units-generation'),
+      'user-stories': makeInceptionStageState('user-stories'),
       'bolt-planning': makeInceptionStageState('bolt-planning'),
     },
     ...overrides,
@@ -135,7 +134,7 @@ describe('workspace-detection stage', () => {
       expect(saved.inception_stages?.['reverse-engineering'].skip_reason).toContain('Greenfield');
     });
 
-    it('does not skip user-stories or application-design for greenfield', async () => {
+    it('does not skip user-stories for greenfield', async () => {
       mockDetectBrownfield.mockResolvedValue({ isBrownfield: false, sourceFileCount: 0 });
       const checkpoint = createMockCheckpoint();
       const freshCheckpoint = createMockCheckpoint();
@@ -146,7 +145,6 @@ describe('workspace-detection stage', () => {
 
       const saved = mockSaveCheckpoint.mock.calls[0]?.[1] as WorkflowCheckpointV3;
       expect(saved.inception_stages?.['user-stories'].status).toBe('not_started');
-      expect(saved.inception_stages?.['application-design'].status).toBe('not_started');
     });
   });
 
@@ -232,7 +230,7 @@ describe('workspace-detection stage', () => {
   });
 
   describe('bugfix pathway stage skipping', () => {
-    it('skips user-stories and application-design for bugfix pathway', async () => {
+    it('skips user-stories for bugfix pathway', async () => {
       mockDetectBrownfield.mockResolvedValue({ isBrownfield: true, sourceFileCount: 5 });
       mockPathExists.mockResolvedValue(true as never);
       mockReadFile.mockResolvedValue('fix the crash' as never);
@@ -247,8 +245,6 @@ describe('workspace-detection stage', () => {
       const saved = mockSaveCheckpoint.mock.calls[0]?.[1] as WorkflowCheckpointV3;
       expect(saved.inception_stages?.['user-stories'].status).toBe('skipped');
       expect(saved.inception_stages?.['user-stories'].skip_reason).toContain('bugfix');
-      expect(saved.inception_stages?.['application-design'].status).toBe('skipped');
-      expect(saved.inception_stages?.['application-design'].skip_reason).toContain('bugfix');
     });
 
     it('does not skip reverse-engineering for bugfix pathway', async () => {
@@ -268,7 +264,7 @@ describe('workspace-detection stage', () => {
   });
 
   describe('optimization pathway stage skipping', () => {
-    it('skips user-stories and application-design for optimization pathway', async () => {
+    it('skips user-stories for optimization pathway', async () => {
       mockDetectBrownfield.mockResolvedValue({ isBrownfield: true, sourceFileCount: 5 });
       mockPathExists.mockResolvedValue(true as never);
       mockReadFile.mockResolvedValue('optimize performance' as never);
@@ -283,8 +279,6 @@ describe('workspace-detection stage', () => {
       const saved = mockSaveCheckpoint.mock.calls[0]?.[1] as WorkflowCheckpointV3;
       expect(saved.inception_stages?.['user-stories'].status).toBe('skipped');
       expect(saved.inception_stages?.['user-stories'].skip_reason).toContain('optimization');
-      expect(saved.inception_stages?.['application-design'].status).toBe('skipped');
-      expect(saved.inception_stages?.['application-design'].skip_reason).toContain('optimization');
     });
   });
 
