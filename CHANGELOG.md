@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.11] - 2026-03-27
+
+### Fixed
+
+- **Distribution audit blockers** — Resolved 7 distribution audit blockers in workflow engine
+- **Distribution audit warnings** — Resolved 9 distribution audit warnings (Tier 1)
+
 ## [4.5.10] - 2026-03-27
 
 ### Fixed
