@@ -1,98 +1,192 @@
-# AI-DLC Core Workflow (Olympus Reference)
+# AI-DLC Core Workflow
 
-This document adapts the AWS AI-DLC workflow for Olympus conventions.
-Actual workflow execution is driven by the `/plan` command and Olympus agent delegation.
+This document is the compact reference for the AI-DLC (AI-Driven Development Life Cycle) framework.
+It is installed into CLAUDE.md and read by the AI at session start.
+Detailed process rules are loaded on demand from `~/.claude/olympus/rules/`.
 
 ## Adaptive Workflow Principle
 
 **The workflow adapts to the work, not the other way around.**
 
-The AI model intelligently assesses what stages are needed based on:
+The AI assesses what stages are needed based on:
 1. User's stated intent and clarity
-2. Existing codebase state (if any)
+2. Existing codebase state (greenfield vs brownfield)
 3. Complexity and scope of change
-4. Risk and impact assessment
+4. Team familiarity with the affected area
 
-## MANDATORY: Rule Details Loading
+## MANDATORY: Rule Loading
 
-**CRITICAL**: When performing any phase, you MUST read and use relevant content from rule detail files installed at `~/.claude/olympus/rules/`.
+**CRITICAL**: When performing any stage, you MUST read the relevant rule file from `~/.claude/olympus/rules/` BEFORE executing.
 
-**Common Rules**: ALWAYS load common rules at workflow start:
-- Load `~/.claude/olympus/rules/common/process-overview.md` for workflow overview
-- Load `~/.claude/olympus/rules/common/session-continuity.md` for session resumption guidance
-- Load `~/.claude/olympus/rules/common/content-validation.md` for content validation requirements
-- Load `~/.claude/olympus/rules/common/markdown-formatting.md` for markdown formatting and markdownlint compliance
-- Load `~/.claude/olympus/rules/common/question-format-guide.md` for question formatting rules
-- Load `~/.claude/olympus/rules/common/terminology.md` for phase/stage naming conventions
-- Load `~/.claude/olympus/rules/common/error-handling.md` for error recovery procedures
+**Common Rules** — ALWAYS load at workflow start:
+- `common/process-overview.md` — workflow overview with Mermaid diagrams
+- `common/terminology.md` — canonical terms and naming conventions
+- `common/gate-enforcement.md` — checkpoint and gate approval rules
+- `common/session-continuity.md` — session resumption and checkpoint recovery
+- `common/content-validation.md` — content validation before file creation
+- `common/markdown-formatting.md` — markdown formatting and markdownlint compliance
+- `common/question-format-guide.md` — question formatting for mob/squad interactions
+- `common/error-handling.md` — error recovery procedures
 
 ## MANDATORY: Content Validation
 
-Before creating ANY file, validate content per `~/.claude/olympus/rules/common/content-validation.md`:
+Before creating ANY artifact, validate per `common/content-validation.md`:
 Mermaid syntax, ASCII diagrams, special character escaping, text alternatives.
 
-## MANDATORY: Question File Format
+## MANDATORY: Welcome Message
 
-Follow `~/.claude/olympus/rules/common/question-format-guide.md` for multiple choice format, [Answer]: tags, and validation.
-
-## MANDATORY: Custom Welcome Message
-
-At workflow start, load and display `~/.claude/olympus/rules/common/welcome-message.md` once.
+At workflow start, load and display `common/welcome-message.md` once.
 
 ---
 
-# INCEPTION PHASE — Determine WHAT to build and WHY
+## Two-Layer Context Model
 
-Core decomposition flow: **Intent -> Units -> Stories -> Bolts -> Done**
+AI context comes from two layers:
 
-Each stage: load its rule file BEFORE executing, log all interactions in audit.md, wait for explicit user approval before proceeding (do not auto-advance).
+| Layer | Location | Purpose | Created |
+|-------|----------|---------|---------|
+| **Persistent Project Context** | `.aidlc/` at repo root | Architecture, patterns, conventions, gotchas | Once, maintained over time |
+| **Scoped Discovery** | `{intent-id}/inception/discovery/` | Code paths affected by THIS intent | Per intent, during inception |
+
+The AI reads `.aidlc/project-context.md` first, then does a focused scan of only the affected code. Discovery depth adapts to team familiarity with the area.
+
+---
+
+## Phase Model
+
+Two top-level phases. Construction has two sub-phases per unit.
+
+```
+INCEPTION                             CONSTRUCTION (per unit)
+(Mob -- decision makers)              (Squad -- implementers)
+
++-----------------------+            +-----------------------------+
+|  Workspace Detection  |            |  +----------+  +---------+ |
+|  Scoped Discovery     |            |  |  Design  |->|  Build  | |
+|  Requirements Analysis|   GATE 1   |  +----------+  +---------+ |
+|  Units Generation     | ---------> |     GATE 2        GATE 3   |
+|  User Stories         |  handoff   |                             |
+|  Bolt Planning        |            |  Units run in PARALLEL      |
+|  Workflow Planning    |            |  Bolts run in SEQUENCE      |
++-----------------------+            +-----------------------------+
+```
+
+### Stage Checkpoints
+
+Every stage has a checkpoint -- the AI presents output, pauses, and waits for human approval before advancing. Checkpoints are mandatory and cannot be skipped.
+
+### Gates
+
+Three formal quality gates at phase boundaries:
+
+| Gate | When | Who Approves | What's Checked |
+|------|------|--------------|----------------|
+| **Gate 1** | After all inception stages | PO + Tech Lead | Requirements covered, units independent, stories approved, bolt outlines reasonable, execution plan reviewed |
+| **Gate 2** | After unit design (per unit) | Tech Lead | Functional design sound, bolt specs refined, domain entities documented, QA reviewed for testability |
+| **Gate 3** | After all bolts built (per unit) | QA + Reviewer | All bolts pass acceptance criteria, tests pass, no regressions |
+
+Gate 2 and Gate 3 never relax. Per-bolt gates can relax after 2-3 full workflows.
+
+---
+
+# INCEPTION -- Determine WHAT to build and WHY
+
+Core flow: **Intent -> Units -> Stories -> Bolts -> Execution Plan**
+
+Each stage: load its rule file BEFORE executing, log all interactions in audit.md, wait for explicit approval before proceeding.
 
 | Stage | Condition | Rule File |
 |-------|-----------|-----------|
-| Workspace Detection | ALWAYS | `~/.claude/olympus/rules/inception/workspace-detection.md` |
-| Reverse Engineering | Brownfield only (no prior artifacts) | `~/.claude/olympus/rules/inception/reverse-engineering.md` |
-| Requirements Analysis | ALWAYS (adaptive depth) | `~/.claude/olympus/rules/inception/requirements-analysis.md` |
-| Workflow Planning | ALWAYS | `~/.claude/olympus/rules/inception/workflow-planning.md` |
-| Units Generation | Conditional (decomposes intent into independent domain units; includes domain analysis — subsumes former Application Design stage) | `~/.claude/olympus/rules/inception/units-generation.md` |
-| User Stories | Conditional (creates stories per-unit from each unit's assigned requirements; falls back to requirements-based when units skipped) | `~/.claude/olympus/rules/inception/user-stories.md` |
-| Bolt Planning | Conditional (decomposes each unit's stories into executable bolts with dependency tracking) | `~/.claude/olympus/rules/inception/bolt-planning.md` |
+| Workspace Detection | ALWAYS | `inception/workspace-detection.md` |
+| Scoped Discovery | ALWAYS (adaptive depth) | `inception/scoped-discovery.md` |
+| Requirements Analysis | ALWAYS | `inception/requirements-analysis.md` |
+| Units Generation | Conditional | `inception/units-generation.md` |
+| User Stories | Conditional | `inception/user-stories.md` |
+| Bolt Planning | Conditional | `inception/bolt-planning.md` |
+| Workflow Planning | ALWAYS | `inception/workflow-planning.md` |
+
+**Pre-inception inputs** (async, before mob session):
+- **Intent Brief** -- PO writes what to build and why (~30 min)
+- **Technical Brief** -- Senior dev who knows the area writes constraints, patterns, gotchas (~15 min, optional)
 
 ---
 
-# CONSTRUCTION PHASE — Determine HOW to build it
+# CONSTRUCTION -- Determine HOW to build it
 
-Each unit is completed fully (design + code) before moving to the next unit. Construction stages use standardized 2-option completion messages (Request Changes / Continue) — NO emergent 3-option behavior.
+Each unit is self-contained: own design, own build, own validation. Units run in parallel (different squads). Bolts run in sequence within a unit.
 
-**Per-Unit Loop** (for each unit of work):
+## Design Sub-Phase (per unit)
+
+Squad reads inception artifacts (unit-brief, stories, units-overview, execution-plan), then creates design artifacts. QA participates from the start.
 
 | Stage | Condition | Rule File |
 |-------|-----------|-----------|
-| Functional Design | Conditional (new data models, complex business logic) | `~/.claude/olympus/rules/construction/functional-design.md` |
-| NFR Requirements | Conditional (performance, security, scalability, tech stack) | `~/.claude/olympus/rules/construction/nfr-requirements.md` |
-| NFR Design | Conditional (NFR Requirements was executed) | `~/.claude/olympus/rules/construction/nfr-design.md` |
-| Infrastructure Design | Conditional (infra services, deployment arch) | `~/.claude/olympus/rules/construction/infrastructure-design.md` |
-| Code Generation | ALWAYS (two-part: plan then generate) | `~/.claude/olympus/rules/construction/code-generation.md` |
+| Unit Design (orchestrator) | ALWAYS | `construction/unit-design.md` |
+| Functional Design | ALWAYS (depth varies) | `construction/functional-design.md` |
+| Business Rules | ALWAYS (depth varies) | `construction/business-rules.md` |
+| Domain Entities | ALWAYS (depth varies) | `construction/domain-entities.md` |
+| NFR Design | Conditional | `construction/nfr-design.md` |
+| Infrastructure Design | Conditional | `construction/infrastructure-design.md` |
 
-**Build and Test** (ALWAYS, after all units): Load `~/.claude/olympus/rules/construction/build-and-test.md`
+**--> GATE 2: Design Approved** (Tech Lead reviews)
 
-**Documentation** (ALWAYS, after Build and Test): Load `~/.claude/olympus/rules/construction/documentation.md`
+## Build Sub-Phase (per unit)
+
+Bolts execute sequentially. Each bolt follows the **Plan -> Code -> Review** lifecycle.
+
+```
++----------------------------------------------------------+
+| BOLT-NNN                                                  |
+|  Plan ------------> Code ------------> Review             |
+|  [human gate]       [automated]        [human gate]       |
+|                                                           |
+|  AI reads spec      AI generates       Dev reviews code.  |
+|  + unit design      code + tests.      QA validates AC.   |
+|  -> impl approach   Tests run auto.    -> review.md       |
+|  Dev approves.                                            |
++----------------------------------------------------------+
+```
+
+**Advancement:** Tests pass + QA validates + human says "continue" -> next bolt.
+
+| Stage | Rule File |
+|-------|-----------|
+| Bolt Execution | `construction/bolt-execution.md` |
+| Test Generation | `construction/test-generation.md` |
+
+## Completion (per unit)
+
+| Stage | Condition | Rule File |
+|-------|-----------|-----------|
+| Unit Validation | ALWAYS (after all bolts) | `construction/unit-validation.md` |
+
+**--> GATE 3: Unit Complete** (QA validates, reviewer approves PR)
+
+## Post-Construction (after all units)
+
+| Stage | Condition | Rule File |
+|-------|-----------|-----------|
+| Documentation | ALWAYS | `construction/documentation.md` |
 
 ---
 
-# OPERATIONS PHASE — Placeholder for future deployment/monitoring workflows
+# OPERATIONS -- After all units complete
+
+Placeholder for deployment, monitoring, and operational workflows.
 
 ---
 
 ## Key Principles
 
-- **Adaptive Execution**: Only execute stages that add value
-- **User Control**: User can request stage inclusion/exclusion
+- **Adaptive Execution**: Only execute stages that add value; depth scales with complexity
+- **Stage Checkpoints**: AI presents output, pauses, waits for approval at EVERY stage
+- **Gate Enforcement**: Three gates always enforced -- no exceptions, even solo
+- **Per-Unit Independence**: Each unit has own checkpoint, design, validation
+- **Global Bolt Numbering**: BOLT-001 through BOLT-NNN across all units (unambiguous)
 - **Progress Tracking**: Update aidlc-state.md with executed and skipped stages
 - **Complete Audit Trail**: Log ALL user inputs and AI responses in audit.md with timestamps
   - Capture user's COMPLETE RAW INPUT exactly as provided (never summarize)
   - Log every interaction, not just approvals
-- **Content Validation**: Validate before file creation per content-validation.md rules
-- **NO EMERGENT BEHAVIOR**: Construction phases use standardized 2-option completion messages only
 
 ## MANDATORY: Plan-Level Checkbox Enforcement
 
@@ -100,13 +194,8 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 2. IMMEDIATELY mark steps `[x]` in the SAME interaction where work is completed
 3. Two-Level tracking: Plan-Level (detailed steps) + Stage-Level (aidlc-state.md)
 
-## Prompts Logging Requirements
+## Audit Log Format
 
-- Log EVERY user input with ISO 8601 timestamp in audit.md
-- Capture COMPLETE RAW INPUT exactly as provided (never summarize)
-- ALWAYS append/edit audit.md — NEVER overwrite
-
-### Audit Log Format:
 ```markdown
 ## [Stage Name]
 **Timestamp**: [ISO timestamp]
@@ -117,80 +206,98 @@ Each unit is completed fully (design + code) before moving to the next unit. Con
 ---
 ```
 
-## Directory Structure
+## Folder Structure
 
-```text
-<WORKSPACE-ROOT>/                   # APPLICATION CODE HERE
-├── [project-specific structure]
-├── aidlc-docs/                     # DOCUMENTATION ONLY
-│   ├── inception/
-│   │   ├── plans/
-│   │   ├── reverse-engineering/    # Brownfield only
-│   │   ├── requirements/
-│   │   ├── units/
-│   │   │   └── {UNIT-NNN-slug}/
-│   │   │       ├── unit-brief.md
-│   │   │       └── stories/        # Per-unit stories (created during User Stories stage)
-│   │   │           ├── S-001-{slug}.md
-│   │   │           └── S-002-{slug}.md
-│   │   └── user-stories/
-│   │       └── personas.md         # Project-wide personas (not per-unit)
-│   ├── construction/
-│   │   ├── {UNIT-NNN-slug}/
-│   │   │   ├── functional-design/
-│   │   │   ├── nfr-requirements/
-│   │   │   ├── nfr-design/
-│   │   │   ├── infrastructure-design/
-│   │   │   ├── code/               # Markdown summaries only
-│   │   │   └── bolts/              # Per-unit bolt specs (created during Bolt Planning)
-│   │   │       └── BOLT-NNN-{slug}/
-│   │   │           ├── spec.md
-│   │   │           └── review.md
-│   │   ├── design/
-│   │   ├── build-and-test/
-│   │   └── documentation/
-│   ├── operations/                 # Placeholder
-│   ├── aidlc-state.md
-│   └── audit.md
+```
+<repo-root>/
++-- .aidlc/                              # PERSISTENT PROJECT CONTEXT (Layer 1)
+|   +-- project-context.md
+|   +-- coding-standards.md
+|   +-- legacy-notes.md
+|   +-- templates/                       # project-level template overrides
+|       +-- inception/
+|       +-- construction/
+|
+aidlc-docs/
++-- {intent-id}/
+    +-- checkpoint.json                  # global workflow state
+    +-- aidlc-state.md                   # human-readable progress
+    +-- audit.md                         # full action trail
+    +-- intent.md                        # business objective (at root -- all phases reference)
+    |
+    +-- inception/                       === GATE 1 AT EXIT ===
+    |   +-- intent-questions.md              # Q&A + raw notes from mob session
+    |   +-- discovery/
+    |   |   +-- workspace-scan.json          # machine-generated, machine-consumed
+    |   |   +-- scope-analysis.md            # affected code, integration points, risks
+    |   +-- requirements/
+    |   |   +-- requirements.md              # functional requirements (FR-NNN)
+    |   |   +-- nfr.md                       # non-functional requirements
+    |   +-- personas.md                      # project-wide user personas
+    |   +-- story-map.md                     # PO review: all stories + requirements coverage
+    |   +-- units-overview.md                # mob's unit decomposition record
+    |   +-- execution-plan.md                # risk matrix, sequencing rationale, scope decisions
+    |
+    +-- construction/                    === SQUADS OWN FROM HERE ===
+    |   +-- UNIT-NNN-slug/
+    |   |   +-- unit-brief.md                # mob creates during inception (squad input)
+    |   |   +-- stories.md                   # user stories with acceptance criteria
+    |   |   +-- unit-checkpoint.json         # squad's own state
+    |   |   +-- design/                  = GATE 2 =
+    |   |   |   +-- functional-design.md
+    |   |   |   +-- business-rules.md
+    |   |   |   +-- domain-entities.md
+    |   |   +-- bolts/                       # global numbering across all units
+    |   |   |   +-- BOLT-NNN-slug/
+    |   |   |       +-- spec.md              # outlined by mob, refined by squad
+    |   |   |       +-- review.md            # created after bolt build
+    |   |   +-- validation/              = GATE 3 =
+    |   |       +-- validation-report.md
+    |   |       +-- build-summary.md
+    |   +-- ...                              # additional units, same structure
+    |
+    +-- operations/                      === AFTER ALL UNITS ===
+        +-- deploy-guide.md
+        +-- runbook.md
+        +-- release-notes.md
+        +-- monitoring.json
 ```
 
 Application code: workspace root (NEVER in aidlc-docs/). Documentation: aidlc-docs/ only.
 
-## Canonical Templates
+## Artifact Templates
 
-Agents MUST read and follow these template files when creating artifacts:
+Two-tier template system -- Olympus ships defaults, project-level `.aidlc/templates/` overrides.
 
-| Template | Path | Used By |
-|----------|------|---------|
-| Units overview | `resources/templates/inception/units-template.md` | Units Generation |
-| Unit brief | `resources/templates/inception/unit-brief-template.md` | Units Generation |
-| Bolt spec | `resources/templates/construction/bolt-spec-template.md` | Bolt Planning |
+AI checks `.aidlc/templates/` first, falls back to global Olympus defaults at `~/.claude/olympus/templates/`.
+
+All templates use YAML frontmatter for machine-parseable metadata. See `common/process-overview.md` for the full template inventory.
 
 ## Olympus Agent Delegation
 
 | Stage | Agent | Purpose |
 |-------|-------|---------|
-| Discovery/Reverse Engineering | `explore-medium` | Codebase analysis |
+| Discovery | `explore-medium` | Scoped codebase analysis |
 | Intent/Requirements | `prometheus` | Strategic planning with interview |
 | Units Generation | `olympian` + `momus` (optional) | Domain decomposition with optional review |
 | User Stories | `oracle-medium` | Per-unit story and persona generation |
 | Bolt Planning | `olympian` + `momus` (optional) | Bolt decomposition with optional review |
-| Functional/NFR/Infrastructure Design | `oracle-medium` | Design decisions |
-| Code Generation (backend) | `olympian` or `olympian-high` | Implementation |
-| Code Generation (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI implementation |
-| Build & Test | `qa-tester` | Testing and verification |
-| Documentation | `document-writer` | Documentation draft generation |
+| Unit Design | `oracle-medium` | Design decisions |
+| Bolt Execution (backend) | `olympian` or `olympian-high` | Implementation |
+| Bolt Execution (frontend) | `frontend-engineer` or `frontend-engineer-high` | UI implementation |
+| Unit Validation | `qa-tester` | Testing and verification |
+| Documentation | `document-writer` | Documentation generation |
 | Review | `momus` | Critical evaluation |
 
-## Skill Stacking for AI-DLC
+## Skill Stacking
 
 | Combination | Effect |
 |-------------|--------|
 | `/plan` alone | Structured workflow with agent delegation |
-| `/plan` + `/ascent` | Adds persistence — cannot stop until all units complete |
+| `/plan` + `/ascent` | Adds persistence -- cannot stop until all units complete |
 | `/plan` + `/ultrawork` | Adds parallel execution and verification guarantees |
 | `/plan` + `/ascent` + `/ultrawork` | Full power: parallel, persistent, verified |
 
 ## Extensions
 
-Custom extensions in `.aidlc-rule-details/extensions/` at workspace root take precedence over standard rules.
+Custom extensions in `.aidlc/extensions/` at workspace root take precedence over standard rules.

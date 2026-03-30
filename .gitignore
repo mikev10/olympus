@@ -68,3 +68,5 @@ lancedb/
 models/
 .mcp.json
 .mcp.local.json
+
+_v4-reference/
