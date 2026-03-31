@@ -1,0 +1,5 @@
+{
+  "critical": ["auth", "payment", "security", "encrypt", "token", "credential", "password", "session", "permission"],
+  "moderate": ["validate", "transform", "process", "persist", "database", "query", "transaction", "migrate", "cache"],
+  "low": ["log", "format", "display", "util", "helper", "config", "constant", "mock", "fixture"]
+}
