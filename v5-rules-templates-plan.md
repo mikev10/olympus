@@ -120,6 +120,7 @@ V4 files to assess during Phase 6:
 | `construction/business-rules-template.md` | `construction/business-rules-template.md` | `UNIT-NNN/design/business-rules.md` |
 | `construction/domain-entities-template.md` | `construction/domain-entities-template.md` | `UNIT-NNN/design/domain-entities.md` |
 | `construction/bolt-spec-template.md` | `construction/bolt-spec-template.md` | `UNIT-NNN/bolts/BOLT-NNN/spec.md` |
+| `construction/bolt-plan-template.md` | *(new)* | `UNIT-NNN/bolts/BOLT-NNN/plan.md` |
 | `construction/review-template.md` | `construction/review-template.md` | `UNIT-NNN/bolts/BOLT-NNN/review.md` |
 
 ---
@@ -244,9 +245,9 @@ All templates use YAML frontmatter per the architecture doc's common frontmatter
 ### Phase 4: Construction Rules
 
 **Depends on:** Phase 1 (common rules)
-**Deliverable:** 10 construction rule files — 1 orchestrator + 9 individual rules
+**Deliverable:** 11 construction rule files — 1 orchestrator + 10 individual rules
 
-The orchestrator (`unit-design.md`) defines the sequence and references individual rules. Each individual rule stays focused on one concern.
+The orchestrator (`unit-design.md`) defines the sequence and references individual rules. Each individual rule stays focused on one concern. Note: business-rules.md and domain-entities.md are guidance files referenced during the Functional Design stage — not separate stages with their own checkpoints.
 
 **On phase start:** (1) Read `aidlc-v5-architecture.md` in full — it is the source of truth and MUST be loaded into context before writing any file. (2) Create in-session task list with all tasks below. Mark each `in_progress` when starting, `completed` when user approves.
 
@@ -254,11 +255,13 @@ The orchestrator (`unit-design.md`) defines the sequence and references individu
 
 **Design sub-phase:**
 
-- [ ] `construction/unit-design.md` — **New (orchestrator).** Defines the design sub-phase sequence for one unit. Squad reads inception artifacts (unit-brief, stories, units-overview, execution-plan). References individual rules below in order. QA participates from the start. Each individual rule has its own checkpoint. Gate 2 at exit: Tech Lead formal review.
-- [ ] `construction/functional-design.md` — **Adapt.** How to create the functional design artifact. Depth scales with unit complexity (lightweight vs comprehensive — see architecture doc examples). Referenced by unit-design.md. **Checkpoint:** squad reviews functional design.
-- [ ] `construction/business-rules.md` — **New.** How to identify and document business rules, edge cases, validation logic, state transitions. Referenced by unit-design.md. **Checkpoint:** squad + QA review business rules for completeness and edge cases.
-- [ ] `construction/domain-entities.md` — **New.** How to model entities, relationships, constraints, lifecycle states. Referenced by unit-design.md. **Checkpoint:** squad reviews entity model.
+- [ ] `construction/unit-design.md` — **New (orchestrator).** Defines the design stage sequence for one unit. Squad reads inception artifacts (unit-brief, stories, units-overview, execution-plan). References individual rules below. QA participates from the start. Gate 2 at exit: Tech Lead formal review.
+- [ ] `construction/functional-design.md` — **Adapt.** How to create the functional design artifact. Depth scales with unit complexity (lightweight vs comprehensive — see architecture doc examples). Referenced by unit-design.md during Functional Design stage.
+- [ ] `construction/business-rules.md` — **New.** How to identify and document business rules, edge cases, validation logic, state transitions. Referenced by unit-design.md during Functional Design stage (not a separate stage).
+- [ ] `construction/domain-entities.md` — **New.** How to model entities, relationships, constraints, lifecycle states. Referenced by unit-design.md during Functional Design stage (not a separate stage).
 - [ ] `construction/nfr-design.md` — **Adapt.** HOW to meet NFR requirements in this unit's context. NFR requirements (WHAT) are in inception; this is the design response. Conditional — not every unit needs it. Referenced by unit-design.md. **Checkpoint:** squad reviews NFR design decisions.
+
+**Functional Design stage checkpoint:** Squad + QA review the complete design package (all three artifacts: functional-design.md, business-rules.md, domain-entities.md) in a single checkpoint before proceeding.
 - [ ] `construction/infrastructure-design.md` — **Adapt.** Conditional rule for units requiring infrastructure changes (new services, deployment changes, infra provisioning). Referenced by unit-design.md. **Checkpoint:** squad reviews infrastructure design.
 
 **Build sub-phase:**
@@ -273,16 +276,17 @@ The orchestrator (`unit-design.md`) defines the sequence and references individu
 **Completion:**
 
 - [ ] `construction/unit-validation.md` — **New.** Gate 3 enforcement after all bolts complete. QA does full validation (regression, integration, edge cases). Produces: validation-report.md + build-summary.md. PR merged after approval.
+- [ ] `construction/integration-testing.md` — **New.** Cross-unit integration testing after all units pass Gate 3. Conditional — only when multiple units exist. Tests cross-unit API contracts, shared data flows, end-to-end user journeys across unit boundaries. Produces: integration-test-results.md at construction root. **Checkpoint:** QA + Tech Lead review integration test results.
 - [ ] `construction/documentation.md` — **Adapt.** Post-build documentation and operations artifacts (deploy guide, runbook, release notes).
 
-**Validation:** Design → Build → Gate flow matches architecture doc. Bolt lifecycle is exactly Plan→Code→Review. Gate 2 and Gate 3 enforcement rules are explicit and match gate-enforcement.md. Individual rules are referenced (not duplicated) by the orchestrator. Every rule includes a checkpoint with specific reviewer and criteria.
+**Validation:** Design → Build → Gate flow matches architecture doc and core-workflow.md. Functional Design is a single stage producing three artifacts (functional-design.md, business-rules.md, domain-entities.md) with one checkpoint. Bolt lifecycle is exactly Plan→Code→Review. Gate 2 and Gate 3 enforcement rules are explicit and match gate-enforcement.md. Individual rules are referenced (not duplicated) by the orchestrator.
 
 ---
 
 ### Phase 5: Construction Templates
 
 **Depends on:** Phase 4 (rules define what each template must contain)
-**Deliverable:** 5 construction templates with consistent frontmatter
+**Deliverable:** 6 construction templates with consistent frontmatter
 
 **On phase start:** (1) Read `aidlc-v5-architecture.md` in full — it is the source of truth and MUST be loaded into context before writing any file. (2) Create in-session task list with all tasks below. Mark each `in_progress` when starting, `completed` when user approves.
 
@@ -295,9 +299,10 @@ The orchestrator (`unit-design.md`) defines the sequence and references individu
   - `status: outlined` (mob creates): Goal, High-Level Acceptance Criteria, Stories Covered, Estimated Complexity.
   - `status: refined` (squad enriches): + Detailed Acceptance Criteria (Given/When/Then), Target Files, Implementation Notes, Test Strategy, Dependencies.
   Frontmatter: type: bolt-spec, unit: UNIT-NNN-slug, bolt: BOLT-NNN-slug, status: outlined|refined, complexity: low|medium|high, stories: [S-NNN].
+- [ ] `construction/bolt-plan-template.md` — **New.** Frontmatter: type: bolt-plan, unit: UNIT-NNN-slug, bolt: BOLT-NNN-slug, status: draft|approved. Sections: Implementation Approach, Numbered Steps with Checkboxes (target files, patterns to follow, code to generate/modify), Story Traceability, Dependencies on Prior Bolts, Risks/Spec Gaps Identified. Modeled after AWS code-generation-plan pattern but per-bolt scope.
 - [ ] `construction/review-template.md` — **Adapt.** Frontmatter: type: review, bolt: BOLT-NNN-slug. Sections: Status (passed/failed), Acceptance Criteria Checklist, Tests (count + status), QA Validation (who + notes), Deviations from Spec.
 
-**Validation:** Every template matches the artifact format shown in the architecture doc. Bolt spec template handles both outlined and refined states.
+**Validation:** Every template matches the artifact format shown in the architecture doc. Bolt spec template handles both outlined and refined states. Bolt plan template matches the Plan step in bolt-execution.md.
 
 ---
 
@@ -354,13 +359,13 @@ Walk through every file in `_v4-reference/` and confirm each is either:
 | Root rules | 1 | 0 | 1 | 0 | 0 | 0 |
 | Common rules | 15 | 1 | 2 | 6 | 1 | 4+1 (welcome) |
 | Inception rules | 7 | 1 | 1 | 5 | 0 | 0 |
-| Construction rules | 10 | 4 | 0 | 5 | 0 | 0+1 (operations) |
+| Construction rules | 11 | 5 | 0 | 5 | 0 | 0+1 (operations) |
 | Inception templates | 10 | 1 | 1 | 8 | 0 | 0 |
-| Construction templates | 5 | 0 | 0 | 5 | 0 | 0 |
-| **Total** | **48** | **7** | **5** | **29** | **1** | **~6** |
+| Construction templates | 6 | 1 | 0 | 5 | 0 | 0 |
+| **Total** | **50** | **9** | **5** | **29** | **1** | **~6** |
 
 V4: 34 rules + 14 templates = 48 files
-V5 (confirmed): 33 rules + 15 templates = 48 files (before assess decisions)
+V5 (confirmed): 34 rules + 16 templates = 50 files (before assess decisions)
 V5 (after assess): Final count depends on Phase 1 and Phase 6 decisions
 
 ---

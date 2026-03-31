@@ -139,10 +139,9 @@ Workflow Planning      → checkpoint (mob reviews execution-plan.md)
 #### Construction Checkpoints + Gates 2–3
 
 ```
-Design sub-phase (per unit):
-  Functional Design    → checkpoint (squad reviews)
-  Business Rules       → checkpoint (squad + QA review)
-  Domain Entities      → checkpoint (squad reviews)
+Design stages (per unit):
+  Functional Design    → checkpoint (squad + QA review all three design artifacts:
+                           functional-design.md, business-rules.md, domain-entities.md)
   NFR Design           → checkpoint (if applicable)
   Bolt Spec Refinement → checkpoint (squad reviews enriched specs)
                        ═══ GATE 2: Design Approved ═══
@@ -480,12 +479,15 @@ aidlc-docs/
     │   │   ├── bolts/                       # mob outlines, squad refines + builds
     │   │   │   ├── BOLT-001-api-endpoints/      # global numbering across all units
     │   │   │   │   ├── spec.md                  # outline from mob, refined by squad
+    │   │   │   │   ├── plan.md                  # implementation plan (approved before code)
     │   │   │   │   └── review.md                # added after build
     │   │   │   ├── BOLT-002-page-shell/
     │   │   │   │   ├── spec.md
+    │   │   │   │   ├── plan.md
     │   │   │   │   └── review.md
     │   │   │   └── BOLT-003-settings-form/
     │   │   │       ├── spec.md
+    │   │   │       ├── plan.md
     │   │   │       └── review.md
     │   │   │
     │   │   └── validation/      ═ GATE 3 ═  # squad creates during/after build
@@ -524,11 +526,15 @@ aidlc-docs/
     │       └── validation/
     │           └── ...
     │
-    └── operations/                  ══════ AFTER ALL UNITS ══════
-        ├── deploy-guide.md
-        ├── runbook.md
-        ├── release-notes.md
-        └── monitoring.json
+    ├── integration-test-results.md   ══════ AFTER ALL UNITS (if multiple units) ══════
+    │
+    └── operations/
+        ├── release-notes.md                 # ALWAYS
+        ├── api-documentation.md             # if new/changed APIs
+        ├── user-guide.md                    # if user-facing changes
+        ├── deploy-guide.md                  # if deployment changes
+        ├── runbook.md                       # if operations changes
+        └── migration-guide.md               # if breaking changes
 ```
 
 ---
