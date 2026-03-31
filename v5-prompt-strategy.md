@@ -10,7 +10,7 @@
 ## Phase 0: Setup
 
 ```
-Read v5-rules-templates-plan.md, specifically Phase 0.
+Read v5-rules-templates-plan.md, specifically Approach and Phase 0.
 
 Execute the setup steps:
 1. Rename resources/ to _v4-reference/
@@ -25,7 +25,7 @@ Do not proceed beyond Phase 0.
 ## Phase 1: Common Rules
 
 ```
-Read v5-rules-templates-plan.md (Phase 1) and aidlc-v5-architecture.md in full.
+Read v5-rules-templates-plan.md Approach AND Phase 1 AND aidlc-v5-architecture.md in full.
 
 We are starting Phase 1: Common Rules. Create the in-session task list for
 all Phase 1 tasks.

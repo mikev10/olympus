@@ -18,6 +18,12 @@
 
 **MANDATORY: In-Session Task List.** At the start of each phase, create an in-session task list (using TaskCreate) with all tasks in that phase. Mark each task `in_progress` when starting and `completed` when the user approves it. This provides real-time visual progress tracking and prevents context loss across long phases.
 
+**MANDATORY RULES FOR PLAN EXECUTION:**
+1. **NEVER** complete any work without updating plan checkboxes
+2. **IMMEDIATELY** after completing ANY step described in this plan file, mark that step `[x]`
+3. This must happen in the **SAME interaction** where the work is completed
+4. **NO EXCEPTIONS**: Every plan step completion MUST be tracked with checkbox updates
+
 **Source of truth:** `aidlc-v5-architecture.md`
 **V4 reference:** `_v4-reference/rules/` and `_v4-reference/templates/`
 **Branch:** `aidlc-v5-architecture` (existing)
