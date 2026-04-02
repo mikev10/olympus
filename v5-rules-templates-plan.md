@@ -150,14 +150,14 @@ This matches AWS's separation of `nfr-requirements` from `nfr-design`, but moves
 **Depends on:** Nothing
 **Deliverable:** Clean workspace with v4 reference preserved
 
-- [ ] Rename `resources/` → `_v4-reference/`
-- [ ] Create `resources/rules/common/`
-- [ ] Create `resources/rules/inception/`
-- [ ] Create `resources/rules/construction/`
-- [ ] Create `resources/rules/operations/`
-- [ ] Create `resources/templates/inception/`
-- [ ] Create `resources/templates/construction/`
-- [ ] Verify: `_v4-reference/` contains all original files (34 rules + 14 templates + skills + agents)
+- [x] Rename `resources/` → `_v4-reference/`
+- [x] Create `resources/rules/common/`
+- [x] Create `resources/rules/inception/`
+- [x] Create `resources/rules/construction/`
+- [x] Create `resources/rules/operations/`
+- [x] Create `resources/templates/inception/`
+- [x] Create `resources/templates/construction/`
+- [x] Verify: `_v4-reference/` contains all original files (34 rules + 14 templates + skills + agents)
 
 ---
 
@@ -174,7 +174,7 @@ These must be done first — every inception and construction rule references co
 
 **Core framework rules:**
 
-- [ ] `core-workflow.md` — **Rewrite.** The compact orchestration document installed into CLAUDE.md. Must reflect: two phases, three gates, new stage list, bolt lifecycle, folder structure, artifact list. This is the "master reference" the AI reads at session start.
+- [x] `core-workflow.md` — **Rewrite.** The compact orchestration document installed into CLAUDE.md. Must reflect: two phases, three gates, new stage list, bolt lifecycle, folder structure, artifact list. This is the "master reference" the AI reads at session start.
 - [ ] `common/process-overview.md` — **Rewrite.** Must be consistent with `core-workflow.md` (compact version above) — same phases, stages, gates, terminology. This is the detailed version with Mermaid diagrams, loaded on demand. Detailed process overview. Two phases (Inception → Construction). Three gates (always enforced). Inception stages: workspace detection → scoped discovery → requirements → units → stories → bolt planning → workflow planning. Construction sub-phases: Design (Gate 2) → Build with Plan→Code→Review per bolt (Gate 3).
 - [ ] `common/terminology.md` — **Rewrite.** Canonical terms: Intent (=Epic), Unit (=Feature), Bolt (=User Story), Story (=Task), Gate, Mob, Squad, Design sub-phase, Build sub-phase. Drop deprecated terms: "elaboration", "forge", "summit", "vision". Global bolt numbering. Per-unit checkpoints.
 - [ ] `common/gate-enforcement.md` — **New.** Two-level approval model: stage checkpoints (every stage, lightweight, AI pauses and waits) + formal gates (phase boundaries, defined reviewers). Gate 1: Inception Complete (PO + Tech Lead). Gate 2: Design Approved (Tech Lead, per unit). Gate 3: Unit Complete (QA + reviewer, per unit). What's checked at each gate. Start strict, per-bolt gates can relax. Gate 2/3 never relax. Checkpoints never relax.

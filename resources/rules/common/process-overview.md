@@ -23,8 +23,8 @@ flowchart TD
         SD["Scoped Discovery<br/><b>ALWAYS (adaptive depth)</b>"]
         RA["Requirements Analysis<br/><b>ALWAYS (adaptive depth)</b>"]
         UG["Units Generation<br/><b>ALWAYS</b>"]
-        US["User Stories<br/><b>CONDITIONAL</b>"]
-        BP["Bolt Planning<br/><b>CONDITIONAL</b>"]
+        US["User Stories<br/><b>ALWAYS (skip bug fixes/trivial)</b>"]
+        BP["Bolt Planning<br/><b>ALWAYS (skip bug fixes/trivial)</b>"]
         WP["Workflow Planning<br/><b>ALWAYS</b>"]
     end
 
@@ -49,8 +49,8 @@ flowchart TD
     SD --> RA
     RA --> UG
     RA -.-> WP
-    UG -.-> US
-    US -.-> BP
+    UG --> US
+    US --> BP
     BP --> WP
 
     WP -->|"GATE 1: Inception Complete"| FD
@@ -80,8 +80,8 @@ flowchart TD
     style DOC fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
 
     style UG fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
-    style US fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
-    style BP fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
+    style US fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    style BP fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
     style NFR fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
     style INFRA fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
     style INT fill:#FFA726,stroke:#E65100,stroke-width:3px,stroke-dasharray: 5 5,color:#000
@@ -104,18 +104,16 @@ flowchart TD
 
 ## Actor Model
 
-The same framework serves both solo developers and teams. Solo mode is the degenerate case — one person fills all roles. Same structure, same gates, same artifacts. The difference is WHO, not WHAT.
+| Role | Inception | Construction |
+|------|-----------|-------------|
+| **PO / BA** | Writes intent brief, validates requirements, reviews story-map at Gate 1 | — |
+| **Tech Lead** | Writes technical brief (optional), approves unit boundaries + bolt outlines at Gate 1 | Reviews design at Gate 2 |
+| **Senior Devs** | Participate in inception session, validate decisions | — |
+| **Dev (Squad)** | — | Drives design + build, approves bolt plans, reviews code |
+| **QA (Squad)** | Reviews acceptance criteria for testability | Reviews design for edge cases, validates per bolt, full validation at Gate 3 |
+| **AI** | Drafts artifacts, proposes decomposition, generates analysis | Generates design artifacts, code, tests, review.md |
 
-| Role | Inception | Construction | Solo Mode |
-|------|-----------|-------------|-----------|
-| **PO / BA** | Writes intent brief, validates requirements, reviews story-map at Gate 1 | — | You fill this role |
-| **Tech Lead** | Writes technical brief (optional), approves unit boundaries + bolt outlines at Gate 1 | Reviews design at Gate 2 | You fill this role |
-| **Senior Devs** | Participate in inception session, validate decisions | — | You fill this role |
-| **Dev (Squad)** | — | Drives design + build, approves bolt plans, reviews code | You fill this role |
-| **QA (Squad)** | Reviews acceptance criteria for testability | Reviews design for edge cases, validates per bolt, full validation at Gate 3 | You fill this role |
-| **AI** | Drafts artifacts, proposes decomposition, generates analysis | Generates design artifacts, code, tests, review.md | AI does the work |
-
-**Squad**: One or more developers + QA assigned to a unit. In solo mode, one person fills all squad roles. The framework behaves identically regardless of squad size.
+**Squad**: One or more developers + QA assigned to a unit. One person can fill multiple roles. The framework behaves identically regardless of squad size.
 
 ---
 
@@ -173,8 +171,8 @@ If nobody knows the area, skip the technical brief. AI does fuller discovery dur
 | **Scoped Discovery** | ALWAYS (adaptive depth) | `workspace-scan.json` + `scope-analysis.md` |
 | **Requirements Analysis** | ALWAYS (adaptive depth) | `intent.md` + `requirements/requirements.md` + `requirements/nfr.md` |
 | **Units Generation** | ALWAYS (skip only for bug fixes or trivial changes) | `inception/units-overview.md` + per-unit `unit-brief.md` |
-| **User Stories** | CONDITIONAL | `inception/personas.md` + per-unit `stories.md` + `inception/story-map.md` |
-| **Bolt Planning** | CONDITIONAL | Per-bolt `spec.md` with `status: outlined` (global numbering) |
+| **User Stories** | ALWAYS (skip bug fixes/trivial) | `inception/personas.md` + per-unit `stories.md` + `inception/story-map.md` |
+| **Bolt Planning** | ALWAYS (skip bug fixes/trivial) | Per-bolt `spec.md` with `status: outlined` (global numbering) |
 | **Workflow Planning** | ALWAYS | `inception/execution-plan.md` |
 
 **Gate 1: Inception Complete** — See `common/gate-enforcement.md`.
@@ -330,7 +328,7 @@ updated: {YYYY-MM-DDTHH:MM:SSZ}
 - **Transparent Planning**: Always show execution plan before starting construction
 - **Quality Focus**: Complex changes get full treatment, simple changes stay efficient
 - **Stage Checkpoints**: AI presents output, pauses, waits for approval at EVERY stage
-- **Gate Enforcement**: Three gates always enforced — no exceptions, even solo
+- **Gate Enforcement**: Three gates always enforced — no exceptions
 - **Per-Unit Independence**: Each unit has own checkpoint, design, validation
 - **Global Bolt Numbering**: BOLT-001 through BOLT-NNN across all units (unambiguous)
 - **User Control**: User can request stage inclusion/exclusion

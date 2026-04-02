@@ -73,8 +73,8 @@ The AI intelligently assesses what stages are needed based on:
 - Scoped Discovery (ALWAYS — adaptive depth)
 - Requirements Analysis (ALWAYS — adaptive depth)
 - Units Generation (ALWAYS — skip only for bug fixes or trivial changes)
-- User Stories (CONDITIONAL)
-- Bolt Planning (CONDITIONAL)
+- User Stories (ALWAYS — skip only for bug fixes or trivial changes)
+- Bolt Planning (ALWAYS — skip only for bug fixes or trivial changes)
 - Workflow Planning (ALWAYS)
 
 **Gate 1 at phase exit**: See `common/gate-enforcement.md` for gate criteria.
@@ -162,42 +162,14 @@ The AI intelligently assesses what stages are needed based on:
 5. **Wait for Explicit Approval**: Team validates unit boundaries, dependency matrix, and sequencing rationale — DO NOT PROCEED until user confirms
 6. **MANDATORY**: Log user's response in audit.md with complete raw input
 
-## User Stories (CONDITIONAL)
+## User Stories (ALWAYS — skip only for bug fixes or trivial changes)
 
-**INTELLIGENT ASSESSMENT**: Use multi-factor analysis to determine if user stories add value:
+**Always executes** — user stories are the default. Stories provide acceptance criteria that QA validates during construction and ensure requirements coverage is traceable.
 
-**ALWAYS Execute IF** (High Priority Indicators):
-- New user-facing features or functionality
-- Changes affecting user workflows or interactions
-- Multiple user types or personas involved
-- Complex business requirements with acceptance criteria needs
-- Cross-functional team collaboration required
-- Customer-facing API or service changes
-
-**LIKELY Execute IF** (Medium Priority — Assess Complexity):
-- Modifications to existing user-facing features
-- Backend changes that indirectly affect user experience
-- Integration work that impacts user workflows
-- Performance improvements with user-visible benefits
-- Data model changes affecting user data or reports
-
-**COMPLEXITY-BASED ASSESSMENT**: For medium priority cases, execute user stories if:
-- Request involves multiple components or services
-- Changes span multiple user touchpoints
-- Business logic is complex or has multiple scenarios
-- Requirements have ambiguity that stories could clarify
-- Change has significant business impact or risk
-
-**SKIP ONLY IF** (All must be true):
-- Pure internal refactoring with zero user impact
-- Simple bug fixes with clear, isolated scope
-- Infrastructure changes with no user-facing effects
-- Documentation-only updates
-- Developer tooling or build process improvements
-
-**When in doubt, favor inclusion** — the cost of unnecessary stories is low, the cost of missing acceptance criteria is high.
-
-**Note**: If Units Generation executed, stories are created per-unit. If skipped, stories are created from requirements directly.
+**Skip ONLY IF** (all must be true):
+- Pure bug fix with clear, isolated scope
+- Trivial change (config update, typo fix, single-file edit)
+- No acceptance criteria or story tracking needed
 
 **Execution**:
 1. **MANDATORY**: Log any user input during this stage in audit.md
@@ -210,16 +182,14 @@ The AI intelligently assesses what stages are needed based on:
 5. **Wait for Explicit Approval**: PO reviews story-map for coverage, QA reviews acceptance criteria for testability — DO NOT PROCEED until user confirms
 6. **MANDATORY**: Log user's response in audit.md with complete raw input
 
-## Bolt Planning (CONDITIONAL)
+## Bolt Planning (ALWAYS — skip only for bug fixes or trivial changes)
 
-**Execute IF**:
-- Units have been generated
-- Units need decomposition into smaller executable bolts
-- Complex units with multiple implementation steps
+**Always executes** — bolt planning decomposes units into executable work items. Every unit needs at least one bolt with a spec that drives the Plan → Code → Review cycle.
 
-**Skip IF**:
-- Single simple unit that IS the bolt
-- No further decomposition needed
+**Skip ONLY IF** (all must be true):
+- Pure bug fix with clear, isolated scope
+- Trivial change (config update, typo fix, single-file edit)
+- No decomposition or spec tracking needed
 
 **Execution**:
 1. **MANDATORY**: Log any user input during this stage in audit.md
@@ -493,7 +463,7 @@ The Operations phase will eventually include:
 - **Adaptive Execution**: Only execute stages that add value
 - **Transparent Planning**: Always show execution plan before starting construction
 - **Stage Checkpoints**: AI presents output, pauses, waits for approval at EVERY stage
-- **Gate Enforcement**: Three gates always enforced — no exceptions, even solo
+- **Gate Enforcement**: Three gates always enforced — no exceptions
 - **Per-Unit Independence**: Each unit has own checkpoint, design, validation
 - **Global Bolt Numbering**: BOLT-001 through BOLT-NNN across all units (unambiguous)
 - **User Control**: User can request stage inclusion/exclusion
