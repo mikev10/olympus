@@ -74,7 +74,9 @@ export interface InstallOptions {
   force?: boolean;
   verbose?: boolean;
   skipClaudeCheck?: boolean;
-  local?: boolean;  // Install to current directory instead of global ~/.claude/
+  local?: boolean;
+  global?: boolean;
+  projectDir?: string;
 }
 
 /**
@@ -121,8 +123,8 @@ const OLYMPUS_CLAUDE_MD_SENTINEL = '# Olympus Multi-Agent System';
  * This ensures rule file references point to .claude/olympus/ instead of ~/.claude/olympus/.
  */
 function localizeContent(content: string, isLocal: boolean): string {
-  if (!isLocal) return content;
-  return content.replaceAll('~/.claude/olympus/', '.claude/olympus/');
+  if (isLocal) return content;
+  return content.replaceAll('.claude/olympus/', '~/.claude/olympus/');
 }
 
 /**
@@ -478,17 +480,18 @@ function installClaudeMd(
 /**
  * Install the bundled hooks file
  */
-export function installBundledHooks(): boolean {
+export function installBundledHooks(targetHooksDir?: string): boolean {
   const bundleSource = join(__dirname, '..', '..', 'dist', 'hooks', 'olympus-hooks.cjs');
-  const bundleDest = join(HOOKS_DIR, 'olympus-hooks.cjs');
+  const destDir = targetHooksDir || HOOKS_DIR;
+  const bundleDest = join(destDir, 'olympus-hooks.cjs');
 
   if (!existsSync(bundleSource)) {
     console.warn('Warning: Bundled hooks not found. Run npm run build:hooks first.');
     return false;
   }
 
-  if (!existsSync(HOOKS_DIR)) {
-    mkdirSync(HOOKS_DIR, { recursive: true });
+  if (!existsSync(destDir)) {
+    mkdirSync(destDir, { recursive: true });
   }
 
   try {
@@ -524,24 +527,26 @@ export function install(options: InstallOptions = {}): InstallResult {
     }
   };
 
-  // Determine installation paths based on --local flag
-  const baseDir = options.local ? join(process.cwd(), '.claude') : CLAUDE_CONFIG_DIR;
+  // Determine installation paths based on --global/--local flag
+  const isLocal = options.global ? false : true;
+  const projectRoot = options.projectDir || process.cwd();
+  const baseDir = isLocal ? join(projectRoot, '.claude') : CLAUDE_CONFIG_DIR;
   const agentsDir = join(baseDir, 'agents');
   const commandsDir = join(baseDir, 'commands');
   const skillsDir = join(baseDir, 'skills');
-  const hooksDir = options.local ? join(process.cwd(), '.claude', 'hooks') : HOOKS_DIR;
-  const settingsFile = options.local ? join(process.cwd(), '.claude', 'settings.json') : SETTINGS_FILE;
-  const versionFile = options.local ? join(baseDir, '.olympus-version.json') : VERSION_FILE;
+  const hooksDir = isLocal ? join(projectRoot, '.claude', 'hooks') : HOOKS_DIR;
+  const settingsFile = isLocal ? join(projectRoot, '.claude', 'settings.json') : SETTINGS_FILE;
+  const versionFile = isLocal ? join(baseDir, '.olympus-version.json') : VERSION_FILE;
 
-  if (options.local) {
-    log('Installing locally to ./.claude/');
+  if (!isLocal) {
+    log('Installing globally to ~/.claude/');
   }
 
   // Check Node.js version (required for Node.js hooks on Windows)
   const nodeCheck = checkNodeVersion();
   if (!nodeCheck.valid) {
     log(`Warning: Node.js ${nodeCheck.required}+ required, found ${nodeCheck.current}`);
-    if (isWindows() && !options.local) {
+    if (isWindows() && isLocal) {
       result.errors.push(`Node.js ${nodeCheck.required}+ is required for Windows support. Found: ${nodeCheck.current}`);
       result.message = `Installation failed: Node.js ${nodeCheck.required}+ required`;
       return result;
@@ -549,8 +554,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     // On Unix, we can still use bash hooks, so just warn
   }
 
-  // Log platform info
-  if (!options.local) {
+  if (!isLocal) {
     log(`Platform: ${process.platform} (${shouldUseNodeHooks() ? 'Node.js hooks' : 'Bash hooks'})`);
   }
 
@@ -599,11 +603,11 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Install agents
     log('Installing agent definitions...');
-    result.installedAgents = installAgents(agentsDir, !!options.force, !!options.local, log);
+    result.installedAgents = installAgents(agentsDir, !!options.force, isLocal, log);
 
     // Install skills (migrated from commands)
     log('Installing skills...');
-    result.installedSkills = installSkills(skillsDir, !!options.force, !!options.local, log);
+    result.installedSkills = installSkills(skillsDir, !!options.force, isLocal, log);
 
     // Clean up legacy mega-rule files BEFORE writing new individual rule files
     const rulesDir = join(baseDir, 'olympus', 'rules');
@@ -613,28 +617,28 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Install individual rule files (always overwrite)
     log('Installing AI-DLC rule files...');
-    installRules(rulesDir, !!options.local, log);
+    installRules(rulesDir, isLocal, log);
 
     // Install template files (always overwrite)
     log('Installing AI-DLC template files...');
     const templatesDir = join(baseDir, 'olympus', 'templates');
     mkdirSync(templatesDir, { recursive: true });
-    const installedTemplateCount = installTemplates(templatesDir, !!options.local, log);
+    const installedTemplateCount = installTemplates(templatesDir, isLocal, log);
 
     // Install CLAUDE.md with smart detection
     log('Installing CLAUDE.md...');
-    installClaudeMd(baseDir, !!options.force, !!options.local, log);
+    installClaudeMd(baseDir, !!options.force, isLocal, log);
 
     // Merge AI-DLC core-workflow into the installed CLAUDE.md
     log('Merging AI-DLC core workflow into CLAUDE.md...');
     try {
       const claudeMdPath = join(baseDir, 'CLAUDE.md');
       if (existsSync(claudeMdPath)) {
-        const coreWorkflowContent = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
+        const coreWorkflowContent = localizeContent(readContent('rules/core-workflow.md'), isLocal);
         const currentContent = readFileSync(claudeMdPath, 'utf-8');
         const merged = mergeAidlcRules(currentContent, coreWorkflowContent);
         writeFileSync(claudeMdPath, merged, 'utf-8');
-        const location = options.local ? './.claude/CLAUDE.md' : '~/.claude/CLAUDE.md';
+        const location = isLocal ? './.claude/CLAUDE.md' : '~/.claude/CLAUDE.md';
         log(`  Merged AI-DLC core workflow into ${location}`);
       }
     } catch (error) {
@@ -677,12 +681,10 @@ export function install(options: InstallOptions = {}): InstallResult {
           const existingContent = existsSync(projectClaudeMdPath)
             ? readFileSync(projectClaudeMdPath, 'utf-8')
             : '';
-          const workflowRules = localizeContent(getAidlcRulesContent(workflowId, pathwayType), !!options.local);
-          // For global installs, core-workflow.md is already in ~/.claude/CLAUDE.md — don't duplicate.
-          // For local installs, include it since there's no global CLAUDE.md.
+          const workflowRules = localizeContent(getAidlcRulesContent(workflowId, pathwayType), isLocal);
           let rules: string;
-          if (options.local) {
-            const coreWorkflow = localizeContent(readContent('rules/core-workflow.md'), !!options.local);
+          if (isLocal) {
+            const coreWorkflow = localizeContent(readContent('rules/core-workflow.md'), isLocal);
             rules = `${coreWorkflow}\n\n---\n\n${workflowRules}`;
           } else {
             rules = workflowRules;
@@ -706,7 +708,7 @@ export function install(options: InstallOptions = {}): InstallResult {
       if (shouldUseBundledHooks()) {
         // Install bundled hooks (includes all features like learning system)
         log('Installing bundled hook scripts...');
-        const bundleInstalled = installBundledHooks();
+        const bundleInstalled = installBundledHooks(hooksDir);
         if (bundleInstalled) {
           log('  Installed olympus-hooks.cjs (bundled)');
         } else {
@@ -828,7 +830,7 @@ export function install(options: InstallOptions = {}): InstallResult {
 
         // Merge hooks configuration (platform-aware)
         const existingHooks = (existingSettings.hooks || {}) as Record<string, unknown>;
-        const hooksConfig = getHooksSettingsConfig();
+        const hooksConfig = getHooksSettingsConfig(hooksDir);
         const newHooks = hooksConfig.hooks;
 
         // Deep merge: add our hooks, or update if --force is used
@@ -856,8 +858,7 @@ export function install(options: InstallOptions = {}): InstallResult {
       }
     }
 
-    // Register as Claude Code plugin (for native installer) - only for global install
-    if (!options.local) {
+    if (!isLocal) {
       log('Registering as Claude Code plugin...');
       try {
         // 1. Copy plugin.json to ~/.claude/.claude-plugin/
@@ -926,7 +927,7 @@ export function install(options: InstallOptions = {}): InstallResult {
     const versionMetadata = {
       version: VERSION,
       installedAt: new Date().toISOString(),
-      installMethod: options.local ? 'npm-local' as const : 'npm' as const,
+      installMethod: isLocal ? 'npm-local' as const : 'npm' as const,
       lastCheckAt: new Date().toISOString()
     };
     writeFileSync(versionFile, JSON.stringify(versionMetadata, null, 2));
@@ -948,19 +949,21 @@ export function install(options: InstallOptions = {}): InstallResult {
 /**
  * Check if Olympus is already installed
  */
-export function isInstalled(): boolean {
+export function isInstalled(local?: boolean): boolean {
+  if (local) {
+    const localBase = join(process.cwd(), '.claude');
+    return existsSync(join(localBase, '.olympus-version.json')) && existsSync(join(localBase, 'agents'));
+  }
   return existsSync(VERSION_FILE) && existsSync(AGENTS_DIR);
 }
 
-/**
- * Get installation info
- */
-export function getInstallInfo(): { version: string; installedAt: string; method: string } | null {
-  if (!existsSync(VERSION_FILE)) {
+export function getInstallInfo(local?: boolean): { version: string; installedAt: string; method: string } | null {
+  const versionPath = local ? join(process.cwd(), '.claude', '.olympus-version.json') : VERSION_FILE;
+  if (!existsSync(versionPath)) {
     return null;
   }
   try {
-    const content = readFileSync(VERSION_FILE, 'utf-8');
+    const content = readFileSync(versionPath, 'utf-8');
     const data = JSON.parse(content);
     return {
       version: data.version,
@@ -975,7 +978,9 @@ export function getInstallInfo(): { version: string; installedAt: string; method
 export interface UninstallOptions {
   verbose?: boolean;
   local?: boolean;
+  global?: boolean;
   dryRun?: boolean;
+  projectDir?: string;
 }
 
 export interface UninstallResult {
@@ -994,7 +999,9 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
   };
 
   const log = (msg: string) => { if (options.verbose) console.log(msg); };
-  const baseDir = options.local ? join(process.cwd(), '.claude') : CLAUDE_CONFIG_DIR;
+  const isLocal = options.global ? false : true;
+  const projectRoot = options.projectDir || process.cwd();
+  const baseDir = isLocal ? join(projectRoot, '.claude') : CLAUDE_CONFIG_DIR;
 
   const removeFile = (filePath: string, label: string) => {
     if (options.dryRun) {
@@ -1059,7 +1066,7 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
   }
 
   try {
-    const hooksDir = options.local ? join(process.cwd(), '.claude', 'hooks') : join(CLAUDE_CONFIG_DIR, 'hooks');
+    const hooksDir = isLocal ? join(projectRoot, '.claude', 'hooks') : join(CLAUDE_CONFIG_DIR, 'hooks');
     if (existsSync(hooksDir)) {
       const allHookFilenames = new Set<string>([
         ...Object.keys(HOOK_SCRIPTS_BASH),
@@ -1078,7 +1085,7 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
   }
 
   try {
-    const settingsPath = options.local ? join(process.cwd(), '.claude', 'settings.json') : join(CLAUDE_CONFIG_DIR, 'settings.json');
+    const settingsPath = isLocal ? join(projectRoot, '.claude', 'settings.json') : join(CLAUDE_CONFIG_DIR, 'settings.json');
     if (existsSync(settingsPath)) {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
       const existingHooks = settings.hooks as Record<string, unknown> | undefined;
@@ -1170,7 +1177,7 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
     result.errors.push(`Failed to remove version file: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (!options.local) {
+  if (!isLocal) {
     try {
       const installedPluginsPath = join(CLAUDE_CONFIG_DIR, 'plugins', 'installed_plugins.json');
       if (existsSync(installedPluginsPath)) {
@@ -1196,7 +1203,7 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
     }
   }
 
-  if (!options.local) {
+  if (!isLocal) {
     try {
       const pluginDir = join(CLAUDE_CONFIG_DIR, '.claude-plugin');
       if (existsSync(pluginDir)) {

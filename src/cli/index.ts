@@ -479,25 +479,29 @@ program
   .description('Install Olympus agents and commands to Claude Code config')
   .option('-f, --force', 'Overwrite existing files')
   .option('-q, --quiet', 'Suppress output except for errors')
-  .option('-l, --local', 'Install to current project (./.claude/) instead of global (~/.claude/)')
+  .option('-l, --local', 'Install to current project (./.claude/)')
+  .option('-g, --global', 'Install to user home (~/.claude/)')
   .option('--skip-claude-check', 'Skip checking if Claude Code is installed')
   .action(async (options) => {
+    if (!options.local && !options.global) {
+      console.error(chalk.red('Error: Please specify --local or --global'));
+      console.error('');
+      console.error('  olympus-ai install --local    Install to current project (./.claude/)');
+      console.error('  olympus-ai install --global   Install to user home (~/.claude/)');
+      process.exit(1);
+    }
+
     if (!options.quiet) {
       console.log(chalk.blue('╔═══════════════════════════════════════════════════════════╗'));
       console.log(chalk.blue('║         Olympus Installer                                 ║'));
       console.log(chalk.blue('║   Multi-Agent Orchestration for Claude Code               ║'));
       console.log(chalk.blue('╚═══════════════════════════════════════════════════════════╝'));
       console.log('');
-      if (options.local) {
-        console.log(chalk.yellow('Installing locally to: ./.claude/'));
-        console.log(chalk.gray('(Hooks require global installation with: olympus-ai install)'));
-        console.log('');
-      }
     }
 
-    // Check if already installed
-    if (isInstalled() && !options.force) {
-      const info = getInstallInfo();
+    const checkLocal = !options.global;
+    if (isInstalled(checkLocal) && !options.force) {
+      const info = getInstallInfo(checkLocal);
       if (!options.quiet) {
         console.log(chalk.yellow('Olympus is already installed.'));
         if (info) {
@@ -509,11 +513,11 @@ program
       return;
     }
 
-    // Run installation
     const result = installOlympus({
       force: options.force,
       verbose: !options.quiet,
       skipClaudeCheck: options.skipClaudeCheck,
+      global: options.global,
       local: options.local
     });
 
@@ -524,10 +528,13 @@ program
         console.log(chalk.green('║         Olympus Installed!                                ║'));
         console.log(chalk.green('╚═══════════════════════════════════════════════════════════╝'));
         console.log('');
-        console.log(chalk.gray(`Installed to: ${options.local ? './.claude/' : '~/.claude/'}`));
-        if (options.local) {
-          console.log(chalk.yellow('\nNote: Hooks are not installed with --local.'));
-          console.log(chalk.yellow('For full functionality, also run: olympus-ai install'));
+        console.log(chalk.gray(`Installed to: ${options.global ? '~/.claude/' : './.claude/'}`));
+        if (options.global) {
+          console.log(chalk.gray('\nGlobal install applies Olympus to all projects.'));
+          console.log(chalk.gray('For project-specific install, run: olympus-ai install --local'));
+        } else {
+          console.log(chalk.gray('\nProject install applies Olympus to this project only.'));
+          console.log(chalk.gray('For global install, run: olympus-ai install --global'));
         }
         console.log('');
         console.log(chalk.yellow('Get started:'));
@@ -550,16 +557,26 @@ program
 program
   .command('uninstall')
   .description('Uninstall Olympus files (only removes Olympus-owned files)')
-  .option('--local', 'Uninstall from current project (./.claude/) instead of global (~/.claude/)')
+  .option('-l, --local', 'Uninstall from current project (./.claude/)')
+  .option('-g, --global', 'Uninstall from user home (~/.claude/)')
   .option('--dry-run', 'Show what would be removed without actually removing')
   .option('-v, --verbose', 'Show detailed output')
   .action((opts) => {
+    if (!opts.local && !opts.global) {
+      console.error(chalk.red('Error: Please specify --local or --global'));
+      console.error('');
+      console.error('  olympus-ai uninstall --local    Uninstall from current project (./.claude/)');
+      console.error('  olympus-ai uninstall --global   Uninstall from user home (~/.claude/)');
+      process.exit(1);
+    }
+
     const prefix = opts.dryRun ? chalk.yellow('[DRY RUN] ') : '';
     console.log(chalk.blue(`${prefix}Uninstalling Olympus...`));
     console.log('');
 
     const result = uninstallOlympus({
       local: opts.local,
+      global: opts.global,
       dryRun: opts.dryRun,
       verbose: opts.verbose || opts.dryRun
     });
@@ -595,20 +612,40 @@ program
   .command('postinstall', { hidden: true })
   .description('Run post-install setup (called automatically by npm)')
   .action(async () => {
-    // Silent install - only show errors
-    const result = installOlympus({
-      force: false,
-      verbose: false,
-      skipClaudeCheck: true
-    });
+    const isGlobalNpmInstall = process.env.npm_config_global === 'true';
 
-    if (result.success) {
-      console.log(chalk.green('✓ Olympus installed successfully!'));
-      console.log(chalk.gray('  Run /getting-started in Claude Code for a guided tour.'));
+    if (isGlobalNpmInstall) {
+      const result = installOlympus({
+        force: false,
+        verbose: false,
+        skipClaudeCheck: true,
+        global: true
+      });
+
+      if (result.success) {
+        console.log(chalk.green('✓ Olympus installed globally to ~/.claude/'));
+        console.log(chalk.gray('  Run /getting-started in Claude Code for a guided tour.'));
+      } else {
+        console.warn(chalk.yellow('⚠ Could not complete Olympus setup:'), result.message);
+        console.warn(chalk.gray('  Run "olympus-ai install --global" manually to complete setup.'));
+      }
     } else {
-      // Don't fail the npm install, just warn
-      console.warn(chalk.yellow('⚠ Could not complete Olympus setup:'), result.message);
-      console.warn(chalk.gray('  Run "olympus install" manually to complete setup.'));
+      const projectDir = process.env.INIT_CWD || process.cwd();
+      const result = installOlympus({
+        force: false,
+        verbose: false,
+        skipClaudeCheck: true,
+        global: false,
+        projectDir
+      });
+
+      if (result.success) {
+        console.log(chalk.green(`✓ Olympus installed locally to ${projectDir}/.claude/`));
+        console.log(chalk.gray('  Run /getting-started in Claude Code for a guided tour.'));
+      } else {
+        console.warn(chalk.yellow('⚠ Could not complete Olympus setup:'), result.message);
+        console.warn(chalk.gray('  Run "olympus-ai install --local" manually to complete setup.'));
+      }
     }
   });
 

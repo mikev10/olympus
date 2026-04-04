@@ -47,8 +47,8 @@ export function getClaudeConfigDir(): string {
 }
 
 /** Get the hooks directory path */
-export function getHooksDir(): string {
-  return join(getClaudeConfigDir(), 'hooks');
+export function getHooksDir(baseDir?: string): string {
+  return join(baseDir || getClaudeConfigDir(), 'hooks');
 }
 
 /**
@@ -1417,10 +1417,17 @@ export const HOOKS_SETTINGS_CONFIG_BASH = {
   }
 };
 
-/**
- * Settings.json hooks configuration for Node.js (Cross-platform)
- * Uses node to run .mjs scripts directly
- */
+export function getBashHooksSettingsConfig(hooksDir?: string) {
+  if (!hooksDir) return HOOKS_SETTINGS_CONFIG_BASH;
+  return {
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: "command" as const, command: `bash "${join(hooksDir, 'keyword-detector.sh')}"` }] }],
+      SessionStart: [{ hooks: [{ type: "command" as const, command: `bash "${join(hooksDir, 'session-start.sh')}"` }] }],
+      Stop: [{ hooks: [{ type: "command" as const, command: `bash "${join(hooksDir, 'persistent-mode.sh')}"` }] }]
+    }
+  };
+}
+
 export const HOOKS_SETTINGS_CONFIG_NODE = {
   hooks: {
     UserPromptSubmit: [
@@ -1464,70 +1471,33 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
   }
 };
 
-/**
- * Settings config for bundled hooks (new unified approach)
- * Single bundle handles all hook events via --event flag
- */
-export const HOOKS_SETTINGS_CONFIG_BUNDLED = {
-  hooks: {
-    UserPromptSubmit: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=UserPromptSubmit`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=UserPromptSubmit`
-      }]
-    }],
-    SessionStart: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=SessionStart`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=SessionStart`
-      }]
-    }],
-    Stop: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=Stop`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=Stop`
-      }]
-    }],
-    PreToolUse: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PreToolUse`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PreToolUse`
-      }]
-    }],
-    PostToolUse: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PostToolUse`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PostToolUse`
-      }]
-    }],
-    PostToolUseFailure: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PostToolUseFailure`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=PostToolUseFailure`
-      }]
-    }],
-    Notification: [{
-      hooks: [{
-        type: "command" as const,
-        command: isWindows()
-          ? `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=Notification`
-          : `node "${join(getHooksDir(), 'olympus-hooks.cjs')}" --event=Notification`
-      }]
-    }]
-  }
-};
+export function getNodeHooksSettingsConfig(hooksDir?: string) {
+  if (!hooksDir) return HOOKS_SETTINGS_CONFIG_NODE;
+  return {
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: "command" as const, command: `node "${join(hooksDir, 'keyword-detector.mjs')}"` }] }],
+      SessionStart: [{ hooks: [{ type: "command" as const, command: `node "${join(hooksDir, 'session-start.mjs')}"` }] }],
+      Stop: [{ hooks: [{ type: "command" as const, command: `node "${join(hooksDir, 'persistent-mode.mjs')}"` }] }]
+    }
+  };
+}
+
+function buildBundledHooksSettingsConfig(hooksDir?: string) {
+  const dir = hooksDir || getHooksDir();
+  return {
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=UserPromptSubmit` }] }],
+      SessionStart: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=SessionStart` }] }],
+      Stop: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=Stop` }] }],
+      PreToolUse: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=PreToolUse` }] }],
+      PostToolUse: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=PostToolUse` }] }],
+      PostToolUseFailure: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=PostToolUseFailure` }] }],
+      Notification: [{ hooks: [{ type: "command" as const, command: `node "${join(dir, 'olympus-hooks.cjs')}" --event=Notification` }] }]
+    }
+  };
+}
+
+export const HOOKS_SETTINGS_CONFIG_BUNDLED = buildBundledHooksSettingsConfig();
 
 /**
  * Check if bundled hooks should be used
@@ -1546,18 +1516,16 @@ export function shouldUseBundledHooks(): boolean {
 /**
  * Get the bundled hooks settings config
  */
-export function getBundledHooksSettingsConfig() {
+export function getBundledHooksSettingsConfig(hooksDir?: string) {
+  if (hooksDir) return buildBundledHooksSettingsConfig(hooksDir);
   return HOOKS_SETTINGS_CONFIG_BUNDLED;
 }
 
-/**
- * Get the appropriate hooks settings config for the current platform
- */
-export function getHooksSettingsConfig(): typeof HOOKS_SETTINGS_CONFIG_BASH {
+export function getHooksSettingsConfig(hooksDir?: string): typeof HOOKS_SETTINGS_CONFIG_BASH {
   if (shouldUseBundledHooks()) {
-    return getBundledHooksSettingsConfig();
+    return getBundledHooksSettingsConfig(hooksDir);
   }
-  return shouldUseNodeHooks() ? HOOKS_SETTINGS_CONFIG_NODE : HOOKS_SETTINGS_CONFIG_BASH;
+  return shouldUseNodeHooks() ? getNodeHooksSettingsConfig(hooksDir) : getBashHooksSettingsConfig(hooksDir);
 }
 
 /**
