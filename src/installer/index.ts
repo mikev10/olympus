@@ -57,7 +57,7 @@ export const SETTINGS_FILE = join(CLAUDE_CONFIG_DIR, 'settings.json');
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.olympus-version.json');
 
 /** Current version - MUST match package.json */
-export const VERSION = '4.5.14';
+export const VERSION = '4.5.15';
 
 /** Installation result */
 export interface InstallResult {

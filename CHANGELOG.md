@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.15] - 2026-04-06
+
+### Fixed
+
+- **Postinstall no longer auto-installs globally** — `npm install -g olympus-ai` no longer silently installs Olympus to `~/.claude/`, which caused duplicate user/project skills when users also ran `install --local`. Postinstall now prints setup instructions instead.
+- **preuninstall scope detection** — `npm uninstall -g olympus-ai` now properly cleans up `~/.claude/` via auto-detected scope instead of failing silently.
+- **Uninstall always shows output** — `olympus-ai uninstall` now always shows what it removes and warns when no files are found.
+
+## [4.5.14] - 2026-04-06
+
+### Fixed
+
+- **Require explicit --local or --global** — `install` and `uninstall` commands now require explicit `--local` or `--global` flag instead of defaulting silently.
+
 ## [4.5.13] - 2026-03-27
 
 ### Changed
