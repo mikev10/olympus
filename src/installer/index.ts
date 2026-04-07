@@ -1095,9 +1095,18 @@ export function uninstall(options: UninstallOptions = {}): UninstallResult {
         for (const [eventType, eventValue] of Object.entries(existingHooks)) {
           if (Array.isArray(eventValue)) {
             const filtered = eventValue.filter((entry: unknown) => {
-              if (typeof entry === 'object' && entry !== null && 'command' in entry) {
-                const cmd = (entry as Record<string, unknown>).command;
-                return typeof cmd !== 'string' || !cmd.includes('olympus');
+              if (typeof entry !== 'object' || entry === null) return true;
+              const obj = entry as Record<string, unknown>;
+              if ('command' in obj) {
+                return typeof obj.command !== 'string' || !obj.command.includes('olympus');
+              }
+              if ('hooks' in obj && Array.isArray(obj.hooks)) {
+                const hasOlympus = obj.hooks.some((h: unknown) => {
+                  if (typeof h !== 'object' || h === null) return false;
+                  const cmd = (h as Record<string, unknown>).command;
+                  return typeof cmd === 'string' && cmd.includes('olympus');
+                });
+                return !hasOlympus;
               }
               return true;
             });
