@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.16] - 2026-04-06
+
+### Fixed
+
+- **Uninstall now properly removes hooks from settings.json** — The nested hook structure `{ hooks: [{ command }] }` wasn't matched by the cleanup filter, leaving stale entries after uninstall that caused `MODULE_NOT_FOUND` errors.
+- **Uninstall respects `projectDir`** — Local uninstall no longer hardcodes `process.cwd()`, fixing preuninstall scope detection.
+
 ## [4.5.15] - 2026-04-06
 
 ### Fixed
