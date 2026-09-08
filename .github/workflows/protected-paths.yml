@@ -1,0 +1,75 @@
+name: Protected paths
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fail on unlabelled gate changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+        run: |
+          set -euo pipefail
+
+          # Paths that enforce the gates. A change here can disable a control,
+          # so it must be a declared intent rather than a side effect of other work.
+          PATTERNS='
+          ^\.github/workflows/
+          ^\.gitignore$
+          ^\.gitattributes$
+          ^CLAUDE\.md$
+          ^eslint\.config\.
+          ^tsconfig\.base\.json$
+          ^packages/conformance/
+          ^packages/[^/]+/src/.*types\.ts$
+          ^packages/core/src/driver/contract\.ts$
+          '
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          HITS=""
+          while read -r pattern; do
+            [ -z "$pattern" ] && continue
+            MATCH=$(printf '%s\n' "$CHANGED" | grep -E "$pattern" || true)
+            [ -n "$MATCH" ] && HITS="$HITS$MATCH"$'\n'
+          done <<< "$PATTERNS"
+
+          HITS=$(printf '%s' "$HITS" | sed '/^$/d' | sort -u)
+
+          if [ -z "$HITS" ]; then
+            echo "No protected paths touched."
+            exit 0
+          fi
+
+          echo "This PR modifies paths that enforce the gates:"
+          printf '  %s\n' $HITS
+          echo
+
+          case " $LABELS " in
+            *" gate-change "*)
+              echo "Label 'gate-change' present. Allowed."
+              echo "Reviewer: confirm each change above is intended and is not"
+              echo "a control being weakened to make other work pass."
+              exit 0
+              ;;
+            *)
+              echo "FAILED: add the 'gate-change' label to acknowledge these edits."
+              echo
+              echo "An agent that can quietly edit a check has no check. The label"
+              echo "exists so weakening a control is a decision someone made, not a"
+              echo "side effect nobody noticed."
+              exit 1
+              ;;
+          esac
