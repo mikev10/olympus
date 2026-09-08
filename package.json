@@ -16,6 +16,6 @@
   "devDependencies": {
     "@changesets/cli": "^3.0.2",
     "@types/node": "^22",
-    "typescript": "^7.0.2"
+    "typescript": "6.0.3"
   }
 }

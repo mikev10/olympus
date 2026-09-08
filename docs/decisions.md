@@ -65,7 +65,7 @@ chosen, why, and how to reverse it. Newest units at the bottom.
 ### D-F2-09: Toolchain versions
 
 - **Ambiguous:** no versions were specified.
-- **Chosen:** TypeScript 7.0.2, pnpm 12.3.4 (installed with `npm install -g` because `corepack enable` needs administrator rights on this machine), `engines.node >= 22`, `@types/node` 22.
+- **Chosen:** TypeScript 7.0.2, pnpm 12.3.4 (installed with `npm install -g` because `corepack enable` needs administrator rights on this machine), `engines.node >= 22`, `@types/node` 22. The TypeScript choice is superseded by D-F2-14 below.
 - **Why:** each is the current stable line. Node 20 reached end of life in April 2026, so a new runtime should not promise support for it.
 - **Reverse:** edit `package.json`; nothing in the nine files depends on a version.
 
@@ -170,3 +170,10 @@ Recorded, not fixed, so that no comment in the contract reads as though one of t
 - **`CapabilityScope.tools` has no relation to `DriverCapabilities`** (owner: P3, policy engine). `tools: string[]` is a free list, so a policy can grant a tool no driver exposes and nothing notices. Validation against what the selected driver declares belongs to P3.
 - **`commitRunState(s, ifVersion)` carries the version twice** (owner: P1, Vault). `ifVersion` is a parameter while `s.version` also holds one, and the contract does not say which the optimistic-concurrency check compares against. P1 must document which is authoritative before implementing it.
 - **`StationContract.allowedContext` restricts review context by comment only** (owner: P4, station machine). The rule that review seats never see `author-narrative` or `plan` is a comment on the field, where I1's write boundary got a literal type (`vault: 'never'`). Inconsistent; revisit at P4 when the ten contracts are written.
+
+### D-F2-14: TypeScript pinned to 6.0.3; supersedes the TypeScript line of D-F2-09
+
+- **Problem:** typescript-eslint 8.70.0 (and its canary) declares `typescript >=4.8.4 <6.1.0`. TypeScript 7.0.2 ships no stable programmatic API (a new one is expected in 7.1), and typescript-eslint's TypeScript 7 tracking issue is blocked on it. The two rules R-F2-04 relies on, `restrict-plus-operands` and `restrict-template-expressions`, therefore cannot run against TypeScript 7, and I7 would have two open holes with no compensating control.
+- **Chosen (decided at the F2 review gate):** pin `typescript` to exactly `6.0.3` at the workspace root, with no caret, so the version cannot drift without an explicit edit. Node stays `>=22`; pnpm, `@types/node`, and every compiler flag are unchanged. `pnpm -r typecheck` passes with no tsconfig changes.
+- **Rejected:** the npm-alias arrangement Microsoft documents for the 6/7 transition (`typescript` aliased to `@typescript/typescript6` for lint, TypeScript 7 aliased under another name for `tsc`). Typed lint would then analyze a different compiler than the one that typechecks the shipped code, so the control I7 depends on would not be looking at what ships. That is a silent degrade, which I5 forbids. TypeScript 7's benefit is compile speed, and on a repo of pure type declarations there is nothing to speed up.
+- **Reverse:** revisit only when both hold: TypeScript 7.1 ships its stable programmatic API, AND typescript-eslint declares support for it in its `typescript` peer range. Then bump the pin and confirm the two lint rules still run.
