@@ -1,4 +1,4 @@
-import { compileError, lintFixture, pending, runtime } from '../kit/assert.js';
+import { castFixture, compileError, lintFixture, pending, runtime } from '../kit/assert.js';
 import { resolvedRuleSeverity, workspaceEslint } from '../kit/eslint.js';
 import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
@@ -52,6 +52,12 @@ export const I7: InvariantEntry = {
         }
       },
     }),
+    castFixture({
+      id: 'I7.cast-scan-sees-through-unknown',
+      title: 'the cast scan reports the double cast `raw as unknown as string`, its angle-bracket form, and `as never`: the inner cast is from UntrustedText, and a plain string field is not reported',
+      fixture: 'i7/untrusted-text-double-cast.ts',
+      names: UNTRUSTED_TYPES,
+    }),
     runtime({
       id: 'I7.lint-rules-active',
       title: 'the resolved ESLint configuration keeps restrict-plus-operands, restrict-template-expressions, and no-base-to-string at error for every TypeScript file in every package',
@@ -87,6 +93,15 @@ export const I7: InvariantEntry = {
         'TriggerEvent.extracted is the only path from a payload into a run and it is an unconstrained ' +
         'Record<string, string>. Per-kind field schemas with length caps and character-class validation ' +
         'must exist, and be asserted, before any non-human trigger is enabled. The trigger framework is M2.',
+    }),
+    pending({
+      id: 'I7.untrusted-sink-lint-rule',
+      owner: 'M2',
+      reason:
+        'JSON.stringify(raw), and widening raw to unknown by annotation or parameter before casting, both compile, pass ' +
+        'lint, and contain no cast from UntrustedText for the scan to see. A type-aware custom ESLint rule that rejects ' +
+        'an UntrustedText- or UntrustedPayload-typed value at those sinks closes them (TypeScript 6.0.3 supports ' +
+        'type-aware custom rules). Deferred to M2 with the trigger framework; see D-F3-06 in docs/decisions.md.',
     }),
   ],
 };

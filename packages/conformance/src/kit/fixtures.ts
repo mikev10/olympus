@@ -170,6 +170,15 @@ export class FixtureCompiler {
   }
 
   compile(input: FixtureInput): FixtureOutcome {
+    return this.build(input).outcome;
+  }
+
+  /**
+   * Compiles the fixture and also hands back the program, the source file,
+   * and the text, so a scan can run the type checker over the fixture
+   * (kit/scan.ts) rather than only compare diagnostics.
+   */
+  build(input: FixtureInput): CompiledFixture {
     const absolute = fixturePath(input.path);
     const key = toPosix(resolve(absolute));
     this.overlay.clear();
@@ -194,8 +203,16 @@ export class FixtureCompiler {
     const diagnostics = ts.getPreEmitDiagnostics(program, sourceFile).map((d) => toFixtureDiagnostic(d, file));
     const expectations = parseExpectations(text);
     const { unmet, unexpected } = matchExpectations(expectations, diagnostics, file);
-    return { file, expectations, diagnostics, unmet, unexpected };
+    return { outcome: { file, expectations, diagnostics, unmet, unexpected }, program, sourceFile, text };
   }
+}
+
+export interface CompiledFixture {
+  readonly outcome: FixtureOutcome;
+  readonly program: ts.Program;
+  readonly sourceFile: ts.SourceFile;
+  /** The fixture's source text as compiled. */
+  readonly text: string;
 }
 
 function isFixtureFile(posixPath: string): boolean {

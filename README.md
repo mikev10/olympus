@@ -96,7 +96,9 @@ and CI fails if any invariant has none.
 | I10 | Greek names never appear in code. Documentation and CLI output only. | [i10.ts](packages/conformance/src/registry/i10.ts) |
 
 Run `pnpm conformance` to print the registry: which invariants are asserted,
-which are pending, and which unit owes each pending assertion.
+partial, or pending, which unit owes each pending assertion, and how every
+pending count compares with the committed baseline that CI ratchets it
+against.
 
 ## Repository layout
 

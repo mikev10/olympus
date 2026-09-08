@@ -1,7 +1,7 @@
 /**
  * The registry's type model. An invariant is asserted by executable
  * assertions; where one cannot exist yet, a pending entry names the unit that
- * owes it and why. The meta-test in test/registry.test.ts derives one of three
+ * owes it and why. The meta-test in test/registry.test.ts derives one of four
  * states per invariant from these records and fails on `missing`.
  */
 
@@ -122,4 +122,9 @@ export interface Registry {
   readonly claims: Readonly<Record<ClaimId, ClaimEntry>>;
 }
 
-export type InvariantState = 'asserted' | 'pending' | 'missing';
+/**
+ * `asserted`: live assertions and nothing owed. `partial`: live assertions
+ * and at least one pending entry, so the invariant's coverage is real but
+ * incomplete. `pending`: only pending entries. `missing`: neither; fails CI.
+ */
+export type InvariantState = 'asserted' | 'partial' | 'pending' | 'missing';

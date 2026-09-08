@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import ts from 'typescript';
-import { GREEK_NAMES, castsFrom, moduleSpecifiers, propertyChains, splitWords, words } from '../../src/kit/scan.js';
+import {
+  GREEK_NAMES,
+  castsFrom,
+  matchCastExpectations,
+  moduleSpecifiers,
+  parseCastExpectations,
+  propertyChains,
+  splitWords,
+  words,
+} from '../../src/kit/scan.js';
 
 function parse(text: string): ts.SourceFile {
   return ts.createSourceFile('sample.ts', text, ts.ScriptTarget.ES2022, true);
@@ -77,6 +86,8 @@ describe('castsFrom', () => {
       `const c = payload satisfies UntrustedPayload;`,
       `const d = payload.source as string;`,
       `const e = { raw: payload.raw } as { raw: unknown };`,
+      `const f = <string>(<unknown>payload.raw);`,
+      `const g = payload.raw as never as string;`,
     ].join('\n');
     const program = ts.createProgram({
       rootNames: ['sample.ts'],
@@ -95,6 +106,46 @@ describe('castsFrom', () => {
       [4, 'UntrustedText'],
       [5, 'UntrustedText'],
       [6, 'UntrustedPayload'],
+      [9, 'UntrustedText'],
+      [10, 'UntrustedText'],
     ]);
+  });
+});
+
+describe('parseCastExpectations', () => {
+  test('reads one type name per annotated line', () => {
+    const source = [
+      `export const a = payload.raw as unknown as string; // expect-cast UntrustedText`,
+      `export const b = payload.source as string;`,
+      `export const c = payload as unknown as { raw: string }; // expect-cast UntrustedPayload`,
+    ].join('\n');
+    expect(parseCastExpectations(source)).toEqual([
+      { line: 1, from: 'UntrustedText' },
+      { line: 3, from: 'UntrustedPayload' },
+    ]);
+  });
+});
+
+describe('matchCastExpectations', () => {
+  const cast = (line: number, from: string) => ({ file: 'x.ts', line, text: 'x', from });
+
+  test('pairs each annotation with one reported cast on its line; leftovers on either side are failures', () => {
+    const result = matchCastExpectations(
+      [
+        { line: 1, from: 'UntrustedText' },
+        { line: 2, from: 'UntrustedText' },
+      ],
+      [cast(1, 'UntrustedText'), cast(3, 'UntrustedPayload')],
+    );
+    expect(result).toEqual({
+      unmet: [{ line: 2, from: 'UntrustedText' }],
+      unexpected: [cast(3, 'UntrustedPayload')],
+    });
+  });
+
+  test('an annotation naming the wrong type is unmet and the cast stays unexpected', () => {
+    const result = matchCastExpectations([{ line: 1, from: 'UntrustedPayload' }], [cast(1, 'UntrustedText')]);
+    expect(result.unmet).toHaveLength(1);
+    expect(result.unexpected).toHaveLength(1);
   });
 });

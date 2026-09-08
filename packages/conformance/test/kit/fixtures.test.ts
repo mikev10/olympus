@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import ts from 'typescript';
 import {
   FixtureCompiler,
   describeFailure,
@@ -128,6 +129,16 @@ describe('FixtureCompiler', () => {
         ` // expect-error TS2322: 'string | undefined' is not assignable to type 'string'\n`,
     });
     expect(describeFailure(outcome)).toBeUndefined();
+  });
+
+  test('build exposes the program, source file, and text so a scan can run over the fixture', () => {
+    const built = compiler.build({ path: 'virtual/built.ts', text: `export const n = 1;\n` });
+    expect(built.outcome.diagnostics).toEqual([]);
+    expect(built.text).toBe(`export const n = 1;\n`);
+    const declaration = built.sourceFile.statements.find(ts.isVariableStatement)?.declarationList.declarations[0];
+    if (declaration === undefined) throw new Error('declaration not found');
+    const checker = built.program.getTypeChecker();
+    expect(checker.typeToString(checker.getTypeAtLocation(declaration.name))).toBe('1');
   });
 
   test('a second compiler instance is independent', () => {

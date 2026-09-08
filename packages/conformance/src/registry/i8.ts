@@ -1,8 +1,9 @@
 import { join, resolve } from 'node:path';
 import ts from 'typescript';
-import { compileError, compileOkSource, runtime } from '../kit/assert.js';
+import { compileError, compileOkSource, pending, runtime } from '../kit/assert.js';
+import { PENDING_BASELINE_FILE, readPendingBaseline } from '../kit/baseline.js';
 import { evaluateRegistry, formatReport } from '../kit/registry.js';
-import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js';
 import { conformanceRoot, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { claimKeys } from './claims.js';
 
@@ -46,9 +47,35 @@ export const I8: InvariantEntry = {
       title: 'every invariant and capability claim is asserted, or pending with a named owner and reason; no record is malformed',
       run: async () => {
         const { REGISTRY } = await import('./index.js');
-        const evaluation = evaluateRegistry(REGISTRY);
+        const evaluation = evaluateRegistry(REGISTRY, { baseline: readPendingBaseline() });
         if (evaluation.problems.length > 0 || evaluation.counts.missing > 0) {
           throw new Error(`I8: the registry is incomplete\n${formatReport(evaluation)}`);
+        }
+      },
+    }),
+    runtime({
+      id: 'I8.pending-count-never-exceeds-baseline',
+      title: 'every entry has a committed pending baseline, none owes more than it allows, and one pending entry added without a baseline edit is refused',
+      run: async () => {
+        const { REGISTRY } = await import('./index.js');
+        const baseline = readPendingBaseline();
+        const real = evaluateRegistry(REGISTRY, { baseline });
+        const violations = real.problems.filter((p) => p.includes(PENDING_BASELINE_FILE));
+        if (violations.length > 0) throw new Error(`I8: the pending ratchet is violated\n  ${violations.join('\n  ')}`);
+        // The ratchet must fire, not merely exist: raise I1 to one entry above
+        // its baseline, keep the baseline, and require the refusal.
+        const current = REGISTRY.invariants.I1;
+        const allowed = baseline.invariants.I1 ?? 0;
+        const extra = Array.from({ length: allowed + 1 - current.pending.length }, (_, i) =>
+          pending({ id: `I1.ratchet-self-test-${String(i)}`, owner: 'S1', reason: 'must be refused by the ratchet' }),
+        );
+        const raised: Registry = {
+          ...REGISTRY,
+          invariants: { ...REGISTRY.invariants, I1: { ...current, pending: [...current.pending, ...extra] } },
+        };
+        const expected = `I1: pending count ${String(allowed + 1)} exceeds baseline ${String(allowed)}`;
+        if (!evaluateRegistry(raised, { baseline }).problems.some((p) => p.startsWith(expected))) {
+          throw new Error(`I8: the pending ratchet did not refuse a count one above its baseline (expected "${expected}")`);
         }
       },
     }),

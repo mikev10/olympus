@@ -119,6 +119,44 @@ export function castsFrom(sf: ts.SourceFile, checker: ts.TypeChecker, names: Rea
   return out;
 }
 
+export interface CastExpectation {
+  /** 1-based line the cast must be reported on. */
+  readonly line: number;
+  /** The type name the scan must report the cast as coming from. */
+  readonly from: string;
+}
+
+const CAST_ANNOTATION = /\/\/\s*expect-cast\s+(\S+)\s*$/;
+
+/** Reads `// expect-cast <TypeName>` annotations; each applies to its own line. */
+export function parseCastExpectations(source: string): CastExpectation[] {
+  const out: CastExpectation[] = [];
+  source.split(/\r?\n/).forEach((text, index) => {
+    const match = CAST_ANNOTATION.exec(text);
+    if (match?.[1] !== undefined) out.push({ line: index + 1, from: match[1] });
+  });
+  return out;
+}
+
+/**
+ * Pairs reported casts with annotations by line and type name; the leftovers
+ * on either side are failures. An unmet annotation means the scan stopped
+ * seeing a form; an unexpected cast means it reports something it should not.
+ */
+export function matchCastExpectations(
+  expectations: readonly CastExpectation[],
+  casts: readonly CastSite[],
+): { unmet: CastExpectation[]; unexpected: CastSite[] } {
+  const remaining = [...casts];
+  const unmet: CastExpectation[] = [];
+  for (const expectation of expectations) {
+    const index = remaining.findIndex((c) => c.line === expectation.line && c.from === expectation.from);
+    if (index === -1) unmet.push(expectation);
+    else remaining.splice(index, 1);
+  }
+  return { unmet, unexpected: remaining };
+}
+
 export type WordSource = 'identifier' | 'string';
 
 export interface WordSite extends Located {

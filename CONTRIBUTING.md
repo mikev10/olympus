@@ -130,9 +130,14 @@ pending({
 });
 ```
 
-Pending entries are printed with every run so the count is visible. When
-your unit lands, replace its pending entries with live assertions in the
-same pull request.
+Pending entries are printed with every run so the count is visible, and
+every count is ratcheted against `packages/conformance/pending-baseline.json`,
+which holds the number of pending entries each invariant and each claim may
+carry. Adding a pending entry without raising its number fails CI; raising
+the number is a deliberate edit that a reviewer sees in the diff. A decrease
+is always allowed and the report shows the delta. When your unit lands,
+replace its pending entries with live assertions and lower the numbers it
+paid down in the same pull request, so the ratchet stays tight.
 
 **Capability claims.** Every key of `DriverCapabilities` and
 `SandboxCapabilities` is a claim, and each has a registry entry under
@@ -140,9 +145,11 @@ same pull request.
 fails until you add the claim; if you implement a driver or provider, its
 claims move from pending to asserted.
 
-**The three states.** An invariant is `asserted` when it has at least one
-live assertion, `pending` when it has only pending entries, and `missing`
-otherwise. `missing` fails CI. Adding an invariant to the registry requires
+**The four states.** An invariant is `asserted` when it has live assertions
+and nothing pending, `partial` when it has live assertions and at least one
+pending entry, `pending` when it has only pending entries, and `missing`
+otherwise. `missing` fails CI; `partial` is a report that coverage is real
+but incomplete, not a gate. Adding an invariant to the registry requires
 adding it to the `InvariantId` type; the registry is a total record over that
 type, so omitting one is a compile error.
 
