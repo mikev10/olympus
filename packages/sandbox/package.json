@@ -1,0 +1,16 @@
+{
+  "name": "@olympus-ai/sandbox",
+  "version": "0.0.0",
+  "description": "Sandbox contract: mount tables, egress policy, and the provider interface",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

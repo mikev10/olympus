@@ -1,0 +1,21 @@
+{
+  "name": "@olympus-ai/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Olympus v2: a provider-neutral software factory runtime (workspace root)",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.2",
+    "@types/node": "^22",
+    "typescript": "^7.0.2"
+  }
+}

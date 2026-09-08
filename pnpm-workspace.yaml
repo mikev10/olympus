@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+
+# The contract spec's type graph is cyclic (core -> vault -> integrity -> core).
+# Typecheck is order-independent (noEmit, sources resolved directly), so tasks
+# may run in any order. A future build step will need the cycle broken.
+ignoreWorkspaceCycles: true
