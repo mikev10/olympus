@@ -1,9 +1,9 @@
 /**
  * Integrity: the checks the runtime runs, the results only the runtime can
- * produce, and the tamper analysis that turns a diff into a verdict.
+ * produce, the tamper analysis that turns a diff into a verdict, and the
+ * violation record the Vault stores when a control is circumvented.
  */
-import type { RunId } from '@olympus-ai/core';
-import type { IntegrityViolation } from '@olympus-ai/vault';
+import type { RoleId, RunId, TaskId } from '@olympus-ai/core';
 
 export type CheckKind =
   | 'compile' | 'typecheck' | 'lint' | 'unit'
@@ -41,6 +41,15 @@ export interface TamperReport {
   snapshotsRegenerated: string[];
   coverageDelta: number;
   protectedPathsTouched: string[];
+}
+
+export interface IntegrityViolation {
+  runId: RunId; taskId: TaskId | null;
+  kind: 'lock-tamper' | 'vault-write-attempt' | 'protected-path'
+      | 'claim-mismatch' | 'suite-shrink' | 'skip-marker'
+      | 'assertion-weakened' | 'prompt-injection' | 'capability-escape';
+  role: RoleId; driverProvenanceId: string; contractVersion: string;
+  detectedAt: string; detail: Record<string, unknown>;
 }
 
 export interface GateResult {

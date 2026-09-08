@@ -1,9 +1,13 @@
 /**
- * Run, task, and task-graph records. Every field here is written by the
- * runtime; nothing in this file is populated from a model's output.
+ * Run, task, and task-graph records, plus the reference types that run state
+ * and policy point at. Every field here is written by the runtime; nothing in
+ * this file is populated from a model's output.
+ *
+ * This file is the root of the package graph. Every other package depends on
+ * core, and core depends only on sandbox. Types that policy or run state refer
+ * to live here for that reason, even where another package owns their
+ * implementation.
  */
-import type { TriggerRef } from '@olympus-ai/triggers';
-import type { VaultRef } from '@olympus-ai/vault';
 
 export type RunId = string & { readonly __brand: 'RunId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -15,6 +19,31 @@ export type StationId =
 
 export type AutonomyLevel = 0 | 1 | 2 | 3;
 export type ModelTier = 'fast' | 'standard' | 'deep';
+
+// Vault references. The Vault (packages/vault) stores the artifacts; run state
+// holds only references to them.
+
+export type VaultRefKind =
+  | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
+  | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
+  | 'run-state' | 'rubric' | 'learning';
+
+export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
+
+// Trigger references. The trigger envelope (packages/triggers) is where
+// untrusted input lives; a run records only which kind of trigger started it
+// and its lineage.
+
+export type TriggerKind = 'human' | 'ci-failure' | 'review-feedback' | 'post-merge' | 'scheduled';
+export type AuthorTrust = 'owner' | 'collaborator' | 'outside' | 'anonymous';
+
+export interface TriggerLineage {
+  depth: number;                      // maxTriggerDepth default 2
+  chain: RunId[];
+  windowStart: string;
+}
+
+export interface TriggerRef { kind: TriggerKind; eventId: string; lineage: TriggerLineage; }
 
 export interface Run {
   id: RunId;

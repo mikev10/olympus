@@ -14,7 +14,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@olympus-ai/core": "workspace:*",
-    "@olympus-ai/vault": "workspace:*"
+    "@olympus-ai/core": "workspace:*"
   }
 }

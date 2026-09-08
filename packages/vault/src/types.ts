@@ -2,16 +2,13 @@
  * The Vault: the runtime-only store for everything an agent must not be able
  * to alter. I1: no agent writes here, at every level, in every role. Enforced at
  * the mount layer (sandbox MountTable), not in application code.
+ *
+ * VaultRef and VaultRefKind live in core (run/types.ts) because run state
+ * holds them; IntegrityViolation lives in integrity because it produces them.
+ * The Vault stores both.
  */
-import type { AgentClaim, RoleId, RunId, RunState, StationId, TaskId } from '@olympus-ai/core';
-import type { CheckResult } from '@olympus-ai/integrity';
-
-export type VaultRefKind =
-  | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
-  | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
-  | 'run-state' | 'rubric' | 'learning';
-
-export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
+import type { AgentClaim, RunId, RunState, StationId, TaskId, VaultRef } from '@olympus-ai/core';
+import type { CheckResult, IntegrityViolation } from '@olympus-ai/integrity';
 
 /**
  * I3: an agent may not be judged by an artifact it can write. Specs and
@@ -42,15 +39,6 @@ export interface EvidenceBundle {
   collectedBy: 'runtime';             // literal type - an agent cannot construct one
   driverProvenanceId: string;
   contractVersion: string;
-}
-
-export interface IntegrityViolation {
-  runId: RunId; taskId: TaskId | null;
-  kind: 'lock-tamper' | 'vault-write-attempt' | 'protected-path'
-      | 'claim-mismatch' | 'suite-shrink' | 'skip-marker'
-      | 'assertion-weakened' | 'prompt-injection' | 'capability-escape';
-  role: RoleId; driverProvenanceId: string; contractVersion: string;
-  detectedAt: string; detail: Record<string, unknown>;
 }
 
 /**

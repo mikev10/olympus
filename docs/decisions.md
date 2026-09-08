@@ -20,12 +20,12 @@ chosen, why, and how to reverse it. Newest units at the bottom.
 - **Why:** preserving unsaved work costs nothing; discarding it is irreversible.
 - **Reverse:** on `main`, `git stash pop` to restore, or `git stash drop` to discard.
 
-### D-F2-03: v1 leftovers git never tracked stayed on disk, hidden by a local exclude
+### D-F2-03: v1 leftovers git never tracked were moved out of the repo
 
 - **Ambiguous:** ignored and untracked v1 state survived the clear (`.env.local`, the v1 dogfooding install under `.claude/`, local RAG data in `lancedb/` and `models/`, `aidlc-docs/`, and similar). None of it is recoverable from git.
-- **Chosen:** delete only regenerable build output (`node_modules/`, `dist/`, `coverage/`, `docs/build/`, `docs/.docusaurus/`, `docs/node_modules/`, an empty `.olympus-test/`). List the rest in `.git/info/exclude` so `git status` on this machine stays clean without polluting the tracked `.gitignore` with v1 vocabulary.
-- **Why:** `.env.local` holds secrets and the `.claude/` install drives the running session; deleting either is destructive with no safe default.
-- **Reverse:** delete the paths at leisure and remove the lines from `.git/info/exclude`.
+- **Chosen:** delete only regenerable build output (`node_modules/`, `dist/`, `coverage/`, `docs/build/`, `docs/.docusaurus/`, `docs/node_modules/`, an empty `.olympus-test/`). Move everything else, structure preserved, to the sibling directory `../olympus-v1-untracked/` so the working tree holds only `.git`, `.plan`, and v2 files. (First attempt hid them with `.git/info/exclude`; the maintainer asked for a genuinely clean tree.)
+- **Why:** `.env.local` holds secrets and the `.claude/` install drove the v1 session; a move is reversible, a delete is not.
+- **Reverse:** move the paths back, or delete `../olympus-v1-untracked/` once nothing in it is needed.
 
 ### D-F2-04: Six packages, no CLI package yet
 
@@ -41,12 +41,12 @@ chosen, why, and how to reverse it. Newest units at the bottom.
 - **Why:** the import sites are already what they will be after a build exists; only the package entry changes. The publish shape (dist, exports map, build tool) belongs to the unit that adds a build.
 - **Reverse:** repoint `main`, `types`, and an `exports` map at `dist/` when the build lands. No import site changes.
 
-### D-F2-06: The contract's type graph is cyclic; `ignoreWorkspaceCycles` is on
+### D-F2-06: The contract's type graph was cyclic; core is now the root
 
-- **Ambiguous:** `core` imports `VaultRef` and `TriggerRef`; `vault` and `triggers` import `RunId` and `StationId` from `core`; `vault` imports `CheckResult` from `integrity`, which imports `IntegrityViolation` from `vault`. pnpm 12 refuses to run `-r` tasks across a cycle.
-- **Chosen:** `ignoreWorkspaceCycles: true` in `pnpm-workspace.yaml`. Typecheck is order-independent (`noEmit`, sources resolved directly), so arbitrary order is correct for it.
-- **Why:** the acceptance command is `pnpm -r typecheck` and it must run. Breaking the cycle means moving types between packages, which is a redesign the review gate owns.
-- **Reverse:** move the shared primitives (ids, `StationId`, `AutonomyLevel`, `VaultRef`, `TriggerRef`) so every edge points at `core`, then drop the flag. A future build step or TypeScript project references will force this.
+- **Ambiguous:** as specified, `core` imported `VaultRef` and `TriggerRef`; `vault` and `triggers` imported `RunId` and `StationId` from `core`; `vault` imported `CheckResult` from `integrity`, which imported `IntegrityViolation` from `vault`. pnpm 12 refuses to run `-r` tasks across a cycle, and TypeScript project references cannot express one.
+- **Chosen (approved at the F2 review gate):** every type that run state or policy refers to lives in `core`. Moved into `core/src/run/types.ts`: `VaultRef`, `VaultRefKind`, `TriggerKind`, `AuthorTrust`, `TriggerLineage`, `TriggerRef`. Moved into `core/src/policy/types.ts`: `TriggerPolicy`. Moved into `integrity/src/types.ts`: `IntegrityViolation` (integrity produces it; the Vault only stores it). The graph is now `core -> sandbox`, `integrity -> core`, `triggers -> core`, `vault -> core, integrity`, `adapters -> integrity, sandbox`. The interim `ignoreWorkspaceCycles` flag is gone.
+- **Why:** an ordered build and project references both need an acyclic graph, and the rule "core owns the vocabulary" is easy to apply to every later unit.
+- **Reverse:** move a type back to the package that implements it and re-add the edge; the flag would then be needed again.
 
 ### D-F2-07: `CompiledRole` is declared in `core/src/driver/contract.ts`
 

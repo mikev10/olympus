@@ -2,9 +2,10 @@
  * Policy: the versioned, Vault-resident declaration of what each role may do,
  * where, and at what autonomy level. I4: anything not granted here is denied.
  */
-import type { TriggerKind, TriggerPolicy } from '@olympus-ai/triggers';
 import type { Budget } from '../driver/contract.js';
-import type { AutonomyLevel, ModelTier, RoleId, StationId } from '../run/types.js';
+import type {
+  AuthorTrust, AutonomyLevel, ModelTier, RoleId, StationId, TriggerKind,
+} from '../run/types.js';
 
 export interface CapabilityScope {
   stations: StationId[];              // where this role may act - nowhere else
@@ -18,6 +19,17 @@ export interface CapabilityScope {
 }
 
 export type ApprovalOutcome = 'auto' | 'human-required' | 'blocked';
+
+/** I7: a trigger selects a pre-declared template; the payload cannot name one. */
+export interface TriggerPolicy {
+  enabled: TriggerKind[];             // ships as ['human'] only
+  entryStation: Partial<Record<TriggerKind, StationId>>;
+  taskTemplate: Partial<Record<TriggerKind, string>>;   // pre-declared; payload cannot name it
+  maxAutonomy: Partial<Record<TriggerKind, AutonomyLevel>>;
+  minAuthorTrust: Partial<Record<TriggerKind, AuthorTrust>>;
+  maxTriggerDepth: number;
+  budgetPerWindow: { runs: number; windowMs: number };
+}
 
 export interface Policy {
   globalCap: AutonomyLevel;                                    // ships as 2
