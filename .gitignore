@@ -1,0 +1,33 @@
+# Maintainer-local planning docs. Never staged, committed, pushed, or referenced from any tracked file.
+.plan/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test output
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tool-local overrides
+.claude/settings.local.json
