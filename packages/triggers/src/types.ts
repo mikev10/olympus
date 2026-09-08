@@ -35,6 +35,16 @@ export interface UntrustedPayload {
 export interface TriggerEvent {
   kind: TriggerKind;
   payload: UntrustedPayload;
-  extracted: Record<string, string>;  // typed fields only; the sole path into a run
+  /**
+   * I7: the only path from a payload into a run, and it is currently
+   * unconstrained. Once the extractor casts `raw` and reads it, whatever it
+   * pulls through becomes ordinary trusted strings, and Record<string, string>
+   * limits neither which fields exist nor what they may contain. An
+   * over-permissive extractor that copies the payload into a field defeats I7
+   * entirely, and no type notices. Per-kind field schemas with length caps
+   * and character-class validation are required before a non-human trigger
+   * is enabled (docs/decisions.md, F2 known gaps).
+   */
+  extracted: Record<string, string>;
   lineage: TriggerLineage;
 }

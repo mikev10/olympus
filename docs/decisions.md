@@ -141,5 +141,32 @@ records the package moves approved at the same gate.
 
 ### Not changed
 
-- `Policy.approvals` still requires all forty `station:level` keys. Left as specified pending confirmation that every policy file must enumerate them.
+- `Policy.approvals` still requires all forty `station:level` keys. Left as specified pending confirmation that every policy file must enumerate them. Resolved by R-F2-08 below.
 - `collectedBy: 'runtime'` and `vault: 'never'` are unchanged. Their comments now say what the type does (make the other value unrepresentable) rather than who is prevented from writing it.
+
+## F2 amendment: maintainer review of the nine files
+
+The maintainer reviewed the nine files after the gate and asked for three
+type-only edits plus a record of the gaps left open. Each entry below is a
+change relative to the files as they passed the gate.
+
+### R-F2-07: `Task.status` removed; `RunState.tasks` is the sole authority
+
+- **Problem:** `Task.status` (inside the `TaskGraph`) and `RunState.tasks: Record<TaskId, TaskStatus>` both held a `TaskStatus`. They could disagree and nothing said which won: the same defect R-F2-03 removed from `GateResult`, missed in a second place.
+- **Change:** `Task` is the static definition (identity, run, station, role, dependencies, base commit, dependency set, worktree, attempt). `RunState.tasks` alone holds mutable status, so a `RunState` on its own is enough to resume a run. `TaskStatus` is unchanged and stays where it was.
+- **Reverse:** add the field back and document which one wins.
+
+### R-F2-08: `PolicyDocument` split from `Policy`; `PolicyEngine.resolvePolicy` added
+
+- **Problem:** `Policy.approvals` required all forty `station:level` keys, which no one can author by hand. Making it `Partial` would have been worse: a missing key means something downstream must decide, and a default of `auto` grants autonomy silently.
+- **Change:** `PolicyDocument` is what a human authors and what `policy.yaml` parses to; `approvals` and `stationCaps` are `Partial`. `Policy` is the resolved form the engine consumes; `approvals` is the total forty-key record (`ApprovalKey` names the key type) and nothing else changed. `PolicyEngine.resolvePolicy(doc): Policy` runs once at load, and every approval the document omits resolves to `human-required`, never `auto`. The resolved `Policy` is what is hashed into the Vault, not the sparse document, so an auditor reads the effective table rather than a config plus a defaulting rule.
+- **Reverse:** delete `PolicyDocument`, `ApprovalKey`, and `resolvePolicy`; every policy file must then enumerate all forty keys.
+
+### Known gaps
+
+Recorded, not fixed, so that no comment in the contract reads as though one of these is closed. Each names the unit that owns it.
+
+- **`TriggerEvent.extracted` has no field schema** (owner: triggers unit, M2). `UntrustedText` keeps `raw` out of prompts, but `extracted` is the only path from a payload into a run and it is a free `Record<string, string>`. Once the extractor casts and reads `raw`, whatever it pulls through becomes ordinary trusted strings, and the type constrains neither which fields exist nor what they contain. An over-permissive extractor that copies the payload into a field defeats I7 entirely, and no type notices. Per-kind field schemas with length caps and character-class validation are required before any non-human trigger is enabled. The comment on the field now says this; it previously called `extracted` "the sole path into a run" as though being the only path made it safe.
+- **`CapabilityScope.tools` has no relation to `DriverCapabilities`** (owner: P3, policy engine). `tools: string[]` is a free list, so a policy can grant a tool no driver exposes and nothing notices. Validation against what the selected driver declares belongs to P3.
+- **`commitRunState(s, ifVersion)` carries the version twice** (owner: P1, Vault). `ifVersion` is a parameter while `s.version` also holds one, and the contract does not say which the optimistic-concurrency check compares against. P1 must document which is authoritative before implementing it.
+- **`StationContract.allowedContext` restricts review context by comment only** (owner: P4, station machine). The rule that review seats never see `author-narrative` or `plan` is a comment on the field, where I1's write boundary got a literal type (`vault: 'never'`). Inconsistent; revisit at P4 when the ten contracts are written.

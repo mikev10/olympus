@@ -56,6 +56,12 @@ export interface Run {
   createdAt: string;
 }
 
+/**
+ * The static definition of one task, as emitted by `plan`. It carries no
+ * mutable state: status lives only in RunState.tasks, so there is exactly one
+ * place it can be read from (I2) and a RunState alone is enough to resume a
+ * run.
+ */
 export interface Task {
   id: TaskId;
   runId: RunId;
@@ -71,7 +77,6 @@ export interface Task {
   dependencySet: string[];
   worktreePath: string;
   attempt: number;
-  status: TaskStatus;          // runtime-owned, never model-set (I2)
 }
 
 export type TaskStatus =
@@ -86,7 +91,7 @@ export interface TaskGraph {
 export interface RunState {
   runId: RunId;
   station: StationId;
-  tasks: Record<TaskId, TaskStatus>;
+  tasks: Record<TaskId, TaskStatus>;   // the sole authority for task status (I2); Task holds none
   evidenceRefs: VaultRef[];
   violations: VaultRef[];
   version: string;             // optimistic concurrency

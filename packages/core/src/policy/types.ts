@@ -1,6 +1,11 @@
 /**
  * Policy: the versioned, Vault-resident declaration of what each role may do,
  * where, and at what autonomy level. I4: anything not granted here is denied.
+ *
+ * Two shapes. PolicyDocument is what a human authors and what policy.yaml
+ * parses to; it is sparse. Policy is the resolved, total form the engine
+ * consumes and the Vault stores. PolicyEngine.resolvePolicy is the only way
+ * from one to the other.
  */
 import type { Budget } from '../driver/contract.js';
 import type {
@@ -20,6 +25,9 @@ export interface CapabilityScope {
 
 export type ApprovalOutcome = 'auto' | 'human-required' | 'blocked';
 
+/** One key per station and level: ten stations, four levels, forty keys. */
+export type ApprovalKey = `${StationId}:${AutonomyLevel}`;
+
 /** I7: a trigger selects a pre-declared template; the payload cannot name one. */
 export interface TriggerPolicy {
   enabled: TriggerKind[];             // ships as ['human'] only
@@ -31,10 +39,36 @@ export interface TriggerPolicy {
   budgetPerWindow: { runs: number; windowMs: number };
 }
 
+/**
+ * What a human authors: the shape parsed from policy.yaml. `approvals` and
+ * `stationCaps` are sparse, so a file need not enumerate every station and
+ * level. The engine never consumes this shape directly; it becomes a Policy
+ * only through PolicyEngine.resolvePolicy, which decides what every omitted
+ * key means.
+ */
+export interface PolicyDocument {
+  globalCap: AutonomyLevel;                                    // ships as 2
+  stationCaps: Partial<Record<StationId, AutonomyLevel>>;
+  approvals: Partial<Record<ApprovalKey, ApprovalOutcome>>;
+  roles: Record<RoleId, CapabilityScope>;
+  protectedPaths: string[];           // in-repo but escalating: CI, test config, package scripts
+  triggers: TriggerPolicy;
+  concurrency: { maxParallelTasks: number; maxConflictRetries: number };
+}
+
+/**
+ * The resolved form the engine consumes. `approvals` is total: all forty
+ * station:level keys are present, so a gate lookup can never miss and nothing
+ * downstream has a default to apply.
+ *
+ * This resolved Policy, not the PolicyDocument it came from, is what is
+ * hashed into the Vault (VaultRefKind 'policy'). An auditor reads the
+ * effective table, never a config file plus a defaulting rule.
+ */
 export interface Policy {
   globalCap: AutonomyLevel;                                    // ships as 2
   stationCaps: Partial<Record<StationId, AutonomyLevel>>;
-  approvals: Record<`${StationId}:${AutonomyLevel}`, ApprovalOutcome>;
+  approvals: Record<ApprovalKey, ApprovalOutcome>;
   roles: Record<RoleId, CapabilityScope>;
   protectedPaths: string[];           // in-repo but escalating: CI, test config, package scripts
   triggers: TriggerPolicy;
@@ -64,6 +98,14 @@ export type CapabilityResolution =
  * station cap or the global cap is a PolicyRefusal, never a lower level.
  */
 export interface PolicyEngine {
+  /**
+   * Runs once at load. Every approval the document leaves unspecified resolves
+   * to 'human-required', never 'auto': an unconfigured policy is safe, not
+   * broken. The Policy this returns is what the runtime hashes into the Vault
+   * and what every other method here takes; the document is never the policy
+   * of record.
+   */
+  resolvePolicy(doc: PolicyDocument): Policy;
   resolveAutonomy(
     requested: AutonomyLevel, station: StationId, role: RoleId, policy: Policy
   ): PolicyResolution;
