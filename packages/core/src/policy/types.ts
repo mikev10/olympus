@@ -41,15 +41,31 @@ export interface Policy {
   concurrency: { maxParallelTasks: number; maxConflictRetries: number };
 }
 
+export interface PolicyRefusal {
+  ok: false;
+  reason: 'exceeds-cap' | 'station-forbidden' | 'capability-missing';
+  detail: string;
+}
+
 export type PolicyResolution =
   | { ok: true; level: AutonomyLevel }
-  | { ok: false; reason: 'exceeds-cap' | 'station-forbidden' | 'capability-missing'; detail: string };
+  | PolicyRefusal;
 
-/** I5: over-request is refused, never silently downgraded. */
-export declare function resolveAutonomy(
-  requested: AutonomyLevel, station: StationId, role: RoleId, policy: Policy
-): PolicyResolution;
+export type CapabilityResolution =
+  | { ok: true; scope: CapabilityScope }
+  | PolicyRefusal;
 
-export declare function resolveCapabilities(
-  role: RoleId, station: StationId, policy: Policy
-): CapabilityScope | PolicyResolution;
+/**
+ * The policy engine. An interface rather than ambient function declarations so
+ * the contract has no runtime exports that resolve to undefined before an
+ * implementation exists.
+ *
+ * I5: over-request is refused, never silently downgraded. A request above the
+ * station cap or the global cap is a PolicyRefusal, never a lower level.
+ */
+export interface PolicyEngine {
+  resolveAutonomy(
+    requested: AutonomyLevel, station: StationId, role: RoleId, policy: Policy
+  ): PolicyResolution;
+  resolveCapabilities(role: RoleId, station: StationId, policy: Policy): CapabilityResolution;
+}

@@ -8,9 +8,16 @@ import type { ModelTier, RoleId, TaskId } from '../run/types.js';
 
 export const DRIVER_CONTRACT_VERSION = '1.0.0';
 
+/**
+ * I6: reviewers never share the author's model family. Branded so a driver
+ * must assign it deliberately; a driver id, provider string, or model name
+ * cannot be passed as a family by accident.
+ */
+export type ModelFamily = string & { readonly __brand: 'ModelFamily' };
+
 export interface ModelIdentity {
   provider: string;
-  family: string;     // explicit. NEVER inferred from driver id - I6 depends on this
+  family: ModelFamily; // explicit. NEVER inferred from driver id - I6 depends on this
   model: string;
   version: string;
 }

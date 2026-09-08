@@ -36,7 +36,7 @@ export interface EvidenceBundle {
   checks: CheckResult[];
   claim: AgentClaim;                  // stored beside evidence, never merged into it
   claimEvidenceDiff: string[];        // I2: where the model's story and the facts differ
-  collectedBy: 'runtime';             // literal type - an agent cannot construct one
+  collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
   contractVersion: string;
 }
@@ -46,7 +46,7 @@ export interface EvidenceBundle {
  * calls. No method on this interface is reachable from inside a Workspace.
  */
 export interface Vault {
-  read(ref: VaultRef): Promise<Buffer>;
+  read(ref: VaultRef): Promise<Uint8Array>;
   lock(runId: RunId, paths: string[], by: StationId): Promise<LockManifest>;
   verifyLocks(runId: RunId): Promise<LockVerdict>;
   writeEvidence(b: EvidenceBundle): Promise<VaultRef>;

@@ -10,12 +10,24 @@
 import type { AuthorTrust, TriggerKind, TriggerLineage } from '@olympus-ai/core';
 
 /**
- * I7: branded so untrusted text cannot be passed where a prompt string is expected.
- * `raw` is NEVER concatenated into a system or role prompt - only `extracted` crosses in.
+ * I7: an opaque handle to untrusted text. Deliberately NOT a string subtype, so
+ * it cannot be passed where a string is expected: not to a prompt builder, a
+ * template, or a driver. Only the trigger extractor reads it, through a
+ * deliberate cast, and the conformance suite (packages/conformance) rejects
+ * that cast anywhere else. Two gaps remain at the type level because `+` and
+ * template interpolation accept objects; lint closes them with the
+ * typescript-eslint rules restrict-plus-operands and
+ * restrict-template-expressions.
+ */
+export type UntrustedText = { readonly __brand: 'UntrustedText' };
+
+/**
+ * I7: the envelope for untrusted input. `raw` is NEVER concatenated into a
+ * system or role prompt; only `extracted` (on TriggerEvent) crosses in.
  */
 export interface UntrustedPayload {
   readonly __brand: 'UntrustedPayload';
-  raw: string;
+  raw: UntrustedText;
   source: string;
   authorTrust: AuthorTrust;
 }

@@ -57,8 +57,8 @@ chosen, why, and how to reverse it. Newest units at the bottom.
 
 ### D-F2-08: `@types/node` lives at the workspace root
 
-- **Ambiguous:** only `vault` uses a Node type (`Buffer`), but every package's typecheck pulls every imported package's sources into its own program.
-- **Chosen:** one root `@types/node` and `types: ["node"]` in the base tsconfig.
+- **Ambiguous:** as specified, only `vault` used a Node type (`Buffer`), but every package's typecheck pulls every imported package's sources into its own program.
+- **Chosen:** one root `@types/node` and `types: ["node"]` in the base tsconfig. Kept as the baseline for a Node service (I9) even though, after R-F2-06 below, no contract file needs a Node type.
 - **Why:** a per-package copy would be invisible to the other packages' programs and fail their typecheck.
 - **Reverse:** move it into each package that needs it once builds emit `.d.ts` files and programs stop crossing package boundaries.
 
@@ -96,3 +96,50 @@ chosen, why, and how to reverse it. Newest units at the bottom.
 - **Chosen:** `.gitattributes` forces LF everywhere. Every package declares `"license": "MIT"`; the `LICENSE` file itself arrives with F3's contribution surface.
 - **Why:** mixed endings are the first thing a Linux CI job trips on; the license field matches the stated OSS boundary.
 - **Reverse:** edit `.gitattributes`; add or change the license.
+
+## F2 review gate: approved changes to the contract spec
+
+The maintainer reviewed the nine files and approved the recommendations below.
+Each changes a signature relative to the original contract spec. D-F2-06 above
+records the package moves approved at the same gate.
+
+### R-F2-01: `PolicyEngine` interface replaces two ambient function declarations
+
+- **Problem:** `export declare function resolveAutonomy` and `resolveCapabilities` produced module exports with no runtime binding; importing either before the policy unit lands would yield `undefined` silently. Every other contract is an interface.
+- **Change:** `PolicyEngine { resolveAutonomy(...): PolicyResolution; resolveCapabilities(...): CapabilityResolution }`.
+- **Reverse:** restore the declarations; the policy unit must then implement them in that exact module.
+
+### R-F2-02: `resolveCapabilities` returns a discriminated `CapabilityResolution`
+
+- **Problem:** `CapabilityScope | PolicyResolution` had two success shapes, one of them (`{ ok: true; level }`) meaningless for a capability lookup, and no discriminant on the scope.
+- **Change:** `PolicyRefusal` is the shared failure shape. `PolicyResolution = { ok: true; level } | PolicyRefusal` and `CapabilityResolution = { ok: true; scope } | PolicyRefusal`. Both narrow on `ok`.
+- **Reverse:** return `CapabilityScope | PolicyRefusal` and discriminate with `'ok' in result`.
+
+### R-F2-03: `GateResult.passed` removed
+
+- **Problem:** `passed: boolean` and `verdict: 'pass' | 'fail' | 'escalate'` were two sources of truth; `passed: true` with `verdict: 'escalate'` was representable.
+- **Change:** `verdict` alone. "Passed" is `verdict === 'pass'`.
+- **Reverse:** add the field back and document which one wins.
+
+### R-F2-04: `UntrustedPayload.raw` is an opaque `UntrustedText`, not a `string`
+
+- **Problem:** the I7 comment claimed the brand kept untrusted text out of prompts, but `raw: string` flowed anywhere a string does, and a branded string subtype would too.
+- **Change:** `UntrustedText = { readonly __brand: 'UntrustedText' }` with no string in it. Passing `raw` to anything typed `string` is now a compile error. Reading it requires a deliberate cast that only the extractor may contain (F3 conformance). Two gaps stay open at the type level, `+` concatenation and template interpolation, and F3's lint must enable `restrict-plus-operands` and `restrict-template-expressions` to close them.
+- **Reverse:** `raw: string` and rely on lint alone.
+
+### R-F2-05: `ModelIdentity.family` is a branded `ModelFamily`
+
+- **Problem:** a free `string` let a driver pass its id or provider as the family by accident, which is exactly the inference I6 forbids.
+- **Change:** `ModelFamily = string & { readonly __brand: 'ModelFamily' }`; assigning one requires a deliberate cast at the driver.
+- **Reverse:** `family: string`. A closed union was rejected because adding a family would then be a contract change.
+
+### R-F2-06: `Vault.read` returns `Uint8Array`
+
+- **Problem:** `Buffer` tied the contract to Node's type for no benefit.
+- **Change:** `Promise<Uint8Array>`. Node's `Buffer` satisfies it, so implementations lose nothing.
+- **Reverse:** `Promise<Buffer>`.
+
+### Not changed
+
+- `Policy.approvals` still requires all forty `station:level` keys. Left as specified pending confirmation that every policy file must enumerate them.
+- `collectedBy: 'runtime'` and `vault: 'never'` are unchanged. Their comments now say what the type does (make the other value unrepresentable) rather than who is prevented from writing it.

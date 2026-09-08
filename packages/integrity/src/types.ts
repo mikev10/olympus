@@ -52,8 +52,8 @@ export interface IntegrityViolation {
   detectedAt: string; detail: Record<string, unknown>;
 }
 
+/** `verdict` is the single source of truth; "passed" is `verdict === 'pass'`. */
 export interface GateResult {
-  passed: boolean;
   checks: CheckResult[];
   tamper: TamperReport;
   violations: IntegrityViolation[];
