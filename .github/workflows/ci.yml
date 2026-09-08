@@ -1,0 +1,58 @@
+# Typecheck, lint, test, conformance registry. The four commands are the same
+# ones a contributor runs locally; CI adds nothing they cannot reproduce.
+name: CI
+
+on:
+  push:
+    branches: [v2]
+  pull_request:
+    branches: [v2]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck, lint, test, conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reads the pnpm version from the packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: No tracked file is covered by .gitignore
+        run: |
+          ignored="$(git ls-files --cached --ignored --exclude-standard)"
+          if [ -n "$ignored" ]; then
+            echo "$ignored"
+            echo "::error::tracked files match .gitignore; they must never be committed"
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      # Runs the registry meta-test on its own so its report is the last
+      # thing in the log: every invariant's state, every pending entry, and
+      # the unit that owes it. A `missing` invariant fails this step.
+      - name: Conformance registry
+        run: pnpm conformance

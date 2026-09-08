@@ -1,0 +1,24 @@
+{
+  "name": "@olympus-ai/conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Conformance kit and invariant registry: proves I1-I10 in isolation, with no factory run",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "registry": "vitest run test/registry.test.ts --reporter=verbose"
+  },
+  "dependencies": {
+    "eslint": "^10.10.0",
+    "typescript": "6.0.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

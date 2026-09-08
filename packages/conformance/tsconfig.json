@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The kit has no package.json dependency on any sibling, so a Phase 2
+    // package can devDepend on the kit without forming a workspace cycle.
+    // Fixtures still need the sibling contracts, so each package name maps to
+    // its published entry (the `types` field of its package.json). The
+    // registry asserts that this map and those fields agree.
+    "paths": {
+      "@olympus-ai/core": ["../core/src/index.ts"],
+      "@olympus-ai/vault": ["../vault/src/index.ts"],
+      "@olympus-ai/integrity": ["../integrity/src/index.ts"],
+      "@olympus-ai/sandbox": ["../sandbox/src/index.ts"],
+      "@olympus-ai/triggers": ["../triggers/src/index.ts"],
+      "@olympus-ai/adapters": ["../adapters/src/index.ts"]
+    }
+  },
+  // fixtures/types is deliberately absent: those files fail to compile by
+  // design and are compiled one at a time by the fixture compiler.
+  "include": ["src", "test", "fixtures/lint", "vitest.config.ts"]
+}
