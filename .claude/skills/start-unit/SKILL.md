@@ -12,8 +12,9 @@ the unit spec; this skill loads it and holds the boundary.
 
 1. `CLAUDE.md` — invariants, vocabulary, conventions
 2. `docs/plan/F1-spine.md` — invariants, frozen vocabulary, dependency graph
-3. `docs/plan/DECOMPOSITION.md` — the named unit's entry only
-4. The unit's detailed spec if one exists, e.g. `docs/plan/F2-contracts.md`
+3. `docs/plan/WORKFLOW.md` — the three work types, the unit loop, where state lives
+4. `docs/plan/DECOMPOSITION.md` — the named unit's entry only
+5. The unit's detailed spec if one exists, e.g. `docs/plan/F2-contracts.md`
 
 Load nothing else. The maintainer's master plan is not in the repository and
 is never session context; `CLAUDE.md` says where it lives and that it stays
