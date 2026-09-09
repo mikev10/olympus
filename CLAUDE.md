@@ -10,8 +10,9 @@ This is a **v2 rewrite**. `main` is frozen v1. Ignore v1 code, v1 vocabulary, an
 ## Read order
 
 1. `docs/plan/F1-spine.md` — invariants, vocabulary, dependency graph
-2. `docs/plan/DECOMPOSITION.md` — find the current unit
-3. That unit's spec under `docs/plan/`, if it has one (`F2-contracts.md`, `S1-skeleton.md`)
+2. `docs/plan/WORKFLOW.md` — the three work types, the unit loop, where state lives
+3. `docs/plan/DECOMPOSITION.md` — find the current unit
+4. That unit's spec under `docs/plan/`, if it has one (`F2-contracts.md`, `S1-skeleton.md`)
 
 **Do not load `.plan/olympus-v2-plan.md`.** It is maintainer reference, not session context.
 
