@@ -46,8 +46,17 @@ conclusions already reached and stops questioning them. `docs/reviews/` holds
 what earlier reviewers found. `docs/plan/` is the spec the code is judged
 against; the reviewer gets the invariants restated in the prompt instead.
 
-Never include anything from `.plan/`. Confirm with `grep -c '\.plan/'` and
-`grep -c 'docs/decisions.md'` before handing the bundle over.
+Never include anything from `.plan/`. Confirm before handing the bundle over
+that both of these print `0`:
+
+```
+grep -c '^===== \.plan/'                    ~/Desktop/olympus-<unit>-review.txt
+grep -c '^===== docs/decisions\.md =====$'  ~/Desktop/olympus-<unit>-review.txt
+```
+
+They match the bundle's section headers, not prose. A count over the bare
+path would report a false hit whenever README.md, CONTRIBUTING.md, or a
+changeset that mentions the decisions log is in the diff.
 
 ## 3. Derive the unit-specific half of the prompt
 
