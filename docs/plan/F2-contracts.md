@@ -1,5 +1,13 @@
 # F2 — Contracts
 
+> **Historical: the F2 build spec, as written for the F2 session.** The
+> signatures below are what F2 was built to. They are not maintained and are
+> already behind the code: the F2 review gate, the maintainer review, and the
+> amendments surfaced by S1 each changed a contract without changing this
+> file. The types under `packages/*/src` are authoritative; where this file
+> and the code differ, the code is right. The amendment history, with what
+> changed and why, is in `docs/decisions.md`.
+
 **Unit:** F2 (Phase 0, foundation, maintainer-only)
 **Depends on:** F1 Spine
 **Blocks:** everything
