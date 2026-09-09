@@ -2,7 +2,8 @@
  * Regression tests from the external review of S1
  * (docs/reviews/2026-09-09-S1-walking-skeleton-adversarial-triage.md). Each
  * test is one finding's construction, kept as the reviewer wrote it, and
- * failed against the code the review saw.
+ * failed against the code the review saw. Every refusal is read by field:
+ * a path and a code for a request problem, a payload for a transition.
  */
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import type { CheckSpec, IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { startRun, type FixtureTask, type RunOutcome, type RunRequest } from '../src/index.js';
+import { startRun, type FixtureTask, type RequestProblemCode, type RunOutcome, type RunRequest } from '../src/index.js';
 
 const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
 const runId = 'run-hardening' as RunId;
@@ -45,18 +46,19 @@ function request(task: Partial<FixtureTask>): RunRequest {
   };
 }
 
-/** The refusal that happens before anything is locked, provisioned, or committed. */
-async function expectInvalid(outcome: RunOutcome, problem: RegExp): Promise<void> {
+/** The refusal that happens before anything is locked, provisioned, or committed, naming the field and the code. */
+async function expectInvalid(outcome: RunOutcome, path: string, code: RequestProblemCode): Promise<void> {
   expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request' });
   if (outcome.ok || outcome.reason !== 'invalid-request') return;
-  expect(outcome.problems.join('\n')).toMatch(problem);
+  expect(outcome.problems).toContainEqual(expect.objectContaining({ path, code }));
+  for (const problem of outcome.problems) expect(problem.message).not.toBe('');
   await expect(vault.readRunState(runId)).rejects.toThrow();
   await expect(vault.verifyLocks(runId)).rejects.toThrow();
 }
 
 describe('finding 1: duplicate check ids', () => {
   test('a manifest with a duplicated id is refused before anything runs', async () => {
-    await expectInvalid(await startRun(request({ checks: [ok, bad] })), /'x'.*(twice|duplicate)/i);
+    await expectInvalid(await startRun(request({ checks: [ok, bad] })), 'task.checks[1].id', 'duplicate');
   });
 
   test('results keep their position: a second required check that fails is not masked by a first that passes', async () => {
@@ -68,6 +70,7 @@ describe('finding 1: duplicate check ids', () => {
       ['y', 3],
     ]);
     expect(outcome.gate.verdict).toBe('fail');
+    expect(outcome.next).toMatchObject({ ok: false, reason: 'gate-failed', failed: [{ checkId: 'y', exitCode: 3, cause: 'exit-code' }] });
   });
 });
 
@@ -76,7 +79,12 @@ describe('finding 2: a locked artifact changed during verify', () => {
     const rewrite: CheckSpec = { ...ok, id: 'rewrite', command: "node -e require('node:fs').writeFileSync('spec.md','changed')" };
     const outcome = await startRun(request({ checks: [rewrite] }));
     expect(await readFile(join(workspace, 'spec.md'), 'utf8')).toBe('changed');
-    expect(outcome).toMatchObject({ ok: false, reason: 'refused', at: 'verify', transition: { ok: false, reason: 'lock-tamper' } });
+    expect(outcome).toMatchObject({
+      ok: false,
+      reason: 'refused',
+      at: 'verify',
+      transition: { ok: false, reason: 'lock-tamper', tampered: [{ path: 'spec.md' }] },
+    });
 
     const state = await vault.readRunState(runId);
     expect(state.station).toBe('verify');
@@ -94,11 +102,11 @@ describe('finding 2: a locked artifact changed during verify', () => {
 
 describe('finding 3: the verification manifest', () => {
   test('3a: a manifest with no checks is refused', async () => {
-    await expectInvalid(await startRun(request({ checks: [] })), /no check/i);
+    await expectInvalid(await startRun(request({ checks: [] })), 'task.checks', 'missing');
   });
 
   test('3a: a manifest with only optional checks is refused', async () => {
-    await expectInvalid(await startRun(request({ checks: [{ ...ok, required: false }] })), /required/i);
+    await expectInvalid(await startRun(request({ checks: [{ ...ok, required: false }] })), 'task.checks', 'none-required');
   });
 
   test("3b: the run works from a snapshot: shrinking the caller's array after startRun changes nothing", async () => {
@@ -114,13 +122,13 @@ describe('finding 3: the verification manifest', () => {
 
   test('3c: a check whose required flag is not a boolean is refused', async () => {
     const unrequired = { ...bad, required: undefined as unknown as boolean };
-    await expectInvalid(await startRun(request({ checks: [unrequired] })), /required.*boolean/i);
+    await expectInvalid(await startRun(request({ checks: [unrequired] })), 'task.checks[0].required', 'not-boolean');
   });
 
   test('3c: a check with an empty command, an empty id, or a bad suite count is refused', async () => {
-    await expectInvalid(await startRun(request({ checks: [{ ...ok, command: '  ' }] })), /command/i);
-    await expectInvalid(await startRun(request({ checks: [{ ...ok, id: '' }] })), /id/i);
-    await expectInvalid(await startRun(request({ checks: [{ ...ok, expectedSuiteCount: -1 }] })), /expectedSuiteCount/);
+    await expectInvalid(await startRun(request({ checks: [{ ...ok, command: '  ' }] })), 'task.checks[0].command', 'empty');
+    await expectInvalid(await startRun(request({ checks: [{ ...ok, id: '' }] })), 'task.checks[0].id', 'empty');
+    await expectInvalid(await startRun(request({ checks: [{ ...ok, expectedSuiteCount: -1 }] })), 'task.checks[0].expectedSuiteCount', 'not-integer');
   });
 });
 
@@ -129,20 +137,20 @@ describe('finding 7: locked paths', () => {
     const outside = await mkdtemp(join(tmpdir(), 's1-outside-'));
     try {
       await writeFile(join(outside, 'other.md'), 'elsewhere');
-      await expectInvalid(await startRun(request({ lockedPaths: [join(outside, 'other.md')] })), /absolute/i);
+      await expectInvalid(await startRun(request({ lockedPaths: [join(outside, 'other.md')] })), 'task.lockedPaths[0]', 'absolute');
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
   });
 
   test('a path with a .. segment is refused', async () => {
-    await expectInvalid(await startRun(request({ lockedPaths: ['../spec.md'] })), /\.\./);
-    await expectInvalid(await startRun(request({ lockedPaths: ['a/../../spec.md'] })), /\.\./);
+    await expectInvalid(await startRun(request({ lockedPaths: ['../spec.md'] })), 'task.lockedPaths[0]', 'escapes');
+    await expectInvalid(await startRun(request({ lockedPaths: ['a/../../spec.md'] })), 'task.lockedPaths[0]', 'escapes');
   });
 
   test('an empty list, an empty path, or a duplicated path is refused', async () => {
-    await expectInvalid(await startRun(request({ lockedPaths: [] })), /lockedPaths/);
-    await expectInvalid(await startRun(request({ lockedPaths: [''] })), /empty/i);
-    await expectInvalid(await startRun(request({ lockedPaths: ['spec.md', 'spec.md'] })), /twice|duplicate/i);
+    await expectInvalid(await startRun(request({ lockedPaths: [] })), 'task.lockedPaths', 'missing');
+    await expectInvalid(await startRun(request({ lockedPaths: [''] })), 'task.lockedPaths[0]', 'empty');
+    await expectInvalid(await startRun(request({ lockedPaths: ['spec.md', 'spec.md'] })), 'task.lockedPaths[1]', 'duplicate');
   });
 });

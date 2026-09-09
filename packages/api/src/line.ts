@@ -9,11 +9,22 @@
  */
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { Run, RunState, StationId, StationTransition, Task, TaskResult, TaskStatus, VaultRef } from '@olympus-ai/core';
+import type {
+  FailedCheck,
+  Run,
+  RunState,
+  StationId,
+  StationRefusal,
+  StationTransition,
+  Task,
+  TaskResult,
+  TaskStatus,
+  VaultRef,
+} from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, GateResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
 import type { LockManifest } from '@olympus-ai/vault';
-import type { ComponentGraph, FixtureTask, RunOutcome, StationRefusal } from './run.js';
+import type { ComponentGraph, FixtureTask, RunOutcome } from './run.js';
 
 export interface LineContext {
   readonly run: Run;
@@ -134,11 +145,17 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
   const tampered = await refuseIfTampered(ctx, 'verify', { phase: 'after-checks', checks });
   if (tampered !== undefined) return tampered;
 
-  const failures = specs.flatMap((check, i) => {
-    const shortfall = requiredShortfall(check, results[i], unstarted[i]);
-    return shortfall === undefined ? [] : [shortfall];
+  // The verdict: every required check with a shortfall fails the gate. The payload names each in
+  // the runtime's terms and the message describes it for a person (I2, I5).
+  const failed: FailedCheck[] = [];
+  const described: string[] = [];
+  specs.forEach((check, i) => {
+    const shortfall = requiredShortfall(check, results[i]);
+    if (shortfall === undefined) return;
+    failed.push(shortfall);
+    described.push(describeShortfall(shortfall, check, results[i], unstarted[i]));
   });
-  const verdict = failures.length === 0 ? 'pass' : 'fail';
+  const verdict = failed.length === 0 ? 'pass' : 'fail';
   const gate: GateResult = { checks, tamper: emptyTamperReport(), violations: [], verdict };
   const evidence = await vault.writeEvidence({
     runId: ctx.run.id,
@@ -154,7 +171,9 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
   // The task's status follows the verdict and nothing else (I2).
   await commit(ctx, { station: 'verify', status: verdict === 'pass' ? 'passed' : 'failed', evidence });
   const next: StationTransition =
-    verdict === 'pass' ? { ok: true, next: 'review' } : { ok: false, reason: 'gate-failed', detail: failures.join('; ') };
+    verdict === 'pass'
+      ? { ok: true, next: 'review' }
+      : { ok: false, reason: 'gate-failed', failed, message: `gate failed: ${described.join('; ')}` };
   return { gate, evidence, next };
 }
 
@@ -183,21 +202,33 @@ async function refuseIfTampered(ctx: LineContext, at: StationId, extra: Record<s
   await commit(ctx, { station: at, status: 'failed', violation: ref });
   const paths = verdict.tampered.map((t) => `${t.path} (expected ${t.expected}, actual ${t.actual})`).join(', ');
   const when = typeof extra.phase === 'string' ? ` (${extra.phase})` : '';
-  return { ok: false, reason: 'lock-tamper', detail: `locked artifact changed before ${at}${when}: ${paths}` };
+  return { ok: false, reason: 'lock-tamper', tampered: verdict.tampered, message: `locked artifact changed before ${at}${when}: ${paths}` };
 }
 
-/** Why a required check fails the gate, or undefined when it does not. A check that is not required never fails it. */
-function requiredShortfall(check: CheckSpec, result: CheckResult | undefined, unstartedBecause: string | undefined): string | undefined {
+/** Why a required check fails the gate, in the runtime's terms, or undefined when it does not. A check that is not required never fails it. */
+function requiredShortfall(check: CheckSpec, result: CheckResult | undefined): FailedCheck | undefined {
   if (!check.required) return undefined;
-  if (result === undefined) return `${check.id}: no result${unstartedBecause === undefined ? '' : ` (${unstartedBecause})`}`;
-  if (result.exitCode !== 0) return `${check.id}: exit code ${String(result.exitCode)}`;
-  if (check.expectedSuiteCount !== undefined) {
-    if (result.suiteCount === null) return `${check.id}: expected ${String(check.expectedSuiteCount)} suites, count unknown`;
-    if (result.suiteCount < check.expectedSuiteCount) {
-      return `${check.id}: expected ${String(check.expectedSuiteCount)} suites, counted ${String(result.suiteCount)}`;
-    }
+  if (result === undefined) return { checkId: check.id, exitCode: null, cause: 'no-result' };
+  if (result.exitCode !== 0) return { checkId: check.id, exitCode: result.exitCode, cause: 'exit-code' };
+  if (check.expectedSuiteCount !== undefined && (result.suiteCount === null || result.suiteCount < check.expectedSuiteCount)) {
+    return { checkId: check.id, exitCode: result.exitCode, cause: 'suite-count' };
   }
   return undefined;
+}
+
+/** The same shortfall for a person: the exit code, the spawn error, or the suite counts. */
+function describeShortfall(f: FailedCheck, check: CheckSpec, result: CheckResult | undefined, unstartedBecause: string | undefined): string {
+  switch (f.cause) {
+    case 'no-result':
+      return `${f.checkId}: no result${unstartedBecause === undefined ? '' : ` (${unstartedBecause})`}`;
+    case 'exit-code':
+      return `${f.checkId}: exit code ${String(f.exitCode)}`;
+    case 'suite-count': {
+      const expected = String(check.expectedSuiteCount);
+      const counted = result?.suiteCount === undefined || result.suiteCount === null ? 'count unknown' : `counted ${String(result.suiteCount)}`;
+      return `${f.checkId}: expected ${expected} suites, ${counted}`;
+    }
+  }
 }
 
 interface StateChange {

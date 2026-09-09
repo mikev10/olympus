@@ -19,7 +19,8 @@ export const I5: InvariantEntry = {
   assertions: [
     compileError({
       id: 'I5.transition-has-no-warn-and-continue',
-      title: 'StationTransition advances or refuses with a closed reason; there is no warned or degraded advance',
+      title:
+        'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
       fixture: 'i5/transition-has-no-warn-and-continue.ts',
     }),
     compileError({

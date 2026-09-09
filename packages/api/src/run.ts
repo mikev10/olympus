@@ -12,6 +12,7 @@ import type {
   RunId,
   RunState,
   StationId,
+  StationRefusal,
   StationTransition,
   Task,
   TaskId,
@@ -22,7 +23,7 @@ import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { Vault } from '@olympus-ai/vault';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
-import { taskProblems } from './validate.js';
+import { taskProblems, type RequestProblem } from './validate.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -50,8 +51,12 @@ export interface RunRequest {
   readonly components: ComponentGraph;
 }
 
-export type StationRefusal = Extract<StationTransition, { ok: false }>;
-
+/**
+ * Every way a run ends. The two refusals before the line carry what a caller
+ * needs to act: the declarations that capped the level, or the request fields
+ * that could not be trusted. A refusal inside the line carries the station's
+ * own typed transition.
+ */
 export type RunOutcome =
   | {
       readonly ok: true;
@@ -66,7 +71,7 @@ export type RunOutcome =
       readonly requestedLevel: AutonomyLevel;
       readonly unsafe: readonly UnsafeDeclaration[];
     }
-  | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly string[] }
+  | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly RequestProblem[] }
   | { readonly ok: false; readonly reason: 'refused'; readonly at: StationId; readonly transition: StationRefusal };
 
 /** The one role in the skeleton. */

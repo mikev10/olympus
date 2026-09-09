@@ -193,7 +193,13 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     if (!outcome.ok) return;
     expect(outcome.gate.verdict).toBe('fail');
     expect(outcome.gate.checks[0]?.exitCode).toBe(3);
-    expect(outcome.next).toMatchObject({ ok: false, reason: 'gate-failed' });
+    expect(outcome.next).toMatchObject({
+      ok: false,
+      reason: 'gate-failed',
+      failed: [{ checkId: 'hello-exit-zero', exitCode: 3, cause: 'exit-code' }],
+    });
+    if (outcome.next.ok) return;
+    expect(outcome.next.message).not.toBe('');
     expect(outcome.state.tasks[taskId]).toBe('failed');
     expect(outcome.state.evidenceRefs).toEqual([outcome.evidence]);
     expect((await readEvidence(outcome.evidence)).claim).toEqual(claim);
@@ -205,9 +211,11 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     if (!outcome.ok) return;
     expect(outcome.gate.verdict).toBe('fail');
     expect(outcome.gate.checks[0]).toMatchObject({ exitCode: 0, suiteCount: null });
-    expect(outcome.next).toMatchObject({ ok: false, reason: 'gate-failed' });
-    if (outcome.next.ok) return;
-    expect(outcome.next.detail).toMatch(/hello-exit-zero/);
+    expect(outcome.next).toMatchObject({
+      ok: false,
+      reason: 'gate-failed',
+      failed: [{ checkId: 'hello-exit-zero', exitCode: 0, cause: 'suite-count' }],
+    });
   });
 
   test('a required check that cannot be started has no result and fails the gate, naming it (I5)', async () => {
@@ -218,9 +226,11 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     if (!outcome.ok) return;
     expect(outcome.gate.verdict).toBe('fail');
     expect(outcome.gate.checks).toEqual([]);
-    expect(outcome.next).toMatchObject({ ok: false, reason: 'gate-failed' });
-    if (outcome.next.ok) return;
-    expect(outcome.next.detail).toMatch(/cannot-start/);
+    expect(outcome.next).toMatchObject({
+      ok: false,
+      reason: 'gate-failed',
+      failed: [{ checkId: 'cannot-start', exitCode: null, cause: 'no-result' }],
+    });
     expect(outcome.state.tasks[taskId]).toBe('failed');
   });
 
@@ -240,9 +250,16 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
 describe('locks are re-verified at every transition (I3)', () => {
   test('a locked artifact changed between spec and build is refused at build with a recorded violation', async () => {
     const outcome = await startRun(request({ components: { ...components, vault: new TamperingVault(vault, workspace, 1) } }));
-    expect(outcome).toMatchObject({ ok: false, reason: 'refused', at: 'build', transition: { ok: false, reason: 'lock-tamper' } });
-    if (outcome.ok || outcome.reason !== 'refused') return;
-    expect(outcome.transition.detail).toMatch(/spec\.md/);
+    expect(outcome).toMatchObject({
+      ok: false,
+      reason: 'refused',
+      at: 'build',
+      transition: { ok: false, reason: 'lock-tamper', tampered: [{ path: 'spec.md' }] },
+    });
+    if (outcome.ok || outcome.reason !== 'refused' || outcome.transition.reason !== 'lock-tamper') return;
+    const [entry] = outcome.transition.tampered;
+    expect(entry?.expected).not.toBe(entry?.actual);
+    expect(outcome.transition.message).not.toBe('');
 
     const state = await vault.readRunState(runId);
     expect(state.station).toBe('build');
@@ -266,7 +283,12 @@ describe('locks are re-verified at every transition (I3)', () => {
   test('a locked artifact changed between build and verify is refused at verify before any check runs', async () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     const outcome = await startRun(request({ components: { vault: new TamperingVault(vault, workspace, 2), sandbox, driver: new StubDriver() } }));
-    expect(outcome).toMatchObject({ ok: false, reason: 'refused', at: 'verify', transition: { ok: false, reason: 'lock-tamper' } });
+    expect(outcome).toMatchObject({
+      ok: false,
+      reason: 'refused',
+      at: 'verify',
+      transition: { ok: false, reason: 'lock-tamper', tampered: [{ path: 'spec.md' }] },
+    });
     expect(sandbox.executed).toEqual([]);
     const state = await vault.readRunState(runId);
     expect(state.station).toBe('verify');

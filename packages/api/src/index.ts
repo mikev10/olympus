@@ -1,7 +1,8 @@
 /**
  * @olympus-ai/api: the runtime as a service. This package holds the
- * programmatic entry point (`startRun`) and the safety declaration the
- * runtime enforces before a run starts (I5). The line it drives is the
+ * programmatic entry point (`startRun`), the safety declaration the
+ * runtime enforces before a run starts (I5), and the request validation
+ * that refuses what the verdict could not trust. The line it drives is the
  * walking skeleton: three stations over stubs, replaced piece by piece in
  * Phase 2.
  *
@@ -10,3 +11,4 @@
  */
 export * from './safety.js';
 export * from './run.js';
+export * from './validate.js';

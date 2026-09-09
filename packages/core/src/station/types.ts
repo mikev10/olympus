@@ -4,7 +4,7 @@
  */
 import type { DriverCapability } from '../driver/contract.js';
 import type { ApprovalOutcome } from '../policy/types.js';
-import type { ModelTier, StationId } from '../run/types.js';
+import type { ModelTier, StationId, VaultRef } from '../run/types.js';
 
 export type ContextGrant =
   | 'locked-spec' | 'acceptance-tests' | 'task-graph' | 'plan'
@@ -34,6 +34,29 @@ export interface ExitGate {
   approval: ApprovalOutcome;
 }
 
-export type StationTransition =
-  | { ok: true; next: StationId }
-  | { ok: false; reason: 'gate-failed' | 'lock-tamper' | 'violation' | 'parked'; detail: string };
+/** A check that failed the gate, in the runtime's own terms; the driver's claim has no way in (I2). */
+export interface FailedCheck {
+  checkId: string;
+  /** The check's own exit code, or null when it produced no result because it could not be started. */
+  exitCode: number | null;
+  /** What fails it: a non-zero exit, no result at all, or a suite count that is unknown or below what was expected (I5). */
+  cause: 'exit-code' | 'no-result' | 'suite-count';
+}
+
+/** A locked artifact whose bytes no longer match the lock manifest (I3). */
+export interface TamperedPath { path: string; expected: string; actual: string; }
+
+/**
+ * A refusal to advance. `reason` is a closed set and selects the payload a
+ * machine reads; `message` says the same thing to a person. One string never
+ * does both jobs, so a consumer reads fields and never parses prose.
+ */
+export type StationRefusal =
+  | { ok: false; reason: 'gate-failed'; failed: FailedCheck[]; message: string }
+  | { ok: false; reason: 'lock-tamper'; tampered: TamperedPath[]; message: string }
+  | { ok: false; reason: 'violation'; violations: VaultRef[]; message: string }
+  | { ok: false; reason: 'unsafe-above-l1'; components: string[]; message: string }
+  | { ok: false; reason: 'capability-missing'; station: StationId; capability: DriverCapability; message: string }
+  | { ok: false; reason: 'parked'; cause: string; retries: number; message: string };
+
+export type StationTransition = { ok: true; next: StationId } | StationRefusal;
