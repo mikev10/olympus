@@ -47,3 +47,8 @@ the four above, that is a gap in them.
 
 Check in order: unfinished step in the current unit's loop; unlanded amendment
 from the last unit; the next unit whose dependencies have all shipped.
+
+Every turn ends by naming what is next per this document, whatever the turn
+did. That holds when the answer is a decision only the maintainer can make:
+then the turn names the decision, states the options, and recommends one. The
+maintainer should never have to ask.
