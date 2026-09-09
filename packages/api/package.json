@@ -20,8 +20,5 @@
     "@olympus-ai/integrity": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
     "@olympus-ai/vault": "workspace:*"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.11"
   }
 }
