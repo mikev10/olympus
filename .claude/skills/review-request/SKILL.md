@@ -31,23 +31,23 @@ needs surrounding context, and a hunk hides it.
 {
   echo "BASE: <base>"; echo "HEAD: $(git rev-parse --short HEAD)"; echo
   echo "=== COMMITS ==="; git log --oneline <base>..HEAD; echo
-  echo "=== CHANGED ==="; git diff --stat <base>..HEAD -- . ':!docs/plan'; echo
-  git diff --name-only --diff-filter=ACMR <base>..HEAD -- . ':!docs/plan' | while read -r f; do
+  echo "=== CHANGED ==="; git diff --stat <base>..HEAD; echo
+  git diff --name-only --diff-filter=ACMR <base>..HEAD | while read -r f; do
     [ -f "$f" ] || continue
+    case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
   done
 } > ~/Desktop/olympus-<unit>-review.txt
 ```
 
-The bundle is built from tracked files, so nothing maintainer-local can enter
-it. `docs/plan/` is excluded on purpose: the spine, the decomposition, and the
-unit specs are design documents, and the reviewer works from source alone.
-Confirm both before handing it over:
+**Excluded by construction, and why.** `docs/decisions.md` carries author
+reasoning and prior review outcomes — a reviewer reading it inherits
+conclusions already reached and stops questioning them. `docs/reviews/` holds
+what earlier reviewers found. `docs/plan/` is the spec the code is judged
+against; the reviewer gets the invariants restated in the prompt instead.
 
-```
-grep -c '^===== docs/plan/' ~/Desktop/olympus-<unit>-review.txt   # must be 0
-git ls-files -- .plan/                                            # must print nothing
-```
+Never include anything from `.plan/`. Confirm with `grep -c '\.plan/'` and
+`grep -c 'docs/decisions.md'` before handing the bundle over.
 
 ## 3. Derive the unit-specific half of the prompt
 
@@ -56,8 +56,7 @@ From `docs/plan/DECOMPOSITION.md` and the unit's spec, extract four things:
 - **What the unit built**, in two or three sentences, no jargon the reviewer
   cannot resolve from the bundle
 - **The mechanisms that matter** — the two to four things a bypass would target
-- **Which invariants it touches**, stated in full (the reviewer has no design
-  documents)
+- **Which invariants it touches**, stated in full (the reviewer has no `docs/plan/`)
 - **Out of scope**, verbatim, so absent work is not reported as a defect
 
 **The adversarial question is derived from what the unit does.** Conformance
@@ -165,3 +164,31 @@ Print the bundle path and the prompt. Remind the maintainer:
 - Bring the findings back for triage; findings are not instructions
 
 Do not review the unit yourself. Do not act on a review you did not receive.
+
+## 6. When the review comes back
+
+Store the raw response verbatim at
+`docs/reviews/<date>-<UNIT>-<slug>-review.md`, **tracked** — for S1,
+`docs/reviews/2026-09-09-S1-walking-skeleton-adversarial-review.md`. The unit
+id keeps its case; the slug names the unit and the kind of review. The file is
+not regenerable — the same prompt tomorrow returns different findings — and the
+triage record cites findings by number, so without the original those citations
+point at nothing.
+
+Its header must record: the **model and family** that produced it, the date, the
+bundle's base and head commits, and whether the reviewer disclosed prior context
+or lookups. Rotation degrades into guessing within a few units if the family is
+not written down, and reviewer calibration over time is impossible without it.
+
+Then triage into `docs/reviews/<date>-<UNIT>-<slug>-triage.md`, the same name
+with `-triage` in place of `-review`: which findings were accepted, which
+recorded as known limits, which rejected and why, which could not be verified
+against the cited line.
+
+**Verify every finding against the cited line before acting on it.** The
+reviewer had no repo access and worked from a bundle; line numbers drift, and
+findings self-labeled medium confidence are often reasoning from an absent file.
+A finding that does not hold is reported as such, never fixed.
+
+The **bundle** is not stored. It is `git diff` output, reproducible from the
+recorded base and head, so keeping it is keeping a cache. Delete it.
