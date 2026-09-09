@@ -519,3 +519,14 @@ of this section, each with the unit that owes it.
 - **What still matches prose:** `packages/api/test/safety.test.ts` matches `SKELETON_LINE.unsafe.cannotEnforce` lines with regular expressions. Those are the declarations S1 §1 defines as one line per control, for the refusal to print, not a gate verdict; no test reads a verdict or a refusal by pattern any more. If a machine ever needs to reason about which controls a component lacks, `cannotEnforce` wants a closed set of control ids beside the lines, and that question belongs with P4's compositional provenance (D-S1-07).
 - **Cost of deferring:** P4 would produce prose from the station machine, P6 from verification, P9 would serialize it, and every test written between now and then would parse it; the change would then rewrite three producers and every consumer instead of one line and its tests.
 - **Reverse:** restore `detail: string`; the tests go back to regular expressions, which is the point.
+
+### Owed, not amended: the three contract gaps that wait for the unit that knows what completes them
+
+A contract that is merely incomplete waits for the unit that knows what
+completes it. These three are recorded as owed; none is a registry entry and
+no baseline changed. If one becomes a pending assertion, it is added by a
+deliberate baseline edit, as `I3.lock-preserves-earlier-entries` was.
+
+- **`CheckSpec.command` grammar, owed to P6.** The command is one string, so the runtime had to invent a grammar: the skeleton splits on whitespace with no shell, which is the least it could do and wrong for any real command. P6 owns the verification manifest and decides whether a command is an argv array, a shell string with a declared shell, or something an adapter produces.
+- **`CheckResult` cannot represent a check that could not start, owed to P6.** The evidence bundle simply lacks an entry; `FailedCheck.cause: 'no-result'` says so in the transition, and the spawn error lives only in `message`. Evidence that a required check never ran should be in the evidence, not only in the refusal. P6 decides the shape.
+- **`TaskRequest.sandbox` hands a driver a handle it cannot exec in, owed to P5 with P2.** Nothing in the contract lets a driver run a command inside the sandbox it was given; the stub driver does not care, and a real one will on its first task. P5 meets it first; P2 owns the provider side.
