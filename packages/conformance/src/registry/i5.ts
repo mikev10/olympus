@@ -130,5 +130,15 @@ export const I5: InvariantEntry = {
         'AdapterSet.unavailableControls() must name every null slot for a stack, and a stack with any must ' +
         'be refused at L3. Needs the adapter implementations P8 delivers.',
     }),
+    pending({
+      id: 'I5.check-command-has-a-grammar',
+      owner: 'P6',
+      reason:
+        'CheckSpec.command is one string with no declared grammar, so the skeleton invented one: split on whitespace, ' +
+        'no shell, which mangles any quoted argument. A pinned check the runtime cannot execute exactly as pinned must ' +
+        'be refused, never approximated. P6 owns the verification manifest and must declare the grammar (an argv array, ' +
+        'or a shell string with the shell declared) and assert that an unrepresentable command is refused. Surfaced by ' +
+        'S1 (docs/decisions.md, owed contract gaps).',
+    }),
   ],
 };

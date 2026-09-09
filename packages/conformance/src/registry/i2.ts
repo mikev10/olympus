@@ -40,5 +40,15 @@ export const I2: InvariantEntry = {
         'The runtime must compute a task\'s status from CheckResult exit codes alone and record where the ' +
         'claim and the evidence differ (claimEvidenceDiff). Until P6 there is no code that derives status.',
     }),
+    pending({
+      id: 'I2.unstarted-check-is-in-the-evidence',
+      owner: 'P6',
+      reason:
+        'CheckResult cannot represent a required check that could not be started, so the evidence bundle simply lacks ' +
+        "an entry and the only record of why is the refusal's message. A verdict derived from a fact the evidence does " +
+        'not carry is not auditable. P6 must give the bundle a record for a check that produced no result, with the ' +
+        'reason, and assert that the gate fails on it and that the bundle shows it. Surfaced by S1 (docs/decisions.md, ' +
+        'owed contract gaps).',
+    }),
   ],
 };

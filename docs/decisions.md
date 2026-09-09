@@ -523,10 +523,13 @@ of this section, each with the unit that owes it.
 ### Owed, not amended: the three contract gaps that wait for the unit that knows what completes them
 
 A contract that is merely incomplete waits for the unit that knows what
-completes it. These three are recorded as owed; none is a registry entry and
-no baseline changed. If one becomes a pending assertion, it is added by a
-deliberate baseline edit, as `I3.lock-preserves-earlier-entries` was.
+completes it. These three were first recorded here as prose. By maintainer
+direction, and for the reason that made the review's finding 6 a registry
+entry (prose nobody counts, against an owned, ratcheted, visible obligation),
+each is a pending registry entry under the invariant it protects, and the
+baselines rose with them: I1 from 1 to 2, I2 from 1 to 2, I5 from 3 to 4. The
+unit that pays one lowers its baseline in the same pull request.
 
-- **`CheckSpec.command` grammar, owed to P6.** The command is one string, so the runtime had to invent a grammar: the skeleton splits on whitespace with no shell, which is the least it could do and wrong for any real command. P6 owns the verification manifest and decides whether a command is an argv array, a shell string with a declared shell, or something an adapter produces.
-- **`CheckResult` cannot represent a check that could not start, owed to P6.** The evidence bundle simply lacks an entry; `FailedCheck.cause: 'no-result'` says so in the transition, and the spawn error lives only in `message`. Evidence that a required check never ran should be in the evidence, not only in the refusal. P6 decides the shape.
-- **`TaskRequest.sandbox` hands a driver a handle it cannot exec in, owed to P5 with P2.** Nothing in the contract lets a driver run a command inside the sandbox it was given; the stub driver does not care, and a real one will on its first task. P5 meets it first; P2 owns the provider side.
+- **`CheckSpec.command` grammar: `I5.check-command-has-a-grammar`, owed to P6.** The command is one string, so the runtime had to invent a grammar: the skeleton splits on whitespace with no shell, which mangles any quoted argument. Under I5 because a pinned check the runtime cannot execute exactly as pinned must be refused, never approximated. P6 owns the verification manifest and decides whether a command is an argv array, a shell string with a declared shell, or something an adapter produces, and asserts that an unrepresentable command is refused.
+- **`CheckResult` cannot represent a check that could not start: `I2.unstarted-check-is-in-the-evidence`, owed to P6.** The evidence bundle simply lacks an entry; `FailedCheck.cause: 'no-result'` says so in the transition, and the spawn error lives only in `message`. Under I2 because a verdict derived from a fact the evidence does not carry is not auditable. P6 decides the shape of the record and asserts that the gate fails on it and the bundle shows it.
+- **`TaskRequest.sandbox` hands a driver a handle it cannot exec in: `I1.driver-executes-inside-the-sandbox`, owed to P5 with P2.** Nothing in the contract lets a driver run a command inside the sandbox it was given; the stub driver does not care, and a real one will on its first task. Under I1 because a driver with no path into the sandbox runs the model on the host, outside the mount table where I1 is enforced. P5 meets it first and asserts that a task's commands run inside the sandbox and nowhere else; P2 owns the provider side.
