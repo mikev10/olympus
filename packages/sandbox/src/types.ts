@@ -11,12 +11,15 @@ export interface MountEntry {
 }
 
 /**
- * I1 enforced at the substrate: exactly one rw mount, and it is the Workspace.
- * Implementations MUST reject every table that violates this, and MUST resolve
- * symlinks and path escapes before mounting.
+ * I1 enforced at the substrate: at most one rw mount, and if there is one, it
+ * is the Workspace. `others` admits ro only, so a second rw mount has no slot;
+ * the Workspace itself is rw for build and ro for verification, so the checks
+ * run against a tree they cannot modify (I3). Implementations MUST reject
+ * every table that violates this, MUST mount the Workspace with the mode the
+ * table gives it, and MUST resolve symlinks and path escapes before mounting.
  */
 export interface MountTable {
-  workspace: MountEntry & { mode: 'rw' };
+  workspace: MountEntry & { mode: 'rw' | 'ro' };
   readonly others: Array<MountEntry & { mode: 'ro' }>;
 }
 

@@ -161,7 +161,7 @@ describe('hello at L1', () => {
     expect(req.sandbox).toBe(sandbox.provisioned[0]);
   });
 
-  test('verify collects evidence in a fresh sandbox, after the build sandbox is destroyed, from a workspace-only mount table', async () => {
+  test('verify collects evidence in a fresh sandbox, after the build sandbox is destroyed; build mounts the workspace rw and verify mounts it ro', async () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     const outcome = await startRun(request({ components: { ...components, sandbox } }));
     expect(outcome.ok).toBe(true);
@@ -171,10 +171,12 @@ describe('hello at L1', () => {
     expect(build).not.toBe(verify);
     expect(sandbox.executed.map((e) => e.handle)).toEqual([verify]);
     expect(sandbox.executed[0]?.cmd).toEqual(['node', '-e', 'process.exit(0)']);
-    for (const spec of sandbox.specs) {
-      expect(spec.mounts).toEqual({ workspace: { source: workspace, target: '/workspace', mode: 'rw' }, others: [] });
-      expect(spec.egress).toEqual({ mode: 'deny-all', allow: [] });
-    }
+    // The workspace is the only mount either way; the checks get a tree they cannot modify (I3).
+    expect(sandbox.specs.map((s) => s.mounts)).toEqual([
+      { workspace: { source: workspace, target: '/workspace', mode: 'rw' }, others: [] },
+      { workspace: { source: workspace, target: '/workspace', mode: 'ro' }, others: [] },
+    ]);
+    for (const spec of sandbox.specs) expect(spec.egress).toEqual({ mode: 'deny-all', allow: [] });
   });
 });
 

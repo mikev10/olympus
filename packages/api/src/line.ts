@@ -59,7 +59,7 @@ async function build(ctx: LineContext): Promise<StationTransition> {
   const refusal = await refuseIfTampered(ctx, 'build');
   if (refusal !== undefined) return refusal;
   const { sandbox, driver } = ctx.components;
-  const handle = await sandbox.provision(workspaceOnly(ctx.fixture));
+  const handle = await sandbox.provision(workspaceOnly(ctx.fixture, 'rw'));
   try {
     await commit(ctx, { station: 'build', status: 'running' });
     // The locked files' text, read after verification, is the cacheable prefix; the task id is all that varies.
@@ -85,8 +85,8 @@ async function build(ctx: LineContext): Promise<StationTransition> {
 
 /**
  * `verify`: re-verify the locks, run every check in a fresh sandbox where
- * the agent never ran, re-verify the locks again because the checks ran with
- * the workspace writable, derive the verdict, write the evidence, and stop.
+ * the agent never ran and the workspace is mounted read-only, re-verify the
+ * locks again afterwards, derive the verdict, write the evidence, and stop.
  * `review` does not exist, so the run ends here either way.
  */
 async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
@@ -100,7 +100,7 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
   const specs = ctx.fixture.checks;
   const results: Array<CheckResult | undefined> = [];
   const unstarted: Array<string | undefined> = [];
-  const handle = await sandbox.provision(workspaceOnly(ctx.fixture));
+  const handle = await sandbox.provision(workspaceOnly(ctx.fixture, 'ro'));
   try {
     for (const check of specs) {
       const startedAt = new Date().toISOString();
@@ -128,8 +128,9 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
   }
   const checks = results.filter((r): r is CheckResult => r !== undefined);
 
-  // The checks ran with the workspace writable (the contract admits no other mode), so a locked
-  // artifact may have changed under them. Evidence collected over a changed artifact is not evidence.
+  // The table asked for a read-only workspace, but only a provider that enforces it makes that true,
+  // and the stub does not. Evidence collected over a changed artifact is not evidence, so the locks
+  // are checked again whatever the provider claims.
   const tampered = await refuseIfTampered(ctx, 'verify', { phase: 'after-checks', checks });
   if (tampered !== undefined) return tampered;
 
@@ -222,11 +223,15 @@ async function commit(ctx: LineContext, change: StateChange): Promise<void> {
   );
 }
 
-/** The Workspace alone, nothing else mounted, no egress, no limits. There is no image; the stub ignores it. */
-function workspaceOnly(fixture: FixtureTask): SandboxSpec {
+/**
+ * The Workspace alone, nothing else mounted, no egress, no limits: rw for
+ * build, ro for verification, so the checks run against a tree they cannot
+ * modify (I3). There is no image; the stub ignores it.
+ */
+function workspaceOnly(fixture: FixtureTask, mode: 'rw' | 'ro'): SandboxSpec {
   return {
     image: 'none',
-    mounts: { workspace: { source: fixture.workspace, target: '/workspace', mode: 'rw' }, others: [] },
+    mounts: { workspace: { source: fixture.workspace, target: '/workspace', mode }, others: [] },
     egress: { mode: 'deny-all', allow: [] },
     limits: { cpus: 0, memoryMb: 0, pids: 0, wallClockMs: 0 },
   };

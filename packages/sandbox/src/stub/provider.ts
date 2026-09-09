@@ -37,7 +37,7 @@ export class StubSandboxProvider implements SandboxProvider {
   readonly unsafe: { readonly component: 'StubSandboxProvider'; readonly cannotEnforce: readonly string[] } = {
     component: 'StubSandboxProvider',
     cannotEnforce: [
-      "the mount table: nothing is mounted, every path on the host is reachable, the Vault's memory included, and `others` is ignored",
+      "the mount table: nothing is mounted, every path on the host is reachable, the Vault's memory included, `others` is ignored, and a workspace the table marks ro is as writable as one it marks rw",
       'egress: the host network is reachable whatever the policy says',
       'limits: no CPU, memory, PID, or wall-clock bound is applied',
       'isolation: commands run on the host as the invoking user, and `image` is ignored',
