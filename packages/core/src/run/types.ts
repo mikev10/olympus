@@ -88,11 +88,16 @@ export interface TaskGraph {
   edges: Array<{ from: TaskId; to: TaskId }>;
 }
 
+/**
+ * Read-only: a consumer holding a state cannot alter it. A new state is a
+ * new record, committed through the Vault; that is the only way status or
+ * station changes (I2).
+ */
 export interface RunState {
-  runId: RunId;
-  station: StationId;
-  tasks: Record<TaskId, TaskStatus>;   // the sole authority for task status (I2); Task holds none
-  evidenceRefs: VaultRef[];
-  violations: VaultRef[];
-  version: string;             // optimistic concurrency
+  readonly runId: RunId;
+  readonly station: StationId;
+  readonly tasks: Readonly<Record<TaskId, TaskStatus>>;   // the sole authority for task status (I2); Task holds none
+  readonly evidenceRefs: readonly VaultRef[];
+  readonly violations: readonly VaultRef[];
+  readonly version: string;             // optimistic concurrency
 }

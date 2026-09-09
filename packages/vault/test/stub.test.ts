@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RunId, RunState, TaskId } from '@olympus-ai/core';
+import type { RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { StubVault, type EvidenceBundle } from '../src/index.js';
@@ -196,8 +196,10 @@ describe('run state', () => {
   test('what is stored is a copy: mutating the input or the result does not change what is read back', async () => {
     const input = state();
     const stored = await vault.commitRunState(input, '0');
-    input.station = 'build';
-    stored.tasks[taskId] = 'passed';
+    // RunState is read-only in the type (A-S1-03); a cast is what a careless consumer would do,
+    // and the copy is what stops it reaching the store.
+    (input as { station: StationId }).station = 'build';
+    (stored.tasks as Record<TaskId, TaskStatus>)[taskId] = 'passed';
     const read = await vault.readRunState(runId);
     expect(read.station).toBe('spec');
     expect(read.tasks[taskId]).toBe('pending');

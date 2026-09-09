@@ -480,3 +480,22 @@ D-F3-22 were amended in place for findings 5 and 9.
 - **Problem:** `StubVault.lock` replaces the run's manifest on every call, as spec §2 says it must, so S1 is correct as built. The reviewer (finding 6) showed what that means for the full line: `spec` locks the spec, `test-design` locks the acceptance tests, and the second lock drops the first's entries, while I3 requires both locked and re-verified at every transition. Replace semantics make I3 unsatisfiable, and the `Vault.lock` contract is silent on which it means.
 - **Chosen, by maintainer direction:** not a decisions-only note. `I3.lock-preserves-earlier-entries` is a pending registry entry owed to P1, and `pending-baseline.json` raises I3 from 2 to 3 in the same change. The S1 spec's out-of-scope rule against adding pending entries was set aside for this one by the maintainer, deliberately and in the diff. P1 must make a later lock preserve earlier entries and assert that a re-lock cannot rebase a locked artifact's hash.
 - **Reverse:** P1 pays the entry and lowers the baseline in the same pull request.
+
+## Amendments surfaced by S1
+
+`docs/plan/WORKFLOW.md` names three work types; these are amendments: changes
+to contract files that a unit surfaced by being the first real use of them.
+They do not run the unit loop and they land on `v2` before P1 starts. Each
+entry names what S1 hit, what changed, how the conformance assertion changed
+in the same commit, and what deferring would have cost. Ids are `A-S1-nn`.
+The four contract findings S1 recorded that are not amendments are at the end
+of this section, each with the unit that owes it.
+
+### A-S1-03: `RunState`, `TaskResult`, and `AgentClaim` are read-only records
+
+- **Surfaced by S1:** the stub vault clones on every read and commit (D-S1-04) and the stub driver copies its claim, because the types let anything holding one of the runtime's records mutate it, and the store's own memory with it. P1 would face the same choice with a real store, and every later consumer would inherit mutable records.
+- **Chosen:** `readonly` on every property of the three, `Readonly<Record<TaskId, TaskStatus>>` for `tasks`, and `readonly T[]` for `evidenceRefs`, `violations`, `events`, and `filesChanged`. A new state is a new record, committed through the Vault; that is the only way status or station changes (I2). The stubs keep cloning: `readonly` is erased at run time (the lesson of D-F3-22), a cast is one keystroke, and the copy is what stops a careless consumer's write reaching the store. The two tests that prove the copies now mutate through a cast, which is the point.
+- **Conformance, same commit:** `I2.records-are-readonly`, a new compile-error fixture: assignment to `station`, to a `tasks` entry, `push` on the three arrays, reassignment of `claim` and `narrative` are all refused with the read-only diagnostics, and a new state built by spread compiles. Shown failing against the mutable types, then passing.
+- **Not changed:** `Usage`, `ModelIdentity`, `DriverEvent`, `VaultRef`, `CheckResult`, `GateResult`, and `EvidenceBundle` were not named and are untouched. P1 and P6 may extend the same treatment to what they own.
+- **Cost of deferring:** P1 decides clone-or-trust for the real Vault against mutable types, P4 and P6 build on whichever it picks, and P9 serializes them; adding `readonly` after that touches every consumer at once instead of two stubs and two tests.
+- **Reverse:** remove the modifiers; the fixture fails on every annotated line.

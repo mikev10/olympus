@@ -54,22 +54,24 @@ export interface TaskRequest {
 
 export interface Budget { maxTokens: number; maxCostUsd: number; maxWallClockMs: number; }
 
+/** Read-only once collected: what the model said is recorded, never edited. */
 export interface AgentClaim {
-  narrative: string;          // what the model says it did - a CLAIM, not evidence
-  filesChanged: string[];
+  readonly narrative: string;          // what the model says it did - a CLAIM, not evidence
+  readonly filesChanged: readonly string[];
 }
 
 /**
  * I2: there is deliberately NO status field. The runtime computes status from
  * CheckResult exit codes (integrity/types.ts). A model cannot report success.
+ * Read-only: the runtime records a result; nothing holding one rewrites it.
  */
 export interface TaskResult {
-  taskId: TaskId;
-  claim: AgentClaim;
-  events: DriverEvent[];
-  usage: Usage;
-  model: ModelIdentity;
-  contractVersion: string;
+  readonly taskId: TaskId;
+  readonly claim: AgentClaim;
+  readonly events: readonly DriverEvent[];
+  readonly usage: Usage;
+  readonly model: ModelIdentity;
+  readonly contractVersion: string;
 }
 
 export interface DriverEvent {

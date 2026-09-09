@@ -25,6 +25,12 @@ export const I2: InvariantEntry = {
       title: 'GateResult has one verdict and no second boolean to disagree with it',
       fixture: 'i2/gate-verdict-single-source.ts',
     }),
+    compileError({
+      id: 'I2.records-are-readonly',
+      title:
+        'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
+      fixture: 'i2/records-are-readonly.ts',
+    }),
   ],
   pending: [
     pending({

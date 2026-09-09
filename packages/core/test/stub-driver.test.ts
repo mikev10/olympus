@@ -95,8 +95,10 @@ describe('runTask', () => {
   test('hands out a copy of the canned claim, so a caller cannot alter the next result', async () => {
     const driver = new StubDriver();
     const first = await driver.runTask(request());
-    first.claim.filesChanged.push('x.ts');
-    first.claim.narrative = 'edited';
+    // AgentClaim is read-only in the type (A-S1-03); a cast is what a careless consumer would do,
+    // and the copy is what keeps the next result clean.
+    (first.claim.filesChanged as string[]).push('x.ts');
+    (first.claim as { narrative: string }).narrative = 'edited';
     const second = await driver.runTask(request());
     expect(second.claim).toEqual({ narrative: 'stub: no model was called', filesChanged: [] });
   });
