@@ -110,6 +110,7 @@ packages/
   sandbox/      the mount table and the sandbox provider contract
   triggers/     the untrusted-input envelope
   adapters/     per-stack test, coverage, mutation, behavioral hooks
+  api/          the entry point: startRun, the line, and the unsafe declarations
   conformance/  the kit that proves invariants, and the registry
 docs/
   plan/         the spine, the decomposition into units, and unit specs

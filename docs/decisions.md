@@ -358,3 +358,69 @@ expanded from a summary to a spec (`docs/plan/S1-skeleton.md`).
 - **The check:** `ship-unit` ran `git ls-files | grep -i plan`, which now matches `docs/plan/` and would report a false positive on every ship. Replaced with `git ls-files -- .plan/`, scoped to the directory. CI gains a step of the same scope beside the tracked-but-ignored check D-F3-11 chose: nothing under the maintainer-local directory is tracked, and no tracked file names a path under it, where a reference is the directory followed by a file name. `CLAUDE.md` is the one file excluded from the reference check, because it holds the rule itself and the one standing exception (the instruction never to load the master plan). D-F3-11's reasoning, that naming the directory in a tracked file was itself forbidden, no longer applies: the rule now says what the exceptions are, and the check enforces it as stated.
 - **Also changed:** `review-request` excludes `docs/plan/` from the review bundle. The reviewer works from source alone, and the skill's clean-room rule would otherwise have been weakened by the move as a side effect. Its bundle check moved from a substring search for the directory name, which `CLAUDE.md`'s own rule would now trip, to a check of the bundle's file headers.
 - **Reverse:** move the three files back and restore the paths; delete the CI step.
+
+## S1: Walking skeleton
+
+The spec (`docs/plan/S1-skeleton.md`) is complete and was built to as
+written. The entries below are the calls it left open, and the positions the
+implementation took on the contract findings it records.
+
+### D-S1-01: `StubVault.lock` refuses an empty path list
+
+- **Problem:** The spec says `verifyLocks` must throw for a run with no manifest, because `{ ok: true }` is never the answer to "nothing was locked". It does not say what `lock(runId, [], by)` does. Accepting it would store an empty manifest, and every later verification of that run would pass with nothing checked: the same hole, one call earlier.
+- **Chosen:** `lock` throws on an empty list and stores nothing (I5).
+- **Reverse:** delete the guard and the test `throws on an empty path list`.
+
+### D-S1-02: a deleted locked artifact verifies as tampered, with `actual: 'missing'`
+
+- **Problem:** The spec covers a changed file (one `tampered` item) and a missing manifest (throw), not a locked file that no longer exists. Throwing would turn a detectable tamper into an exception the line never records as a violation; hashing an empty byte string would report a deletion as an empty file.
+- **Chosen:** the entry is reported in `tampered` with `actual` set to the literal `missing`, which no hex digest can equal. The line records the violation and refuses like any other mismatch.
+- **Reverse:** throw instead. P1 owns the real Vault and may pick either.
+
+### D-S1-03: a `VaultRef` is looked up by run, kind, and hash together
+
+- **Problem:** The spec stores evidence and violations "under their SHA-256" and says an unknown ref throws. A store keyed by hash alone would answer a ref whose `kind` or `runId` is wrong as long as the bytes exist.
+- **Chosen:** the key is the triple; a ref with a wrong kind or run is unknown. Identical bytes written twice for the same run and kind still return the same ref, as the spec requires.
+
+### D-S1-04: the stub vault hands out copies
+
+- **Problem:** An in-memory store returns object references by default. A caller that mutates a returned `RunState`, or the one it passed in, would be editing the vault's memory directly, which is the kind of write path I1 exists to close, even in a stub.
+- **Chosen:** `commitRunState`, `readRunState`, `lock`, and `read` return copies (`structuredClone`; a fresh `Uint8Array` for `read`). The test `what is stored is a copy` pins it.
+
+### D-S1-05: a check that cannot be started has no result, and a required one fails the gate by name
+
+- **Problem:** The spec's verdict rule fails a required check that "has no result", and finding 4c forbids inventing an exit code. It does not say where the reason goes. Swallowing the error would leave a missing result with no explanation; propagating it would end the run with an exception instead of a committed state and a gate.
+- **Chosen:** `StubSandboxProvider.exec` rejects when the process cannot be spawned. The verify station records no `CheckResult` for that check, runs the rest, and fails the gate when the check is required. The refusal's `detail` names every shortfall: no result with the spawn error, a non-zero exit code, or a suite count that is unknown or short. A check that is not required never fails the gate. Test: `a required check that cannot be started has no result and fails the gate, naming it`.
+- **Reverse:** P6 owns the verification runtime; if `CheckResult` gains a way to record an unstarted check, use it.
+
+### D-S1-06: what the spec left blank in `Run`, `SandboxSpec`, `TaskRequest`, and the violation record
+
+- `Run.repo` is the workspace path: there is no repository yet, and the fixture directory is what the run operates on.
+- `SandboxSpec.image` is the literal `none`: the stub mounts nothing and ignores it. The unit that adds a real image hands P2's provider one.
+- `TaskRequest.stablePrefix` is the locked files' text joined by a newline, read from the workspace after verification. There is no prompt format to follow until the compiler (M2), and the stub driver does not read it.
+- `IntegrityViolation.detail` carries `station` beside `tampered`, so a violation read back on its own says where it was detected.
+
+### D-S1-07: `unsafeComponents` throws on a malformed declaration
+
+- **Problem:** The declaration is read structurally. A component whose `unsafe` property is not a well-formed declaration (not an object, no name, an empty `cannotEnforce`) is neither declared nor undeclared. Ignoring it would let a component that tried to declare pass as safe.
+- **Chosen:** it throws, naming the slot and the component, and the run does not start (I5).
+- **Known limit:** a wrapper around a stub that does not forward `unsafe` carries no declaration and lifts the cap. The fixture pins the exported stubs, not what wraps them; the skeleton's own tests use such wrappers deliberately, at L1 only. P4, which replaces the line, inherits the question of whether a graph should be able to hide a stub.
+
+### D-S1-08: tests live inside each package's program
+
+- **Problem:** `core`, `vault`, and `sandbox` had no tests and no `test` script, and their `tsconfig.json` included `src` only, which D-F3-22 records as an inventory limit of the scans. The stubs need tests, and untypechecked tests are not evidence.
+- **Chosen:** each of the three gains `test/`, a `test` script, a `vitest` devDependency, and `"include": ["src", "test"]`, like `api` and `conformance`. Every test is typechecked with the contracts' strictness and sits inside the I7, I9, and I10 scans. These are manifest and compiler-configuration edits, so the pull request carries `gate-change`.
+
+### D-S1-09: the tsconfig `paths` map has one reader, used by I8 and by vitest
+
+- **Problem:** §7 requires `vitest.config.ts` to derive `resolve.alias` from the same `paths` map the fixtures typecheck against. The reader lived inside `registry/i8.ts`.
+- **Chosen:** it moved to `kit/paths.ts` as `conformancePathsMap`, with `conformanceAliases` beside it; both are kit exports, and `vitest.config.ts` imports the latter. One map, two readers, one parser.
+
+### D-S1-10: host-conditional tests for the sandbox stub
+
+- `capabilities()` throws on a host the `os` union cannot name (finding 4a). The test asserts the value on Linux and macOS and the refusal elsewhere, selected by `test.runIf` on the platform; CI on Linux and a Windows workstation between them cover both branches.
+- A process that ends by signal is refused by name (finding 4c). On Windows a child that kills itself exits with a code and no signal, so that test is skipped there and runs in CI.
+
+### D-S1-11: positions on the contract findings
+
+Findings 4a, 4c, and 4d are implemented exactly as the spec states: `capabilities()` throws on an unnamed host, `exec` throws on a signal, the vault takes its root at construction. Finding 4b: `CheckSpec.timeoutMs` is carried in the fixture and not applied; the skeleton's checks are short, and the line does not provision one sandbox per check to work around the contract. Finding 4e: the empty `TamperReport` is built fresh per gate, and `SKELETON_LINE` is the statement that no analysis ran. Nothing was absorbed by relaxing an interface, and the three stub files total 325 lines.

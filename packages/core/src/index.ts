@@ -11,3 +11,4 @@ export * from './run/types.js';
 export * from './driver/contract.js';
 export * from './policy/types.js';
 export * from './station/types.js';
+export * from './driver/stub/driver.js';

@@ -1,29 +1,13 @@
 import { join, resolve } from 'node:path';
-import ts from 'typescript';
 import { compileError, keysEqual, pending, runtime } from '../kit/assert.js';
 import { PENDING_BASELINE_FILE, readPendingBaseline } from '../kit/baseline.js';
+import { conformancePathsMap } from '../kit/paths.js';
 import { EXTERNAL_RECONCILIATION_ID, evaluateRegistry, formatReport } from '../kit/registry.js';
 import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js';
 import { conformanceRoot, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { claimKeys } from './claims.js';
 
 const CONFORMANCE = '@olympus-ai/conformance';
-
-function readPathsMap(): Record<string, string[]> {
-  const file = join(conformanceRoot(), 'tsconfig.json');
-  const read = ts.readConfigFile(file, (path) => ts.sys.readFile(path));
-  const config: unknown = read.config;
-  if (typeof config !== 'object' || config === null || !('compilerOptions' in config)) return {};
-  const options: unknown = config.compilerOptions;
-  if (typeof options !== 'object' || options === null || !('paths' in options)) return {};
-  const paths: unknown = options.paths;
-  if (typeof paths !== 'object' || paths === null) return {};
-  const out: Record<string, string[]> = {};
-  for (const [key, value] of Object.entries(paths)) {
-    if (Array.isArray(value) && value.every((v) => typeof v === 'string')) out[key] = value;
-  }
-  return out;
-}
 
 /** I8: Every capability claim maps to an executable assertion. */
 export const I8: InvariantEntry = {
@@ -111,7 +95,7 @@ export const I8: InvariantEntry = {
       id: 'I8.fixture-paths-match-published-entries',
       title: 'the conformance tsconfig maps every sibling package to its published entry, so fixtures assert against the real contracts',
       run: () => {
-        const paths = readPathsMap();
+        const paths = conformancePathsMap();
         const packages = workspacePackages().filter((p) => p.name !== CONFORMANCE);
         if (packages.length === 0) throw new Error('I8: no sibling packages found');
         const problems: string[] = [];

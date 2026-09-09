@@ -140,6 +140,25 @@ importers:
         specifier: workspace:*
         version: link:../sandbox
 
+  packages/api:
+    dependencies:
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@olympus-ai/integrity':
+        specifier: workspace:*
+        version: link:../integrity
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@olympus-ai/vault':
+        specifier: workspace:*
+        version: link:../vault
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+
   packages/conformance:
     dependencies:
       eslint:
@@ -158,6 +177,10 @@ importers:
       '@olympus-ai/sandbox':
         specifier: workspace:*
         version: link:../sandbox
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
   packages/integrity:
     dependencies:
@@ -165,7 +188,11 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  packages/sandbox: {}
+  packages/sandbox:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
   packages/triggers:
     dependencies:
@@ -181,6 +208,10 @@ importers:
       '@olympus-ai/integrity':
         specifier: workspace:*
         version: link:../integrity
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
 packages:
 

@@ -1,7 +1,7 @@
 {
-  "name": "@olympus-ai/sandbox",
+  "name": "@olympus-ai/api",
   "version": "0.0.0",
-  "description": "Sandbox contract: mount tables, egress policy, and the provider interface",
+  "description": "The runtime as a service: the programmatic entry point that carries a run through the line",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -14,6 +14,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@olympus-ai/core": "workspace:*",
+    "@olympus-ai/integrity": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*",
+    "@olympus-ai/vault": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^4.1.11"
