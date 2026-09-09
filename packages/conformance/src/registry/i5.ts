@@ -44,7 +44,8 @@ export const I5: InvariantEntry = {
     }),
     compileOk({
       id: 'I5.stubs-declare-unsafe',
-      title: 'StubVault, StubSandboxProvider, StubDriver, and SKELETON_LINE are each assignable to DeclaresUnsafe; removing a declaration is a compile error',
+      title:
+        'StubVault, StubSandboxProvider, StubDriver, and SKELETON_LINE are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
       fixture: 'i5/stubs-declare-unsafe.ts',
     }),
     runtime({

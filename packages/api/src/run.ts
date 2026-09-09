@@ -22,6 +22,7 @@ import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { Vault } from '@olympus-ai/vault';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
+import { taskProblems } from './validate.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -34,9 +35,9 @@ export interface FixtureTask {
   readonly id: TaskId;
   /** Absolute path: the Workspace mount source, and what lockedPaths resolve against. */
   readonly workspace: string;
-  /** Workspace-relative; locked at `spec`, re-verified on the way into `build` and `verify`. */
+  /** Workspace-relative, inside it, no `..`; locked at `spec`, re-verified on the way into `build` and `verify` and again after the checks. */
   readonly lockedPaths: readonly string[];
-  /** The verification manifest, run at `verify`. */
+  /** The verification manifest, run at `verify`. Ids are unique and at least one check is required. */
   readonly checks: readonly CheckSpec[];
 }
 
@@ -65,10 +66,25 @@ export type RunOutcome =
       readonly requestedLevel: AutonomyLevel;
       readonly unsafe: readonly UnsafeDeclaration[];
     }
+  | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly string[] }
   | { readonly ok: false; readonly reason: 'refused'; readonly at: StationId; readonly transition: StationRefusal };
 
 /** The one role in the skeleton. */
 const BUILDER = 'builder' as RoleId;
+
+/**
+ * The line works from its own copy of the task. The caller's arrays are
+ * mutable at run time whatever `readonly` says, and a manifest that can
+ * shrink after the run starts is not a manifest.
+ */
+function snapshot(task: FixtureTask): FixtureTask {
+  return {
+    id: task.id,
+    workspace: task.workspace,
+    lockedPaths: [...task.lockedPaths],
+    checks: task.checks.map((check) => ({ ...check })),
+  };
+}
 
 /**
  * L0 and L1 both mean: run the three stations and return the gate verdict
@@ -77,17 +93,20 @@ const BUILDER = 'builder' as RoleId;
  * the graph declares itself unsafe, which in the skeleton is always.
  */
 export async function startRun(req: RunRequest): Promise<RunOutcome> {
-  // 1. Nothing has been provisioned, locked, or written when this returns.
+  // 1. Nothing has been provisioned, locked, or written when either refusal returns.
   const unsafe = unsafeComponents(req.components);
   if (unsafe.length > 0 && req.requestedLevel > 1) {
     return { ok: false, reason: 'unsafe-above-l1', requestedLevel: req.requestedLevel, unsafe };
   }
+  const problems = taskProblems(req.task);
+  if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
+  const fixture = snapshot(req.task);
 
   // 2. The run, its one task, and the initial state.
   const now = new Date().toISOString();
   const run: Run = {
     id: req.runId,
-    repo: req.task.workspace,
+    repo: fixture.workspace,
     baseCommit: req.baseCommit,
     trigger: { kind: 'human', eventId: req.runId, lineage: { depth: 0, chain: [], windowStart: now } },
     requestedLevel: req.requestedLevel,
@@ -96,14 +115,14 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
     createdAt: now,
   };
   const task: Task = {
-    id: req.task.id,
+    id: fixture.id,
     runId: req.runId,
     station: 'build',
     role: BUILDER,
     dependsOn: [],
     baseCommit: req.baseCommit,
     dependencySet: ['**'],
-    worktreePath: req.task.workspace,
+    worktreePath: fixture.workspace,
     attempt: 1,
   };
   const state = await req.components.vault.commitRunState(
@@ -112,6 +131,6 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
   );
 
   // 3. The line.
-  const ctx: LineContext = { run, task, fixture: req.task, components: req.components, state, locks: null, result: null };
+  const ctx: LineContext = { run, task, fixture, components: req.components, state, locks: null, result: null };
   return runLine(ctx);
 }

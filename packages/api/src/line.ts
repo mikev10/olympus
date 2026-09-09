@@ -1,13 +1,14 @@
 /**
  * The line: three station functions over one context, called in order.
  * Each commits run state on the way out, so a RunState alone says where the
- * run is. `build` and `verify` re-verify the locks on the way in (I3). The
- * verify station runs the checks and derives the verdict from their exit
- * codes and nothing else (I2). It performs no tamper analysis and no
- * claim/evidence diff; SKELETON_LINE says so.
+ * run is. `build` and `verify` re-verify the locks on the way in, and
+ * `verify` re-verifies them again after the checks have run (I3). The verify
+ * station runs the checks and derives the verdict from their exit codes and
+ * nothing else (I2). It performs no tamper analysis and no claim/evidence
+ * diff; SKELETON_LINE says so.
  */
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import type { Run, RunState, StationId, StationTransition, Task, TaskResult, TaskStatus, VaultRef } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, GateResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
@@ -62,7 +63,8 @@ async function build(ctx: LineContext): Promise<StationTransition> {
   try {
     await commit(ctx, { station: 'build', status: 'running' });
     // The locked files' text, read after verification, is the cacheable prefix; the task id is all that varies.
-    const locked = await Promise.all(ctx.fixture.lockedPaths.map((path) => readFile(join(ctx.fixture.workspace, path), 'utf8')));
+    // `resolve` against the workspace is the same resolution the vault applies to its root.
+    const locked = await Promise.all(ctx.fixture.lockedPaths.map((path) => readFile(resolve(ctx.fixture.workspace, path), 'utf8')));
     ctx.result = await driver.runTask({
       taskId: ctx.task.id,
       role: ctx.task.role,
@@ -83,7 +85,8 @@ async function build(ctx: LineContext): Promise<StationTransition> {
 
 /**
  * `verify`: re-verify the locks, run every check in a fresh sandbox where
- * the agent never ran, derive the verdict, write the evidence, and stop.
+ * the agent never ran, re-verify the locks again because the checks ran with
+ * the workspace writable, derive the verdict, write the evidence, and stop.
  * `review` does not exist, so the run ends here either way.
  */
 async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
@@ -93,16 +96,18 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
   if (result === null) throw new Error('verify: build produced no TaskResult; the line ran out of order');
   const { sandbox, vault, driver } = ctx.components;
 
+  // Results stay aligned with the specs by position, never matched up by id afterwards.
+  const specs = ctx.fixture.checks;
+  const results: Array<CheckResult | undefined> = [];
+  const unstarted: Array<string | undefined> = [];
   const handle = await sandbox.provision(workspaceOnly(ctx.fixture));
-  const checks: CheckResult[] = [];
-  const unstarted = new Map<string, string>();
   try {
-    for (const check of ctx.fixture.checks) {
+    for (const check of specs) {
       const startedAt = new Date().toISOString();
       try {
         // Whitespace split and no shell is the whole command grammar in S1; P6 replaces it.
         const exec = await sandbox.exec(handle, check.command.split(/\s+/));
-        checks.push({
+        results.push({
           checkId: check.id,
           exitCode: exec.exitCode,
           stdout: exec.stdout,
@@ -111,17 +116,25 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
           durationMs: exec.durationMs,
           startedAt,
         });
+        unstarted.push(undefined);
       } catch (error) {
         // There is no exit code to record and none is invented; a required check with no result fails the gate.
-        unstarted.set(check.id, describe(error));
+        results.push(undefined);
+        unstarted.push(describe(error));
       }
     }
   } finally {
     await sandbox.destroy(handle);
   }
+  const checks = results.filter((r): r is CheckResult => r !== undefined);
 
-  const failures = ctx.fixture.checks.flatMap((check) => {
-    const shortfall = requiredShortfall(check, checks.find((c) => c.checkId === check.id), unstarted.get(check.id));
+  // The checks ran with the workspace writable (the contract admits no other mode), so a locked
+  // artifact may have changed under them. Evidence collected over a changed artifact is not evidence.
+  const tampered = await refuseIfTampered(ctx, 'verify', { phase: 'after-checks', checks });
+  if (tampered !== undefined) return tampered;
+
+  const failures = specs.flatMap((check, i) => {
+    const shortfall = requiredShortfall(check, results[i], unstarted[i]);
     return shortfall === undefined ? [] : [shortfall];
   });
   const verdict = failures.length === 0 ? 'pass' : 'fail';
@@ -145,11 +158,13 @@ async function verify(ctx: LineContext): Promise<StationRefusal | Verified> {
 }
 
 /**
- * I3: a mismatch on the way into a station is a refusal with a recorded
- * violation, never a warning. The state commits with the task failed at the
- * station that refused.
+ * I3: a mismatch on the way into a station, or after the checks, is a
+ * refusal with a recorded violation, never a warning. The state commits with
+ * the task failed at the station that refused. `extra` goes into the
+ * violation's detail beside the tampered list: the phase, and the check
+ * results when they exist, so a violation read back on its own says what ran.
  */
-async function refuseIfTampered(ctx: LineContext, at: StationId): Promise<StationRefusal | undefined> {
+async function refuseIfTampered(ctx: LineContext, at: StationId, extra: Record<string, unknown> = {}): Promise<StationRefusal | undefined> {
   const { vault, driver } = ctx.components;
   const verdict = await vault.verifyLocks(ctx.run.id);
   if (verdict.ok) return undefined;
@@ -161,12 +176,13 @@ async function refuseIfTampered(ctx: LineContext, at: StationId): Promise<Statio
     driverProvenanceId: driver.provenanceId(),
     contractVersion: driver.contractVersion,
     detectedAt: new Date().toISOString(),
-    detail: { station: at, tampered: verdict.tampered },
+    detail: { station: at, ...extra, tampered: verdict.tampered },
   };
   const ref = await vault.recordViolation(violation);
   await commit(ctx, { station: at, status: 'failed', violation: ref });
   const paths = verdict.tampered.map((t) => `${t.path} (expected ${t.expected}, actual ${t.actual})`).join(', ');
-  return { ok: false, reason: 'lock-tamper', detail: `locked artifact changed before ${at}: ${paths}` };
+  const when = typeof extra.phase === 'string' ? ` (${extra.phase})` : '';
+  return { ok: false, reason: 'lock-tamper', detail: `locked artifact changed before ${at}${when}: ${paths}` };
 }
 
 /** Why a required check fails the gate, or undefined when it does not. A check that is not required never fails it. */

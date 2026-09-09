@@ -40,10 +40,25 @@ export interface WorkspacePackage {
   dir: string;
   /** Directory relative to the workspace root, POSIX separators. */
   relativeDir: string;
-  /** package.json `types` (or `main`) as written: the published entry. */
+  /** package.json `main` as written: what the runtime loads. */
+  main: string | undefined;
+  /** package.json `types` as written: what the compiler reads. */
+  types: string | undefined;
+  /** `types`, or else `main`: the published entry. */
   entry: string | undefined;
   /** package.json `private`. */
   isPrivate: boolean;
+}
+
+/**
+ * A package whose `main` and `types` name different files, so a fixture
+ * would typecheck against one while the runtime loads the other. Undefined
+ * when they agree or only one is set. (S1 external review, configuration note.)
+ */
+export function entryDivergence(pkg: WorkspacePackage): string | undefined {
+  if (pkg.main === undefined || pkg.types === undefined) return undefined;
+  if (toPosix(resolve(pkg.dir, pkg.main)) === toPosix(resolve(pkg.dir, pkg.types))) return undefined;
+  return `${pkg.name}: main (${pkg.main}) and types (${pkg.types}) resolve to different files`;
 }
 
 interface PackageJson {
@@ -74,12 +89,15 @@ export function workspacePackages(root: string = workspaceRoot()): WorkspacePack
     if (!statSync(dir).isDirectory()) continue;
     const pkg = readPackageJson(dir);
     if (pkg === undefined || typeof pkg.name !== 'string') continue;
-    const entry = typeof pkg.types === 'string' ? pkg.types : typeof pkg.main === 'string' ? pkg.main : undefined;
+    const main = typeof pkg.main === 'string' ? pkg.main : undefined;
+    const types = typeof pkg.types === 'string' ? pkg.types : undefined;
     result.push({
       name: pkg.name,
       dir,
       relativeDir: toPosix(relative(root, dir)),
-      entry,
+      main,
+      types,
+      entry: types ?? main,
       isPrivate: pkg.private === true,
     });
   }
