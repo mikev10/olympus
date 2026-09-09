@@ -1,7 +1,7 @@
 {
-  "name": "@olympus-ai/vault",
+  "name": "@olympus-ai/api",
   "version": "0.0.0",
-  "description": "Vault contract: locked artifacts, evidence bundles, integrity violations, run state",
+  "description": "The runtime as a service: the programmatic entry point that carries a run through the line",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@olympus-ai/core": "workspace:*",
-    "@olympus-ai/integrity": "workspace:*"
+    "@olympus-ai/integrity": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*",
+    "@olympus-ai/vault": "workspace:*"
   }
 }

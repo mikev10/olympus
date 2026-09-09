@@ -64,6 +64,17 @@ Each unit's pending assertions are listed in the registry report
 acceptance criteria: when the unit lands, its pending entries become live
 assertions.
 
+Any package that carries tests must list `test` in the `include` array of its
+`tsconfig.json`, beside `src`. Lint runs through typescript-eslint's project
+service, which refuses a file that no tsconfig covers, so a test directory
+outside the include fails `pnpm lint` with a parsing error before any rule
+runs. Including it also puts the tests inside the package's program, where
+`pnpm typecheck` and the I7, I9, and I10 scans see them. This is a standing
+constraint on every Phase 2 unit, not a detail of the skeleton; the edit to
+`tsconfig.json` is a protected path and carries `gate-change`. The package's
+`test` script resolves `vitest` from the workspace root and declares no
+devDependency of its own for it.
+
 ## Writing a conformance suite
 
 The kit lives in `packages/conformance`. It gives you three kinds of

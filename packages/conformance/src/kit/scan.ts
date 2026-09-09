@@ -4,9 +4,9 @@
  * assertions that read the repository rather than compile a fixture (I7's
  * cast rule, I9's terminal rule, I10's naming rule).
  */
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import ts from 'typescript';
-import { toPosix, workspaceRelative, type WorkspacePackage } from './workspace.js';
+import { toPosix, walkFiles, workspaceRelative, type WorkspacePackage } from './workspace.js';
 
 export interface PackageProgram {
   readonly pkg: WorkspacePackage;
@@ -36,6 +36,21 @@ export function packageProgram(pkg: WorkspacePackage): PackageProgram {
   const result: PackageProgram = { pkg, program, checker: program.getTypeChecker(), files };
   programs.set(pkg.dir, result);
   return result;
+}
+
+/**
+ * Every `.ts` file under the package's `src` that its program does not
+ * contain, relative to the package directory, POSIX separators, sorted. A
+ * tsconfig `include` that names only a safe file keeps the program non-empty
+ * while the runtime source leaves it, and a scan that trusts the program
+ * alone then scans nothing that matters. (S1 external review, finding 10.)
+ */
+export function sourceFilesOutsideProgram(pkg: WorkspacePackage): string[] {
+  const inProgram = new Set(packageProgram(pkg).files.map((sf) => toPosix(sf.fileName)));
+  return walkFiles(join(pkg.dir, 'src'))
+    .filter((file) => !inProgram.has(toPosix(file)))
+    .map((file) => toPosix(relative(pkg.dir, file)))
+    .sort();
 }
 
 export interface Located {

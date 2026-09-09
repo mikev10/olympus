@@ -342,7 +342,7 @@ The review exposed a structural ceiling that no single fix closes. A compile-err
 - **The I7 cast scan is a syntax scan (I7).** It reports `as`, angle-bracket, and `satisfies` nodes whose operand is typed `UntrustedText` or `UntrustedPayload`, and it sees through a double cast (D-F3-15). It does not see widening to `unknown` by annotation or parameter, erasure through a generic (`erase<T>(x: T): unknown`, then `as string`), or a type predicate (`x is string` narrows `raw` to `UntrustedText & string`, which is a `string`). All three compile and none contains a cast from the branded type. **Owed to M2:** the type-aware sink rule `I7.untrusted-sink-lint-rule`, which judges the value's type at the sink rather than the syntax on the way there.
 - **The pending ratchet has slack (I8).** A count lowered without lowering its baseline can rise back to the baseline without a review. Accepted in D-F3-13: decreases are always allowed and the baseline changes only by a deliberate edit; the delta line and CONTRIBUTING's instruction to lower the number in the same pull request are the mitigation. No further change.
 - **The scans run over an inventory that can be incomplete (I7, I9, I10).** `workspacePackages` reads one directory level under `packages/`, and `packageProgram` reads each package's `tsconfig.json` `include`. Every non-conformance package today includes only `src`, so a `test/` directory in one of them is outside its program and outside every scan; a package nested deeper than `packages/*`, which is where the spine's `drivers/claude-code` would go, is outside the workspace glob and the scan both. **Owed to P5**, the first unit that adds such a package: derive the inventory from `pnpm-workspace.yaml`'s globs, and assert that every `.ts` file under a package directory (outside `node_modules`, `dist`, `coverage`, and `fixtures/types`) is in that package's program.
-- **The I9 terminal scan matches spellings, not bindings (I9).** It reports dotted chains rooted at `process` and `console` and imports of terminal modules. `const { stdout } = process; stdout.write(...)`, an alias (`const p = process`), or a re-export from another module contain none of those spellings and pass. **Owed to P9:** resolve each identifier through the checker to the `process` and `console` globals and the terminal modules, so a binding is what is matched.
+- **The I9 terminal scan matches spellings, not bindings (I9).** It reports dotted chains rooted at `process` and `console` and imports of terminal modules. `const { stdout } = process; stdout.write(...)`, an alias (`const p = process`), or a re-export from another module contain none of those spellings and pass. **Owed to P9:** resolve each identifier through the checker to the `process` and `console` globals and the terminal modules, so a binding is what is matched. The S1 external review (finding 9) adds a construction with no terminal spelling at all: `readFileSync(0, 'utf8')` through `node:fs` reads foreground stdin, and `/dev/tty` opens the same way. The blacklist was not extended for it; `I9.api-runs-headless`, pending for P9, is the behavioural assertion that closes the class. What S1 did add (D-S1-16) is a refusal when a package's tsconfig leaves any `.ts` under `src` out of the scanned program, so the scan cannot be emptied by configuration.
 - **The I10 scan is finite and partial (I10).** The precise policy, in place of the invariant's broad wording: the assertion reads identifiers, string literals, and template text in every file of every package's program; file paths under `packages/`; and every key and non-prose value of each package's `package.json` and `tsconfig.json`; it strips the npm scope `@olympus-ai/` and the CLI package name `olympus-ai`; it exempts the word-list file and its unit test; and it matches against the curated `GREEK_NAMES` list, which leaves out names that are ordinary English words (atlas, echo, iris, pan, muse, phoenix, oracle). It does not read comments, files outside a package's program (see the inventory limit), root configuration, workflows, changesets, or Markdown, and it cannot find a name the list lacks. Adding a name to the list is a one-line edit; adding a surface is a scan over that file kind. Neither is owed to a unit today; the policy is what I10's assertion asserts, and the invariant's wording in the README and CLAUDE.md is the broader intent.
 
 ## F3 amendment: planning documents tracked
@@ -358,3 +358,125 @@ expanded from a summary to a spec (`docs/plan/S1-skeleton.md`).
 - **The check:** `ship-unit` ran `git ls-files | grep -i plan`, which now matches `docs/plan/` and would report a false positive on every ship. Replaced with `git ls-files -- .plan/`, scoped to the directory. CI gains a step of the same scope beside the tracked-but-ignored check D-F3-11 chose: nothing under the maintainer-local directory is tracked, and no tracked file names a path under it, where a reference is the directory followed by a file name. `CLAUDE.md` is the one file excluded from the reference check, because it holds the rule itself and the one standing exception (the instruction never to load the master plan). D-F3-11's reasoning, that naming the directory in a tracked file was itself forbidden, no longer applies: the rule now says what the exceptions are, and the check enforces it as stated.
 - **Also changed:** `review-request` excludes `docs/plan/` from the review bundle. The reviewer works from source alone, and the skill's clean-room rule would otherwise have been weakened by the move as a side effect. Its bundle check moved from a substring search for the directory name, which `CLAUDE.md`'s own rule would now trip, to a check of the bundle's file headers.
 - **Reverse:** move the three files back and restore the paths; delete the CI step.
+
+## S1: Walking skeleton
+
+The spec (`docs/plan/S1-skeleton.md`) is complete and was built to as
+written. The entries below are the calls it left open, and the positions the
+implementation took on the contract findings it records.
+
+### D-S1-01: `StubVault.lock` refuses an empty path list
+
+- **Problem:** The spec says `verifyLocks` must throw for a run with no manifest, because `{ ok: true }` is never the answer to "nothing was locked". It does not say what `lock(runId, [], by)` does. Accepting it would store an empty manifest, and every later verification of that run would pass with nothing checked: the same hole, one call earlier.
+- **Chosen:** `lock` throws on an empty list and stores nothing (I5).
+- **Reverse:** delete the guard and the test `throws on an empty path list`.
+
+### D-S1-02: a deleted locked artifact verifies as tampered, with `actual: 'missing'`
+
+- **Problem:** The spec covers a changed file (one `tampered` item) and a missing manifest (throw), not a locked file that no longer exists. Throwing would turn a detectable tamper into an exception the line never records as a violation; hashing an empty byte string would report a deletion as an empty file.
+- **Chosen:** the entry is reported in `tampered` with `actual` set to the literal `missing`, which no hex digest can equal. The line records the violation and refuses like any other mismatch.
+- **Reverse:** throw instead. P1 owns the real Vault and may pick either.
+
+### D-S1-03: a `VaultRef` is looked up by run, kind, and hash together
+
+- **Problem:** The spec stores evidence and violations "under their SHA-256" and says an unknown ref throws. A store keyed by hash alone would answer a ref whose `kind` or `runId` is wrong as long as the bytes exist.
+- **Chosen:** the key is the triple; a ref with a wrong kind or run is unknown. Identical bytes written twice for the same run and kind still return the same ref, as the spec requires.
+
+### D-S1-04: the stub vault hands out copies
+
+- **Problem:** An in-memory store returns object references by default. A caller that mutates a returned `RunState`, or the one it passed in, would be editing the vault's memory directly, which is the kind of write path I1 exists to close, even in a stub.
+- **Chosen:** `commitRunState`, `readRunState`, `lock`, and `read` return copies (`structuredClone`; a fresh `Uint8Array` for `read`). The test `what is stored is a copy` pins it.
+
+### D-S1-05: a check that cannot be started has no result, and a required one fails the gate by name
+
+- **Problem:** The spec's verdict rule fails a required check that "has no result", and finding 4c forbids inventing an exit code. It does not say where the reason goes. Swallowing the error would leave a missing result with no explanation; propagating it would end the run with an exception instead of a committed state and a gate.
+- **Chosen:** `StubSandboxProvider.exec` rejects when the process cannot be spawned. The verify station records no `CheckResult` for that check, runs the rest, and fails the gate when the check is required. The refusal's `detail` names every shortfall: no result with the spawn error, a non-zero exit code, or a suite count that is unknown or short. A check that is not required never fails the gate. Test: `a required check that cannot be started has no result and fails the gate, naming it`.
+- **Reverse:** P6 owns the verification runtime; if `CheckResult` gains a way to record an unstarted check, use it.
+
+### D-S1-06: what the spec left blank in `Run`, `SandboxSpec`, `TaskRequest`, and the violation record
+
+- `Run.repo` is the workspace path: there is no repository yet, and the fixture directory is what the run operates on.
+- `SandboxSpec.image` is the literal `none`: the stub mounts nothing and ignores it. The unit that adds a real image hands P2's provider one.
+- `TaskRequest.stablePrefix` is the locked files' text joined by a newline, read from the workspace after verification. There is no prompt format to follow until the compiler (M2), and the stub driver does not read it.
+- `IntegrityViolation.detail` carries `station` beside `tampered`, so a violation read back on its own says where it was detected.
+
+### D-S1-07: `unsafeComponents` throws on a malformed declaration
+
+- **Problem:** The declaration is read structurally. A component whose `unsafe` property is not a well-formed declaration (not an object, no name, an empty `cannotEnforce`) is neither declared nor undeclared. Ignoring it would let a component that tried to declare pass as safe.
+- **Chosen:** it throws, naming the slot and the component, and the run does not start (I5).
+- **Known limit, sharpened by the S1 external review (finding 5 and its framing finding):** a wrapper around a stub that does not forward `unsafe` carries no declaration. The fixture pins the exported stubs, not what wraps them; the skeleton's own tests wrap stubs deliberately, at L1 only. This is not a route above L1 today: `SKELETON_LINE` is appended unconditionally and any non-empty list refuses. The question P4 inherits is therefore not whether a hidden stub can get above L1 now, it cannot, but whether the mechanism will still refuse one once the line cap is removed. For this code the answer is no. **Requirement for P4:** before `SKELETON_LINE` is deleted, component provenance must be compositional, so that a wrapper cannot drop a declaration: trusted metadata a wrapper must propagate, a graph-construction layer that owns provenance, or an equivalent. P4 decides whether that becomes a pending registry entry.
+
+### D-S1-08: tests live inside each package's program
+
+- **Problem:** `core`, `vault`, and `sandbox` had no tests and no `test` script, and their `tsconfig.json` included `src` only, which D-F3-22 records as an inventory limit of the scans. The stubs need tests, and untypechecked tests are not evidence.
+- **Chosen:** each of the three gains `test/`, a `test` script, and `"include": ["src", "test"]`, like `api` and `conformance`. Every test is typechecked with the contracts' strictness and sits inside the I7, I9, and I10 scans. The `include` edit is not optional: with a test file outside every tsconfig, `pnpm lint` fails with a parsing error, because typescript-eslint's project service refuses a file no project covers. Neither the three packages nor `api` declares a `vitest` devDependency of its own; the `test` script resolves it from the workspace root, which was verified in each package by removing the declaration, reinstalling, and running the suite. The `conformance` manifest's own declaration predates S1 and is untouched. These are manifest and compiler-configuration edits, so the pull request carries `gate-change`.
+
+### D-S1-09: the paths reader moved out of `registry/i8.ts`; not required by an S1 deliverable
+
+- **Problem:** §7 requires `vitest.config.ts` to derive `resolve.alias` from the same `paths` map the fixtures typecheck against, so the config needs a reader for that map. The only reader was `readPathsMap`, a private function inside `registry/i8.ts` behind `I8.fixture-paths-match-published-entries`. The config cannot reach a private function, and importing a registry module from the vitest config would load the whole registry at config time.
+- **What would have been duplicated:** the fifteen-line parse of `tsconfig.json` through `ts.readConfigFile` and the narrowing of `compilerOptions.paths` to `Record<string, string[]>`. A second copy in the config would have been the minimal change and would have touched no existing file.
+- **Chosen:** the function moved to `kit/paths.ts` as `conformancePathsMap`, `i8.ts` now imports it, and `conformanceAliases` beside it turns the map into absolute alias targets for the config. The `i8.ts` edit was a consolidation made during S1 because the two readers must never disagree about the map, and one parser is the simplest way to make that true. It was not required by any S1 deliverable; the deliverable was the alias derivation. The module is not re-exported from the kit's index: the config imports it by relative path and nothing else consumes it.
+- **Reverse:** restore `readPathsMap` inside `i8.ts` and give the config its own copy.
+
+### D-S1-10: host-conditional tests for the sandbox stub
+
+- `capabilities()` throws on a host the `os` union cannot name (finding 4a). The test asserts the value on Linux and macOS and the refusal elsewhere, selected by `test.runIf` on the platform; CI on Linux and a Windows workstation between them cover both branches.
+- A process that ends by signal is refused by name (finding 4c). On Windows a child that kills itself exits with a code and no signal, so that test is skipped there and runs in CI.
+
+### D-S1-11: positions on the contract findings
+
+Findings 4a, 4c, and 4d are implemented exactly as the spec states: `capabilities()` throws on an unnamed host, `exec` throws on a signal, the vault takes its root at construction. Finding 4b: `CheckSpec.timeoutMs` is carried in the fixture and not applied; the skeleton's checks are short, and the line does not provision one sandbox per check to work around the contract. Finding 4e: the empty `TamperReport` is built fresh per gate, and `SKELETON_LINE` is the statement that no analysis ran. Nothing was absorbed by relaxing an interface, and the three stub files total 325 lines.
+
+## S1 amendment: external adversarial review
+
+An external reviewer (ChatGPT, clean room, bundle only) returned ten
+findings, a configuration note, and a framing finding; every one held
+against the tree. The verbatim findings and the triage are in
+`docs/reviews/2026-09-09-S1-walking-skeleton-adversarial-review.md` and
+`...-triage.md`. The entries below record what changed and why; D-S1-07 and
+D-F3-22 were amended in place for findings 5 and 9.
+
+### D-S1-12: duplicate check ids are refused, and results are correlated by position
+
+- **Problem:** the verify station matched each `CheckSpec` to its result with `checks.find` by id. Two required checks sharing an id both saw the first result, so a second that exited non-zero or never started was masked by a first that exited zero (review finding 1, reproduced).
+- **Chosen:** `startRun` refuses a manifest with a duplicate id as `invalid-request` before anything is locked, provisioned, or committed. The verify station keeps results in a position-aligned array beside the specs and never matches by id afterwards, so the correlation cannot alias even without the guard.
+- **Reverse:** neither half depends on the other; keep the guard if the correlation is ever rewritten.
+
+### D-S1-13: the locks are re-verified after the checks; the writable workspace during verification is a contract limit
+
+- **Problem:** the locks were verified on entry to `verify` and not again. The checks run in the workspace with the mount `rw`, so a check that rewrote `spec.md` and exited zero reached a passing gate with the locked artifact changed (finding 2, reproduced with the reviewer's command).
+- **Chosen:** after the checks and before evidence is written or state committed, `verifyLocks` runs again. A mismatch records an `IntegrityViolation` whose detail carries `phase: 'after-checks'` and the check results, commits the task as failed at `verify`, writes no evidence, and returns the `lock-tamper` refusal. Evidence collected over a changed artifact is not evidence.
+- **Recorded for P6, with P2:** the reviewer's stronger remedy, locked paths unwritable during verification, is unreachable from the skeleton: `MountTable.workspace` is typed `mode: 'rw'` with no other value, so every provider mounts the verification workspace writable. Whether verification should run against a read-only workspace, and what the contract needs for that, is P6's question and P2's enforcement.
+- **Reverse:** delete the second `refuseIfTampered` call and the regression test `finding 2`.
+
+### D-S1-14: the task is validated and snapshotted before the first `await`; `invalid-request` is a fourth outcome
+
+- **Problem:** `checks: []` was a passing gate; the caller's array was held by reference and could be shrunk after `startRun` began, because `readonly` is erased; a `required` that was not a boolean read as optional through `!check.required` (finding 3, all three reproduced).
+- **Chosen:** `validate.ts` refuses, as a new `RunOutcome` variant `{ reason: 'invalid-request', problems }`, a manifest with no check, with no required check, or with a check whose id is empty or duplicated, whose command is empty, whose `required` is not a boolean, or whose `expectedSuiteCount` is present and not a non-negative integer; the locked-path rules of D-S1-15 run in the same pass. The line then works from a copy of the task. A structured outcome rather than a throw, because this is caller input, not a component defect (contrast D-S1-07), and P9 will surface it.
+- **Kept with P6:** the authoritative manifest, pinned at `test-design` and read from the Vault rather than the caller, is what closes the class; `I5.missing-check-or-shrunken-suite-refuses` already owes it. The validation here is the least the skeleton can insist on, not a substitute.
+- **Reverse:** remove the variant and the `taskProblems` call; keep the snapshot regardless.
+
+### D-S1-15: locked paths are validated as workspace-relative; the previous behaviour was fail-closed by accident
+
+- **Problem:** the vault resolved a locked path with `resolve(root, path)` and the build station read it with `join(workspace, path)`, so an absolute path named two different files and a `..` segment escaped the root in both (finding 7, reproduced).
+- **What actually happened before the fix, stated plainly:** an absolute path outside the workspace was locked by the vault, then `build` threw `ENOENT` for `workspace/<absolute>`. The run did not refuse; it threw an unstructured error after the lock, recorded no violation, and left the run state at `running`. That is fail-closed by accident, not by design. An exception that happens to stop a run is not a control: it holds only until someone adds a `catch`, and it leaves the record inconsistent. P1 (the vault's root) and P2 (the mount layer, which the contract requires to resolve symlinks and path escapes) will meet the same shape and should not read the old behaviour as precedent.
+- **Chosen:** `startRun` refuses, as `invalid-request`, a locked path that is absolute on either platform, empty, duplicated, or contains a `..` segment, before the lock. Both readers now call `resolve`. Symlink and realpath containment stay with P1 and P2.
+- **Reverse:** remove the locked-path rules from `validate.ts`; the two readers should stay on one resolver.
+
+### D-S1-16: the I9 scan refuses a program that omits source files; the general inventory stays with P5
+
+- **Problem:** the scan's only enumeration guard was `files.length === 0`. A tsconfig `include` naming one safe file kept the program non-empty while `src/run.ts`, `line.ts`, and `safety.ts` left it, and the label on `tsconfig.json` is process control, not executable evidence (finding 10).
+- **Chosen:** `sourceFilesOutsideProgram` in `kit/scan.ts` names every `.ts` under a package's `src` that its program does not contain, and both I9 assertions refuse when it is non-empty. S1 widened this scan, so S1 owns the hole. The general assertion, that every `.ts` under every package directory is in that package's program, is a different inventory and stays with P5 as D-F3-22 records.
+- **Reverse:** delete the guard and the `sourceFilesOutsideProgram` test; P5's assertion would then be the only cover.
+
+### D-S1-17: I8 refuses a package whose `main` and `types` name different files
+
+- **Problem:** `workspacePackages` exposed one entry, `types` or else `main`, and `I8.fixture-paths-match-published-entries` compared the paths map to it. The two could diverge and the fixtures would typecheck against a file the runtime never loads (review configuration note).
+- **Chosen:** `WorkspacePackage` carries `main` and `types` separately; `entryDivergence` reports a package whose two resolve to different files, and the I8 assertion adds it to its problems. Every package today sets both to `./src/index.ts`.
+- **Reverse:** drop the field pair and the call.
+
+### D-S1-18: a pending entry under I3 for lock append-versus-replace, owed to P1; the I3 baseline raised from 2 to 3
+
+- **Problem:** `StubVault.lock` replaces the run's manifest on every call, as spec §2 says it must, so S1 is correct as built. The reviewer (finding 6) showed what that means for the full line: `spec` locks the spec, `test-design` locks the acceptance tests, and the second lock drops the first's entries, while I3 requires both locked and re-verified at every transition. Replace semantics make I3 unsatisfiable, and the `Vault.lock` contract is silent on which it means.
+- **Chosen, by maintainer direction:** not a decisions-only note. `I3.lock-preserves-earlier-entries` is a pending registry entry owed to P1, and `pending-baseline.json` raises I3 from 2 to 3 in the same change. The S1 spec's out-of-scope rule against adding pending entries was set aside for this one by the maintainer, deliberately and in the diff. P1 must make a later lock preserve earlier entries and assert that a re-lock cannot rebase a locked artifact's hash.
+- **Reverse:** P1 pays the entry and lowers the baseline in the same pull request.

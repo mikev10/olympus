@@ -140,6 +140,21 @@ importers:
         specifier: workspace:*
         version: link:../sandbox
 
+  packages/api:
+    dependencies:
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@olympus-ai/integrity':
+        specifier: workspace:*
+        version: link:../integrity
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@olympus-ai/vault':
+        specifier: workspace:*
+        version: link:../vault
+
   packages/conformance:
     dependencies:
       eslint:
