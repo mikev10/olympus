@@ -9,8 +9,8 @@ Deterministic. No judgment calls. If a step fails, stop and report — never wor
 
 ## 1. Identify the unit
 
-Read `.plan/DECOMPOSITION.md`. Find the unit whose work is complete. If more
-than one is plausible, ask which — do not guess.
+Read `docs/plan/DECOMPOSITION.md`. Find the unit whose work is complete. If
+more than one is plausible, ask which — do not guess.
 
 Extract from its entry: scope, deliverables, out-of-scope, acceptance criteria.
 
@@ -22,8 +22,12 @@ Run every command in the unit's acceptance criteria, plus the standing four:
 pnpm -r typecheck
 pnpm -r lint
 pnpm -r test
-git ls-files | grep -i plan     # must return nothing under .plan/
+git ls-files -- .plan/          # must print nothing: the directory is maintainer-local
 ```
+
+The last check is scoped to the maintainer-local directory on purpose. The
+tracked planning documents live under `docs/plan/`, so a search for the word
+"plan" across tracked paths reports them and proves nothing.
 
 **Any failure stops the ship.** Report which criterion failed and stop. Do not
 open a PR with a failing gate and a note explaining it.

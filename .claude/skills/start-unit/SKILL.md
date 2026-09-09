@@ -11,12 +11,13 @@ the unit spec; this skill loads it and holds the boundary.
 ## 1. Load context, in this order
 
 1. `CLAUDE.md` — invariants, vocabulary, conventions
-2. `.plan/F1-spine.md` — invariants, frozen vocabulary, dependency graph
-3. `.plan/DECOMPOSITION.md` — the named unit's entry only
-4. The unit's detailed spec if one exists, e.g. `.plan/F2-contracts.md`
+2. `docs/plan/F1-spine.md` — invariants, frozen vocabulary, dependency graph
+3. `docs/plan/DECOMPOSITION.md` — the named unit's entry only
+4. The unit's detailed spec if one exists, e.g. `docs/plan/F2-contracts.md`
 
-**Do not load `.plan/olympus-v2-plan.md`.** Maintainer reference, not session
-context.
+Load nothing else. The maintainer's master plan is not in the repository and
+is never session context; `CLAUDE.md` says where it lives and that it stays
+out.
 
 ## 2. Check dependencies
 
@@ -36,7 +37,7 @@ Print, and wait for nothing — this is a record, not a question:
 
 If any of those five is absent from the spec, say which, propose what it should
 be, and ask. An underspecified unit is a spec defect — fix it in
-`.plan/DECOMPOSITION.md` before writing code, not after.
+`docs/plan/DECOMPOSITION.md` before writing code, not after.
 
 ## 4. Work the unit
 

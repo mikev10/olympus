@@ -42,6 +42,27 @@ jobs:
             exit 1
           fi
 
+      # The maintainer-local planning directory is never tracked and never
+      # named by a tracked file. Scoped to that directory: the tracked
+      # planning documents live under docs/plan/, so a search for the word
+      # "plan" would report them and prove nothing. A reference is the
+      # directory followed by a file name; CLAUDE.md holds the rule and its
+      # one exception (the master plan) and is the only file allowed either.
+      - name: Nothing under .plan/ is tracked or referenced
+        run: |
+          tracked="$(git ls-files -- .plan/)"
+          if [ -n "$tracked" ]; then
+            echo "$tracked"
+            echo "::error::files under the maintainer-local planning directory are tracked"
+            exit 1
+          fi
+          refs="$(git grep -nE '\.plan/[A-Za-z0-9_-]' -- ':!CLAUDE.md' || true)"
+          if [ -n "$refs" ]; then
+            echo "$refs"
+            echo "::error::tracked files reference a path under the maintainer-local planning directory"
+            exit 1
+          fi
+
       - name: Typecheck
         run: pnpm typecheck
 

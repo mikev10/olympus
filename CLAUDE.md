@@ -9,13 +9,13 @@ This is a **v2 rewrite**. `main` is frozen v1. Ignore v1 code, v1 vocabulary, an
 
 ## Read order
 
-1. `.plan/F1-spine.md` — invariants, vocabulary, dependency graph
-2. `.plan/DECOMPOSITION.md` — find the current unit
-3. That unit's spec, if it has one
+1. `docs/plan/F1-spine.md` — invariants, vocabulary, dependency graph
+2. `docs/plan/DECOMPOSITION.md` — find the current unit
+3. That unit's spec under `docs/plan/`, if it has one (`F2-contracts.md`, `S1-skeleton.md`)
 
 **Do not load `.plan/olympus-v2-plan.md`.** It is maintainer reference, not session context.
 
-`.plan/` is maintainer-local and gitignored — never commit it, never reference its paths from tracked files, and never quote it in a commit message, PR body, or code comment. Everything a contributor needs is in this file, the README, and CONTRIBUTING.md.
+`.plan/` is maintainer-local and gitignored — never commit it, never reference a path under it from a tracked file, and never quote it in a commit message, PR body, or code comment. This file is the one exception: the rule and the line above are the only references allowed anywhere, and CI checks it. Everything a contributor needs is in this file, the README, CONTRIBUTING.md, and `docs/plan/`.
 
 ## The invariants
 

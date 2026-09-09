@@ -111,6 +111,10 @@ packages/
   triggers/     the untrusted-input envelope
   adapters/     per-stack test, coverage, mutation, behavioral hooks
   conformance/  the kit that proves invariants, and the registry
+docs/
+  plan/         the spine, the decomposition into units, and unit specs
+  decisions.md  every judgment call made while building each unit
+  reviews/      external review findings and how each was resolved
 ```
 
 Packages import each other only through their published entry, never through
@@ -136,7 +140,9 @@ CI runs the same four commands on every push and pull request to `v2`.
 Work is cut into units that a contributor can finish and verify alone, without
 running the whole factory. [CONTRIBUTING.md](CONTRIBUTING.md) has the rule
 every unit follows, the units that are open, and how to write a conformance
-suite with the kit. Decisions made while building each unit are recorded in
+suite with the kit. The units themselves are defined in
+[docs/plan](docs/plan): the spine, the decomposition, and a spec for each unit
+that needs one. Decisions made while building each unit are recorded in
 [docs/decisions.md](docs/decisions.md).
 
 ## License

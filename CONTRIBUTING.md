@@ -7,7 +7,16 @@ how to prove your unit holds the invariants.
 
 Read [README.md](README.md) first. It states the mission, the claim, the ten
 invariants, and the open-source boundary. Everything a contributor needs is in
-the README, this file, `CLAUDE.md`, and the package you are working in.
+the README, this file, `CLAUDE.md`, the planning documents under
+[docs/plan](docs/plan), and the package you are working in.
+
+The planning documents are three kinds of file. The spine
+([F1-spine.md](docs/plan/F1-spine.md)) states the invariants, the frozen
+vocabulary, and the dependency graph between units. The decomposition
+([DECOMPOSITION.md](docs/plan/DECOMPOSITION.md)) is every unit with its scope,
+deliverables, out-of-scope list, conformance obligations, and acceptance
+criteria; the table below is a summary of it. A unit that needs more than an
+entry has its own spec beside them (`F2-contracts.md`, `S1-skeleton.md`).
 
 ## The five-part rule
 
