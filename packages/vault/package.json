@@ -18,8 +18,5 @@
   "dependencies": {
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/integrity": "workspace:*"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.11"
   }
 }

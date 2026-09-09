@@ -17,8 +17,5 @@
   },
   "dependencies": {
     "@olympus-ai/sandbox": "workspace:*"
-  },
-  "devDependencies": {
-    "vitest": "^4.1.11"
   }
 }

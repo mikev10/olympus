@@ -11,7 +11,6 @@
  */
 export * from './kit/types.js';
 export * from './kit/workspace.js';
-export * from './kit/paths.js';
 export * from './kit/baseline.js';
 export * from './kit/fixtures.js';
 export * from './kit/registry.js';

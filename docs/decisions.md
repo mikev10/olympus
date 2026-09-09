@@ -409,12 +409,14 @@ implementation took on the contract findings it records.
 ### D-S1-08: tests live inside each package's program
 
 - **Problem:** `core`, `vault`, and `sandbox` had no tests and no `test` script, and their `tsconfig.json` included `src` only, which D-F3-22 records as an inventory limit of the scans. The stubs need tests, and untypechecked tests are not evidence.
-- **Chosen:** each of the three gains `test/`, a `test` script, a `vitest` devDependency, and `"include": ["src", "test"]`, like `api` and `conformance`. Every test is typechecked with the contracts' strictness and sits inside the I7, I9, and I10 scans. These are manifest and compiler-configuration edits, so the pull request carries `gate-change`.
+- **Chosen:** each of the three gains `test/`, a `test` script, and `"include": ["src", "test"]`, like `api` and `conformance`. Every test is typechecked with the contracts' strictness and sits inside the I7, I9, and I10 scans. The `include` edit is not optional: with a test file outside every tsconfig, `pnpm lint` fails with a parsing error, because typescript-eslint's project service refuses a file no project covers. The three packages declare no `vitest` devDependency of their own; the `test` script resolves it from the workspace root, which was verified by removing the declaration, reinstalling, and running the suite. These are manifest and compiler-configuration edits, so the pull request carries `gate-change`.
 
-### D-S1-09: the tsconfig `paths` map has one reader, used by I8 and by vitest
+### D-S1-09: the paths reader moved out of `registry/i8.ts`; not required by an S1 deliverable
 
-- **Problem:** §7 requires `vitest.config.ts` to derive `resolve.alias` from the same `paths` map the fixtures typecheck against. The reader lived inside `registry/i8.ts`.
-- **Chosen:** it moved to `kit/paths.ts` as `conformancePathsMap`, with `conformanceAliases` beside it; both are kit exports, and `vitest.config.ts` imports the latter. One map, two readers, one parser.
+- **Problem:** §7 requires `vitest.config.ts` to derive `resolve.alias` from the same `paths` map the fixtures typecheck against, so the config needs a reader for that map. The only reader was `readPathsMap`, a private function inside `registry/i8.ts` behind `I8.fixture-paths-match-published-entries`. The config cannot reach a private function, and importing a registry module from the vitest config would load the whole registry at config time.
+- **What would have been duplicated:** the fifteen-line parse of `tsconfig.json` through `ts.readConfigFile` and the narrowing of `compilerOptions.paths` to `Record<string, string[]>`. A second copy in the config would have been the minimal change and would have touched no existing file.
+- **Chosen:** the function moved to `kit/paths.ts` as `conformancePathsMap`, `i8.ts` now imports it, and `conformanceAliases` beside it turns the map into absolute alias targets for the config. The `i8.ts` edit was a consolidation made during S1 because the two readers must never disagree about the map, and one parser is the simplest way to make that true. It was not required by any S1 deliverable; the deliverable was the alias derivation. The module is not re-exported from the kit's index: the config imports it by relative path and nothing else consumes it.
+- **Reverse:** restore `readPathsMap` inside `i8.ts` and give the config its own copy.
 
 ### D-S1-10: host-conditional tests for the sandbox stub
 

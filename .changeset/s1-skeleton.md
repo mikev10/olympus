@@ -29,7 +29,7 @@ Conformance: `I5.stubs-declare-unsafe` pins each declaration with a
 compile-ok fixture, `I5.unsafe-component-refused-above-l1` runs the entry
 point and requires the refusal at L2 and L3 naming all four components and a
 passing gate at L1, and the I9 terminal scan now covers `@olympus-ai/api`.
-The tsconfig `paths` map gains `api`, `vitest.config.ts` derives
-`resolve.alias` from that map, and `conformancePathsMap` and
-`conformanceAliases` are new kit exports. No pending entry is added or paid;
-`pending-baseline.json` is untouched.
+The tsconfig `paths` map gains `api`, and `vitest.config.ts` derives
+`resolve.alias` from that map through the one reader in `kit/paths.ts`, which
+`I8.fixture-paths-match-published-entries` now shares. No pending entry is
+added or paid; `pending-baseline.json` is untouched.
