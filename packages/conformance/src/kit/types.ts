@@ -81,8 +81,13 @@ export interface LocalAssertion {
 /**
  * An assertion that lives in another package's own conformance suite, written
  * with this kit's `invariantTest`. The kit cannot import it (that would create
- * a workspace cycle), so the meta-test verifies it statically: the package and
- * file exist and the file registers exactly this id.
+ * a workspace cycle). Static verification (package present, file present, id
+ * quoted in the file) is satisfied by a skipped test or a comment, so the
+ * registry refuses every external assertion until it can reconcile the ids
+ * it lists against the tests the package actually ran and passed. That
+ * reconciliation is the pending assertion
+ * `I8.external-assertion-execution-reconciled`; the shape is kept so the unit
+ * that lands it has a target.
  */
 export interface ExternalAssertion {
   readonly kind: 'external';

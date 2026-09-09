@@ -1,5 +1,5 @@
 import { castFixture, compileError, lintFixture, pending, runtime } from '../kit/assert.js';
-import { resolvedRuleSeverity, workspaceEslint } from '../kit/eslint.js';
+import { inlineSuppressions, resolvedRuleSeverity, workspaceEslint } from '../kit/eslint.js';
 import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
@@ -83,6 +83,21 @@ export const I7: InvariantEntry = {
       id: 'I7.lint-rules-fire',
       title: 'the three rules report concatenation, interpolation, and String() of UntrustedText',
       fixture: 'i7/untrusted-text-coercion.ts',
+    }),
+    runtime({
+      id: 'I7.lint-rules-not-suppressed-inline',
+      title:
+        'no package source outside fixtures/ carries an eslint-disable or inline eslint configuration comment that names one of the three rules, or a bare disable that silences every rule',
+      run: () => {
+        // The ordinary lint run honours inline configuration, so a disable
+        // comment in a package source would silence a rule while the resolved
+        // configuration still reports it at error and the fixture still fires.
+        const hits = inlineSuppressions(I7_LINT_RULES, workspacePackages());
+        if (hits.length > 0) {
+          const detail = hits.map((h) => `${h.file}:${String(h.line)}: ${h.text}`).join('\n  ');
+          throw new Error(`I7: a lint rule the invariant depends on is suppressed inline\n  ${detail}`);
+        }
+      },
     }),
   ],
   pending: [

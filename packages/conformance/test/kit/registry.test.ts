@@ -1,10 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { external, pending, runtime } from '../../src/kit/assert.js';
 import { type PendingBaseline } from '../../src/kit/baseline.js';
-import { evaluateRegistry, formatReport, stateOf, verifyExternalAssertion } from '../../src/kit/registry.js';
+import { evaluateRegistry, formatReport, stateOf } from '../../src/kit/registry.js';
 import { INVARIANT_IDS, INVARIANTS, type InvariantEntry, type InvariantId, type Registry } from '../../src/kit/types.js';
 import { validateAssertionId } from '../../src/kit/vitest.js';
 
@@ -224,44 +221,25 @@ describe('pending baseline', () => {
 });
 
 describe('external assertions', () => {
-  let root: string;
-  beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'conformance-external-'));
-    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
-    const pkg = join(root, 'packages', 'sandbox');
-    mkdirSync(join(pkg, 'test'), { recursive: true });
-    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@olympus-ai/sandbox', types: './src/index.ts' }));
-    writeFileSync(
-      join(pkg, 'test', 'mount.test.ts'),
-      `invariantTest('I1.mount-rejects-second-rw', 'a second rw mount is refused', () => {});\n`,
-    );
-  });
-  afterAll(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
+  const ref = (id: `I1.${string}`) =>
+    external({ id, title: 'x', level: 'runtime', package: '@olympus-ai/sandbox', file: 'test/mount.test.ts' });
 
-  const ref = (id: `I1.${string}`, file = 'test/mount.test.ts', pkg = '@olympus-ai/sandbox') =>
-    external({ id, title: 'x', level: 'runtime', package: pkg, file });
-
-  test('verifies when the package, file, and id are all present', () => {
-    expect(verifyExternalAssertion(ref('I1.mount-rejects-second-rw'), root)).toBeUndefined();
-  });
-  test('fails for an unknown package', () => {
-    expect(verifyExternalAssertion(ref('I1.mount-rejects-second-rw', 'test/mount.test.ts', '@olympus-ai/nope'), root)).toContain(
-      'not in the workspace',
-    );
-  });
-  test('fails for a missing file', () => {
-    expect(verifyExternalAssertion(ref('I1.mount-rejects-second-rw', 'test/gone.test.ts'), root)).toContain('does not exist');
-  });
-  test('fails when the file does not register the id', () => {
-    expect(verifyExternalAssertion(ref('I1.something-else'), root)).toContain('does not register that id');
-  });
-  test('a broken external assertion is a registry problem', () => {
-    const registry = fullRegistry({ I1: { title: 'x', assertions: [ref('I1.absent')], pending: [] } });
-    expect(evaluateRegistry(registry, { root }).problems).toEqual([
-      'I1.absent: packages/sandbox/test/mount.test.ts does not register that id',
+  test('are refused: the registry cannot tell a registered id from one that runs, so none is accepted until reconciliation exists', () => {
+    // The package, file, and id can all exist and the assertion can still be
+    // skipped, or the id can sit in a comment. Presence is not execution.
+    const registry = fullRegistry({ I1: { title: 'x', assertions: [ref('I1.mount-rejects-second-rw')], pending: [] } });
+    const evaluation = evaluateRegistry(registry);
+    expect(evaluation.problems).toEqual([
+      'I1.mount-rejects-second-rw: external assertions are refused until execution reconciliation exists ' +
+        '(I8.external-assertion-execution-reconciled)',
+      'I1: missing (no assertion and no pending owner)',
     ]);
+    expect(evaluation.counts.external).toBe(1);
+  });
+
+  test('a refused external assertion does not count as coverage: an entry with nothing else is missing', () => {
+    const registry = fullRegistry({ I1: { title: 'x', assertions: [ref('I1.mount-rejects-second-rw')], pending: [] } });
+    expect(evaluateRegistry(registry).invariants.find((r) => r.id === 'I1')?.state).toBe('missing');
   });
 });
 

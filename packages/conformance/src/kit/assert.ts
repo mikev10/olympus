@@ -5,7 +5,7 @@
  */
 import { join } from 'node:path';
 import { assertLintFixture } from './eslint.js';
-import { assertFixture, sharedFixtureCompiler, type CompiledFixture } from './fixtures.js';
+import { assertFixture, sharedFixtureCompiler, type CompiledFixture, type FixtureOutcome } from './fixtures.js';
 import { castsFrom, matchCastExpectations, parseCastExpectations } from './scan.js';
 import type { AssertionId, ClaimId, ExternalAssertion, LocalAssertion, PendingAssertion, UnitId } from './types.js';
 import { conformanceRoot } from './workspace.js';
@@ -35,6 +35,21 @@ export function compileError(spec: FixtureAssertionSpec): LocalAssertion {
   };
 }
 
+/**
+ * A compile-ok outcome must carry no annotations and produce no diagnostics.
+ * An annotated error would match its diagnostic and pass a plain fixture
+ * check, so the annotation itself is refused before the diagnostics are read.
+ */
+function requireClean(outcome: FixtureOutcome): void {
+  if (outcome.expectations.length > 0) {
+    throw new Error(`fixture ${outcome.file} is registered as compile-ok but carries expect-error annotations`);
+  }
+  assertFixture(outcome);
+  if (outcome.diagnostics.length > 0) {
+    throw new Error(`fixture ${outcome.file} is registered as compile-ok but produced ${String(outcome.diagnostics.length)} diagnostics`);
+  }
+}
+
 /** The fixture must compile with no diagnostics at all. */
 export function compileOk(spec: FixtureAssertionSpec): LocalAssertion {
   return {
@@ -44,11 +59,7 @@ export function compileOk(spec: FixtureAssertionSpec): LocalAssertion {
     title: spec.title,
     fixture: `fixtures/types/${spec.fixture}`,
     run: () => {
-      const outcome = sharedFixtureCompiler().compile({ path: spec.fixture });
-      if (outcome.expectations.length > 0) {
-        throw new Error(`fixture ${outcome.file} is registered as compile-ok but carries expect-error annotations`);
-      }
-      assertFixture(outcome);
+      requireClean(sharedFixtureCompiler().compile({ path: spec.fixture }));
     },
   };
 }
@@ -131,7 +142,7 @@ interface GeneratedSpec {
   readonly source: () => string;
 }
 
-/** Generated source that must compile with no diagnostics. */
+/** Generated source that must compile with no diagnostics and carry no annotations. */
 export function compileOkSource(spec: GeneratedSpec): LocalAssertion {
   return {
     kind: 'local',
@@ -139,9 +150,62 @@ export function compileOkSource(spec: GeneratedSpec): LocalAssertion {
     level: 'compile-ok',
     title: spec.title,
     run: () => {
-      assertFixture(sharedFixtureCompiler().compile({ path: spec.name, text: spec.source() }));
+      requireClean(sharedFixtureCompiler().compile({ path: spec.name, text: spec.source() }));
     },
   };
+}
+
+interface KeysEqualSpec {
+  readonly id: AssertionId | ClaimId;
+  readonly title: string;
+  /** Virtual file name under fixtures/types; the file need not exist. */
+  readonly name: string;
+  /** The type whose keys are checked, as written in source. */
+  readonly typeName: string;
+  /** One statement that brings `typeName` into scope: an import in the registry, a declaration in a test. */
+  readonly declare: string;
+  /** Produces the registered keys at run time. */
+  readonly keys: () => readonly string[];
+}
+
+/**
+ * Source that compiles only when `keys` and `keyof typeName` are the same
+ * finite, non-empty set. Both directions are checked separately, because
+ * `Record<keyof T, 0>` alone is one-directional: when T loses every key it
+ * becomes `Record<never, 0>`, the empty object type, which accepts any
+ * literal. Wrapping each side in a tuple keeps `never` from distributing.
+ * Each constant is typed `true` when its condition holds and otherwise as
+ * the offending keys (`Unregistered`, `Stale`, or the index-signature kind),
+ * so the diagnostic names what is wrong.
+ */
+export function keyEqualitySource(keys: readonly string[], typeName: string, declare: string): string {
+  const registered = keys.length === 0 ? 'never' : keys.map((k) => JSON.stringify(k)).join(' | ');
+  return [
+    declare,
+    `// Generated from the registry. Compiles only when the registered keys and`,
+    `// keyof ${typeName} are the same finite, non-empty set.`,
+    `type Registered = ${registered};`,
+    `type Actual = keyof ${typeName};`,
+    `type Unregistered = Exclude<Actual, Registered>;`,
+    `type Stale = Exclude<Registered, Actual>;`,
+    `export const noKeyIsUnregistered: [Unregistered] extends [never] ? true : Unregistered = true;`,
+    `export const noClaimIsStale: [Stale] extends [never] ? true : Stale = true;`,
+    `export const keysAreFinite: string extends Actual ? 'string index signature'` +
+      ` : number extends Actual ? 'number index signature'` +
+      ` : symbol extends Actual ? 'symbol index signature' : true = true;`,
+    `export const keysAreNonEmpty: [Actual] extends [never] ? 'no keys' : true = true;`,
+    '',
+  ].join('\n');
+}
+
+/** The registered keys must equal the keys of a type, in both directions, and the type's key set must be finite. */
+export function keysEqual(spec: KeysEqualSpec): LocalAssertion {
+  return compileOkSource({
+    id: spec.id,
+    title: spec.title,
+    name: spec.name,
+    source: () => keyEqualitySource(spec.keys(), spec.typeName, spec.declare),
+  });
 }
 
 interface RuntimeSpec {
@@ -163,7 +227,13 @@ interface ExternalSpec {
   readonly file: string;
 }
 
-/** An assertion another package runs in its own suite with `invariantTest`. */
+/**
+ * An assertion another package runs in its own suite with `invariantTest`.
+ * The registry refuses every external assertion until it can reconcile the
+ * ids it lists against the tests that package actually ran and passed
+ * (pending `I8.external-assertion-execution-reconciled`). The constructor
+ * stays so that unit has the shape to target.
+ */
 export function external(spec: ExternalSpec): ExternalAssertion {
   return { kind: 'external', ...spec };
 }

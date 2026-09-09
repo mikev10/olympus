@@ -20,12 +20,20 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          # contains() over the label-name array is element equality: only a
+          # label named exactly 'gate-change' counts. A joined string would
+          # let 'not gate-change approved' pass a substring match.
+          HAS_GATE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'gate-change') }}
         run: |
           set -euo pipefail
 
           # Paths that enforce the gates. A change here can disable a control,
           # so it must be a declared intent rather than a side effect of other work.
+          #
+          # CI runs the four checks through root package scripts, and each
+          # package's scripts and configuration decide what those checks read.
+          # Rewriting any of them can make CI green while running nothing, so
+          # the manifests and the test and compiler configuration are gates too.
           PATTERNS='
           ^\.github/workflows/
           ^\.gitignore$
@@ -33,6 +41,11 @@ jobs:
           ^CLAUDE\.md$
           ^eslint\.config\.
           ^tsconfig\.base\.json$
+          ^package\.json$
+          ^pnpm-workspace\.yaml$
+          ^packages/[^/]+/package\.json$
+          ^packages/[^/]+/tsconfig(\.[^/]+)?\.json$
+          (^|/)vitest\.(config|workspace)\.
           ^packages/conformance/
           ^packages/[^/]+/src/.*types\.ts$
           ^packages/core/src/driver/contract\.ts$
@@ -57,19 +70,16 @@ jobs:
           printf '  %s\n' $HITS
           echo
 
-          case " $LABELS " in
-            *" gate-change "*)
-              echo "Label 'gate-change' present. Allowed."
-              echo "Reviewer: confirm each change above is intended and is not"
-              echo "a control being weakened to make other work pass."
-              exit 0
-              ;;
-            *)
-              echo "FAILED: add the 'gate-change' label to acknowledge these edits."
-              echo
-              echo "An agent that can quietly edit a check has no check. The label"
-              echo "exists so weakening a control is a decision someone made, not a"
-              echo "side effect nobody noticed."
-              exit 1
-              ;;
-          esac
+          if [ "$HAS_GATE_LABEL" = "true" ]; then
+            echo "Label 'gate-change' present. Allowed."
+            echo "Reviewer: confirm each change above is intended and is not"
+            echo "a control being weakened to make other work pass."
+            exit 0
+          fi
+
+          echo "FAILED: add the 'gate-change' label to acknowledge these edits."
+          echo
+          echo "An agent that can quietly edit a check has no check. The label"
+          echo "exists so weakening a control is a decision someone made, not a"
+          echo "side effect nobody noticed."
+          exit 1

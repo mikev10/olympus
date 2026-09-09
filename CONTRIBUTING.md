@@ -92,7 +92,13 @@ with `runtime`.
 **Assertions in your own package.** When your package has an implementation,
 its invariant assertions belong in its own test suite, next to the code they
 exercise. Write them with `invariantTest` from the kit and register them in
-the central registry as external:
+the central registry as external. **Today the registry refuses every
+external assertion**: it can check that a file quotes an id, and a comment or
+a skipped test satisfies that, so presence is not evidence. The first unit
+that needs one must first land `I8.external-assertion-execution-reconciled`
+(pending, owner P2): the registry reconciles the external ids it lists
+against the tests the owning package actually ran and passed. The shape
+below is the target that unit builds toward.
 
 ```ts
 // packages/sandbox/test/mount-table.test.ts
@@ -114,10 +120,11 @@ external({
 });
 ```
 
-The registry verifies that the package exists, the file exists, and the file
-names the id. Your package's `test` script runs the assertion itself. The kit
-has no dependency on any other package, so your package may depend on the
-kit without creating a workspace cycle.
+Your package's `test` script runs the assertion itself. The kit has no
+dependency on any other package, so your package may depend on the kit
+without creating a workspace cycle. Until reconciliation exists, an
+assertion that needs your implementation stays a pending entry owned by your
+unit, and your acceptance criteria include replacing it.
 
 **Pending entries.** An assertion that cannot exist yet is recorded as
 pending, with the unit that owes it and the reason:
@@ -174,7 +181,16 @@ type, so omitting one is a compile error.
 - One ESLint configuration governs the workspace (`eslint.config.js`). Three
   typed rules are load-bearing for I7 and the registry asserts they stay
   active: `restrict-plus-operands`, `restrict-template-expressions`, and
-  `no-base-to-string`.
+  `no-base-to-string`. No package source outside a `fixtures/` directory may
+  carry an `eslint-disable` comment that names one of them or names no rule,
+  nor an inline `/* eslint ... */` configuration comment that names one; the
+  registry fails on any. If you need the rule off, the answer is a
+  configuration change behind the `gate-change` label, not a comment.
+- The manifests and the test and compiler configuration CI reads (root and
+  per-package `package.json`, `pnpm-workspace.yaml`, per-package
+  `tsconfig.json`, any `vitest.config.*`) are protected paths: a change to
+  them needs the `gate-change` label, like a change to the workflows or the
+  conformance package.
 - Every package change gets a changeset (`pnpm changeset`).
 
 ## Pull requests

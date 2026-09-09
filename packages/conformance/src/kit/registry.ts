@@ -1,10 +1,8 @@
 /**
  * Registry evaluation: derives one of four states per invariant and per
- * capability claim, validates the records themselves, verifies external
- * assertions statically, and renders the report CI prints.
+ * capability claim, validates the records themselves, refuses external
+ * assertions, and renders the report CI prints.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { PENDING_BASELINE_FILE, type PendingBaseline } from './baseline.js';
 import {
   INVARIANT_IDS,
@@ -12,7 +10,6 @@ import {
   type Assertion,
   type ClaimEntry,
   type ClaimId,
-  type ExternalAssertion,
   type InvariantEntry,
   type InvariantId,
   type InvariantState,
@@ -20,7 +17,6 @@ import {
   type Registry,
   type UnitId,
 } from './types.js';
-import { workspacePackages, workspaceRoot } from './workspace.js';
 
 /**
  * Identity at runtime; the parameter type does the work. `invariants` is a
@@ -53,7 +49,7 @@ export interface ClaimReport {
 export interface RegistryEvaluation {
   readonly invariants: readonly InvariantReport[];
   readonly claims: readonly ClaimReport[];
-  /** Structural defects: duplicate ids, unknown owners, missing states, broken external refs, a pending count over its baseline. Empty when the registry is sound. */
+  /** Structural defects: duplicate ids, unknown owners, missing states, an external assertion, a pending count over its baseline. Empty when the registry is sound. */
   readonly problems: readonly string[];
   readonly counts: {
     readonly asserted: number;
@@ -69,8 +65,6 @@ export interface RegistryEvaluation {
 }
 
 export interface EvaluateOptions {
-  /** Workspace root used to verify external assertions. Defaults to the real one. */
-  readonly root?: string;
   /**
    * The committed pending-count baseline (kit/baseline.ts). When supplied,
    * every entry must have one and no entry's pending count may exceed it.
@@ -78,8 +72,9 @@ export interface EvaluateOptions {
   readonly baseline?: PendingBaseline;
 }
 
+/** Only local assertions count as live: an external one is refused and is not coverage. */
 export function stateOf(entry: { assertions: readonly Assertion[]; pending: readonly PendingAssertion[] }): InvariantState {
-  if (entry.assertions.length > 0) return entry.pending.length > 0 ? 'partial' : 'asserted';
+  if (entry.assertions.some((a) => a.kind === 'local')) return entry.pending.length > 0 ? 'partial' : 'asserted';
   if (entry.pending.length > 0) return 'pending';
   return 'missing';
 }
@@ -89,28 +84,20 @@ function isUnitId(value: string): value is UnitId {
 }
 
 /**
- * Checks that an external assertion is real: its package is in the
- * workspace, its file exists, and the file names the assertion id. Returns a
- * problem description, or undefined when it verifies.
+ * The pending assertion that must land before an external assertion can be
+ * accepted: reconciling the ids the registry lists against the tests the
+ * owning package actually ran and passed. Until then a package, a file, and
+ * a quoted id can all exist while the test is skipped or the id sits in a
+ * comment, so presence is not evidence and every external assertion is a
+ * problem.
  */
-export function verifyExternalAssertion(assertion: ExternalAssertion, root: string = workspaceRoot()): string | undefined {
-  const pkg = workspacePackages(root).find((p) => p.name === assertion.package);
-  if (pkg === undefined) return `${assertion.id}: package ${assertion.package} is not in the workspace`;
-  const file = join(pkg.dir, assertion.file);
-  if (!existsSync(file)) return `${assertion.id}: ${pkg.relativeDir}/${assertion.file} does not exist`;
-  const text = readFileSync(file, 'utf8');
-  if (!text.includes(`'${assertion.id}'`) && !text.includes(`"${assertion.id}"`)) {
-    return `${assertion.id}: ${pkg.relativeDir}/${assertion.file} does not register that id`;
-  }
-  return undefined;
-}
+export const EXTERNAL_RECONCILIATION_ID = 'I8.external-assertion-execution-reconciled';
 
 function validateEntry(
   ownerId: string,
   entry: { assertions: readonly Assertion[]; pending: readonly PendingAssertion[] },
   seen: Map<string, string>,
   problems: string[],
-  root: string,
 ): void {
   const prefix = `${ownerId}.`;
   const belongs = (id: string): boolean => id === ownerId || id.startsWith(prefix);
@@ -121,8 +108,9 @@ function validateEntry(
     seen.set(a.id, ownerId);
     if (a.title.trim() === '') problems.push(`${a.id}: empty title`);
     if (a.kind === 'external') {
-      const problem = verifyExternalAssertion(a, root);
-      if (problem !== undefined) problems.push(problem);
+      problems.push(
+        `${a.id}: external assertions are refused until execution reconciliation exists (${EXTERNAL_RECONCILIATION_ID})`,
+      );
     }
   }
   for (const p of entry.pending) {
@@ -162,7 +150,6 @@ function ratchet(
 }
 
 export function evaluateRegistry(registry: Registry, options: EvaluateOptions = {}): RegistryEvaluation {
-  const root = options.root ?? workspaceRoot();
   const baseline = options.baseline;
   const problems: string[] = [];
   const seen = new Map<string, string>();
@@ -176,7 +163,7 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
       invariants.push({ id, title: '', state: 'missing', assertions: [], pending: [], baseline: undefined });
       continue;
     }
-    validateEntry(id, entry, seen, problems, root);
+    validateEntry(id, entry, seen, problems);
     const state = stateOf(entry);
     if (state === 'missing') problems.push(`${id}: missing (no assertion and no pending owner)`);
     const allowed = ratchet(id, baseline?.invariants, entry.pending.length, problems);
@@ -189,7 +176,7 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
   const claims: ClaimReport[] = [];
   for (const [id, entry] of Object.entries(registry.claims) as Array<[ClaimId, ClaimEntry]>) {
     if (!id.startsWith('driver.') && !id.startsWith('sandbox.')) problems.push(`${id}: not a capability claim`);
-    validateEntry(id, entry, seen, problems, root);
+    validateEntry(id, entry, seen, problems);
     const state = stateOf(entry);
     if (state === 'missing') problems.push(`${id}: missing (no assertion and no pending owner)`);
     const allowed = ratchet(id, baseline?.claims, entry.pending.length, problems);

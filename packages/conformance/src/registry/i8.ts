@@ -1,8 +1,8 @@
 import { join, resolve } from 'node:path';
 import ts from 'typescript';
-import { compileError, compileOkSource, pending, runtime } from '../kit/assert.js';
+import { compileError, keysEqual, pending, runtime } from '../kit/assert.js';
 import { PENDING_BASELINE_FILE, readPendingBaseline } from '../kit/baseline.js';
-import { evaluateRegistry, formatReport } from '../kit/registry.js';
+import { EXTERNAL_RECONCILIATION_ID, evaluateRegistry, formatReport } from '../kit/registry.js';
 import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js';
 import { conformanceRoot, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { claimKeys } from './claims.js';
@@ -23,19 +23,6 @@ function readPathsMap(): Record<string, string[]> {
     if (Array.isArray(value) && value.every((v) => typeof v === 'string')) out[key] = value;
   }
   return out;
-}
-
-function capabilityKeysSource(family: 'driver' | 'sandbox', typeName: string, from: string): string {
-  const keys = claimKeys(family);
-  return [
-    `import type { ${typeName} } from '${from}';`,
-    `// Generated from the registry: a key here with no property in ${typeName} is an excess property,`,
-    `// and a property in ${typeName} with no key here is a missing property. Either fails.`,
-    `export const registered: Record<keyof ${typeName}, 0> = {`,
-    ...keys.map((k) => `  ${k}: 0,`),
-    '};',
-    '',
-  ].join('\n');
 }
 
 /** I8: Every capability claim maps to an executable assertion. */
@@ -84,17 +71,23 @@ export const I8: InvariantEntry = {
       title: 'the registry type rejects a missing invariant, an invented one, an unknown owner, and a stray claim family at compile time',
       fixture: 'kit/registry-total-over-invariants.ts',
     }),
-    compileOkSource({
+    keysEqual({
       id: 'I8.driver-capability-keys-registered',
-      title: 'the registry lists exactly the keys of DriverCapabilities as driver.* claims',
+      title:
+        'the registry lists exactly the keys of DriverCapabilities as driver.* claims, in both directions, and the interface has a finite non-empty key set',
       name: 'generated/driver-capability-keys.ts',
-      source: () => capabilityKeysSource('driver', 'DriverCapabilities', '@olympus-ai/core'),
+      typeName: 'DriverCapabilities',
+      declare: `import type { DriverCapabilities } from '@olympus-ai/core';`,
+      keys: () => claimKeys('driver'),
     }),
-    compileOkSource({
+    keysEqual({
       id: 'I8.sandbox-capability-keys-registered',
-      title: 'the registry lists exactly the keys of SandboxCapabilities as sandbox.* claims',
+      title:
+        'the registry lists exactly the keys of SandboxCapabilities as sandbox.* claims, in both directions, and the interface has a finite non-empty key set',
       name: 'generated/sandbox-capability-keys.ts',
-      source: () => capabilityKeysSource('sandbox', 'SandboxCapabilities', '@olympus-ai/sandbox'),
+      typeName: 'SandboxCapabilities',
+      declare: `import type { SandboxCapabilities } from '@olympus-ai/sandbox';`,
+      keys: () => claimKeys('sandbox'),
     }),
     runtime({
       id: 'I8.every-fixture-is-registered',
@@ -144,5 +137,16 @@ export const I8: InvariantEntry = {
       },
     }),
   ],
-  pending: [],
+  pending: [
+    pending({
+      id: EXTERNAL_RECONCILIATION_ID,
+      owner: 'P2',
+      reason:
+        'An external assertion, one another package runs in its own suite, is refused by the registry today: the only ' +
+        'check available was that a file quotes the id, which a comment or a skipped test satisfies. Before the first ' +
+        'one is accepted, the registry must reconcile every external id it lists against the tests the owning package ' +
+        'actually ran and passed, read from that package\'s own test run, and refuse an id that did not run. Owed to the ' +
+        'first Phase 2 unit that needs an implementation-backed assertion: P2, which owes I1.mount-layer-enforcement.',
+    }),
+  ],
 };

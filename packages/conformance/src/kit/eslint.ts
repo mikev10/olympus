@@ -7,7 +7,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
-import { workspaceRoot } from './workspace.js';
+import ts from 'typescript';
+import { walkFiles, workspaceRelative, workspaceRoot, type WorkspacePackage } from './workspace.js';
 
 export type RuleSeverity = 'off' | 'warn' | 'error';
 
@@ -98,6 +99,125 @@ export function parseLintExpectations(source: string): LintExpectation[] {
  */
 export function unmetLintExpectations(expectations: readonly LintExpectation[], messages: readonly LintMessage[]): LintExpectation[] {
   return expectations.filter((e) => !messages.some((m) => m.line === e.line && m.ruleId === e.rule));
+}
+
+export type InlineConfigKind = 'disable' | 'disable-line' | 'disable-next-line' | 'config';
+
+/** An ESLint directive or configuration comment: the inline configuration the ordinary lint run honours. */
+export interface InlineConfigComment {
+  readonly line: number;
+  readonly kind: InlineConfigKind;
+  /** The rules the comment names; empty for a disable that names none, which disables every rule. */
+  readonly rules: readonly string[];
+  /** The comment body, trimmed. */
+  readonly text: string;
+}
+
+/** `eslint`, `eslint-disable`, `eslint-disable-line`, `eslint-disable-next-line`, followed by whitespace or the end. */
+const DIRECTIVE = /^eslint(-disable(?:-next-line|-line)?)?(?=\s|$)([\s\S]*)$/;
+/** ESLint's description separator: a run of two or more dashes between whitespace. */
+const DESCRIPTION = /\s-{2,}\s[\s\S]*$/;
+/** A rule name followed by a colon inside a configuration comment, with or without quotes. */
+const CONFIG_KEY = /["']?([^\s,:"'{}]+)["']?\s*:/g;
+
+/** Every comment in the file, in order, including ones no statement owns (inside an empty argument list, say). */
+function commentRanges(sf: ts.SourceFile): ts.CommentRange[] {
+  const text = sf.text;
+  const seen = new Set<number>();
+  const out: ts.CommentRange[] = [];
+  const add = (ranges: ts.CommentRange[] | undefined): void => {
+    for (const range of ranges ?? []) {
+      if (seen.has(range.pos)) continue;
+      seen.add(range.pos);
+      out.push(range);
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    // A JSDoc node's children start inside the comment; the comment itself is
+    // trivia of the declaration it documents and is collected there.
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
+    const children = node.getChildren(sf);
+    if (children.length === 0) {
+      add(ts.getLeadingCommentRanges(text, node.getFullStart()));
+      add(ts.getTrailingCommentRanges(text, node.getEnd()));
+      return;
+    }
+    for (const child of children) visit(child);
+  };
+  visit(sf);
+  add(ts.getLeadingCommentRanges(text, sf.endOfFileToken.getFullStart()));
+  return out.sort((a, b) => a.pos - b.pos);
+}
+
+function parseDirective(body: string, line: number): InlineConfigComment | undefined {
+  const match = DIRECTIVE.exec(body);
+  if (match === null) return undefined;
+  const suffix = match[1];
+  const rest = (match[2] ?? '').replace(DESCRIPTION, '').trim();
+  if (suffix === undefined) {
+    const rules = [...rest.matchAll(CONFIG_KEY)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
+    return { line, kind: 'config', rules, text: body };
+  }
+  const kind: InlineConfigKind = suffix === '-disable' ? 'disable' : suffix === '-disable-line' ? 'disable-line' : 'disable-next-line';
+  const rules = rest === '' ? [] : rest.split(/[\s,]+/).filter((r) => r !== '');
+  return { line, kind, rules, text: body };
+}
+
+/**
+ * Every ESLint directive and configuration comment in `source`, read from
+ * the parsed file so a directive inside a string or a regular expression is
+ * not one. `eslint-enable` is not returned: it restores rules, it never
+ * suppresses one.
+ */
+export function inlineConfigComments(source: string, fileName = 'source.ts'): InlineConfigComment[] {
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const out: InlineConfigComment[] = [];
+  for (const range of commentRanges(sf)) {
+    const raw = source.slice(range.pos, range.end);
+    const body = (range.kind === ts.SyntaxKind.MultiLineCommentTrivia ? raw.slice(2, -2) : raw.slice(2)).trim();
+    const parsed = parseDirective(body, sf.getLineAndCharacterOfPosition(range.pos).line + 1);
+    if (parsed !== undefined) out.push(parsed);
+  }
+  return out;
+}
+
+/** Whether the comment turns off, or could reconfigure, any of `rules`: a disable that names one, a disable that names none, or a configuration comment that names one. */
+export function suppressesAny(rules: readonly string[], comment: InlineConfigComment): boolean {
+  if (comment.kind !== 'config' && comment.rules.length === 0) return true;
+  return comment.rules.some((r) => rules.includes(r));
+}
+
+export interface InlineSuppression {
+  /** Workspace-relative path, POSIX separators. */
+  readonly file: string;
+  readonly line: number;
+  readonly text: string;
+}
+
+const SOURCE_EXTENSIONS: readonly string[] = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs'];
+
+/**
+ * Every inline comment in the packages' sources that suppresses or
+ * reconfigures one of `rules`. Files under a `fixtures/` directory are
+ * skipped: a lint fixture must carry the disable comments that let the
+ * ordinary run pass, and it is linted with inline configuration ignored.
+ */
+export function inlineSuppressions(
+  rules: readonly string[],
+  packages: readonly WorkspacePackage[],
+  root: string = workspaceRoot(),
+): InlineSuppression[] {
+  const out: InlineSuppression[] = [];
+  for (const pkg of packages) {
+    for (const file of walkFiles(pkg.dir, { extensions: SOURCE_EXTENSIONS })) {
+      const relative = workspaceRelative(file, root);
+      if (relative.includes('/fixtures/')) continue;
+      for (const comment of inlineConfigComments(readFileSync(file, 'utf8'), file)) {
+        if (suppressesAny(rules, comment)) out.push({ file: relative, line: comment.line, text: comment.text });
+      }
+    }
+  }
+  return out;
 }
 
 /** Lints a fixture with inline configuration ignored and throws unless every annotated rule fired. */
