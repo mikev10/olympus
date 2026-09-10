@@ -6,10 +6,13 @@
  * concurrent commits leave one winner (I5), and that the prototype carries
  * only the seven named operations (I1). What is here is the rest of the
  * contract: durability, content addressing, the refusals, and the audit
- * property that an object file's own SHA-256 is its name.
+ * property that an object file's own SHA-256 is its name. Substitution by
+ * symlink or junction is `I3.locked-artifact-cannot-be-substituted` in the
+ * registry, which is the suite CI runs with a verbose reporter, so its log
+ * names the mechanism that ran on each platform.
  */
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RunId, RunState, TaskId } from '@olympus-ai/core';
@@ -20,6 +23,7 @@ import { LocalVault, type EvidenceBundle } from '../src/index.js';
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
 const SPEC = '# spec\n\nOne shippable capability.\n';
+
 
 let base: string;
 let store: string;
@@ -147,31 +151,6 @@ describe('locking', () => {
 
   test('verifyLocks throws for a run with no manifest rather than reporting intact', async () => {
     await expect(vault.verifyLocks(runId)).rejects.toThrow(/nothing is locked/);
-  });
-
-  test('a locked artifact that comes to resolve outside the tree is tampered, not followed', async () => {
-    // A directory junction rather than a file symlink: Windows grants the
-    // first without elevation and withholds the second, and both reach the
-    // same realpath containment check. The bytes at the far end are identical,
-    // so nothing but the escape distinguishes this from an intact file --
-    // which is precisely the substitution the check exists to catch.
-    const inside = join(artifacts, 'sub');
-    await mkdir(inside, { recursive: true });
-    await writeFile(join(inside, 'spec.md'), SPEC);
-    const manifest = await vault.lock(runId, [join('sub', 'spec.md')], 'spec');
-    expect(await vault.verifyLocks(runId)).toEqual({ ok: true });
-
-    const elsewhere = join(base, 'elsewhere');
-    await mkdir(elsewhere, { recursive: true });
-    await writeFile(join(elsewhere, 'spec.md'), SPEC);
-    await rm(inside, { recursive: true });
-    await symlink(elsewhere, inside, 'junction');
-
-    const verdict = await vault.verifyLocks(runId);
-    expect(verdict.ok).toBe(false);
-    expect(verdict.ok ? [] : verdict.tampered).toEqual([
-      { path: manifest.entries[0]?.path, expected: manifest.entries[0]?.sha256, actual: 'escaped' },
-    ]);
   });
 
   test('a deleted locked artifact is tampered, distinguishably from an edited one', async () => {

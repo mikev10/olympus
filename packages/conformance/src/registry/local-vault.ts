@@ -40,13 +40,30 @@ export async function withVaultDirs<T>(prefix: string, body: (dirs: VaultDirs, b
   }
 }
 
-/** The same, with a `LocalVault` already open over the two roots. */
-export async function withVault<T>(prefix: string, body: (vault: LocalVault, dirs: VaultDirs) => Promise<T>): Promise<T> {
-  return withVaultDirs(prefix, async (dirs) => {
+/** The same, with a `LocalVault` already open over the two roots. `base` holds both, and is the place to build a tree that is deliberately outside the artifact root. */
+export async function withVault<T>(
+  prefix: string,
+  body: (vault: LocalVault, dirs: VaultDirs, base: string) => Promise<T>,
+): Promise<T> {
+  return withVaultDirs(prefix, async (dirs, base) => {
     const { LocalVault: Ctor } = await import('@olympus-ai/vault');
-    return body(new Ctor(dirs), dirs);
+    return body(new Ctor(dirs), dirs, base);
   });
 }
+
+/**
+ * How a contained path is made to resolve outside the tree. Windows grants a
+ * directory junction without elevation and withholds a file symlink; POSIX has
+ * no junctions and takes the file symlink, which is the more direct form of
+ * the substitution. Both reach the same `realpath` containment check.
+ *
+ * Chosen by platform, never skipped, and never wrapped in a catch: if a
+ * platform's own mechanism cannot be created, the assertion fails there. A
+ * containment check that silently goes unexercised on a platform is worse than
+ * no check at all. The mechanism appears in the assertion's title so a CI log
+ * says which one ran instead of leaving it to be assumed.
+ */
+export const ESCAPE_MECHANISM: 'junction' | 'symlink' = process.platform === 'win32' ? 'junction' : 'symlink';
 
 /**
  * The implementation module a contending child loads.

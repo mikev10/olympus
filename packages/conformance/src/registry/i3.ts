@@ -1,10 +1,10 @@
-import { rm, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunId } from '@olympus-ai/core';
 import type { LockEntry, LockVerdict } from '@olympus-ai/vault';
 import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
-import { withVault } from './local-vault.js';
+import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -129,6 +129,62 @@ export const I3: InvariantEntry = {
           const after = soleTampered(await vault.verifyLocks(runId), 'a locked artifact after a refused re-lock');
           if (after.expected !== lockedSpec.sha256) {
             throw new Error(`I3: the refused re-lock still moved the manifest's hash to ${after.expected}`);
+          }
+        });
+      },
+    }),
+    runtime({
+      id: 'I3.locked-artifact-cannot-be-substituted',
+      title:
+        `a locked artifact replaced by a ${ESCAPE_MECHANISM} to identical bytes outside the artifact root verifies as tampered ` +
+        `rather than being followed and hashed clean (exercised on ${process.platform} via ${ESCAPE_MECHANISM})`,
+      run: async () => {
+        await withVault('p1-i3-escape-', async (vault, dirs, base) => {
+          const runId = 'i3-escape' as RunId;
+          const inside = join(dirs.artifacts, 'sub');
+          const locked = join('sub', 'spec.md');
+          await mkdir(inside, { recursive: true });
+          await writeFile(join(inside, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+
+          const manifest = await vault.lock(runId, [locked], 'spec');
+          const entry = entryFor(manifest.entries, locked);
+          const before = await vault.verifyLocks(runId);
+          if (!before.ok) throw new Error(`I3: the artifact verified as tampered before anything was substituted (${JSON.stringify(before.tampered)})`);
+
+          // Identical bytes at the far end. Nothing but the escape
+          // distinguishes this from an intact file, which is the whole point:
+          // a check that compares content alone cannot see this.
+          const elsewhere = join(base, 'elsewhere');
+          await mkdir(elsewhere, { recursive: true });
+          await writeFile(join(elsewhere, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+
+          // No try/catch: a platform whose mechanism will not build fails here.
+          if (ESCAPE_MECHANISM === 'junction') {
+            await rm(inside, { recursive: true });
+            await symlink(elsewhere, inside, 'junction');
+          } else {
+            await rm(join(inside, 'spec.md'));
+            await symlink(join(elsewhere, 'spec.md'), join(inside, 'spec.md'));
+          }
+
+          // The escape is real before the Vault is asked about it, so the
+          // verdict below cannot pass for the wrong reason.
+          const reached = await realpath(join(dirs.artifacts, locked));
+          const target = await realpath(join(elsewhere, 'spec.md'));
+          if (reached !== target) {
+            throw new Error(`I3: the ${ESCAPE_MECHANISM} did not take effect on ${process.platform}: ${locked} still resolves to ${reached}`);
+          }
+
+          const escaped = soleTampered(await vault.verifyLocks(runId), `a locked artifact substituted via a ${ESCAPE_MECHANISM}`);
+          if (escaped.path !== entry.path) throw new Error(`I3: the tampered record named ${escaped.path}, expected ${entry.path}`);
+          if (escaped.expected !== entry.sha256) {
+            throw new Error(`I3: the tampered record's expected hash is ${escaped.expected}, not the ${entry.sha256} the manifest locked`);
+          }
+          if (escaped.actual !== 'escaped') {
+            throw new Error(
+              `I3: a locked artifact that resolves outside the artifact root reported actual '${escaped.actual}'. ` +
+                "The bytes are identical, so anything but 'escaped' means the link was followed and the substitution was hashed clean.",
+            );
           }
         });
       },
