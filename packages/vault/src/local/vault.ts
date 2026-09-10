@@ -45,6 +45,20 @@ const MISSING = 'missing';
  */
 const ESCAPED = 'escaped';
 
+/**
+ * Reported as `actual` for a locked path that is present but cannot be read
+ * as bytes: replaced by a directory (EISDIR), a symlink loop (ELOOP), or a
+ * file whose permissions were removed (EACCES).
+ *
+ * A sentinel rather than a thrown error, because D-S1-15 records exactly this
+ * shape: an exception that happens to stop a run is not a control. It holds
+ * only until someone adds a catch, and it ends the run with no violation
+ * recorded and the state left mid-flight. An artifact that cannot be read is
+ * not the artifact that was locked, so it is a mismatch like any other, and
+ * the line records it and refuses.
+ */
+const UNREADABLE = 'unreadable';
+
 /** A run state version, and the name of the file that holds it. Zero means "nothing committed yet" and is never a file. */
 const VERSION = /^(0|[1-9][0-9]*)$/;
 
@@ -153,24 +167,40 @@ function encode(record: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(record));
 }
 
-function requireRunState(value: unknown, file: string): RunState {
-  if (
-    typeof value !== 'object' || value === null ||
-    !('runId' in value) || typeof value.runId !== 'string' ||
-    !('station' in value) || typeof value.station !== 'string' ||
-    !('version' in value) || typeof value.version !== 'string' ||
-    !('tasks' in value) || typeof value.tasks !== 'object' || value.tasks === null
-  ) {
-    throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
-  }
-  return value as RunState;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
+function hasString(value: Record<string, unknown>, key: string): boolean {
+  return typeof value[key] === 'string';
+}
+
+/**
+ * Every field a consumer reads without checking, checked here. A record that
+ * satisfies part of the shape is refused rather than returned: a state whose
+ * `evidenceRefs` is absent survives this function and then throws `is not
+ * iterable` in whichever caller spreads it, which turns a corrupt store into
+ * a crash somewhere else entirely. Found by the P1 external review, finding 2.
+ */
+function requireRunState(value: unknown, file: string): RunState {
+  const ok =
+    isRecord(value) &&
+    hasString(value, 'runId') && hasString(value, 'station') && hasString(value, 'version') &&
+    isRecord(value.tasks) && !Array.isArray(value.tasks) &&
+    Array.isArray(value.evidenceRefs) && Array.isArray(value.violations);
+  if (!ok) throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
+  return value as unknown as RunState;
+}
+
+function isLockEntry(value: unknown): boolean {
+  return isRecord(value) && hasString(value, 'path') && hasString(value, 'sha256') && hasString(value, 'lockedAt') && hasString(value, 'lockedBy');
+}
+
+/** As above: an entry list whose elements are not entries is refused here, not resolved as a path later. */
 function requireManifest(value: unknown, file: string): LockManifest {
-  if (typeof value !== 'object' || value === null || !('entries' in value) || !Array.isArray(value.entries)) {
-    throw new Error(`LocalVault: ${file} does not hold a lock manifest; refusing to report on an unreadable one`);
-  }
-  return value as LockManifest;
+  const ok = isRecord(value) && hasString(value, 'runId') && Array.isArray(value.entries) && value.entries.every(isLockEntry);
+  if (!ok) throw new Error(`LocalVault: ${file} does not hold a lock manifest; refusing to report on an unreadable one`);
+  return value as unknown as LockManifest;
 }
 
 /**
@@ -207,22 +237,42 @@ function refuseUnusablePaths(runId: string, paths: readonly string[]): void {
  * out of the tree resolves outside the artifact root and is reported as a
  * tamper rather than silently hashed.
  */
-async function hashArtifact(artifacts: string, path: string): Promise<string> {
-  const target = resolve(artifacts, path);
+async function artifactRoot(artifacts: string): Promise<string> {
+  try {
+    return await realpath(artifacts);
+  } catch (error) {
+    throw new Error(
+      `LocalVault: the artifact root ${artifacts} cannot be resolved, so no locked path can be verified against it`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * The SHA-256 of a locked artifact, or a sentinel saying why there is none.
+ * Resolving the real path is what closes the symlink case: a locked file
+ * swapped for a link out of the tree resolves outside the root and is
+ * reported as a tamper rather than silently hashed.
+ *
+ * No failure here throws. Every way of failing to resolve or read the
+ * artifact is a mismatch the caller records and refuses on, because a locked
+ * artifact the runtime cannot read is not the locked artifact. The root is
+ * resolved once by the caller: it is the same for every entry, and losing it
+ * is an operational failure rather than a verdict about one path.
+ */
+async function hashArtifact(root: string, path: string): Promise<string> {
+  const target = resolve(root, path);
   let real: string;
   try {
     real = await realpath(target);
   } catch (error) {
-    if (isAbsent(error)) return MISSING;
-    throw error;
+    return isAbsent(error) ? MISSING : UNREADABLE;
   }
-  const root = await realpath(artifacts);
   if (!contains(root, real)) return ESCAPED;
   try {
     return sha256(await readFile(real));
   } catch (error) {
-    if (isAbsent(error)) return MISSING;
-    throw error;
+    return isAbsent(error) ? MISSING : UNREADABLE;
   }
 }
 
@@ -302,12 +352,14 @@ export class LocalVault implements Vault {
       );
     }
 
+    const root = await artifactRoot(this.#artifacts);
     const lockedAt = new Date().toISOString();
     const added: LockEntry[] = [];
     for (const path of paths) {
-      const hash = await hashArtifact(this.#artifacts, path);
+      const hash = await hashArtifact(root, path);
       if (hash === MISSING) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: no such file under ${this.#artifacts}`);
       if (hash === ESCAPED) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: it resolves outside ${this.#artifacts}`);
+      if (hash === UNREADABLE) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: it exists but cannot be read as bytes`);
       added.push({ path, sha256: hash, lockedAt, lockedBy: by });
     }
 
@@ -331,9 +383,10 @@ export class LocalVault implements Vault {
     const file = join(locks, `${String(generation)}.json`);
     const manifest = requireManifest(await readJson(file), file);
 
+    const root = await artifactRoot(this.#artifacts);
     const tampered: Array<{ path: string; expected: string; actual: string }> = [];
     for (const entry of manifest.entries) {
-      const actual = await hashArtifact(this.#artifacts, entry.path);
+      const actual = await hashArtifact(root, entry.path);
       if (actual !== entry.sha256) tampered.push({ path: entry.path, expected: entry.sha256, actual });
     }
     return tampered.length === 0 ? { ok: true } : { ok: false, tampered };

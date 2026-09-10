@@ -153,6 +153,24 @@ describe('locking', () => {
     await expect(vault.verifyLocks(runId)).rejects.toThrow(/nothing is locked/);
   });
 
+  test('a locked artifact replaced by a directory is tampered, not an exception', async () => {
+    // External review finding 1. readFile yields EISDIR, which the absence
+    // check does not catch, so this threw out of verifyLocks and ended the run
+    // with no violation recorded -- the shape D-S1-15 names: an exception that
+    // happens to stop a run is not a control.
+    await vault.lock(runId, ['spec.md'], 'spec');
+    await rm(join(artifacts, 'spec.md'));
+    await mkdir(join(artifacts, 'spec.md'));
+    const verdict = await vault.verifyLocks(runId);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok ? [] : verdict.tampered[0]?.actual).toBe('unreadable');
+  });
+
+  test('refuses to lock an artifact that exists but cannot be read as bytes', async () => {
+    await mkdir(join(artifacts, 'a-directory'));
+    await expect(vault.lock(runId, ['a-directory'], 'spec')).rejects.toThrow(/cannot be read as bytes/);
+  });
+
   test('a deleted locked artifact is tampered, distinguishably from an edited one', async () => {
     await vault.lock(runId, ['spec.md'], 'spec');
     await rm(join(artifacts, 'spec.md'));
@@ -205,6 +223,32 @@ describe('run state', () => {
 
   test('an unknown run has no state', async () => {
     await expect(vault.readRunState(runId)).rejects.toThrow(/no run state/);
+  });
+});
+
+describe('records read back from the store', () => {
+  // External review finding 2. A record that satisfies part of the shape used
+  // to survive validation and fail later in whichever caller spread it, which
+  // turns a corrupt store into a crash somewhere else entirely.
+  test('a run state missing evidenceRefs or violations is refused, not returned', async () => {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '1.json'), JSON.stringify({ runId, station: 'spec', version: '1', tasks: {} }));
+    await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
+  });
+
+  test('a run state whose tasks is an array is refused', async () => {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '1.json'), JSON.stringify({ runId, station: 'spec', version: '1', tasks: [], evidenceRefs: [], violations: [] }));
+    await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
+  });
+
+  test('a manifest whose entries are not lock entries is refused, not resolved as paths', async () => {
+    const dir = join(store, 'runs', runId, 'locks');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '1.json'), JSON.stringify({ runId, entries: ['not-an-entry', { nonsense: true }] }));
+    await expect(vault.verifyLocks(runId)).rejects.toThrow(/does not hold a lock manifest/);
   });
 });
 

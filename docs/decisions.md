@@ -617,3 +617,48 @@ parts F1 requires, with no acceptance criteria. Both are recorded below.
 - **The store grows without bound.** One file per state version per run, one per lock generation, one per object, and nothing prunes them. Retention policy is explicitly out of scope for P1 and has no owning unit today. This is the cost of dropping the database and is worth naming rather than discovering.
 - **Serialization is not canonicalized.** Objects are stored as `JSON.stringify` produced them, so the content address is over *those bytes*. Two logically identical bundles built with different property insertion order hash differently. This is correct for the audit property, which is byte-level, but it means deduplication is byte identity and not semantic identity.
 - **Records are validated structurally, not fully.** A file that is not a run state or not a manifest is refused rather than returned as a partial record, but individual field types beyond the load-bearing few are trusted. The Vault wrote these files; the check is against corruption, not against a hostile store.
+
+## P1 amendment: external adversarial review
+
+An external reviewer (Gemini 3.1 Pro Extended Thinking, clean room, bundle
+only) returned three findings. All three held against the tree; two were
+fixed and one is recorded below as a known limit with an owning unit. The
+verbatim findings and the triage are in
+`docs/reviews/2026-09-10-P1-vault-adversarial-review.md` and
+`...-triage.md`.
+
+### D-P1-11: a locked artifact that cannot be read is `unreadable`, a third sentinel, and never an exception
+
+- **Problem:** `isAbsent` covered `ENOENT` and `ENOTDIR` only, so `EISDIR` (a locked file replaced by a directory), `ELOOP` (a symlink cycle), and `EACCES` (permissions removed) escaped `hashArtifact` as unhandled exceptions. Reproduced: substituting a directory for a locked `spec.md` threw `EISDIR` out of `verifyLocks`. Replacing a file with a directory requires no privilege.
+- **Why this mattered more than the reviewer's framing:** the reviewer predicted a pipeline crash through `api/src/line.ts`, which is wired to `StubVault` and not to this Vault, so nothing crashes today. The real objection is D-S1-15's, recorded during S1 and reintroduced here by the component whose job is detecting tampering: an exception that happens to stop a run is not a control. It holds only until someone adds a `catch`, it records no violation, and it leaves the run state mid-flight.
+- **Chosen:** `UNREADABLE`, beside `MISSING` and `ESCAPED`. Every failure to resolve or read a locked artifact is a sentinel in `tampered`, never a throw, because an artifact the runtime cannot read is not the artifact that was locked — a mismatch like any other, which the line records and refuses on. `lock` refuses an unreadable path outright.
+- **Not chosen:** catching in `line.ts` and converting to a `lock-tamper` refusal, as the reviewer suggested. That leaves the Vault throwing and obliges every caller to remember a `catch`, which is the same fragility one level up.
+- **Also changed:** the artifact root now resolves once in `lock` and `verifyLocks` instead of once per entry. A root that cannot be resolved is an operational failure rather than a verdict about one path, and it now fails loudly and once.
+- **Known, not owned by P1:** `StubVault.hashFile` carries the identical `ENOENT`/`ENOTDIR`-only guard. S1 owns that file and I1 deletes it; it is recorded so it is not inherited.
+- **Reverse:** restore the rethrow; the test `a locked artifact replaced by a directory is tampered, not an exception` fails.
+
+### D-P1-12: records read back from the store are validated in full, not in part
+
+- **Problem:** `requireRunState` checked `runId`, `station`, `version`, and `tasks` and omitted `evidenceRefs` and `violations` entirely; `requireManifest` checked that `entries` was an array but never that its elements were entries. Both then cast. A partial record survived validation and failed later in whichever caller spread it (`api/src/line.ts:249-250`), turning a corrupt store into a `TypeError` somewhere else; a manifest of junk entries surfaced as `The "paths[1]" argument must be of type string` from inside `resolve()`, with nothing naming the Vault or the run.
+- **Chosen:** both boundaries validate every field a consumer reads without checking. `evidenceRefs` and `violations` must be arrays, `tasks` must be a non-array object, and every manifest entry must carry `path`, `sha256`, `lockedAt`, and `lockedBy` as strings. Refusal names the file.
+- **Scope of the check, unchanged:** this is a guard against a corrupt or partial store, not against a hostile one. The Vault wrote these files, and the mount layer is what keeps anything else from writing them.
+- **Reverse:** drop the added clauses; the three tests under `records read back from the store` fail.
+
+### Known limit, owed to P2: the TOCTOU window in `hashArtifact`
+
+`realpath` and `readFile` are two syscalls, and a locked path can be swapped
+between them, so a read can follow a link that did not exist when containment
+was checked (review finding 3). It is recorded rather than fixed, for the
+reason the reviewer itself gives: passing the gate through that window
+requires a file whose bytes hash to the locked artifact's SHA-256, which means
+already holding the locked content, at which point writing it into the
+workspace legitimately is simpler. No privilege is gained.
+
+Descriptor-based reads would narrow the window inside the Vault, but the
+window exists only because the tree is writable while it is being verified.
+A-S1-02 widened `MountTable.workspace` to admit `ro` precisely so verification
+can run against a read-only workspace, and `I1.mount-layer-enforcement`
+already obliges P2 to mount the workspace with the mode the table gives it.
+That closes the class; narrowing the syscall gap closes one instance of it. No
+new pending entry is added: the obligation P2 already carries covers it, and
+this note names the case so P2 meets it deliberately.
