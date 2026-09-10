@@ -31,3 +31,9 @@ Thumbs.db
 
 # Tool-local overrides
 .claude/settings.local.json
+
+# Review bundles. Regenerable git output, named olympus-<unit>-review.txt by
+# the review-request skill. The reviews and triages beside them are tracked
+# .md files; the bundles are a cache, and an untracked few hundred kilobytes
+# under docs/reviews/ is one `git add docs/reviews/` from being committed.
+docs/reviews/*.txt

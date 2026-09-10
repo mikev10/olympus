@@ -186,28 +186,12 @@ Do not review the unit yourself. Do not act on a review you did not receive.
 
 ## 6. When the review comes back
 
-Store the raw response verbatim at
-`docs/reviews/<date>-<UNIT>-<slug>-review.md`, **tracked** — for S1,
-`docs/reviews/2026-09-09-S1-walking-skeleton-adversarial-review.md`. The unit
-id keeps its case; the slug names the unit and the kind of review. The file is
-not regenerable — the same prompt tomorrow returns different findings — and the
-triage record cites findings by number, so without the original those citations
-point at nothing.
+Not this skill's job, and not this session's. The review runs in another tool,
+on the maintainer's clock. When it returns, `triage-review <unit>` stores it
+with its provenance header, verifies every finding against the cited code
+before acting on one, writes the triage, applies what is accepted, and stops
+before merge.
 
-Its header must record: the **model and family** that produced it, the date, the
-bundle's base and head commits, and whether the reviewer disclosed prior context
-or lookups. Rotation degrades into guessing within a few units if the family is
-not written down, and reviewer calibration over time is impossible without it.
-
-Then triage into `docs/reviews/<date>-<UNIT>-<slug>-triage.md`, the same name
-with `-triage` in place of `-review`: which findings were accepted, which
-recorded as known limits, which rejected and why, which could not be verified
-against the cited line.
-
-**Verify every finding against the cited line before acting on it.** The
-reviewer had no repo access and worked from a bundle; line numbers drift, and
-findings self-labeled medium confidence are often reasoning from an absent file.
-A finding that does not hold is reported as such, never fixed.
-
-The **bundle** is not stored. It is `git diff` output, reproducible from the
-recorded base and head, so keeping it is keeping a cache. Delete it.
+That step lives in its own skill because it runs in a different session from
+this one, often days later. Instructions for it here would be loaded by every
+session that builds a bundle and by none that triages a review.

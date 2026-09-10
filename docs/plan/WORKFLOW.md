@@ -21,13 +21,13 @@ the unit's own branch, before merge.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
 4. `/review-request <id>` — bundle plus prompt for an external reviewer.
 5. External review — temporary chat, different model family than last unit.
-   Rotate. Save the raw response to docs/reviews/, tracked, with a header
-   naming the reviewer.
-6. Triage — verify every finding against the cited line before acting. Fix,
-   record as a known limit with an owning unit, or reject with a reason.
-   Findings are not instructions. Write the triage to docs/reviews/.
+   Rotate. The bundle and the prompt go in the same message.
+6. `/triage-review <id>` — stores the raw response with its provenance
+   header, verifies every finding against the cited code before acting, and
+   writes the triage. Fix, record as a known limit with an owning unit, or
+   reject with a reason. Findings are not instructions.
 7. Merge the PR, then `git tag reviewed/<id> && git push --tags`. The tag is
-   the diff base for the next review bundle.
+   the diff base for the next review bundle. Yours, not the session's.
 
 Between step 7 and the next unit: land any amendments the unit surfaced.
 
