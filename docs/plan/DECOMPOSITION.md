@@ -71,10 +71,20 @@
 ## Phase 2
 
 ### P1 — Vault
-**Scope:** `Vault` from F2 §3, over the local filesystem plus SQLite.
+**Scope:** `Vault` from F2 §3, over the local filesystem. Content-addressed files, not a database: an evidence bundle, a lock manifest, and a violation are write-once and immutable, and an auditor must be able to verify one with `sha256sum` alone — without Olympus, and without trusting the tool that produced it. A database puts that behind an opaque file and trades away the property the claim rests on. Run state is the only mutable record, and it needs compare-and-swap, not queries. SQLite stays a later option behind the `Vault` interface, for the unit that has a real query workload; nothing at M1 has one.
 **Deliver:** lock/verify with SHA-256, evidence write, violation record, run state with optimistic concurrency on `version`.
-**Out of scope:** hosted storage, cross-repo aggregation, retention policy.
+**Out of scope:** hosted storage, cross-repo aggregation, retention policy, a database of any kind.
+**Concurrency, binding:** `commitRunState` is a genuine atomic primitive, never read-compare-write. Exclusive create (`wx`) of a version-named file, so the filesystem arbitrates and the loser gets `EEXIST`. No `current` pointer beside it: a pointer written after the create is a second, non-atomic step, and a writer that dies between the two wedges the run. The current version is derived by scanning for the highest version file, so the exclusive create *is* the commit. Hand-rolled concurrency is this unit's real risk: its conformance assertion must run **concurrent** commits from separate processes or workers against the same `ifVersion` and require exactly one winner. Tested sequentially, or with `await`s in one process, it passes while broken.
 **Conformance:** lock a file → modify it → `verifyLocks` returns tampered. No exported path mutates the Vault outside the named operations. Concurrent `commitRunState` with a stale version is rejected.
+**Accept:**
+- a locked file modified on disk makes `verifyLocks` return `ok: false` naming the path, its expected hash and its actual one; a deleted one is reported the same way
+- a second `lock` for the same run preserves the first's entries and refuses to rebase an already-locked path's hash
+- `commitRunState` with a stale `ifVersion` is rejected and stores nothing; concurrent commits from one version leave exactly one winner
+- evidence and violations read back byte-identical through their `VaultRef`; an unknown ref throws
+- a Vault reopened over the same root reads back what a previous process wrote
+- `I3.lock-verification-detects-change` and `I3.lock-preserves-earlier-entries` are live registry assertions, and `pending-baseline.json` lowers I3 from 3 to 1
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
 
 ### P2 — Sandbox (local Docker)
 **Scope:** `LocalDockerProvider` from F2 §7.
