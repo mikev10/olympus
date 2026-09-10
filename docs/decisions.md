@@ -533,3 +533,85 @@ unit that pays one lowers its baseline in the same pull request.
 - **`CheckSpec.command` grammar: `I5.check-command-has-a-grammar`, owed to P6.** The command is one string, so the runtime had to invent a grammar: the skeleton splits on whitespace with no shell, which mangles any quoted argument. Under I5 because a pinned check the runtime cannot execute exactly as pinned must be refused, never approximated. P6 owns the verification manifest and decides whether a command is an argv array, a shell string with a declared shell, or something an adapter produces, and asserts that an unrepresentable command is refused.
 - **`CheckResult` cannot represent a check that could not start: `I2.unstarted-check-is-in-the-evidence`, owed to P6.** The evidence bundle simply lacks an entry; `FailedCheck.cause: 'no-result'` says so in the transition, and the spawn error lives only in `message`. Under I2 because a verdict derived from a fact the evidence does not carry is not auditable. P6 decides the shape of the record and asserts that the gate fails on it and the bundle shows it.
 - **`TaskRequest.sandbox` hands a driver a handle it cannot exec in: `I1.driver-executes-inside-the-sandbox`, owed to P5 with P2.** Nothing in the contract lets a driver run a command inside the sandbox it was given; the stub driver does not care, and a real one will on its first task. Under I1 because a driver with no path into the sandbox runs the model on the host, outside the mount table where I1 is enforced. P5 meets it first and asserts that a task's commands run inside the sandbox and nowhere else; P2 owns the provider side.
+
+## P1: Vault
+
+The unit entry in `DECOMPOSITION.md` was underspecified in two ways and was
+fixed before any code was written: the scope line named a storage substrate
+that turned out to be wrong, and the entry carried four of the five sub-plan
+parts F1 requires, with no acceptance criteria. Both are recorded below.
+
+### D-P1-01: the Vault stores files, not SQLite; the scope line was corrected
+
+- **Problem:** the unit entry said "over the local filesystem plus SQLite". Taken literally that meant a database under the component that holds audit evidence, and the choice of binding (`node:sqlite` or `better-sqlite3`) looked like the only open question.
+- **Chosen, by maintainer direction:** files, and the scope line rewritten to say so. Evidence bundles, lock manifests, and violations are write-once and immutable, so files are the right shape — and an auditor verifying one with `sha256sum`, without Olympus and without a database, is *part of the audit claim* rather than a compromise. A row inside an opaque `.db` puts the tool back in the trust path that the claim exists to remove. Run state is the only mutable record: one small object needing compare-and-swap, which is not a database workload.
+- **Against `better-sqlite3`:** a native module under every contributor and every CI runner. When a prebuild is missing for some Node-version-by-platform pair, a first-time contributor lands in `node-gyp`. That cuts against the distribution constraint and against decomposing for contributors.
+- **Against `node:sqlite`:** an experimental API under the component holding audit evidence. Its upside is query, and nothing at M1 queries; that need arrives with the control plane, when the access patterns are known rather than guessed.
+- **Asserted:** `an object file verifies as its own name` in `packages/vault/test/local.test.ts` recomputes the SHA-256 of the bytes on disk and requires it to equal the hash in the file's name. That test is the audit property, not a formality.
+- **Reverse:** SQLite remains a later option behind the `Vault` interface. Nothing outside `packages/vault/src/local/` knows how the store is laid out.
+
+### D-P1-02: the Vault takes two roots, and refuses a nested pair
+
+- **Problem:** S1 finding 4d left this to P1: `Vault.lock(runId, paths, by)` gives the locked paths no base, and `StubVault` took a single `root` at construction. That one root was doing two jobs — where the Vault keeps its own files, and what a locked path resolves against. The second is the workspace, which is the tree an agent writes.
+- **Chosen:** `new LocalVault({ store, artifacts })`. The constructor resolves both and throws if either contains the other, or if they are the same directory. A store inside the artifact root is a Vault an agent can reach, which is the arrangement I1 exists to prevent, and it is worth refusing in the one place the Vault can see it even though the real enforcement is P2's mount layer.
+- **Note for P2 and P4:** this is a constructor-time guard, not the mount table. It stops a misconfiguration, not an attacker; `I1.mount-layer-enforcement` is still owed.
+- **Reverse:** collapse to one root; the `two roots` tests fail.
+
+### D-P1-03: the run-state CAS is an exclusive create, and nothing reads before it writes
+
+- **Problem, named rather than treated as solved:** hand-rolled concurrency is this unit's real risk. A compare-then-write loses an update whenever two writers interleave between the read and the write, and — this is the part that makes it dangerous — it passes a sequential test while doing so.
+- **Chosen:** `commitRunState` computes the next version from `ifVersion` alone and creates `state/<next>.json` with the `wx` flag. That single filesystem operation is the entire concurrency control: of any number of writers holding the same `ifVersion`, exactly one creates the file and the rest get `EEXIST` and are refused. No version is read in order to decide whether to write.
+- **No `current` pointer.** The current version is derived by scanning for the highest `<n>.json`. A pointer file written *after* the record it points at is a second, non-atomic step: a writer that died between the two would leave a record no reader can see and a version no writer can take, wedging the run with no recovery path. Scanning costs a `readdir` and has no such state.
+- **Demonstrated, not assumed:** with the flag changed from `wx` to `w`, `I5.stale-commit-is-refused-under-contention` fails with *8 processes committed run state from version 0 and 8 succeeded* — seven lost updates. Restored, it passes.
+- **Reverse:** there is no safe reverse. Any change here that reads a version, decides, and then writes reintroduces the lost update; the assertion is what catches it.
+
+### D-P1-04: `ifVersion` is authoritative, and a version that was never current is refused
+
+- **Problem:** the contract left open which of `ifVersion` and `s.version` wins (S1 spec section 2). Separately, computing the next version from `ifVersion` alone means a caller passing a fabricated future version would create a valid file and leave a hole in the run's history.
+- **Chosen:** `ifVersion` wins and `s.version` is ignored and overwritten, which is what `StubVault` did and what P4 will already have been written against. A precondition refuses an `ifVersion` that was never current — zero when state already exists, or a number above the highest committed.
+- **Why the precondition does not weaken D-P1-03:** it is an additional refusal checked before the create, not the control. Two writers at the same live version both pass it and still race on the exclusive create, where exactly one wins. It rejects the fabricated case that the create alone would accept.
+- **Reverse:** drop the precondition; the test `a version that was never current is refused` fails and a run may skip forward.
+
+### D-P1-05: a lock adds a generation, and an already-locked path is refused outright
+
+- **Problem:** `I3.lock-preserves-earlier-entries`, owed to P1 by D-S1-18. Replace semantics make I3 unsatisfiable: `spec` locks the spec, `test-design` locks the acceptance tests, and the second lock drops the first while I3 requires both re-verified at every transition.
+- **Chosen:** each lock writes `locks/<generation>.json` with the same exclusive create, carrying every earlier entry plus the new ones. Nothing is ever rewritten, so the lock history is itself auditable, and a partial write cannot corrupt the manifest that is the tamper baseline. A concurrent second lock for the same generation is refused rather than merged.
+- **The stricter half:** re-locking a path that is *already* locked is refused, not merely refused when the hash differs. Re-locking is how a tamper would launder itself — edit the artifact, lock it again, and the manifest agrees with the disk. The station and instant of the first lock are the audit record. The looser reading (permit an idempotent re-lock at the same hash) would still overwrite `lockedAt` and `lockedBy`, losing provenance for no gain.
+- **Reverse:** compare hashes and allow a same-hash re-lock. `I3.lock-preserves-earlier-entries` asserts the refusal, so this cannot change quietly.
+
+### D-P1-06: a locked path that comes to resolve outside the artifact root is tampered, not followed
+
+- **Problem:** D-S1-15 left symlink and realpath containment to P1 and P2. A locked file replaced by a link to an identical file elsewhere would otherwise hash clean, and the artifact an agent is judged by would no longer be the artifact that was locked.
+- **Chosen:** hashing resolves the real path and requires it to sit under the real artifact root. A path that escapes is reported in `tampered` with `actual: 'escaped'`, beside `'missing'` for a deletion (D-S1-02). Both are sentinels no hex digest can equal. Reporting rather than throwing keeps an escape on the path that records a violation and refuses, like any other mismatch.
+- **Tested across the privilege gap:** the test uses a *directory junction*, because Windows grants that without elevation and withholds file symlinks (this workstation returns `EPERM` for `symlink`). Both reach the same `realpath` containment check. Verified by disabling the check: the substituted file then verifies as `{ ok: true }`, which is the silent pass the check prevents.
+- **Reverse:** hash the path without resolving it; the escape test fails.
+
+### D-P1-07: the implementation module imports nothing at run time but Node builtins
+
+- **Problem:** the contention assertion must run *separate processes*, because two commits inside one process interleave only where the code happens to yield, and a compare-then-write that never yields between its two halves would pass such a test while being broken. A child process therefore has to load the real `commitRunState` — but Node's type stripping does not rewrite a `.js` specifier to the `.ts` file beside it, so `packages/vault/src/index.ts`, which re-exports `./types.js` at run time, cannot be loaded outside a bundler.
+- **Chosen:** every cross-file import in `src/local/vault.ts` is type-only, so all of them erase and the file loads directly under `node`. The child imports that module by absolute path. This is a standing requirement on the file, recorded because it looks incidental: adding one value import to a sibling would break the assertion in a way whose cause is not obvious from the failure.
+- **Cost if it must change:** the alternative is compiling the package before the registry runs, which puts a build step in front of the conformance suite.
+- **Reverse:** none available without that build step.
+
+### D-P1-08: the class carries exactly seven methods; helpers are module-level
+
+- **Problem:** the unit's conformance line requires that no exported path mutates the Vault outside the named operations. The type-level fixture `I1.vault-has-no-generic-write` cannot see this: a TypeScript `private` method is fully public at run time, so an internal helper on the prototype is an undeclared write path.
+- **Chosen:** every helper is a module-level function and the class holds `#store` and `#artifacts` as ECMAScript private fields, so `LocalVault.prototype` carries the seven named operations and nothing else. `I1.vault-implementation-exposes-only-named-operations` enumerates the prototype and fails on any extra name, quoting the `private`-is-not-private reason so the next person adding a helper knows where to put it.
+- **Reverse:** delete the assertion; nothing then stops a helper from becoming a write path.
+
+### D-P1-09: the contention assertion is registered under I5, not I2
+
+- **Considered:** I2 owns run state as the single authority for task status, and a lost update corrupts exactly that.
+- **Chosen:** I5. I2 is about *who produces* status — the runtime, never the model — and concurrency has nothing to do with the model. The invariant actually at risk is that a stale write is refused rather than quietly applied, which is I5's "never a silent degrade" verbatim. The assertion additionally requires every loser to carry a reason, because a refusal that says nothing is a silent failure wearing a different hat.
+
+### D-P1-10: what P1 did not touch
+
+- **`StubVault` stays.** The comment on it says "P1 replaces this file", but `I5.unsafe-component-refused-above-l1` and `I5.stubs-declare-unsafe` both still execute it, and stub replacement is I1 (Phase 3), which the decomposition assigns to the integration unit. `LocalVault` lands beside it. Nothing in `packages/api` was rewired.
+- **No contract file changed.** `packages/vault/src/types.ts` is untouched; the `Vault` interface was implemented as written.
+- **`LocalVault` carries no `unsafe` declaration**, because it is not a stub. The skeleton line still refuses above L1 on the three stubs and its own declaration, so nothing about the L1 cap changes.
+
+### Known limits
+
+- **The store grows without bound.** One file per state version per run, one per lock generation, one per object, and nothing prunes them. Retention policy is explicitly out of scope for P1 and has no owning unit today. This is the cost of dropping the database and is worth naming rather than discovering.
+- **Serialization is not canonicalized.** Objects are stored as `JSON.stringify` produced them, so the content address is over *those bytes*. Two logically identical bundles built with different property insertion order hash differently. This is correct for the audit property, which is byte-level, but it means deduplication is byte identity and not semantic identity.
+- **Records are validated structurally, not fully.** A file that is not a run state or not a manifest is refused rather than returned as a partial record, but individual field types beyond the load-bearing few are trusted. The Vault wrote these files; the check is against corruption, not against a hostile store.
