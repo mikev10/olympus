@@ -93,6 +93,11 @@ calibration, and output sections are fixed — do not reword them. They are what
 separates a useful review from a list of style opinions.
 
 ```
+The code under review is in the attached file `olympus-<unit>-review.txt` — the
+full contents of every changed file, with the commit range at its top. If that
+file is not present in this conversation, stop and say so; do not review from
+the description below alone.
+
 You are reviewing <what: e.g. the conformance testing infrastructure> of a
 TypeScript project. You have the source and nothing else — no design documents,
 no author reasoning, no prior version, no conversation that produced it.
@@ -166,6 +171,11 @@ context and whether you performed any lookups.
 
 Print the bundle path and the prompt. Remind the maintainer:
 
+- **Attach the bundle to the same message as the prompt.** They are two
+  artifacts and both are required: the prompt is only instructions, and a
+  reviewer given it alone will ask for the source, or worse, answer from the
+  description. Upload the file rather than pasting it; it runs to thousands of
+  lines.
 - Paste into a **temporary chat** — no memory, no history
 - Use a **different model family** than the last reviewer, and rotate across
   units; two runs of the same family return correlated findings, which reads as
