@@ -1,6 +1,6 @@
 ---
 name: ship-unit
-description: Open a pull request for a completed unit. Verifies the unit's done-when criteria, checks that no gitignored path is staged, creates the unit branch, and opens a PR whose body comes from the unit spec. Use when a unit's work is finished and verified. Do not use mid-unit.
+description: Open a pull request for a completed unit, then request its external review. Verifies the unit's done-when criteria, checks that no gitignored path is staged, creates the unit branch, opens a PR whose body comes from the unit spec, and hands off to review-request. Use when a unit's work is finished and verified. Do not use mid-unit.
 ---
 
 # Ship a unit
@@ -88,14 +88,29 @@ The body is generated from the unit spec, in this order:
 The out-of-scope section exists so a reviewer does not report absent work as a
 defect. It is the single most useful part of the body.
 
-## 6. Report and stop
+## 6. Report, then request the review
 
-Print the PR URL. Do not merge. Do not push to `v2` directly. Do not begin the
-next unit.
+Print the PR URL. Then invoke `review-request` for the same unit, without
+stopping to ask. The unit loop's next step is always the external review, so
+halting here only to be told to continue costs a turn and gains nothing.
+
+**Safe to chain**, because `review-request` produces two artifacts and stops: a
+bundle file on disk and a prompt for the maintainer to paste. It opens nothing,
+sends nothing, merges nothing, and contacts no reviewer. If the maintainer
+wants neither artifact, there is nothing to undo — delete the file. The human
+gate sits at triage, where every finding is verified against the cited line
+before anything acts on it, and chaining does not move it.
+
+**Only on success.** This step is reached only when step 2 passed and step 5
+actually opened a pull request. A failed acceptance criterion stops at step 2
+and never arrives here: a bundle built from a unit that does not pass its own
+gates sends a reviewer at a tree that is about to change.
+
+Do not merge. Do not push to `v2` directly. Do not begin the next unit.
 
 ## Never
 
-- Ship with a failing acceptance criterion
+- Ship with a failing acceptance criterion, or reach step 6 with one
 - Modify a done-when criterion to make it pass
 - Touch `.github/workflows/`, `CLAUDE.md`, the conformance baseline, or a
   contract type file as part of shipping. Those are gate changes and belong to
