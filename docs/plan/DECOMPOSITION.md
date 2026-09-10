@@ -91,6 +91,18 @@
 **Deliver:** container lifecycle, mount table with exactly one `rw` mount, symlink and path-escape resolution before mounting, `deny-all` egress default, CPU/memory/PID/wall-clock limits.
 **Out of scope:** remote workers, pools, hosted providers — all M4b.
 **Conformance:** a write outside the Workspace fails at the mount layer; a symlink escape fails; a `MountTable` with two `rw` entries is rejected at construction; blocked egress is refused and logged.
+**Requires a Docker daemon, and fails closed without one.** The assertions that prove I1 at the mount layer cannot be proven by a host that has no containers, and an assertion that skips itself proves nothing while reporting green — the failure mode I5 exists to refuse. A host without a daemon gets a failing suite that names the requirement, never a silent pass.
+**Accept:**
+- a `MountTable` carrying a second `rw` entry is refused at construction, naming the offending mount; the workspace slot's own `rw`/`ro` mode is honoured as given
+- every mount source is resolved through symlinks and `..` *before* the containment check, so a source that is a symlink into a Vault path is refused, naming the declared path and what it resolved to
+- a mount whose resolved source is a Vault path, sits inside one, or contains one is refused at any mode, `ro` included; a source that does not exist is refused rather than created
+- inside a provisioned sandbox, a write outside the workspace fails, and a write inside a workspace the table marks `ro` fails the same way
+- a `deny-all` sandbox has no egress channel at all: its only interface is loopback, a route attempt reports the network unreachable, and the applied control is recorded beside the exact `docker run` argv. An `allowlist`, which this provider cannot enforce, is refused by name. Per-connection logging of blocked attempts is **not** delivered and is recorded as a known limit — see `docs/decisions.md`
+- each of `cpus`, `memoryMb`, `pids` and `wallClockMs` is applied to the container, and a command that exceeds the wall clock is terminated with the limit named
+- provisioning is refused, not degraded, when a `SandboxSpec` asks for a capability the provider does not have (I5)
+- `I1.mount-layer-enforcement` is a live registry assertion and `pending-baseline.json` lowers I1 from 2 to 1; the five `sandbox.*` claims are live and each lowers from 1 to 0
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
 **This unit carries I1.** It is the substrate everything else's safety rests on.
 
 ### P3 — Policy engine

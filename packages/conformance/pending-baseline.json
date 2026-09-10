@@ -1,7 +1,7 @@
 {
   "$comment": "The pending ratchet. Each number is the most pending entries that invariant or capability claim may carry in src/registry. The meta-test fails when a count exceeds its number. A decrease is always allowed and shows as a delta in the report; lower the number in the same pull request that pays the work down. Raising a number is a deliberate edit here, reviewed in the diff, never a side effect of adding an entry.",
   "invariants": {
-    "I1": 2,
+    "I1": 1,
     "I2": 2,
     "I3": 1,
     "I4": 2,
@@ -20,10 +20,10 @@
     "driver.computerUse": 1,
     "driver.steering": 1,
     "driver.stablePrefixCaching": 1,
-    "sandbox.computerUse": 1,
-    "sandbox.gpu": 1,
-    "sandbox.os": 1,
-    "sandbox.persistent": 1,
-    "sandbox.remote": 1
+    "sandbox.computerUse": 0,
+    "sandbox.gpu": 0,
+    "sandbox.os": 0,
+    "sandbox.persistent": 0,
+    "sandbox.remote": 0
   }
 }

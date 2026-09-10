@@ -218,8 +218,16 @@ type, so omitting one is a compile error.
 - One unit per pull request. Stay inside its scope; file an issue for
   anything adjacent.
 - CI runs `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance`.
-  All four must pass. Run them locally first; they need nothing but Node 22
-  and pnpm 12.
+  All four must pass. Run them locally first; they need Node 22, pnpm 12, and
+  a Docker daemon.
+- **Docker is required, and its absence fails the suite rather than skipping
+  it.** The sandbox package and the I1 registry assertions provision real
+  Linux containers, because the mount layer is where I1 is enforced and there
+  is no way to observe an enforcement with no container to enforce it in. A
+  suite that skipped itself on a host without containers would report green
+  having proved nothing about the substrate everything else's safety rests on,
+  which is the failure I5 exists to refuse. Any daemon serving Linux
+  containers on a local socket or pipe works.
 - Record any decision the unit's description did not settle in
   `docs/decisions.md`: what was unclear, what you chose, why, and how to
   reverse it.

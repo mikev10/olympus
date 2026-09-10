@@ -63,6 +63,17 @@ jobs:
             exit 1
           fi
 
+      # The sandbox package and the I1 registry assertions provision real Linux
+      # containers: the mount layer is where I1 is enforced, and an assertion
+      # that skipped itself without a daemon would report green having proved
+      # nothing about it. Checked here so a missing daemon fails with this
+      # message, and the image is pulled here so a cold-cache pull is never
+      # timed against a wall-clock assertion.
+      - name: Docker daemon and the pinned test image
+        run: |
+          docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
+          docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+
       - name: Typecheck
         run: pnpm typecheck
 
