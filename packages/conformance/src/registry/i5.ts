@@ -6,9 +6,13 @@ import type { AutonomyLevel, RunId, TaskId } from '@olympus-ai/core';
 import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
+import { contendOnCommit, withVaultDirs } from './local-vault.js';
 
 /** The declaration order the entry point promises: vault, sandbox, driver, then the line itself. */
 const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine'];
+
+/** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
+const CONTENDERS = 8;
 
 /** The hello fixture the api package's own test drives: one locked file, one check that exits zero. */
 const HELLO_FIXTURE = join('packages', 'api', 'test', 'fixtures', 'hello');
@@ -105,6 +109,63 @@ export const I5: InvariantEntry = {
         } finally {
           await rm(workspace, { recursive: true, force: true });
         }
+      },
+    }),
+    runtime({
+      id: 'I5.stale-commit-is-refused-under-contention',
+      title:
+        'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+      run: async () => {
+        await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+          const runId = 'i5-contend';
+          const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+
+          const winners = outcomes.filter((o) => o.ok);
+          if (winners.length !== 1) {
+            const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+            throw new Error(
+              `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                `\n  ${detail.join('\n  ')}`,
+            );
+          }
+          const [winner] = winners;
+          if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+          if (winner.version !== '1') {
+            throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+          }
+          for (const loser of outcomes.filter((o) => !o.ok)) {
+            if (loser.message === '') {
+              throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+            }
+          }
+
+          // The record that landed must be one writer's whole state, not a
+          // blend: each child tags its own `tasks`, so the stored state names
+          // exactly one of them.
+          const { LocalVault } = await import('@olympus-ai/vault');
+          const vault = new LocalVault(dirs);
+          const stored = await vault.readRunState(runId as RunId);
+          if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+          const tags = Object.keys(stored.tasks);
+          if (tags.length !== 1 || tags[0] !== winner.tag) {
+            throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+          }
+
+          // The same refusal, uncontended: a commit from a version that has
+          // already been superseded stores nothing at all.
+          let stale = true;
+          try {
+            await vault.commitRunState({ ...stored, version: '0' }, '0');
+          } catch {
+            stale = false;
+          }
+          if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+          const after = await vault.readRunState(runId as RunId);
+          if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+            throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+          }
+        });
       },
     }),
   ],
