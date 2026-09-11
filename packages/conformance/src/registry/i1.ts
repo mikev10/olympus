@@ -1,5 +1,5 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
@@ -135,6 +135,25 @@ export const I1: InvariantEntry = {
           );
           if (readOnly.layer !== 'mount') {
             throw new Error(`I1: a Vault path mounted ro was accepted, or refused elsewhere: ${readOnly.message}`);
+          }
+
+          // The Vault reached by truncation rather than by naming it. Docker's --mount grammar
+          // splits on commas, so a source of `<vault>,readonly` is mounted as `<vault>`: every
+          // containment check passes on the longer name and the container gets the Vault. The
+          // declared path carries no comma, so checking only what the caller wrote misses it.
+          // Review finding 1; an I1 bypass demonstrated against a running container.
+          const decoy = join(dirname(dirs.vault), `${basename(dirs.vault)},readonly`);
+          await mkdir(decoy, { recursive: true });
+          const plain = join(dirs.readable, 'plain-link');
+          await linkTo(decoy, plain);
+          if (plain.includes(',')) throw new Error('I1: this assertion needs a comma-free declared path');
+          const truncated = await refusalFrom(() =>
+            provider.provision(
+              specFor(dirs, 'rw', { mounts: { workspace: { source: plain, target: '/workspace', mode: 'rw' }, others: [] } }),
+            ),
+          );
+          if (truncated.layer !== 'mount') {
+            throw new Error(`I1: a source resolving to a comma-bearing path was not refused by the mount layer: ${truncated.message}`);
           }
 
           // A second rw mount has no slot in the type, so a cast is how it arrives at run time.

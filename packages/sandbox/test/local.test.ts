@@ -262,6 +262,23 @@ describe('limits', () => {
     expect(await containerExists(containerId)).toBe(false);
   });
 
+  test('a sandbox nobody calls again is destroyed when its budget expires — review finding 2', async () => {
+    // The check inside exec() bounds only sandboxes somebody keeps calling. A task that starts
+    // background work and is never exec'd again would otherwise outlive its limit entirely.
+    const handle = await provision({ limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 1500 } });
+    const containerId = provider.appliedControls(handle).containerId;
+    await provider.exec(handle, ['sh', '-c', 'nohup sh -c "while :; do sleep 1; done" >/dev/null 2>&1 &']);
+
+    expect(await containerExists(containerId)).toBe(true);
+    await new Promise((done) => setTimeout(done, 3500));
+
+    // Nothing touched the provider in between; the budget enforced itself.
+    expect(await containerExists(containerId)).toBe(false);
+    const error = await refusal(() => provider.exec(handle, ['sh', '-c', 'echo x']));
+    expect(error.layer).toBe('lifetime');
+    expect(error.message).toContain('1500ms');
+  });
+
   test('the budget is the sandbox lifetime, so a later exec is refused rather than started', async () => {
     const handle = await provision({ limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 1500 } });
     const first = await provider.exec(handle, ['sh', '-c', 'echo one']);

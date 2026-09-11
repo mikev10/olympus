@@ -60,6 +60,11 @@ interface Sandbox {
   readonly controls: AppliedControls;
   /** Set once the budget is spent or the container is destroyed, so a later exec says why rather than failing obscurely. */
   ended?: string;
+  /**
+   * Destroys the container when the wall-clock budget expires, whether or not
+   * anyone calls `exec` again. Cleared when the sandbox ends by another route.
+   */
+  timer?: NodeJS.Timeout | undefined;
 }
 
 function checkLimits(limits: SandboxSpec['limits']): void {
@@ -187,7 +192,7 @@ export class LocalDockerProvider implements SandboxProvider {
     }
 
     const handle = containerId as SandboxHandle;
-    this.#sandboxes.set(handle, {
+    const sandbox: Sandbox = {
       controls: {
         containerId,
         mounts,
@@ -196,7 +201,20 @@ export class LocalDockerProvider implements SandboxProvider {
         deadline: performance.now() + spec.limits.wallClockMs,
         runArgs: Object.freeze([...args]),
       },
-    });
+    };
+    this.#sandboxes.set(handle, sandbox);
+
+    // The budget has to be enforced by something that runs on its own. Checking it inside `exec`
+    // bounds only sandboxes somebody keeps calling: a task that starts a background process and
+    // is never exec'd again would outlive its limit entirely, which is the whole thing the limit
+    // exists to prevent. Review finding 2.
+    const timer = setTimeout(() => {
+      void this.#expire(sandbox, spec.limits.wallClockMs);
+    }, spec.limits.wallClockMs);
+    // The runtime is a service (I9), and a pending timer must never be the reason its process
+    // stays alive. An unref'd timer still fires for as long as the process is running.
+    timer.unref();
+    sandbox.timer = timer;
     return handle;
   }
 
@@ -264,7 +282,25 @@ export class LocalDockerProvider implements SandboxProvider {
    */
   async #end(sandbox: Sandbox, why: string): Promise<Error | undefined> {
     sandbox.ended = why;
+    if (sandbox.timer !== undefined) {
+      clearTimeout(sandbox.timer);
+      sandbox.timer = undefined;
+    }
     return this.#remove(sandbox.controls.containerId);
+  }
+
+  /**
+   * The wall-clock timer firing. Nothing is waiting on this call, so a removal
+   * failure has no caller to refuse: it is recorded on the sandbox, where the
+   * next `exec` or `destroy` reports it, rather than raised as an unhandled
+   * rejection.
+   */
+  async #expire(sandbox: Sandbox, budgetMs: number): Promise<void> {
+    if (sandbox.ended !== undefined) return;
+    const removal = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
+    if (removal !== undefined) {
+      sandbox.ended = `it exceeded its wall-clock limit of ${String(budgetMs)}ms and could not be destroyed: ${removal.message}`;
+    }
   }
 
   async #remove(containerId: string): Promise<Error | undefined> {

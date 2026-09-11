@@ -768,3 +768,86 @@ none` is enforced by the kernel, which drops the attempt before any userspace
 component of ours could see it; itemising attempts needs the same filtering
 proxy `allowlist` needs. Recorded here rather than claimed, and it arrives with
 the proxy or not at all.
+
+## P2 amendment: external adversarial review
+
+An external reviewer (Gemini, temporary chat, bundle only) returned six
+findings. Four hold and were fixed on the unit branch; two hold in part and are
+recorded below. The full triage, with the verification evidence for each, is
+`docs/reviews/2026-09-11-P2-sandbox-adversarial-triage.md`.
+
+One was a genuine I1 bypass: a running container was handed the Vault,
+read-write, with every containment check passing.
+
+### D-P2-13: the grammar check runs on the resolved path, because that is the path Docker is given
+
+- **Problem:** `refuseUnrepresentable` ran on the path the caller declared; `mountArgument` interpolated the path after `realpath`. A comma-free declared source resolving to a comma-bearing one reached `docker run` intact, and Docker's `--mount` grammar splits on the comma and mounts the *prefix before it* — a different directory from the one every check validated, created by Docker if absent. A sibling of the Vault named `vault,readonly` truncates to the Vault. `containsPath` is right to find no overlap between the two, which is what made the hole invisible.
+- **Chosen:** check the resolved path as well, inside `resolveSource`, before it can reach an argument. The rule is that whatever string ends up in the argv is the string the grammar check must have seen.
+- **Note on the finding:** the reviewer described this as overriding the `target=` key. That is not constructible — a `target` payload needs a `/`, which no filesystem allows in a path component — and fixing what was described would have left the real hole open. The conclusion was right, the mechanism was not, and only running it settled which.
+- **Asserted:** a mount-layer test, and `I1.mount-layer-refuses-a-vault-mount` drives the decoy through the real provider. Both fail when the check is reverted.
+- **Reverse:** drop the second `refuseUnrepresentable` call; both assertions fail.
+
+### D-P2-14: the wall clock arms a timer at provision; supersedes the enforcement half of D-P2-08
+
+- **Problem:** D-P2-08 made `wallClockMs` the sandbox's lifetime budget, but it was only ever consulted inside `exec`. A task that started background work and was never called again outlived its budget entirely. Measured: a 1500 ms sandbox still running after 4000 ms.
+- **Chosen:** `provision` arms a `setTimeout` that destroys the container when the budget expires, independent of any call. It is `unref()`d, because under I9 the runtime is a service and a pending timer must never be what keeps its process alive. `#end` clears it; `#expire` records a removal failure on the sandbox rather than raising an unhandled rejection, since nothing awaits it.
+- **Why here and not in an orchestrator,** which is what the reviewer asked: `wallClockMs` is a field of `SandboxSpec` and this unit's deliverables name the wall-clock limit among the controls the provider applies. A limit the provider accepts and does not enforce is the silent degrade I5 refuses. An orchestrator-level budget is a fine additional control; it cannot be the reason this one is missing.
+- **The budget semantics of D-P2-08 stand.** Only the enforcement mechanism changed, from lazy to self-firing.
+- **Reverse:** disarm the timer; the regression test in `local.test.ts` fails.
+
+### D-P2-15: an absent Vault root is canonicalised, not passed through unresolved
+
+- **Problem:** a Vault root that did not exist yet had its `realpath` failure caught and the unresolved path returned, so containment compared a resolved mount source against an unresolved Vault string and found no overlap. An agent could hold read-write on the directory where the Vault was about to be created, and the refusal would arrive only once it existed — a fail-open on an I1 check, which is the one category that must fail closed.
+- **Chosen:** `canonicalise` resolves the deepest existing ancestor and appends the missing tail, so an absent root still compares as the location it will occupy.
+- **Rejected — dropping an unresolvable Vault path:** a Vault root that does not exist yet still names somewhere nothing may mount.
+- **Asserted:** the refusal, plus a control that an unrelated absent Vault root does not become a refusal of everything.
+- **Reverse:** restore the `catch { return absolute; }`; two tests fail.
+
+### D-P2-16: every mount entry is frozen, not only the containers holding them
+
+- **Problem:** `mountTable` froze the returned object and the `others` array, leaving the `workspace` entry writable. The reviewer named that; it stopped one short, because the `others` entries were unfrozen too.
+- **Chosen:** freeze every entry as well as both containers. A validated table whose entries can still be edited afterwards is worth nothing, and that is as true of `others` as of `workspace`.
+- **Severity, honestly:** defence in depth, not a live bypass — the table does not currently escape to untrusted scope.
+- **Reverse:** freeze only the containers; the extended freeze assertion fails.
+
+### Known limit, owed elsewhere: the Vault prototype assertion is narrow
+
+`I1.vault-implementation-exposes-only-named-operations` enumerates
+`Object.getOwnPropertyNames(LocalVault.prototype)`, so it would not see methods
+reached through a superclass, exposed as symbols, or assigned to the instance in
+the constructor. The observation is correct and identifies no present defect:
+`LocalVault` has no superclass, no symbol-keyed members and no instance
+properties, so the narrow check and a broad one return the same answer today.
+The gap would open if inheritance were ever added.
+
+Not fixed here. It is P1's assertion, untouched by this unit, and in the review
+bundle only because `registry/i1.ts` was edited beside it. A review does not
+widen a unit. Recorded rather than made a pending registry entry because it
+names no unasserted capability — the invariant is asserted; the assertion could
+be broader — and because inventing an owner for work no decomposition unit
+carries would put a name on the ratchet that nothing redeems.
+
+### Known limit: `sandbox.remote` verifies the declaration, not the fact
+
+The assertion compares `capabilities().remote` against the endpoint
+`probeDaemon` read from `docker context inspect`. It is not tautological — it
+fails when the declaration is flipped, which was confirmed by mutation — but
+`probeDaemon` has already refused a non-local endpoint by the time it runs, so
+the comparison can only catch a mis-declaration, never a provider that
+misidentifies a remote daemon as local.
+
+The reviewer's suggested remedy, observing locality from inside the container,
+does not work: the container runs with `--network none` and has no interface but
+loopback, and nothing visible from inside establishes where its daemon lives.
+The only honest local/remote discriminator available is comparing the
+container's view of a known host path against the host's own — a new mechanism
+rather than a tightening, and out of scope for this unit.
+
+### Unreviewed, and named so the next review can cover it
+
+The reviewer left prompt items 3 (fail-open conditions) and 4 (language-level
+escape hatches) empty. Item 3 was covered in substance anyway — finding 3 is a
+fail-open. Item 4 was not touched, and it is what this unit most needed a second
+opinion on: D-P2-06 deliberately widened an input type to `mode: string` so the
+run-time guards would not be compiled away, and the tests reach those guards
+through `as unknown as` casts. Nothing in this review examined that choice.

@@ -10,7 +10,7 @@
  * the Vault, and the container gets the Vault anyway.
  */
 import { realpath, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { MountEntry, MountTable } from '../types.js';
 import { containsPath, isAbsoluteHostPath, isContainerTarget, overlapsPath, samePath } from './paths.js';
 import { refuse as refuseAt } from './refusal.js';
@@ -102,6 +102,13 @@ export function mountTable(spec: MountTableSpec): MountTable {
   // Frozen through the binding rather than through the return value: `MountTable.others` is a
   // mutable array behind a readonly property, and `Object.freeze`'s `readonly T[]` return type
   // would not fit it. The array is frozen either way; only the static type differs.
+  //
+  // Every entry is frozen as well as the two containers. Freezing the array alone leaves each
+  // entry's `mode` and `source` writable, so a validated table could still be edited after the
+  // validation that makes it worth anything. Review finding 6, extended to `others`, which the
+  // finding did not mention and which has the same hole.
+  Object.freeze(workspace);
+  for (const entry of others) Object.freeze(entry);
   Object.freeze(others);
   return Object.freeze({ workspace, others });
 }
@@ -116,6 +123,37 @@ export interface ResolvedMount {
   readonly mode: 'ro' | 'rw';
 }
 
+/**
+ * The real path of `path`, resolving as much of it as exists.
+ *
+ * A Vault root that does not exist yet still names a location nothing may
+ * mount, so it cannot simply be dropped. Returning it unresolved is worse than
+ * dropping it: the containment check would then compare a fully resolved
+ * mount source against an unresolved Vault string, and two spellings of one
+ * location would not match. A Vault declared behind a symlinked parent before
+ * it is created would be mountable, and the refusal would arrive only once the
+ * directory existed — which is exactly the wrong way round for a check that
+ * must fail closed. So the deepest existing ancestor is resolved and the
+ * missing tail is appended to it. Review finding 3.
+ */
+async function canonicalise(path: string): Promise<string> {
+  const absolute = resolve(path);
+  const missing: string[] = [];
+  let current = absolute;
+  for (;;) {
+    try {
+      const real = await realpath(current);
+      return missing.length === 0 ? real : join(real, ...missing.reverse());
+    } catch {
+      const parent = dirname(current);
+      // At the filesystem root `dirname` returns its argument; nothing above it exists to resolve.
+      if (parent === current) return absolute;
+      missing.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
 async function resolveSource(label: string, source: string): Promise<string> {
   const absolute = resolve(source);
   let real: string;
@@ -128,6 +166,12 @@ async function resolveSource(label: string, source: string): Promise<string> {
   }
   const info = await stat(real);
   if (!info.isDirectory()) refuse(`${label} source ${absolute} resolves to ${real}, which is not a directory`);
+  // The resolved path is what reaches `--mount`, so it is what the grammar check has to cover.
+  // Checking only the declared path leaves a comma-free name that resolves to a comma-bearing
+  // one: Docker then reads the comma as an option delimiter and mounts the prefix before it,
+  // which is a different directory from the one every check above just validated. A sibling of
+  // the Vault named `vault,readonly` truncates to the Vault itself. Review finding 1.
+  refuseUnrepresentable(`${label} source ${absolute} resolves to`, real);
   return real;
 }
 
@@ -139,17 +183,7 @@ async function resolveSource(label: string, source: string): Promise<string> {
  * mount away from being rw, and there is no reason for one to be there.
  */
 export async function resolveMounts(table: MountTable, vaultPaths: readonly string[]): Promise<ResolvedMount[]> {
-  const vault = await Promise.all(
-    vaultPaths.map(async (path) => {
-      const absolute = resolve(path);
-      try {
-        return await realpath(absolute);
-      } catch {
-        // A Vault root that does not exist yet still names a location nothing may mount.
-        return absolute;
-      }
-    }),
-  );
+  const vault = await Promise.all(vaultPaths.map((path) => canonicalise(path)));
 
   const entries: Array<{ label: string; entry: MountEntry }> = [
     { label: 'the workspace', entry: table.workspace },

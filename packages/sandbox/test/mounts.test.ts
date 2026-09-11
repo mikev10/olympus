@@ -47,6 +47,11 @@ describe('mountTable: I1 at run time', () => {
     expect(table.others).toHaveLength(1);
     expect(Object.isFrozen(table)).toBe(true);
     expect(Object.isFrozen(table.others)).toBe(true);
+    // Freezing the containers alone leaves every entry's mode and source writable, so a
+    // validated table could still be edited after the validation that makes it worth
+    // anything. Review finding 6, extended to the `others` entries.
+    expect(Object.isFrozen(table.workspace)).toBe(true);
+    expect(table.others.every((entry) => Object.isFrozen(entry))).toBe(true);
   });
 
   test('refuses a second rw mount, naming it and the invariant', async () => {
@@ -211,6 +216,49 @@ describe('resolveMounts: symlinks and `..` are resolved before the Vault is chec
     const error = await refusal(() => resolveMounts(table, [vault]));
     expect(error.layer).toBe('mount');
     expect(error.message).toContain('overlap');
+  });
+
+  test(`refuses a comma-free source that resolves to a comma-bearing path (${ESCAPE_MECHANISM}) — review finding 1`, async () => {
+    // Docker's --mount grammar splits on commas, so it would mount the prefix before the comma:
+    // a sibling of the Vault named `vault,readonly` truncates to the Vault itself, after every
+    // containment check has passed on the longer name.
+    const decoy = join(base, 'vault,readonly');
+    await mkdir(decoy, { recursive: true });
+    const link = join(base, 'plain-link');
+    await linkTo(decoy, link);
+    expect(link).not.toContain(',');
+
+    const table = mountTable({ workspace: { source: link, target: '/workspace', mode: 'rw' } });
+    const error = await refusal(() => resolveMounts(table, [vault]));
+    expect(error.layer).toBe('mount');
+    expect(error.message).toContain('--mount');
+    expect(error.message).toContain('resolves to');
+  });
+
+  test('refuses a mount beside a Vault root that does not exist yet, reached through a symlinked parent — review finding 3', async () => {
+    // The Vault is declared behind a link and has not been created. Resolving only the part that
+    // exists is what makes the two spellings comparable; leaving it unresolved compares a
+    // resolved source against an unresolved Vault string and finds no overlap.
+    const real = join(base, 'real');
+    await mkdir(real, { recursive: true });
+    const linkedParent = join(base, 'linked-parent');
+    await linkTo(real, linkedParent);
+    const futureVault = join(linkedParent, 'vault');
+
+    const table = mountTable({ workspace: { source: real, target: '/workspace', mode: 'rw' } });
+    const error = await refusal(() => resolveMounts(table, [futureVault]));
+    expect(error.layer).toBe('mount');
+    expect(error.message).toContain('I1');
+  });
+
+  test('allows a mount unrelated to a Vault root that does not exist yet', async () => {
+    // The control for the test above: resolving the missing tail must not turn every absent
+    // Vault path into a refusal of everything.
+    const elsewhere = join(base, 'elsewhere');
+    await mkdir(elsewhere, { recursive: true });
+    const table = mountTable({ workspace: { source: elsewhere, target: '/workspace', mode: 'rw' } });
+    const resolved = await resolveMounts(table, [join(base, 'never-created', 'vault')]);
+    expect(resolved).toHaveLength(1);
   });
 
   test('allows two ro mounts that resolve to the same tree: neither grants a write', async () => {
