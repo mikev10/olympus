@@ -662,3 +662,200 @@ already obliges P2 to mount the workspace with the mode the table gives it.
 That closes the class; narrowing the syscall gap closes one instance of it. No
 new pending entry is added: the obligation P2 already carries covers it, and
 this note names the case so P2 meets it deliberately.
+
+## P2: Sandbox (local Docker)
+
+The unit entry carried four of the five sub-plan parts F1 requires, with no
+acceptance criteria — the same defect P1 had. It was fixed in
+`DECOMPOSITION.md` before any code was written, and the two decisions inside
+that block that were the maintainer's are recorded below.
+
+### D-P2-01: the unit entry gained acceptance criteria before work started
+
+- **Problem:** `Scope`, `Deliver`, `Out of scope` and `Conformance` were present; `Accept` was not. F1 requires all five, and a unit whose done-when is only implied is a unit that argues about done at the end.
+- **Chosen:** an `Accept` block on the P2 entry, written from the `Deliver` and `Conformance` lines it already had, plus the registry obligations P2 owns and the four commands every unit ends on.
+- **Reverse:** delete the block; the unit is underspecified again.
+
+### D-P2-02: no Docker daemon is a failing suite, not a skipped one
+
+- **Problem:** the assertions that prove I1 at the mount layer need a real daemon. A host without one could skip them, and `pnpm conformance` would print green having proven nothing about the substrate every other package's safety rests on.
+- **Chosen, by maintainer direction:** fail closed. A missing daemon fails the assertion and names the requirement. CI runs on `ubuntu-latest`, which has Docker, so the proof runs on every pull request; a contributor without Docker gets a red suite and a message, never a quiet pass.
+- **Rejected — `test.runIf` on daemon presence:** it is warn-and-continue with a report line in front of it. I5 names exactly this: never degrade silently, never let a run continue past a missing check. The one suite that proves I1 is the last place to make an exception.
+- **Rejected — an env-var escape hatch:** it would let a contributor work without Docker, and it would also let CI be configured past the check. Something that can be set will be.
+- **Reverse:** the daemon probe is one function; make it return a skip instead of throwing.
+
+### D-P2-03: the Docker-backed assertions are local to the conformance package; I8's reconciliation entry is re-owned, not silently deferred
+
+- **Problem:** `packages/sandbox` could own these assertions in its own suite and register them with the registry as `external` — but the registry refuses every external assertion until `I8.external-assertion-execution-reconciled` lands, and that entry names P2 as its owner.
+- **Chosen, by maintainer direction:** register them as local `runtime` assertions inside `packages/conformance`, which imports `@olympus-ai/sandbox` and drives the provider directly. This is the shape P1 already used for `I1.vault-implementation-exposes-only-named-operations`, so it needs no new mechanism, and it keeps the proof of I1 in the package whose job is proving invariants.
+- **Cost, paid explicitly:** `pnpm conformance` now requires Docker (D-P2-02), and P2 does not pay `I8.external-assertion-execution-reconciled`. That entry is not left pointing at a unit that declined it: its owner and reason are amended in this unit's diff to name the first unit that actually needs an assertion it cannot run locally. Deferring an owned entry by saying nothing is the thing the ratchet exists to prevent.
+- **Reverse:** build the reconciliation mechanism, move the assertions into `packages/sandbox/test`, and register them with `external()`.
+
+### D-P2-04: the provider is built by `create()`, which probes the daemon first
+
+- **Problem:** `capabilities()` is synchronous and claims `os: 'linux'` and `remote: false`. A provider constructed without ever reaching a daemon would have to answer both with a guess, and every assertion resting on it would be asserting the guess.
+- **Chosen:** a static async `LocalDockerProvider.create()` is the only way to build one. It runs `docker info` and `docker context inspect`, and refuses unless there is a daemon, it serves Linux containers, and its endpoint is a local socket or pipe. The constructor is private and takes the probed facts. `capabilities()` then reports what was established rather than what was hoped.
+- **Consequence:** a remote or Windows-container daemon is a refusal at construction, not a degraded provider. Both are M4b or later, and a provider that provisioned on a remote worker while declaring `remote: false` would break I8 directly.
+- **Reverse:** make the constructor public and default the facts; the three `create` tests fail.
+
+### D-P2-05: the Docker CLI, not the daemon socket
+
+- **Chosen:** every daemon call is `spawn('docker', argv, { shell: false })`. No shell is involved, so nothing a caller supplies can be read as shell syntax, and `appliedControls().runArgs` is the exact argv, which a reviewer can paste into a terminal to get the same container.
+- **Against a socket client:** a hand-rolled HTTP client over a named pipe or Unix socket puts the container's configuration behind code nobody reads, and the flags that carry the limits are the documented, stable surface. The cost is one process per call, which is nothing beside pulling an image.
+- **Reverse:** replace `docker.ts`; nothing outside `src/local/` knows how the daemon is reached.
+
+### D-P2-06: `mountTable` takes an unvalidated shape, and returns the validated one
+
+- **Problem:** typing the validator's input as `MountTable` made its own checks unreachable — the compiler called `entry.mode !== 'ro'` impossible, and lint failed on it, while a second `rw` mount arriving through a cast is exactly the case the check exists for.
+- **Chosen:** `MountTableSpec` carries `mode: string`. Loose in, strict out. The type-level guarantee is not weakened by this and is asserted separately by the compile-error fixture behind `I1.mount-table-single-rw`; this function is the run-time half, for values that reached the process through a cast, a parsed document, or JavaScript.
+- **Also:** `provision` re-validates `spec.mounts` through the same function rather than trusting the `MountTable` it was handed, for the same reason.
+- **Reverse:** narrow `MountTableSpec`; the four cast-driven refusal tests become unreachable.
+
+### D-P2-07: an `allowlist` egress policy is refused
+
+- **Problem:** `EgressPolicy.mode` admits `allowlist`, and enforcing one needs a filtering proxy the container is forced through. Nothing at M1 provides that.
+- **Chosen:** refuse it, at the `egress` layer, naming why. Treating it as deny-all would break a run silently; treating it as allow-all would grant the whole network to a policy that asked for a subset. Either is the silent degrade I5 forbids. `deny-all` carrying `allow` entries is refused too — the policy contradicts itself, and half-applying it is a guess.
+- **Reverse:** implement the proxy, then accept the mode. Nothing else changes.
+
+### D-P2-08: the wall clock bounds the sandbox, not the command
+
+- **Chosen:** `limits.wallClockMs` is a budget measured from `provision`. Each `exec` is bounded by what remains; on expiry the container is destroyed and the refusal names the limit. An `exec` started after the budget is spent is refused rather than run.
+- **Why the container goes with it:** killing only the `docker exec` client leaves whatever it started running inside the container, so the limit that was supposed to bound the work would not have bounded it.
+- **Why not per command:** a station provisions once and runs many commands. A per-command bound puts no ceiling on the total, which is what a runaway agent actually consumes.
+- **A terminated command throws rather than returning an exit code**, following the same reasoning as S1 finding 4c: `ExecResult.exitCode` cannot represent "killed", and inventing one would be a lie.
+- **Reverse:** move the deadline into `exec`; two limit tests fail.
+
+### D-P2-09: path comparison is case-insensitive on every platform
+
+- **Chosen:** every comparison in `local/paths.ts` folds case, including on Linux. Each one decides a refusal, and refusing a pair that only a case-sensitive filesystem would call distinct is the fail-closed direction. The reverse — a Vault path reachable because two spellings looked different — is the failure I1 exists to prevent.
+- **Cost:** on Linux, `/srv/vault` in the deny list refuses a mount of a genuinely different `/srv/Vault`. Rare, and harmless when it happens.
+- **Reverse:** make the fold conditional on `process.platform`.
+
+### D-P2-10: a path carrying a comma or an equals sign is refused
+
+- **Problem:** `--mount` is comma-separated `key=value` pairs, so neither character can be expressed in a source or target. The CLI does not document a quoting form for them.
+- **Chosen:** refuse. Guessing at a quoting grammar risks a mount landing somewhere other than where the table says, which is the failure the whole module exists to prevent.
+- **Reverse:** if a quoting form is ever documented, apply it and drop the check.
+
+### D-P2-11: what is proven behaviourally and what is proven by configuration
+
+- **Behaviourally, inside a container:** the mount modes (a write to an `ro` mount fails, a write to the `rw` workspace lands on the host), the absence of a network (the only interface is `lo`, and a route attempt reports `Network unreachable`), persistence across `exec`, the kernel's name, and the absence of a display and a GPU device.
+- **By the container's own `HostConfig`:** `--cpus`, `--memory` and `--pids-limit`, read back with `docker inspect` rather than from the arguments that were sent, so the assertion sits on what the daemon applied.
+- **Not proven behaviourally:** that the cpu, memory and pid limits *bite*. Provoking them means a fork bomb or a deliberate allocator overrun, which are slow and flaky in CI and would be testing the kernel's cgroup implementation rather than this provider's use of it. Reading them back from `HostConfig` establishes the provider's whole contribution: the limit was requested and the daemon accepted it.
+- **The assertions were mutation-tested rather than assumed.** Twelve deliberate breakages — dropping the `readonly` flag, skipping the Vault containment check, dropping `--network none` and `--pids-limit`, downgrading a second `rw` mount instead of refusing it, letting an over-budget command report success, letting Docker create an absent mount source, and flipping each of the five capability declarations — were each caught by at least one assertion.
+
+### D-P2-12: an ended sandbox keeps its record, and the wall-clock refusal is never masked by a failed removal
+
+- **Problem:** `#end` deleted the handle's record, so `Sandbox.ended` was written and never read, and a sandbox the runtime had itself destroyed on its wall clock reported "not a handle this provider issued" on the next call — the least informative answer available for the most likely real failure. A second defect sat beside it: the timeout path awaited a removal that throws, so a `docker rm` failure replaced the wall-clock refusal with a removal error and the breach went unreported.
+- **Chosen:** the record survives its container. A later `exec` or `destroy` refuses at the `lifetime` layer naming why the sandbox ended, `#require` still refuses a handle that was never issued at the `handle` layer, and `appliedControls()` keeps answering — what was enforced on a sandbox outlives the sandbox, which is the shape an audit needs. `#remove` returns its failure instead of throwing it, so the timeout path reports the breach *and* the failed removal in one refusal rather than trading one for the other.
+- **Cost:** one small record per sandbox, never freed for the life of the provider instance. Accepted: the record is a handful of strings, and losing the evidence of what a sandbox enforced the moment it stops running is the worse trade for a component whose purpose is auditable enforcement. If a long-lived provider ever provisions enough sandboxes for this to matter, the fix is to age records out, not to delete them at destruction.
+- **Reverse:** delete the record in `#end`; the two lifecycle tests naming the `lifetime` layer fail.
+
+### Known limit, and an acceptance criterion narrowed to match: blocked egress is refused, not itemised
+
+The `Accept` bullet on this unit was narrowed during the work, which is
+recorded here rather than done quietly. It first read "a network call from
+inside a `deny-all` sandbox fails, and the refusal is recorded rather than
+merely dropped", written from the entry's original conformance line. What is
+delivered is stated below; the bullet now says that instead.
+
+The unit's conformance line asks for blocked egress to be "refused and logged".
+The refusal is real and recorded: an unenforceable `allowlist` is refused by
+name, and `appliedControls()` records `network: 'none'` beside the exact
+`docker run` argv, which is the evidence that deny-all was applied rather than
+assumed. What does not exist is a log line per blocked connection. `--network
+none` is enforced by the kernel, which drops the attempt before any userspace
+component of ours could see it; itemising attempts needs the same filtering
+proxy `allowlist` needs. Recorded here rather than claimed, and it arrives with
+the proxy or not at all.
+
+## P2 amendment: external adversarial review
+
+An external reviewer (Gemini, temporary chat, bundle only) returned six
+findings. Four hold and were fixed on the unit branch; two hold in part and are
+recorded below. The full triage, with the verification evidence for each, is
+`docs/reviews/2026-09-11-P2-sandbox-adversarial-triage.md`.
+
+One was a genuine I1 bypass: a running container was handed the Vault,
+read-write, with every containment check passing.
+
+### D-P2-13: the grammar check runs on the resolved path, because that is the path Docker is given
+
+- **Problem:** `refuseUnrepresentable` ran on the path the caller declared; `mountArgument` interpolated the path after `realpath`. A comma-free declared source resolving to a comma-bearing one reached `docker run` intact, and Docker's `--mount` grammar splits on the comma and mounts the *prefix before it* — a different directory from the one every check validated, created by Docker if absent. A sibling of the Vault named `vault,readonly` truncates to the Vault. `containsPath` is right to find no overlap between the two, which is what made the hole invisible.
+- **Chosen:** check the resolved path as well, inside `resolveSource`, before it can reach an argument. The rule is that whatever string ends up in the argv is the string the grammar check must have seen.
+- **Note on the finding:** the reviewer described this as overriding the `target=` key. That is not constructible — a `target` payload needs a `/`, which no filesystem allows in a path component — and fixing what was described would have left the real hole open. The conclusion was right, the mechanism was not, and only running it settled which.
+- **Asserted:** a mount-layer test, and `I1.mount-layer-refuses-a-vault-mount` drives the decoy through the real provider. Both fail when the check is reverted.
+- **Reverse:** drop the second `refuseUnrepresentable` call; both assertions fail.
+
+### D-P2-14: the wall clock arms a timer at provision; supersedes the enforcement half of D-P2-08
+
+- **Problem:** D-P2-08 made `wallClockMs` the sandbox's lifetime budget, but it was only ever consulted inside `exec`. A task that started background work and was never called again outlived its budget entirely. Measured: a 1500 ms sandbox still running after 4000 ms.
+- **Chosen:** `provision` arms a `setTimeout` that destroys the container when the budget expires, independent of any call. It is `unref()`d, because under I9 the runtime is a service and a pending timer must never be what keeps its process alive. `#end` clears it; `#expire` records a removal failure on the sandbox rather than raising an unhandled rejection, since nothing awaits it.
+- **Why here and not in an orchestrator,** which is what the reviewer asked: `wallClockMs` is a field of `SandboxSpec` and this unit's deliverables name the wall-clock limit among the controls the provider applies. A limit the provider accepts and does not enforce is the silent degrade I5 refuses. An orchestrator-level budget is a fine additional control; it cannot be the reason this one is missing.
+- **The budget semantics of D-P2-08 stand.** Only the enforcement mechanism changed, from lazy to self-firing.
+- **Reverse:** disarm the timer; the regression test in `local.test.ts` fails.
+
+### D-P2-17: ending a sandbox is one removal, awaited by whoever asks second
+
+- **Problem, found by CI and not locally:** D-P2-14's timer and an `exec` that outlives its budget expire at the same instant and both wanted the container gone, so both issued `docker rm --force` for it. The second returns as soon as the first has marked the container, while removal is still in progress, and a caller checking immediately afterwards still finds it. The pre-existing wall-clock assertion caught this on the Linux runner; a Windows daemon removes fast enough that it does not reproduce there.
+- **Chosen:** `Sandbox.ending` holds the single in-flight removal. `#end` returns it to whoever arrives second instead of starting another, so both callers wait for the same `docker rm` and neither returns before the container is gone.
+- **A test was written for this and then deleted.** It raced two `destroy` calls, which are already serialised by the `ended` flag set before the first `await`; it passed with the fix reverted and so proved nothing. A safety test that cannot fail is worse than none, because the suite then reports coverage it does not have. The guard is the wall-clock assertion in `local.test.ts`, which is where the failure actually surfaced, and its comment now says so.
+- **Honest limit:** that guard is timing-dependent and enforces this on Linux CI rather than on every host.
+- **Reverse:** drop the `ending` guard; CI fails on Linux and the local suite does not.
+
+### D-P2-15: an absent Vault root is canonicalised, not passed through unresolved
+
+- **Problem:** a Vault root that did not exist yet had its `realpath` failure caught and the unresolved path returned, so containment compared a resolved mount source against an unresolved Vault string and found no overlap. An agent could hold read-write on the directory where the Vault was about to be created, and the refusal would arrive only once it existed — a fail-open on an I1 check, which is the one category that must fail closed.
+- **Chosen:** `canonicalise` resolves the deepest existing ancestor and appends the missing tail, so an absent root still compares as the location it will occupy.
+- **Rejected — dropping an unresolvable Vault path:** a Vault root that does not exist yet still names somewhere nothing may mount.
+- **Asserted:** the refusal, plus a control that an unrelated absent Vault root does not become a refusal of everything.
+- **Reverse:** restore the `catch { return absolute; }`; two tests fail.
+
+### D-P2-16: every mount entry is frozen, not only the containers holding them
+
+- **Problem:** `mountTable` froze the returned object and the `others` array, leaving the `workspace` entry writable. The reviewer named that; it stopped one short, because the `others` entries were unfrozen too.
+- **Chosen:** freeze every entry as well as both containers. A validated table whose entries can still be edited afterwards is worth nothing, and that is as true of `others` as of `workspace`.
+- **Severity, honestly:** defence in depth, not a live bypass — the table does not currently escape to untrusted scope.
+- **Reverse:** freeze only the containers; the extended freeze assertion fails.
+
+### Known limit, owed elsewhere: the Vault prototype assertion is narrow
+
+`I1.vault-implementation-exposes-only-named-operations` enumerates
+`Object.getOwnPropertyNames(LocalVault.prototype)`, so it would not see methods
+reached through a superclass, exposed as symbols, or assigned to the instance in
+the constructor. The observation is correct and identifies no present defect:
+`LocalVault` has no superclass, no symbol-keyed members and no instance
+properties, so the narrow check and a broad one return the same answer today.
+The gap would open if inheritance were ever added.
+
+Not fixed here. It is P1's assertion, untouched by this unit, and in the review
+bundle only because `registry/i1.ts` was edited beside it. A review does not
+widen a unit. Recorded rather than made a pending registry entry because it
+names no unasserted capability — the invariant is asserted; the assertion could
+be broader — and because inventing an owner for work no decomposition unit
+carries would put a name on the ratchet that nothing redeems.
+
+### Known limit: `sandbox.remote` verifies the declaration, not the fact
+
+The assertion compares `capabilities().remote` against the endpoint
+`probeDaemon` read from `docker context inspect`. It is not tautological — it
+fails when the declaration is flipped, which was confirmed by mutation — but
+`probeDaemon` has already refused a non-local endpoint by the time it runs, so
+the comparison can only catch a mis-declaration, never a provider that
+misidentifies a remote daemon as local.
+
+The reviewer's suggested remedy, observing locality from inside the container,
+does not work: the container runs with `--network none` and has no interface but
+loopback, and nothing visible from inside establishes where its daemon lives.
+The only honest local/remote discriminator available is comparing the
+container's view of a known host path against the host's own — a new mechanism
+rather than a tightening, and out of scope for this unit.
+
+### Unreviewed, and named so the next review can cover it
+
+The reviewer left prompt items 3 (fail-open conditions) and 4 (language-level
+escape hatches) empty. Item 3 was covered in substance anyway — finding 3 is a
+fail-open. Item 4 was not touched, and it is what this unit most needed a second
+opinion on: D-P2-06 deliberately widened an input type to `mode: string` so the
+run-time guards would not be compiled away, and the tests reach those guards
+through `as unknown as` casts. Nothing in this review examined that choice.
