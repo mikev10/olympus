@@ -795,6 +795,14 @@ read-write, with every containment check passing.
 - **The budget semantics of D-P2-08 stand.** Only the enforcement mechanism changed, from lazy to self-firing.
 - **Reverse:** disarm the timer; the regression test in `local.test.ts` fails.
 
+### D-P2-17: ending a sandbox is one removal, awaited by whoever asks second
+
+- **Problem, found by CI and not locally:** D-P2-14's timer and an `exec` that outlives its budget expire at the same instant and both wanted the container gone, so both issued `docker rm --force` for it. The second returns as soon as the first has marked the container, while removal is still in progress, and a caller checking immediately afterwards still finds it. The pre-existing wall-clock assertion caught this on the Linux runner; a Windows daemon removes fast enough that it does not reproduce there.
+- **Chosen:** `Sandbox.ending` holds the single in-flight removal. `#end` returns it to whoever arrives second instead of starting another, so both callers wait for the same `docker rm` and neither returns before the container is gone.
+- **A test was written for this and then deleted.** It raced two `destroy` calls, which are already serialised by the `ended` flag set before the first `await`; it passed with the fix reverted and so proved nothing. A safety test that cannot fail is worse than none, because the suite then reports coverage it does not have. The guard is the wall-clock assertion in `local.test.ts`, which is where the failure actually surfaced, and its comment now says so.
+- **Honest limit:** that guard is timing-dependent and enforces this on Linux CI rather than on every host.
+- **Reverse:** drop the `ending` guard; CI fails on Linux and the local suite does not.
+
 ### D-P2-15: an absent Vault root is canonicalised, not passed through unresolved
 
 - **Problem:** a Vault root that did not exist yet had its `realpath` failure caught and the unresolved path returned, so containment compared a resolved mount source against an unresolved Vault string and found no overlap. An agent could hold read-write on the directory where the Vault was about to be created, and the refusal would arrive only once it existed — a fail-open on an I1 check, which is the one category that must fail closed.

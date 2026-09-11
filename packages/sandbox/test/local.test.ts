@@ -253,6 +253,11 @@ describe('limits', () => {
     expect(error.layer).toBe('limits');
   });
 
+  // This is the assertion that guards the single-removal serialisation in `#end`. The wall-clock
+  // timer and this exec's own timeout expire at the same instant and both want the container
+  // gone; two concurrent `docker rm` calls let the second return while removal is still in
+  // progress, and the container is still there when the line below looks. It reproduces on Linux
+  // and not on a Windows daemon, so CI is where it is actually enforced.
   test('a command that outlives the wall-clock budget is terminated and the container destroyed', async () => {
     const handle = await provision({ limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 2000 } });
     const containerId = provider.appliedControls(handle).containerId;

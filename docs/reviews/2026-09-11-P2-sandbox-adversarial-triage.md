@@ -246,6 +246,29 @@ endorsement is worth something — but a reviewer agreeing with the question it
 was handed is the weakest of the seven answers, and it is recorded as
 concurrence, not as validation.
 
+## A defect in the fix for finding 2, found by CI
+
+The first version of the finding-2 fix was wrong, and the record should say so
+rather than present the second version as though it were the first.
+
+Arming a timer gave the sandbox two independent destroyers: the timer and an
+`exec` that outlives its budget expire at the same instant and both issued
+`docker rm --force`. The second returns as soon as the first has marked the
+container, while removal is still in progress, so the pre-existing assertion
+`a command that outlives the wall-clock budget is terminated and the container
+destroyed` found the container still there. It failed on the Linux runner and
+passed on the Windows development host, which is why it reached CI at all.
+
+Fixed in D-P2-17: `Sandbox.ending` holds one in-flight removal, and whoever
+arrives second awaits it instead of starting another.
+
+A regression test for it was written and then deleted. It raced two `destroy`
+calls, which are already serialised by the `ended` flag set before the first
+`await`, so it passed with the fix reverted and discriminated nothing. Keeping
+it would have added a green line claiming coverage that did not exist. The real
+guard is the wall-clock assertion above, annotated in place to say what it
+protects and that the race reproduces on Linux and not on Windows.
+
 ## Gates after the fixes
 
 `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm conformance` — all pass. No

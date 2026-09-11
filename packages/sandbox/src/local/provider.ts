@@ -65,6 +65,16 @@ interface Sandbox {
    * anyone calls `exec` again. Cleared when the sandbox ends by another route.
    */
   timer?: NodeJS.Timeout | undefined;
+  /**
+   * The one in-flight removal. The wall-clock timer and an `exec` that
+   * outlives its budget both expire at the same instant and both want the
+   * container gone, so without this they issue two concurrent `docker rm`
+   * calls for the same container: the second returns as soon as the first has
+   * marked it, while removal is still in progress, and a caller that checks
+   * immediately afterwards still finds it. One promise, awaited by whoever
+   * arrives second.
+   */
+  ending?: Promise<Error | undefined> | undefined;
 }
 
 function checkLimits(limits: SandboxSpec['limits']): void {
@@ -281,12 +291,16 @@ export class LocalDockerProvider implements SandboxProvider {
    * that is already refusing for a better reason can decide which to report.
    */
   async #end(sandbox: Sandbox, why: string): Promise<Error | undefined> {
+    // Whoever gets here second awaits the first removal rather than starting another, and so
+    // does not return until the container is actually gone.
+    if (sandbox.ending !== undefined) return sandbox.ending;
     sandbox.ended = why;
     if (sandbox.timer !== undefined) {
       clearTimeout(sandbox.timer);
       sandbox.timer = undefined;
     }
-    return this.#remove(sandbox.controls.containerId);
+    sandbox.ending = this.#remove(sandbox.controls.containerId);
+    return sandbox.ending;
   }
 
   /**
@@ -296,7 +310,7 @@ export class LocalDockerProvider implements SandboxProvider {
    * rejection.
    */
   async #expire(sandbox: Sandbox, budgetMs: number): Promise<void> {
-    if (sandbox.ended !== undefined) return;
+    if (sandbox.ending !== undefined) return;
     const removal = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
     if (removal !== undefined) {
       sandbox.ended = `it exceeded its wall-clock limit of ${String(budgetMs)}ms and could not be destroyed: ${removal.message}`;
