@@ -2,11 +2,12 @@ import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FixtureTask, RunRequest } from '@olympus-ai/api';
-import type { AutonomyLevel, RunId, TaskId } from '@olympus-ai/core';
+import type { AutonomyLevel, RunId, StationId, TaskId } from '@olympus-ai/core';
 import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
+import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 
 /** The declaration order the entry point promises: vault, sandbox, driver, then the line itself. */
 const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine'];
@@ -168,14 +169,88 @@ export const I5: InvariantEntry = {
         });
       },
     }),
+    runtime({
+      id: 'I5.over-request-refused',
+      title:
+        'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+      run: async () => {
+        const { StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const policy = engine.resolvePolicy(grantingDocument());
+
+        // Three bounds, three different values, so each refusal names the one
+        // that actually bit. `build` is capped below the role ceiling, which is
+        // itself below the global cap.
+        const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+          { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+          { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+        ];
+        for (const { level, station, bound } of overRequests) {
+          const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+          if (outcome.ok) {
+            throw new Error(
+              `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                'agree to, while reporting success.',
+            );
+          }
+          if (outcome.reason !== 'exceeds-cap') {
+            throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+          }
+          if (Object.hasOwn(outcome, 'level')) {
+            throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+          }
+          if (outcome.detail === '') {
+            throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+          }
+        }
+
+        // The global cap, which the fixture document sets to the maximum and
+        // so can never bite on its own. Lowered here, it must refuse a request
+        // the station cap and role ceiling would both have allowed.
+        const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+        const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+        if (global.ok) {
+          throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+        }
+        if (global.reason !== 'exceeds-cap') {
+          throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+        }
+        if (!global.detail.includes('global L0')) {
+          throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+        }
+        if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+          throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+        }
+
+        // The control: a request within every bound is granted, and granted at
+        // the level requested rather than raised or lowered to a cap. An engine
+        // that refused everything would satisfy the loop above.
+        for (const level of [0, 1] as const) {
+          const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+          if (!outcome.ok) {
+            throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+          }
+          if (outcome.level !== level) {
+            throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+          }
+        }
+      },
+    }),
   ],
   pending: [
     pending({
-      id: 'I5.over-request-refused',
-      owner: 'P3',
+      id: 'I5.policy-document-load-is-hardened',
+      owner: 'P9',
       reason:
-        'resolveAutonomy must return a PolicyRefusal, never a lower level, when the requested level exceeds ' +
-        'the station cap or the global cap. Needs the engine P3 delivers.',
+        'P3 validates an already-parsed policy document; nothing yet reads policy.yaml off a disk, and no package ' +
+        'carries a YAML parser (D-P3-01). The loader is the first code to touch untrusted-shaped bytes on their way ' +
+        'into the Vault, so the unit that adds it owes four refusals, not four configured options: an exact version ' +
+        'pin with no caret on the parser; maxAliasCount 0, so an alias bomb cannot expand; a byte cap on the ' +
+        'document; and a nesting-depth limit. Each must be asserted as a refusal that fails when the setting is ' +
+        'relaxed. Owner is P9 because P4 is handed a resolved Policy and reads no file, and packages/api is the ' +
+        'run-creation path; a unit before P9 that needs a Vault-resident policy at run time inherits this entry by ' +
+        'editing the owner.',
     }),
     pending({
       id: 'I5.missing-check-or-shrunken-suite-refuses',

@@ -897,3 +897,17 @@ through `as unknown as` casts. Nothing in this review examined that choice.
 - **Chosen:** the default carries `globalCap: 2`, `triggers.enabled: ['human']`, its protected paths, and `roles: {}`. An empty role map means every `resolveCapabilities` call refuses, which is what default deny means (I4): a shipped policy that grants a role something before any role is defined would be a grant nobody authored. P4 and P5 add roles when they have them.
 - **Rejected — a plausible builder role:** it would be the first capability grant in the system, written by the unit least able to say what a builder needs.
 - **Reverse:** add roles to the default; every one is a grant that must be justified in the diff.
+
+### D-P3-06: an omitted station cap is no cap, not L0
+
+- **Ambiguous:** F1 gives the effective level as `min(requested, stationCap, globalCap)`, and `stationCaps` is `Partial`. Nothing says what an omitted station means. Under I4 the default-deny reading is L0, which would deny every station a document does not enumerate.
+- **Chosen:** an omitted station cap adds no restriction; the bound is the tightest of the global cap, the station cap where the document sets one, and the role's own `autonomyCeiling`. R-F2-08 made `approvals` total precisely because a missing approval would leave something downstream to decide, and it deliberately left `stationCaps` sparse **in the resolved `Policy` too** — the contract saying a station cap is a tightening control rather than a grant. Omitting one cannot widen anything: the global cap and the role ceiling still bound the request, the role must be defined at all and must list the station, and every approval still reads `human-required` until a document says otherwise. So no capability is granted by omission, which is what I4 asks.
+- **Rejected — omitted means L0:** it makes `globalCap` dead in the shipped default, and forces every author to enumerate all ten stations to get any autonomy at all. That is the ergonomics problem R-F2-08 rejected for approvals, reintroduced one field over; and unlike approvals, the omission here cannot grant.
+- **Asserted:** `resolveAutonomy` at the global cap with an empty `stationCaps` is granted, one above it is refused, and a station cap tighter than the global cap bites at that station only.
+- **Reverse:** treat a missing entry as 0 and make `Policy.stationCaps` total in the same edit, since a resolved policy would then have a defaulting rule an auditor could not read off the table.
+
+### D-P3-07: a defect report names a role as a plain string
+
+- **Problem:** `UngrantedTool` needs to say which role holds an unoffered tool. `Record<RoleId, CapabilityScope>` is not indexable by a plain string and `Object.keys` over it yields `string[]`, so recovering a `RoleId` from the policy's own keys would take a cast to a branded type — and the brands are load-bearing (CLAUDE.md), so casting into one to build a message is the wrong trade.
+- **Chosen:** `UngrantedTool.role` is `string`. The value is read out of the policy for a message; a defect report is not a capability, and nothing downstream uses it to look anything up.
+- **Reverse:** brand it and add the cast, with a comment naming what guarantees it.
