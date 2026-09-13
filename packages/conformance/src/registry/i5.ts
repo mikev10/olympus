@@ -237,6 +237,50 @@ export const I5: InvariantEntry = {
         }
       },
     }),
+    runtime({
+      id: 'I5.malformed-document-refused-at-resolve',
+      title:
+        'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+      run: async () => {
+        const { StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const document = grantingDocument();
+        const scope = document.roles[GRANTED_ROLE];
+        if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+
+        // Each of these is what a caller produces by writing `value as
+        // PolicyDocument`. Without the guard, the first resolves a global cap
+        // of 99 and grants every level; the rest widen a scope the document
+        // never authorised.
+        const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+          { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+          { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+          { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+          { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+        ];
+        for (const { what, value } of rogues) {
+          let refused = false;
+          try {
+            engine.resolvePolicy(value as never);
+          } catch {
+            refused = true;
+          }
+          if (!refused) {
+            throw new Error(
+              `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                'only while every caller remembers to validate first is not closed.',
+            );
+          }
+        }
+
+        // The control: a genuine document resolves. A guard that threw on
+        // everything would satisfy the loop above and break the engine.
+        const policy = engine.resolvePolicy(document);
+        if (policy.globalCap !== document.globalCap) {
+          throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+        }
+      },
+    }),
   ],
   pending: [
     pending({

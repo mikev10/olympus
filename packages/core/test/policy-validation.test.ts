@@ -267,3 +267,33 @@ describe('the validated document is built, not passed through', () => {
     expect(validated.roles[BUILDER]?.tools).toStrictEqual(['read']);
   });
 });
+
+describe('an egress entry names one host (D-P3-08, review finding 1)', () => {
+  test.each(['*', '*.example.com', 'exam?le.com', '0.0.0.0/0', '::/0', 'https://example.com', 'example.com/v2', 'exa mple.com'])(
+    'refuses %s, which denotes a set or is not a host at all',
+    (host) => {
+      const document = authored();
+      document.roles = { builder: { ...scope(), network: { egress: [host] } } };
+      expect(lines(refuse(document)).join('\n')).toContain('names one host');
+    },
+  );
+
+  test('the refusal names every offending entry, not just the first', () => {
+    const document = authored();
+    document.roles = { builder: { ...scope(), network: { egress: ['ok.example.com', '*', '10.0.0.0/8'] } } };
+    const reported = lines(refuse(document)).join('\n');
+    expect(reported).toContain('"*"');
+    expect(reported).toContain('"10.0.0.0/8"');
+    expect(reported).not.toContain('"ok.example.com"');
+  });
+
+  test('a literal host, a subdomain, and a bare IP are still accepted', () => {
+    const document = authored();
+    document.roles = {
+      builder: { ...scope(), network: { egress: ['registry.npmjs.org', 'api.github.com', '192.0.2.10', 'localhost:8080'] } },
+    };
+    expect(accept(document).roles[BUILDER]?.network.egress).toStrictEqual([
+      'registry.npmjs.org', 'api.github.com', '192.0.2.10', 'localhost:8080',
+    ]);
+  });
+});

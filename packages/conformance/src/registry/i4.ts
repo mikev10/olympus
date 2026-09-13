@@ -170,8 +170,54 @@ export const I4: InvariantEntry = {
         }
       },
     }),
+    runtime({
+      id: 'I4.egress-entry-names-one-host',
+      title:
+        'an egress host list carrying a wildcard, a path, a prefix length, or whitespace is refused; a list of literal hosts is accepted, so the refusal is the entry being read and not the list being rejected',
+      run: async () => {
+        const { validatePolicyDocument } = await import('@olympus-ai/core');
+        const document = grantingDocument();
+        const scope = document.roles[GRANTED_ROLE];
+        if (scope === undefined) throw new Error('I4: the fixture document defines no granted role');
+
+        // Refusing the bare string 'all' while accepting ['*'] would leave the
+        // authored form reading as an explicit allowlist while denoting every
+        // host. Each of these denotes a set, or is not a host at all.
+        for (const entry of ['*', '*.example.com', '0.0.0.0/0', '::/0', 'https://example.com', 'exa mple.com']) {
+          const widened = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: [entry] } } } };
+          const outcome = validatePolicyDocument(widened);
+          if (outcome.ok) {
+            throw new Error(
+              `I4: a policy granting egress to ${JSON.stringify(entry)} was accepted. An egress list admits no ` +
+                'wildcard, so an entry that denotes a set makes a restrictive-looking policy unrestricted.',
+            );
+          }
+        }
+
+        // The control: literal hosts are accepted, so the check above is the
+        // entry being read rather than every list being refused.
+        const literal = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: ['registry.npmjs.org', '192.0.2.10'] } } } };
+        const accepted = validatePolicyDocument(literal);
+        if (!accepted.ok) {
+          throw new Error(`I4: a list of literal hosts was refused: ${accepted.defects.map((d) => d.problem).join('; ')}`);
+        }
+      },
+    }),
   ],
   pending: [
+    pending({
+      id: 'I4.approval-outcome-gates-the-station',
+      owner: 'P4',
+      reason:
+        'resolvePolicy builds the total forty-key approvals table and nothing reads it. resolveAutonomy answers cap '
+        + 'arithmetic only, by design: approval evaluation is P4 and trigger admission is M2, both on P3 out-of-scope '
+        + 'list. So a policy can carry approvals["build:2"] = "blocked" and resolveAutonomy still returns '
+        + '{ ok: true, level: 2 }. P3 pins that boundary with a test so a later change to it is deliberate, but a '
+        + 'table nobody consults is a control that does not exist. P4 must refuse to advance a station:level whose '
+        + 'approval cell is blocked, and require a human for human-required, and assert both. Surfaced by the P3 '
+        + 'external review, finding 3, and by its second framing question: which later callers may treat the engine '
+        + 'answer as sufficient. The answer recorded in D-P3-10 is none.',
+    }),
     pending({
       id: 'I4.driver-tool-inventory-validated',
       owner: 'P5',

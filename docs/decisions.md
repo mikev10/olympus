@@ -911,3 +911,123 @@ through `as unknown as` casts. Nothing in this review examined that choice.
 - **Problem:** `UngrantedTool` needs to say which role holds an unoffered tool. `Record<RoleId, CapabilityScope>` is not indexable by a plain string and `Object.keys` over it yields `string[]`, so recovering a `RoleId` from the policy's own keys would take a cast to a branded type — and the brands are load-bearing (CLAUDE.md), so casting into one to build a message is the wrong trade.
 - **Chosen:** `UngrantedTool.role` is `string`. The value is read out of the policy for a message; a defect report is not a capability, and nothing downstream uses it to look anything up.
 - **Reverse:** brand it and add the cast, with a comment naming what guarantees it.
+
+## P3 amendment: external adversarial review
+
+An external reviewer (Grok, temporary chat, bundle only — the first xAI review,
+so family rotation was met) returned five findings plus three inventory
+sections. Three hold as descriptions of the code and were reproduced by
+execution; two are observations that name no defect. Two were fixed on the unit
+branch, one is recorded as a boundary with a new pending registry entry. The
+full triage, with the verification evidence for each, is
+`docs/reviews/2026-09-13-P3-policy-engine-adversarial-triage.md`.
+
+The review's most valuable content was not a finding. Item 7 asked which later
+callers may treat this engine's answer as sufficient — see D-P3-10.
+
+### D-P3-08: an egress entry names one host
+
+- **Problem:** `validateEgress` refused the bare string `'all'` or `'*'`, then
+  accepted any non-empty string *inside* the array. `{ egress: ['*'] }`
+  validated, resolved, and came back out of `resolveCapabilities` as the grant.
+  So did `'*.example.com'`, `'0.0.0.0/0'`, and `'https://example.com'`. The
+  authored form reads as an explicit allowlist while denoting every host.
+- **Consequence, separated from the defect:** not a live bypass today, and the
+  reviewer was right to ask for that to be confirmed before treating it as
+  high. `CapabilityScope.network.egress` and `SandboxSpec.egress` are different
+  types, no code maps one to the other, and `LocalDockerProvider` refuses
+  `allowlist` by name (D-P2-07). A wildcard host list therefore cannot reach an
+  enforcement point. It is a schema gap and a trap laid for whichever unit can
+  enforce an allowlist.
+- **Chosen:** refuse an entry containing a glob wildcard, a path or
+  prefix-length separator, a backslash, or whitespace. The rule is narrow and
+  statable — *an entry denotes a single host* — and it is enforced where the
+  document is read rather than where it is applied.
+- **Rejected — a hostname grammar:** label lengths, permitted characters, IDN,
+  and whether a port or a CIDR range is admissible are decisions for the unit
+  that can actually enforce an allowlist, and inventing them here would refuse
+  legitimate values on a guess.
+- **Honest limit:** the rule catches entries that denote *every* host and
+  entries that are not hosts. It does not catch a narrower range written
+  without a slash, and it is not a validation that a host exists or is
+  reachable. `10.0.0.0/8` is refused because of the slash, not because the
+  range was understood.
+- **Asserted:** `I4.egress-entry-names-one-host`, live, with a literal-host
+  control so the assertion cannot pass by refusing every list. Mutation-checked:
+  accepting any non-empty entry fails it.
+- **Reverse:** drop the `isHostLiteral` filter; the assertion and three unit
+  tests fail.
+
+### D-P3-09: resolvePolicy validates its own input, because the parameter type is a claim
+
+- **Problem:** `resolvePolicy(doc: PolicyDocument)` trusted the type. A caller
+  writing `junk as PolicyDocument` reached it with `globalCap: 99`, a role
+  ceiling of 99, or a station id that is not one of the ten, and every one flowed
+  through resolution into a grant. Reproduced: `globalCap: 99` resolved, and
+  `resolveAutonomy(3, 'build', …)` then returned `{ ok: true, level: 3 }`. The
+  narrowing was optional at the only runtime entry that matters.
+- **Chosen:** `resolvePolicy` runs `validatePolicyDocument` on its argument and
+  throws, naming the defects, when it does not validate. I5 says fail closed,
+  and a control that holds only while every caller remembers to compose two
+  functions in the right order is not closed. It runs once at load, so the cost
+  of re-validating an already-validated document is one pass.
+- **Why a throw:** `PolicyEngine.resolvePolicy(doc): Policy` returns a `Policy`,
+  not a result union, and widening it is an edit to an F2 contract file — an
+  amendment, and on this unit's out-of-scope list. A throw is the fail-closed
+  option available without one.
+- **The stronger fix, not taken here:** brand the validated document so
+  `resolvePolicy` accepts only a value `validatePolicyDocument` produced, the
+  way `UntrustedPayload` works. That makes the composition unskippable at
+  compile time rather than caught at run time. It changes the contract
+  signature, so it is an amendment and belongs between units, not inside one.
+  Recorded here so it is not lost.
+- **Asserted:** `I5.malformed-document-refused-at-resolve`, live, four rogue
+  documents plus a genuine one as the control. Mutation-checked: reverting the
+  guard fails it.
+- **Reverse:** remove the validation call; the assertion and six unit tests
+  fail.
+
+### D-P3-10: no later caller may treat this engine's answer as sufficient
+
+- **The reviewer's question,** and the most useful thing in the review: "which
+  later readers are allowed to treat `resolveAutonomy` / `resolveCapabilities`
+  as sufficient, and which must still consult approvals, trigger caps, and the
+  tool inventory? If any caller only asks the engine, findings 2 and 3 become
+  the production bypass."
+- **The answer: none.** `resolveAutonomy` answers cap arithmetic over three
+  bounds and nothing else. It does not read `approvals` and does not read
+  `triggers.maxAutonomy`, so a policy carrying `approvals['build:2'] = 'blocked'`
+  and `triggers.maxAutonomy.human = 0` still returns `{ ok: true, level: 2 }`.
+  Reproduced. This is by design — approval evaluation is P4 and trigger
+  admission is M2, both on this unit's out-of-scope list — but "by design" is
+  not a control.
+- **Chosen:** three things rather than a comment. The boundary is pinned by
+  tests, so a later change that makes the engine consult either table fails them
+  and is therefore deliberate. The obligation on the consuming unit is a pending
+  registry entry, `I4.approval-outcome-gates-the-station`, owned by P4, which
+  raises the I4 baseline from 1 to 2 — a deliberate edit, visible in the diff,
+  and the instrument that counts where prose does not. And this entry records
+  the answer so P4 does not have to re-derive it.
+- **Not fixed here:** making `resolveAutonomy` consult the approvals table would
+  absorb P4's work into P3 on a reviewer's suggestion. The out-of-scope list is
+  binding, and a review does not widen a unit.
+- **Reverse:** have `resolveAutonomy` read `approvals` and `triggers.maxAutonomy`;
+  the three boundary tests fail and the pending entry should then be paid here
+  rather than by P4.
+
+### Findings that named no defect
+
+- **The `as Record<ApprovalKey, ApprovalOutcome>` in `totalApprovals`** (finding
+  4). The reviewer confirmed the runtime count check makes the assertion honest
+  and that a drift between the two lists throws at resolve time — fail loud, not
+  fail open — and suggested optionally building the record without the
+  assertion. Not taken: TypeScript cannot prove a loop assigned every key of a
+  union, `Object.fromEntries` returns an index-signature type that is not
+  assignable to the total record, and a forty-entry literal would defeat the
+  derivation the record exists for. The assertion plus the throw is the honest
+  arrangement. No change.
+- **Shallow freeze** (finding 5). The reviewer traced `cloneScope` and concluded
+  it freezes the arrays and the nested `network` and `budget` objects, and that
+  what freeze does not stop — a caller replacing the `Policy` reference it holds
+  — is not a widen of the engine's copy. Agreed, and not preventable by any
+  means available to a function that returns a value. No change.

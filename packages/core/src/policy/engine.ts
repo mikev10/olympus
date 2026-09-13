@@ -15,6 +15,7 @@
  */
 import type { AutonomyLevel, RoleId, StationId } from '../run/types.js';
 import { APPROVAL_KEYS, STATION_IDS, AUTONOMY_LEVELS } from './constants.js';
+import { formatDefects, validatePolicyDocument } from './validation.js';
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityResolution, CapabilityScope,
   Policy, PolicyDocument, PolicyEngine, PolicyResolution, TriggerPolicy,
@@ -154,16 +155,36 @@ export class StrictPolicyEngine implements PolicyEngine {
    * Runs once at load. The result is deeply frozen and shares no object with
    * the document it came from, so a caller holding either cannot alter what
    * the runtime hashes into the Vault.
+   *
+   * The document is validated here even though the parameter is already typed
+   * `PolicyDocument` (D-P3-09). The type is a compiler claim, and a caller that
+   * asserts past the compiler — `junk as PolicyDocument` — otherwise reaches
+   * this function with `globalCap: 99`, a station id that is not one of the
+   * ten, or a role scope of any shape at all, and every one of those flows
+   * through resolution into a grant. I5 says fail closed, and a control that
+   * only works when the caller remembers to compose two functions in the right
+   * order is not closed. Re-validating a document that was already validated
+   * costs one pass at load.
    */
   resolvePolicy(doc: PolicyDocument): Policy {
+    const checked = validatePolicyDocument(doc);
+    if (!checked.ok) {
+      throw new Error(
+        'policy: resolvePolicy was given a value that does not validate as a PolicyDocument. '
+        + 'The parameter type says it is one, so this value reached here through an assertion '
+        + 'rather than through validatePolicyDocument. Refused rather than resolved:\n'
+        + formatDefects(checked.defects),
+      );
+    }
+    const valid = checked.document;
     return frozen({
-      globalCap: doc.globalCap,
-      stationCaps: frozen({ ...doc.stationCaps }),
-      approvals: totalApprovals(doc.approvals),
-      roles: cloneRoles(doc.roles),
-      protectedPaths: frozenCopy(doc.protectedPaths),
-      triggers: cloneTriggers(doc.triggers),
-      concurrency: frozen({ ...doc.concurrency }),
+      globalCap: valid.globalCap,
+      stationCaps: frozen({ ...valid.stationCaps }),
+      approvals: totalApprovals(valid.approvals),
+      roles: cloneRoles(valid.roles),
+      protectedPaths: frozenCopy(valid.protectedPaths),
+      triggers: cloneTriggers(valid.triggers),
+      concurrency: frozen({ ...valid.concurrency }),
     });
   }
 

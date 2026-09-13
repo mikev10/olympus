@@ -244,9 +244,29 @@ function validateBudget(value: unknown, path: string, defects: PolicyDefect[]): 
 }
 
 /**
+ * Characters that mean an entry is not one host: the glob wildcards, a path or
+ * prefix-length separator, a backslash, and any whitespace. The rule this
+ * enforces is narrow and statable — *an egress entry denotes a single host* —
+ * rather than a hostname grammar, which belongs to whichever unit can actually
+ * enforce an allowlist (D-P3-08).
+ */
+const NOT_ONE_HOST = /[*?/\\\s]/u;
+
+function isHostLiteral(value: string): boolean {
+  return !NOT_ONE_HOST.test(value);
+}
+
+/**
  * `egress` is `'none'` or an explicit host list (I4: the contract admits no
  * wildcard). An empty list is accepted and means the same as `'none'` by
  * granting nothing; `'all'`, `'*'`, or any other bare string is refused.
+ *
+ * Refusing the bare `'*'` while accepting `['*']` was the hole: the authored
+ * form then reads as an explicit allowlist while denoting every host, and a
+ * consumer that treats entries as patterns would grant the whole network from
+ * a policy that looks restrictive. Entries carrying a wildcard, a path, a
+ * prefix length, or whitespace are refused here so the list means what it
+ * looks like.
  */
 function validateEgress(
   value: unknown, path: string, defects: PolicyDefect[],
@@ -264,6 +284,16 @@ function validateEgress(
     const hosts = egress.filter(isNonEmptyString);
     if (hosts.length !== egress.length) {
       defects.push({ path: at, problem: 'every egress entry must be a non-empty host string' });
+      return undefined;
+    }
+    const notHosts = hosts.filter((host) => !isHostLiteral(host));
+    if (notHosts.length > 0) {
+      defects.push({
+        path: at,
+        problem:
+          'an egress entry names one host and carries no wildcard, path, prefix length, or whitespace; refused: '
+          + notHosts.map((host) => JSON.stringify(host)).join(', '),
+      });
       return undefined;
     }
     return { egress: hosts };

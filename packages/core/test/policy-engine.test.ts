@@ -301,3 +301,73 @@ describe('the derived union lists cannot drift from the contract', () => {
     expect(Object.isFrozen(APPROVAL_KEYS)).toBe(true);
   });
 });
+
+describe('resolvePolicy refuses a document that only claims to be one (D-P3-09, review finding 2)', () => {
+  /** The rogue value a caller produces by asserting past the compiler. */
+  function asserted(over: Record<string, unknown>): PolicyDocument {
+    const value: unknown = { ...DEFAULT_POLICY_DOCUMENT, ...over };
+    return value as PolicyDocument;
+  }
+
+  test('an out-of-range global cap throws instead of becoming a bound', () => {
+    expect(() => engine.resolvePolicy(asserted({ globalCap: 99 }))).toThrow(/does not validate/);
+  });
+
+  test('an out-of-range role ceiling throws', () => {
+    expect(() => engine.resolvePolicy(asserted({ roles: { [BUILDER]: { ...scope(), autonomyCeiling: 99 } } })))
+      .toThrow(/does not validate/);
+  });
+
+  test('a station id that is not one of the ten throws', () => {
+    expect(() => engine.resolvePolicy(asserted({ roles: { [BUILDER]: { ...scope(), stations: ['deploy'] } } })))
+      .toThrow(/does not validate/);
+  });
+
+  test('an unknown key throws', () => {
+    expect(() => engine.resolvePolicy(asserted({ backdoor: true }))).toThrow(/does not validate/);
+  });
+
+  test('the refusal names what was wrong, so the caller can fix the document', () => {
+    expect(() => engine.resolvePolicy(asserted({ globalCap: 99 }))).toThrow(/globalCap/);
+  });
+
+  test('a genuine document still resolves, so the guard is not refusing everything', () => {
+    expect(engine.resolvePolicy(DEFAULT_POLICY_DOCUMENT).globalCap).toBe(2);
+    expect(resolved().globalCap).toBe(3);
+  });
+});
+
+describe('the boundary this engine does not cross (review finding 3)', () => {
+  /**
+   * Pinned deliberately. `resolveAutonomy` answers cap arithmetic only: it does
+   * not read `approvals` and does not read `triggers.maxAutonomy`, because
+   * approval evaluation belongs to P4 and trigger admission to M2, and both are
+   * on this unit's out-of-scope list.
+   *
+   * The risk the external review named is real and is why this is a test rather
+   * than a comment: a caller that treats `resolveAutonomy` as the whole answer
+   * gets a level the rest of the document forbids. The obligation on the
+   * consuming unit is registered as `I4.approval-outcome-gates-the-station`,
+   * owned by P4. If a later change makes this function consult either table,
+   * these tests fail and that change is then a deliberate one.
+   */
+  test('a blocked approval cell does not stop the level being granted here', () => {
+    const policy = resolved({ approvals: { 'build:2': 'blocked' } });
+    expect(policy.approvals['build:2']).toBe('blocked');
+    expect(engine.resolveAutonomy(2, 'build', BUILDER, policy)).toStrictEqual({ ok: true, level: 2 });
+  });
+
+  test('a tighter trigger cap does not stop it either', () => {
+    const policy = resolved({
+      triggers: { ...DEFAULT_POLICY_DOCUMENT.triggers, maxAutonomy: { human: 0 } },
+    });
+    expect(policy.triggers.maxAutonomy.human).toBe(0);
+    expect(engine.resolveAutonomy(2, 'build', BUILDER, policy)).toStrictEqual({ ok: true, level: 2 });
+  });
+
+  test('both tables survive resolution intact, so the consuming unit has them to read', () => {
+    const policy = resolved({ approvals: { 'build:2': 'blocked' }, stationCaps: { build: 3 } });
+    expect(policy.approvals['build:2']).toBe('blocked');
+    expect(policy.triggers.maxAutonomy.human).toBe(2);
+  });
+});
