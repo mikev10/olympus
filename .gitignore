@@ -37,3 +37,12 @@ Thumbs.db
 # .md files; the bundles are a cache, and an untracked few hundred kilobytes
 # under docs/reviews/ is one `git add docs/reviews/` from being committed.
 docs/reviews/*.txt
+
+# Exception, by maintainer request: a bundle the maintainer needs to reach
+# from a device that is not the machine that generated it. Named per unit and
+# negated one file at a time, deliberately — a blanket negation would restore
+# exactly the accident the rule above exists to prevent. The tracked copy is
+# still a cache: the SHA-256 in the companion review-request file, with the
+# base and head commits, is what makes a bundle verifiable, and the bundle can
+# always be regenerated from those.
+!docs/reviews/2026-09-11-P3-policy-engine-review-bundle.txt
