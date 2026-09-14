@@ -23,15 +23,8 @@ reject the framing outright.
 - **Range:**
   - `2ac7e33` docs: P3 gains the five parts it lacked, and the tools gap splits in two
   - `6dd2688` P3: Policy engine
-- **File:** `olympus-P3-review.txt` as generated, 2141 lines, 95774 bytes.
+- **File:** `olympus-P3-review.txt`, 2141 lines, 95774 bytes.
 - **SHA-256:** `df7302c997cf419c479a7f2d0dd756c2ca24f91613fc4a202163a1e954612afe`
-- **Tracked copy:** `2026-09-11-P3-policy-engine-review-bundle.txt`, beside this
-  file. Bundles are gitignored by default — they are regenerable and the hash
-  above is what makes one verifiable — so this one is a named exception in
-  `.gitignore`, added because the maintainer needed to reach it from a device
-  other than the machine that generated it. The tracked bytes are identical to
-  the hash above; `.gitattributes` pins `eol=lf`, so they round-trip on any
-  checkout and the hash still verifies.
 - **Contents:** the full contents of every tracked file changed in that range,
   not diff hunks — a reviewer hunting for bypasses needs the surrounding
   context, and a hunk hides it. Thirteen files:
