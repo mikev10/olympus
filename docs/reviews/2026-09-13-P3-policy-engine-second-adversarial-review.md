@@ -9,11 +9,21 @@ companion file `2026-09-13-P3-policy-engine-second-adversarial-triage.md`.
 
 ## Source
 
-- **Reviewer:** not named by the maintainer at handover beyond "another model",
-  after the first review was run with Grok. Family: **unrecorded — fill in
-  before tagging.** Conditions: the reviewer reported reviewing only the
-  attached bundle, with no repository access, and said it "locally checked the
-  relevant JavaScript semantics".
+- **Reviewer:** not named at handover beyond "another model", after the first
+  review was run with Grok. Family: **not recorded, permanently.** It was asked
+  for three times before tagging and not supplied, so it is settled here as a
+  known gap rather than left as an instruction that would rot unread:
+  `reviewed/P3` was tagged with this reviewer's family unknown. Conditions: the
+  reviewer reported reviewing only the attached bundle, with no repository
+  access, and said it "locally checked the relevant JavaScript semantics".
+- **What the gap costs, stated rather than glossed:** rotation is tracked by
+  family, so the next unit's reviewer cannot be chosen to avoid repeating this
+  one. Treat P4 as constrained: prefer a family that has not reviewed recently
+  — ChatGPT last at S1, Gemini at P2, Grok at P3's first review — and capture
+  the family *at handover*, before the response is pasted, because it cannot be
+  recovered from the response text afterwards. Amendable by a one-line commit
+  if the maintainer recalls it; a documentation fix does not require moving the
+  tag.
 - **Family rotation:** ChatGPT reviewed F3 and S1; Gemini reviewed P1 and P2;
   Grok reviewed P3 first. This is the second review of one unit, which is new —
   prior units had one each. Its purpose was corroboration across families, and
