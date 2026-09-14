@@ -37,7 +37,7 @@ needs surrounding context, and a hunk hides it.
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
   done
-} > ~/Desktop/olympus-<unit>-review.txt
+} > docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
 ```
 
 **Excluded by construction, and why.** `docs/decisions.md` carries author
@@ -46,12 +46,28 @@ conclusions already reached and stops questioning them. `docs/reviews/` holds
 what earlier reviewers found. `docs/plan/` is the spec the code is judged
 against; the reviewer gets the invariants restated in the prompt instead.
 
+**The bundle lives in the repository, not on a desktop, and is tracked.** It is
+the record of what a reviewer actually saw, and that belongs beside the review
+it produced. Name it for its unit like its siblings, commit it to the unit
+branch, and push, so it is reachable from any device before the review is run:
+
+```
+git add docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
+git commit -m "<UNIT>: the review bundle, as sent"
+git push
+```
+
+Record its SHA-256 in the review-request file. The hash, not the copy, is what
+makes the bundle verifiable — a copy can be edited and a hash cannot — so both
+are kept and the hash is the authority. Note that `docs/reviews/*` is on the
+exclusion list above, so a tracked bundle never appears inside a later one.
+
 Never include anything from `.plan/`. Confirm before handing the bundle over
 that both of these print `0`:
 
 ```
-grep -c '^===== \.plan/'                    ~/Desktop/olympus-<unit>-review.txt
-grep -c '^===== docs/decisions\.md =====$'  ~/Desktop/olympus-<unit>-review.txt
+grep -c '^===== \.plan/'                    docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
+grep -c '^===== docs/decisions\.md =====$'  docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
 ```
 
 They match the bundle's section headers, not prose. A count over the bare

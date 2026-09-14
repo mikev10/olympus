@@ -32,8 +32,11 @@ Thumbs.db
 # Tool-local overrides
 .claude/settings.local.json
 
-# Review bundles. Regenerable git output, named olympus-<unit>-review.txt by
-# the review-request skill. The reviews and triages beside them are tracked
-# .md files; the bundles are a cache, and an untracked few hundred kilobytes
-# under docs/reviews/ is one `git add docs/reviews/` from being committed.
-docs/reviews/*.txt
+# Review bundles are TRACKED, deliberately. They used to be ignored here as a
+# regenerable cache; the maintainer's call is that the record of what a
+# reviewer actually saw belongs in the repository beside the review it
+# produced, not on someone's desktop. The SHA-256 in each review-request file
+# still pins the bytes, so the tracked copy is corroboration rather than the
+# sole evidence. They cannot cause recursion: the review-request skill excludes
+# docs/reviews/* from every bundle it builds, so a tracked bundle never appears
+# inside a later one.

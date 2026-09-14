@@ -23,8 +23,16 @@ reject the framing outright.
 - **Range:**
   - `2ac7e33` docs: P3 gains the five parts it lacked, and the tools gap splits in two
   - `6dd2688` P3: Policy engine
-- **File:** `olympus-P3-review.txt`, 2141 lines, 95774 bytes.
+- **File:** `2026-09-11-P3-policy-engine-review-bundle.txt`, beside this one and
+  tracked, 2141 lines, 95774 bytes. Bundles live in the repository from P3
+  onward: the record of what a reviewer actually saw belongs next to the review
+  it produced, and a reader checking whether a finding was possible should not
+  have to rebuild the input first.
 - **SHA-256:** `df7302c997cf419c479a7f2d0dd756c2ca24f91613fc4a202163a1e954612afe`
+  — and the hash, not the tracked copy, remains the authority. A copy can be
+  edited; the hash, with the base and head commits beside it, lets anyone
+  regenerate the bundle and prove it is the one that was sent. Both reviews of
+  P3 worked from this exact file.
 - **Contents:** the full contents of every tracked file changed in that range,
   not diff hunks — a reviewer hunting for bypasses needs the surrounding
   context, and a hunk hides it. Thirteen files:

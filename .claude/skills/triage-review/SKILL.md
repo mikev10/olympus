@@ -153,17 +153,23 @@ about the contract, which is an amendment, not a review fix.
 Where a fix changes behaviour an assertion covers, show the assertion failing
 against the old behaviour before trusting the new one.
 
-## 6. Delete the bundle
+## 6. Keep the bundle
 
-It is `git` output, reproducible from the base and head the header records.
-Keeping it is keeping a cache, and an untracked file of a few hundred
-kilobytes under `docs/reviews/` is one `git add docs/reviews/` away from
-being committed.
+**Do not delete it.** Bundles are tracked, in `docs/reviews/` beside the review
+and triage they belong to. The earlier rule deleted them as a regenerable
+cache; the record of what a reviewer actually saw is worth more than the few
+hundred kilobytes, and a reader checking whether a finding was possible should
+not have to rebuild the input first.
 
-**One exception.** A bundle built before the current exclusion rules, or by an
-ad-hoc command rather than this loop, is not exactly reproducible: it is the
-only record of what that reviewer actually saw. Move it out of the repository
-rather than deleting it, and say where it went.
+Confirm before finishing that the bundle for this review is committed, that its
+SHA-256 matches the one recorded in the review-request file, and that no copy
+was left outside the repository. If the bundle was built before this rule and
+exists only on a local disk, move it into `docs/reviews/`, name it for its
+unit, and commit it with its hash recorded.
+
+The hash stays the authority. A tracked copy can be edited; the hash in the
+review-request file, with the base and head commits beside it, is what lets
+anyone regenerate the bundle and prove it is the one that was sent.
 
 ## 7. Report and stop
 
