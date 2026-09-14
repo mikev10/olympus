@@ -1,8 +1,18 @@
 name: Protected paths
 
+# Two triggers, because there are two ways a gate-enforcing path can change.
+#
+# A pull request is acknowledged with the 'gate-change' label. A push straight
+# to v2 has no pull request and therefore no label, so it is acknowledged with
+# a `Gate-Change: acknowledged` trailer in the commit message of every commit
+# that touches one. The trailer is the better record of the two: a label lives
+# in GitHub metadata and can be removed afterwards, while the trailer is part
+# of the commit and travels with it.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [v2]
 
 permissions:
   contents: read
@@ -17,6 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Fail on unlabelled gate changes
+        if: github.event_name == 'pull_request'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -27,37 +38,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Paths that enforce the gates. A change here can disable a control,
-          # so it must be a declared intent rather than a side effect of other work.
-          #
-          # CI runs the four checks through root package scripts, and each
-          # package's scripts and configuration decide what those checks read.
-          # Rewriting any of them can make CI green while running nothing, so
-          # the manifests and the test and compiler configuration are gates too.
-          PATTERNS='
-          ^\.github/workflows/
-          ^\.gitignore$
-          ^\.gitattributes$
-          ^CLAUDE\.md$
-          ^eslint\.config\.
-          ^tsconfig\.base\.json$
-          ^package\.json$
-          ^pnpm-workspace\.yaml$
-          ^packages/[^/]+/package\.json$
-          ^packages/[^/]+/tsconfig(\.[^/]+)?\.json$
-          (^|/)vitest\.(config|workspace)\.
-          ^packages/conformance/
-          ^packages/[^/]+/src/.*types\.ts$
-          ^packages/core/src/driver/contract\.ts$
-          '
-
           CHANGED=$(git diff --name-only "$BASE" "$HEAD")
           HITS=""
           while read -r pattern; do
-            [ -z "$pattern" ] && continue
+            case "$pattern" in ''|'#'*) continue ;; esac
             MATCH=$(printf '%s\n' "$CHANGED" | grep -E "$pattern" || true)
             [ -n "$MATCH" ] && HITS="$HITS$MATCH"$'\n'
-          done <<< "$PATTERNS"
+          done < .github/protected-paths.txt
 
           HITS=$(printf '%s' "$HITS" | sed '/^$/d' | sort -u)
 
@@ -82,4 +69,81 @@ jobs:
           echo "An agent that can quietly edit a check has no check. The label"
           echo "exists so weakening a control is a decision someone made, not a"
           echo "side effect nobody noticed."
+          exit 1
+
+      - name: Fail on unacknowledged gate changes pushed straight to v2
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+
+          EMPTY='0000000000000000000000000000000000000000'
+          if [ "$BEFORE" = "$EMPTY" ]; then
+            echo "Branch created; no previous tip to compare against."
+            exit 0
+          fi
+
+          # A push that carries a merge is a pull request landing, and the
+          # pull_request trigger above already guarded it with the label. The
+          # individual commits from the unit branch are in this range too, and
+          # they carry no trailer because they were never meant to — the label
+          # was their acknowledgement.
+          #
+          # Honest limit: a merge made locally and pushed straight here is
+          # indistinguishable from a pull request landing, so it is not caught.
+          # This check closes the gap for direct commits, which is the one that
+          # was actually being used.
+          if [ -n "$(git rev-list --merges "$BEFORE..$AFTER")" ]; then
+            echo "This push contains a merge; the pull-request check is authoritative for it."
+            exit 0
+          fi
+
+          FAILED=0
+          for sha in $(git rev-list --no-merges "$BEFORE..$AFTER"); do
+            CHANGED=$(git diff-tree --no-commit-id --name-only -r "$sha")
+            HITS=""
+            while read -r pattern; do
+              case "$pattern" in ''|'#'*) continue ;; esac
+              MATCH=$(printf '%s\n' "$CHANGED" | grep -E "$pattern" || true)
+              [ -n "$MATCH" ] && HITS="$HITS$MATCH"$'\n'
+            done < .github/protected-paths.txt
+
+            HITS=$(printf '%s' "$HITS" | sed '/^$/d' | sort -u)
+            [ -z "$HITS" ] && continue
+
+            SUBJECT=$(git log -1 --format=%s "$sha")
+            echo "$sha  $SUBJECT"
+            printf '    %s\n' $HITS
+
+            # The trailer must be its own line. A mention inside prose does not
+            # count, for the same reason the label is matched by element
+            # equality rather than substring.
+            if git log -1 --format=%B "$sha" | grep -qE '^Gate-Change:[[:space:]]*acknowledged[[:space:]]*$'; then
+              echo "    Gate-Change trailer present. Allowed."
+            else
+              echo "    FAILED: no 'Gate-Change: acknowledged' trailer."
+              FAILED=1
+            fi
+            echo
+          done
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo "No unacknowledged gate changes in this push."
+            exit 0
+          fi
+
+          echo "FAILED: a commit pushed straight to v2 edits a path that enforces"
+          echo "the gates, without acknowledging it."
+          echo
+          echo "An agent that can quietly edit a check has no check. On a pull"
+          echo "request the 'gate-change' label is the acknowledgement; there is"
+          echo "no pull request here, so the commit message is. Add a trailer on"
+          echo "its own line:"
+          echo
+          echo "    Gate-Change: acknowledged"
+          echo
+          echo "Or move the change onto a branch and open a pull request, which"
+          echo "is the better route when anyone else should see it first."
           exit 1

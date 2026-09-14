@@ -1,0 +1,31 @@
+# Paths that enforce the gates. A change here can disable a control, so it must
+# be a declared intent rather than a side effect of other work.
+#
+# One extended regular expression per line, matched against paths from
+# `git diff --name-only`. Blank lines and `#` comments are ignored.
+#
+# This list lives in its own file so the pull-request check and the push check
+# read the same patterns. Held in the workflow twice, one copy would eventually
+# gain a pattern the other lacks, and the half that was forgotten would silently
+# stop guarding it.
+#
+# CI runs the four checks through root package scripts, and each package's
+# scripts and configuration decide what those checks read. Rewriting any of them
+# can make CI green while running nothing, so the manifests and the test and
+# compiler configuration are gates too.
+
+^\.github/workflows/
+^\.github/protected-paths\.txt$
+^\.gitignore$
+^\.gitattributes$
+^CLAUDE\.md$
+^eslint\.config\.
+^tsconfig\.base\.json$
+^package\.json$
+^pnpm-workspace\.yaml$
+^packages/[^/]+/package\.json$
+^packages/[^/]+/tsconfig(\.[^/]+)?\.json$
+(^|/)vitest\.(config|workspace)\.
+^packages/conformance/
+^packages/[^/]+/src/.*types\.ts$
+^packages/core/src/driver/contract\.ts$
