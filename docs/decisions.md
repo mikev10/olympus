@@ -1191,3 +1191,51 @@ produced D-P3-14, which neither the unit nor the first review had written down.
   payload-to-template-to-prompt path in this unit, and the next review request
   for a policy-shaped unit should ask the narrower question the reviewer
   proposed instead of restating I7 in full.
+
+## P4: Station machine
+
+The unit entry carried scope, deliverables, and a conformance line, and no
+out-of-scope list, acceptance criteria, invariants, or ledger — the defect P1,
+P2, and P3 each had. It was fixed in `DECOMPOSITION.md` before any code was
+written. Reading the contracts against the deliverables also showed that the
+unit cannot be built without amending them, which is a stop condition; the
+maintainer settled that and three scope questions before work began.
+
+### D-P4-01: the entry gained its five parts, and four questions were the maintainer's
+
+- **Problem:** besides the missing parts, four things were not decisions a
+  session should make alone. (1) `StationRefusal` has no arm for an approval or
+  a same-family reviewer, `GateResult` cannot record reduced independence, and
+  `RunState` holds nothing a resume can trust for the level, the policy, or the
+  retry count, and no Vault operation stores a `Run`: contract changes, which
+  are amendments. (2) Which of two resume designs. (3) D-S1-07 left P4 to decide
+  whether compositional provenance becomes a registry entry. (4) What
+  "write-boundary enforcement" can honestly mean before the runtime collects a
+  diff.
+- **Chosen, by the maintainer:** (1) the amendments land in this unit's pull
+  request as their own commits, one `A-P4-nn` entry each, under the
+  `gate-change` label, as A-S1-01 did; the external review then covers them
+  with the code that needed them. (2) A write-once admission record in the Vault
+  holding the `Run` and the resolved `Policy`, referenced from `RunState`, with
+  per-task attempt counts in run state: a resume can neither raise its own level
+  nor reset its retry bound. The rejected design had the caller restate both on
+  resume. (3) A pending entry, `I5.unsafe-declaration-survives-composition`,
+  owned by P6, the unit that deletes `SKELETON_LINE`'s last lines; I5's baseline
+  rises from 4 to 5. P4 narrows the line and does not delete it, so the risk the
+  entry names is not live until P6. (4) P4 re-verifies locks at every transition
+  and hard-fails the run on a mismatch; checking a role's `writableGlobs`
+  against the runtime-collected diff is owed to P6 as
+  `I4.writable-globs-enforced-on-the-diff`. Checking against the driver's
+  `file-write` events was rejected: it is blind to any write the driver does not
+  observe, so it would read stronger than it is.
+- **Session calls inside the entry, recorded so they are not mistaken for the
+  maintainer's:** the effective approval is the stricter of the contract's
+  `exitGate.approval` and the policy cell, because a contract that says a gate
+  needs a human must not be relaxed by a policy that says `auto`; a contract
+  with `requiresPanel: true` is refused at M1 rather than seated with one
+  reviewer; tasks run one at a time; an `EvidenceBundle` carries the
+  `ModelIdentity` that produced it, which is inside amendment (1)'s I6 half,
+  because an author family held only in memory is lost by exactly the resume
+  this unit delivers.
+- **Reverse:** revert the entry. The amendments and both pending entries go with
+  it, and the unit is underspecified again.
