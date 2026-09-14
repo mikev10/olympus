@@ -203,6 +203,64 @@ export const I4: InvariantEntry = {
         }
       },
     }),
+    runtime({
+      id: 'I4.role-lookup-ignores-the-prototype-chain',
+      title:
+        'a role the policy does not define is refused with capability-missing even when Object.prototype carries a scope-shaped value under that name, and a role named for a prototype member refuses rather than throwing; the resolved role map has no prototype',
+      run: async () => {
+        const { StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const policy = engine.resolvePolicy(grantingDocument());
+        const prototype = Object.prototype as Record<string, unknown>;
+
+        if (Object.getPrototypeOf(policy.roles) !== null) {
+          throw new Error('I4: the resolved role map has a prototype, so an undefined role can be answered by it');
+        }
+
+        // Pollution somewhere else in the process must not become a grant here.
+        prototype[UNDEFINED_ROLE] = { stations: ['build'], tools: ['read'] };
+        try {
+          const outcome = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+          if (outcome.ok) {
+            throw new Error(
+              `I4: role '${UNDEFINED_ROLE}' is defined nowhere in the policy and resolved to a grant because ` +
+                'Object.prototype carried that name. Default deny has to be total, and a lookup that reads the ' +
+                'prototype chain is not.',
+            );
+          }
+          if (outcome.reason !== 'capability-missing') {
+            throw new Error(`I4: the polluted role was refused as '${outcome.reason}'; expected 'capability-missing'`);
+          }
+          if (engine.resolveAutonomy(1, 'build', UNDEFINED_ROLE, policy).ok) {
+            throw new Error('I4: resolveAutonomy granted a level to a role that exists only on Object.prototype');
+          }
+        } finally {
+          Reflect.deleteProperty(prototype, UNDEFINED_ROLE);
+        }
+
+        // A role named for a prototype member must refuse, not throw: an
+        // exception is not the refusal the contract promises, and a caller that
+        // catches it has no reason recorded.
+        for (const name of ['__proto__', 'constructor', 'toString', 'valueOf']) {
+          const role = name as typeof UNDEFINED_ROLE;
+          let refused: string;
+          try {
+            const outcome = engine.resolveCapabilities(role, 'build', policy);
+            refused = outcome.ok ? 'granted' : outcome.reason;
+          } catch {
+            throw new Error(`I4: an ungranted role named '${name}' threw instead of refusing with capability-missing`);
+          }
+          if (refused !== 'capability-missing') {
+            throw new Error(`I4: an ungranted role named '${name}' resolved as '${refused}'`);
+          }
+        }
+
+        // The control: a real grant still resolves.
+        if (!engine.resolveCapabilities(GRANTED_ROLE, 'build', policy).ok) {
+          throw new Error('I4: the granted role was refused, so the guard is refusing everything');
+        }
+      },
+    }),
   ],
   pending: [
     pending({

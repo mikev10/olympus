@@ -1031,3 +1031,163 @@ callers may treat this engine's answer as sufficient — see D-P3-10.
   what freeze does not stop — a caller replacing the `Policy` reference it holds
   — is not a widen of the engine's copy. Agreed, and not preventable by any
   means available to a function that returns a value. No change.
+
+## P3 amendment: second external review
+
+A second external reviewer, run against the **same bundle** as the first so the
+two are comparable, returned five findings. Two reproduce the first review's
+(and had already been fixed by the time it arrived); **two are findings the
+first review did not make at all** and were fixed here; one is an ambiguity now
+owned by M2. The full triage is
+`docs/reviews/2026-09-13-P3-policy-engine-second-adversarial-triage.md`.
+
+The case for running a second review of one unit is settled by the result: the
+prototype-chain grant (D-P3-11) and the malformed autonomy level (D-P3-12) were
+both invisible to the first family, and the second review's framing answer
+produced D-P3-14, which neither the unit nor the first review had written down.
+
+### D-P3-11: the prototype chain is not an authority on what a policy grants
+
+- **Problem:** `cloneRoles` built the role map with `Object.fromEntries`, an
+  ordinary object, and both lookups read `policy.roles[role]`. Two consequences,
+  both reproduced. With `Object.prototype.reviewer` set to a scope-shaped value
+  anywhere in the process, `resolveCapabilities('reviewer', 'build', policy)`
+  returned **a grant** for a role the policy does not define. And with no
+  pollution at all, an ungranted role named `toString` or `constructor` resolved
+  to an inherited function and then threw a `TypeError` at
+  `scope.stations.includes(...)` instead of refusing with `capability-missing`.
+- **Why it matters more than its reachability suggests:** the grant half needs
+  prototype pollution elsewhere, which is a real but conditional precondition.
+  The throw half needs only an unvalidated role id. Neither is acceptable: I4's
+  default deny has to be *total*, and a lookup that consults the prototype chain
+  is not total. An exception is also not the refusal the contract promises — it
+  carries no reason, and a caller that catches it has nothing to record.
+- **The irony worth recording:** `validateRoles` already refuses `__proto__`,
+  `constructor` and `prototype` as authored role ids (`RESERVED_ROLE_IDS`). The
+  validator worried about prototype names while the runtime lookup handed the
+  prototype back its authority. Guarding the input and not the lookup is half a
+  control.
+- **Chosen:** build the role map on `Object.create(null)`, and read it only
+  through `scopeFor`, which uses `Object.hasOwn`. Both, not either: the null
+  prototype closes it now, and the `hasOwn` keeps it closed if a later edit
+  rebuilds the map with an ordinary prototype. `ownStationCap` does the same for
+  the station caps, which were reachable by the same route and were saved only
+  by an ordering accident that put the station check first.
+- **Asserted:** `I4.role-lookup-ignores-the-prototype-chain` — a polluted
+  prototype, four prototype-named roles, the null-prototype check, and a real
+  grant as the control. Mutation-checked: restoring either the plain object or
+  the plain index fails it.
+- **Reverse:** restore `Object.fromEntries` and `policy.roles[role]`; the
+  assertion and seven unit tests fail.
+
+### D-P3-12: an autonomy level that is not one refuses rather than being compared
+
+- **Problem:** `resolveAutonomy` compared `requested > cap` with no runtime
+  guard, and the parameter type is erased. `NaN > 3` is `false`, so
+  `resolveAutonomy(NaN, …)` returned `{ ok: true, level: NaN }`. Reproduced —
+  and it is broader than the review reported: `-1` and `2.5` were also answered
+  with success carrying themselves as the level. Only `Infinity` was refused,
+  and only because `Infinity > 3` happens to be true.
+- **Why success is the worst possible answer here:** this unit's entire I5 story
+  is that an over-request is refused rather than downgraded, because a caller
+  that receives a level proceeds believing it was granted what it asked for. A
+  caller receiving `{ ok: true, level: NaN }` does exactly that, with a level
+  nothing can honour.
+- **Chosen:** guard `requested` with the `isAutonomyLevel` predicate the package
+  already had, and throw. `PolicyRefusal.reason` has no arm for a malformed
+  argument, and widening the union is an edit to an F2 contract file — an
+  amendment, on this unit's out-of-scope list. A throw is the fail-closed option
+  available without one, and it matches D-P3-09's precedent: a value that lies
+  about its type gets an exception, not a refusal object.
+- **Not guarded, and why:** `station` needs no guard, because an invented
+  station fails `scope.stations.includes(station)` and refuses with
+  `station-forbidden` — a correct refusal reached by the normal path.
+- **Asserted:** `I5.malformed-autonomy-level-refused`, with all four real levels
+  as the control. Mutation-checked.
+- **Reverse:** delete the guard; the assertion and five unit tests fail.
+
+### D-P3-13: the trigger maps are partial by contract, and admission owes the relational check
+
+- **Ambiguous, and the reviewer was right to flag it:** `TriggerPolicy` fields
+  are validated independently. `enabled: ['ci-failure']` with empty
+  `taskTemplate`, `entryStation`, `maxAutonomy` and `minAuthorTrust` is a valid
+  document, and the shipped default enables `human` with an empty
+  `taskTemplate` — which D-P3-05 chose deliberately, because naming a template
+  no registry declares would be a fiction that reads as wiring.
+- **Chosen:** the maps stay partial, and `enabled` means "this kind is not
+  switched off", not "this kind is fully admissible". The relational check
+  belongs at admission rather than in the validator, because admission is the
+  only place that knows whether a named template exists — a validator enforcing
+  relational completeness against a template registry that does not exist would
+  be checking a name against nothing.
+- **But the hole is real,** and I7 holds only while a trigger selects a
+  pre-declared template. An enabled kind with no declared template is precisely
+  the gap a permissive admission implementation would fill from the payload. So
+  it is registered rather than described: `I7.enabled-trigger-declares-a-template`,
+  owner M2, raising the I7 baseline from 2 to 3.
+- **Reverse:** make the validator require an entry in each per-kind map for
+  every enabled kind; the shipped default must then name a template, and
+  D-P3-05 is reversed with it.
+
+### D-P3-14: the threat model this unit's argument depends on
+
+- **The reviewer's framing answer,** and the most valuable thing in either
+  review: the adversarial question is right "if the adversary controls
+  policy/request data but not arbitrary code in the process… if `as any`,
+  forged `Policy` objects, or arbitrary prototype mutation are considered
+  attacker capabilities, TypeScript types cannot be part of the security
+  argument".
+- **Stated, because it was written down nowhere:** the adversary this unit
+  defends against controls **the policy document and the arguments to the
+  engine's methods**. It does not control code running inside the runtime's own
+  process. An adversary who does control in-process code does not need a policy
+  bypass, because the runtime is the thing enforcing the policy. But the
+  corollary is what matters: **no type in this package is part of the security
+  argument.** Types stop mistakes; runtime checks stop bypasses.
+- **What follows, and what was done about it.** Every exported method that
+  answers an authorization question now carries a runtime check that does not
+  depend on its parameter types: `resolvePolicy` validates its document
+  (D-P3-09), `resolveAutonomy` guards its level (D-P3-12), role lookup is
+  own-property only (D-P3-11), and `validateToolGrants` requires an inventory
+  whose absence refuses rather than admits.
+- **A correction to D-P3-09.** That entry called branding the validated document
+  "the stronger fix". The reviewer is right that it is not: "a TypeScript brand
+  alone is not a security boundary because it can also be asserted away." A
+  brand raises the cost of the mistake and documents the intent; it is not a
+  control. The runtime validation is the control, and a brand would be an
+  ergonomic improvement on top of it. Recorded here rather than quietly edited
+  into D-P3-09, because overstating what a type buys is the exact error this
+  decision exists to name.
+- **Known limit, stated plainly:** a forged `Policy` handed directly to
+  `resolveAutonomy` or `resolveCapabilities` is not revalidated. Validating a
+  whole policy on every lookup moves a load-time cost onto every call, and under
+  the threat model above a `Policy` comes from `resolvePolicy`, which validates.
+  If the threat model ever widens to in-process adversaries this is the first
+  thing that must change — and by then the types would have to leave the
+  argument entirely.
+- **Reverse:** narrow the threat model to trusted documents only; the runtime
+  guards above become belt-and-braces rather than controls.
+
+### The second review's other conclusions
+
+- **Finding 1 (egress wildcards) and finding 4 (resolution separable from
+  validation) had already been fixed** by the first triage, as D-P3-08 and
+  D-P3-09. Two families independently finding the same two things is the
+  strongest evidence either review produced, and it is the whole reason the
+  rotation exists.
+- **One residual from finding 1 is rejected.** The reviewer asked for `['all']`
+  to be refused alongside `['*']`. It is not: `all` is a syntactically valid DNS
+  label denoting one host, and refusing it would be guessing at semantics —
+  `any`, `everything` and `world` would have equal claim. The bare string
+  `'all'` is refused because the only valid bare string is `'none'`, not because
+  `all` is special. D-P3-08's rule is *an entry denotes a single host*, and
+  `all` does.
+- **The reviewer's note that the mandatory-inventory conformance fixture is a
+  compile-time check and not a runtime boundary is correct,** and it checked the
+  runtime behaviour rather than assuming: omitting the argument in JavaScript
+  makes `new Set(undefined)` empty, so a policy with tool grants is refused
+  rather than admitted. Fails closed. No change.
+- **On the I7 half of the prompt being premature:** accepted. There is no
+  payload-to-template-to-prompt path in this unit, and the next review request
+  for a policy-shaped unit should ask the narrower question the reviewer
+  proposed instead of restating I7 in full.

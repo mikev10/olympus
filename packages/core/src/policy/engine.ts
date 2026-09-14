@@ -14,7 +14,7 @@
  * would proceed believing it had asked for and received something.
  */
 import type { AutonomyLevel, RoleId, StationId } from '../run/types.js';
-import { APPROVAL_KEYS, STATION_IDS, AUTONOMY_LEVELS } from './constants.js';
+import { APPROVAL_KEYS, AUTONOMY_LEVELS, STATION_IDS, isAutonomyLevel } from './constants.js';
 import { formatDefects, validatePolicyDocument } from './validation.js';
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityResolution, CapabilityScope,
@@ -75,11 +75,33 @@ function cloneScope(scope: CapabilityScope): CapabilityScope {
   });
 }
 
+/**
+ * The role map is built on a null prototype, and every read of it goes through
+ * `scopeFor` (D-P3-11). An ordinary object answers `roles['toString']` with a
+ * function and `roles['reviewer']` with whatever anything else in the process
+ * has put on `Object.prototype`, which turns "the policy defines no such role"
+ * from a refusal into a grant. Default deny has to be total, and a lookup that
+ * consults the prototype chain is not.
+ */
 function cloneRoles(roles: PolicyDocument['roles']): Policy['roles'] {
-  const cloned = Object.fromEntries(
-    Object.entries(roles).map(([role, scope]) => [role, cloneScope(scope)]),
-  );
+  // `Object.create(null)` is untyped by construction; the shape is built below.
+  const cloned = Object.create(null) as Record<string, CapabilityScope>;
+  for (const [role, scope] of Object.entries(roles)) cloned[role] = cloneScope(scope);
   return frozen(cloned);
+}
+
+/**
+ * The only way this file reads a role. `Object.hasOwn` rather than a plain
+ * index, so the check holds even if a later edit rebuilds the map with an
+ * ordinary prototype.
+ */
+function scopeFor(policy: Policy, role: RoleId): CapabilityScope | undefined {
+  return Object.hasOwn(policy.roles, role) ? policy.roles[role] : undefined;
+}
+
+/** The same care for the station cap: an own entry, or none. */
+function ownStationCap(policy: Policy, station: StationId): AutonomyLevel | undefined {
+  return Object.hasOwn(policy.stationCaps, station) ? policy.stationCaps[station] : undefined;
 }
 
 function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
@@ -123,7 +145,7 @@ function totalApprovals(sparse: PolicyDocument['approvals']): Record<ApprovalKey
  * so the message reads the same way every time.
  */
 function capDetail(policy: Policy, station: StationId, scope: CapabilityScope): string {
-  const stationCap = policy.stationCaps[station];
+  const stationCap = ownStationCap(policy, station);
   const parts = [
     `global L${String(policy.globalCap)}`,
     stationCap === undefined ? `no ${station} cap` : `${station} L${String(stationCap)}`,
@@ -144,7 +166,7 @@ function capDetail(policy: Policy, station: StationId, scope: CapabilityScope): 
  * `human-required` until a document says otherwise.
  */
 function effectiveCap(policy: Policy, station: StationId, scope: CapabilityScope): AutonomyLevel {
-  const stationCap = policy.stationCaps[station];
+  const stationCap = ownStationCap(policy, station);
   const bounds: AutonomyLevel[] = [policy.globalCap, scope.autonomyCeiling];
   if (stationCap !== undefined) bounds.push(stationCap);
   return bounds.reduce((tightest, bound) => (bound < tightest ? bound : tightest));
@@ -191,7 +213,22 @@ export class StrictPolicyEngine implements PolicyEngine {
   resolveAutonomy(
     requested: AutonomyLevel, station: StationId, role: RoleId, policy: Policy,
   ): PolicyResolution {
-    const scope = policy.roles[role];
+    // The parameter type is erased at run time, and the cap arithmetic below is
+    // a numeric comparison that a non-member silently survives: `NaN > cap` is
+    // false, and so is `-1 > cap` and `2.5 > cap`, so each would be answered
+    // `{ ok: true }` carrying a level that is not a level (D-P3-12). I5 says an
+    // unsupported input is a refusal, and a success is the one answer a caller
+    // must never receive for an input nobody can honour. `PolicyRefusal.reason`
+    // has no arm for a malformed argument and widening it is a contract
+    // amendment, so this throws, as `resolvePolicy` does for a malformed
+    // document.
+    if (!isAutonomyLevel(requested)) {
+      throw new Error(
+        `policy: resolveAutonomy was asked for autonomy level ${String(requested)}, which is not one of 0, 1, 2, 3. `
+        + 'The parameter type says it is one, so this value arrived through an assertion. Refused rather than compared.',
+      );
+    }
+    const scope = scopeFor(policy, role);
     if (scope === undefined) {
       return {
         ok: false,
@@ -223,7 +260,7 @@ export class StrictPolicyEngine implements PolicyEngine {
   }
 
   resolveCapabilities(role: RoleId, station: StationId, policy: Policy): CapabilityResolution {
-    const scope = policy.roles[role];
+    const scope = scopeFor(policy, role);
     if (scope === undefined) {
       return {
         ok: false,

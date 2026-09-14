@@ -281,6 +281,45 @@ export const I5: InvariantEntry = {
         }
       },
     }),
+    runtime({
+      id: 'I5.malformed-autonomy-level-refused',
+      title:
+        'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+      run: async () => {
+        const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const policy = engine.resolvePolicy(grantingDocument());
+
+        for (const [label, level] of [
+          ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+        ] as const) {
+          let refused = false;
+          try {
+            const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+            if (outcome.ok) {
+              throw new Error(
+                `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                  'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                  'level nobody can honour.',
+              );
+            }
+          } catch (error) {
+            if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+            refused = true;
+          }
+          if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+        }
+
+        // The control: every real level is still answered normally.
+        for (const level of AUTONOMY_LEVELS) {
+          const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+          const allowed = level <= ROLE_CEILING;
+          if (outcome.ok !== allowed) {
+            throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+          }
+        }
+      },
+    }),
   ],
   pending: [
     pending({

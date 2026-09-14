@@ -4,7 +4,7 @@
  * I4 — nothing is granted that the document did not grant.
  * I5 — an over-request is refused and never downgraded.
  */
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import {
   APPROVAL_KEYS, AUTONOMY_LEVELS, DEFAULT_POLICY_DOCUMENT, STATION_IDS,
   StrictPolicyEngine, validateToolGrants,
@@ -369,5 +369,68 @@ describe('the boundary this engine does not cross (review finding 3)', () => {
     const policy = resolved({ approvals: { 'build:2': 'blocked' }, stationCaps: { build: 3 } });
     expect(policy.approvals['build:2']).toBe('blocked');
     expect(policy.triggers.maxAutonomy.human).toBe(2);
+  });
+});
+
+describe('default deny is total: the prototype chain is not an authority (D-P3-11, second review finding 2)', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(Object.prototype, 'reviewer');
+  });
+
+  test('a polluted Object.prototype does not become a grant', () => {
+    const policy = resolved();
+    (Object.prototype as Record<string, unknown>).reviewer = scope();
+    const outcome = engine.resolveCapabilities(MISSING, 'build', policy);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('unreachable');
+    expect(outcome.reason).toBe('capability-missing');
+  });
+
+  test('the same through resolveAutonomy', () => {
+    const policy = resolved();
+    (Object.prototype as Record<string, unknown>).reviewer = scope();
+    expect(engine.resolveAutonomy(1, 'build', MISSING, policy).ok).toBe(false);
+  });
+
+  test.each(['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf'])(
+    'an ungranted role named %s refuses rather than throwing',
+    (name) => {
+      const policy = resolved();
+      const role = name as RoleId;
+      const capabilities = engine.resolveCapabilities(role, 'build', policy);
+      expect(capabilities.ok).toBe(false);
+      if (capabilities.ok) throw new Error('unreachable');
+      expect(capabilities.reason).toBe('capability-missing');
+      expect(engine.resolveAutonomy(1, 'build', role, policy).ok).toBe(false);
+    },
+  );
+
+  test('the resolved role map has no prototype at all', () => {
+    expect(Object.getPrototypeOf(resolved().roles)).toBeNull();
+  });
+
+  test('a genuinely granted role still resolves, so the guard refuses nothing real', () => {
+    expect(engine.resolveCapabilities(BUILDER, 'build', resolved()).ok).toBe(true);
+  });
+});
+
+describe('an autonomy level that is not one refuses (D-P3-12, second review finding 3)', () => {
+  test.each([
+    ['NaN', Number.NaN],
+    ['-1', -1],
+    ['2.5', 2.5],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['4', 4],
+  ])('%s throws instead of being compared against the cap', (_label, level) => {
+    const policy = resolved();
+    expect(() => engine.resolveAutonomy(level as AutonomyLevel, 'build', BUILDER, policy))
+      .toThrow(/not one of 0, 1, 2, 3/);
+  });
+
+  test('the four real levels are unaffected', () => {
+    const policy = resolved({ globalCap: 3, roles: { [BUILDER]: scope({ autonomyCeiling: 3 }) } });
+    for (const level of AUTONOMY_LEVELS) {
+      expect(engine.resolveAutonomy(level, 'build', BUILDER, policy)).toStrictEqual({ ok: true, level });
+    }
   });
 });
