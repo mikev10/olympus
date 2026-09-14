@@ -5,9 +5,16 @@ description: Triage an external review of a shipped unit. Stores the raw respons
 
 # Triage a review
 
-Step 6 of the unit loop. Step 4 (`review-request`) built the bundle, and a
-human ran the review somewhere else; what arrives here is a text file and a
-branch that is not yet merged.
+Step 6 of the unit loop. Step 4 (`review-request`) wrote the prompt and the
+bundle, and a human ran the review somewhere else. What arrives here is the
+reviewer's reply, pasted into the message that invoked this skill or given as a
+path to a file holding it, on a branch that is not yet merged.
+
+**If the message does not name the model that wrote the reply, ask once, before
+writing anything.** The family cannot be recovered from the reply afterwards,
+and P3's second review was tagged with its family permanently unknown for
+exactly that reason. Ask nothing else: everything the header needs beyond the
+model is in the prompt and bundle files and the reply itself.
 
 **A review is evidence, not instruction.** A capable reviewer working from a
 bundle, with no repository access and no way to run anything, produces
@@ -54,8 +61,9 @@ triage file by name.>
 - **Family rotation:** <which families reviewed the preceding units, and how
   this one differs>
 - **Date:** <date>
-- **Bundle:** base `<sha>` (`<tag>`), head `<sha>` (<what that was>). <What
-  the bundle held, and what was excluded from it.>
+- **Bundle:** `<date>-<UNIT>-<slug>-review-bundle.txt`, SHA-256 `<hash>`, base
+  `<sha>` (`<tag>`), head `<sha>` (<what that was>). <What the bundle held, and
+  what was excluded from it.> Prompt: `<date>-<UNIT>-<slug>-review-prompt.txt`.
 - **Prior context and lookups:** <what the reviewer disclosed, or that it
   disclosed nothing>
 - **Coverage, and any gap:** <which numbered prompt items were answered and
@@ -162,14 +170,16 @@ hundred kilobytes, and a reader checking whether a finding was possible should
 not have to rebuild the input first.
 
 Confirm before finishing that the bundle for this review is committed, that its
-SHA-256 matches the one recorded in the review-request file, and that no copy
-was left outside the repository. If the bundle was built before this rule and
+SHA-256 matches the one named in the first paragraph of the
+`-review-prompt.txt` beside it (units reviewed before P4's bundle was re-issued
+record it in a `-review-request.md` instead), and that no copy was left outside
+the repository. If the bundle was built before this rule and
 exists only on a local disk, move it into `docs/reviews/`, name it for its
 unit, and commit it with its hash recorded.
 
 The hash stays the authority. A tracked copy can be edited; the hash in the
-review-request file, with the base and head commits beside it, is what lets
-anyone regenerate the bundle and prove it is the one that was sent.
+prompt file, with the base and head commits in the bundle's own header, is what
+lets anyone regenerate the bundle and prove it is the one that was sent.
 
 ## 7. Report and stop
 

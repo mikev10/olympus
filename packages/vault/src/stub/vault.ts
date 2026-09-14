@@ -9,9 +9,9 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { RunId, RunState, StationId, VaultRef } from '@olympus-ai/core';
+import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
+import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -46,6 +46,7 @@ export class StubVault implements Vault {
   private readonly blobs = new Map<string, Uint8Array>();
   private readonly locks = new Map<RunId, LockManifest>();
   private readonly states = new Map<RunId, RunState>();
+  private readonly admitted = new Set<RunId>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -58,12 +59,24 @@ export class StubVault implements Vault {
     return Promise.resolve(new Uint8Array(bytes));
   }
 
+  /**
+   * Adds to the run's manifest and refuses an already-locked path, as the
+   * local Vault does (D-P1-05). The skeleton replaced the manifest instead,
+   * which went unnoticed while its line locked once; a line that locks at
+   * `spec`, `test-design`, and `plan` would drop the spec from verification at
+   * the second lock (D-P4-05).
+   */
   async lock(runId: RunId, paths: string[], by: StationId): Promise<LockManifest> {
     if (paths.length === 0) {
       throw new Error(`StubVault: refusing to lock nothing for run ${runId}; an empty manifest would verify as intact`);
     }
+    const existing = this.locks.get(runId)?.entries ?? [];
+    const already = paths.filter((path) => existing.some((entry) => entry.path === path));
+    if (already.length > 0) {
+      throw new Error(`StubVault: refusing to lock ${already.join(', ')} again for run ${runId}; an artifact is fixed from its first lock`);
+    }
     const lockedAt = new Date().toISOString();
-    const entries: LockEntry[] = [];
+    const entries: LockEntry[] = [...existing];
     for (const path of paths) {
       const hash = await this.hashFile(path);
       if (hash === undefined) throw new Error(`StubVault: cannot lock ${path} for run ${runId}: no such file under ${this.root}`);
@@ -93,6 +106,19 @@ export class StubVault implements Vault {
     return Promise.resolve(this.store(v.runId, 'violation', v));
   }
 
+  recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
+    const runId = a.run.id;
+    if (this.admitted.has(runId)) {
+      return Promise.reject(new Error(`StubVault: run ${runId} already has an admission record; nothing was stored`));
+    }
+    this.admitted.add(runId);
+    return Promise.resolve(this.store(runId, 'admission', a));
+  }
+
+  recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef> {
+    return Promise.resolve(this.store(runId, 'task-result', r));
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
     if (state === undefined) return Promise.reject(new Error(`StubVault: no run state for ${runId}`));
@@ -113,7 +139,11 @@ export class StubVault implements Vault {
     return Promise.resolve(structuredClone(stored));
   }
 
-  private store(runId: RunId, kind: 'evidence' | 'violation', record: EvidenceBundle | IntegrityViolation): VaultRef {
+  private store(
+    runId: RunId,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult,
+  ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };
     this.blobs.set(refKey(ref), bytes);

@@ -91,7 +91,10 @@ const { LocalVault } = await import(moduleUrl);
 const vault = new LocalVault({ store, artifacts });
 // The tag makes this child's bytes identifiable, so the caller can prove the
 // state that landed is one winner's whole record and not a blend of several.
-const state = { runId, station: 'spec', tasks: { [tag]: 'pending' }, evidenceRefs: [], violations: [], version: ifVersion };
+const state = {
+  runId, admission: { runId, kind: 'admission', hash: 'c'.repeat(64) }, station: 'spec', phase: 'working',
+  tasks: { [tag]: 'pending' }, attempts: {}, results: {}, evidenceRefs: [], violations: [], approvals: [], reviews: [], version: ifVersion,
+};
 while (Date.now() < Number(startAt)) { /* spin: sleeping to a deadline wakes the children in sequence */ }
 try {
   const stored = await vault.commitRunState(state, ifVersion);

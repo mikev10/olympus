@@ -7,7 +7,7 @@
  * holds them; IntegrityViolation lives in integrity because it produces them.
  * The Vault stores both.
  */
-import type { AgentClaim, RunId, RunState, StationId, TaskId, VaultRef } from '@olympus-ai/core';
+import type { AgentClaim, Policy, Run, RunId, RunState, StationId, TaskId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation } from '@olympus-ai/integrity';
 
 /**
@@ -41,6 +41,33 @@ export interface EvidenceBundle {
   contractVersion: string;
 }
 
+/** An artifact as admitted: where it sits in the workspace, and the SHA-256 of its bytes at admission. */
+export interface AdmittedArtifact {
+  readonly path: string;
+  readonly sha256: string;
+}
+
+/**
+ * What a run was admitted as. Written once, before the run's first state, and
+ * never again: a resume reads the requested level, the policy, and the
+ * artifacts from here, so its caller has no way to restate them (I5).
+ *
+ * `policy` is the resolved Policy, not the document it came from, so an
+ * auditor reads the effective table. Each artifact carries the hash it had at
+ * admission; the station that locks it refuses a lock whose hash differs,
+ * so what a station locks is what was admitted (I3).
+ */
+export interface AdmissionRecord {
+  readonly run: Run;
+  readonly policy: Policy;
+  readonly artifacts: {
+    readonly spec: readonly AdmittedArtifact[];
+    readonly acceptanceTests: readonly AdmittedArtifact[];
+    readonly verificationManifest: AdmittedArtifact;
+    readonly taskGraph: AdmittedArtifact;
+  };
+}
+
 /**
  * I1: no generic write(). Every mutator is a named, audited operation the runtime
  * calls. No method on this interface is reachable from inside a Workspace.
@@ -51,6 +78,10 @@ export interface Vault {
   verifyLocks(runId: RunId): Promise<LockVerdict>;
   writeEvidence(b: EvidenceBundle): Promise<VaultRef>;
   recordViolation(v: IntegrityViolation): Promise<VaultRef>;
+  /** Refused when the run already has an admission record. */
+  recordAdmission(a: AdmissionRecord): Promise<VaultRef>;
+  /** The result exactly as the driver returned it. A claim a later station reads comes from here, never from memory. */
+  recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

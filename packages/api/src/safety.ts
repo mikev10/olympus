@@ -25,19 +25,18 @@ export interface DeclaresUnsafe {
 }
 
 /**
- * The line's own declaration (S1 finding 3). If only the three
- * infrastructure stubs declared themselves, replacing them would lift the
- * L1 cap while the line still faked its half. Deleted by the unit that
- * replaces the line.
+ * The line's own declaration (S1 finding 3). If only the infrastructure stubs
+ * declared themselves, replacing them would lift the L1 cap while the line
+ * still faked its half. P4 paid the policy and station lines; what is left is
+ * P6's and P7's, and the unit that pays the last of them deletes this, after
+ * `I5.unsafe-declaration-survives-composition` is paid.
  */
 export const SKELETON_LINE: DeclaresUnsafe = {
   unsafe: {
     component: 'SkeletonLine',
     cannotEnforce: [
-      'no policy engine: the requested level is not resolved against a station or global cap, and no approval is evaluated',
-      'no tamper analysis: GateResult.tamper is empty by construction, not because analysis found nothing',
+      'no tamper analysis: no assertion, skip marker, deletion, or protected-path touch is detected, so integrate never escalates for one',
       'no claim/evidence diff: EvidenceBundle.claimEvidenceDiff is empty by construction',
-      'no station beyond spec, build, and verify: the run stops at verify, and review does not exist',
     ],
   },
 };
@@ -52,7 +51,7 @@ function isStringArray(value: unknown): value is readonly string[] {
  * an absence: a component that tries to declare and fails must not pass as
  * safe.
  */
-function declarationOf(slot: 'vault' | 'sandbox' | 'driver', component: object): UnsafeDeclaration | undefined {
+function declarationOf(slot: 'vault' | 'sandbox' | 'driver' | 'reviewer', component: object): UnsafeDeclaration | undefined {
   if (!('unsafe' in component)) return undefined;
   const unsafe: unknown = component.unsafe;
   if (typeof unsafe !== 'object' || unsafe === null || !('component' in unsafe) || !('cannotEnforce' in unsafe)) {
@@ -68,10 +67,15 @@ function declarationOf(slot: 'vault' | 'sandbox' | 'driver', component: object):
   return { component: name, cannotEnforce };
 }
 
-/** Every declaration in the graph, plus the line's own. Order: vault, sandbox, driver, line. */
+/**
+ * Every declaration in the graph, plus the line's own. Order: vault, sandbox,
+ * driver, reviewer, line. A reviewer that is the driver itself is listed once.
+ */
 export function unsafeComponents(graph: ComponentGraph): UnsafeDeclaration[] {
   const declarations: UnsafeDeclaration[] = [];
-  for (const [slot, component] of [['vault', graph.vault], ['sandbox', graph.sandbox], ['driver', graph.driver]] as const) {
+  const slots = [['vault', graph.vault], ['sandbox', graph.sandbox], ['driver', graph.driver], ['reviewer', graph.reviewer]] as const;
+  for (const [slot, component] of slots) {
+    if (slot === 'reviewer' && component === graph.driver) continue;
     const declaration = declarationOf(slot, component);
     if (declaration !== undefined) declarations.push(declaration);
   }

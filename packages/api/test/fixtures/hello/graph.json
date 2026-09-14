@@ -1,0 +1,6 @@
+{
+  "tasks": [
+    { "id": "hello", "station": "build", "role": "builder", "dependsOn": [], "dependencySet": ["**"] },
+    { "id": "hello-review", "station": "review", "role": "reviewer", "dependsOn": ["hello"], "dependencySet": ["**"] }
+  ]
+}

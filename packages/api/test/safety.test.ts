@@ -10,11 +10,12 @@ import { SKELETON_LINE, unsafeComponents, type ComponentGraph } from '../src/ind
 import { DelegatingDriver, DelegatingSandbox, DelegatingVault } from './wrappers.js';
 
 function stubs() {
-  return { vault: new StubVault('/'), sandbox: new StubSandboxProvider(), driver: new StubDriver() };
+  const driver = new StubDriver();
+  return { vault: new StubVault('/'), sandbox: new StubSandboxProvider(), driver, reviewer: driver };
 }
 
 describe('unsafeComponents', () => {
-  test('lists the vault, sandbox, and driver declarations in that order, then the line itself', () => {
+  test('lists the vault, sandbox, and driver declarations in that order, then the line itself; a reviewer that is the driver is listed once', () => {
     const graph = stubs();
     const declarations = unsafeComponents(graph);
     expect(declarations.map((d) => d.component)).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine']);
@@ -22,12 +23,19 @@ describe('unsafeComponents', () => {
     expect(declarations[3]).toBe(SKELETON_LINE.unsafe);
   });
 
+  test('a reviewer that is a separate component is listed in its own slot, after the driver', () => {
+    const graph = { ...stubs(), reviewer: new StubDriver() };
+    expect(unsafeComponents(graph).map((d) => d.component)).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver', 'StubDriver', 'SkeletonLine']);
+  });
+
   test('reads the declaration structurally: a component without one is not listed, and the line always is', () => {
     const graph = stubs();
+    const driver = new DelegatingDriver(graph.driver);
     const undeclared: ComponentGraph = {
       vault: new DelegatingVault(graph.vault),
       sandbox: new DelegatingSandbox(graph.sandbox),
-      driver: new DelegatingDriver(graph.driver),
+      driver,
+      reviewer: driver,
     };
     expect(unsafeComponents(undeclared).map((d) => d.component)).toEqual(['SkeletonLine']);
   });
@@ -40,16 +48,18 @@ describe('unsafeComponents', () => {
     expect(() => unsafeComponents({ ...graph, sandbox: notAnObject })).toThrow(/sandbox/);
     const noName = Object.assign(new DelegatingVault(graph.vault), { unsafe: { cannotEnforce: ['x'] } });
     expect(() => unsafeComponents({ ...graph, vault: noName })).toThrow(/vault/);
+    const reviewer = Object.assign(new DelegatingDriver(graph.driver), { unsafe: 'no' });
+    expect(() => unsafeComponents({ ...graph, reviewer })).toThrow(/reviewer/);
   });
 });
 
 describe('SKELETON_LINE', () => {
-  test('declares the line unsafe, naming the policy engine, tamper analysis, the claim/evidence diff, and the missing stations', () => {
+  test('declares what the line still cannot enforce: tamper analysis and the claim/evidence diff, and no longer the policy or the stations P4 paid', () => {
     expect(SKELETON_LINE.unsafe.component).toBe('SkeletonLine');
     const text = SKELETON_LINE.unsafe.cannotEnforce.join('\n');
-    expect(text).toMatch(/policy/i);
     expect(text).toMatch(/tamper/i);
     expect(text).toMatch(/claim/i);
-    expect(text).toMatch(/station/i);
+    expect(text).not.toMatch(/policy engine/i);
+    expect(text).not.toMatch(/no station beyond/i);
   });
 });

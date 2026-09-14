@@ -1,5 +1,6 @@
 import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
 import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
@@ -261,20 +262,20 @@ export const I4: InvariantEntry = {
         }
       },
     }),
+    APPROVAL_OUTCOME_GATES_THE_STATION,
   ],
   pending: [
     pending({
-      id: 'I4.approval-outcome-gates-the-station',
-      owner: 'P4',
+      id: 'I4.writable-globs-enforced-on-the-diff',
+      owner: 'P6',
       reason:
-        'resolvePolicy builds the total forty-key approvals table and nothing reads it. resolveAutonomy answers cap '
-        + 'arithmetic only, by design: approval evaluation is P4 and trigger admission is M2, both on P3 out-of-scope '
-        + 'list. So a policy can carry approvals["build:2"] = "blocked" and resolveAutonomy still returns '
-        + '{ ok: true, level: 2 }. P3 pins that boundary with a test so a later change to it is deliberate, but a '
-        + 'table nobody consults is a control that does not exist. P4 must refuse to advance a station:level whose '
-        + 'approval cell is blocked, and require a human for human-required, and assert both. Surfaced by the P3 '
-        + 'external review, finding 3, and by its second framing question: which later callers may treat the engine '
-        + 'answer as sufficient. The answer recorded in D-P3-10 is none.',
+        'A role\'s CapabilityScope.writableGlobs and the station\'s WriteBoundary.workspaceGlobs are carried into '
+        + 'the run and enforced nowhere inside the workspace: the mount layer keeps an agent out of the Vault (I1) and '
+        + 'the lock re-verification catches a write to a locked artifact (I3), but a build task that writes outside '
+        + 'its globs, to a file nothing locked, is not refused. The only honest input is the diff the runtime '
+        + 'collects itself; a driver\'s file-write events miss any write the driver does not observe, so checking '
+        + 'them would read stronger than it is (D-P4-01). P6 collects base+diff in a fresh sandbox and must refuse a '
+        + 'change outside the granted globs, and assert the refusal. Surfaced by P4.',
     }),
     pending({
       id: 'I4.driver-tool-inventory-validated',

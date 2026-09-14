@@ -1191,3 +1191,212 @@ produced D-P3-14, which neither the unit nor the first review had written down.
   payload-to-template-to-prompt path in this unit, and the next review request
   for a policy-shaped unit should ask the narrower question the reviewer
   proposed instead of restating I7 in full.
+
+## P4: Station machine
+
+The unit entry carried scope, deliverables, and a conformance line, and no
+out-of-scope list, acceptance criteria, invariants, or ledger — the defect P1,
+P2, and P3 each had. It was fixed in `DECOMPOSITION.md` before any code was
+written. Reading the contracts against the deliverables also showed that the
+unit cannot be built without amending them, which is a stop condition; the
+maintainer settled that and three scope questions before work began.
+
+### D-P4-01: the entry gained its five parts, and four questions were the maintainer's
+
+- **Problem:** besides the missing parts, four things were not decisions a
+  session should make alone. (1) `StationRefusal` has no arm for an approval or
+  a same-family reviewer, `GateResult` cannot record reduced independence, and
+  `RunState` holds nothing a resume can trust for the level, the policy, or the
+  retry count, and no Vault operation stores a `Run`: contract changes, which
+  are amendments. (2) Which of two resume designs. (3) D-S1-07 left P4 to decide
+  whether compositional provenance becomes a registry entry. (4) What
+  "write-boundary enforcement" can honestly mean before the runtime collects a
+  diff.
+- **Chosen, by the maintainer:** (1) the amendments land in this unit's pull
+  request as their own commits, one `A-P4-nn` entry each, under the
+  `gate-change` label, as A-S1-01 did; the external review then covers them
+  with the code that needed them. (2) A write-once admission record in the Vault
+  holding the `Run` and the resolved `Policy`, referenced from `RunState`, with
+  per-task attempt counts in run state: a resume can neither raise its own level
+  nor reset its retry bound. The rejected design had the caller restate both on
+  resume. (3) A pending entry, `I5.unsafe-declaration-survives-composition`,
+  owned by P6, the unit that deletes `SKELETON_LINE`'s last lines; I5's baseline
+  rises from 4 to 5. P4 narrows the line and does not delete it, so the risk the
+  entry names is not live until P6. (4) P4 re-verifies locks at every transition
+  and hard-fails the run on a mismatch; checking a role's `writableGlobs`
+  against the runtime-collected diff is owed to P6 as
+  `I4.writable-globs-enforced-on-the-diff`. Checking against the driver's
+  `file-write` events was rejected: it is blind to any write the driver does not
+  observe, so it would read stronger than it is.
+- **Session calls inside the entry, recorded so they are not mistaken for the
+  maintainer's:** the effective approval is the stricter of the contract's
+  `exitGate.approval` and the policy cell, because a contract that says a gate
+  needs a human must not be relaxed by a policy that says `auto`; a contract
+  with `requiresPanel: true` is refused at M1 rather than seated with one
+  reviewer; tasks run one at a time. Where the amendments landed differs in two
+  places from how the question put them, both recorded where they are made:
+  the seat is recorded in run state rather than `GateResult` (A-P4-02), and
+  every `TaskResult` is recorded in the Vault (A-P4-03), because an author
+  family or a claim held only in memory is lost by exactly the resume this unit
+  delivers.
+- **Reverse:** revert the entry. The amendments and both pending entries go with
+  it, and the unit is underspecified again.
+
+### A-P4-01: `StationRefusal` gains the approval and seat arms, and `parked` names its task and a closed cause
+
+- **Surfaced by P4:** the station machine has three refusals the contract could
+  not type. A `blocked` approval cell and a `human-required` cell with no
+  recorded grant (`I4.approval-outcome-gates-the-station`) had no arm, and the
+  nearest, `gate-failed`, carries `FailedCheck[]`, so either would have been
+  reported as a check that never ran. A same-family reviewer at L3
+  (`I6.review-seat-family-check`) had none either. And `parked` carried
+  `cause: string` and `retries: number`, which A-S1-01 left open for P4 to close
+  once the causes were known.
+- **Chosen:** `approval-blocked` and `approval-required`, each carrying the
+  `ApprovalKey` it read; `same-family-reviewer`, carrying the review task and
+  the shared `ModelFamily`; and `parked` now carries the task, a `ParkCause`
+  (`iterations-exhausted` | `retries-exhausted`), and the `limit` it reached.
+  The two causes are the two bounds a contract states: `maxIterations`, spent
+  by a gate that keeps failing, and `retry.max`, spent by a driver or sandbox
+  that keeps failing. `retries` became `limit` because an iteration bound is
+  not a retry count.
+- **Not chosen:** one `approval` arm with the `ApprovalOutcome` beside it. A
+  `blocked` cell ends the run and a `human-required` one waits for a grant, so a
+  consumer would have to branch on a second field to learn which, and the arm
+  would admit `outcome: 'auto'`, which is not a refusal at all.
+- **Conformance, same commit:** `I5.transition-has-no-warn-and-continue` gains
+  the three arms as valid constructions, and refuses a free-text park cause
+  (TS2322), an advance that carries an approval as a note (TS2353), and an
+  approval refusal with no key (TS2322).
+- **Reverse:** drop the arms and restore `cause: string`; the fixture fails.
+
+### A-P4-02: the review seat is recorded in run state, not in `GateResult`
+
+- **Surfaced by P4:** `I6.review-seat-family-check` asks that reduced
+  independence be recorded "in the gate result". `GateResult` is returned to a
+  caller and stored nowhere: the evidence bundle carries the checks, and
+  nothing else in the Vault holds a gate. A record of reduced independence that
+  exists only in a return value is a claim of the guarantee to everyone who
+  reads the run afterwards, which is what I6 forbids.
+- **Chosen:** `ReviewSeat { task, authors, reviewer, independence }` in
+  `core/src/station/types.ts`, and `RunState.reviews: readonly ReviewSeat[]`.
+  Run state is committed through the Vault's exclusive create, and every
+  version is kept, so the seat is durable and auditable, and a resume reads it
+  back. `authors` is a list because a review task may cover several build
+  tasks; a seat is `reduced` when the reviewer's family is any author's.
+- **Where it differs from the maintainer's question:** the question offered
+  "GateResult independence". The field would have been a record nobody can read
+  after the call returns; run state is the record. The obligation's substance,
+  that the run records reduced independence rather than claim the guarantee, is
+  unchanged, and the meta-test that pins its wording tests L0-L2 and L3, not
+  the word "gate".
+- **Reverse:** move the seat to `GateResult` and persist gate results; the run
+  state field then duplicates it.
+
+### A-P4-03: a write-once admission record and recorded task results make run state resumable
+
+- **Surfaced by P4:** a resume had nothing to trust. `RunState` held no
+  requested level, base commit, policy, artifact list, or attempt count, and no
+  Vault operation stored a `Run`, so a resumed run would take its level from
+  whoever called resume, and a crash would reset the retry bound. Separately,
+  the claim `verify` stores beside its evidence existed only in memory between
+  `build` and `verify`; a crash, or a human approval of the build exit that
+  arrives a day later, would lose it. The same is true of the author's
+  `ModelIdentity`, which a review seat compares.
+- **Chosen:** two named Vault operations and the run state a resume reads.
+  - `recordAdmission(AdmissionRecord)`: the `Run`, the resolved `Policy`, and
+    each station's artifacts with their hashes at admission. Once per run: the
+    local Vault creates `runs/<id>/admission.json` exclusively, and `read` of an
+    `admission` ref checks the bytes against the ref's hash, because the file is
+    named by its run and not by its content. A second admission stores nothing.
+  - `recordTaskResult(runId, TaskResult)`: content-addressed like evidence.
+    `verify` reads the claim from here and a review seat reads the author's
+    model identity from here.
+  - `RunState` gains `admission`, `phase` (`working` | `exiting`), `attempts`
+    (`iterations`, `retries` per task), `results` (the latest result ref per
+    task), `approvals` (`ApprovalGrant`s), and `reviews` (A-P4-02).
+    `VaultRefKind` gains `admission` and `task-result`.
+- **Why the artifact hashes:** a station locks the artifact it was admitted
+  with. A lock whose hash differs from the admission hash is refused as a
+  tamper, so the window between admission and a station's lock is closed and
+  the verification manifest and task graph validated at admission are the
+  bytes the run later executes. P5 revisits this when a spec agent writes the
+  spec after admission.
+- **Not chosen:** putting the graph and the manifest inline in the admission
+  record. `plan` and `test-design` would then lock nothing, and P5, where a
+  model writes both, would move them back out.
+- **Conformance, same commit:** `I1.vault-implementation-exposes-only-named-operations`
+  now names nine operations; the contention assertion's child writes a whole
+  run state, because the local Vault refuses a partial one on read.
+- **At this commit `packages/api` does not compile:** the S1 line builds the old
+  `RunState`. The line is what this unit re-cuts, and the commit that does so
+  follows; making the old line compile against a record it is about to stop
+  using would be work written to be deleted.
+- **Reverse:** drop the two operations and the six fields; resume then trusts
+  its caller.
+
+### D-P4-02: the machine is pure and lives in `core`; the line in `api` performs its steps, and start and resume share one path
+
+- **Problem:** CONTRIBUTING places the station machine in `core`, and `core` cannot import `vault` or `integrity`, both of which depend on it. A machine that locks, verifies, and commits cannot live there.
+- **Chosen:** `core/src/station/` holds the contract table and pure functions: `transition`, `effectiveApproval`, `seatReviewer`, `grantedContext`, `capabilityRefusal`, `stationCapRefusal`, `parkRefusal`, and `nextStep`. `nextStep` reads only a committed `RunState` and the admitted task graph and names the next step. `packages/api/src/line.ts` performs that step and commits what happened. `startRun` admits a run and enters the loop; `resumeRun` enters the same loop from the stored state. Resume has no code path of its own to drift from, which is what makes `I2.resume-derives-state-from-the-vault` provable by stopping a run after every one of its commits.
+- **Reverse:** move the loop into `core` behind a Vault-shaped port. That would be a second copy of the Vault contract inside `core`.
+
+### D-P4-03: the effective approval is the stricter of contract and policy; `integrate` needs a human at M1; a grant is exact
+
+- **The rule:** a station exit needs the stricter of the contract's `exitGate.approval` and `policy.approvals[station:level]`, raised to `human-required` when a protected path was touched. A contract that says a gate needs a human must not be relaxed by a policy cell that says `auto`, and a policy must be able to tighten any gate.
+- **`integrate` states `human-required` as its own floor.** Every M1 run therefore ends waiting for a human at `integrate`, whatever the policy says. M1 claims no lights-off autonomy, and this makes the claim structural rather than a default. The unit that brings L3 (M3) is the one that lowers it.
+- **A grant is exact and standing for the run.** `approveStation` records a grant only for the exit the run is waiting at: the current station, the admitted level, an effective approval of `human-required`, and no grant already held. A `blocked` exit cannot be approved, and a grant for another station or level is refused, because it would be a standing approval of something nobody has seen. Once recorded, a grant for `build:2` satisfies every later exit of `build` in that run, since the build and verify stations alternate while tasks are rebuilt.
+- **A move back up the line is not an advance.** Leaving `verify` for `build` to rebuild a failed task re-verifies the locks and needs no approval.
+- **Reverse:** make the policy the sole authority. Then `integrate`'s floor is a default a policy line removes.
+
+### D-P4-04: the agent stations require `parallelism`; the runtime's own stations require nothing
+
+- **Problem:** "a station missing a required driver capability fails closed" is vacuous against a table that requires nothing. Declaring a capability the stub driver lacks (`hooks`, `stablePrefixCaching`) would make every stub run refuse. Declaring one the line does not use would be a placeholder dressed as a requirement.
+- **Chosen:** `build` and `review` require `parallelism`, a count that is missing below one. The line runs a task through the driver there, and a driver that declares it can run no task at a time cannot run this one. The requirement is real, the stub declares one, and a driver declaring zero is refused at admission and on resume. Every other station requires nothing, and `contractTableProblems` refuses a table where a station no driver runs at requires something. P5 adds requirements when the line starts using the capabilities behind them.
+- **Reverse:** empty `requires` everywhere; the assertion then only exercises the machine function.
+
+### D-P4-05: `StubVault.lock` adds to the manifest, as `LocalVault` does
+
+- **Found by P4's own test:** a spec rewritten after `plan` locked the task graph verified clean. `StubVault.lock` replaced the run's manifest, and its test pinned that ("replaces an earlier manifest"). P1 fixed replace semantics in `LocalVault` (D-P1-05); the stub kept them, and the skeleton never noticed, because its line locked once. A line that locks at `spec`, `test-design`, and `plan` drops the spec from verification at the second lock.
+- **Chosen:** the stub accumulates entries and refuses an already-locked path, and its test now asserts both. The stub stays unsafe-declared, so this is correctness of the L1 path rather than a new guarantee.
+- **Reverse:** restore replace semantics; the line's lock tests fail on the stub.
+
+### D-P4-06: what an attempt is, when it is counted, and what a resume re-runs
+
+- **Iterations** count builds of a task. Each is committed as the build starts, before the driver is called, and is bounded by the build contract's `maxIterations`. A gate that fails with iterations left returns the task to `build`; one that fails on the last iteration parks it with `iterations-exhausted`.
+- **Retries** count driver or sandbox failures within the current iteration, bounded by the current station's `retry.max`, with `retry.backoffMs` between attempts. A new iteration starts at zero, so a task's total attempts are bounded by `maxIterations × (retry.max + 1)`. Past the bound the task parks with `retries-exhausted`.
+- **A task found `running` on resume** was in flight when the run stopped. It is run again without being counted, because its iteration was already counted before the driver was called. This is what makes a resumed run reach the same counts as an uninterrupted one. Each re-run needs an external resume, so a crash loop is not autonomous.
+- **Parked is terminal at P4.** A resume refuses a parked run with `parked`, whatever driver it brings. Unparking is lifecycle, and lifecycle is P9's.
+- **Reverse:** count a crash re-run as a retry. Resumed runs then diverge from uninterrupted ones on every stop between a build's start and its result.
+
+### D-P4-07: the graph and the manifest are workspace artifacts, validated at admission and bound to it by hash
+
+- **Chosen:** a run request names four artifacts: spec files, acceptance tests, a verification manifest (`{ checks }`), and a task graph (`{ tasks }`). All four are read and hashed at admission, and the manifest and graph are parsed from the same bytes. The admission record keeps each hash, and the station that locks an artifact refuses a lock whose hash differs (A-P4-03). A resume re-reads the manifest and graph and refuses bytes that no longer hash to admission.
+- **Graph rules at M1:** tasks at `build` or `review` only; a build task depends only on build tasks; a review task depends on at least one build task and nothing else; every build task is covered by a review task, so no work reaches `integrate` unreviewed; the dependencies are acyclic, so the graph can finish. A role the graph schedules is resolved at admission against its station, so an undefined role or one without that station is refused before anything is written.
+- **Scheduling:** one task at a time, in graph order. `build` builds every task whose dependencies have passed, `verify` verifies what `build` left verifying, and leaving `verify` returns to `build` while any build task has not passed.
+- **What `passed` means for a review task:** the seat was assembled, its independence recorded, and the reviewer's result recorded. The runtime does not interpret a reviewer's verdict. A verdict is model output, and deriving task status from it would be the model reporting status (I2). A rubric and panel that turn review into checks are M3's. Until then the human at the `integrate` floor reads the recorded review.
+- **Reverse:** pass the graph and checks inline in the request, as S1 did. `plan` and `test-design` then lock nothing, and a resume trusts its caller for both.
+
+### D-P4-08: a violation with no task in flight names the last task that ran, or no role
+
+- **Problem:** `IntegrityViolation.role` is required. A tamper found at an exit, or before any task has run, has no task in flight to attribute it to.
+- **Chosen:** the role of the task in flight; else the role of the last task with a recorded result; else `unattributed`. At M1 no agent runs before `build`, so a mismatch there cannot be an agent's. The record says so rather than naming a role that did not act.
+- **Reverse:** make `role` nullable, which is a contract change.
+
+### D-P4-09: SKELETON_LINE is narrowed, not deleted; the I6 L3 half is asserted on the machine
+
+- **Chosen:** `SKELETON_LINE` loses the policy-engine and missing-station lines this unit pays, and keeps the two P6 and P7 owe: tamper analysis (so `integrate` never escalates for a protected path) and the claim/evidence diff. Every run above L1 is therefore still refused. A reviewer at L3 cannot be seated through `startRun` until P6, so the L3 half of `I6.review-seat-family-check` runs against `seatReviewer`, and the L0-L2 half runs end to end. The assertion's title says which half is which.
+- **Reverse:** delete `SKELETON_LINE` now. That would lift the L1 cap over a line that still fakes tamper analysis, and `I5.unsafe-declaration-survives-composition` is unpaid.
+
+### D-P4-10: every new assertion was shown to fail with its control removed
+
+- **Demonstrated, not assumed (I8):** each control was deleted in turn, the assertion that owns it was run, and the file was restored. All eleven deletions were caught: the exit lock re-verification (`I3.transition-reverifies-locks`); the admission-hash comparison at a lock (`I3.station-locks-the-admitted-artifact`); the human-required check, and separately the contract floor, in `transition` (`I4.approval-outcome-gates-the-station`); the admission capability check (`I5.station-missing-capability-refused`); the retry bound (`I5.task-attempts-are-bounded`); the admission policy check (`I5.over-request-refused-at-admission`); the no-recount of an in-flight task (`I2.resume-derives-state-from-the-vault`); the L3 refusal in `seatReviewer`, and separately the recording of the seat in run state (`I6.review-seat-family-check`); and context filtering at the review seat (`I6.reviewer-receives-no-author-material`).
+
+### Known limits, stated now
+
+- **A crash between a Vault write and the run state that records it.** Between a station's `lock` and its commit, a resume re-locks and the Vault refuses the already-locked path. Between `recordAdmission` and the first run state, no resume can find the run. Both fail closed, loudly, and neither is silent; both need an operator. The first would be closed by a Vault read of the lock manifest, the second by a lookup of an admission without state. Neither exists, and neither is added here.
+- **Review verdicts are recorded, not interpreted** (D-P4-07).
+- **Protected-path escalation has no input** until tamper analysis exists (P7). The machine consumes `protectedPathsTouched`, and the line passes an empty list; `SKELETON_LINE` says so.
+- **Tasks do not run in parallel**, and `concurrency.maxParallelTasks` and `maxConflictRetries` are not consulted. No invariant rests on parallelism.
+- **A `Policy` handed straight to a machine function is not revalidated** (D-P3-14's threat model). `startRun` validates the request's policy and re-resolves it, and `resumeRun` validates the admitted policy, so every policy that reaches the line has passed validation.
+- **A driver that reports another model than it runs** is held to the identity its result reports. The seat is checked against `resolveModel` before the reviewer runs and against `TaskResult.model` after. Whether a driver's identity is true is P5's claim to prove.

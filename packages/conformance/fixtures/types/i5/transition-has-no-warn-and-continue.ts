@@ -3,7 +3,9 @@
 // is no shape for "advanced, with a warning" or "advanced, degraded", a
 // refusal cannot invent a softer reason, and it cannot be prose alone: the
 // message is for people, the payload beside it is what a machine reads.
-import type { StationTransition } from '@olympus-ai/core';
+import type { ModelFamily, StationTransition, TaskId } from '@olympus-ai/core';
+
+declare const task: TaskId;
 
 export const advance: StationTransition = { ok: true, next: 'build' };
 
@@ -31,6 +33,23 @@ export const unsafe: StationTransition = {
   message: 'L2 requested; StubVault and SkeletonLine cannot enforce their contracts',
 };
 
+export const approvalRequired: StationTransition = {
+  ok: false,
+  reason: 'approval-required',
+  key: 'integrate:2',
+  message: 'integrate at L2 needs a human approval, and none is recorded',
+};
+
+export const sameFamily: StationTransition = {
+  ok: false,
+  reason: 'same-family-reviewer',
+  task,
+  family: 'claude' as ModelFamily,
+  message: 'the reviewer shares the author family claude, and L3 does not seat it',
+};
+
+export const parked: StationTransition = { ok: false, reason: 'parked', task, cause: 'retries-exhausted', limit: 2, message: 'retried twice' };
+
 export const warned: StationTransition = { ok: true, next: 'build', warnings: ['suite shrank'] }; // expect-error TS2353: 'warnings' does not exist in type
 export const degraded: StationTransition = { ok: true, next: 'build', degraded: true }; // expect-error TS2353: 'degraded' does not exist in type
 export const soft: StationTransition = { ok: false, reason: 'warning', message: 'suite shrank' }; // expect-error TS2322: Type '"warning"' is not assignable to type
@@ -38,3 +57,6 @@ export const skipped: StationTransition = { ok: false, reason: 'skipped', messag
 export const proseOnly: StationTransition = { ok: false, reason: 'gate-failed', message: 'typecheck failed' }; // expect-error TS2322: Property 'failed' is missing
 export const wrongPayload: StationTransition = { ok: false, reason: 'lock-tamper', failed: [], message: 'spec.md changed' }; // expect-error TS2353: 'failed' does not exist in type
 export const noMessage: StationTransition = { ok: false, reason: 'gate-failed', failed: [] }; // expect-error TS2322: Property 'message' is missing
+export const vagueCause: StationTransition = { ok: false, reason: 'parked', task, cause: 'gave up', limit: 2, message: 'gave up' }; // expect-error TS2322: Type '"gave up"' is not assignable to type 'ParkCause'
+export const approvalAsWarning: StationTransition = { ok: true, next: 'observe', approval: 'human-required' }; // expect-error TS2353: 'approval' does not exist in type
+export const keylessApproval: StationTransition = { ok: false, reason: 'approval-blocked', message: 'blocked' }; // expect-error TS2322: Property 'key' is missing
