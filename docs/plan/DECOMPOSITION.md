@@ -106,9 +106,26 @@
 **This unit carries I1.** It is the substrate everything else's safety rests on.
 
 ### P3 — Policy engine
-**Scope:** parse and evaluate `policy.yaml`.
-**Deliver:** `resolveAutonomy`, `resolveCapabilities`, schema validation, default-deny, protected-path list, shipped default `globalCap: 2`.
-**Conformance:** an over-request is **refused, not downgraded** (I5); an ungranted tool is absent, not merely warned; an unknown policy key fails validation rather than being ignored.
+**Scope:** validate and evaluate the policy document. The engine takes an already-parsed value and is the only path from the sparse `PolicyDocument` a human authors to the total `Policy` the runtime consumes. Where the bytes came from is not its concern: resolution needs no file, and the parser is the half with the attack surface.
+**Deliver:** `resolvePolicy`, `resolveAutonomy`, `resolveCapabilities`, schema validation that narrows `unknown` to a `PolicyDocument` and refuses an unknown key, default-deny, protected-path list, `validateToolGrants` with a mandatory inventory, shipped default with `globalCap: 2`.
+**Out of scope:**
+- **the YAML parser and file loading.** The engine's input is an already-parsed value, so no package gains a third-party runtime dependency here — least of all `core`, which every package imports, to serve a loader only the CLI path needs. Owed to **P9**, the first unit that must read a policy artifact from disk: P4 is handed a resolved `Policy` and reads no file, and `packages/api` is the run-creation path P9 owns. Tracked as `I5.policy-document-load-is-hardened`, which names the hardening the loader owes; if a unit before P9 turns out to need a Vault-resident policy at run time, it inherits the entry by editing the owner.
+- **the driver-side tool inventory.** `validateToolGrants` takes the inventory as a mandatory argument; nothing in this repo can yet produce a real one, because `DriverCapabilities` holds feature flags and no tool list. Owed to **P5** as `I4.driver-tool-inventory-validated`.
+- the station machine's consumption of a resolved `Policy` (P4); writing or hashing a `Policy` into the Vault — `Vault` has no policy operation and adding one is an amendment owed to the first unit that stores one (P4); role definitions and the role compiler (M2), so the shipped default carries an empty `roles` map, which is default-deny and correct; approval *evaluation*, since P3 resolves the forty-key table and P4 reads it; trigger admission (M2); a CLI surface for policy (P9); any modification to the contract files, `packages/core/src/policy/types.ts` included — P3's own result types live beside the implementation.
+**Conformance:** an over-request is **refused, not downgraded** (I5); an ungranted tool is absent, not merely warned; an unknown policy key fails validation rather than being ignored; a tool grant checked against an empty inventory is refused, so a validator called without a real inventory cannot pass.
+**Accept:**
+- an unknown key at any level is refused, naming the key and the path it sits at; it is never ignored, and a document that is not an object at all is refused rather than treated as empty
+- a value outside its domain is refused naming the field and what was wrong: `globalCap: 4`, a station that is not one of the ten, an `ApprovalKey` that is not `station:level`, an `ApprovalOutcome` that is not one of the three, a negative budget
+- `resolvePolicy` returns all forty `station:level` approval keys; every key the document omitted reads `human-required`, and no key reads `auto` that the document did not state
+- `resolveAutonomy` above `stationCaps[station]` or above `globalCap` returns `{ ok: false, reason: 'exceeds-cap' }` naming the requested and the effective level, and never returns a lower `level`; a level equal to the cap is allowed
+- `resolveCapabilities` for a role the policy does not define refuses with `capability-missing`, since no scope exists to grant anything; for a station outside a defined role's `stations` it refuses with `station-forbidden`. An ungranted tool, egress host, or trigger kind is absent from the resolved scope rather than warned about
+- `validateToolGrants(policy, inventory)` requires the inventory: it has no default and is not optional, so the call does not compile without one. An empty inventory against a non-empty grant refuses, naming the role and the tool — it never reads as allow-all
+- a resolved `Policy` is not aliased to the document it came from, and a resolved scope is not aliased to the policy: mutating either returned value changes nothing, and a second call returns the same grants
+- the shipped default resolves, carries `globalCap: 2` and `triggers.enabled: ['human']`, names its protected paths, and grants nothing else
+- **the ledger.** Paid: `I4.unlisted-capability-refused`, `I4.omitted-approval-is-human-required`, `I5.over-request-refused`. Added live: `I4.tool-grant-requires-an-inventory` (compile-error) and `I4.empty-inventory-refuses-every-grant` (runtime). Added pending: `I4.driver-tool-inventory-validated` (P5), `I5.policy-document-load-is-hardened` (P9). So `pending-baseline.json` lowers I4 from 2 to 1 and leaves I5 at 4, and the diff in `registry/i4.ts` and `registry/i5.ts` shows each swap
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I4 is this unit's whole subject; I5 is what makes an over-request a refusal instead of a downgrade.
 
 ### P4 — Station machine
 **Scope:** station registry, transitions, gate evaluation, write-boundary enforcement, Ascent bounds per task, resume from run state.

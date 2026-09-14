@@ -102,6 +102,20 @@ export const I7: InvariantEntry = {
   ],
   pending: [
     pending({
+      id: 'I7.enabled-trigger-declares-a-template',
+      owner: 'M2',
+      reason:
+        'TriggerPolicy validates its fields independently, not relationally: `enabled: ["ci-failure"]` with empty '
+        + '`taskTemplate`, `entryStation`, `maxAutonomy` and `minAuthorTrust` maps is a valid document, and the '
+        + 'shipped default itself enables `human` with an empty `taskTemplate` (D-P3-05, deliberately, because no '
+        + 'template registry exists yet). I7 holds only while a trigger selects a pre-declared template, so an '
+        + 'enabled kind with no declared template is a hole for admission to fill permissively — the payload is then '
+        + 'the only thing left that could name one. Trigger admission is M2 and out of scope for P3, so the '
+        + 'obligation lands there: refuse to admit an enabled kind that has no pre-declared template and no entry '
+        + 'station, and assert the refusal. Surfaced by the second P3 external review, finding 5. Whether the '
+        + 'relational check belongs in the validator instead is recorded in D-P3-13.',
+    }),
+    pending({
       id: 'I7.extracted-field-schemas',
       owner: 'M2',
       reason:

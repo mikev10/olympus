@@ -167,7 +167,7 @@ change relative to the files as they passed the gate.
 Recorded, not fixed, so that no comment in the contract reads as though one of these is closed. Each names the unit that owns it.
 
 - **`TriggerEvent.extracted` has no field schema** (owner: triggers unit, M2). `UntrustedText` keeps `raw` out of prompts, but `extracted` is the only path from a payload into a run and it is a free `Record<string, string>`. Once the extractor casts and reads `raw`, whatever it pulls through becomes ordinary trusted strings, and the type constrains neither which fields exist nor what they contain. An over-permissive extractor that copies the payload into a field defeats I7 entirely, and no type notices. Per-kind field schemas with length caps and character-class validation are required before any non-human trigger is enabled. The comment on the field now says this; it previously called `extracted` "the sole path into a run" as though being the only path made it safe.
-- **`CapabilityScope.tools` has no relation to `DriverCapabilities`** (owner: P3, policy engine). `tools: string[]` is a free list, so a policy can grant a tool no driver exposes and nothing notices. Validation against what the selected driver declares belongs to P3.
+- **`CapabilityScope.tools` has no relation to `DriverCapabilities`** — *split by P3, see D-P3-04*. `tools: string[]` is a free list, so a policy can grant a tool no driver exposes and nothing notices. The engine-side half is closed: P3 ships `validateToolGrants(policy, inventory)`, asserted by `I4.tool-grant-requires-an-inventory`. The driver-side half is open and owned by **P5**: `DriverCapabilities` holds feature flags and no tool inventory, so nothing in the repo can yet produce the argument that function requires. Tracked as `I4.driver-tool-inventory-validated`.
 - **`commitRunState(s, ifVersion)` carries the version twice** (owner: P1, Vault). `ifVersion` is a parameter while `s.version` also holds one, and the contract does not say which the optimistic-concurrency check compares against. P1 must document which is authoritative before implementing it.
 - **`StationContract.allowedContext` restricts review context by comment only** (owner: P4, station machine). The rule that review seats never see `author-narrative` or `plan` is a comment on the field, where I1's write boundary got a literal type (`vault: 'never'`). Inconsistent; revisit at P4 when the ten contracts are written.
 
@@ -859,3 +859,335 @@ fail-open. Item 4 was not touched, and it is what this unit most needed a second
 opinion on: D-P2-06 deliberately widened an input type to `mode: string` so the
 run-time guards would not be compiled away, and the tests reach those guards
 through `as unknown as` casts. Nothing in this review examined that choice.
+
+## P3: Policy engine
+
+### D-P3-01: the engine takes an already-parsed value; the loader and its hardening are owed to P9
+
+- **Ambiguous:** P3's scope line read "parse and evaluate `policy.yaml`", which is two jobs. Resolution — sparse `PolicyDocument` to total `Policy`, cap arithmetic, default-deny lookup — needs no file and no parser. Reading bytes off a disk does, and no package in the repo has a third-party runtime dependency yet.
+- **Chosen:** the engine's input is an already-parsed value, typed `unknown` and narrowed by this unit's own validator. Schema validation, unknown-key refusal, and every domain check stay here, because that is the substance; only the YAML text-to-object step and the file read are deferred. `DECOMPOSITION.md` now says object-only in the scope line itself, so the next session does not have to rediscover it.
+- **Why not add `yaml` to `core`:** the cost is placement, not the dependency. `core` is what every package imports, and it would inherit a parser to serve a loader only the CLI path needs. When the loader lands it belongs beside the thing that reads files.
+- **Why not JSON instead:** `policy.yaml` is named in F1's frozen artifact table. Revising frozen vocabulary to avoid a dependency decision is the wrong reason to touch it.
+- **Owner, checked rather than assumed:** P4 is handed a resolved `Policy` and reads no file; `packages/api` is the run-creation path, and `packages/api/src/safety.ts` already declares the absent policy engine as an unsafe component. The first unit that must read a policy artifact from disk is **P9**. If a unit before P9 turns out to need a Vault-resident policy at run time, it inherits the entry by editing the owner — the arrangement D-F3-14's successor set for `I8.external-assertion-execution-reconciled`.
+- **The obligation is written down now, not left as "load policy.yaml":** `I5.policy-document-load-is-hardened` names what the loader owes — an exact version pin with no caret, `maxAliasCount` 0 so an alias bomb cannot expand, a byte cap on the document, a nesting-depth limit, and each of those four asserted as a *refusal* rather than as a configured option. A parser is the first code to touch untrusted-shaped bytes on the way into the Vault, and hardening that ships unasserted is the silent degrade I5 refuses.
+- **Reverse:** add the parser to this unit; `core` gains a runtime dependency and every package inherits it.
+
+### D-P3-02: this unit's result types live beside the implementation, not in the contract file
+
+- **Problem:** validation needs a result type, and `PolicyRefusal.reason` is `'exceeds-cap' | 'station-forbidden' | 'capability-missing'` — none of which describes a malformed document. Widening that union means editing `packages/core/src/policy/types.ts`, an F2 contract file, which is an amendment rather than unit work.
+- **Chosen:** the new types go in `packages/core/src/policy/validation.ts`, exported through the package index. The contract file is untouched. `PolicyRefusal` keeps its three reasons and stays what `resolveAutonomy` and `resolveCapabilities` return; a document defect is a different shape because it is a different failure.
+- **Reverse:** move them into the contract file as an amendment, with the reason union widened deliberately.
+
+### D-P3-03: the runtime string lists are derived from total records, so the union cannot drift from them
+
+- **Problem:** validating a station or an autonomy level needs those unions as runtime values, and `core`'s contract types are type-only. A hand-written array beside a union silently rots the moment the union gains a member — and a validator that does not know about a new station accepts it nowhere, which fails closed, or rejects it everywhere, which fails a legitimate policy.
+- **Chosen:** each list is `Object.keys` of a `Readonly<Record<T, true>>` literal. The total record makes an omitted member a compile error and an invented one a compile error too, so the runtime list cannot disagree with the type. Membership is tested with `Object.hasOwn`, never `in`, so a prototype key such as `toString` is not a valid station.
+- **Reverse:** replace with plain arrays; the drift guard is gone and nothing notices a new station.
+
+### D-P3-04: `validateToolGrants` takes a mandatory inventory, and the owed gap is split in two
+
+- **Problem:** the known gap at F2 (`CapabilityScope.tools` has no relation to `DriverCapabilities`) was recorded with owner P3. It cannot be closed here as written: `DriverCapabilities` holds feature flags and no tool list, so there is nothing to validate against, and inventing `declaredTools()` with only `StubDriver` to satisfy it would guess at a shape P5 discovers for real and then need amending twice — the `CheckSpec.command` reasoning from S1, where a merely incomplete contract waits for the unit that knows what completes it.
+- **Chosen:** split the gap. P3 ships the engine-side half, `validateToolGrants(policy, inventory)`, which refuses any `tools` entry the inventory does not cover. P5 owes the driver-side inventory as `I4.driver-tool-inventory-validated`. Two entries with distinct reasons, so the ratchet records that P3 paid something and P5's obligation is specific rather than inherited. One entry handed down a third time is the pattern that made `I8.external-assertion-execution-reconciled` worth flagging.
+- **The inventory is mandatory, and that is the point.** No default, no optional parameter, no "empty means allow all". A validator that can be called without a real inventory and still pass validates nothing, and every caller between now and P5 would take that path. An empty inventory against a non-empty grant list is a refusal. Both halves are asserted: `I4.tool-grant-requires-an-inventory` is a compile-error fixture that the one-argument call and an explicit `undefined` both fail, and `I4.empty-inventory-refuses-every-grant` is the runtime refusal.
+- **Reverse:** give `inventory` a default of the granted tools; the compile fixture stops diagnosing and the runtime assertion passes vacuously.
+
+### D-P3-05: the shipped default grants nothing
+
+- **Ambiguous:** P3 ships a default carrying `globalCap: 2`, but no role exists anywhere in the repo — `RoleId` is a brand with no registry, and P5 says it emits from hardcoded roles "for now".
+- **Chosen:** the default carries `globalCap: 2`, `triggers.enabled: ['human']`, its protected paths, and `roles: {}`. An empty role map means every `resolveCapabilities` call refuses, which is what default deny means (I4): a shipped policy that grants a role something before any role is defined would be a grant nobody authored. P4 and P5 add roles when they have them.
+- **Rejected — a plausible builder role:** it would be the first capability grant in the system, written by the unit least able to say what a builder needs.
+- **Reverse:** add roles to the default; every one is a grant that must be justified in the diff.
+
+### D-P3-06: an omitted station cap is no cap, not L0
+
+- **Ambiguous:** F1 gives the effective level as `min(requested, stationCap, globalCap)`, and `stationCaps` is `Partial`. Nothing says what an omitted station means. Under I4 the default-deny reading is L0, which would deny every station a document does not enumerate.
+- **Chosen:** an omitted station cap adds no restriction; the bound is the tightest of the global cap, the station cap where the document sets one, and the role's own `autonomyCeiling`. R-F2-08 made `approvals` total precisely because a missing approval would leave something downstream to decide, and it deliberately left `stationCaps` sparse **in the resolved `Policy` too** — the contract saying a station cap is a tightening control rather than a grant. Omitting one cannot widen anything: the global cap and the role ceiling still bound the request, the role must be defined at all and must list the station, and every approval still reads `human-required` until a document says otherwise. So no capability is granted by omission, which is what I4 asks.
+- **Rejected — omitted means L0:** it makes `globalCap` dead in the shipped default, and forces every author to enumerate all ten stations to get any autonomy at all. That is the ergonomics problem R-F2-08 rejected for approvals, reintroduced one field over; and unlike approvals, the omission here cannot grant.
+- **Asserted:** `resolveAutonomy` at the global cap with an empty `stationCaps` is granted, one above it is refused, and a station cap tighter than the global cap bites at that station only.
+- **Reverse:** treat a missing entry as 0 and make `Policy.stationCaps` total in the same edit, since a resolved policy would then have a defaulting rule an auditor could not read off the table.
+
+### D-P3-07: a defect report names a role as a plain string
+
+- **Problem:** `UngrantedTool` needs to say which role holds an unoffered tool. `Record<RoleId, CapabilityScope>` is not indexable by a plain string and `Object.keys` over it yields `string[]`, so recovering a `RoleId` from the policy's own keys would take a cast to a branded type — and the brands are load-bearing (CLAUDE.md), so casting into one to build a message is the wrong trade.
+- **Chosen:** `UngrantedTool.role` is `string`. The value is read out of the policy for a message; a defect report is not a capability, and nothing downstream uses it to look anything up.
+- **Reverse:** brand it and add the cast, with a comment naming what guarantees it.
+
+## P3 amendment: external adversarial review
+
+An external reviewer (Grok, temporary chat, bundle only — the first xAI review,
+so family rotation was met) returned five findings plus three inventory
+sections. Three hold as descriptions of the code and were reproduced by
+execution; two are observations that name no defect. Two were fixed on the unit
+branch, one is recorded as a boundary with a new pending registry entry. The
+full triage, with the verification evidence for each, is
+`docs/reviews/2026-09-13-P3-policy-engine-adversarial-triage.md`.
+
+The review's most valuable content was not a finding. Item 7 asked which later
+callers may treat this engine's answer as sufficient — see D-P3-10.
+
+### D-P3-08: an egress entry names one host
+
+- **Problem:** `validateEgress` refused the bare string `'all'` or `'*'`, then
+  accepted any non-empty string *inside* the array. `{ egress: ['*'] }`
+  validated, resolved, and came back out of `resolveCapabilities` as the grant.
+  So did `'*.example.com'`, `'0.0.0.0/0'`, and `'https://example.com'`. The
+  authored form reads as an explicit allowlist while denoting every host.
+- **Consequence, separated from the defect:** not a live bypass today, and the
+  reviewer was right to ask for that to be confirmed before treating it as
+  high. `CapabilityScope.network.egress` and `SandboxSpec.egress` are different
+  types, no code maps one to the other, and `LocalDockerProvider` refuses
+  `allowlist` by name (D-P2-07). A wildcard host list therefore cannot reach an
+  enforcement point. It is a schema gap and a trap laid for whichever unit can
+  enforce an allowlist.
+- **Chosen:** refuse an entry containing a glob wildcard, a path or
+  prefix-length separator, a backslash, or whitespace. The rule is narrow and
+  statable — *an entry denotes a single host* — and it is enforced where the
+  document is read rather than where it is applied.
+- **Rejected — a hostname grammar:** label lengths, permitted characters, IDN,
+  and whether a port or a CIDR range is admissible are decisions for the unit
+  that can actually enforce an allowlist, and inventing them here would refuse
+  legitimate values on a guess.
+- **Honest limit:** the rule catches entries that denote *every* host and
+  entries that are not hosts. It does not catch a narrower range written
+  without a slash, and it is not a validation that a host exists or is
+  reachable. `10.0.0.0/8` is refused because of the slash, not because the
+  range was understood.
+- **Asserted:** `I4.egress-entry-names-one-host`, live, with a literal-host
+  control so the assertion cannot pass by refusing every list. Mutation-checked:
+  accepting any non-empty entry fails it.
+- **Reverse:** drop the `isHostLiteral` filter; the assertion and three unit
+  tests fail.
+
+### D-P3-09: resolvePolicy validates its own input, because the parameter type is a claim
+
+- **Problem:** `resolvePolicy(doc: PolicyDocument)` trusted the type. A caller
+  writing `junk as PolicyDocument` reached it with `globalCap: 99`, a role
+  ceiling of 99, or a station id that is not one of the ten, and every one flowed
+  through resolution into a grant. Reproduced: `globalCap: 99` resolved, and
+  `resolveAutonomy(3, 'build', …)` then returned `{ ok: true, level: 3 }`. The
+  narrowing was optional at the only runtime entry that matters.
+- **Chosen:** `resolvePolicy` runs `validatePolicyDocument` on its argument and
+  throws, naming the defects, when it does not validate. I5 says fail closed,
+  and a control that holds only while every caller remembers to compose two
+  functions in the right order is not closed. It runs once at load, so the cost
+  of re-validating an already-validated document is one pass.
+- **Why a throw:** `PolicyEngine.resolvePolicy(doc): Policy` returns a `Policy`,
+  not a result union, and widening it is an edit to an F2 contract file — an
+  amendment, and on this unit's out-of-scope list. A throw is the fail-closed
+  option available without one.
+- **The stronger fix, not taken here:** brand the validated document so
+  `resolvePolicy` accepts only a value `validatePolicyDocument` produced, the
+  way `UntrustedPayload` works. That makes the composition unskippable at
+  compile time rather than caught at run time. It changes the contract
+  signature, so it is an amendment and belongs between units, not inside one.
+  Recorded here so it is not lost.
+- **Asserted:** `I5.malformed-document-refused-at-resolve`, live, four rogue
+  documents plus a genuine one as the control. Mutation-checked: reverting the
+  guard fails it.
+- **Reverse:** remove the validation call; the assertion and six unit tests
+  fail.
+
+### D-P3-10: no later caller may treat this engine's answer as sufficient
+
+- **The reviewer's question,** and the most useful thing in the review: "which
+  later readers are allowed to treat `resolveAutonomy` / `resolveCapabilities`
+  as sufficient, and which must still consult approvals, trigger caps, and the
+  tool inventory? If any caller only asks the engine, findings 2 and 3 become
+  the production bypass."
+- **The answer: none.** `resolveAutonomy` answers cap arithmetic over three
+  bounds and nothing else. It does not read `approvals` and does not read
+  `triggers.maxAutonomy`, so a policy carrying `approvals['build:2'] = 'blocked'`
+  and `triggers.maxAutonomy.human = 0` still returns `{ ok: true, level: 2 }`.
+  Reproduced. This is by design — approval evaluation is P4 and trigger
+  admission is M2, both on this unit's out-of-scope list — but "by design" is
+  not a control.
+- **Chosen:** three things rather than a comment. The boundary is pinned by
+  tests, so a later change that makes the engine consult either table fails them
+  and is therefore deliberate. The obligation on the consuming unit is a pending
+  registry entry, `I4.approval-outcome-gates-the-station`, owned by P4, which
+  raises the I4 baseline from 1 to 2 — a deliberate edit, visible in the diff,
+  and the instrument that counts where prose does not. And this entry records
+  the answer so P4 does not have to re-derive it.
+- **Not fixed here:** making `resolveAutonomy` consult the approvals table would
+  absorb P4's work into P3 on a reviewer's suggestion. The out-of-scope list is
+  binding, and a review does not widen a unit.
+- **Reverse:** have `resolveAutonomy` read `approvals` and `triggers.maxAutonomy`;
+  the three boundary tests fail and the pending entry should then be paid here
+  rather than by P4.
+
+### Findings that named no defect
+
+- **The `as Record<ApprovalKey, ApprovalOutcome>` in `totalApprovals`** (finding
+  4). The reviewer confirmed the runtime count check makes the assertion honest
+  and that a drift between the two lists throws at resolve time — fail loud, not
+  fail open — and suggested optionally building the record without the
+  assertion. Not taken: TypeScript cannot prove a loop assigned every key of a
+  union, `Object.fromEntries` returns an index-signature type that is not
+  assignable to the total record, and a forty-entry literal would defeat the
+  derivation the record exists for. The assertion plus the throw is the honest
+  arrangement. No change.
+- **Shallow freeze** (finding 5). The reviewer traced `cloneScope` and concluded
+  it freezes the arrays and the nested `network` and `budget` objects, and that
+  what freeze does not stop — a caller replacing the `Policy` reference it holds
+  — is not a widen of the engine's copy. Agreed, and not preventable by any
+  means available to a function that returns a value. No change.
+
+## P3 amendment: second external review
+
+A second external reviewer, run against the **same bundle** as the first so the
+two are comparable, returned five findings. Two reproduce the first review's
+(and had already been fixed by the time it arrived); **two are findings the
+first review did not make at all** and were fixed here; one is an ambiguity now
+owned by M2. The full triage is
+`docs/reviews/2026-09-13-P3-policy-engine-second-adversarial-triage.md`.
+
+The case for running a second review of one unit is settled by the result: the
+prototype-chain grant (D-P3-11) and the malformed autonomy level (D-P3-12) were
+both invisible to the first family, and the second review's framing answer
+produced D-P3-14, which neither the unit nor the first review had written down.
+
+### D-P3-11: the prototype chain is not an authority on what a policy grants
+
+- **Problem:** `cloneRoles` built the role map with `Object.fromEntries`, an
+  ordinary object, and both lookups read `policy.roles[role]`. Two consequences,
+  both reproduced. With `Object.prototype.reviewer` set to a scope-shaped value
+  anywhere in the process, `resolveCapabilities('reviewer', 'build', policy)`
+  returned **a grant** for a role the policy does not define. And with no
+  pollution at all, an ungranted role named `toString` or `constructor` resolved
+  to an inherited function and then threw a `TypeError` at
+  `scope.stations.includes(...)` instead of refusing with `capability-missing`.
+- **Why it matters more than its reachability suggests:** the grant half needs
+  prototype pollution elsewhere, which is a real but conditional precondition.
+  The throw half needs only an unvalidated role id. Neither is acceptable: I4's
+  default deny has to be *total*, and a lookup that consults the prototype chain
+  is not total. An exception is also not the refusal the contract promises — it
+  carries no reason, and a caller that catches it has nothing to record.
+- **The irony worth recording:** `validateRoles` already refuses `__proto__`,
+  `constructor` and `prototype` as authored role ids (`RESERVED_ROLE_IDS`). The
+  validator worried about prototype names while the runtime lookup handed the
+  prototype back its authority. Guarding the input and not the lookup is half a
+  control.
+- **Chosen:** build the role map on `Object.create(null)`, and read it only
+  through `scopeFor`, which uses `Object.hasOwn`. Both, not either: the null
+  prototype closes it now, and the `hasOwn` keeps it closed if a later edit
+  rebuilds the map with an ordinary prototype. `ownStationCap` does the same for
+  the station caps, which were reachable by the same route and were saved only
+  by an ordering accident that put the station check first.
+- **Asserted:** `I4.role-lookup-ignores-the-prototype-chain` — a polluted
+  prototype, four prototype-named roles, the null-prototype check, and a real
+  grant as the control. Mutation-checked: restoring either the plain object or
+  the plain index fails it.
+- **Reverse:** restore `Object.fromEntries` and `policy.roles[role]`; the
+  assertion and seven unit tests fail.
+
+### D-P3-12: an autonomy level that is not one refuses rather than being compared
+
+- **Problem:** `resolveAutonomy` compared `requested > cap` with no runtime
+  guard, and the parameter type is erased. `NaN > 3` is `false`, so
+  `resolveAutonomy(NaN, …)` returned `{ ok: true, level: NaN }`. Reproduced —
+  and it is broader than the review reported: `-1` and `2.5` were also answered
+  with success carrying themselves as the level. Only `Infinity` was refused,
+  and only because `Infinity > 3` happens to be true.
+- **Why success is the worst possible answer here:** this unit's entire I5 story
+  is that an over-request is refused rather than downgraded, because a caller
+  that receives a level proceeds believing it was granted what it asked for. A
+  caller receiving `{ ok: true, level: NaN }` does exactly that, with a level
+  nothing can honour.
+- **Chosen:** guard `requested` with the `isAutonomyLevel` predicate the package
+  already had, and throw. `PolicyRefusal.reason` has no arm for a malformed
+  argument, and widening the union is an edit to an F2 contract file — an
+  amendment, on this unit's out-of-scope list. A throw is the fail-closed option
+  available without one, and it matches D-P3-09's precedent: a value that lies
+  about its type gets an exception, not a refusal object.
+- **Not guarded, and why:** `station` needs no guard, because an invented
+  station fails `scope.stations.includes(station)` and refuses with
+  `station-forbidden` — a correct refusal reached by the normal path.
+- **Asserted:** `I5.malformed-autonomy-level-refused`, with all four real levels
+  as the control. Mutation-checked.
+- **Reverse:** delete the guard; the assertion and five unit tests fail.
+
+### D-P3-13: the trigger maps are partial by contract, and admission owes the relational check
+
+- **Ambiguous, and the reviewer was right to flag it:** `TriggerPolicy` fields
+  are validated independently. `enabled: ['ci-failure']` with empty
+  `taskTemplate`, `entryStation`, `maxAutonomy` and `minAuthorTrust` is a valid
+  document, and the shipped default enables `human` with an empty
+  `taskTemplate` — which D-P3-05 chose deliberately, because naming a template
+  no registry declares would be a fiction that reads as wiring.
+- **Chosen:** the maps stay partial, and `enabled` means "this kind is not
+  switched off", not "this kind is fully admissible". The relational check
+  belongs at admission rather than in the validator, because admission is the
+  only place that knows whether a named template exists — a validator enforcing
+  relational completeness against a template registry that does not exist would
+  be checking a name against nothing.
+- **But the hole is real,** and I7 holds only while a trigger selects a
+  pre-declared template. An enabled kind with no declared template is precisely
+  the gap a permissive admission implementation would fill from the payload. So
+  it is registered rather than described: `I7.enabled-trigger-declares-a-template`,
+  owner M2, raising the I7 baseline from 2 to 3.
+- **Reverse:** make the validator require an entry in each per-kind map for
+  every enabled kind; the shipped default must then name a template, and
+  D-P3-05 is reversed with it.
+
+### D-P3-14: the threat model this unit's argument depends on
+
+- **The reviewer's framing answer,** and the most valuable thing in either
+  review: the adversarial question is right "if the adversary controls
+  policy/request data but not arbitrary code in the process… if `as any`,
+  forged `Policy` objects, or arbitrary prototype mutation are considered
+  attacker capabilities, TypeScript types cannot be part of the security
+  argument".
+- **Stated, because it was written down nowhere:** the adversary this unit
+  defends against controls **the policy document and the arguments to the
+  engine's methods**. It does not control code running inside the runtime's own
+  process. An adversary who does control in-process code does not need a policy
+  bypass, because the runtime is the thing enforcing the policy. But the
+  corollary is what matters: **no type in this package is part of the security
+  argument.** Types stop mistakes; runtime checks stop bypasses.
+- **What follows, and what was done about it.** Every exported method that
+  answers an authorization question now carries a runtime check that does not
+  depend on its parameter types: `resolvePolicy` validates its document
+  (D-P3-09), `resolveAutonomy` guards its level (D-P3-12), role lookup is
+  own-property only (D-P3-11), and `validateToolGrants` requires an inventory
+  whose absence refuses rather than admits.
+- **A correction to D-P3-09.** That entry called branding the validated document
+  "the stronger fix". The reviewer is right that it is not: "a TypeScript brand
+  alone is not a security boundary because it can also be asserted away." A
+  brand raises the cost of the mistake and documents the intent; it is not a
+  control. The runtime validation is the control, and a brand would be an
+  ergonomic improvement on top of it. Recorded here rather than quietly edited
+  into D-P3-09, because overstating what a type buys is the exact error this
+  decision exists to name.
+- **Known limit, stated plainly:** a forged `Policy` handed directly to
+  `resolveAutonomy` or `resolveCapabilities` is not revalidated. Validating a
+  whole policy on every lookup moves a load-time cost onto every call, and under
+  the threat model above a `Policy` comes from `resolvePolicy`, which validates.
+  If the threat model ever widens to in-process adversaries this is the first
+  thing that must change — and by then the types would have to leave the
+  argument entirely.
+- **Reverse:** narrow the threat model to trusted documents only; the runtime
+  guards above become belt-and-braces rather than controls.
+
+### The second review's other conclusions
+
+- **Finding 1 (egress wildcards) and finding 4 (resolution separable from
+  validation) had already been fixed** by the first triage, as D-P3-08 and
+  D-P3-09. Two families independently finding the same two things is the
+  strongest evidence either review produced, and it is the whole reason the
+  rotation exists.
+- **One residual from finding 1 is rejected.** The reviewer asked for `['all']`
+  to be refused alongside `['*']`. It is not: `all` is a syntactically valid DNS
+  label denoting one host, and refusing it would be guessing at semantics —
+  `any`, `everything` and `world` would have equal claim. The bare string
+  `'all'` is refused because the only valid bare string is `'none'`, not because
+  `all` is special. D-P3-08's rule is *an entry denotes a single host*, and
+  `all` does.
+- **The reviewer's note that the mandatory-inventory conformance fixture is a
+  compile-time check and not a runtime boundary is correct,** and it checked the
+  runtime behaviour rather than assuming: omitting the argument in JavaScript
+  makes `new Set(undefined)` empty, so a policy with tool grants is refused
+  rather than admitted. Fails closed. No change.
+- **On the I7 half of the prompt being premature:** accepted. There is no
+  payload-to-template-to-prompt path in this unit, and the next review request
+  for a policy-shaped unit should ask the narrower question the reviewer
+  proposed instead of restating I7 in full.
