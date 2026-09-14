@@ -59,12 +59,24 @@ export class StubVault implements Vault {
     return Promise.resolve(new Uint8Array(bytes));
   }
 
+  /**
+   * Adds to the run's manifest and refuses an already-locked path, as the
+   * local Vault does (D-P1-05). The skeleton replaced the manifest instead,
+   * which went unnoticed while its line locked once; a line that locks at
+   * `spec`, `test-design`, and `plan` would drop the spec from verification at
+   * the second lock (D-P4-05).
+   */
   async lock(runId: RunId, paths: string[], by: StationId): Promise<LockManifest> {
     if (paths.length === 0) {
       throw new Error(`StubVault: refusing to lock nothing for run ${runId}; an empty manifest would verify as intact`);
     }
+    const existing = this.locks.get(runId)?.entries ?? [];
+    const already = paths.filter((path) => existing.some((entry) => entry.path === path));
+    if (already.length > 0) {
+      throw new Error(`StubVault: refusing to lock ${already.join(', ')} again for run ${runId}; an artifact is fixed from its first lock`);
+    }
     const lockedAt = new Date().toISOString();
-    const entries: LockEntry[] = [];
+    const entries: LockEntry[] = [...existing];
     for (const path of paths) {
       const hash = await this.hashFile(path);
       if (hash === undefined) throw new Error(`StubVault: cannot lock ${path} for run ${runId}: no such file under ${this.root}`);

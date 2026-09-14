@@ -32,12 +32,15 @@ describe('registry', () => {
     // An obligation phrased as "refuse OR record reduced independence" is met
     // by the weaker branch while a same-family reviewer is seated, which is
     // the violation I6 exists to prevent.
-    const entry = REGISTRY.invariants.I6.pending.find((p) => p.id === 'I6.review-seat-family-check');
+    // P4 paid the entry, so the wording is pinned on the live assertion's
+    // title: both halves stated, and no "or" that lets the weaker one stand in.
+    const entry = REGISTRY.invariants.I6.assertions.find((a) => a.id === 'I6.review-seat-family-check');
     expect(entry).toBeDefined();
-    const reason = entry?.reason ?? '';
-    expect(reason).toMatch(/L0[^.]*L2/);
-    expect(reason).toMatch(/L3[^.]*refus/);
-    expect(reason).not.toMatch(/,? or record reduced/);
+    expect(REGISTRY.invariants.I6.pending.some((p) => p.id === 'I6.review-seat-family-check')).toBe(false);
+    const title = entry?.title ?? '';
+    expect(title).toMatch(/L0-L2[^;]*reduced/);
+    expect(title).toMatch(/L3[^;]*refus/);
+    expect(title).not.toMatch(/,? or record reduced/);
   });
 });
 

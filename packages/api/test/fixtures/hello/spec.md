@@ -1,5 +1,6 @@
 # hello
 
-The one locked artifact of the walking skeleton. The fixture task locks this
-file at `spec`, re-verifies its hash on the way into `build` and `verify`,
-and runs one check that exits zero.
+The fixture run's spec. `spec` locks this file, `test-design` locks the
+acceptance test and the verification manifest, and `plan` locks the task
+graph: one build task and the review task that covers it. Every transition
+after `spec` re-verifies all of them.

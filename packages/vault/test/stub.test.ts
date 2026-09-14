@@ -96,13 +96,23 @@ describe('lock', () => {
     expect(Date.parse(manifest.entries[0]?.lockedAt ?? '')).not.toBeNaN();
   });
 
-  test('replaces an earlier manifest for the run', async () => {
+  test('a later lock preserves the earlier entries, so a spec changed after test-design locks is still tampered', async () => {
     await vault.lock(runId, ['spec.md'], 'spec');
     await writeFile(join(root, 'tests.md'), 'tests');
     const second = await vault.lock(runId, ['tests.md'], 'test-design');
-    expect(second.entries.map((e) => e.path)).toEqual(['tests.md']);
+    expect(second.entries.map((e) => [e.path, e.lockedBy])).toEqual([
+      ['spec.md', 'spec'],
+      ['tests.md', 'test-design'],
+    ]);
     await writeFile(join(root, 'spec.md'), 'changed');
-    await expect(vault.verifyLocks(runId)).resolves.toEqual({ ok: true });
+    await expect(vault.verifyLocks(runId)).resolves.toMatchObject({ ok: false, tampered: [{ path: 'spec.md' }] });
+  });
+
+  test('refuses to lock an already-locked path again, which would rebase its hash', async () => {
+    await vault.lock(runId, ['spec.md'], 'spec');
+    await writeFile(join(root, 'spec.md'), 'changed');
+    await expect(vault.lock(runId, ['spec.md'], 'test-design')).rejects.toThrow(/again/);
+    await expect(vault.verifyLocks(runId)).resolves.toMatchObject({ ok: false });
   });
 
   test('throws on a path that does not exist and locks nothing (I5)', async () => {

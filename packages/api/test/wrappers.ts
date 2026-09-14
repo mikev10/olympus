@@ -1,5 +1,5 @@
 /**
- * Delegating wrappers for the skeleton tests. Each forwards every contract
+ * Delegating wrappers for the line tests. Each forwards every contract
  * method to the component it wraps and carries no `unsafe` declaration of
  * its own, so a test can observe or interfere with one call without
  * changing what the stub is. Test code only; nothing in src knows them.
@@ -21,7 +21,7 @@ import type {
 } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import type { EvidenceBundle, LockManifest, LockVerdict, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, EvidenceBundle, LockManifest, LockVerdict, Vault } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
   protected readonly inner: Vault;
@@ -48,6 +48,14 @@ export class DelegatingVault implements Vault {
 
   recordViolation(v: IntegrityViolation): Promise<VaultRef> {
     return this.inner.recordViolation(v);
+  }
+
+  recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
+    return this.inner.recordAdmission(a);
+  }
+
+  recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef> {
+    return this.inner.recordTaskResult(runId, r);
   }
 
   readRunState(runId: RunId): Promise<RunState> {
