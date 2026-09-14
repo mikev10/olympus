@@ -1233,9 +1233,39 @@ maintainer settled that and three scope questions before work began.
   `exitGate.approval` and the policy cell, because a contract that says a gate
   needs a human must not be relaxed by a policy that says `auto`; a contract
   with `requiresPanel: true` is refused at M1 rather than seated with one
-  reviewer; tasks run one at a time; an `EvidenceBundle` carries the
-  `ModelIdentity` that produced it, which is inside amendment (1)'s I6 half,
-  because an author family held only in memory is lost by exactly the resume
-  this unit delivers.
+  reviewer; tasks run one at a time. Where the amendments landed differs in two
+  places from how the question put them, both recorded where they are made:
+  the seat is recorded in run state rather than `GateResult` (A-P4-02), and
+  every `TaskResult` is recorded in the Vault (A-P4-03), because an author
+  family or a claim held only in memory is lost by exactly the resume this unit
+  delivers.
 - **Reverse:** revert the entry. The amendments and both pending entries go with
   it, and the unit is underspecified again.
+
+### A-P4-01: `StationRefusal` gains the approval and seat arms, and `parked` names its task and a closed cause
+
+- **Surfaced by P4:** the station machine has three refusals the contract could
+  not type. A `blocked` approval cell and a `human-required` cell with no
+  recorded grant (`I4.approval-outcome-gates-the-station`) had no arm, and the
+  nearest, `gate-failed`, carries `FailedCheck[]`, so either would have been
+  reported as a check that never ran. A same-family reviewer at L3
+  (`I6.review-seat-family-check`) had none either. And `parked` carried
+  `cause: string` and `retries: number`, which A-S1-01 left open for P4 to close
+  once the causes were known.
+- **Chosen:** `approval-blocked` and `approval-required`, each carrying the
+  `ApprovalKey` it read; `same-family-reviewer`, carrying the review task and
+  the shared `ModelFamily`; and `parked` now carries the task, a `ParkCause`
+  (`iterations-exhausted` | `retries-exhausted`), and the `limit` it reached.
+  The two causes are the two bounds a contract states: `maxIterations`, spent
+  by a gate that keeps failing, and `retry.max`, spent by a driver or sandbox
+  that keeps failing. `retries` became `limit` because an iteration bound is
+  not a retry count.
+- **Not chosen:** one `approval` arm with the `ApprovalOutcome` beside it. A
+  `blocked` cell ends the run and a `human-required` one waits for a grant, so a
+  consumer would have to branch on a second field to learn which, and the arm
+  would admit `outcome: 'auto'`, which is not a refusal at all.
+- **Conformance, same commit:** `I5.transition-has-no-warn-and-continue` gains
+  the three arms as valid constructions, and refuses a free-text park cause
+  (TS2322), an advance that carries an approval as a note (TS2353), and an
+  approval refusal with no key (TS2322).
+- **Reverse:** drop the arms and restore `cause: string`; the fixture fails.

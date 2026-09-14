@@ -2,9 +2,9 @@
  * Station contracts: what each of the ten stations requires from a driver, what
  * context it may see, where it may write, and the gate it must pass to exit.
  */
-import type { DriverCapability } from '../driver/contract.js';
-import type { ApprovalOutcome } from '../policy/types.js';
-import type { ModelTier, StationId, VaultRef } from '../run/types.js';
+import type { DriverCapability, ModelFamily } from '../driver/contract.js';
+import type { ApprovalKey, ApprovalOutcome } from '../policy/types.js';
+import type { ModelTier, StationId, TaskId, VaultRef } from '../run/types.js';
 
 export type ContextGrant =
   | 'locked-spec' | 'acceptance-tests' | 'task-graph' | 'plan'
@@ -47,9 +47,21 @@ export interface FailedCheck {
 export interface TamperedPath { path: string; expected: string; actual: string; }
 
 /**
+ * Why a task stopped being attempted. `iterations-exhausted`: its gate failed
+ * on every one of the contract's `maxIterations` builds. `retries-exhausted`:
+ * its driver or sandbox failed more times than the contract's `retry.max`.
+ */
+export type ParkCause = 'iterations-exhausted' | 'retries-exhausted';
+
+/**
  * A refusal to advance. `reason` is a closed set and selects the payload a
  * machine reads; `message` says the same thing to a person. One string never
  * does both jobs, so a consumer reads fields and never parses prose.
+ *
+ * The three approval and seat arms are I4 and I6 made refusals: a `blocked`
+ * approval cell, a `human-required` cell with no recorded grant, and, at L3
+ * only, a reviewer whose model family is an author's. None of them is a
+ * warning the run may continue past.
  */
 export type StationRefusal =
   | { ok: false; reason: 'gate-failed'; failed: FailedCheck[]; message: string }
@@ -57,6 +69,9 @@ export type StationRefusal =
   | { ok: false; reason: 'violation'; violations: VaultRef[]; message: string }
   | { ok: false; reason: 'unsafe-above-l1'; components: string[]; message: string }
   | { ok: false; reason: 'capability-missing'; station: StationId; capability: DriverCapability; message: string }
-  | { ok: false; reason: 'parked'; cause: string; retries: number; message: string };
+  | { ok: false; reason: 'approval-blocked'; key: ApprovalKey; message: string }
+  | { ok: false; reason: 'approval-required'; key: ApprovalKey; message: string }
+  | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
+  | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string };
 
 export type StationTransition = { ok: true; next: StationId } | StationRefusal;
