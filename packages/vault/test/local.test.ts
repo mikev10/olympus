@@ -4,7 +4,7 @@
  * The registry owns the invariant assertions — that a changed lock verifies as
  * tampered (I3), that a later lock preserves the earlier one (I3), that
  * concurrent commits leave one winner (I5), and that the prototype carries
- * only the seven named operations (I1). What is here is the rest of the
+ * only the nine named operations (I1). What is here is the rest of the
  * contract: durability, content addressing, the refusals, and the audit
  * property that an object file's own SHA-256 is its name. Substitution by
  * symlink or junction is `I3.locked-artifact-cannot-be-substituted` in the
@@ -15,10 +15,10 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RunId, RunState, TaskId } from '@olympus-ai/core';
+import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { LocalVault, type EvidenceBundle } from '../src/index.js';
+import { LocalVault, type AdmissionRecord, type EvidenceBundle } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -70,8 +70,45 @@ function violation(): IntegrityViolation {
   };
 }
 
+const ADMISSION_REF = { runId, kind: 'admission', hash: 'c'.repeat(64) } as const;
+
 function state(version: string): RunState {
-  return { runId, station: 'spec', tasks: {}, evidenceRefs: [], violations: [], version };
+  return {
+    runId,
+    admission: ADMISSION_REF,
+    station: 'spec',
+    phase: 'working',
+    tasks: {},
+    attempts: {},
+    results: {},
+    evidenceRefs: [],
+    violations: [],
+    approvals: [],
+    reviews: [],
+    version,
+  };
+}
+
+function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
+  return {
+    run: {
+      id: runId,
+      repo: artifacts,
+      baseCommit: 'a'.repeat(40),
+      trigger: { kind: 'human', eventId: runId, lineage: { depth: 0, chain: [], windowStart: '2026-09-14T00:00:00.000Z' } },
+      requestedLevel: level,
+      station: 'intake',
+      graph: null,
+      createdAt: '2026-09-14T00:00:00.000Z',
+    },
+    policy: new StrictPolicyEngine().resolvePolicy(DEFAULT_POLICY_DOCUMENT),
+    artifacts: {
+      spec: [{ path: 'spec.md', sha256: 'd'.repeat(64) }],
+      acceptanceTests: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }],
+      verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
+      taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
+    },
+  };
 }
 
 describe('two roots', () => {
@@ -126,6 +163,47 @@ describe('evidence and violations', () => {
 
   test('refuses a reference that is not a digest, rather than reading a path from it', async () => {
     await expect(vault.read({ runId, kind: 'evidence', hash: '../../etc/passwd' })).rejects.toThrow(/not a SHA-256/);
+  });
+});
+
+describe('admission and task results', () => {
+  test('a run is admitted once: the record reads back byte-identical, verifies as its own hash, and a second admission stores nothing', async () => {
+    const ref = await vault.recordAdmission(admission(1));
+    expect(ref).toMatchObject({ runId, kind: 'admission' });
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(admission(1));
+    const file = join(store, 'runs', runId, 'admission.json');
+    expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
+
+    // Re-admitting at another level is how a resume would raise its own level.
+    await expect(vault.recordAdmission(admission(2))).rejects.toThrow(/already has an admission record/);
+    expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
+  });
+
+  test('an admission ref carrying another hash does not read the run\'s record back as if it matched', async () => {
+    const ref = await vault.recordAdmission(admission());
+    await expect(vault.read({ ...ref, hash: 'b'.repeat(64) })).rejects.toThrow(/no admission/);
+  });
+
+  test('a task result is stored under its own kind and reads back exactly as the driver returned it', async () => {
+    const result = await new StubDriver().runTask({
+      taskId,
+      role: 'builder' as RoleId,
+      stablePrefix: '',
+      variableSuffix: taskId,
+      tier: 'fast',
+      tools: [],
+      sandbox: {} as never,
+      timeoutMs: 0,
+      budget: { maxTokens: 0, maxCostUsd: 0, maxWallClockMs: 0 },
+    });
+    const ref = await vault.recordTaskResult(runId, result);
+    expect(ref).toMatchObject({ runId, kind: 'task-result' });
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(result);
+    expect(await vault.recordTaskResult(runId, result)).toEqual(ref);
+  });
+
+  test('refuses a task result that names no task', async () => {
+    await expect(vault.recordTaskResult(runId, {} as never)).rejects.toThrow(/names no task/);
   });
 });
 
@@ -240,7 +318,25 @@ describe('records read back from the store', () => {
   test('a run state whose tasks is an array is refused', async () => {
     const dir = join(store, 'runs', runId, 'state');
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, '1.json'), JSON.stringify({ runId, station: 'spec', version: '1', tasks: [], evidenceRefs: [], violations: [] }));
+    await writeFile(join(dir, '1.json'), JSON.stringify({ ...state('1'), tasks: [] }));
+    await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
+  });
+
+  test.each(['admission', 'phase', 'attempts', 'results', 'approvals', 'reviews'] as const)(
+    'a run state without %s, which a resume reads, is refused',
+    async (field) => {
+      const dir = join(store, 'runs', runId, 'state');
+      await mkdir(dir, { recursive: true });
+      const { [field]: _dropped, ...partial } = state('1');
+      await writeFile(join(dir, '1.json'), JSON.stringify(partial));
+      await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
+    },
+  );
+
+  test('a run state whose phase is not one of the two is refused', async () => {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, '1.json'), JSON.stringify({ ...state('1'), phase: 'done' }));
     await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
   });
 

@@ -2,7 +2,7 @@
  * Station contracts: what each of the ten stations requires from a driver, what
  * context it may see, where it may write, and the gate it must pass to exit.
  */
-import type { DriverCapability, ModelFamily } from '../driver/contract.js';
+import type { DriverCapability, ModelFamily, ModelIdentity } from '../driver/contract.js';
 import type { ApprovalKey, ApprovalOutcome } from '../policy/types.js';
 import type { ModelTier, StationId, TaskId, VaultRef } from '../run/types.js';
 
@@ -41,6 +41,20 @@ export interface FailedCheck {
   exitCode: number | null;
   /** What fails it: a non-zero exit, no result at all, or a suite count that is unknown or below what was expected (I5). */
   cause: 'exit-code' | 'no-result' | 'suite-count';
+}
+
+/**
+ * One review seat as the runtime assembled it (I6). `authors` are the model
+ * identities recorded with the results of the tasks under review, read from
+ * the Vault; `reviewer` is the identity recorded with the review task's own
+ * result. `reduced` means the reviewer's family is an author's: reportable at
+ * L0-L2, never at L3, where the seat is refused instead.
+ */
+export interface ReviewSeat {
+  readonly task: TaskId;
+  readonly authors: readonly ModelIdentity[];
+  readonly reviewer: ModelIdentity;
+  readonly independence: 'independent' | 'reduced';
 }
 
 /** A locked artifact whose bytes no longer match the lock manifest (I3). */

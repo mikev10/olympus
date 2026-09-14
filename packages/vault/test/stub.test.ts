@@ -49,7 +49,20 @@ function violation(): IntegrityViolation {
 }
 
 function state(): RunState {
-  return { runId, station: 'spec', tasks: { [taskId]: 'pending' }, evidenceRefs: [], violations: [], version: '0' };
+  return {
+    runId,
+    admission: { runId, kind: 'admission', hash: 'c'.repeat(64) },
+    station: 'spec',
+    phase: 'working',
+    tasks: { [taskId]: 'pending' },
+    attempts: {},
+    results: {},
+    evidenceRefs: [],
+    violations: [],
+    approvals: [],
+    reviews: [],
+    version: '0',
+  };
 }
 
 let root: string;

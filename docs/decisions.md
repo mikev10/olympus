@@ -1269,3 +1269,68 @@ maintainer settled that and three scope questions before work began.
   (TS2322), an advance that carries an approval as a note (TS2353), and an
   approval refusal with no key (TS2322).
 - **Reverse:** drop the arms and restore `cause: string`; the fixture fails.
+
+### A-P4-02: the review seat is recorded in run state, not in `GateResult`
+
+- **Surfaced by P4:** `I6.review-seat-family-check` asks that reduced
+  independence be recorded "in the gate result". `GateResult` is returned to a
+  caller and stored nowhere: the evidence bundle carries the checks, and
+  nothing else in the Vault holds a gate. A record of reduced independence that
+  exists only in a return value is a claim of the guarantee to everyone who
+  reads the run afterwards, which is what I6 forbids.
+- **Chosen:** `ReviewSeat { task, authors, reviewer, independence }` in
+  `core/src/station/types.ts`, and `RunState.reviews: readonly ReviewSeat[]`.
+  Run state is committed through the Vault's exclusive create, and every
+  version is kept, so the seat is durable and auditable, and a resume reads it
+  back. `authors` is a list because a review task may cover several build
+  tasks; a seat is `reduced` when the reviewer's family is any author's.
+- **Where it differs from the maintainer's question:** the question offered
+  "GateResult independence". The field would have been a record nobody can read
+  after the call returns; run state is the record. The obligation's substance,
+  that the run records reduced independence rather than claim the guarantee, is
+  unchanged, and the meta-test that pins its wording tests L0-L2 and L3, not
+  the word "gate".
+- **Reverse:** move the seat to `GateResult` and persist gate results; the run
+  state field then duplicates it.
+
+### A-P4-03: a write-once admission record and recorded task results make run state resumable
+
+- **Surfaced by P4:** a resume had nothing to trust. `RunState` held no
+  requested level, base commit, policy, artifact list, or attempt count, and no
+  Vault operation stored a `Run`, so a resumed run would take its level from
+  whoever called resume, and a crash would reset the retry bound. Separately,
+  the claim `verify` stores beside its evidence existed only in memory between
+  `build` and `verify`; a crash, or a human approval of the build exit that
+  arrives a day later, would lose it. The same is true of the author's
+  `ModelIdentity`, which a review seat compares.
+- **Chosen:** two named Vault operations and the run state a resume reads.
+  - `recordAdmission(AdmissionRecord)`: the `Run`, the resolved `Policy`, and
+    each station's artifacts with their hashes at admission. Once per run: the
+    local Vault creates `runs/<id>/admission.json` exclusively, and `read` of an
+    `admission` ref checks the bytes against the ref's hash, because the file is
+    named by its run and not by its content. A second admission stores nothing.
+  - `recordTaskResult(runId, TaskResult)`: content-addressed like evidence.
+    `verify` reads the claim from here and a review seat reads the author's
+    model identity from here.
+  - `RunState` gains `admission`, `phase` (`working` | `exiting`), `attempts`
+    (`iterations`, `retries` per task), `results` (the latest result ref per
+    task), `approvals` (`ApprovalGrant`s), and `reviews` (A-P4-02).
+    `VaultRefKind` gains `admission` and `task-result`.
+- **Why the artifact hashes:** a station locks the artifact it was admitted
+  with. A lock whose hash differs from the admission hash is refused as a
+  tamper, so the window between admission and a station's lock is closed and
+  the verification manifest and task graph validated at admission are the
+  bytes the run later executes. P5 revisits this when a spec agent writes the
+  spec after admission.
+- **Not chosen:** putting the graph and the manifest inline in the admission
+  record. `plan` and `test-design` would then lock nothing, and P5, where a
+  model writes both, would move them back out.
+- **Conformance, same commit:** `I1.vault-implementation-exposes-only-named-operations`
+  now names nine operations; the contention assertion's child writes a whole
+  run state, because the local Vault refuses a partial one on read.
+- **At this commit `packages/api` does not compile:** the S1 line builds the old
+  `RunState`. The line is what this unit re-cuts, and the commit that does so
+  follows; making the old line compile against a record it is about to stop
+  using would be work written to be deleted.
+- **Reverse:** drop the two operations and the six fields; resume then trusts
+  its caller.
