@@ -16,6 +16,8 @@ the unit's own branch, before merge.
 
 ## The unit loop
 
+Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
+
 1. `/start-unit <id>` — fresh session. It states the boundary back; read it.
 2. Work. Conformance suite first. Decisions logged as they are made.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
