@@ -57,7 +57,11 @@ Ordered 1–10. `test-design` runs before `plan` and is strictly black-box.
 
 `L0` manual · `L1` supervised · `L2` delegated · `L3` autonomous
 
-Effective level = `min(run.requested, policy.stationCap, policy.globalCap)`. Over-request fails closed; it never silently downgrades.
+Effective level = `min(run.requested, policy.stationCap, policy.globalCap, readiness.ceiling)`. Over-request fails closed; it never silently downgrades.
+
+`readiness.ceiling` is the fourth term, and it subtracts or it does nothing. A scan lowers the effective level or leaves it alone; it can never raise one, grant a capability policy withheld, or make an ungranted tool available — a derived number that grants is an I4 violation whatever it is called. The term is present only when a scan ran, and its absence leaves the other three unchanged rather than reading as clearance. Absence must be a state the type makes explicit, never an `undefined` that flows through a comparison and disappears. `R1-readiness.md` owns the derivation and the assertions.
+
+The term is stated here and is not yet wired: no unit reads it until R1 lands, the same way this section names ten stations while M1 runs eight. A refusal bound by readiness must name readiness as the term that bound it, which is R1's to deliver — P3 shipped with three terms and owes nothing here.
 
 ### Artifacts
 
@@ -76,7 +80,7 @@ Effective level = `min(run.requested, policy.stationCap, policy.globalCap)`. Ove
 
 ### Packages
 
-`core` · `vault` · `integrity` · `adapters` · `sandbox` · `triggers` · `api` · `cli` · `compiler` · `learning` · `drivers/claude-code` · `drivers/codex`
+`core` · `vault` · `integrity` · `adapters` · `sandbox` · `triggers` · `api` · `cli` · `compiler` · `learning` · `readiness` · `drivers/claude-code` · `drivers/codex`
 
 ### Retired
 
@@ -128,6 +132,6 @@ A package that cannot be verified without the rest of the system is decomposed w
 
 **Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
 
-The three added to this list in the same edit as `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness in particular would change the effective-level formula above, which is frozen vocabulary; the amendment is stated in `R1-readiness.md` §4 and is not taken here.
+The three named here alongside `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness is the one that reaches back into this document: it added the fourth term to the effective-level formula above and `readiness` to the package list, both taken deliberately as an amendment rather than by the unit that will use them.
 
 Test Design at M1 is single-family. The full green-on-green defense does not exist until M2 and M1 must not claim it.

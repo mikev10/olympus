@@ -1217,14 +1217,14 @@ a session would otherwise have made silently on the way in.
 - **Ambiguous:** F1 freezes the package list and `readiness` is not on it, so the unit either amends that list or lives in a package already named.
 - **Chosen:** recorded both options in §1 with a recommendation (a new `readiness` package) and did not take either. The spec assumes the recommendation and marks where the alternative differs.
 - **Why:** F1's package list is frozen vocabulary, and a planning document is the wrong place to quietly extend it. The recommendation is the one that keeps the dependency direction honest — readiness consumes `adapters`, so folding it into `adapters` inverts that.
-- **Reverse:** pick the other option; §1 names what changes.
+- **Reverse:** pick the other option; §1 names what changes. **Taken by D-R1-07 below: the new package.**
 
 ### D-R1-04: The F1 effective-level formula was not amended
 
 - **Ambiguous:** a readiness ceiling has to reach `resolveAutonomy` somehow, and the natural form is a fourth term in `min(run.requested, policy.stationCap, policy.globalCap)` — which is frozen vocabulary that F1 says must be revised deliberately, first.
 - **Chosen:** state the amendment in `R1-readiness.md` §4 with both ways to take it and a recommendation, and leave the spine's formula untouched. F1's M1 boundary gained the pointer, not the edit.
 - **Why:** working rule 5 — an ambiguous spec gets two options and a recommendation, never a silent resolution. This one changes a line every later unit reads.
-- **Reverse:** take the amendment, or take the alternative in §4 and have the caller lower `globalCap` before resolution.
+- **Reverse:** take the amendment, or take the alternative in §4 and have the caller lower `globalCap` before resolution. **Taken by D-R1-08 below: the amendment.**
 
 ### D-R1-05: The portfolio metric stays out of this repository
 
@@ -1239,3 +1239,30 @@ a session would otherwise have made silently on the way in.
 - **Chosen:** out of scope, and recorded with the reason rather than as a bare exclusion: if it is ever built, it is not built by whoever owns the probes.
 - **Why:** I3. A component that satisfies a probe it also authored is judging itself, and the fact that remediation and measurement are natural neighbours is exactly what makes the violation easy to miss.
 - **Reverse:** none available that keeps I3. A remediation unit needs a different owner and its probes hashed before it runs.
+
+## R1 amendment: the two open decisions, taken
+
+The maintainer took both recommendations. This is an amendment in the sense
+`WORKFLOW.md` gives the word — a change to the spine, landed on its own,
+before the unit that needs it starts. No unit ran and no package changed.
+
+### D-R1-07: `readiness` is a package, and F1's frozen package list says so
+
+- **Ambiguous:** D-R1-03 left placement open between a new `readiness` package and an extension of `packages/adapters`.
+- **Chosen:** the new package. `readiness` is appended to F1's frozen package list in the same edit as D-R1-08, and `R1-readiness.md` §1 now states it rather than offering it.
+- **Why:** readiness consumes `AdapterSet`, so housing it in `adapters` inverts the dependency, and it would give a package whose job is to *describe a stack* a second job *judging a repository* — plus a `sandbox` dependency it does not otherwise need. The vocabulary amendment is the smaller cost, and the list already spans milestones (`compiler` and `learning` are both beyond M1).
+- **Reverse:** remove the entry from F1, move the implementation into `adapters`, and give that package the `sandbox` dependency. Nothing else refers to the package name yet.
+
+### D-R1-08: The effective-level formula names readiness, as a fourth term
+
+- **Ambiguous:** D-R1-04 left open whether to amend F1's `min(run.requested, policy.stationCap, policy.globalCap)` or to keep three terms and have the caller lower `globalCap` before resolution.
+- **Chosen:** amend. The formula reads `min(run.requested, policy.stationCap, policy.globalCap, readiness.ceiling)`, with the subtractive rule, the absence rule, and the not-yet-wired note stated beside it.
+- **Why:** the alternative works and hides why a run was capped, folding readiness into a number an auditor cannot attribute. For a repository whose claim is auditable evidence, an unattributable cap is the wrong trade.
+- **Reverse:** restore the three-term formula and lower `globalCap` at the call site. Nothing reads the fourth term yet, so the reversal costs one edit for as long as that holds.
+
+### What the amendment obliges, and of whom
+
+- **P3 owes nothing.** It shipped against three terms and its refusals are correct for them. Recorded explicitly so a later reader does not treat the spine change as a retroactive finding against a merged unit.
+- **R1 owes the attribution.** With four terms, a bare `exceeds-cap` no longer identifies what refused, so `I5.refusal-names-the-bounding-term` joins R1's conformance table and I5's pending count rises by two rather than one.
+- **R1 owes an explicit absence.** A run on an unscanned repository keeps the ceiling policy gave it, so the term is genuinely absent — but the type must make absence visible rather than let an optional value vanish inside a `min` and read as clearance.
+- **Nobody owes the wiring yet.** The term is stated and unread until the run-creation path takes it, as the spine names ten stations while M1 runs eight. `R1-readiness.md` §5 keeps that out of R1's scope.

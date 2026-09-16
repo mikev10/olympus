@@ -192,8 +192,9 @@ order between these three is settled before any of them is picked up.
 Scans one target repository and derives the highest `AutonomyLevel` it can
 support, from probes that executed, with the probe that holds the ceiling
 named. Subtractive only: a scan lowers a cap or does nothing, and never grants
-what policy withheld. Spec is complete; two decisions in it are the
-maintainer's and are listed in its §9 before any session starts.
+what policy withheld. Spec is complete and both of its open decisions are taken
+(D-R1-07, D-R1-08): a `readiness` package, and a fourth term in F1's
+effective-level formula. Still blocked on P8, whose `AdapterSet` it consumes.
 
 ### R2 — Outcome measurement
 

@@ -64,19 +64,17 @@ question about one repository at one commit: what is the highest autonomy
 level this repository can support, and which executed probe is the reason it
 is not higher.
 
-**Package placement is a decision for the maintainer, not for the
-implementing session.** F1 freezes the package list, and `readiness` is not on
-it, so this unit either amends that list or lives somewhere already named.
+**Settled (D-R1-07): a new `readiness` package.** F1's frozen package list
+carries it as of the same amendment that added the fourth term to the
+effective-level formula, so this unit creates `packages/readiness` and edits
+`pnpm-workspace.yaml` — a protected path, so the pull request carries
+`gate-change`.
 
-- **Option A — a new `readiness` package.** Amends F1's package vocabulary and
-  `pnpm-workspace.yaml` (protected path, `gate-change`). Keeps a scan that runs
-  outside any run separate from the adapters a run uses. **Recommended.**
-  Readiness consumes `adapters`; folding it in inverts that.
-- **Option B — extend `packages/adapters`.** No vocabulary amendment. Costs
-  `adapters` a dependency on `sandbox` at scan time and blurs "describes a
-  stack" with "judges a repository".
-
-The rest of this document assumes A and marks every place B would differ.
+The alternative was extending `packages/adapters`, which avoids the vocabulary
+amendment and costs more than it saves: readiness consumes `AdapterSet`, so
+folding it into `adapters` inverts the dependency, and it would give a package
+that *describes a stack* a second job *judging a repository*, plus a
+`sandbox` dependency it otherwise does not need.
 
 ---
 
@@ -142,12 +140,11 @@ L3  never — M3 canary owns L3, and no scan grants it
 
 Three properties are binding, and each has an assertion:
 
-**It only ever lowers.** The effective level stays
-`min(requested, stationCap, globalCap)` with the readiness ceiling as one more
-term. A scan cannot raise a cap policy set, cannot grant a capability policy
-withheld, and cannot make an ungranted tool available. A readiness result that
-could raise anything is a default-deny violation (I4) wearing a metric as a
-disguise.
+**It only ever lowers.** The ceiling is the fourth term of F1's effective-level
+formula and contributes nothing but a `min`. A scan cannot raise a cap policy
+set, cannot grant a capability policy withheld, and cannot make an ungranted
+tool available. A readiness result that could raise anything is a default-deny
+violation (I4) wearing a metric as a disguise.
 
 **An absent scan is not a pass.** A repository with no readiness result
 carries the ceiling policy already gives it, unchanged — readiness is
@@ -158,15 +155,27 @@ type must not permit an optional ceiling that an absent value could satisfy.
 writes, exactly as `TaskResult` has no status field (I2). The probe outcome is
 computed from the exit code by the runtime; a driver never supplies one.
 
-> **Amendment owed to the maintainer before this unit starts.** F1 states the
-> effective level as `min(run.requested, policy.stationCap, policy.globalCap)`.
-> Adding a fourth term changes frozen vocabulary, and F1 says changing anything
-> there means revising that section deliberately first. This document does not
-> make that edit. Two ways to take it: amend the F1 formula to name readiness,
-> or keep the formula and have the caller lower `globalCap` before resolution,
-> which leaves the spine untouched at the cost of making the ceiling invisible
-> in the resolved `Policy` an auditor reads. **Recommended: amend the formula.**
-> The auditor should see why a run was capped.
+**Settled (D-R1-08): the F1 formula names readiness.** The effective level is
+`min(run.requested, policy.stationCap, policy.globalCap, readiness.ceiling)`,
+amended in the spine deliberately rather than by this unit on its way past. The
+alternative — leaving the formula at three terms and having the caller lower
+`globalCap` before resolution — keeps the spine untouched and hides the reason
+a run was capped inside a number an auditor cannot attribute. The auditor
+should see which term bound the run.
+
+Two obligations follow, and both are R1's:
+
+- **A refusal names the term that bound it.** With four terms, `exceeds-cap`
+  alone no longer identifies what refused. P3 shipped against three terms and
+  owes nothing here; the unit that adds the fourth adds the attribution.
+- **Absence is an explicit state, not `undefined`.** A run on an unscanned
+  repository keeps the ceiling policy gave it, so the term is genuinely absent
+  — but absence must be representable and visible, never an optional value that
+  vanishes inside a `min` and reads as clearance.
+
+Wiring the term into run creation stays out of scope (§5): the formula is
+stated in the spine and read by no unit until the run-creation path is ready
+for it, the same way the spine names ten stations while M1 runs eight.
 
 ---
 
@@ -187,9 +196,10 @@ Binding. Adjacent work becomes an issue, not a commit.
 - **Scheduling, watching, or re-scanning on a timer.** Triggers own that (M2).
 - **Storing the result.** No `Vault` operation for readiness exists, and
   adding one is an amendment owed to the first unit that stores a result.
-- **Making the result consumable by the station machine.** P4 reads a resolved
-  `Policy`; wiring the ceiling into run creation belongs to whichever unit owns
-  that path once the §4 amendment is settled.
+- **Wiring the ceiling into run creation.** P4 reads a resolved `Policy` and
+  takes no readiness argument. R1 delivers the derivation, the attribution, and
+  the assertions; the call site that applies the fourth term belongs to the unit
+  that owns run creation, and R1 must not reach into it.
 - **The pillar-to-score presentation number** beyond what §7 names.
 - **Any edit to a contract file**, `packages/core/src/policy/types.ts`
   included. R1's result types live beside its implementation, as P3's do.
@@ -208,10 +218,11 @@ invariant, since adding one edits `InvariantId` and the spine.
 | `I4.absent-scan-is-not-a-pass` | compile-error | the ceiling is not optional and has no value an absent scan could satisfy; `ReadinessReport | undefined` does not typecheck at the consumption site |
 | `I5.indeterminate-probe-lowers` | runtime | a probe that could not execute yields the same ceiling as one that failed, and never a higher one |
 | `I5.unsupported-stack-refuses` | runtime | a stack with no `AdapterSet.test` derives `L0` and names the missing adapter |
+| `I5.refusal-names-the-bounding-term` | runtime | a run refused by the readiness ceiling names readiness, and one refused by a policy cap names that cap; neither reports a bare `exceeds-cap` |
 | `I8.ceiling-bearing-probe-has-an-assertion` | runtime | a registry meta-test: every probe declared ceiling-bearing maps to an executable assertion, and deleting the probe fails it |
 
-`pending-baseline.json` rises by one for each of I2, I4, I5, and I8 when the
-pending entries are added, and each is paid down in the pull request that lands
+`pending-baseline.json` rises by one for each of I2, I4, and I8, and by two for
+I5, when the pending entries are added, and each is paid down in the pull request that lands
 the unit. Raising a baseline number is a deliberate edit a reviewer sees; it is
 called out here so it is expected in the diff rather than argued about in it.
 
@@ -265,9 +276,9 @@ Verifiable by someone who has read the README, CONTRIBUTING.md, and this file.
 
 1. Load `CLAUDE.md`, `F1-spine.md`, this unit's entry in `DECOMPOSITION.md`,
    and this file. Nothing else.
-2. **Confirm the two open decisions first** — package placement (§1) and the
-   F1 effective-level amendment (§4). Both are the maintainer's, and neither is
-   resolved silently by the implementing session.
+2. Both decisions this spec once left open are settled — `packages/readiness`
+   (§1) and the four-term formula (§4) — and the spine already carries them.
+   Neither is reopened by the implementing session.
 3. Conformance suite first (§6); watch it fail.
 4. Probes, then derivation, then reporting.
 5. Run the acceptance criteria (§8). The unit touches `pnpm-workspace.yaml`
