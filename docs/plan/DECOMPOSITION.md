@@ -175,6 +175,47 @@
 
 ---
 
+## Beyond M1
+
+Not part of M1 and not startable inside it. Recorded here so adjacent work
+found during an M1 unit has somewhere to go that is not a commit, and so the
+order between these three is settled before any of them is picked up.
+
+| ID | Unit | Milestone | Depends on | Spec |
+|---|---|---|---|---|
+| R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
+| R2 | Outcome measurement | M2 | P4, P9 | — |
+| R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
+
+### R1 — Readiness
+
+Scans one target repository and derives the highest `AutonomyLevel` it can
+support, from probes that executed, with the probe that holds the ceiling
+named. Subtractive only: a scan lowers a cap or does nothing, and never grants
+what policy withheld. Spec is complete and both of its open decisions are taken
+(D-R1-07, D-R1-08): a `readiness` package, and a fourth term in F1's
+effective-level formula. Still blocked on P8, whose `AdapterSet` it consumes.
+
+### R2 — Outcome measurement
+
+Autonomy ratio (the share of tasks completed at their requested level with no
+approval consumed), cycle time from `intake` to `integrate`, and cost per
+merged change. Every input already exists in run state and the usage figures
+P5 captures, so this is derivation and a reporting surface, not collection.
+Bounded by the same rule as R1: derived by the runtime, never reported by a
+model. Blocked on P4 and P9 because it reads finished runs through the API.
+
+### R3 — Behavioral breadth (browser)
+
+`BehavioralAdapter.kind` already admits `'browser'` and P8 ships only `'cli'`
+and `'http'`, so the contract needs no amendment and `unavailableControls()`
+already names the gap correctly today. This unit implements the browser case:
+a scenario drives the running product and its expectation comes from locked
+acceptance criteria, never from the implementation. M3, with the rest of the
+QA surface.
+
+---
+
 ## Working Rules
 
 1. **One unit per session.** Load `F1-spine.md`, `CLAUDE.md`, and this unit's section. Nothing else.
