@@ -126,6 +126,8 @@ A package that cannot be verified without the rest of the system is decomposed w
 
 **In:** stations 1–8, local Docker, Claude Code driver, TypeScript adapters, C1/C2/C3, trust boundary, policy engine, API + CLI, cost and cache measurement, L2, human trigger only.
 
-**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), learning (M3), review panel (M3), mutation testing (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
+**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
+
+The three added to this list in the same edit as `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness in particular would change the effective-level formula above, which is frozen vocabulary; the amendment is stated in `R1-readiness.md` §4 and is not taken here.
 
 Test Design at M1 is single-family. The full green-on-green defense does not exist until M2 and M1 must not claim it.

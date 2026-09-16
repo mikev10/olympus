@@ -1191,3 +1191,51 @@ produced D-P3-14, which neither the unit nor the first review had written down.
   payload-to-template-to-prompt path in this unit, and the next review request
   for a policy-shaped unit should ask the narrower question the reviewer
   proposed instead of restating I7 in full.
+
+## R1 planning: readiness specified, not started
+
+Calls made while writing `docs/plan/R1-readiness.md` and registering the three
+"Beyond M1" units. No package changed and no unit ran; these are the decisions
+a session would otherwise have made silently on the way in.
+
+### D-R1-01: Readiness outputs an `AutonomyLevel`, not a second scale
+
+- **Ambiguous:** the maturity model this unit draws its pillars from numbers its levels L1–L5, and this repository's autonomy levels are `L0`–`L3`. Both are ordered, both are called levels, the numerals overlap, and `L3` is the top of one scale and the middle of the other.
+- **Chosen:** readiness derives an `AutonomyLevel` — the existing type, the existing four values. The eight pillars survive only as a grouping for probes in reports, carrying no weight and no scale of their own.
+- **Why:** two ordered scales sharing a word and a numeral range is a defect that lands in config keys, CLI output, and every conversation afterwards. Reusing the existing type also makes the output directly consumable by the policy engine instead of needing a mapping nobody would agree on.
+- **Reverse:** define a separate readiness scale and a mapping into `AutonomyLevel`. Anything that does must not call its values levels.
+
+### D-R1-02: The ceiling is subtractive, and an absent scan is not a pass
+
+- **Ambiguous:** a readiness result could plausibly inform autonomy in either direction — a well-scoring repository "earning" a higher cap is the obvious reading of a maturity model.
+- **Chosen:** a scan lowers an effective cap or does nothing. It cannot raise one, grant a capability policy withheld, or make an ungranted tool available. A repository with no scan keeps the ceiling policy already gave it, and the type does not permit an optional ceiling an absent value could satisfy.
+- **Why:** a score that raises a cap is a grant, and I4 says a grant is an explicit versioned edit to a Vault file, not a derived number. The absent-scan half is I5: the failure mode is a scan that fails to run and reads as clearance.
+- **Reverse:** nothing to reverse without also reversing I4. If readiness is ever to grant, it becomes a policy authoring input a human reviews, never a runtime term.
+
+### D-R1-03: Package placement left to the maintainer, with a recommendation
+
+- **Ambiguous:** F1 freezes the package list and `readiness` is not on it, so the unit either amends that list or lives in a package already named.
+- **Chosen:** recorded both options in §1 with a recommendation (a new `readiness` package) and did not take either. The spec assumes the recommendation and marks where the alternative differs.
+- **Why:** F1's package list is frozen vocabulary, and a planning document is the wrong place to quietly extend it. The recommendation is the one that keeps the dependency direction honest — readiness consumes `adapters`, so folding it into `adapters` inverts that.
+- **Reverse:** pick the other option; §1 names what changes.
+
+### D-R1-04: The F1 effective-level formula was not amended
+
+- **Ambiguous:** a readiness ceiling has to reach `resolveAutonomy` somehow, and the natural form is a fourth term in `min(run.requested, policy.stationCap, policy.globalCap)` — which is frozen vocabulary that F1 says must be revised deliberately, first.
+- **Chosen:** state the amendment in `R1-readiness.md` §4 with both ways to take it and a recommendation, and leave the spine's formula untouched. F1's M1 boundary gained the pointer, not the edit.
+- **Why:** working rule 5 — an ambiguous spec gets two options and a recommendation, never a silent resolution. This one changes a line every later unit reads.
+- **Reverse:** take the amendment, or take the alternative in §4 and have the caller lower `globalCap` before resolution.
+
+### D-R1-05: The portfolio metric stays out of this repository
+
+- **Ambiguous:** the headline metric of the model these pillars come from is an organisational one — the share of repositories at or above a level — and it is the number a buyer asks for first.
+- **Chosen:** out of scope, named explicitly in §5. This package scans one repository and returns one result.
+- **Why:** it aggregates across repositories, which is the hosted control plane, a separate product in a separate repository under D24. A rollup here would pull cross-repository state into the MIT runtime and blur a boundary that was drawn deliberately.
+- **Reverse:** the control plane consumes per-repository results; nothing here needs to change for it to.
+
+### D-R1-06: Remediation is not R1's, and must not be whoever owns the probes
+
+- **Ambiguous:** scaffolding a repository up to a ceiling is the obvious next step after measuring it, and the two are usually sold together.
+- **Chosen:** out of scope, and recorded with the reason rather than as a bare exclusion: if it is ever built, it is not built by whoever owns the probes.
+- **Why:** I3. A component that satisfies a probe it also authored is judging itself, and the fact that remediation and measurement are natural neighbours is exactly what makes the violation easy to miss.
+- **Reverse:** none available that keeps I3. A remediation unit needs a different owner and its probes hashed before it runs.
