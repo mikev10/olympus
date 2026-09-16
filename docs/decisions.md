@@ -1252,6 +1252,7 @@ before the unit that needs it starts. No unit ran and no package changed.
 - **Chosen:** the new package. `readiness` is appended to F1's frozen package list in the same edit as D-R1-08, and `R1-readiness.md` §1 now states it rather than offering it.
 - **Why:** readiness consumes `AdapterSet`, so housing it in `adapters` inverts the dependency, and it would give a package whose job is to *describe a stack* a second job *judging a repository* — plus a `sandbox` dependency it does not otherwise need. The vocabulary amendment is the smaller cost, and the list already spans milestones (`compiler` and `learning` are both beyond M1).
 - **Reverse:** remove the entry from F1, move the implementation into `adapters`, and give that package the `sandbox` dependency. Nothing else refers to the package name yet.
+- **Also edited:** `CLAUDE.md` carries a condensed copy of the frozen package list, and it is the file every session reads first. Amending F1 without it would have left the two disagreeing, with the more-read copy the stale one. `CLAUDE.md` is a protected path, so the pull request carrying this amendment takes the `gate-change` label — correctly: the mirror exists so a session need not open the spine, which is exactly why it must not be allowed to drift.
 
 ### D-R1-08: The effective-level formula names readiness, as a fourth term
 
