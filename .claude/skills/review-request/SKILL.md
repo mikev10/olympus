@@ -113,6 +113,15 @@ A vault: *how would I write to it?* A sandbox: *how would I escape the mount or
 reach a read-only path?* A policy engine: *how would I obtain a capability that
 was not granted?* Get this wrong and the review reads like a code-style pass.
 
+**Name both sides of the trust boundary, not just the untrusted one.** Say what
+the party controls *and* what it does not. A boundary stated from one side only
+gets read literally: P4's prompt said the party controls the arguments to the
+exported entry points, and the Vault the gates are checked against is an
+argument, so the prompt handed the attacker the thing under test. Its reviewer
+spent two of ten findings on that contradiction rather than on the code. The
+components a runtime is wired with — vault, sandbox, drivers — are trusted even
+where a function takes one as a parameter, and the prompt has to say so.
+
 **Name mechanisms, never verdicts.** Say what a mechanism does and leave every
 judgment to the reviewer. No "this should be solid", no "the weak point is
 probably X", no target number of findings, no hint at what a previous review
@@ -156,6 +165,13 @@ It must hold against a capable, motivated party trying to <the unit's failure
 mode: make CI green without doing the work / write to the vault / escape the
 sandbox / obtain an ungranted capability>. Assume no deceptive intent — only
 that the easiest path gets taken.
+
+That party controls <the untrusted inputs: what the model returns / the files
+in the workspace / the data on a request / when the process stops>. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process.
 
 The invariants at stake:
 
