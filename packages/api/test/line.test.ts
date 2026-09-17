@@ -6,9 +6,9 @@
  */
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { RunId, RunState, TaskId, TaskRequest, TaskResult } from '@olympus-ai/core';
+import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
+import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
 import type { EvidenceBundle, LockVerdict, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
@@ -88,6 +88,17 @@ class TamperingVault extends DelegatingVault {
   }
 }
 
+/** Fails the first check it runs and passes afterwards, so one verify sends the task back to `build`. */
+class FailsFirstCheck extends DelegatingSandbox {
+  private calls = 0;
+
+  override async exec(handle: SandboxHandle, argv: string[]): Promise<ExecResult> {
+    this.calls += 1;
+    const result = await this.inner.exec(handle, argv);
+    return this.calls === 1 ? { ...result, exitCode: 1 } : result;
+  }
+}
+
 class ThrowingDriver extends DelegatingDriver {
   calls = 0;
 
@@ -149,10 +160,13 @@ describe('hello at L1', () => {
     expect(req.sandbox).toBe(sandbox.provisioned[0]);
   });
 
-  test('a task runs in a rw sandbox, its checks in a fresh ro one, and every sandbox is destroyed; egress is denied', async () => {
+  test('a build runs in a rw sandbox, its checks and the review seat in ro ones, and every sandbox is destroyed; egress is denied', async () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     await startRun(runRequest(runId, workspace, { ...components, sandbox }));
-    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['rw', 'ro', 'rw']);
+    // The mount follows the station contract's write boundary: `build` grants
+    // `**` and gets rw; `review` grants nothing and gets a tree it cannot write.
+    expect(STATION_CONTRACTS.review.writeBoundary.workspaceGlobs).toEqual([]);
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['rw', 'ro', 'ro']);
     expect(sandbox.destroyed).toEqual(sandbox.provisioned);
     for (const spec of sandbox.specs) expect(spec.egress).toEqual({ mode: 'deny-all', allow: [] });
   });
@@ -236,7 +250,9 @@ describe('locks are re-verified at every transition (I3)', () => {
     expect(state.violations).toHaveLength(1);
     const [ref] = state.violations;
     if (ref === undefined) return;
-    expect(await read<IntegrityViolation>(components.vault, ref)).toMatchObject({ kind: 'lock-tamper', taskId: hello, role: 'builder' });
+    // The task in flight is failed with the violation, but it had not run when
+    // the mismatch was found, so no role is named for it (D-P4-08, A-P4-05).
+    expect(await read<IntegrityViolation>(components.vault, ref)).toMatchObject({ kind: 'lock-tamper', taskId: hello, role: 'unattributed' });
 
     const resumed = await resumeRun({ runId, components });
     expect(resumed).toMatchObject({ ok: false, reason: 'refused', transition: { reason: 'violation', violations: [ref] } });
@@ -273,5 +289,100 @@ describe('approvals gate the station (I4)', () => {
     expect(await approveStation({ runId, key: 'spec:1', approvedBy: '  ', vault: components.vault })).toMatchObject({ reason: 'invalid-request' });
     expect(await approveStation({ runId, key: 'spec:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
     expect(await resumeRun({ runId, components })).toMatchObject({ at: 'integrate', transition: { reason: 'approval-required' } });
+  });
+
+  test('a grant authorises one exit: the rebuild after a failed verify waits for a second approval', async () => {
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const sandbox = new FailsFirstCheck(new StubSandboxProvider());
+    components = stubComponents(workspace, { driver, reviewer: driver, sandbox });
+    const request = runRequest(runId, workspace, components, { policy: policy(approvals({ 'build:1': 'human-required' })) });
+
+    expect(await startRun(request)).toMatchObject({ at: 'build', transition: { reason: 'approval-required', key: 'build:1' } });
+    expect(await approveStation({ runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
+
+    // The first check fails, so `verify` sends the task back to `build`, and it is built a second time.
+    const second = await resumeRun({ runId, components });
+    expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(2);
+    expect(second).toMatchObject({ at: 'build', transition: { reason: 'approval-required', key: 'build:1' } });
+    const spent = refusedState(second).approvals;
+    expect(spent).toHaveLength(1);
+    expect(spent[0]?.usedAt).toEqual(expect.any(String));
+
+    // The second visit is approved in its own right, and the run then goes on.
+    expect(await approveStation({ runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
+    expect(await resumeRun({ runId, components })).toMatchObject({ at: 'integrate' });
+  });
+});
+
+describe('what a station is handed, beyond its prompt', () => {
+  test('a locked artifact swapped between the lock check and the read is caught by the bytes read (I3)', async () => {
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const spec = join(workspace, 'spec.md');
+    const original = await readSpec(workspace);
+    class SwapsAfterTheCheck extends DelegatingVault {
+      station = 'intake';
+      swapped = false;
+
+      override async commitRunState(s: RunState, version: string): Promise<RunState> {
+        const stored = await this.inner.commitRunState(s, version);
+        this.station = stored.station;
+        return stored;
+      }
+
+      override async verifyLocks(id: RunId): Promise<LockVerdict> {
+        // Put the admitted bytes back, so every lock comparison sees what was admitted.
+        if (this.swapped) {
+          await writeFile(spec, original);
+          this.swapped = false;
+        }
+        const verdict = await this.inner.verifyLocks(id);
+        if (this.station === 'build' && verdict.ok) {
+          await writeFile(spec, '# swapped between the check and the read\n');
+          this.swapped = true;
+        }
+        return verdict;
+      }
+    }
+    const base = stubComponents(workspace, { driver, reviewer: driver });
+    components = { ...base, vault: new SwapsAfterTheCheck(base.vault) };
+    const outcome = await startRun(runRequest(runId, workspace, components));
+    expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'lock-tamper' } });
+    expect(driver.requests).toHaveLength(0);
+    const state = refusedState(outcome);
+    expect(state.violations).toHaveLength(1);
+    const [ref] = state.violations;
+    if (ref === undefined) return;
+    const violation = await read<IntegrityViolation>(base.vault, ref);
+    expect(violation.detail).toMatchObject({ station: 'build', phase: 'context' });
+  });
+
+  test('a tamper found before a task ran names neither that task role nor the other driver', async () => {
+    const author = new ChosenDriver({ narrative: 'built' });
+    const reviewer = new ChosenDriver({ family: 'other-family' });
+    const base = stubComponents(workspace, { driver: author, reviewer });
+    class TampersAtReview extends DelegatingVault {
+      station = 'intake';
+
+      override async commitRunState(s: RunState, version: string): Promise<RunState> {
+        const stored = await this.inner.commitRunState(s, version);
+        this.station = stored.station;
+        return stored;
+      }
+
+      override verifyLocks(id: RunId): Promise<LockVerdict> {
+        if (this.station !== 'review') return this.inner.verifyLocks(id);
+        return Promise.resolve({ ok: false, tampered: [{ path: 'spec.md', expected: 'a', actual: 'b' }] });
+      }
+    }
+    components = { ...base, vault: new TampersAtReview(base.vault) };
+    const outcome = await startRun(runRequest(runId, workspace, components));
+    expect(outcome).toMatchObject({ at: 'review', transition: { reason: 'lock-tamper' } });
+    expect(reviewer.requests).toHaveLength(0);
+    const [ref] = refusedState(outcome).violations;
+    if (ref === undefined) return;
+    const violation = await read<IntegrityViolation>(base.vault, ref);
+    // The reviewer never ran, so the builder is the last role that acted; the reviewer's driver is what found it.
+    expect(violation.role).toBe('builder');
+    expect(violation.driverProvenanceId).toBe(reviewer.provenanceId());
   });
 });

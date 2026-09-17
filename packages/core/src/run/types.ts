@@ -116,6 +116,14 @@ export interface ApprovalGrant {
   /** Who approved. The runtime records what its caller authenticated; P9 owns authentication. */
   readonly approvedBy: string;
   readonly approvedAt: string;
+  /**
+   * When the exit this grant authorised was crossed, or null while it is
+   * unspent. A grant authorises one exit, not the station: a run that comes
+   * back to `build` after a failed verify meets the gate again with this one
+   * already spent, and waits for a second human (A-P4-04). Spent grants stay
+   * in run state, because they are the record that a human approved.
+   */
+  readonly usedAt: string | null;
 }
 
 /**

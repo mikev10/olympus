@@ -128,15 +128,17 @@ export interface TransitionInput {
  * The transition function. A tampered lock refuses whatever else is true
  * (I3). A move back up the line — `verify` returning a task to `build` — is a
  * rebuild, not an advance, and needs no approval. An advance needs the exit
- * approval: `blocked` refuses, `human-required` refuses until a grant for
- * exactly this station and level is recorded, and `auto` advances (I4).
+ * approval: `blocked` refuses, `human-required` refuses until an unspent grant
+ * for exactly this station and level is recorded, and `auto` advances (I4). A
+ * human-required advance names the grant it spends, so the next visit to the
+ * same station waits for its own approval (A-P4-04).
  */
 export function transition(input: TransitionInput): StationTransition {
   if (input.tampered.length > 0) {
     const paths = input.tampered.map((t) => `${t.path} (expected ${t.expected}, actual ${t.actual})`).join(', ');
     return { ok: false, reason: 'lock-tamper', tampered: [...input.tampered], message: `a locked artifact changed before leaving ${input.from}: ${paths}` };
   }
-  if (isBackward(input.from, input.to)) return { ok: true, next: input.to };
+  if (isBackward(input.from, input.to)) return { ok: true, next: input.to, spends: null };
   const contracts = input.contracts ?? STATION_CONTRACTS;
   const contract = contracts[input.from];
   const key = approvalKey(input.from, input.level);
@@ -144,10 +146,10 @@ export function transition(input: TransitionInput): StationTransition {
   if (approval === 'blocked') {
     return { ok: false, reason: 'approval-blocked', key, message: `the exit from ${input.from} at L${String(input.level)} is blocked by policy; the run does not advance` };
   }
-  if (approval === 'human-required' && !input.grants.some((g) => g.key === key)) {
+  if (approval === 'human-required' && !input.grants.some((g) => g.key === key && g.usedAt === null)) {
     return { ok: false, reason: 'approval-required', key, message: `the exit from ${input.from} at L${String(input.level)} needs a human approval, and none is recorded` };
   }
-  return { ok: true, next: input.to };
+  return { ok: true, next: input.to, spends: approval === 'human-required' ? key : null };
 }
 
 export type SeatResult = { readonly ok: true; readonly seat: ReviewSeat } | StationRefusal;

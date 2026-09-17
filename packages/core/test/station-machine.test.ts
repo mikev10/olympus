@@ -164,16 +164,19 @@ describe('transition', () => {
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: policyWith({ 'spec:1': 'blocked' }) })).toMatchObject({ reason: 'approval-blocked', key: 'spec:1' });
     const waits = policyWith({ 'spec:1': 'human-required' });
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits })).toMatchObject({ reason: 'approval-required', key: 'spec:1' });
-    const wrong = [{ key: approvalKey('spec', 2), approvedBy: 'm', approvedAt: 't' }];
+    const wrong = [{ key: approvalKey('spec', 2), approvedBy: 'm', approvedAt: 't', usedAt: null }];
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: wrong })).toMatchObject({ reason: 'approval-required' });
-    const right = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't' }];
-    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: right })).toEqual({ ok: true, next: 'test-design' });
-    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: policyWith({ 'spec:1': 'auto' }) })).toEqual({ ok: true, next: 'test-design' });
+    const right = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: null }];
+    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: right })).toEqual({ ok: true, next: 'test-design', spends: 'spec:1' });
+    // A grant already spent is not a standing approval of the next visit (A-P4-04).
+    const spent = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: 't' }];
+    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: spent })).toMatchObject({ reason: 'approval-required', key: 'spec:1' });
+    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: policyWith({ 'spec:1': 'auto' }) })).toEqual({ ok: true, next: 'test-design', spends: null });
   });
 
   test('a rebuild is not an advance and needs no approval, but still refuses a tampered lock', () => {
     expect(isBackward('verify', 'build')).toBe(true);
-    expect(transition({ ...base, from: 'verify', to: 'build', policy: policyWith({ 'verify:1': 'blocked' }) })).toEqual({ ok: true, next: 'build' });
+    expect(transition({ ...base, from: 'verify', to: 'build', policy: policyWith({ 'verify:1': 'blocked' }) })).toEqual({ ok: true, next: 'build', spends: null });
   });
 
   test('locks are re-verified leaving spec and every station after it, and not leaving intake, where nothing is locked yet', () => {

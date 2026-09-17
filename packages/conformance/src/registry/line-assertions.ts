@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import type { RunOutcome } from '@olympus-ai/api';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { AutonomyLevel, ModelFamily, ModelIdentity, RunState, StationContractTable, TaskId } from '@olympus-ai/core';
+import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { LockManifest, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
@@ -144,7 +145,7 @@ export const STATION_LOCKS_THE_ADMITTED_ARTIFACT: LocalAssertion = runtime({
 export const APPROVAL_OUTCOME_GATES_THE_STATION: LocalAssertion = runtime({
   id: 'I4.approval-outcome-gates-the-station',
   title:
-    'a blocked approval cell refuses the station exit, cannot be approved, and holds on resume; a human-required cell refuses until approveStation records a grant for exactly that station and level, and a resume then advances; the stricter of the contract floor and the policy cell applies, so integrate needs a human even where the policy says auto',
+    'a blocked approval cell refuses the station exit, cannot be approved, and holds on resume; a human-required cell refuses until approveStation records a grant for exactly that station and level, and a resume then advances; the stricter of the contract floor and the policy cell applies, so integrate needs a human even where the policy says auto; and a grant crosses one exit, so a station re-entered after a failed verify waits for its own approval',
   run: async () => {
     await withLine('p4-i4-blocked-', async (rig) => {
       const { startRun, resumeRun, approveStation } = await api();
@@ -186,6 +187,38 @@ export const APPROVAL_OUTCOME_GATES_THE_STATION: LocalAssertion = runtime({
       if (!integrate.ok) throw new Error(`I4: the integrate approval was refused (${integrate.message})`);
       const done = await resumeRun({ runId: rig.runId, components: await rig.components() });
       if (!done.ok) throw new Error(`I4: the fully approved run did not complete (${done.reason})`);
+    });
+
+    // A grant authorises one exit, not the station. A failed verify sends the
+    // task back to `build`, and the second `build` exit is a gate nobody has
+    // approved: the first visit's grant is spent and does not stand in for it.
+    await withLine('p4-i4-revisit-', async (rig) => {
+      const { startRun, resumeRun, approveStation } = await api();
+      const driver = await stubDriver();
+      const sandbox = await failsFirstCheck();
+      const components = await rig.components({ driver, reviewer: driver, sandbox });
+      const policy = await linePolicy({ 'build:1': 'human-required' });
+      const first = refusalOf(await startRun(await rig.request(components, { policy })), 'I4 first build exit');
+      if (first.at !== 'build' || first.transition.reason !== 'approval-required') {
+        throw new Error(`I4: the first build exit ended at ${first.at} as '${first.transition.reason}'`);
+      }
+      const vault = components.vault;
+      const granted = await approveStation({ runId: rig.runId, key: 'build:1', approvedBy: 'conformance', vault });
+      if (!granted.ok) throw new Error(`I4: the first build approval was refused (${granted.message})`);
+
+      const second = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components({ driver, reviewer: driver, sandbox }) }), 'I4 rebuild');
+      const built = driver.requests.filter((r) => r.taskId === HELLO_TASK).length;
+      if (built !== 2) throw new Error(`I4: the failed check did not send the task back to build; it was built ${String(built)} time(s)`);
+      if (second.at !== 'build' || second.transition.reason !== 'approval-required' || second.transition.key !== 'build:1') {
+        throw new Error(`I4: the rebuilt task crossed the human-required build exit on the first visit's grant (${second.at}, '${second.transition.reason}')`);
+      }
+      const grants = (await rig.state()).approvals;
+      if (grants.length !== 1 || grants[0]?.usedAt === null) throw new Error(`I4: the spent grant is recorded as ${JSON.stringify(grants)}`);
+
+      const again = await approveStation({ runId: rig.runId, key: 'build:1', approvedBy: 'conformance', vault });
+      if (!again.ok) throw new Error(`I4: the second visit to build could not be approved in its own right (${again.message})`);
+      const onward = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components({ driver, reviewer: driver, sandbox }) }), 'I4 onward');
+      if (onward.at !== 'integrate') throw new Error(`I4: after the second approval the run stopped at ${onward.at}`);
     });
   },
 });
@@ -341,6 +374,24 @@ export const RESUME_DERIVES_STATE_FROM_THE_VAULT: LocalAssertion = runtime({
     }
   },
 });
+
+/** A sandbox whose first check exits non-zero and whose later ones pass, so exactly one verify fails. */
+async function failsFirstCheck(): Promise<SandboxProvider> {
+  const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+  const inner = new StubSandboxProvider();
+  let checks = 0;
+  return {
+    id: inner.id,
+    capabilities: () => inner.capabilities(),
+    provision: (spec) => inner.provision(spec),
+    destroy: (handle) => inner.destroy(handle),
+    exec: async (handle, cmd) => {
+      checks += 1;
+      const result = await inner.exec(handle, cmd);
+      return checks === 1 ? { ...result, exitCode: 1 } : result;
+    },
+  };
+}
 
 function identity(family: string): ModelIdentity {
   return { provider: 'conformance', family: family as ModelFamily, model: 'm', version: '1' };

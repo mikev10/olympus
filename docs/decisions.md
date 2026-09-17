@@ -1392,8 +1392,101 @@ maintainer settled that and three scope questions before work began.
 
 - **Demonstrated, not assumed (I8):** each control was deleted in turn, the assertion that owns it was run, and the file was restored. All eleven deletions were caught: the exit lock re-verification (`I3.transition-reverifies-locks`); the admission-hash comparison at a lock (`I3.station-locks-the-admitted-artifact`); the human-required check, and separately the contract floor, in `transition` (`I4.approval-outcome-gates-the-station`); the admission capability check (`I5.station-missing-capability-refused`); the retry bound (`I5.task-attempts-are-bounded`); the admission policy check (`I5.over-request-refused-at-admission`); the no-recount of an in-flight task (`I2.resume-derives-state-from-the-vault`); the L3 refusal in `seatReviewer`, and separately the recording of the seat in run state (`I6.review-seat-family-check`); and context filtering at the review seat (`I6.reviewer-receives-no-author-material`).
 
+### A-P4-04: an approval crosses one exit, and a spent grant stays on the record
+
+- **Surfaced by P4's external review, finding 3.** A grant was identified by
+  `station:level` alone, and `transition` accepted any grant with that key. A
+  failed verify sends a task back to `build`, which is a rebuild and needs no
+  approval; the second exit from `build` is a fresh human-required gate, and it
+  found the first visit's grant still sitting in run state. A human who approved
+  one build had, without being asked, approved every later build of the same
+  task at the same level. `approveStation` made it worse by refusing to record a
+  second grant for a key it already held, so the human could not have approved
+  the second visit even on purpose. Reproduced before the fix: two builds, one
+  grant, no second approval sought.
+- **Chosen:** `ApprovalGrant` gains `usedAt: string | null`. `transition`
+  requires an *unspent* grant, and a successful human-required advance returns
+  the key it spends, which the line marks used in the same commit as the station
+  move — so a stop between the two leaves the grant unspent and the gate is
+  evaluated again. `approveStation` records a new grant when no unspent one
+  exists. A spent grant is never removed: it is the record that a human
+  approved, and deleting it would destroy the audit trail to fix the gate.
+  `I4.approval-outcome-gates-the-station` gained the rebuild case and was shown
+  to fail when the `usedAt` check is deleted.
+- **Reverse:** bind the grant to a gate instance — station, level, and a hash of
+  the work being approved. Stronger, and it needs an exit nonce in run state
+  that nothing else wants yet. `usedAt` says the same thing for the one way a
+  station is re-entered at M1.
+
+### A-P4-05: judged bytes are hashed as they are read, the review seat cannot write, and a tamper names who acted
+
+- **Surfaced by P4's external review, findings 5, 6, and 10.** Three separate
+  defects in what the line hands a station, each reproduced before the fix:
+  - **The bytes verified were not the bytes read.** `build` called `verifyLocks`
+    and then read the spec and acceptance tests from their paths. A swap in
+    between reached the model while every lock comparison still saw the admitted
+    hash. Demonstrated: the model received a spec the run never admitted, and no
+    violation was recorded.
+  - **The review seat was mounted read-write** over the author's whole working
+    copy, although the `review` contract grants no workspace glob at all.
+  - **A tamper found before a task ran was attributed to that task's role**, and
+    the provenance recorded was always the build driver's, even at `review`.
+    A mismatch found before the reviewer ran named the reviewer.
+- **Chosen:** `readText` hashes the bytes it read and compares them to the
+  admission hash, so what is hashed is exactly what is handed over; a mismatch
+  is a `lock-tamper` violation at phase `context`, recorded before the iteration
+  is spent. `runTask` takes the mount mode from the station contract's
+  `writeBoundary`: a station granted no glob gets a tree it cannot write.
+  `recordTamper` takes the suspect separately from the task it fails — a
+  before-the-task mismatch passes null and falls back to the last task that
+  actually ran, or `unattributed` (D-P4-08) — and records the provenance of the
+  driver at the station where the mismatch was found.
+- **Reverse:** snapshot every locked artifact into content-addressed storage at
+  admission and serve those bytes to models and checks. That closes the check
+  execution window too, and it needs Vault and sandbox operations that do not
+  exist. The read-and-hash closes the window this unit opened.
+
+### D-P4-11: the external review's ten findings, and what each one earned
+
+- **Six held and were reproduced as tests** before anything was changed:
+  findings 3, 4, 5, 6, 7, and 10. Two more held as accurate statements about
+  code that this unit deliberately does not own (2, 9), one holds as a latent
+  gap owned elsewhere (8), and one is about the review prompt rather than the
+  code (1). **None was rejected as not holding.**
+- **Fixed here:** 3 (A-P4-04), and 5, 6, and 10 (A-P4-05).
+- **Recorded, not fixed:** 2 is `approveStation` taking `approvedBy` on trust,
+  which the unit assigns to P9 and the signature says so. 9 is a required check
+  bound to nothing, which P6 owns. 7 was already written down in this file
+  before the review, under Known limits. 8 was too, under the same heading. The
+  half of 5 that P4 cannot close — the plan is a file in the tree the reviewer
+  is mounted — is now `I6.review-seat-reads-only-its-grants`, owned by P6, and
+  the pending baseline for I6 rises from 0 to 1 to carry it.
+- **Open, and the maintainer's:** finding 4. See the Known limits entry below.
+- **Finding 1 is about the prompt**, and it is the most useful thing in the
+  reply. The threat model said the motivated party controls the arguments to the
+  exported entry points, and `ComponentGraph` and `Vault` *are* arguments, so it
+  granted that party the ability to substitute the Vault the gates are checked
+  against. That contradicts the same paragraph's claim that the party does not
+  control code running inside the runtime. The review-request prompt now states
+  that the components are runtime-selected and trusted, and names what the party
+  does control: model output, workspace bytes, request data, and stop timing.
+
 ### Known limits, stated now
 
+- **An attempt is bounded per iteration, not per invocation** (the external
+  review's finding 4, reproduced). `startAttempt` does not count an attempt that
+  was already `running` when the run stopped, so a process killed in the window
+  between the `running` commit and the commit that records the result runs the
+  driver again for free. Three kills in that window produced three driver calls
+  against one recorded iteration. Counting every physical invocation would close
+  it and would break the accept criterion that a run killed after any committed
+  state resumes to the *same* attempt counts as an uninterrupted one — the two
+  properties cannot both hold, because one says a kill costs nothing and the
+  other says it must cost something. That is a contract disagreement, not a
+  review fix, so it is not resolved here. **The recommendation to the maintainer
+  is to amend:** a bounded spend is what I5 is for, the criterion's stated
+  purpose — that a resume cannot reset a bound — survives a stricter count, and
+  an unbounded spend under a kill loop is the worse failure.
 - **A crash between a Vault write and the run state that records it.** Between a station's `lock` and its commit, a resume re-locks and the Vault refuses the already-locked path. Between `recordAdmission` and the first run state, no resume can find the run. Both fail closed, loudly, and neither is silent; both need an operator. The first would be closed by a Vault read of the lock manifest, the second by a lookup of an admission without state. Neither exists, and neither is added here.
 - **Review verdicts are recorded, not interpreted** (D-P4-07).
 - **Protected-path escalation has no input** until tamper analysis exists (P7). The machine consumes `protectedPathsTouched`, and the line passes an empty list; `SKELETON_LINE` says so.

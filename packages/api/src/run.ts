@@ -438,7 +438,9 @@ export async function resumeRun(req: ResumeRequest): Promise<RunOutcome> {
  * it was admitted at, and the effective approval there must be
  * `human-required`: a `blocked` exit cannot be approved, an `auto` one needs no
  * approval, and a grant for any other station or level would be a standing
- * approval of something nobody has seen yet.
+ * approval of something nobody has seen yet. A grant already recorded and not
+ * yet spent is not duplicated; one already spent does not stand in for the
+ * visit now waiting, so a rebuild is approved in its own right (A-P4-04).
  */
 export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutcome> {
   if (typeof req.approvedBy !== 'string' || req.approvedBy.trim() === '') {
@@ -456,7 +458,7 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
   const awaiting =
     step.kind === 'exit' && !isBackward(step.from, step.to) && req.key === expected &&
     effectiveApproval(STATION_CONTRACTS[state.station], policy, level, []) === 'human-required' &&
-    !state.approvals.some((grant) => grant.key === expected);
+    !state.approvals.some((grant) => grant.key === expected && grant.usedAt === null);
   if (!awaiting) {
     return {
       ok: false,
@@ -466,7 +468,7 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
   }
   try {
     const next = await req.vault.commitRunState(
-      { ...state, approvals: [...state.approvals, { key: req.key, approvedBy: req.approvedBy, approvedAt: new Date().toISOString() }] },
+      { ...state, approvals: [...state.approvals, { key: req.key, approvedBy: req.approvedBy, approvedAt: new Date().toISOString(), usedAt: null }] },
       state.version,
     );
     return { ok: true, state: next };

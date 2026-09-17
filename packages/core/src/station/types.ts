@@ -88,4 +88,9 @@ export type StationRefusal =
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
   | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string };
 
-export type StationTransition = { ok: true; next: StationId } | StationRefusal;
+/**
+ * `spends` names the approval grant the advance consumes, or null when the
+ * exit needed none. The line marks that grant used in the same commit as the
+ * station move, so one human approval crosses one exit (A-P4-04).
+ */
+export type StationTransition = { ok: true; next: StationId; spends: ApprovalKey | null } | StationRefusal;

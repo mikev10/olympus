@@ -22,6 +22,7 @@
  * exit once anything is locked. A mismatch records a violation, and a run with
  * a recorded violation does not continue (I3).
  */
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
@@ -38,6 +39,8 @@ import {
 } from '@olympus-ai/core';
 import type {
   AgentClaim,
+  ApprovalGrant,
+  ApprovalKey,
   ContextGrant,
   Driver,
   FailedCheck,
@@ -130,9 +133,16 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
             : next;
           break;
         }
+        // One human approval crosses one exit: the grant is spent in the same
+        // commit as the move, so a stop between the two leaves it unspent and
+        // the gate is evaluated again (A-P4-04).
+        const approvals = spend(ctx.state.approvals, next.spends);
         // The run has passed its last M1 exit gate; `observe` is never entered at M1.
-        if (!M1_STATIONS.includes(next.next)) return { ok: true, state: ctx.state };
-        await commit(ctx, { station: next.next, phase: 'working' });
+        if (!M1_STATIONS.includes(next.next)) {
+          if (next.spends !== null) await commit(ctx, { approvals });
+          return { ok: true, state: ctx.state };
+        }
+        await commit(ctx, { station: next.next, phase: 'working', approvals });
         break;
       }
     }
@@ -142,6 +152,15 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
 
 function refused(ctx: LineContext, at: StationId, transition: StationRefusal): RunOutcome {
   return { ok: false, reason: 'refused', at, transition, state: ctx.state };
+}
+
+/** Marks the first unspent grant for `key` used. A spent grant stays in run state: it is the record that a human approved. */
+function spend(grants: readonly ApprovalGrant[], key: ApprovalKey | null): readonly ApprovalGrant[] {
+  if (key === null) return grants;
+  const at = grants.findIndex((grant) => grant.key === key && grant.usedAt === null);
+  if (at === -1) return grants;
+  const usedAt = new Date().toISOString();
+  return grants.map((grant, i) => (i === at ? { ...grant, usedAt } : grant));
 }
 
 /** The runtime's own stations: lock what was admitted for them, then the station is exiting. */
@@ -206,11 +225,16 @@ async function tamperedPaths(ctx: LineContext): Promise<TamperedPath[]> {
   return verdict.ok ? [] : verdict.tampered.map((t) => ({ ...t }));
 }
 
-/** The role a violation is attributed to: the task in flight, else the last task that ran, else none. */
-function suspectRole(ctx: LineContext, task: Task | null): RoleId {
-  if (task !== null) return task.role;
+/** The role a violation is attributed to: the suspect, else the last task that ran, else none. */
+function suspectRole(ctx: LineContext, suspect: Task | null): RoleId {
+  if (suspect !== null) return suspect.role;
   const ran = ctx.graph.tasks.filter((t) => Object.hasOwn(ctx.state.results, t.id));
   return ran.at(-1)?.role ?? UNATTRIBUTED;
+}
+
+/** The driver a station runs its tasks through. It is what found a mismatch there, and its provenance is the detector's. */
+function driverAt(ctx: LineContext, station: StationId): Driver {
+  return station === 'review' ? ctx.components.reviewer : ctx.components.driver;
 }
 
 /**
@@ -218,18 +242,27 @@ function suspectRole(ctx: LineContext, task: Task | null): RoleId {
  * task in flight, if any, is failed with it. `extra` goes into the violation's
  * detail beside the tampered list, so a violation read back alone says when
  * it was found.
+ *
+ * `suspect` is the task whose role the mismatch is attributed to, and it is not
+ * always the task being failed: a mismatch found *before* a task runs was not
+ * that task's doing, and passing null there falls back to the last task that
+ * actually ran, or to `unattributed` (D-P4-08). The provenance recorded is the
+ * detector's — the driver of the station the mismatch was found at — not
+ * always the build driver's (A-P4-05).
  */
 async function recordTamper(
   ctx: LineContext, station: StationId, task: Task | null, tampered: TamperedPath[], extra: Record<string, unknown>,
+  suspect: Task | null = task,
 ): Promise<StationRefusal> {
-  const { vault, driver } = ctx.components;
+  const { vault } = ctx.components;
+  const detector = driverAt(ctx, station);
   const violation: IntegrityViolation = {
     runId: ctx.run.id,
     taskId: task?.id ?? null,
     kind: 'lock-tamper',
-    role: suspectRole(ctx, task),
-    driverProvenanceId: driver.provenanceId(),
-    contractVersion: driver.contractVersion,
+    role: suspectRole(ctx, suspect),
+    driverProvenanceId: detector.provenanceId(),
+    contractVersion: detector.contractVersion,
     detectedAt: new Date().toISOString(),
     detail: { station, ...extra, tampered },
   };
@@ -285,9 +318,35 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
-async function readText(ctx: LineContext, artifacts: readonly AdmittedArtifact[]): Promise<string> {
-  const texts = await Promise.all(artifacts.map((a) => readFile(resolve(ctx.run.repo, a.path), 'utf8')));
-  return texts.join('\n');
+interface ReadArtifacts {
+  readonly text: string;
+  /** Artifacts whose bytes, as read, do not hash to what was admitted. */
+  readonly tampered: TamperedPath[];
+}
+
+/**
+ * Reads admitted artifacts for a model's context and hashes the bytes it read,
+ * not the path it read them from. `verifyLocks` is a point-in-time check of a
+ * mutable path, so a swap between that check and this read would otherwise
+ * reach the model with every lock comparison still intact; what is hashed here
+ * is exactly what is handed over (A-P4-05).
+ */
+async function readText(ctx: LineContext, artifacts: readonly AdmittedArtifact[]): Promise<ReadArtifacts> {
+  const texts: string[] = [];
+  const tampered: TamperedPath[] = [];
+  for (const artifact of artifacts) {
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(resolve(ctx.run.repo, artifact.path));
+    } catch {
+      tampered.push({ path: artifact.path, expected: artifact.sha256, actual: 'missing' });
+      continue;
+    }
+    const actual = createHash('sha256').update(bytes).digest('hex');
+    if (actual !== artifact.sha256) tampered.push({ path: artifact.path, expected: artifact.sha256, actual });
+    texts.push(decode(bytes));
+  }
+  return { text: texts.join('\n'), tampered };
 }
 
 /** A recorded TaskResult, read back and checked for the fields a later station reads. */
@@ -324,12 +383,18 @@ function scopeFor(ctx: LineContext, task: Task) {
   return resolved.scope;
 }
 
-/** Runs one task through a driver in a fresh rw sandbox, or reports why it could not. */
+/**
+ * Runs one task through a driver in a fresh sandbox, or reports why it could
+ * not. The workspace is mounted as the station's contract allows: a station
+ * whose `writeBoundary` grants no glob — `review` — gets a tree it cannot
+ * write, rather than the author's own working copy (A-P4-05).
+ */
 async function runTask(ctx: LineContext, task: Task, driver: Driver, context: string): Promise<{ ok: true; result: TaskResult } | { ok: false; error: unknown }> {
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
+  const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
   try {
-    const handle = await sandbox.provision(workspaceOnly(ctx, 'rw', egressFor(scope.network)));
+    const handle = await sandbox.provision(workspaceOnly(ctx, mode, egressFor(scope.network)));
     try {
       const request: TaskRequest = {
         taskId: task.id,
@@ -363,12 +428,19 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   const capability = capabilityRefusal(STATION_CONTRACTS.build, driver.capabilities());
   if (capability !== undefined) return capability;
   const tampered = await tamperedPaths(ctx);
-  if (tampered.length > 0) return recordTamper(ctx, 'build', task, tampered, { phase: 'before-build' });
+  // The task has not run, so the mismatch is not its role's doing.
+  if (tampered.length > 0) return recordTamper(ctx, 'build', task, tampered, { phase: 'before-build' }, null);
+
+  const spec = await readText(ctx, ctx.artifacts.spec);
+  const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
+  const drifted = [...spec.tampered, ...tests.tampered];
+  // Read before the iteration is spent: context that changed under the check costs no budget.
+  if (drifted.length > 0) return recordTamper(ctx, 'build', task, drifted, { phase: 'context' }, null);
 
   await startAttempt(ctx, task);
   const offered: Partial<Record<ContextGrant, string>> = {
-    'locked-spec': await readText(ctx, ctx.artifacts.spec),
-    'acceptance-tests': await readText(ctx, ctx.artifacts.acceptanceTests),
+    'locked-spec': spec.text,
+    'acceptance-tests': tests.text,
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
   const ran = await runTask(ctx, task, driver, joinParts(grantedContext(STATION_CONTRACTS.build, offered)));
@@ -477,7 +549,8 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const capability = capabilityRefusal(contract, reviewer.capabilities());
   if (capability !== undefined) return capability;
   const tampered = await tamperedPaths(ctx);
-  if (tampered.length > 0) return recordTamper(ctx, 'review', task, tampered, { phase: 'before-review' });
+  // The reviewer has not run; the mismatch is not the review seat's doing.
+  if (tampered.length > 0) return recordTamper(ctx, 'review', task, tampered, { phase: 'before-review' }, null);
 
   const reviewed = ctx.graph.tasks.filter((t) => task.dependsOn.includes(t.id));
   const authored = await Promise.all(reviewed.map((t) => readResult(ctx, t)));
@@ -486,12 +559,17 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const planned = seatReviewer(task.id, authors, reviewer.resolveModel(scopeFor(ctx, task).tier), level);
   if (!planned.ok) return planned;
 
+  const spec = await readText(ctx, ctx.artifacts.spec);
+  const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
+  const drifted = [...spec.tampered, ...tests.tampered];
+  if (drifted.length > 0) return recordTamper(ctx, 'review', task, drifted, { phase: 'context' }, null);
+
   await startAttempt(ctx, task);
   // Everything the line has is offered, the author's narrative and the plan
   // included; grantedContext is what keeps a seat to its contract.
   const offered: Partial<Record<ContextGrant, string>> = {
-    'locked-spec': await readText(ctx, ctx.artifacts.spec),
-    'acceptance-tests': await readText(ctx, ctx.artifacts.acceptanceTests),
+    'locked-spec': spec.text,
+    'acceptance-tests': tests.text,
     'evidence-bundle': await evidenceFacts(ctx, task.dependsOn),
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
     plan: JSON.stringify(ctx.graph.tasks),
@@ -512,6 +590,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
 interface StateChange {
   readonly station?: StationId;
   readonly phase?: RunState['phase'];
+  readonly approvals?: RunState['approvals'];
   readonly tasks?: RunState['tasks'];
   readonly attempts?: RunState['attempts'];
   readonly results?: RunState['results'];
@@ -528,6 +607,7 @@ async function commit(ctx: LineContext, change: StateChange): Promise<void> {
       ...state,
       station: change.station ?? state.station,
       phase: change.phase ?? state.phase,
+      approvals: change.approvals ?? state.approvals,
       tasks: change.tasks ?? state.tasks,
       attempts: change.attempts ?? state.attempts,
       results: change.results ?? state.results,
