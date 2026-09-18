@@ -1884,6 +1884,16 @@ choices inside the fixes were not forced by the findings and are recorded here.
 - **Why no pending entry was added in exchange:** the gap was found inside this unit and closed inside it. The ledger is unchanged: I4 drops from 2 to 1 and stays there.
 - **Reverse:** delete `#ungrantedMcpTools` and the `--disallowedTools` argument. A granted server's other tools are then in every session that loads it, and the `driver.mcp` assertion fails on the tool it expects to be absent.
 
+### D-P5-19: "zero on the first task" is not measurable, and the assertion measures the growth instead
+
+- **Problem:** the acceptance criterion reads "`cacheReadTokens` is zero on the first task of a run and non-zero on a second task that shares its `stablePrefix`". Run against the real API, the first task read 6373 tokens from cache. The criterion is not wrong about the mechanism; it is wrong about what a first task can observe. The CLI's own system prompt is large, identical between sessions, and cached account-wide with a short time-to-live, so by the time this assertion runs, six earlier assertions in the same suite have already warmed it. A "first" task is only first within its own two-task pair.
+- **Chosen:** the stable prefix carries a nonce generated once per harness, so the exact prefix has never been presented to the cache by any session before this run. Three assertions replace the zero: the first task must *write* cache, the second must read strictly more than the first, and the second must write strictly less than the first.
+- **Why that is the stronger test, not the weaker one:** the difference between the two reads is the stable prefix, and it exists only because the prefix sits in the cacheable span. A driver that concatenated the prefix and the suffix into one turn would leave the CLI's system prompt unchanged between the two tasks, so both would read the same amount and the comparison would not move. The zero-based form could not distinguish those two drivers at all once the account was warm — it would fail for both, for a reason that has nothing to do with either.
+- **Why a nonce rather than a cold account:** waiting out the cache's time-to-live would make the assertion take minutes and would still be a race against anything else using the same account. A prefix nobody has ever sent is cold by construction, on any account, at any time.
+- **What is not claimed:** an absolute number. How many tokens the second task reads depends on the CLI's own prompt, which this unit does not control and should not pin. The assertion is about the direction the numbers move when the prefix is shared, which is what the contract's split exists to produce.
+- **The entry should be corrected:** `DECOMPOSITION.md`'s P5 acceptance line still says zero on the first task. It is amended to the growth form, with this entry as the reason, rather than left to read as a criterion that was quietly not met.
+- **Reverse:** drop the nonce and assert zero again. The assertion then passes only against an account that has made no Claude Code call in the preceding few minutes, which is a property of the machine rather than of the driver.
+
 ## P5 amendments to the contracts
 
 ### A-P5-01: `Driver` gains `declaredTools()`

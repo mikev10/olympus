@@ -101,11 +101,21 @@ function driverWith(provider: RecordingProvider, options: Record<string, unknown
 }
 
 /**
- * The exec that ran the task, rather than the MCP inspection that may precede
- * it. The inspection carries no prompt, so the task is the one that does.
+ * The exec that ran the task, rather than the MCP configuration write or the
+ * inspection that may precede it. Only the task carries a prompt.
  */
 function taskCall(provider: RecordingProvider): { cmd: string[]; env: Readonly<Record<string, string>> | undefined } | undefined {
   return provider.calls.find((call) => call.cmd.includes('--append-system-prompt'));
+}
+
+/** The exec that inspected the MCP servers: a `claude` invocation with no prompt. */
+function inspectionCall(provider: RecordingProvider): string[] {
+  return provider.calls.find((call) => call.cmd.includes('claude') && !call.cmd.includes('--append-system-prompt'))?.cmd ?? [];
+}
+
+/** The shell script that wrote the MCP configuration into the container. */
+function configWrite(provider: RecordingProvider): string {
+  return provider.calls.find((call) => !call.cmd.includes('claude'))?.cmd.join(' ') ?? '';
 }
 
 describe('construction', () => {
@@ -212,10 +222,14 @@ describe('grants the driver refuses before spending anything (I4, I5)', () => {
       mcpServers: { used: { command: 'node' }, unused: { command: 'node' } },
     });
     await driver.runTask(request({ tools: ['Read', 'mcp__used__thing'] }));
+
+    // The configuration is a file written into the container, so the argv
+    // carries its path and the content is in the write that preceded it.
     const cmd = taskCall(provider)?.cmd ?? [];
-    const config = cmd[cmd.indexOf('--mcp-config') + 1] ?? '';
-    expect(config).toContain('used');
-    expect(config).not.toContain('unused');
+    expect(cmd[cmd.indexOf('--mcp-config') + 1]).toMatch(/^\/tmp\/mcp-[0-9a-f-]+\.json$/);
+    const written = configWrite(provider);
+    expect(written).toContain('used');
+    expect(written).not.toContain('unused');
   });
 
   test('the servers are inspected before the task, and every tool they offer beyond the grant is named as disallowed (I4)', async () => {
@@ -227,8 +241,8 @@ describe('grants the driver refuses before spending anything (I4, I5)', () => {
     const driver = driverWith(provider, { mcpServers: { used: { command: 'node' } } });
     await driver.runTask(request({ tools: ['mcp__used__thing'] }));
 
-    const inspection = provider.calls[0]?.cmd ?? [];
-    expect(inspection).not.toContain('--append-system-prompt');
+    const inspection = inspectionCall(provider);
+    expect(inspection).toContain('claude');
     expect(inspection[inspection.indexOf('--tools') + 1]).toBe('');
 
     const cmd = taskCall(provider)?.cmd ?? [];

@@ -13,6 +13,7 @@
  * They also cost money. Every task in this file is the smallest one that can
  * prove its point, and the prompts ask for one word wherever a word will do.
  */
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,6 +50,8 @@ export function credential(): string {
 }
 
 export interface Harness {
+  /** The stable prefix every task of this harness shares, nonce included. */
+  readonly stablePrefix: string;
   readonly driver: ClaudeCodeDriver;
   readonly provider: LocalDockerProvider;
   readonly handle: SandboxHandle;
@@ -84,6 +87,9 @@ export async function withDriver<T>(
   options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
 ): Promise<T> {
   const secret = credential();
+  // One nonce per harness, so every task of this run shares a prefix that no
+  // earlier run has ever presented to the cache.
+  const prefix = stablePrefixFor(randomUUID());
   const image = await ensureImage();
   const base = await mkdtemp(join(tmpdir(), 'factory-driver-'));
   const workspaceDir = join(base, 'workspace');
@@ -115,8 +121,14 @@ export async function withDriver<T>(
     },
   };
   const driver = new ClaudeCodeDriver({ provider: watched, credential: secret, workdir: WORKDIR, ...options });
+  // The run tells the driver which sandbox its artifacts belong in. `emitArtifacts`
+  // takes a target directory and no handle, so a driver that has not been told
+  // refuses rather than writing to the host (I1) — which is what it did the first
+  // time this harness ran, because nothing here had said.
+  driver.useSandbox(handle);
 
   const harness: Harness = {
+    stablePrefix: prefix,
     driver,
     provider,
     handle,
@@ -124,7 +136,7 @@ export async function withDriver<T>(
     request: (overrides: Partial<TaskRequest> = {}): TaskRequest => ({
       taskId: 'probe' as TaskId,
       role: 'builder' as TaskRequest['role'],
-      stablePrefix: STABLE_PREFIX,
+      stablePrefix: prefix,
       variableSuffix: 'Reply with the single word: ready',
       tier: 'fast',
       tools: [],
@@ -147,12 +159,22 @@ export async function withDriver<T>(
 }
 
 /**
- * The invariant half of the context, long enough to be worth caching and
- * identical across every task that uses it. The cache-read assertion turns on
- * two tasks presenting this same prefix and differing only in their suffix, so
- * changing this text changes what that assertion measures.
+ * The invariant half of the context: identical across every task of one run,
+ * and different from every other run's.
+ *
+ * The nonce is what makes the cache measurement mean anything. The CLI's own
+ * system prompt is large, identical between sessions, and cached account-wide,
+ * so by the time this assertion runs, earlier tasks in the same suite have
+ * already warmed it and a first task reads thousands of tokens from cache
+ * before it has done anything. A prefix no session has ever presented cannot
+ * be read from cache, so the first task must write it and only the second can
+ * read it — which is the thing the split is supposed to buy.
  */
-export const STABLE_PREFIX = [
+export function stablePrefixFor(nonce: string): string {
+  return [`Run identifier: ${nonce}. It is the same for every task of this run.`, ...PREFIX_RULES].join('\n');
+}
+
+const PREFIX_RULES: readonly string[] = [
   'You are running inside a conformance assertion for a software factory runtime.',
   'The rules below are the same for every task in this run and never change between tasks.',
   'Answer in as few words as possible. Never explain. Never apologise. Never add preamble.',
@@ -162,7 +184,30 @@ export const STABLE_PREFIX = [
   'Do not ask questions. Do not offer alternatives. Do not summarise what you did.',
   'These instructions are fixed context and are repeated verbatim on every task of this run,',
   'which is what makes them a stable prefix rather than a per-task instruction.',
-].join('\n');
+  '',
+  'Conventions that hold for every task, stated at length because a prefix worth caching is a prefix worth writing:',
+  'Prefer the smallest change that satisfies the request, and make no change the request did not ask for.',
+  'Never add a dependency to avoid writing five lines.',
+  'Never widen a type to make a call site compile; fix the call site.',
+  'Never catch an error you cannot handle; let it reach a caller that can.',
+  'Never log and continue where a refusal is correct: a warning that lets a run proceed is a silent failure.',
+  'A missing check, an absent capability, or an unsupported input is a refusal, never a degraded result.',
+  'Name a thing for what it is, not for what uses it, and never for the ticket that introduced it.',
+  'A comment says why, never what; if the what is unclear, the code is wrong.',
+  'A test asserts one behaviour and names it in the sentence a reader sees when it fails.',
+  'A test that still passes when the behaviour is deleted is not a test.',
+  'Prefer a fixture that fails to compile over a fixture that fails at run time.',
+  'Prefer an assertion about an observed fact over an assertion about a narrative.',
+  'Do not mutate a record after it is constructed; construct a new one.',
+  'Do not derive an identity from a name, an id, or a path; assign it deliberately.',
+  'Do not read configuration from the working tree when the working tree is what is being judged.',
+  'Do not put a secret in an argument vector, a file, or a prompt.',
+  'Do not reach the network for something the task did not ask you to reach it for.',
+  'Report what happened, not what was intended; if a step was skipped, say so.',
+  'If two readings of an instruction lead to different work, say which you took and why.',
+  'If a request cannot be satisfied as written, say what blocks it before doing something adjacent.',
+  'Finish the whole of what was asked, or state plainly which part you did not do.',
+];
 
 /**
  * A minimal stdio MCP server, passed to `node --eval` as one argv element.

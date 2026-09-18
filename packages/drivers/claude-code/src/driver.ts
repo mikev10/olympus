@@ -291,8 +291,9 @@ export class ClaudeCodeDriver implements Driver {
     this.#refuseUngrantedTools(req);
     const identity = this.resolveModel(req.tier);
     const servers = this.#mcpConfigFor(req);
-    const ungranted = await this.#ungrantedMcpTools(req, servers);
-    const invocation = this.#invocationFor(req, identity, asRole, servers, ungranted);
+    const configPath = await this.#writeMcpConfig(req, servers);
+    const ungranted = await this.#ungrantedMcpTools(req, servers, configPath);
+    const invocation = this.#invocationFor(req, identity, asRole, configPath, ungranted);
 
     this.#artifactSandbox = req.sandbox;
     const exec = await this.#provider.exec(req.sandbox, invocation.argv, { env: invocation.env });
@@ -434,8 +435,8 @@ export class ClaudeCodeDriver implements Driver {
    * Only when the request grants an MCP tool at all. A task with no MCP grant
    * configures no server, so there is nothing to inspect and nothing to hide.
    */
-  async #ungrantedMcpTools(req: TaskRequest, servers: Record<string, McpServerConfig>): Promise<string[]> {
-    if (Object.keys(servers).length === 0) return [];
+  async #ungrantedMcpTools(req: TaskRequest, servers: Record<string, McpServerConfig>, configPath: string | undefined): Promise<string[]> {
+    if (configPath === undefined || Object.keys(servers).length === 0) return [];
     const inspected = await this.#provider.exec(
       req.sandbox,
       [
@@ -450,7 +451,7 @@ export class ClaudeCodeDriver implements Driver {
         '--tools', '',
         '--setting-sources', '',
         '--strict-mcp-config',
-        '--mcp-config', JSON.stringify({ mcpServers: servers }),
+        '--mcp-config', configPath,
         '--permission-mode', 'bypassPermissions',
         '--permission-prompts', 'none',
         '--no-session-persistence',
@@ -469,11 +470,42 @@ export class ClaudeCodeDriver implements Driver {
     return init.tools.filter((tool) => mcpServerOf(tool) !== undefined && !granted.has(tool));
   }
 
+  /**
+   * Writes the MCP configuration into the container and returns its path, or
+   * `undefined` when the request granted no MCP tool.
+   *
+   * A file rather than a JSON string on the argv. The CLI takes `--mcp-config`
+   * as "JSON files or strings (space-separated)", and a server definition that
+   * carries a command with arguments has spaces in it, so passing one inline
+   * produced a session with no MCP tools at all — and the model, asked to use
+   * one, invented a tool list rather than saying it had none. A path has no
+   * spaces and is what the documented file form expects.
+   *
+   * It lives in the container's own filesystem, not the workspace mount: the
+   * configuration is the runtime's, and a file the agent could edit between
+   * tasks would be a way to name a server policy never granted (I3). Nothing
+   * secret is in it — the credential travels as an environment value, never as
+   * a file.
+   */
+  async #writeMcpConfig(req: TaskRequest, servers: Record<string, McpServerConfig>): Promise<string | undefined> {
+    if (Object.keys(servers).length === 0) return undefined;
+    const path = `/tmp/mcp-${sessionIdFor(req.taskId)}.json`;
+    const written = await this.#provider.exec(req.sandbox, [
+      'sh',
+      '-c',
+      writeFileScript(path, JSON.stringify({ mcpServers: servers })),
+    ]);
+    if (written.exitCode !== 0) {
+      refuse('invocation', `the MCP configuration could not be written to ${path}: ${written.stderr.trim()}`);
+    }
+    return path;
+  }
+
   #invocationFor(
     req: TaskRequest,
     identity: ModelIdentity,
     asRole: RoleId | undefined,
-    servers: Record<string, McpServerConfig>,
+    configPath: string | undefined,
     ungrantedMcpTools: readonly string[],
   ): Invocation {
     // `--tools` and not `--allowedTools`: the first decides which tools exist
@@ -512,7 +544,7 @@ export class ClaudeCodeDriver implements Driver {
       '--include-hook-events',
       '--max-budget-usd', String(req.budget.maxCostUsd),
     ];
-    if (Object.keys(servers).length > 0) cli.push('--mcp-config', JSON.stringify({ mcpServers: servers }));
+    if (configPath !== undefined) cli.push('--mcp-config', configPath);
     // Named one by one, because a server-wide pattern removes the granted tools
     // with the rest and a later `--allowedTools` does not bring them back.
     if (ungrantedMcpTools.length > 0) cli.push('--disallowedTools', ungrantedMcpTools.join(','));

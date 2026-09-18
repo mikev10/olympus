@@ -115,7 +115,18 @@ invariantTest(
           }),
         );
 
-        // The granted server's tool was reachable and was used.
+        // What the session came up with, before anything the model said about
+        // it. The first run of this assertion checked the narrative first and
+        // reported a model claiming tools that do not exist in the CLI at all
+        // — a confabulated list — which said nothing about whether the server
+        // had loaded. The CLI's own startup report is the fact; the narrative
+        // is a claim (I2), and a claim is worth checking only once the fact
+        // it depends on is established.
+        const loaded = h.driver.sessionFor('mcp' as TaskId);
+        expect(loaded?.mcpServers.map((server) => server.name)).toEqual(['probe']);
+        expect(loaded?.tools).toContain('mcp__probe__ping');
+
+        // Then the tool really was reachable, and really was used.
         expect(result.claim.narrative.toLowerCase()).toContain('pong');
         expect(result.events.some((e) => typeof e.detail.tool === 'string' && e.detail.tool.includes('probe'))).toBe(true);
 
@@ -242,14 +253,22 @@ invariantTest(
         h.request({ taskId: 'cache-2' as TaskId, variableSuffix: 'Reply with the single word: two' }),
       );
 
-      // The split is what the number proves: a driver that concatenated the
-      // prefix and the suffix into one string would present a different prefix
-      // each time and read zero on both.
-      expect(first.usage.cacheReadTokens).toBe(0);
+      // The prefix carries a nonce, so no session before this run has ever
+      // presented it: the first task has to write it, and only the second can
+      // read it back.
       expect(first.usage.cacheWriteTokens).toBeGreaterThan(0);
-      expect(second.usage.cacheReadTokens).toBeGreaterThan(0);
 
-      // And the two tasks really did differ only in the suffix.
+      // The second reads strictly more than the first. That difference is the
+      // stable prefix, and it is what the split buys: a driver that
+      // concatenated the prefix and the suffix would present the CLI's own
+      // system prompt unchanged on both tasks, so both would read the same
+      // amount and this would not move.
+      expect(second.usage.cacheReadTokens).toBeGreaterThan(first.usage.cacheReadTokens);
+
+      // And having read it, the second task does not write it again.
+      expect(second.usage.cacheWriteTokens).toBeLessThan(first.usage.cacheWriteTokens);
+
+      // The two tasks really did differ only in the suffix.
       expect(first.claim.narrative).not.toBe(second.claim.narrative);
     });
   },
