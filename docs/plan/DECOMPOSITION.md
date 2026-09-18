@@ -16,11 +16,12 @@
 | P2 | Sandbox (local Docker) | 2 | contributor | F2, F3 | 2–3 |
 | P3 | Policy engine | 2 | contributor | F2, F3 | 2 |
 | P4 | Station machine | 2 | maintainer | P1, P3 | 3–4 |
-| P5 | Driver: Claude Code | 2 | maintainer | P2 | 2–3 |
+| P5 | Driver: Claude Code | 2 | maintainer | P2, P10 | 2–3 |
 | P6 | Verification + evidence | 2 | maintainer | P1, P2, P8 | 3 |
 | P7 | Tamper detection | 2 | **contributor — best first issue** | P8 | 2 |
 | P8 | Adapters (TypeScript) | 2 | contributor | F2, F3 | 2–3 |
 | P9 | API + CLI | 2 | contributor | P4 | 2 |
+| P10 | Sandbox egress allowlist | 2 | maintainer | P2 | 2 |
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
@@ -162,8 +163,9 @@
 
 ### P5 — Driver: Claude Code
 **Scope:** `Driver` from F2 §2, implemented against the Claude Code CLI. The first real driver, and the first unit whose conformance cannot be satisfied without a model call.
+**Depends on P10, which P5 itself found.** The CLI runs inside the sandbox, and a `deny-all` container cannot reach the API, so five of the seven capability claims are unprovable until an egress allowlist exists. Running the CLI on the host instead is not the workaround it looks like: it is the failure `I1.driver-executes-inside-the-sandbox` was registered to prevent.
 **Deliver:** `stablePrefix`/`variableSuffix` split for cache economy, explicit `ModelIdentity.family`, event capture (commands, file writes, tool calls, network), usage including cache tokens, `emitArtifacts` writing `.md` agents / `SKILL.md` / hooks.
-**Where it lives:** `packages/drivers/claude-code`, the first package under a directory the workspace glob does not cover; `pnpm-workspace.yaml` gains `packages/drivers/*`. It depends on `@olympus-ai/core` for the contract and `@olympus-ai/sandbox` for the provider, and on nothing else in the workspace. The driver never runs the CLI on the host: it is constructed with the `SandboxProvider` that provisioned the handle in `TaskRequest.sandbox`, and every command it issues goes through `provider.exec`, so the mount table is the only filesystem the model can reach (I1). This unit builds and pins the image that carries Node and the CLI, beside the one `packages/sandbox` pins for its own suite; the two are independent and neither follows the other. Credentials arrive as an environment variable on the exec, never as a mount and never inside a prompt, and egress is an allowlist of the API host alone.
+**Where it lives:** `packages/drivers/claude-code`, the first package under a directory the workspace glob does not cover; `pnpm-workspace.yaml` gains `packages/drivers/*`. It depends on `@olympus-ai/core` for the contract and `@olympus-ai/sandbox` for the provider, and on nothing else in the workspace. The driver never runs the CLI on the host: it is constructed with the `SandboxProvider` that provisioned the handle in `TaskRequest.sandbox`, and every command it issues goes through `provider.exec`, so the mount table is the only filesystem the model can reach (I1). This unit builds and pins the image that carries Node and the CLI, beside the one `packages/sandbox` pins for its own suite; the two are independent and neither follows the other. Credentials arrive as an environment variable on the exec, never as a mount and never inside a prompt, and egress is an allowlist of the API host alone — the allowlist P10 delivers, which nothing could enforce when this entry was written.
 **Contract amendments, landed in this unit's pull request**, each an `A-P5-nn` entry in `docs/decisions.md`:
 - `Driver` gains `declaredTools(): readonly string[]` — the driver-side half of the tool-grant gap D-P3-04 split. `validateToolGrants(policy, inventory)` has taken a mandatory inventory since P3 and nothing in the repository could produce one, because `DriverCapabilities` holds feature flags and no tool list. A driver that names its tools closes it for every driver, so the Codex driver (M2) satisfies it rather than reopening it. `StubDriver` declares the empty list, which refuses every grant: default deny where no model runs (I4)
 **Out of scope:**
@@ -208,6 +210,28 @@
 **Deliver:** HTTP surface for run lifecycle — create, status, approve, cancel, stream events — and a CLI that is purely a client of it.
 **Out of scope:** auth beyond a local token, multi-user, the hosted control plane.
 **Conformance:** every CLI command works against a remote API URL; no import from `core` assumes a TTY.
+
+### P10 — Sandbox egress allowlist
+**Scope:** `EgressPolicy.mode: 'allowlist'` in `packages/sandbox`, which P2 refused by name because enforcing one needs a filtering proxy the container is forced through (D-P2-07, whose reverse reads "implement the proxy, then accept the mode").
+**Why it is its own unit:** P5 found it. The Claude Code CLI has to run inside the sandbox — a driver that runs the model on the host is outside the mount table, which is the whole of `I1.driver-executes-inside-the-sandbox` — and inside a `deny-all` container it cannot reach the API. So five of P5's seven capability claims are unprovable until a container can reach exactly one host and nothing else. Folding the work into P5 would make one pull request that both changes the sandbox's network posture and adds a driver, which is the shape the `gate-change` label exists to stop passing casually.
+**Deliver:** a forced filtering proxy, allowlisted by host, with the container on a network whose only route out is that proxy; `appliedControls()` extended to record the allowlist and the proxy as applied evidence, beside the `docker run` argv it already records; `checkEgress` accepting `allowlist` and still refusing a `deny-all` that carries `allow` entries.
+**Where it lives:** `packages/sandbox/src/local/`. The proxy is a container the provider starts and owns, torn down with the sandbox it serves, and it is never reachable by a `deny-all` sandbox.
+**Out of scope:**
+- per-connection logging of blocked attempts. P2 recorded it as a known limit arriving "with the proxy or not at all"; it arrives with the proxy if it is cheap, and stays a known limit if it is not. Either way it is stated, never claimed
+- TLS interception of any kind. The proxy allows or refuses a host and reads nothing inside the connection. An agent's traffic to an allowed host is not the runtime's to inspect, and a man-in-the-middle with the workspace's credentials in it is a larger risk than the one it would close
+- egress for the stub provider. `StubSandboxProvider` declares it cannot enforce a mount table, egress, or limits, and that declaration stays true
+- any driver, credential handling, or model call. P5 owns those and resumes after this unit
+**Conformance:** a container under an `allowlist` reaches an allowlisted host and fails to reach every other, by name and by address; the refusal for a host outside the list is the network's, not the application's; a `deny-all` sandbox still has loopback and nothing else; removing the proxy from the path makes the allowlist assertion fail rather than pass permissively.
+**Accept:**
+- a sandbox provisioned with `mode: 'allowlist'` and one host reaches that host and no other; an attempt to a second host fails inside the container, and it fails the same way when the second host is given as an address rather than a name, so the refusal is not DNS alone
+- bypassing the proxy is not possible from inside the container: the direct route does not exist, rather than existing and being asked politely not to be used. An assertion that unsets every proxy environment variable and tries again still fails
+- an empty `allow` list under `mode: 'allowlist'` is refused, not treated as deny-all and not as allow-all — the same rule `validateToolGrants` follows for an empty inventory
+- a `deny-all` sandbox is unchanged: `--network none`, loopback only, no proxy started, and `appliedControls()` still records `network: 'none'`
+- the proxy container is destroyed with the sandbox it serves, and a leaked one fails the assertion
+- **the ledger.** Pays `sandbox.egress-allowlist-enforced` as a new live assertion under I5, and closes D-P2-07 by reversing it. Adds nothing pending; if the blocked-attempt log is not delivered it stays a known limit with no registry entry, exactly as P2 left it
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I5 is the subject — an unenforceable control is a refusal, and this unit makes one enforceable rather than relaxing the refusal. I1 must not regress: the proxy adds a network route and no mount, and the single-rw-mount rule is untouched. I4 is the allowlist itself: a host not granted is not reachable.
 
 ---
 

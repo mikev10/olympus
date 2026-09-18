@@ -1602,3 +1602,42 @@ before the unit that needs it starts. No unit ran and no package changed.
 - **R1 owes the attribution.** With four terms, a bare `exceeds-cap` no longer identifies what refused, so `I5.refusal-names-the-bounding-term` joins R1's conformance table and I5's pending count rises by two rather than one.
 - **R1 owes an explicit absence.** A run on an unscanned repository keeps the ceiling policy gave it, so the term is genuinely absent — but the type must make absence visible rather than let an optional value vanish inside a `min` and read as clearance.
 - **Nobody owes the wiring yet.** The term is stated and unread until the run-creation path takes it, as the spine names ten stations while M1 runs eight. `R1-readiness.md` §5 keeps that out of R1's scope.
+
+## P5 amendment: the egress allowlist becomes P10
+
+P5 began, stated its boundary, and stopped before writing the driver. The
+reason is worth recording where the next reader of the plan will find it,
+because it changes the unit order.
+
+The Claude Code CLI has to run inside the sandbox. A driver that runs the
+model on the host runs it outside the mount table, which is exactly the
+failure `I1.driver-executes-inside-the-sandbox` was registered to prevent.
+But `LocalDockerProvider` gives every container `--network none` and refuses
+`mode: 'allowlist'` by name: D-P2-07 records that enforcing one needs a
+filtering proxy the container is forced through, that nothing at M1 provided
+it, and that the reverse is "implement the proxy, then accept the mode". No
+unit owned that reverse.
+
+So a container cannot reach the model API, and five of P5's seven capability
+claims — `subagents`, `hooks`, `mcp`, `parallelism`, `stablePrefixCaching` —
+cannot be proven at all. The decision taken before P5 started was that a
+capability claim is proven against a real model call or it is not claimed, so
+there is nothing to trade away here.
+
+**P10 — Sandbox egress allowlist** is added to `DECOMPOSITION.md` with all
+five parts, to F1's dependency graph, to `CONTRIBUTING.md`, and to the
+`UnitId` union. P5 depends on P2 and P10, and resumes when P10 has shipped
+and been reviewed.
+
+Two alternatives were rejected. Folding the proxy into P5 makes one pull
+request that changes the sandbox's network posture *and* adds a driver —
+the shape the `gate-change` label exists to stop passing casually — and the
+assertion that a non-allowlisted host is unreachable is about the sandbox,
+not about a driver. Shipping P5 with five claims pending is the state I8
+exists to end; a specific new reason does not change that it is the second
+hand-off of the same entries.
+
+This is an amendment in the sense `WORKFLOW.md` gives the word: a change to
+the plan, landed on its own, before the unit that needs it starts. The
+decisions P5 took on its own branch are recorded there under `D-P5-01`
+onwards; this section is the part the plan documents depend on.

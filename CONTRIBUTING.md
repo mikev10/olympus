@@ -53,11 +53,12 @@ skeleton lands.
 | P2 | `sandbox` | skeleton | Local Docker provider. Enforces the single-rw-mount rule (I1). |
 | P3 | policy engine (`core`) | skeleton | Resolves autonomy and capabilities; default deny, fail closed. |
 | P4 | station machine (`core`) | P1, P3 | The ten station contracts and the transitions between them. |
-| P5 | `drivers/claude-code` | P2 | The first driver. |
+| P5 | `drivers/claude-code` | P2, P10 | The first driver. Runs inside the sandbox, so it needs P10's egress. |
 | P6 | verification + evidence (`integrity`) | P1, P2, P8 | Runs pinned checks in a fresh sandbox; derives status (I2). |
 | P7 | tamper detection (`integrity`) | P8 | **Best first issue.** Assertion weakening, skip markers, suite shrink. |
 | P8 | `adapters` | skeleton | TypeScript stack: enumerate suites, parse assertions, coverage. |
 | P9 | `api` + `cli` | P4 | The runtime as a service; the CLI as its client (I9). |
+| P10 | `sandbox` egress | P2 | The filtering proxy an `allowlist` needs. Found by P5. |
 
 Each unit's pending assertions are listed in the registry report
 (`pnpm conformance`) under the unit's id. Those are part of the unit's

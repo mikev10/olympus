@@ -31,7 +31,7 @@ export const INVARIANTS: Readonly<Record<InvariantId, string>> = {
  * milestones (M2, M3) that own features the M1 boundary defers.
  */
 export type UnitId =
-  | 'S1' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9'
+  | 'S1' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10'
   | 'M2' | 'M3';
 
 export const UNITS: Readonly<Record<UnitId, string>> = {
@@ -45,6 +45,7 @@ export const UNITS: Readonly<Record<UnitId, string>> = {
   P7: 'Tamper detection',
   P8: 'Adapters (TypeScript)',
   P9: 'API + CLI',
+  P10: 'Sandbox egress allowlist',
   M2: 'Milestone 2 (compiler, Codex driver, trigger framework)',
   M3: 'Milestone 3 (learning, review panel, mutation testing, L3 canary)',
 };

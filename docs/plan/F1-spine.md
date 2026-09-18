@@ -100,7 +100,8 @@ F1 Spine
                  P2 Sandbox (Docker)
                  P3 Policy engine
                  P4 Station machine   [P1, P3]
-                 P5 Driver: Claude Code  [P2]
+                 P10 Sandbox egress allowlist  [P2]
+                 P5 Driver: Claude Code  [P2, P10]
                  P6 Verification + evidence  [P1, P2, P8]
                  P7 Tamper detection  [P8]
                  P8 Adapters (TypeScript)
@@ -108,7 +109,9 @@ F1 Spine
                       └─ I1 Integration + M1 proof
 ```
 
-Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9 follow their bracketed dependencies.
+Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10 follow their bracketed dependencies.
+
+P10 is numbered after P9 and ordered before P5, which is what the bracketed dependencies are for. It was added by P5, which found that the Claude Code CLI has to run inside the sandbox and that a `deny-all` container cannot reach the model API — the allowlist P2 refused to fake. A unit is the first real use of an interface, and friction there is information.
 
 ---
 
