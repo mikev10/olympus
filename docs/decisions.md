@@ -1736,3 +1736,34 @@ choices inside the fixes were not forced by the findings and are recorded here.
 - **Why not a global `uncaughtException` handler:** it would have closed the same symptom and is the obvious cheap fix. A proxy that swallows arbitrary throws and keeps serving is warn-and-continue, which this project refuses everywhere else; it would also have left the `NaN` in place, so the next malformed authority would take a different path to the same place.
 - **What the failure actually was:** it failed closed — the sandbox could reach nothing afterwards — but silently. The provider did not notice, `exec` kept working, and the run would have failed later somewhere else for a reason nothing in the evidence explains. Silence was the defect, not unavailability.
 - **Reverse:** delete `portOf` and parse with `Number` again.
+
+## P5: Driver: Claude Code
+
+### D-P5-01: The unit spec was completed before the code, not after
+
+- **Ambiguous:** `DECOMPOSITION.md`'s P5 entry had Scope, Deliver, Out of scope, and Conformance, and none of the other five parts F1 §"Sub-Plan Rules" requires — no acceptance criteria, no invariant line, no ledger, no statement of where the package lives, no list of the contract changes it needs.
+- **Chosen:** write all five first, in their own commit, and take the three decisions they turn on with the maintainer before any code: capability claims are proven against a real model call inside the sandbox and never skipped; `Driver` gains `declaredTools()` in this unit's pull request; the driver holds the `SandboxProvider` that provisioned its handle.
+- **Why:** P4's entry gained the same five before P4 started. An acceptance criterion written after the implementation is a description of what was built, not a test of it, and the ledger in particular only constrains anything if it is fixed before the work that would edit it.
+- **Reverse:** the commit is documentation only; revert it and the entry is thin again.
+
+### D-P5-02: An external assertion is reconciled against a report the package writes, not by re-running it
+
+- **Ambiguous:** `I8.external-assertion-execution-reconciled` requires the registry to read "that package's own test run" and refuse an id that did not run, without saying how the registry gets it. The registry cannot import a sibling's tests (D-F3-04, the workspace cycle).
+- **Chosen:** the owning package adds `ConformanceRunReporter` to its vitest config; the reporter writes `.conformance/run.json` at the end of every run, passing or failing, holding each test that carried an assertion id, its state, its file, and a hash over every input file in the package. `kit/reconcile.ts` recomputes that hash and accepts the assertion only when the named test passed, in the named file, against the tree being evaluated. Ten refusals, each with its own name and message.
+- **Why:** the alternative — the registry spawning each owning package's suite itself — needs no artifact and cannot go stale, but it runs every external assertion twice. For P5 that is a second set of model calls for an answer the first run already has, and for P2 a second container fleet. A content hash buys the same freshness guarantee for one run. An mtime comparison would not: a checkout, a cache restore, and a clock skew all move mtimes without moving content.
+- **Why the reporter and not a wrapper script:** it runs in-process on every outcome, so a failing suite overwrites the report a passing one left instead of leaving it behind to vouch for code that no longer passes. And `vitest.config.*` is a protected path, so adding it to a package is an acknowledged edit rather than a quiet one.
+- **Reverse:** delete `kit/reconcile.ts`, `kit/run-report.ts`, and `kit/reporter.ts`, restore the unconditional refusal in `validateEntry`, and re-register the pending entry with P5 as owner.
+
+### D-P5-03: The report is a build artifact and is never committed
+
+- **Ambiguous:** nothing said whether a run report belongs in the repository. It is evidence, and this repository tracks evidence — review bundles are tracked deliberately.
+- **Chosen:** `.conformance/` is gitignored.
+- **Why:** a review bundle is what a reviewer saw, fixed forever. A run report is what one machine's run recorded a moment ago, and it is meaningless away from the tree it hashes. A committed one would be a claim about a run nobody can see, asserted by the party being judged — the shape I2 rejects everywhere else. The tree hash makes a stale one harmless anyway: it is refused, not believed.
+- **Reverse:** remove the `.gitignore` entry. Nothing reads a report from git.
+
+### D-P5-04: Workspace discovery follows the globs in `pnpm-workspace.yaml`
+
+- **Ambiguous:** `workspacePackages()` scanned `packages/` one level deep, which was the whole workspace until P5 put a package at `packages/drivers/claude-code`.
+- **Chosen:** read the globs from `pnpm-workspace.yaml` and expand each. Only a trailing `/*` is supported; any other pattern throws rather than matching nothing.
+- **Why:** a hard-coded level would have stopped seeing a package pnpm does see, and every scan built on the list — the fixture-path map, the I9 source inventory, the inline-suppression scan — would have skipped it and reported clean. A silently smaller inventory is the failure mode worth spending a parser on. Throwing on an unsupported pattern is the same rule one level up: an empty result must never be mistaken for an empty workspace (I5).
+- **Reverse:** restore the single-level scan; the driver package then needs to move up a level.

@@ -6,6 +6,7 @@ import { EXTERNAL_RECONCILIATION_ID, evaluateRegistry, formatReport } from '../k
 import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js';
 import { conformanceRoot, entryDivergence, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { claimKeys } from './claims.js';
+import { assertReconciliationRefuses } from './reconciliation.js';
 
 const CONFORMANCE = '@olympus-ai/conformance';
 
@@ -123,20 +124,14 @@ export const I8: InvariantEntry = {
         if (problems.length > 0) throw new Error(`I8: fixture resolution does not follow the published entries\n  ${problems.join('\n  ')}`);
       },
     }),
-  ],
-  pending: [
-    pending({
+    runtime({
       id: EXTERNAL_RECONCILIATION_ID,
-      owner: 'P5',
-      reason:
-        'An external assertion, one another package runs in its own suite, is refused by the registry today: the only ' +
-        'check available was that a file quotes the id, which a comment or a skipped test satisfies. Before the first ' +
-        'one is accepted, the registry must reconcile every external id it lists against the tests the owning package ' +
-        'actually ran and passed, read from that package\'s own test run, and refuse an id that did not run. Re-owned ' +
-        'from P2 to P5 (D-P2-03): P2 paid I1.mount-layer-enforcement with local runtime assertions that drive the real ' +
-        'provider from this package, so it needed no external one, and building the mechanism there would have shipped ' +
-        'it with nothing exercising it. P5 is the first unit that cannot do the same — its capability claims need a ' +
-        'model call, which belongs in the driver package\'s own suite — so it meets this first and owns it.',
+      title:
+        'an external assertion counts only when the owning package reported that exact test passing in that exact file, against the tree being evaluated; a missing report, a changed tree, an id nothing ran, a skipped test, and a failed test are five distinct refusals',
+      run: async () => {
+        await assertReconciliationRefuses();
+      },
     }),
   ],
+  pending: [],
 };

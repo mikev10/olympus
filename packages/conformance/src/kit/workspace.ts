@@ -76,30 +76,88 @@ function readPackageJson(dir: string): PackageJson | undefined {
 }
 
 /**
- * Every package the workspace glob `packages/*` matches, in directory order.
- * The list is read from disk on each call so a test that creates a package
- * in a temporary tree sees it.
+ * The globs under `packages:` in pnpm-workspace.yaml, in file order.
+ *
+ * Read rather than assumed. `packages/*` was the whole list until the first
+ * driver arrived under `packages/drivers/`, and a helper that hard-codes one
+ * level would have stopped seeing a package the workspace does see — quietly,
+ * which is the failure that matters: every scan built on this list would have
+ * skipped that package and reported clean.
+ *
+ * Parsed by line, because the file is a list of strings and nothing else and
+ * a YAML dependency here would be a dependency in every package that runs an
+ * assertion. Anything richer than a flat list under `packages:` is refused by
+ * `expandWorkspaceGlob` rather than half-read.
+ */
+export function workspaceGlobs(root: string = workspaceRoot()): string[] {
+  const file = join(root, WORKSPACE_MARKER);
+  const globs: string[] = [];
+  let inPackages = false;
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (/^packages\s*:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    const item = /^\s+-\s*['"]?([^'"#\s]+)['"]?\s*$/.exec(line);
+    if (item?.[1] !== undefined) {
+      globs.push(item[1]);
+      continue;
+    }
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    break; // a key at any other indentation ends the list
+  }
+  if (globs.length === 0) throw new Error(`conformance: ${WORKSPACE_MARKER} lists no packages`);
+  return globs;
+}
+
+/**
+ * The directories one glob matches. Only a trailing `/*` is supported, which
+ * is every pattern the workspace uses; anything else throws rather than
+ * matching nothing, so an unsupported pattern is a loud failure and not a
+ * silently empty result (I5).
+ */
+function expandWorkspaceGlob(root: string, glob: string): string[] {
+  const prefix = glob.endsWith('/*') ? glob.slice(0, -2) : undefined;
+  if (prefix === undefined || prefix.includes('*')) {
+    throw new Error(
+      `conformance: ${WORKSPACE_MARKER} pattern '${glob}' is not supported; the kit expands a trailing '/*' and nothing else`,
+    );
+  }
+  const dir = join(root, ...prefix.split('/'));
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .sort()
+    .map((name) => join(dir, name))
+    .filter((path) => statSync(path).isDirectory());
+}
+
+/**
+ * Every package the workspace globs match, in glob order then directory
+ * order. The list is read from disk on each call so a test that creates a
+ * package in a temporary tree sees it.
  */
 export function workspacePackages(root: string = workspaceRoot()): WorkspacePackage[] {
-  const packagesDir = join(root, 'packages');
-  if (!existsSync(packagesDir)) return [];
   const result: WorkspacePackage[] = [];
-  for (const name of readdirSync(packagesDir).sort()) {
-    const dir = join(packagesDir, name);
-    if (!statSync(dir).isDirectory()) continue;
-    const pkg = readPackageJson(dir);
-    if (pkg === undefined || typeof pkg.name !== 'string') continue;
-    const main = typeof pkg.main === 'string' ? pkg.main : undefined;
-    const types = typeof pkg.types === 'string' ? pkg.types : undefined;
-    result.push({
-      name: pkg.name,
-      dir,
-      relativeDir: toPosix(relative(root, dir)),
-      main,
-      types,
-      entry: types ?? main,
-      isPrivate: pkg.private === true,
-    });
+  const seen = new Set<string>();
+  for (const glob of workspaceGlobs(root)) {
+    for (const dir of expandWorkspaceGlob(root, glob)) {
+      if (seen.has(dir)) continue;
+      const pkg = readPackageJson(dir);
+      if (pkg === undefined || typeof pkg.name !== 'string') continue;
+      seen.add(dir);
+      const main = typeof pkg.main === 'string' ? pkg.main : undefined;
+      const types = typeof pkg.types === 'string' ? pkg.types : undefined;
+      result.push({
+        name: pkg.name,
+        dir,
+        relativeDir: toPosix(relative(root, dir)),
+        main,
+        types,
+        entry: types ?? main,
+        isPrivate: pkg.private === true,
+      });
+    }
   }
   return result;
 }

@@ -1,12 +1,17 @@
 /**
  * The meta-test. It reads the registry, runs every local assertion as its own
- * test, fails every external assertion (refused until execution
- * reconciliation exists), and fails when any invariant or capability claim is
- * `missing`, any record is malformed, or any entry's pending count exceeds
- * the committed baseline
+ * test, reconciles every external assertion against the owning package's own
+ * run report and fails the ones that did not run and pass, and fails when any
+ * invariant or capability claim is `missing`, any record is malformed, or any
+ * entry's pending count exceeds the committed baseline
  * (pending-baseline.json). The report it prints is the CI artifact: every
  * pending entry with the unit that owes it and the delta against the
  * baseline, so owed work is visible and cannot quietly grow.
+ *
+ * An external assertion is never re-run here. This file's test for one says
+ * where it ran and that it passed; the assertion itself belongs to the suite
+ * that owns it, and running it twice would be a second bill for P5's model
+ * calls and a second daemon for P2's containers.
  */
 import { afterAll, describe, expect, test } from 'vitest';
 import { readPendingBaseline } from '../src/kit/baseline.js';
@@ -61,9 +66,12 @@ for (const report of [...evaluation.invariants, ...evaluation.claims]) {
         });
       } else {
         test(`[${assertion.id}] ${assertion.title} (external: ${assertion.package} ${assertion.file})`, () => {
-          throw new Error(
-            `${assertion.id}: external assertions are refused until execution reconciliation exists (${EXTERNAL_RECONCILIATION_ID})`,
-          );
+          const verdict = evaluation.external.get(assertion.id);
+          if (verdict === undefined) {
+            throw new Error(`${assertion.id}: the evaluation recorded no reconciliation verdict (${EXTERNAL_RECONCILIATION_ID})`);
+          }
+          if (!verdict.ok) throw new Error(`${verdict.detail} (${EXTERNAL_RECONCILIATION_ID}: ${verdict.refusal})`);
+          expect(verdict.ranIn).toBe(`${assertion.package} ${assertion.file}`);
         });
       }
     }

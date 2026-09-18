@@ -103,6 +103,9 @@ describe('inlineSuppressions', () => {
   let root: string;
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'conformance-suppress-'));
+    // A temp root is a workspace only if it says so: workspacePackages reads
+    // the globs from pnpm-workspace.yaml rather than assuming one level.
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), ['packages:', '  - packages/*', ''].join('\n'));
     const pkg = join(root, 'packages', 'sample');
     mkdirSync(join(pkg, 'src'), { recursive: true });
     mkdirSync(join(pkg, 'fixtures', 'lint'), { recursive: true });

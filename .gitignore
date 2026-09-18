@@ -11,6 +11,14 @@ dist/
 # Test output
 coverage/
 
+# Conformance run reports: what a package's own suite recorded about the
+# assertions it ran, read by the registry's execution reconciliation. A build
+# artifact of one run on one machine, and never evidence on its own — each
+# report carries the hash of the tree it came from and is refused against any
+# other. Committing one would put a claim about a run nobody can see into the
+# repository, which is the shape I2 rejects everywhere else.
+.conformance/
+
 # Logs
 *.log
 npm-debug.log*
