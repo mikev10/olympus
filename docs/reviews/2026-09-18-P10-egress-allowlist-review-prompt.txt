@@ -1,0 +1,137 @@
+The code under review is in the attached file
+`2026-09-18-P10-egress-allowlist-review-bundle.txt` (SHA-256
+276f8db9d48fbcdc112cbc87430386fa5bc44556b9450df051baf34d15b17f7c) — the full
+contents of every changed file, with the commit range at its top. If that file
+is not present in this conversation, stop and say so; do not review from the
+description below alone.
+
+You are reviewing the network egress control of a TypeScript project: the part
+that decides which hosts a container may reach, and enforces it. You have the
+source and nothing else — no design documents, no author reasoning, no prior
+version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+This project runs AI coding agents inside disposable Docker containers. A
+container is provisioned from a specification that names an image, a mount
+table, resource limits, and an egress policy. The egress policy is either
+`deny-all`, which has always been `--network none`, or `allowlist` with a list
+of hosts, which until this change was refused outright because nothing could
+enforce it. This change implements it: the container joins a Docker network
+created `--internal`, and a filtering proxy container — started, owned, and
+destroyed by the provider — sits on that network and on a second outbound
+network, forwarding to allowlisted hosts and refusing everything else.
+
+The bundle's commit range covers everything not yet externally reviewed. The
+egress allowlist is the bulk of it; a smaller earlier change to the station
+machine and the run line is also in range and is equally in scope.
+
+It must hold against a capable, motivated party trying to reach a host the
+allowlist does not name, or to make the conformance assertions report the
+control as working while it does not. Assume no deceptive intent — only that
+the easiest path gets taken.
+
+That party controls everything running inside the provisioned sandbox
+container: the processes it starts, the commands it runs, its environment
+variables, its filesystem inside the container, and the contents of the mounted
+workspace tree. It does not control the `SandboxSpec` handed to `provision()`,
+the policy that produced it, the Docker daemon, the host, the provider's own
+Node process, or the program the proxy container runs — those are
+runtime-selected and trusted, even where a function takes one as an argument.
+It does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy is not available. Adding one
+  is an explicit, versioned edit to a policy file.
+
+- Fail closed. A missing required check, an absent capability, an unsupported
+  configuration, or a control that cannot be enforced is a refusal — never a
+  silent degrade, never a warning that lets the run continue.
+
+- No agent writes to the project's Vault (its record of specs, evidence, and
+  run state). Enforced at the mount layer: at most one read-write mount, and if
+  there is one it is the workspace. No mount may be a Vault path, sit inside
+  one, or contain one, at any mode.
+
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. Documentation asserting a subsystem is wired is not
+  evidence that it is, and an assertion that would pass with the mechanism
+  removed is not evidence either.
+
+The mechanisms that matter most:
+
+- The Docker network the sandbox container is placed on, created `--internal`,
+  and what that leaves in the container's routing table.
+- The proxy's host matching for both `CONNECT` and absolute-form HTTP requests,
+  including how an authority string is split into host and port.
+- The validation that runs before any container exists: which egress policies
+  are refused, and which host strings are accepted into the proxy's list.
+- The teardown path: what is removed, in what order, when a sandbox is
+  destroyed, when its wall-clock budget expires, and when provisioning fails
+  part-way.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The list below is copied verbatim from the project's own planning document.
+Absent work listed here is not a defect. The identifiers in it — P2, P5, P6,
+`StubSandboxProvider`, D-P2-07 — refer to other units and decisions of this
+project and are not in your bundle; they mean nothing to you and you are not
+expected to resolve them.
+
+- per-connection logging of blocked attempts. P2 recorded it as a known limit
+  arriving "with the proxy or not at all"; it arrives with the proxy if it is
+  cheap, and stays a known limit if it is not. Either way it is stated, never
+  claimed
+- TLS interception of any kind. The proxy allows or refuses a host and reads
+  nothing inside the connection. An agent's traffic to an allowed host is not
+  the runtime's to inspect, and a man-in-the-middle with the workspace's
+  credentials in it is a larger risk than the one it would close
+- egress for the stub provider. `StubSandboxProvider` declares it cannot
+  enforce a mount table, egress, or limits, and that declaration stays true
+- any driver, credential handling, or model call. P5 owns those and resumes
+  after this unit
+
+THE QUESTION
+
+From inside the sandbox container, how would you reach a host the allowlist
+does not name?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
