@@ -8,6 +8,8 @@
  * to live here for that reason, even where another package owns their
  * implementation.
  */
+import type { ApprovalKey } from '../policy/types.js';
+import type { ReviewSeat } from '../station/types.js';
 
 export type RunId = string & { readonly __brand: 'RunId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -26,7 +28,8 @@ export type ModelTier = 'fast' | 'standard' | 'deep';
 export type VaultRefKind =
   | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
   | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
-  | 'run-state' | 'rubric' | 'learning';
+  | 'run-state' | 'rubric' | 'learning'
+  | 'admission' | 'task-result';
 
 export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 
@@ -89,15 +92,64 @@ export interface TaskGraph {
 }
 
 /**
+ * `working`: the station's own work is not finished. `exiting`: it is, and
+ * only the exit gate remains. A resume that finds `exiting` evaluates the gate
+ * and does not redo the work.
+ */
+export type StationPhase = 'working' | 'exiting';
+
+/**
+ * How much of a task's budget of attempts is spent. Both counts are committed
+ * before the attempt they count starts, so a resume can re-run an attempt that
+ * was in flight but cannot run one uncounted.
+ */
+export interface TaskAttempts {
+  /** Builds started. Bounded by the build contract's `maxIterations`. */
+  readonly iterations: number;
+  /** Driver or sandbox failures in the current iteration. Bounded by the station contract's `retry.max`; a new iteration starts at zero. */
+  readonly retries: number;
+}
+
+/** A human's approval of one station exit at one level, recorded by the runtime (I4). */
+export interface ApprovalGrant {
+  readonly key: ApprovalKey;
+  /** Who approved. The runtime records what its caller authenticated; P9 owns authentication. */
+  readonly approvedBy: string;
+  readonly approvedAt: string;
+  /**
+   * When the exit this grant authorised was crossed, or null while it is
+   * unspent. A grant authorises one exit, not the station: a run that comes
+   * back to `build` after a failed verify meets the gate again with this one
+   * already spent, and waits for a second human (A-P4-04). Spent grants stay
+   * in run state, because they are the record that a human approved.
+   */
+  readonly usedAt: string | null;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
+ *
+ * A RunState and the Vault records it references are enough to resume a run.
+ * Nothing a resume needs comes from its caller: the level, the policy, and the
+ * artifacts are in the admission record, the attempt counts and approvals are
+ * here, and every result a later station reads is recorded in the Vault.
  */
 export interface RunState {
   readonly runId: RunId;
+  /** The write-once admission record: the Run, the resolved Policy, and the artifacts each station locks. */
+  readonly admission: VaultRef;
   readonly station: StationId;
+  readonly phase: StationPhase;
   readonly tasks: Readonly<Record<TaskId, TaskStatus>>;   // the sole authority for task status (I2); Task holds none
+  readonly attempts: Readonly<Record<TaskId, TaskAttempts>>;
+  /** The latest recorded TaskResult for each task that has run. */
+  readonly results: Readonly<Record<TaskId, VaultRef>>;
   readonly evidenceRefs: readonly VaultRef[];
   readonly violations: readonly VaultRef[];
+  readonly approvals: readonly ApprovalGrant[];
+  /** Every review seat assembled, with its independence (I6). */
+  readonly reviews: readonly ReviewSeat[];
   readonly version: string;             // optimistic concurrency
 }

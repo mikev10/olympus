@@ -1,6 +1,6 @@
 ---
 name: review-request
-description: Prepare an external adversarial review of a shipped unit. Generates the diff bundle and a tailored review prompt to paste into a different AI. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
+description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, a prompt to paste and a bundle to attach, commits them, copies the prompt to the clipboard, and prints numbered hand-over steps. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
 ---
 
 # Prepare an external review
@@ -9,7 +9,31 @@ The reviewer is a **different model family** in a clean room — not Claude Code
 not the session that built the unit. That independence is the point: a reviewer
 sharing the author's context inherits the author's blind spots.
 
-Your job is to produce two artifacts and stop. You do not perform the review.
+Your job is to produce two files, hand them over in plain steps, and stop. You
+do not perform the review.
+
+## What the maintainer gets
+
+Exactly two files per review, side by side in `docs/reviews/`, and nothing else
+to open:
+
+| File | What it is | What the maintainer does with it |
+|---|---|---|
+| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Pastes all of it into the chat |
+| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Attaches it to the same message |
+
+`<date>` is today, `<UNIT>` keeps its case, `<slug>` names the unit:
+`2026-09-14-P4-station-machine-review-prompt.txt`.
+
+The prompt refers to the bundle by that exact filename and never by any other
+name, so nothing has to be renamed on upload. Every word in the prompt file is
+meant for the reviewer: no headings, notes, or provenance for the maintainer go
+in it, because the maintainer copies the whole file.
+
+Later, `triage-review` adds `-review.md` (the reply) and `-triage.md` beside
+them. Units reviewed before this rule also carry a `-review-request.md`; that
+file is retired, and its contents now live in the bundle's own header, the
+prompt's first paragraph, and the review header written at triage.
 
 ## 1. Determine the range
 
@@ -37,7 +61,14 @@ needs surrounding context, and a hunk hides it.
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
   done
-} > docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
+} > docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
+```
+
+The header at its top (base, head, commits, changed files) is the bundle's
+provenance. Record the bundle's SHA-256 for the prompt:
+
+```
+sha256sum docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
 
 **Excluded by construction, and why.** `docs/decisions.md` carries author
@@ -46,28 +77,18 @@ conclusions already reached and stops questioning them. `docs/reviews/` holds
 what earlier reviewers found. `docs/plan/` is the spec the code is judged
 against; the reviewer gets the invariants restated in the prompt instead.
 
-**The bundle lives in the repository, not on a desktop, and is tracked.** It is
-the record of what a reviewer actually saw, and that belongs beside the review
-it produced. Name it for its unit like its siblings, commit it to the unit
-branch, and push, so it is reachable from any device before the review is run:
+**The hash is the authority, the tracked copy is the convenience.** A copy can
+be edited and a hash cannot; with the base and head in the bundle's header,
+anyone can regenerate the bundle and prove it is the one that was sent. Because
+`docs/reviews/*` is excluded above, a tracked bundle never appears inside a
+later one.
+
+Never include anything from `.plan/`. Confirm before going on that both of these
+print `0`:
 
 ```
-git add docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
-git commit -m "<UNIT>: the review bundle, as sent"
-git push
-```
-
-Record its SHA-256 in the review-request file. The hash, not the copy, is what
-makes the bundle verifiable — a copy can be edited and a hash cannot — so both
-are kept and the hash is the authority. Note that `docs/reviews/*` is on the
-exclusion list above, so a tracked bundle never appears inside a later one.
-
-Never include anything from `.plan/`. Confirm before handing the bundle over
-that both of these print `0`:
-
-```
-grep -c '^===== \.plan/'                    docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
-grep -c '^===== docs/decisions\.md =====$'  docs/reviews/<date>-<UNIT>-<slug>-bundle.txt
+grep -c '^===== \.plan/'                    docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
+grep -c '^===== docs/decisions\.md =====$'  docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
 
 They match the bundle's section headers, not prose. A count over the bare
@@ -82,7 +103,9 @@ From `docs/plan/DECOMPOSITION.md` and the unit's spec, extract four things:
   cannot resolve from the bundle
 - **The mechanisms that matter** — the two to four things a bypass would target
 - **Which invariants it touches**, stated in full (the reviewer has no `docs/plan/`)
-- **Out of scope**, verbatim, so absent work is not reported as a defect
+- **Out of scope**, verbatim, so absent work is not reported as a defect. Unit
+  ids and decision ids in it mean nothing to the reviewer; add one sentence
+  saying so, as P4's prompt did
 
 **The adversarial question is derived from what the unit does.** Conformance
 infrastructure: *how would I make this pass without the invariant holding?*
@@ -90,11 +113,20 @@ A vault: *how would I write to it?* A sandbox: *how would I escape the mount or
 reach a read-only path?* A policy engine: *how would I obtain a capability that
 was not granted?* Get this wrong and the review reads like a code-style pass.
 
+**Name both sides of the trust boundary, not just the untrusted one.** Say what
+the party controls *and* what it does not. A boundary stated from one side only
+gets read literally: P4's prompt said the party controls the arguments to the
+exported entry points, and the Vault the gates are checked against is an
+argument, so the prompt handed the attacker the thing under test. Its reviewer
+spent two of ten findings on that contradiction rather than on the code. The
+components a runtime is wired with — vault, sandbox, drivers — are trusted even
+where a function takes one as a parameter, and the prompt has to say so.
+
 **Name mechanisms, never verdicts.** Say what a mechanism does and leave every
 judgment to the reviewer. No "this should be solid", no "the weak point is
 probably X", no target number of findings, no hint at what a previous review
-found. Framing tells the reviewer what failure would mean; it never tells them
-where to look for it.
+found, and no known limit from `docs/decisions.md`. Framing tells the reviewer
+what failure would mean; it never tells them where to look for it.
 
 **A limit worth knowing:** this half of the prompt is written by the same system
 that built the unit, so the mechanisms it names are the ones it thought about. A
@@ -102,17 +134,20 @@ bypass nobody considered lives in a mechanism nobody lists. That is why the
 reviewer receives the full bundle rather than only the named mechanisms, and why
 item 7 below invites it to reject this framing outright.
 
-## 4. Emit the prompt
+## 4. Write the prompt file
 
-Fill the template below and print it for the maintainer to copy. The clean-room,
-calibration, and output sections are fixed — do not reword them. They are what
-separates a useful review from a list of style opinions.
+Fill the template below and write it, and only it, to
+`docs/reviews/<date>-<UNIT>-<slug>-review-prompt.txt`. Plain text, no fence
+around it. The clean-room, calibration, and output sections are fixed — do not
+reword them. They are what separates a useful review from a list of style
+opinions.
 
 ```
-The code under review is in the attached file `olympus-<unit>-review.txt` — the
-full contents of every changed file, with the commit range at its top. If that
-file is not present in this conversation, stop and say so; do not review from
-the description below alone.
+The code under review is in the attached file
+`<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — the full contents of
+every changed file, with the commit range at its top. If that file is not
+present in this conversation, stop and say so; do not review from the
+description below alone.
 
 You are reviewing <what: e.g. the conformance testing infrastructure> of a
 TypeScript project. You have the source and nothing else — no design documents,
@@ -130,6 +165,13 @@ It must hold against a capable, motivated party trying to <the unit's failure
 mode: make CI green without doing the work / write to the vault / escape the
 sandbox / obtain an ungranted capability>. Assume no deceptive intent — only
 that the easiest path gets taken.
+
+That party controls <the untrusted inputs: what the model returns / the files
+in the workspace / the data on a request / when the process stops>. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process.
 
 The invariants at stake:
 
@@ -183,31 +225,75 @@ Order by severity, highest first. State at the top whether you had any prior
 context and whether you performed any lookups.
 ```
 
-## 5. Report and stop
+**Committed before the review runs, and that is the point.** The prompt is
+written by the system that built the unit, so publishing it before the answer
+exists lets a reader judge whether the reviewer was steered, and check that the
+findings were not selected to match the framing.
 
-Print the bundle path and the prompt. Remind the maintainer:
+## 5. Commit both files
 
-- **Attach the bundle to the same message as the prompt.** They are two
-  artifacts and both are required: the prompt is only instructions, and a
-  reviewer given it alone will ask for the source, or worse, answer from the
-  description. Upload the file rather than pasting it; it runs to thousands of
-  lines.
-- Paste into a **temporary chat** — no memory, no history
-- Use a **different model family** than the last reviewer, and rotate across
-  units; two runs of the same family return correlated findings, which reads as
-  consensus and is one opinion sampled twice
-- Bring the findings back for triage; findings are not instructions
+On the unit branch, both files in one commit, and push, so they are reachable
+from any device:
+
+```
+git add docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt docs/reviews/<date>-<UNIT>-<slug>-review-prompt.txt
+git commit -m "<UNIT>: the review prompt and bundle, as sent"
+git push
+```
+
+## 6. Put the prompt on the clipboard
+
+Best effort, and say whether it worked. Use a reader that keeps UTF-8, because
+the prompt contains dashes that a console code page would mangle:
+
+- Windows: `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '<absolute path to prompt>' | Set-Clipboard"`
+- macOS: `pbcopy < <path>`
+- Linux: `wl-copy < <path>` or `xclip -selection clipboard < <path>`
+
+If none works, the hand-over tells the maintainer to open the file instead.
+
+## 7. Recommend the reviewer
+
+Read the `Reviewer:` and `Family rotation:` lines in the most recent
+`docs/reviews/*-review.md` headers to learn which families reviewed the last
+units. Recommend a family that did not review the previous unit, preferring the
+one used least recently, and respect any family the maintainer has said not to
+use. If a repeat cannot be avoided, say so in the recommendation.
+
+## 8. Hand over, then stop
+
+End the turn with this block, filled in, and nothing after it except the
+"what is next" line WORKFLOW.md requires. Absolute paths, so the maintainer can
+paste them into a file picker.
+
+```
+REVIEW READY: <UNIT> <title>
+
+Two files in docs/reviews/, both committed:
+  PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions   <on your clipboard | not on the clipboard>
+  BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code           <N> lines
+
+Do this:
+  1. Open <family> in a new temporary chat (no memory, no history, no project).
+     Why <family>: <one line on rotation>.
+  2. Attach the bundle file:
+       <absolute path to bundle>
+  3. Paste the prompt into the message box.<If not on the clipboard: " Open this file, select all, copy:" and the absolute path>
+  4. Send the file and the prompt together, in one message.
+     Write down the exact model name the chat shows.
+  5. When the reply has finished, copy all of it. In a new Claude Code session
+     on branch unit/<id>, run:
+       /triage-review <UNIT>
+     and paste the reply, with the model name, into that message.
+
+The other files in docs/reviews/ are records. You do not need to open them.
+```
 
 Do not review the unit yourself. Do not act on a review you did not receive.
 
-## 6. When the review comes back
+## When the review comes back
 
 Not this skill's job, and not this session's. The review runs in another tool,
-on the maintainer's clock. When it returns, `triage-review <unit>` stores it
-with its provenance header, verifies every finding against the cited code
-before acting on one, writes the triage, applies what is accepted, and stops
-before merge.
-
-That step lives in its own skill because it runs in a different session from
-this one, often days later. Instructions for it here would be loaded by every
-session that builds a bundle and by none that triages a review.
+on the maintainer's clock. `triage-review <unit>` stores the reply with its
+provenance header, verifies every finding against the cited code before acting
+on one, writes the triage, applies what is accepted, and stops before merge.

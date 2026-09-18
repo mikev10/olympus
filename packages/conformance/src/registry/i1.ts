@@ -4,9 +4,10 @@ import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
 
-/** The seven named, audited operations the Vault contract declares. Nothing else may be reachable on an instance. */
+/** The nine named, audited operations the Vault contract declares. Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
-  'read', 'lock', 'verifyLocks', 'writeEvidence', 'recordViolation', 'readRunState', 'commitRunState',
+  'read', 'lock', 'verifyLocks', 'writeEvidence', 'recordViolation', 'recordAdmission', 'recordTaskResult',
+  'readRunState', 'commitRunState',
 ];
 
 /** I1: No agent writes to the Vault. */
@@ -31,7 +32,7 @@ export const I1: InvariantEntry = {
     runtime({
       id: 'I1.vault-implementation-exposes-only-named-operations',
       title:
-        'the filesystem Vault carries exactly the seven named operations at run time: no generic write, no delete, and no helper left reachable on the prototype for a caller to mutate the store past them',
+        'the filesystem Vault carries exactly the nine named operations at run time: no generic write, no delete, and no helper left reachable on the prototype for a caller to mutate the store past them',
       run: async () => {
         const { LocalVault } = await import('@olympus-ai/vault');
         const reachable = Object.getOwnPropertyNames(LocalVault.prototype).filter((name) => name !== 'constructor');

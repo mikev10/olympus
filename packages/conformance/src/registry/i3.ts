@@ -2,8 +2,9 @@ import { mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunId } from '@olympus-ai/core';
 import type { LockEntry, LockVerdict } from '@olympus-ai/vault';
-import { compileError, pending, runtime } from '../kit/assert.js';
+import { compileError, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { STATION_LOCKS_THE_ADMITTED_ARTIFACT, TRANSITION_REVERIFIES_LOCKS } from './line-assertions.js';
 import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
@@ -34,6 +35,11 @@ export const I3: InvariantEntry = {
       id: 'I3.context-grants-name-locked-artifacts',
       title: 'ContextGrant names the locked spec and acceptance tests; there is no grant for a mutable spec',
       fixture: 'i3/context-grants-name-locked-artifacts.ts',
+    }),
+    compileError({
+      id: 'I3.test-design-context-is-the-locked-spec',
+      title: 'the station contract table grants test-design exactly the locked spec: adding acceptance tests, the plan, or the repository, or granting nothing, does not compile',
+      fixture: 'i3/test-design-context-is-the-locked-spec.ts',
     }),
     compileError({
       id: 'I3.lock-verdict-names-tampered-paths',
@@ -189,14 +195,8 @@ export const I3: InvariantEntry = {
         });
       },
     }),
+    TRANSITION_REVERIFIES_LOCKS,
+    STATION_LOCKS_THE_ADMITTED_ARTIFACT,
   ],
-  pending: [
-    pending({
-      id: 'I3.transition-reverifies-locks',
-      owner: 'P4',
-      reason:
-        'Every station transition must re-verify the lock manifest and refuse with reason "lock-tamper" on ' +
-        'a mismatch. The station machine that performs transitions arrives with P4.',
-    }),
-  ],
+  pending: [],
 };

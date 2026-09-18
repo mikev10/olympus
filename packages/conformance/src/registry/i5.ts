@@ -1,11 +1,9 @@
-import { cp, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { FixtureTask, RunRequest } from '@olympus-ai/api';
-import type { AutonomyLevel, RunId, StationId, TaskId } from '@olympus-ai/core';
+import type { ComponentGraph } from '@olympus-ai/api';
+import type { AutonomyLevel, RunId, StationId } from '@olympus-ai/core';
 import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
-import { workspaceRoot } from '../kit/workspace.js';
+import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
+import { withLine } from './line.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 
@@ -14,9 +12,6 @@ const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvide
 
 /** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
 const CONTENDERS = 8;
-
-/** The hello fixture the api package's own test drives: one locked file, one check that exits zero. */
-const HELLO_FIXTURE = join('packages', 'api', 'test', 'fixtures', 'hello');
 
 /** I5: Fail closed. */
 export const I5: InvariantEntry = {
@@ -57,38 +52,25 @@ export const I5: InvariantEntry = {
     runtime({
       id: 'I5.unsafe-component-refused-above-l1',
       title:
-        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and SkeletonLine in that order, and passes the hello fixture at L1',
+        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and SkeletonLine in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
       run: async () => {
-        const [api, core, sandbox, vault] = await Promise.all([
-          import('@olympus-ai/api'),
-          import('@olympus-ai/core'),
-          import('@olympus-ai/sandbox'),
-          import('@olympus-ai/vault'),
-        ]);
-        const workspace = await mkdtemp(join(tmpdir(), 's1-hello-'));
-        try {
-          await cp(join(workspaceRoot(), HELLO_FIXTURE), workspace, { recursive: true });
-          const components: RunRequest['components'] = {
-            vault: new vault.StubVault(workspace),
+        await withLine('s1-hello-', async (rig) => {
+          const [api, core, sandbox, vault] = await Promise.all([
+            import('@olympus-ai/api'),
+            import('@olympus-ai/core'),
+            import('@olympus-ai/sandbox'),
+            import('@olympus-ai/vault'),
+          ]);
+          const driver = new core.StubDriver();
+          const components: ComponentGraph = {
+            vault: new vault.StubVault(rig.dirs.artifacts),
             sandbox: new sandbox.StubSandboxProvider(),
-            driver: new core.StubDriver(),
+            driver,
+            reviewer: driver,
           };
-          const task: FixtureTask = {
-            id: 'hello' as TaskId,
-            workspace,
-            lockedPaths: ['spec.md'],
-            checks: [{ id: 'hello-exit-zero', kind: 'unit', command: 'node -e process.exit(0)', required: true, timeoutMs: 10_000 }],
-          };
-          const request = (level: AutonomyLevel): RunRequest => ({
-            runId: `s1-l${String(level)}` as RunId,
-            baseCommit: '0'.repeat(40),
-            requestedLevel: level,
-            task,
-            components,
-          });
 
           for (const level of [2, 3] as const) {
-            const outcome = await api.startRun(request(level));
+            const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
               const got = outcome.ok ? 'ok' : outcome.reason;
               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
@@ -100,16 +82,21 @@ export const I5: InvariantEntry = {
             for (const u of outcome.unsafe) {
               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
             }
+            let recorded = true;
+            try {
+              await components.vault.readRunState(rig.runId);
+            } catch {
+              recorded = false;
+            }
+            if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
           }
 
-          const l1 = await api.startRun(request(1));
-          if (!l1.ok) {
-            throw new Error(`I5: the hello fixture at L1 was refused (${l1.reason}); a runtime that refuses everything does not satisfy this assertion`);
+          const l1 = await api.startRun(await rig.request(components));
+          if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+            const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+            throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
           }
-          if (l1.gate.verdict !== 'pass') throw new Error(`I5: the hello fixture at L1 produced verdict '${l1.gate.verdict}', expected 'pass'`);
-        } finally {
-          await rm(workspace, { recursive: true, force: true });
-        }
+        });
       },
     }),
     runtime({
@@ -320,8 +307,24 @@ export const I5: InvariantEntry = {
         }
       },
     }),
+    STATION_MISSING_CAPABILITY_REFUSED,
+    TASK_ATTEMPTS_ARE_BOUNDED,
+    OVER_REQUEST_REFUSED_AT_ADMISSION,
   ],
   pending: [
+    pending({
+      id: 'I5.unsafe-declaration-survives-composition',
+      owner: 'P6',
+      reason:
+        "unsafeComponents reads each component's `unsafe` property structurally, so a wrapper around a stub that does " +
+        'not forward the property carries no declaration and passes as safe. Today that is no route above L1: ' +
+        'SKELETON_LINE is appended unconditionally, and any declaration refuses. P4 narrowed SKELETON_LINE to the ' +
+        'two controls P6 and P7 still owe, and the unit that pays the last of them deletes it, at which point a ' +
+        'wrapped stub would carry a run to L2 or L3. Before SKELETON_LINE is deleted, component provenance must be ' +
+        'compositional: trusted metadata a wrapper must propagate, a graph-construction layer that owns provenance, ' +
+        'or an equivalent; and the assertion must wrap a stub without forwarding and require the refusal. Recorded by ' +
+        'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01).',
+    }),
     pending({
       id: 'I5.policy-document-load-is-hardened',
       owner: 'P9',

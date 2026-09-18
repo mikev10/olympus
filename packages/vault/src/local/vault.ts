@@ -30,9 +30,9 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
-import type { RunId, RunState, StationId, VaultRef, VaultRefKind } from '@olympus-ai/core';
+import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
+import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -74,7 +74,11 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
+  'admission', 'task-result',
 ];
+
+/** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
+const ADMISSION_FILE = 'admission.json';
 
 export interface VaultRoots {
   /** What the Vault owns. Never inside `artifacts`, and never the same directory. */
@@ -182,12 +186,22 @@ function hasString(value: Record<string, unknown>, key: string): boolean {
  * iterable` in whichever caller spreads it, which turns a corrupt store into
  * a crash somewhere else entirely. Found by the P1 external review, finding 2.
  */
+function isMap(value: unknown): boolean {
+  return isRecord(value) && !Array.isArray(value);
+}
+
+function isRef(value: unknown): boolean {
+  return isRecord(value) && hasString(value, 'runId') && hasString(value, 'kind') && hasString(value, 'hash');
+}
+
 function requireRunState(value: unknown, file: string): RunState {
   const ok =
     isRecord(value) &&
     hasString(value, 'runId') && hasString(value, 'station') && hasString(value, 'version') &&
-    isRecord(value.tasks) && !Array.isArray(value.tasks) &&
-    Array.isArray(value.evidenceRefs) && Array.isArray(value.violations);
+    (value.phase === 'working' || value.phase === 'exiting') && isRef(value.admission) &&
+    isMap(value.tasks) && isMap(value.attempts) && isMap(value.results) &&
+    Array.isArray(value.evidenceRefs) && Array.isArray(value.violations) &&
+    Array.isArray(value.approvals) && Array.isArray(value.reviews);
   if (!ok) throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
   return value as unknown as RunState;
 }
@@ -279,6 +293,7 @@ async function hashArtifact(root: string, path: string): Promise<string> {
 function objectFile(store: string, ref: VaultRef): string {
   if (!KINDS.includes(ref.kind)) throw new Error(`LocalVault: '${ref.kind}' is not a Vault reference kind`);
   if (!/^[0-9a-f]{64}$/.test(ref.hash)) throw new Error(`LocalVault: '${ref.hash}' is not a SHA-256 digest`);
+  if (ref.kind === 'admission') return join(runDir(store, ref.runId), ADMISSION_FILE);
   return join(runDir(store, ref.runId), 'objects', ref.kind, `${ref.hash}.json`);
 }
 
@@ -313,12 +328,20 @@ export class LocalVault implements Vault {
   }
 
   async read(ref: VaultRef): Promise<Uint8Array> {
+    let bytes: Uint8Array;
     try {
-      return await readFile(objectFile(this.#store, ref));
+      bytes = await readFile(objectFile(this.#store, ref));
     } catch (error) {
       if (isAbsent(error)) throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}`, { cause: error });
       throw error;
     }
+    // Every other kind is named by its hash, so the file a ref names holds that
+    // content. The admission record is named by its run, so a ref carrying some
+    // other hash must not read it back as if it matched.
+    if (ref.kind === 'admission' && sha256(bytes) !== ref.hash) {
+      throw new Error(`LocalVault: no admission ${ref.hash} for run ${ref.runId}; the run's admission record hashes to ${sha256(bytes)}`);
+    }
+    return bytes;
   }
 
   /**
@@ -398,6 +421,31 @@ export class LocalVault implements Vault {
 
   recordViolation(v: IntegrityViolation): Promise<VaultRef> {
     return storeObject(this.#store, v.runId, 'violation', v);
+  }
+
+  /**
+   * Once per run. The record is created with the same exclusive create as run
+   * state, under a fixed name rather than its hash, so a second admission for
+   * the run finds the file present and stores nothing: a run cannot be
+   * re-admitted at another level or under another policy.
+   */
+  async recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
+    if (!isRecord(a) || !isRecord(a.run) || typeof a.run.id !== 'string') {
+      throw new Error('LocalVault: an admission record must carry the run it admits');
+    }
+    const runId = a.run.id;
+    const bytes = encode(a);
+    if (!(await createExclusive(join(runDir(this.#store, runId), ADMISSION_FILE), bytes))) {
+      throw new Error(`LocalVault: run ${runId} already has an admission record; a run is admitted once, and nothing was stored`);
+    }
+    return { runId, kind: 'admission', hash: sha256(bytes) };
+  }
+
+  recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef> {
+    if (!isRecord(r) || typeof r.taskId !== 'string') {
+      return Promise.reject(new Error(`LocalVault: refusing to record a task result for run ${runId} that names no task`));
+    }
+    return storeObject(this.#store, runId, 'task-result', r);
   }
 
   async readRunState(runId: RunId): Promise<RunState> {

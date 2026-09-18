@@ -130,7 +130,35 @@
 ### P4 — Station machine
 **Scope:** station registry, transitions, gate evaluation, write-boundary enforcement, Ascent bounds per task, resume from run state.
 **Deliver:** the ten `StationContract`s (M1 uses 1–8), transition function, `test-design` context restriction (locked spec only), review context restriction (never `author-narrative` or `plan`).
+**Where it lives:** the machine is pure and lives in `packages/core/src/station/`: the contract table, the transition function, capability, approval, and review-seat evaluation, and context filtering, with no I/O. `vault` and `integrity` both depend on `core`, so `core` cannot import either and the machine takes what it needs as arguments. `packages/api` is where it meets the Vault, the sandbox, and the drivers: the S1 line is re-cut to run stations 1–8 through the machine, and gains `resumeRun` and an in-process `approveStation` that P9 later puts behind HTTP.
+**Contract amendments, landed in this unit's pull request** (D-P4-01), each an `A-P4-nn` entry in `docs/decisions.md`:
+- `StationRefusal` gains arms for an approval cell that is `blocked`, one that is `human-required` with no recorded grant, and a same-family reviewer at L3; `parked.cause` closes into a set (A-S1-01 left it to P4)
+- the review seat is recorded in run state: the authors' and the reviewer's `ModelIdentity` and whether independence is reduced. Not in `GateResult`, which nothing persists (A-P4-02)
+- a write-once admission record in the Vault holds the `Run`, the resolved `Policy`, and the artifact paths each station locks with their hashes at admission; every `TaskResult` is recorded in the Vault as it returns, so a task's claim and the author's model family survive a resume or a wait for approval between `build` and `verify`; and `RunState` references both and carries what a resume needs: per-task attempt counts, recorded approvals, review seats, and whether the current station's work is complete. A resume reads its level, policy, and bounds from there; the caller cannot restate them
+**Out of scope:**
+- the work inside a station beyond what moving a run needs. No prompts or role definitions (P5, M2): `spec`, `test-design`, and `plan` lock artifacts the caller placed in the workspace rather than asking a model to write them, and `plan` validates and locks the task graph it is given
+- verification beyond S1's check execution, suite enumeration, and the claim/evidence diff (P6); tamper analysis (P7). `SKELETON_LINE` keeps the two lines that describe those and loses the two this unit pays, so a run above L1 is still refused until P6
+- `integrate`'s merge and pull request (I1); a run ends at `integrate`. `observe` and `learn` get contracts and are never entered
+- the multi-seat review panel (M3); a contract with `requiresPanel: true` is refused, not seated with one reviewer
+- parallel task execution and conflict retries: tasks run one at a time in dependency order. A known limit, not a registry entry; no invariant rests on parallelism
+- enforcing a role's `writableGlobs` inside the workspace. It needs the runtime-collected diff, which P6 produces. Owed as `I4.writable-globs-enforced-on-the-diff` (D-P4-01)
+- compositional provenance for unsafe declarations (D-S1-07). It becomes necessary when `SKELETON_LINE` is deleted, which P6 does. Owed as `I5.unsafe-declaration-survives-composition` (D-P4-01)
+- policy file loading and the HTTP surface for approve, cancel, and status (P9); unparking a parked task (P9)
 **Conformance:** a station missing a required driver capability fails closed; a locked-artifact write during `build` hard-fails the run; a resumed run reaches an identical state.
+**Accept:**
+- a station whose driver lacks a capability its contract `requires` is refused with `capability-missing`, naming the station and the capability, at admission and again on resume, before anything is locked or run
+- every transition re-verifies the locks. A locked artifact changed during `build` records a `lock-tamper` violation and fails the run, and a resume of that run refuses with `violation` rather than continuing
+- the effective approval for a station exit is the stricter of the contract's `exitGate.approval` and `policy.approvals[station:level]`. `blocked` refuses and the run does not advance; `human-required` refuses until `approveStation` records a grant, after which a resume advances; `auto` advances
+- a review seat whose reviewer shares the author's `ModelIdentity.family` is refused at L3 and the run does not advance; at L0–L2 it is seated and run state records reduced independence. A reviewer of a different family records full independence
+- `test-design` may be granted the locked spec alone, and a review seat never `author-narrative` or `plan`. Both are compile errors in the contract table and runtime refusals in context filtering, and a reviewer's `TaskRequest` carries none of the author's narrative
+- a task whose gate keeps failing parks with `iterations-exhausted` after the contract's `maxIterations`; one whose driver or sandbox keeps failing parks with `retries-exhausted` after `retry.max`. Both counts live in run state, so a resume cannot reset them
+- a run killed after any committed run state and resumed ends in the same station, task statuses, attempt counts, approvals, and review seats as the same run uninterrupted. A resume takes no level, policy, or artifacts, and reads them from the admission record; starting an admitted run again, at any level, is refused
+- an over-request at any station the run will enter is refused at admission, naming the station, before anything is written
+- **the ledger.** Paid: `I3.transition-reverifies-locks`, `I4.approval-outcome-gates-the-station`, `I6.review-seat-family-check`. Added live: `I2.resume-derives-state-from-the-vault`, `I3.station-locks-the-admitted-artifact`, `I3.test-design-context-is-the-locked-spec` (compile-error), `I5.station-missing-capability-refused`, `I5.task-attempts-are-bounded`, `I5.over-request-refused-at-admission`, `I6.review-context-excludes-author-material` (compile-error), `I6.reviewer-receives-no-author-material`. Added pending: `I4.writable-globs-enforced-on-the-diff` (P6), `I5.unsafe-declaration-survives-composition` (P6). So `pending-baseline.json` lowers I3 from 1 to 0 and I6 from 1 to 0, leaves I4 at 2, and raises I5 from 4 to 5, each a deliberate edit in the diff
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I3, I4, and I6 are paid here; I5 is every refusal above; I2 is that a resume derives state from the Vault and never from its caller. I1 and I9 must not regress: the machine is pure, and nothing it adds writes to the Vault except through named operations.
+**Known limit, stated now:** the L3 half of the review-seat assertion runs against the machine, not through `startRun`, because `SKELETON_LINE` refuses every run above L1 until P6. The L0–L2 half runs end to end.
 
 ### P5 — Driver: Claude Code
 **Scope:** `Driver` from F2 §2.
