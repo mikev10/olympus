@@ -37,7 +37,7 @@ Never violate one to make a task easier. A PR that does is wrong regardless of w
 
 Stations: `intake` `spec` `test-design` `plan` `build` `verify` `review` `integrate` `observe` `learn`
 Autonomy: `L0` manual, `L1` supervised, `L2` delegated, `L3` autonomous
-Packages: `core` `vault` `integrity` `adapters` `sandbox` `triggers` `api` `cli` `compiler` `learning` `drivers/*`
+Packages: `core` `vault` `integrity` `adapters` `sandbox` `triggers` `api` `cli` `compiler` `learning` `readiness` `drivers/*`
 
 Never reintroduce: Unit, Bolt, Inception, Construction, Operations, AI-DLC, `<promise>DONE</promise>`.
 
