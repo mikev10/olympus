@@ -48,6 +48,27 @@ const ORIGIN_SOURCE =
   "require('node:http').createServer(function (q, s) { s.end('" + ORIGIN_BODY + "'); })" +
   '.listen(' + String(ORIGIN_PORT) + ", '0.0.0.0');";
 
+/** An origin that reports back the Host header it received, so what the upstream was asked for is observed and not inferred. */
+const ECHO_SOURCE =
+  "require('node:http').createServer(function (q, s) { s.end('HOST-SEEN=' + String(q.headers.host)); })" +
+  '.listen(' + String(ORIGIN_PORT) + ", '0.0.0.0');";
+
+/**
+ * A proxied GET whose Host header the caller chooses, run inside the sandbox.
+ * `path` is absolute-form, which is how a proxy is addressed; the Host header
+ * is separate and is what a fronting attempt controls.
+ */
+function frontingClient(origin: string, hostHeader: string): string {
+  return (
+    "const r = require('node:http').request(" +
+    `{ host: '${PROXY_ALIAS}', port: ${String(PROXY_PORT)}, method: 'GET', ` +
+    `path: 'http://${origin}:${String(ORIGIN_PORT)}/', headers: { host: '${hostHeader}' } }, ` +
+    "function (a) { let b = ''; a.on('data', function (d) { b += d; }); " +
+    "a.on('end', function () { console.log('STATUS=' + String(a.statusCode) + ' BODY=' + b); }); });" +
+    "r.on('error', function (e) { console.log('ERROR=' + e.message); }); r.end();"
+  );
+}
+
 let provider: LocalDockerProvider;
 let base: string;
 let workspace: string;
@@ -82,12 +103,12 @@ function allowlistControls(handle: SandboxHandle): AppliedControls & { egress: {
 }
 
 /** Starts the origin on the proxy's outbound network and waits for it to answer. The sandbox is never on that network. */
-async function startOrigin(name: string, network: string): Promise<string> {
+async function startOrigin(name: string, network: string, source: string = ORIGIN_SOURCE): Promise<string> {
   origins.push(name);
   await run('docker', [
     'run', '--detach', '--init', '--name', name,
     '--network', network, '--network-alias', name,
-    EGRESS_PROXY_IMAGE, 'node', '--eval', ORIGIN_SOURCE,
+    EGRESS_PROXY_IMAGE, 'node', '--eval', source,
   ]);
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
@@ -262,7 +283,7 @@ describe('an allowlist is applied, and is the only route out', () => {
     const originName = `egress-origin-${randomUUID()}`;
     const handle = await provisionWith([originName]);
     const controls = allowlistControls(handle);
-    await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+    const originAddress = await startOrigin(originName, controls.egress.proxy.outboundNetwork);
 
     const before = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
     expect(before.stdout).toContain(ORIGIN_BODY);
@@ -273,6 +294,65 @@ describe('an allowlist is applied, and is the only route out', () => {
     const after = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
     expect(after.exitCode).not.toBe(0);
     expect(after.stdout + after.stderr).not.toContain(ORIGIN_BODY);
+
+    // And with the proxy variables unset, so the failure above is not merely wget being pointed
+    // at a stopped proxy. With no proxy and no route there is no way out at all; without this
+    // second half the assertion would pass even against a network that had a default route.
+    // External review of P10, finding 3.
+    const direct = await provider.exec(handle, [
+      'sh', '-c',
+      'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+        `wget -T 4 -O - http://${originAddress}:${String(ORIGIN_PORT)}/ 2>&1`,
+    ]);
+    expect(direct.exitCode).not.toBe(0);
+    expect(direct.stdout + direct.stderr).not.toContain(ORIGIN_BODY);
+    expect(direct.stdout + direct.stderr).toContain('unreachable');
+  });
+});
+
+describe('the grant is the host the upstream is asked for', () => {
+  test("a client's own Host header is discarded: an allowlisted host is asked for the host that was granted", async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provider.provision(
+      // The node image as the sandbox, so the probe can set a Host header exactly. Busybox wget
+      // cannot, and the header is the whole of what this assertion is about.
+      specFor({ image: EGRESS_PROXY_IMAGE, egress: { mode: 'allowlist', allow: [originName] } }),
+    );
+    live.push(handle);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork, ECHO_SOURCE);
+
+    // The control: an honest client, whose Host names the host it asked for.
+    const honest = await provider.exec(handle, ['node', '--eval', frontingClient(originName, `${originName}:${String(ORIGIN_PORT)}`)]);
+    expect(honest.stdout).toContain(`HOST-SEEN=${originName}:${String(ORIGIN_PORT)}`);
+
+    // The attack: absolute-form to the granted host, carrying someone else's Host. The
+    // connection goes to a granted host either way; what is under test is which site the
+    // infrastructure in front of it would be asked to serve. RFC 7230 5.3.2 requires the
+    // received Host to be replaced by the one in the request target.
+    const fronted = await provider.exec(handle, ['node', '--eval', frontingClient(originName, 'evil.example')]);
+    expect(fronted.stdout).not.toContain('HOST-SEEN=evil.example');
+    expect(fronted.stdout).toContain(`HOST-SEEN=${originName}:${String(ORIGIN_PORT)}`);
+  });
+
+  test('an authority whose port is not a port is refused, and the proxy survives to refuse the next one', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    // The host half is on the allowlist and the port half is not a number. Passing that on
+    // reaches the socket layer as NaN, which throws where nothing catches it.
+    const malformed = await throughProxy(handle, `CONNECT ${originName}:${String(ORIGIN_PORT)}@evil.example HTTP/1.1`);
+    expect(malformed).toContain('403');
+
+    const running = await run('docker', ['inspect', '--format', '{{.State.Running}}', controls.egress.proxy.containerId]);
+    expect(running.stdout.trim()).toBe('true');
+
+    // The sandbox still has the egress it was granted. A proxy that died here would take the
+    // only route out with it, and the run would fail for a reason nothing recorded.
+    const after = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    expect(after.stdout).toContain(ORIGIN_BODY);
   });
 });
 

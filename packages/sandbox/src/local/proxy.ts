@@ -75,6 +75,18 @@ if (!Number.isInteger(port) || port <= 0) {
 
 // host[:port], with an IPv6 literal bracketed. The port is the caller's; the
 // grant is by host, so only the host is matched.
+// A port, or nothing. Anything else makes the authority unreadable and the
+// whole target is refused: 'allowed.host:443@elsewhere' splits into a host that
+// is on the list and a port that is not a number, and passing that number on
+// reaches the socket layer as NaN. Refusing here is the fail-closed answer and
+// it is also the only one that keeps the proxy alive to refuse the next
+// request. External review of P10, finding 2.
+function portOf(text) {
+  if (!/^[0-9]{1,5}$/.test(text)) return undefined;
+  const value = Number(text);
+  return value > 0 && value < 65536 ? value : undefined;
+}
+
 function split(authority) {
   const value = String(authority || '');
   if (value.charAt(0) === '[') {
@@ -82,11 +94,16 @@ function split(authority) {
     if (end === -1) return null;
     const rest = value.slice(end + 1);
     if (rest !== '' && rest.charAt(0) !== ':') return null;
-    return { host: value.slice(1, end).toLowerCase(), port: rest === '' ? null : rest.slice(1) };
+    if (rest === '') return { host: value.slice(1, end).toLowerCase(), port: null };
+    const bracketed = portOf(rest.slice(1));
+    if (bracketed === undefined) return null;
+    return { host: value.slice(1, end).toLowerCase(), port: bracketed };
   }
   const colon = value.indexOf(':');
   if (colon === -1) return { host: value.toLowerCase(), port: null };
-  return { host: value.slice(0, colon).toLowerCase(), port: value.slice(colon + 1) };
+  const port = portOf(value.slice(colon + 1));
+  if (port === undefined) return null;
+  return { host: value.slice(0, colon).toLowerCase(), port: port };
 }
 
 function permitted(target) {
@@ -94,7 +111,17 @@ function permitted(target) {
 }
 
 function denied(target) {
-  return 'egress-proxy: ' + (target === null ? 'the request named no host' : target.host + ' is not on the allowlist');
+  return 'egress-proxy: ' + (target === null
+    ? 'the request did not name one host and one port'
+    : target.host + ' is not on the allowlist');
+}
+
+// The authority as it must be written to the upstream. RFC 7230 5.3.2: a proxy
+// given an absolute-form target ignores the Host header it received and
+// replaces it with the host from that target.
+function authorityOf(target, standard) {
+  const host = target.host.indexOf(':') === -1 ? target.host : '[' + target.host + ']';
+  return target.port === null || target.port === standard ? host : host + ':' + String(target.port);
 }
 
 // One line per connection, to this container's stdout. It is readable with
@@ -124,13 +151,20 @@ const server = http.createServer(function (req, res) {
     return;
   }
   record('opened', target);
+  // The client's own Host header is discarded. Forwarding it lets an
+  // absolute-form request to an allowlisted host carry someone else's Host,
+  // and any shared infrastructure in front of that host then serves the other
+  // site: the connection is to a granted host and the response is not. The
+  // grant is by host, so the host the upstream is asked for has to be the one
+  // that was granted. External review of P10, finding 1.
+  const headers = Object.assign({}, req.headers, { host: authorityOf(target, 80) });
   const upstream = http.request(
     {
       host: target.host,
-      port: target.port === null ? 80 : Number(target.port),
+      port: target.port === null ? 80 : target.port,
       method: req.method,
       path: url.pathname + url.search,
-      headers: req.headers,
+      headers: headers,
     },
     function (answer) {
       res.writeHead(answer.statusCode || 502, answer.headers);
@@ -155,12 +189,21 @@ server.on('connect', function (req, socket, head) {
   record('tunnelled', target);
   // A blind tunnel: bytes are copied, never read. This is the whole of the
   // no-interception rule, and it is why the grant can only ever be by host.
-  const upstream = net.connect(target.port === null ? 443 : Number(target.port), target.host, function () {
-    socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');
-    if (head && head.length > 0) upstream.write(head);
-    upstream.pipe(socket);
-    socket.pipe(upstream);
-  });
+  let upstream;
+  try {
+    upstream = net.connect(target.port === null ? 443 : target.port, target.host, function () {
+      socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');
+      if (head && head.length > 0) upstream.write(head);
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+  } catch (error) {
+    // One request's failure must never be the proxy's. A dead proxy takes the
+    // sandbox's only route out with it, and a sandbox that cannot reach the
+    // host it was granted fails for a reason nothing recorded.
+    socket.end('HTTP/1.1 400 Bad Request\\r\\nConnection: close\\r\\n\\r\\negress-proxy: ' + error.message + '\\n');
+    return;
+  }
   upstream.on('error', function (error) {
     socket.end('HTTP/1.1 502 Bad Gateway\\r\\nConnection: close\\r\\n\\r\\negress-proxy: ' + error.message + '\\n');
   });

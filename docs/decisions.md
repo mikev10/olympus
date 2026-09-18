@@ -1713,3 +1713,26 @@ onwards; this section is the part the plan documents depend on.
 - **Why this reading and not a contract change:** an allowlist is not a capability the sandbox declares. `SandboxCapabilities` answers "what can this provider do at all" — `gpu`, `persistent`, `remote` — and every key is asserted against a provisioned container. Egress is per-sandbox policy, not per-provider capability: the same provider applies `deny-all` to one sandbox and an allowlist to the next, so a boolean on the provider could not be true or false for it. The entry's own text agrees — it says "under I5", and I5 is where fail-closed lives.
 - **Flagged rather than silently resolved:** the entry as written names an id the registry would reject, which is a defect in the entry and not in the registry. It is stated here and in the pull request body so a reviewer sees the divergence rather than discovering it.
 - **Reverse:** add an `egress` key to `SandboxCapabilities` and register the claim there. That is an F2 amendment, and it would be registering policy as capability.
+
+## P10 amendment: external adversarial review
+
+Three findings, three verified, three held, none rejected. The full triage,
+with the reproductions, is
+`docs/reviews/2026-09-18-P10-egress-allowlist-adversarial-triage.md`. Two
+choices inside the fixes were not forced by the findings and are recorded here.
+
+### D-P10-10: the received `Host` header is rewritten, not checked for a match
+
+- **Problem:** the proxy forwarded `req.headers` verbatim, so an absolute-form request to an allowlisted host could carry someone else's `Host` and be served by whatever infrastructure sits in front of that host. Reproduced: the upstream reported `HOST-SEEN=evil.example`. The connection never leaves the granted host, so this selects a different site behind a granted address rather than reaching a new one — which, for the model APIs this unit exists to reach, is the normal shape and not an exotic one.
+- **Chosen:** discard the received `Host` and rebuild it from the request target, which is what RFC 7230 §5.3.2 requires of a proxy given an absolute-form target.
+- **Why not the reviewer's other suggestion:** it offered rewriting *or* validating that the two match. Refusing a mismatch would break correct clients — a proxied request has no reason to carry a `Host` at all — to catch a case that rewriting removes outright. A control that refuses legitimate traffic to catch illegitimate traffic it could simply have corrected is the wrong trade here.
+- **What is not claimed:** `Host` is now the proxy's, but an origin configured to route on `X-Forwarded-Host` or similar could still be steered by one. That is the origin's trust configuration, and a forward proxy cannot fix it without rewriting headers it has no contract for. The HTTPS equivalent is unreachable by design, because this unit does not terminate TLS — the reviewer said so itself, and the out-of-scope list already said it.
+- **Reverse:** pass `req.headers` through again. The assertion added with this fix then fails, which is the point of adding it.
+
+### D-P10-11: a malformed authority is refused; the proxy does not catch its way out of it
+
+- **Problem:** `split()` took everything after the first colon as the port, so `CONNECT allowed:8080@elsewhere` produced a host that is on the allowlist and a port of `8080@elsewhere`. `Number` of that is `NaN`, and `net.connect` throws `ERR_SOCKET_BAD_PORT` synchronously inside an event handler. Reproduced: the proxy container exited and the sandbox lost egress entirely, with nothing refused and nothing recorded.
+- **Chosen:** validate the port where the authority is parsed. One to five digits, in range, or the authority is unreadable and the target is refused — `split` returns `null` and the request gets a 403 saying it did not name one host and one port. Both upstream-connect sites are additionally wrapped, so a future parse slip ends one request rather than the process.
+- **Why not a global `uncaughtException` handler:** it would have closed the same symptom and is the obvious cheap fix. A proxy that swallows arbitrary throws and keeps serving is warn-and-continue, which this project refuses everywhere else; it would also have left the `NaN` in place, so the next malformed authority would take a different path to the same place.
+- **What the failure actually was:** it failed closed — the sandbox could reach nothing afterwards — but silently. The provider did not notice, `exec` kept working, and the run would have failed later somewhere else for a reason nothing in the evidence explains. Silence was the defect, not unavailability.
+- **Reverse:** delete `portOf` and parse with `Number` again.
