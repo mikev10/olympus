@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import {
+  allowedHosts,
   DockerUnavailable,
   LocalDockerProvider,
   SandboxRefusal,
@@ -198,7 +199,8 @@ describe('egress', () => {
   test('deny-all is --network none, and the container has no route off the host', async () => {
     const handle = await provision();
     const controls = provider.appliedControls(handle);
-    expect(controls.network).toBe('none');
+    expect(controls.egress.mode).toBe('deny-all');
+    expect(controls.egress.network).toBe('none');
     expect(controls.runArgs).toStrictEqual(expect.arrayContaining(['--network', 'none']));
     expect((await hostConfig(controls.containerId)).networkMode).toBe('none');
 
@@ -216,10 +218,34 @@ describe('egress', () => {
     expect(result.stdout + result.stderr).toContain('Network unreachable');
   });
 
-  test('an allowlist is refused, not applied as deny-all or as allow-all', async () => {
-    const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'allowlist', allow: ['example.com'] } })));
+  test('a deny-all sandbox starts no proxy and creates no network', async () => {
+    const handle = await provision();
+    const controls = provider.appliedControls(handle);
+    // The union makes this the whole of it: `deny-all` has no proxy field to read.
+    expect(controls.egress).toStrictEqual({ mode: 'deny-all', network: 'none' });
+    const networks = await run('docker', ['network', 'ls', '--format', '{{.Name}}']);
+    expect(networks.stdout).not.toContain('egress-in-');
+    const containers = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
+    expect(containers.stdout).not.toContain('egress-proxy-');
+  });
+
+  test('an empty allow list under an allowlist is refused, as neither deny-all nor allow-all', async () => {
+    const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'allowlist', allow: [] } })));
     expect(error.layer).toBe('egress');
-    expect(error.message).toContain('refused');
+    expect(error.message).toContain('empty');
+  });
+
+  test('an allow entry that is not one host the proxy can match exactly is refused', async () => {
+    for (const entry of ['*.example.com', 'https://example.com', 'example.com/path', 'example.com:443', 'exa mple.com', '']) {
+      const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'allowlist', allow: [entry] } })));
+      expect(error.layer).toBe('egress');
+      expect(error.message).toContain(JSON.stringify(entry));
+    }
+    // The control: a hostname and both address families are accepted by the same check, so the
+    // refusals above are the entries being read and not the list being rejected.
+    for (const entry of ['example.com', '192.0.2.10', '2001:db8::1']) {
+      expect(allowedHosts([entry])).toStrictEqual([entry]);
+    }
   });
 
   test('a deny-all policy carrying allow entries contradicts itself and is refused', async () => {
@@ -326,7 +352,7 @@ describe('lifecycle', () => {
     expect(twice.layer).toBe('lifetime');
 
     // What was enforced on a sandbox outlives the sandbox: an audit reads it after the run.
-    expect(provider.appliedControls(handle).network).toBe('none');
+    expect(provider.appliedControls(handle).egress.network).toBe('none');
   });
 
   test('a sandbox killed by its wall clock says so, rather than reporting an unknown handle', async () => {

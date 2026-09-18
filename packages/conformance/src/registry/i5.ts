@@ -4,6 +4,21 @@ import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { withLine } from './line.js';
+import {
+  BLOCKED_ADDRESS,
+  BLOCKED_NAME,
+  ORIGIN_BODY,
+  ORIGIN_PORT,
+  allowlistControls,
+  dockerHas,
+  originName,
+  refusalFrom,
+  specFor,
+  throughProxy,
+  withOrigin,
+  withProvider,
+  withSandbox,
+} from './local-sandbox.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 
@@ -305,6 +320,100 @@ export const I5: InvariantEntry = {
             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
           }
         }
+      },
+    }),
+    runtime({
+      id: 'I5.sandbox-egress-allowlist-enforced',
+      title:
+        'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+        'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+        'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+      run: async () => {
+        await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+          // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+          // name, and it is not permission to reach everything; either reading would be the
+          // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+          const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+          if (empty.layer !== 'egress') {
+            throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+          }
+
+          // deny-all is untouched by the allowlist existing: no proxy is started beside a
+          // sandbox entitled to no egress, and no network is created for it.
+          await withSandbox(provider, specFor(dirs), async (handle) => {
+            const controls = provider.appliedControls(handle);
+            if (controls.egress.mode !== 'deny-all') {
+              throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+            }
+            // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+            // read here is what Docker was actually told and what the container actually got.
+            if (!controls.runArgs.join(' ').includes('--network none')) {
+              throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+            }
+            const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+            if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+              throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+            }
+          });
+
+          const name = originName();
+          const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+          const { egress } = allowlistControls(provider, handle);
+          try {
+            await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+              // The grant. The body proves the origin answered, not the proxy on its behalf.
+              const reached = await provider.exec(handle, [
+                'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+              ]);
+              if (!reached.stdout.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+              }
+
+              // Refused by name, and by address. The second is the one that matters: a refusal
+              // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+              for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                if (!answer.includes('403') || !answer.includes(host)) {
+                  throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                }
+              }
+
+              // The strongest form: the origin's own address, which the proxy demonstrably
+              // reaches, refused for the one reason under test — the address is not on the list.
+              const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+              if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+              }
+
+              // There is nothing to bypass. The internal network carries no default route, so a
+              // process that unsets every proxy variable is left with no second path to take.
+              const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+              if (routes.stdout.includes('default')) {
+                throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+              }
+              const bypass = await provider.exec(handle, [
+                'sh', '-c',
+                'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                  `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+              ]);
+              if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+              }
+            });
+          } finally {
+            await provider.destroy(handle);
+          }
+
+          // The proxy is the sandbox's, and goes with it. One left running is a route off the
+          // host with no workload behind it and nobody watching it.
+          for (const [kind, leaked] of [
+            ['container', egress.proxy.name],
+            ['network', egress.proxy.internalNetwork],
+            ['network', egress.proxy.outboundNetwork],
+          ] as const) {
+            if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+          }
+        });
       },
     }),
     STATION_MISSING_CAPABILITY_REFUSED,
