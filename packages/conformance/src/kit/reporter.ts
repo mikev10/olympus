@@ -82,3 +82,14 @@ export class ConformanceRunReporter implements Reporter {
     writeRunReport(this.packageDir, report);
   }
 }
+
+/**
+ * The default export is what lets a package name this reporter as a string in
+ * its `vitest.config.ts` — `reporters: ['default', '@olympus-ai/conformance/reporter']`
+ * — rather than importing the class into the config file. The difference
+ * matters: a config file is bundled and loaded by Node before vite's resolver
+ * exists, so an import here would have to resolve this package's `.js`
+ * specifiers against `.ts` files that Node cannot see. Named as a string, the
+ * module is loaded through vitest's own runner, which can.
+ */
+export default ConformanceRunReporter;

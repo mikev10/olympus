@@ -1,0 +1,25 @@
+{
+  "name": "@olympus-ai/driver-claude-code",
+  "version": "0.0.0",
+  "description": "Driver: the Claude Code CLI, run inside a provisioned sandbox",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@olympus-ai/core": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*"
+  },
+  "devDependencies": {
+    "@olympus-ai/conformance": "workspace:*"
+  }
+}

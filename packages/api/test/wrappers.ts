@@ -20,7 +20,7 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, EvidenceBundle, LockManifest, LockVerdict, Vault } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
@@ -80,8 +80,8 @@ export class DelegatingSandbox implements SandboxProvider {
     return this.inner.provision(spec);
   }
 
-  exec(h: SandboxHandle, cmd: string[]): Promise<ExecResult> {
-    return this.inner.exec(h, cmd);
+  exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult> {
+    return this.inner.exec(h, cmd, options);
   }
 
   destroy(h: SandboxHandle): Promise<void> {

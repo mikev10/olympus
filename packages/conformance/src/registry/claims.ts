@@ -1,13 +1,13 @@
-import { pending, runtime } from '../kit/assert.js';
-import type { ClaimEntry, ClaimId, UnitId } from '../kit/types.js';
+import { external, runtime } from '../kit/assert.js';
+import type { ClaimEntry, ClaimId } from '../kit/types.js';
 import { specFor, withProvider, withSandbox } from './local-sandbox.js';
 
 /**
  * Capability claims (I8). Every key of DriverCapabilities and
  * SandboxCapabilities is a claim an implementation makes about itself, and
- * each needs an assertion that fails when the capability is removed. No
- * driver exists yet, so every driver claim is pending and P5 owes them; the
- * sandbox claims are live as of P2. I8.driver-capability-keys-registered and
+ * each needs an assertion that fails when the capability is removed. The
+ * sandbox claims are live as of P2, and the driver claims as of P5.
+ * I8.driver-capability-keys-registered and
  * I8.sandbox-capability-keys-registered keep this list equal to the
  * interfaces' keys, so a new capability cannot be declared without a registry
  * entry.
@@ -19,18 +19,37 @@ import { specFor, withProvider, withSandbox } from './local-sandbox.js';
  * the provider does fails the suite, and so does adding the capability
  * without declaring it.
  */
-function owed(id: ClaimId, owner: UnitId, proves: string): [ClaimId, ClaimEntry] {
-  return [id, { assertions: [], pending: [pending({ id, owner, reason: proves })] }];
+/**
+ * The package that owns the driver claims, and the file its suite asserts them
+ * in. External rather than local because each one drives the real CLI inside a
+ * real container: the registry cannot import a sibling's tests (D-F3-04), and
+ * re-running them here would be a second set of model calls for an answer the
+ * first run already has (D-P5-02). Each is counted only after reconciliation
+ * against that package's own run report, so an id no test carries, a skipped
+ * test, a failing test, a report from another tree, and a missing report are
+ * five distinct refusals.
+ */
+const DRIVER_PACKAGE = '@olympus-ai/driver-claude-code';
+const DRIVER_CLAIMS_FILE = 'test/claims.test.ts';
+
+function driverClaim(id: ClaimId, title: string): [ClaimId, ClaimEntry] {
+  return [
+    id,
+    {
+      assertions: [external({ id, title, level: 'runtime', package: DRIVER_PACKAGE, file: DRIVER_CLAIMS_FILE })],
+      pending: [],
+    },
+  ];
 }
 
 const DRIVER: Array<[ClaimId, ClaimEntry]> = [
-  owed('driver.subagents', 'P5', 'spawnSubagent() runs a child task under the parent request\'s policy grants and returns its own TaskResult.'),
-  owed('driver.hooks', 'P5', 'the driver installs the hook points emitArtifacts() renders and each fires a DriverEvent.'),
-  owed('driver.mcp', 'P5', 'the MCP servers named in TaskRequest.tools are reachable from a task, and no other server is.'),
-  owed('driver.parallelism', 'P5', 'the driver runs the declared number of tasks concurrently under one provenance id.'),
-  owed('driver.computerUse', 'P5', 'a task can drive a display inside the sandbox when declared, and the capability is refused when not.'),
-  owed('driver.steering', 'P5', 'steer() delivers a runtime message to a running task and it appears in the event stream.'),
-  owed('driver.stablePrefixCaching', 'P5', 'Usage.cacheReadTokens grows across tasks that share a stablePrefix.'),
+  driverClaim('driver.subagents', "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult"),
+  driverClaim('driver.hooks', 'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported'),
+  driverClaim('driver.mcp', "the MCP servers a task's grants name are reachable from that task, and no other server is loaded"),
+  driverClaim('driver.parallelism', 'the driver runs the declared number of tasks concurrently under one provenance id: one, enforced'),
+  driverClaim('driver.computerUse', 'computerUse is declared false and is absent: no declared tool drives a display, and the container has none'),
+  driverClaim('driver.steering', 'steering is declared false and there is no steer(): a running task has no runtime message channel, in both directions'),
+  driverClaim('driver.stablePrefixCaching', 'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix'),
 ];
 
 /** One assertion per sandbox claim: observe the provisioned container, then require the declaration to match. */

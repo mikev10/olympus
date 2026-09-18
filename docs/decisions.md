@@ -1784,3 +1784,116 @@ choices inside the fixes were not forced by the findings and are recorded here.
 - **Why not ship P5 with five claims pending:** that is what the ledger was fixed in advance to prevent. Five capability claims left as declarations with nothing behind them is the state I8 exists to end, and handing them forward a second time with a new reason is still handing them forward.
 - **What stays on the branch:** the reconciliation mechanism (D-P5-02 through D-P5-04) and `declaredTools()` (D-P5-05). Both are independent of egress and correct as they stand.
 - **Reverse:** delete P10 from the three documents and the `UnitId` union, and decide again between the two rejected options.
+
+### D-P5-07: The credential is an environment value on the exec, and the exec contract grows a slot for one
+
+- **Ambiguous:** the unit entry says credentials "arrive as an environment variable on the exec, never as a mount and never inside a prompt", and `SandboxProvider.exec(h, cmd)` has nowhere to put one. Three readings were open: amend `exec`, amend `SandboxSpec` so the value is set when the container is created, or wrap the command in `sh -c 'KEY=... claude ...'` and change no contract.
+- **Chosen:** `exec(h, cmd, options?: ExecOptions)`, with `env` a name-to-value map. The provider passes `docker exec --env NAME` — the name alone — and puts the value in the environment of the `docker` process it spawns, so the secret travels through the daemon API and appears in no argument vector: not the one this process spawns, not the one the command runs under inside the container. Landed in this pull request as **A-P5-02**.
+- **Why not `SandboxSpec`:** that is the machinery P10 already uses for the proxy variables, so it was the cheaper edit. But it puts the secret in `docker create`'s argv and then in the container's configuration for its whole life, readable by anything that can inspect it, and it contradicts the entry's own words. A credential that outlives the command it was for is a credential with a longer window than it needs.
+- **Why not the shell wrapper:** it changes no contract and leaks the secret twice — into the host's `docker exec` argv and into the process table inside the container. An argv is world-readable to anything that can list processes, and a credential is exactly what this exists to carry.
+- **What the provider refuses:** a name that is not a plain environment-variable name, and a name with no value. Both are the fail-closed case (I5): a command that lost its credential does not fail where the credential was lost, it fails later inside the model runner with an authentication message that says nothing about the provider having dropped it. A new `environment` refusal layer names which control declined, so an assertion can require the right refusal rather than merely some error.
+- **Reverse:** delete `ExecOptions`, the `environment` layer, and `environmentPassthrough`; the driver then has no way to authenticate that is not a mount or a prompt.
+
+### D-P5-08: The image is built by this package, from two pinned inputs
+
+- **Ambiguous:** every other image in the repository is pulled by digest — `packages/sandbox` pins an alpine, P10 pins a node. No published image carries the Claude Code CLI, so the same pattern was not available.
+- **Chosen:** a `Dockerfile` in this package, built on demand, with the base pinned by digest and the CLI pinned to an exact version. The tag carries the version, so raising the version builds a different image rather than replacing one under the same name.
+- **Why pinned to an exact version and never a range:** a range makes the image a function of the day it was built, and the tool inventory asserts against what that image's CLI offers. An inventory checked against a moving CLI proves nothing about the CLI a run will use.
+- **Why nothing from the repository is copied in:** the workspace arrives at run time as the sandbox's one writable mount, so a stale image cannot serve a task an old copy of the tree. The image holds the runner, never the work.
+- **Why the build runs on the host:** it needs a package registry, and the sandbox's allowlist grants the model API alone. Building inside the sandbox would mean widening egress to npm for every run, which is a larger hole than the build is worth.
+- **Reverse:** publish an image carrying the CLI and pin it by digest like the others; `ensureImage` then becomes a pull.
+
+### D-P5-09: The tool grant reaches `--tools`, which decides what exists, not `--allowedTools`, which decides what needs approval
+
+- **Ambiguous:** the CLI has two flags that both look like a grant. `--allowedTools` pre-approves uses of tools that are present; `--tools` sets which built-in tools the session has at all.
+- **Chosen:** `--tools`, with the granted list and nothing else. An empty grant produces `--tools ''`, which is a session with no tools.
+- **Why:** the acceptance criterion is that "a tool outside the grant is unavailable to the model, not merely unused". `--allowedTools` leaves the tool in the session and changes what happens when it is used, which is a different and weaker statement. Default deny is about what exists (I4).
+- **What this made visible:** the CLI silently drops a tool name it does not know — `--tools "Read,NoSuchTool"` produces a session with `Read`. So a policy could grant a tool that never existed and read as though the grant had taken effect. The driver therefore refuses a grant outside `declaredTools()` before the task starts, rather than relying on the CLI to notice.
+- **Reverse:** pass `--allowedTools` instead. The narrow-grant assertion then fails, because the session still holds the tools.
+
+### D-P5-10: The stable prefix is appended to the default system prompt, with the per-machine sections moved out of it
+
+- **Ambiguous:** `TaskRequest.stablePrefix` could replace the CLI's system prompt (`--system-prompt`) or be appended to it (`--append-system-prompt`). Either is identical across a run, so either could be cached.
+- **Chosen:** append, plus `--exclude-dynamic-system-prompt-sections`.
+- **Why append:** replacing the default prompt removes the instructions that make the tools usable, so the session stops behaving like the CLI whose capabilities this unit is asserting. The driver renders what it is handed (the compiler's content is M2's); it should not also be deciding that the runner's own prompt is unwanted.
+- **Why the dynamic sections are excluded:** cwd, environment information, memory paths and git status sit in the default prompt and change between tasks. Left in, they sit *before* the appended prefix and break the cacheable span, so two tasks in one run would each write the cache and neither would read it. The cache-read assertion turns on this flag, which is why it is not a tuning detail.
+- **Reverse:** use `--system-prompt` and drop the exclusion; the caching assertion then measures a prefix the CLI composes rather than the one the contract splits.
+
+### D-P5-11: `parallelism` is 1, and the driver enforces it rather than declaring it
+
+- **Ambiguous:** the CLI can run several sessions in one container, so a number above one was available. The claim's text is "the driver runs the declared number of tasks concurrently under one provenance id", which says nothing about which number.
+- **Chosen:** `parallelism: 1`, with one in-flight invocation per sandbox handle. A second task on the same sandbox waits.
+- **Why not a larger number:** the container's CPU, memory and PID limits come from the `SandboxSpec`, which the driver does not choose. A driver claiming four concurrent tasks would be claiming something the sandbox, not the driver, decides — and I8 asks for a claim that fails when the capability is deleted, not one that fails when the limits are tight.
+- **Why enforced rather than merely declared:** a declared number nothing enforces is a capability claim with nothing behind it, which is the state this unit exists to end. The assertion counts invocations inside the sandbox rather than timing the caller's promises, because two `runTask` calls created together begin at the same instant whatever the driver does.
+- **Reverse:** delete the per-sandbox lock and raise the number; the assertion then has to observe that many invocations overlapping, and the sandbox's limits become part of what it is testing.
+
+### D-P5-12: `steering` is false, and `steer()` is absent rather than present and throwing
+
+- **Ambiguous:** the CLI can take a message mid-turn over `--input-format stream-json`, so `steering: true` was reachable with more work. The contract makes `steer()` optional.
+- **Chosen:** declare false and omit the method. The driver runs one CLI invocation per task and does not hold a session open to deliver a message into.
+- **Why absent and not throwing:** a method that exists and refuses is a capability declared false and present, which is the direction the assertion refuses as firmly as the other. `'steer' in driver` is the check, and it reads the same as the declaration.
+- **Why not implement it:** holding the session open changes the shape of every invocation — stdin stays attached, the process outlives the call, and cancellation becomes the driver's problem — for a capability nothing in M1 uses. A capability is what the driver does, not what the tool could do.
+- **Reverse:** hold the session open over `--input-format stream-json`, add `steer()`, and flip the flag. The assertion's second half then has to change, because absence would no longer be what it is asserting.
+
+### D-P5-13: MCP servers belong to the driver; the request's grants choose which of them start
+
+- **Ambiguous:** the claim says "the MCP servers named in `TaskRequest.tools` are reachable from a task, and no other server is", but `TaskRequest` carries tool names and no server configuration. An `mcp__<server>__<tool>` grant names a server that has to come from somewhere.
+- **Chosen:** the servers are a driver option; the request's grants select from them. The session is started with `--strict-mcp-config` and a configuration holding only the servers its grants actually name.
+- **Why the grants select rather than the driver loading all of them:** "no other server is loaded" is then a fact about the session rather than about what the model chose to use. A server nothing granted is absent, not merely unused (I4).
+- **Why a grant naming an unheld server refuses:** the CLI drops an unknown MCP tool the same way it drops an unknown built-in, so without the refusal a policy could name a server that does not exist and get a session that looks configured.
+- **Why the MCP names are not in `declaredTools()`:** they belong to whichever server a request configures, not to the driver. Naming them in the inventory would be claiming an inventory the driver does not have. They are checked against the server map instead.
+- **Reverse:** add an MCP field to `TaskRequest` and let the request carry its own servers. That is an F2 amendment, and it would give a request a way to start a process the policy layer never saw.
+
+### D-P5-14: A run that never reached the model is a refusal, never a `TaskResult`
+
+- **Ambiguous:** the CLI exits zero on an authentication failure. It retries ten times over about three minutes and then writes a result message with `is_error: true`, `api_error_status: 401`, and an apology in the `result` field. Read naively, that is a completed task whose narrative says it failed.
+- **Chosen:** refuse. An API status the CLI gave up on, a session that never started, a credential from a source this driver did not arrange, and a missing result message are each a refusal with its own message.
+- **Why:** a `TaskResult` says a task ran, and the runtime derives status from evidence that assumes one did (I2). Returning a result whose narrative is "Failed to authenticate" hands the runtime a claim to diff against evidence that does not exist, and the failure then surfaces somewhere that cannot explain it. The driver knows why, here, and says so (I5).
+- **What is *not* a refusal:** a task that ran and concluded something disappointing. The model's verdict on its own work is a claim and goes in `AgentClaim`, where the runtime can disagree with it.
+- **Reverse:** return a `TaskResult` for any run that produced a result message. The refusals become narratives and the evidence layer inherits them.
+
+### D-P5-15: The reporter is named as a string in `vitest.config.ts`, not imported into it
+
+- **Problem:** importing `ConformanceRunReporter` into a package's vitest config fails at load. A config file is bundled and loaded by Node before vite's resolver exists, so the kit's `./run-report.js` specifiers are resolved by Node against files that are `.ts`.
+- **Chosen:** `@olympus-ai/conformance` gains two subpath entries — `./vitest` and `./reporter` — and a package names the reporter as `reporters: ['default', '@olympus-ai/conformance/reporter']`. Vitest then loads the module through its own runner, which resolves `.js` to `.ts`.
+- **Why subpaths rather than importing the package root:** the root re-exports the registry, which imports every sibling package, so typechecking a driver package would drag the whole registry in with it. `./vitest` and `./reporter` reach nothing but `node:` modules and two kit files. Published entries, not a sibling's `src/`, so the import rule holds.
+- **Reverse:** remove the `exports` block and the default export on the reporter; a package contributing external assertions then has no way to write a run report.
+
+### D-P5-16: A claim id is not kebab-case, and `invariantTest` had never been told
+
+- **Problem:** `validateAssertionId` required every id to be `<family>.<kebab-name>`, so `driver.computerUse` was refused outright. Every claim id is held equal to a key of `DriverCapabilities` or `SandboxCapabilities` by a generated fixture, and those keys are camelCase.
+- **Chosen:** two shapes. An invariant assertion stays `I<n>.` plus kebab-case; a claim is `driver.` or `sandbox.` plus a capability key exactly as the interface spells it.
+- **Why it went unnoticed:** the registry constructs its own claim entries directly and never goes through `invariantTest`, and no package had contributed a claim from its own suite before. The first real use of an interface is where the friction is, which is the reason `WORKFLOW.md` treats amendments as expected rather than exceptional.
+- **Reverse:** restore the single kebab-case shape; no claim id can then be written by a contributing package.
+
+### D-P5-17: The declared inventory omits a tool the CLI sometimes offers
+
+- **Ambiguous:** the CLI's default tool set is not stable between sessions — one probe of the pinned version offered `DesignSync` and another did not, from the same image and the same flags. Granting it by name produced a session without it.
+- **Chosen:** leave it out of `DECLARED_TOOLS`. The driver always passes `--tools`, so a tool outside the inventory is never in a session, and a policy that granted it would be refused before the task started.
+- **Why leaving it out is the fail-closed direction:** declaring a tool the CLI will not reliably grant would make the inventory assertion flaky and, worse, would let policy grant something that silently is not there. An inventory that is smaller than what the runner can do costs a capability; one that is larger costs the meaning of a grant.
+- **Reverse:** add it and require the assertion to tolerate its absence, which is the same as not asserting the inventory.
+
+### D-P5-18: An MCP server's other tools are named as disallowed, after asking the CLI what they are
+
+- **Problem, found by running it rather than reasoning about it:** `--tools` governs the built-in set only. An MCP server contributes its whole tool list to a session, so a request granting `mcp__probe__ping` against a server that also offers `mcp__probe__ungranted` produced a session holding both. Reproduced against the pinned CLI: the session's own startup report listed `["mcp__probe__ping","mcp__probe__ungranted"]`. That is a tool available to the model that policy never granted, which is exactly what I4 forbids, and no narrower grant fixes it because the names come from the server rather than from the driver.
+- **Chosen:** the driver asks the CLI what the servers offer before it runs the task, and names every tool beyond the grant in `--disallowedTools`. The inspection starts a session with no tools and reads the list it prints; the CLI prints its session before it calls anything, so this costs a process and no tokens, and it is bounded by `timeout` so a CLI that cannot start does not sit retrying until the sandbox's wall-clock limit ends it.
+- **Why named one by one:** a server-wide pattern was tried first and is worse than useless. `--disallowedTools mcp__probe` empties the session of that server's tools, and a following `--allowedTools mcp__probe__ping` does not bring the granted one back — the session comes up with nothing. Exact names are the only form that removes a tool and leaves its sibling.
+- **Why removal and not refusal of use:** `--disallowedTools` with an exact name takes the tool out of the session's list entirely, so this is absence rather than a denial at use time. That is the same standard `--tools` meets for the built-ins, and it is what "unavailable to the model, not merely unused" asks for.
+- **Why an inspection rather than a declared inventory:** the driver cannot know a server's tools — that is the server's business, and a driver that hard-coded them would be wrong the first time a server was upgraded. Asking is the only honest way to get the list, and the answer is the CLI's rather than the model's.
+- **What happens when the inspection fails:** the task is refused and not started. Running it would mean offering the model tools nobody can enumerate, which is the fail-closed case (I5) and not a reason to proceed with a narrower claim.
+- **Why no pending entry was added in exchange:** the gap was found inside this unit and closed inside it. The ledger is unchanged: I4 drops from 2 to 1 and stays there.
+- **Reverse:** delete `#ungrantedMcpTools` and the `--disallowedTools` argument. A granted server's other tools are then in every session that loads it, and the `driver.mcp` assertion fails on the tool it expects to be absent.
+
+## P5 amendments to the contracts
+
+### A-P5-01: `Driver` gains `declaredTools()`
+
+Landed earlier on this branch and recorded as **D-P5-05**. The driver-side half of `I4.driver-tool-inventory-validated`: `validateToolGrants(policy, inventory)` has taken a mandatory inventory since P3 and nothing in the repository could produce one.
+
+### A-P5-02: `SandboxProvider.exec` gains `ExecOptions`, and the refusal layers gain `environment`
+
+`exec(h, cmd, options?: ExecOptions)`, where `ExecOptions.env` is a name-to-value map the implementation must keep out of every argument vector. Reasoned in **D-P5-07**.
+
+Not named in P5's entry, which listed `declaredTools()` alone. It is named here, in the pull request body, and in the entry itself, because a contract change nobody flagged is the kind that passes review by not being looked at. The entry's own requirement — that the credential reach the CLI as an environment variable on the exec — could not be met without it; the alternatives were a mount, which the entry forbids, or a secret in an argv.
+
+Both implementations and the test wrapper carry the parameter: `LocalDockerProvider` passes `--env NAME` and sets the value on the `docker` process, `StubSandboxProvider` sets it on the child it spawns, and `DelegatingSandbox` forwards it. `ExecOptions` is optional, so every existing call site is unchanged.
