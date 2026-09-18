@@ -716,6 +716,7 @@ that block that were the maintainer's are recorded below.
 - **Problem:** `EgressPolicy.mode` admits `allowlist`, and enforcing one needs a filtering proxy the container is forced through. Nothing at M1 provides that.
 - **Chosen:** refuse it, at the `egress` layer, naming why. Treating it as deny-all would break a run silently; treating it as allow-all would grant the whole network to a policy that asked for a subset. Either is the silent degrade I5 forbids. `deny-all` carrying `allow` entries is refused too — the policy contradicts itself, and half-applying it is a guess.
 - **Reverse:** implement the proxy, then accept the mode. Nothing else changes.
+- **Reversed by P10 (D-P10-01).** The proxy exists, the mode is accepted, and the refusal now fires only for an allowlist that names nothing or an entry that is not one host. The `deny-all` half of this decision is unchanged and still stands.
 
 ### D-P2-08: the wall clock bounds the sandbox, not the command
 
@@ -1641,3 +1642,97 @@ This is an amendment in the sense `WORKFLOW.md` gives the word: a change to
 the plan, landed on its own, before the unit that needs it starts. The
 decisions P5 took on its own branch are recorded there under `D-P5-01`
 onwards; this section is the part the plan documents depend on.
+
+## P10: Sandbox egress allowlist
+
+### D-P10-01: the allowlist is enforced by routing first and by the proxy second
+
+- **Ambiguous:** the unit entry asks for "a forced filtering proxy ... with the container on a network whose only route out is that proxy", and separately that "bypassing the proxy is not possible from inside the container: the direct route does not exist, rather than existing and being asked politely not to be used". A proxy alone cannot deliver the second. Proxy environment variables are a request to a client, and a process that ignores them is not disobeying a control.
+- **Chosen:** two mechanisms, in that order. The sandbox joins one Docker network created `--internal`, which leaves the container with no default route at all — measured, not assumed: `ip route` inside such a container lists only the on-link subnet, and any address off it answers `Network unreachable` from the kernel immediately. The proxy is the only other thing on that network, and is separately attached to a second, ordinary bridge network where its own route out lives. The sandbox is never on that second network and nothing forwards between the two: the proxy terminates the connection and opens its own.
+- **Why:** the routing table is what makes the claim true, and the proxy is what makes it useful. With only the proxy, "the allowlist is enforced" would mean "enforced for clients that read `http_proxy`", which is a configuration, not a control. With only the internal network there is no egress at all, which is deny-all. The assertion that unsets every proxy variable and tries again is aimed exactly at the seam between the two, and it passes because of the first mechanism, not the second.
+- **Reverse:** create the internal network without `--internal`. The container then has a default route and the bypass assertion fails rather than passing permissively, which is the outcome the criterion asks for. This was verified by mutation: dropping `--internal` fails `the direct route does not exist`, and making the proxy permit every host fails `the allowlisted host is reached and every other host is refused`.
+
+### D-P10-02: the proxy is Node source passed on the command line, not an image that is built
+
+- **Ambiguous:** the unit entry says the proxy is "a container the provider starts and owns" and does not say where its program comes from. Three options: build and pin an image, pull a third-party proxy image and configure it, or run source the package carries.
+- **Chosen:** a Node script the package holds as `PROXY_SOURCE`, handed to a digest-pinned `node:22-alpine` with `node --eval`. One argv element, no shell, no mount, no build step, and the container runs `--read-only` with `--cap-drop ALL`.
+- **Why:** the filter is the thing under review, and this way it is a file in the repository that a reviewer reads, diffs, and mutates in a test — rather than a config dialect interpreted by a binary nobody in this repository has read. Building an image would add a Dockerfile, a build, and a registry step to a unit that needs none of them; a third-party proxy image would put the enforcement of I4 inside software the project does not control. No mount matters on its own: the proxy container has no filesystem shared with anything, so the single-rw-mount rule is untouched (I1).
+- **Why a second image at all:** the sandbox image is alpine, which carries no runtime that could serve a proxy. The digest is pinned in `src/`, not in `test/`, because it is production configuration; `LocalDockerOptions.proxyImage` overrides it so an air-gapped host can name a mirror, not so a different filter can be substituted — the behaviour is `PROXY_SOURCE`, which whatever image is named is handed and runs.
+- **Reverse:** build an image and pin it; `PROXY_SOURCE` becomes its entrypoint and nothing else changes.
+
+### D-P10-03: `AppliedControls.network` becomes `AppliedControls.egress`, a discriminated union
+
+- **Ambiguous:** the unit entry asks that `appliedControls()` be "extended to record the allowlist and the proxy as applied evidence", and separately that a `deny-all` sandbox "still records `network: 'none'`". The existing field is typed with the literal `'none'`, which is exactly right for a provider that only did deny-all and cannot hold a network name.
+- **Chosen:** replace the field with `egress: AppliedEgress`, a discriminated union. The `deny-all` branch carries `network: 'none'` as a literal and nothing else; the `allowlist` branch carries the internal network name, the normalised host list, and the proxy. A deny-all sandbox still records `network: 'none'`, now at `controls.egress.network`, where the type is what guarantees it.
+- **Why:** widening the field to `string` would have generalised a literal that encodes an invariant, which the conventions forbid. Keeping `network` beside a new `egress` object would have put the same fact in two places, which is the shape I2's single-source rule rejects everywhere else. The union is strictly stronger than what it replaces: before, nothing at the type level tied `'none'` to the mode that earned it; now `deny-all` cannot carry a network name and `allowlist` cannot exist without the proxy that enforces it. The registry assertion had to stop comparing `network !== 'none'` because the compiler proved it dead, and reads the `--network none` in the recorded argv instead — what Docker was told, rather than what the provider says it told it.
+- **Reverse:** flatten the union back to `network: 'none'` and delete the allowlist branch; every reader in `packages/sandbox` and `packages/conformance` moves back with it. Nothing outside those two packages read the field.
+
+### D-P10-04: the hostname grammar D-P3-08 deferred lands here
+
+- **Ambiguous:** P3 validates that a policy's egress entry "names one host" by refusing wildcards, paths, prefix lengths, and whitespace, and D-P3-08 says explicitly that a hostname grammar "belongs to whichever unit can actually enforce an allowlist". Nothing said whether the sandbox re-validates what policy already checked.
+- **Chosen:** it does. `allowedHosts` accepts a hostname, an IPv4 dotted quad, or an IPv6 literal, lower-cases it, and de-duplicates; anything else is refused at the `egress` layer, naming the entry. A `SandboxSpec` may be built by a cast or parsed from a document, so the check runs where the grant is applied and not only where it was authored.
+- **Why:** the proxy matches an entry exactly. An entry it cannot match exactly is a grant it cannot honour, and applying it anyway would allow or deny a host nobody wrote — `*.example.com` read as a literal denies everything the author meant to allow, and read as a pattern allows things they did not. Refusing rather than filtering matters for the same reason: a list that came back shorter than it went in is an allowlist the caller never wrote, and the entry that vanished is the one somebody looks for later and does not find.
+- **What is deliberately not shared with P3:** the two checks are separate code in separate packages. `packages/sandbox` has no workspace dependency at all, and adding one to `core` to share a regular expression would buy less than the edge it costs. They enforce the same rule at two layers and are allowed to diverge only by becoming stricter here.
+- **Reverse:** delete `egress.ts`'s grammar and accept any non-empty string; the proxy then matches whatever it is given, literally.
+
+### D-P10-05: an empty `allow` under `mode: 'allowlist'` is refused, although P3 accepts an empty policy list
+
+- **Ambiguous:** P3's validator accepts `egress: []` on a role and reads it as granting nothing, which is right for a policy document. The unit entry requires that an empty `allow` under `mode: 'allowlist'` be refused, "not treated as deny-all and not as allow-all".
+- **Chosen:** both, at their own layers. A policy granting no host is a policy; a `SandboxSpec` asking for an allowlist and naming nothing is refused.
+- **Why:** they are different statements. `egress: []` says what a role may reach — nothing. `{ mode: 'allowlist', allow: [] }` asks the provider to stand up a route out and then names nowhere for it to go; a caller that wanted no egress asks for `deny-all`, and a caller that asked for an allowlist and named nothing has not finished writing the policy. This is the rule `validateToolGrants` already follows for an empty inventory. The proxy fails closed on the same condition independently: it exits non-zero rather than start a server with no allowlist, so a misconfigured proxy is a sandbox that never comes up rather than a route out that grants everything.
+- **Noted, not fixed:** `packages/api/src/line.ts` maps a scope's `egress` to a `SandboxSpec`, so a role granting `egress: []` produces `{ mode: 'allowlist', allow: [] }` and is now refused with this unit's message rather than the old "not enforceable" one. The outcome is unchanged — it was refused before and is refused now — so nothing regressed, but the mapping arguably ought to produce `deny-all`. That is `packages/api`, which P9 owns; it is a note here and not a commit.
+- **Reverse:** return `{ mode: 'allowlist', hosts: [] }` for an empty list and let the proxy refuse to start. The refusal moves from provision time to start time and stops naming what is wrong.
+
+### D-P10-06: the proxy logs each connection, and that is stated rather than claimed
+
+- **Ambiguous:** the unit's out-of-scope list keeps per-connection logging of blocked attempts out — "it arrives with the proxy if it is cheap, and stays a known limit if it is not. Either way it is stated, never claimed."
+- **Chosen:** it was cheap, so it arrives. The proxy writes one line per connection to its own stdout — `opened`, `tunnelled`, or `refused`, with the host — readable with `docker logs` for as long as the sandbox lives. A package test asserts both an allow line and a refusal line, and then asserts the container is gone after `destroy`.
+- **What is not claimed:** nothing collects those lines into an evidence bundle, and they are destroyed with the proxy container, which is destroyed with the sandbox. So this is readable during a run and is not evidence after one. It gets no registry entry and no capability claim; evidence collection is P6's. The blocked-attempt log therefore remains a known limit in the sense P2 recorded it, and this unit narrows it rather than closing it.
+- **Reverse:** delete `record()` and its three call sites; the proxy still refuses, silently.
+
+### D-P10-07: a teardown the provider could not finish is reported, not swallowed
+
+- **Problem:** the proxy's outbound network cannot be removed while anything is still attached to it. This was found by a test of this unit's own making — one that destroyed a sandbox while the test's origin container was still on that network — and the provider threw rather than leaving a leak unremarked.
+- **Chosen:** keep that. `#dismantle` removes the sandbox container, then the proxy, then both networks, attempting every step even after one fails, and returns the first failure to whoever called `destroy`. A network that outlives its sandbox is a leak, and the provider says so.
+- **Why not force it:** disconnecting endpoints the provider did not create, to remove a network it did, would make the provider responsible for containers that are not its own. In a real run nothing else ever joins a sandbox's outbound network; when something has, the honest answer is the error. The test ordering was the thing that was wrong, and it was fixed.
+- **Reverse:** disconnect every remaining endpoint before removing the network. Teardown then always succeeds and stops reporting the one case worth knowing about.
+
+### D-P10-08: the suite proves reachability against an origin it starts, never against the internet
+
+- **Ambiguous:** "a sandbox provisioned with `mode: 'allowlist'` and one host reaches that host" needs a host. Using a real one makes every run depend on the network CI happens to have.
+- **Chosen:** the suite starts an origin container on the proxy's own outbound network and allowlists it by name. The sandbox is never on that network, so the only path to it is through the proxy. Nothing in this unit's tests reaches the internet.
+- **Why it is stronger, not weaker:** the denied cases can then be things the proxy demonstrably *can* reach. The sharpest assertion allowlists the origin by name and then asks for it by address: the proxy reached that exact host a moment earlier, and refuses it now for the one reason under test — the address is not on the list. A denied host that was merely unreachable would pass against a provider with no allowlist at all. The counterfactual is asserted too: stopping the proxy container makes the allowed host unreachable, so the earlier success is known to have come through the proxy rather than around it.
+- **Verified once, outside the suite:** an allowlist naming a real public host was provisioned by hand and the tunnel opened — `CONNECT example.com:443` answered `200 Connection Established`, a plain `GET` through the proxy returned the real document, and a second real host was refused with 403. That is the path P5 needs and it works. It is deliberately not a test: a suite that reaches the internet fails for reasons that have nothing to do with the allowlist.
+- **What is not separately asserted:** TLS over the tunnel. `CONNECT` is byte-blind by decision, so there is nothing between the client and the origin for a test to observe; asserting that the tunnel opens is asserting the whole of what this unit does for an HTTPS request.
+- **Reverse:** allowlist a public host and require the network. The assertions read the same and become dependent on CI's egress.
+
+### D-P10-09: the assertion is `I5.sandbox-egress-allowlist-enforced`, not `sandbox.egress-allowlist-enforced`
+
+- **Ambiguous:** the unit entry's ledger line says the unit "pays `sandbox.egress-allowlist-enforced` as a new live assertion under I5". That id cannot be registered under I5. `validateEntry` requires every assertion in an entry to carry that entry's own prefix, so an id under I5 must begin `I5.`; and the `sandbox.` namespace is the capability-claim namespace, whose keys are held equal to `keyof SandboxCapabilities` by a generated compile-ok fixture. Registering `sandbox.egress-allowlist-enforced` under I5 is a registry problem, and registering it as a claim would need a new key on `SandboxCapabilities`, which is a contract change and therefore an amendment rather than unit work.
+- **Chosen:** `I5.sandbox-egress-allowlist-enforced` — the required prefix, then the entry's own words. It is a live runtime assertion in I5's list, and the ledger line is otherwise met exactly: nothing pending was added, and the baseline is untouched at 23.
+- **Why this reading and not a contract change:** an allowlist is not a capability the sandbox declares. `SandboxCapabilities` answers "what can this provider do at all" — `gpu`, `persistent`, `remote` — and every key is asserted against a provisioned container. Egress is per-sandbox policy, not per-provider capability: the same provider applies `deny-all` to one sandbox and an allowlist to the next, so a boolean on the provider could not be true or false for it. The entry's own text agrees — it says "under I5", and I5 is where fail-closed lives.
+- **Flagged rather than silently resolved:** the entry as written names an id the registry would reject, which is a defect in the entry and not in the registry. It is stated here and in the pull request body so a reviewer sees the divergence rather than discovering it.
+- **Reverse:** add an `egress` key to `SandboxCapabilities` and register the claim there. That is an F2 amendment, and it would be registering policy as capability.
+
+## P10 amendment: external adversarial review
+
+Three findings, three verified, three held, none rejected. The full triage,
+with the reproductions, is
+`docs/reviews/2026-09-18-P10-egress-allowlist-adversarial-triage.md`. Two
+choices inside the fixes were not forced by the findings and are recorded here.
+
+### D-P10-10: the received `Host` header is rewritten, not checked for a match
+
+- **Problem:** the proxy forwarded `req.headers` verbatim, so an absolute-form request to an allowlisted host could carry someone else's `Host` and be served by whatever infrastructure sits in front of that host. Reproduced: the upstream reported `HOST-SEEN=evil.example`. The connection never leaves the granted host, so this selects a different site behind a granted address rather than reaching a new one — which, for the model APIs this unit exists to reach, is the normal shape and not an exotic one.
+- **Chosen:** discard the received `Host` and rebuild it from the request target, which is what RFC 7230 §5.3.2 requires of a proxy given an absolute-form target.
+- **Why not the reviewer's other suggestion:** it offered rewriting *or* validating that the two match. Refusing a mismatch would break correct clients — a proxied request has no reason to carry a `Host` at all — to catch a case that rewriting removes outright. A control that refuses legitimate traffic to catch illegitimate traffic it could simply have corrected is the wrong trade here.
+- **What is not claimed:** `Host` is now the proxy's, but an origin configured to route on `X-Forwarded-Host` or similar could still be steered by one. That is the origin's trust configuration, and a forward proxy cannot fix it without rewriting headers it has no contract for. The HTTPS equivalent is unreachable by design, because this unit does not terminate TLS — the reviewer said so itself, and the out-of-scope list already said it.
+- **Reverse:** pass `req.headers` through again. The assertion added with this fix then fails, which is the point of adding it.
+
+### D-P10-11: a malformed authority is refused; the proxy does not catch its way out of it
+
+- **Problem:** `split()` took everything after the first colon as the port, so `CONNECT allowed:8080@elsewhere` produced a host that is on the allowlist and a port of `8080@elsewhere`. `Number` of that is `NaN`, and `net.connect` throws `ERR_SOCKET_BAD_PORT` synchronously inside an event handler. Reproduced: the proxy container exited and the sandbox lost egress entirely, with nothing refused and nothing recorded.
+- **Chosen:** validate the port where the authority is parsed. One to five digits, in range, or the authority is unreadable and the target is refused — `split` returns `null` and the request gets a 403 saying it did not name one host and one port. Both upstream-connect sites are additionally wrapped, so a future parse slip ends one request rather than the process.
+- **Why not a global `uncaughtException` handler:** it would have closed the same symptom and is the obvious cheap fix. A proxy that swallows arbitrary throws and keeps serving is warn-and-continue, which this project refuses everywhere else; it would also have left the `NaN` in place, so the next malformed authority would take a different path to the same place.
+- **What the failure actually was:** it failed closed — the sandbox could reach nothing afterwards — but silently. The provider did not notice, `exec` kept working, and the run would have failed later somewhere else for a reason nothing in the evidence explains. Silence was the defect, not unavailability.
+- **Reverse:** delete `portOf` and parse with `Number` again.

@@ -12,9 +12,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
-import type { EgressPolicy, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type { ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
+import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
+import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { refuse } from './refusal.js';
 
 /**
@@ -37,7 +39,54 @@ export interface LocalDockerOptions {
   readonly vaultPaths: readonly string[];
   /** The Docker executable. Defaults to `docker` on PATH. */
   readonly executable?: string;
+  /**
+   * The image the egress proxy runs on. Defaults to the digest this package
+   * pins. Overridable so an air-gapped host can name a mirror of the same
+   * image, not so a different filter can be substituted: the proxy's behaviour
+   * is `PROXY_SOURCE`, which this image is handed and runs.
+   */
+  readonly proxyImage?: string;
 }
+
+/**
+ * What the provider applied for egress. A discriminated union, so the mode
+ * that was asked for and the evidence that it was applied cannot drift apart:
+ * `deny-all` can only carry `network: 'none'`, and `allowlist` cannot exist
+ * without the proxy that enforces it.
+ */
+export type AppliedEgress =
+  | {
+      readonly mode: 'deny-all';
+      /**
+       * The Docker network mode. `none` is `deny-all` applied: a loopback
+       * interface and nothing else, enforced by the kernel. The literal is
+       * load-bearing — only this branch can carry it, so a sandbox that
+       * records `network: 'none'` is a sandbox that was given it.
+       */
+      readonly network: 'none';
+    }
+  | {
+      readonly mode: 'allowlist';
+      /**
+       * The per-sandbox internal network. Created `--internal`, so a container
+       * on it has no default route at all and every address off the subnet is
+       * unreachable at the kernel, whatever the process believes.
+       */
+      readonly network: string;
+      /** The hosts the proxy will open a connection to, normalised as it matches them. Every other host is refused. */
+      readonly allow: readonly string[];
+      /**
+       * The filtering proxy this sandbox's only route out passes through.
+       *
+       * `proxy.internalNetwork` is the same string as `network` above, and the
+       * suite asserts it. They are kept apart because they are two facts that
+       * coincide rather than one written twice: `network` is the mode the
+       * *sandbox* container was given, which is what `'none'` is in the other
+       * branch, and `proxy.internalNetwork` is a network the *proxy* created
+       * and will remove. Either record read alone is complete.
+       */
+      readonly proxy: AppliedProxy;
+    };
 
 /**
  * What the provider actually applied to one container. Recorded rather than
@@ -47,8 +96,8 @@ export interface LocalDockerOptions {
 export interface AppliedControls {
   readonly containerId: string;
   readonly mounts: readonly ResolvedMount[];
-  /** The Docker network mode. `none` is `deny-all` applied; nothing else is reachable from this provider. */
-  readonly network: 'none';
+  /** What was applied for egress, and the evidence for it: the network mode, and for an allowlist the hosts and the proxy that enforces them. */
+  readonly egress: AppliedEgress;
   readonly limits: SandboxSpec['limits'];
   /** `performance.now()` reading past which the sandbox is over its wall-clock budget. */
   readonly deadline: number;
@@ -95,30 +144,30 @@ function checkLimits(limits: SandboxSpec['limits']): void {
 }
 
 /**
- * `deny-all` is `--network none`, which the kernel enforces: the container
- * gets a loopback interface and nothing else. `allowlist` has no
- * implementation here — enforcing one needs a filtering proxy the container
- * is forced through, which is not in this unit — so it is refused. Treating
- * an allowlist as deny-all would break the run silently, and treating it as
- * allow-all would grant the network to a policy that asked for a subset. I5:
- * a control that cannot be enforced is a refusal, not a default.
+ * The proxy environment variables the sandbox is given under an allowlist.
+ *
+ * They are a convenience for the process inside, not the control: the control
+ * is that the internal network carries no default route, so a process that
+ * ignores or unsets every one of these reaches nothing at all. Loopback is
+ * exempted so a container talking to itself does not take a detour through a
+ * proxy that would refuse it.
  */
-function checkEgress(egress: EgressPolicy): void {
-  if (egress.mode === 'deny-all') {
-    if (egress.allow.length > 0) {
-      refuse('egress', `egress.mode is deny-all but ${String(egress.allow.length)} allow entries are set; the policy contradicts itself and is refused rather than half-applied`);
-    }
-    return;
-  }
-  refuse(
-    'egress',
-    'egress.mode "allowlist" is not enforceable by this provider: an allowlist needs a filtering proxy the container is ' +
-      'forced through, and none exists at M1. It is refused rather than silently applied as deny-all or as allow-all.',
-  );
+function proxyEnvironment(): string[] {
+  const url = `http://${PROXY_ALIAS}:${String(PROXY_PORT)}`;
+  const loopback = 'localhost,127.0.0.1,::1';
+  return [
+    '--env', `HTTP_PROXY=${url}`,
+    '--env', `http_proxy=${url}`,
+    '--env', `HTTPS_PROXY=${url}`,
+    '--env', `https_proxy=${url}`,
+    '--env', `NO_PROXY=${loopback}`,
+    '--env', `no_proxy=${loopback}`,
+  ];
 }
 
-function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string): string[] {
-  const args = ['run', '--detach', '--init', '--name', name, '--network', 'none'];
+function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
+  const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network];
+  if (egress.mode === 'allowlist') args.push(...proxyEnvironment());
   for (const mount of mounts) args.push('--mount', mountArgument(mount));
   args.push(
     '--cpus', String(spec.limits.cpus),
@@ -137,12 +186,19 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #executable: string;
   readonly #vaultPaths: readonly string[];
   readonly #daemon: DaemonFacts;
+  readonly #proxyImage: string;
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
 
-  private constructor(executable: string, vaultPaths: readonly string[], daemon: DaemonFacts) {
+  private constructor(executable: string, vaultPaths: readonly string[], daemon: DaemonFacts, proxyImage: string) {
     this.#executable = executable;
     this.#vaultPaths = vaultPaths;
     this.#daemon = daemon;
+    this.#proxyImage = proxyImage;
+  }
+
+  /** The options the proxy's own lifecycle commands run under. */
+  get #proxyOptions(): ProxyOptions {
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
   }
 
   /**
@@ -156,7 +212,7 @@ export class LocalDockerProvider implements SandboxProvider {
     const executable = options.executable ?? 'docker';
     const daemon = await probeDaemon(executable);
     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
-    return new LocalDockerProvider(executable, vaultPaths, daemon);
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE);
   }
 
   /** What the probe established about the daemon behind this provider. */
@@ -171,7 +227,7 @@ export class LocalDockerProvider implements SandboxProvider {
 
   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
-    checkEgress(spec.egress);
+    const plan = checkEgress(spec.egress);
     checkLimits(spec.limits);
 
     // Re-validated rather than trusted: the table may have been built by a cast, parsed from a
@@ -180,8 +236,47 @@ export class LocalDockerProvider implements SandboxProvider {
     const mounts = await resolveMounts(table, this.#vaultPaths);
 
     // I10: no Greek name in code, container names included. This one reaches `docker ps`.
-    const name = `sandbox-${randomUUID()}`;
-    const args = runArgsFor(spec, mounts, name);
+    const id = randomUUID();
+    const name = `sandbox-${id}`;
+    const egress = await this.#applyEgress(id, plan);
+    try {
+      return await this.#start(spec, mounts, name, egress);
+    } catch (error) {
+      // Whatever refused, the proxy and its networks were created for a sandbox that does not
+      // exist. They go with it: a leaked route out is worse than the failure that caused it.
+      if (egress.mode === 'allowlist') await stopProxy(egress.proxy, this.#proxyOptions);
+      throw error;
+    }
+  }
+
+  /**
+   * Starts the proxy an allowlist needs, or nothing at all.
+   *
+   * `deny-all` is untouched by this unit: no network is created, no proxy is
+   * started, and the container is given `--network none` exactly as before.
+   * Starting a proxy beside a sandbox entitled to no egress would put a route
+   * out next to the one policy that asked for none.
+   */
+  async #applyEgress(id: string, plan: EgressPlan): Promise<AppliedEgress> {
+    if (plan.mode === 'deny-all') return { mode: 'deny-all', network: 'none' };
+    let proxy: AppliedProxy;
+    try {
+      proxy = await startProxy(id, plan.hosts, this.#proxyOptions);
+    } catch (error) {
+      // I5: an allowlist this provider could not stand up is a refusal. There is no fallback to
+      // deny-all, which breaks the run silently, and none to a routed network, which hands the
+      // whole of it to a policy that asked for a subset.
+      refuse(
+        'egress',
+        'the egress allowlist could not be enforced, so no sandbox was provisioned: ' +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+    return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy };
+  }
+
+  async #start(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): Promise<SandboxHandle> {
+    const args = runArgsFor(spec, mounts, name, egress);
     const started = await dockerCli(this.#executable, args, { timeoutMs: LIFECYCLE_TIMEOUT_MS });
     if (started.exitCode !== 0) {
       refuse('image', `docker run exited ${String(started.exitCode)} for image ${spec.image}: ${started.stderr.trim() || started.stdout.trim()}`);
@@ -206,7 +301,7 @@ export class LocalDockerProvider implements SandboxProvider {
       controls: {
         containerId,
         mounts,
-        network: 'none',
+        egress,
         limits: { ...spec.limits },
         deadline: performance.now() + spec.limits.wallClockMs,
         runArgs: Object.freeze([...args]),
@@ -299,8 +394,26 @@ export class LocalDockerProvider implements SandboxProvider {
       clearTimeout(sandbox.timer);
       sandbox.timer = undefined;
     }
-    sandbox.ending = this.#remove(sandbox.controls.containerId);
+    sandbox.ending = this.#dismantle(sandbox.controls);
     return sandbox.ending;
+  }
+
+  /**
+   * Removes everything one sandbox was given: the container, and under an
+   * allowlist the proxy container and both its networks.
+   *
+   * The proxy goes with the sandbox it serves and with nothing else. A proxy
+   * that outlived its sandbox would be a route out with no workload behind it
+   * and nobody watching it, and the assertion that counts leaked containers is
+   * there to make that a failing test rather than a thing somebody notices in
+   * `docker ps` a week later.
+   */
+  async #dismantle(controls: AppliedControls): Promise<Error | undefined> {
+    // The container first: a network still holding an endpoint cannot be removed.
+    const container = await this.#remove(controls.containerId);
+    if (controls.egress.mode === 'deny-all') return container;
+    const proxy = await stopProxy(controls.egress.proxy, this.#proxyOptions);
+    return container ?? proxy;
   }
 
   /**
