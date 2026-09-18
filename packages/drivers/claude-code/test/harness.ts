@@ -223,43 +223,50 @@ const PREFIX_RULES: readonly string[] = [
  * has something to exclude. The server names itself from its last argument, so
  * two of them can run side by side and be told apart.
  */
-export const MCP_SERVER_SOURCE = `'use strict';
-const name = process.argv[process.argv.length - 1] || 'probe';
-let buffer = '';
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  let index = buffer.indexOf('\n');
-  while (index !== -1) {
-    const line = buffer.slice(0, index).trim();
-    buffer = buffer.slice(index + 1);
-    if (line !== '') handle(line);
-    index = buffer.indexOf('\n');
-  }
-});
-function send(payload) { process.stdout.write(JSON.stringify(payload) + '\n'); }
-function handle(line) {
-  let message;
-  try { message = JSON.parse(line); } catch { return; }
-  if (message.id === undefined) return;
-  if (message.method === 'initialize') {
-    send({ jsonrpc: '2.0', id: message.id, result: {
-      protocolVersion: '2024-11-05',
-      capabilities: { tools: {} },
-      serverInfo: { name: name, version: '0.0.0' },
-    } });
-    return;
-  }
-  if (message.method === 'tools/list') {
-    send({ jsonrpc: '2.0', id: message.id, result: { tools: [
-      { name: 'ping', description: 'Returns the single word pong.', inputSchema: { type: 'object', properties: {} } },
-      { name: 'ungranted', description: 'Exists so a grant that names only ping can be seen to exclude it.', inputSchema: { type: 'object', properties: {} } },
-    ] } });
-    return;
-  }
-  if (message.method === 'tools/call') {
-    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'pong' }] } });
-    return;
-  }
-  send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'no such method' } });
-}
-`;
+export const MCP_SERVER_SOURCE = [
+  "'use strict';",
+  // The newline this protocol is framed by, built rather than written. A
+  // literal escape here would be interpreted when this array is joined, not
+  // when node runs the result, and the emitted source would carry a real line
+  // break inside a string literal -- a syntax error, and one the CLI reports
+  // only as an MCP server whose status is 'failed'.
+  'const NL = String.fromCharCode(10);',
+  "const name = process.argv[process.argv.length - 1] || 'probe';",
+  "let buffer = '';",
+  "process.stdin.on('data', function (chunk) {",
+  '  buffer += chunk;',
+  '  let index = buffer.indexOf(NL);',
+  '  while (index !== -1) {',
+  '    const line = buffer.slice(0, index).trim();',
+  '    buffer = buffer.slice(index + 1);',
+  "    if (line !== '') handle(line);",
+  '    index = buffer.indexOf(NL);',
+  '  }',
+  '});',
+  'function send(payload) { process.stdout.write(JSON.stringify(payload) + NL); }',
+  'function handle(line) {',
+  '  let message;',
+  '  try { message = JSON.parse(line); } catch (error) { return; }',
+  '  if (message.id === undefined) return;',
+  "  if (message.method === 'initialize') {",
+  "    send({ jsonrpc: '2.0', id: message.id, result: {",
+  "      protocolVersion: '2024-11-05',",
+  '      capabilities: { tools: {} },',
+  "      serverInfo: { name: name, version: '0.0.0' },",
+  '    } });',
+  '    return;',
+  '  }',
+  "  if (message.method === 'tools/list') {",
+  "    send({ jsonrpc: '2.0', id: message.id, result: { tools: [",
+  "      { name: 'ping', description: 'Returns the single word pong.', inputSchema: { type: 'object', properties: {} } },",
+  "      { name: 'ungranted', description: 'Exists so a grant naming only ping can be seen to exclude it.', inputSchema: { type: 'object', properties: {} } },",
+  '    ] } });',
+  '    return;',
+  '  }',
+  "  if (message.method === 'tools/call') {",
+  "    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: 'pong' }] } });",
+  '    return;',
+  '  }',
+  "  send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'no such method' } });",
+  '}',
+].join(String.fromCharCode(10));
