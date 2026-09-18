@@ -112,6 +112,10 @@ export class DelegatingDriver implements Driver {
     return this.inner.capabilities();
   }
 
+  declaredTools(): readonly string[] {
+    return this.inner.declaredTools();
+  }
+
   resolveModel(tier: ModelTier): ModelIdentity {
     return this.inner.resolveModel(tier);
   }

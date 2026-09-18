@@ -108,6 +108,20 @@ export interface Driver {
   readonly contractVersion: string;
   provenanceId(): string;                       // stamped onto every evidence artifact
   capabilities(): DriverCapabilities;
+  /**
+   * Every tool this driver can offer a task, named as policy grants it.
+   *
+   * The inventory half of `validateToolGrants` (I4, D-P3-04): the engine has
+   * refused a grant outside the inventory since P3, and until a driver could
+   * name its tools nothing in the repository could produce one, so a policy
+   * could grant a tool no driver exposes and nothing noticed. Feature flags
+   * are not that list — `DriverCapabilities` says whether MCP works, not which
+   * tools exist.
+   *
+   * A driver that offers nothing returns the empty list, and every grant is
+   * then refused. Empty never means allow-all.
+   */
+  declaredTools(): readonly string[];
   resolveModel(tier: ModelTier): ModelIdentity;
   runTask(req: TaskRequest): Promise<TaskResult>;
   spawnSubagent?(role: RoleId, req: TaskRequest): Promise<TaskResult>;

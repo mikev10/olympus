@@ -1767,3 +1767,20 @@ choices inside the fixes were not forced by the findings and are recorded here.
 - **Chosen:** read the globs from `pnpm-workspace.yaml` and expand each. Only a trailing `/*` is supported; any other pattern throws rather than matching nothing.
 - **Why:** a hard-coded level would have stopped seeing a package pnpm does see, and every scan built on the list — the fixture-path map, the I9 source inventory, the inline-suppression scan — would have skipped it and reported clean. A silently smaller inventory is the failure mode worth spending a parser on. Throwing on an unsupported pattern is the same rule one level up: an empty result must never be mistaken for an empty workspace (I5).
 - **Reverse:** restore the single-level scan; the driver package then needs to move up a level.
+
+### D-P5-05: `Driver` gains `declaredTools()`, landed early on the unit branch
+
+- **Ambiguous:** `I4.driver-tool-inventory-validated` says P5 owes "the driver-side half — a Driver that declares its tools". Where that declaration lives was not settled: a method on the contract, a field on `DriverCapabilities`, or an export from the driver package alone.
+- **Chosen:** a method on `Driver`. `StubDriver` returns the empty list, and `DelegatingDriver` and the line's test double forward it.
+- **Why:** `validateToolGrants(policy, inventory)` is generic over drivers, so the inventory has to be obtainable from a `Driver` and not from one package that happens to export it — otherwise the Codex driver (M2) reopens the gap instead of satisfying it. `DriverCapabilities` was rejected because it holds feature flags: "MCP works" is a different statement from "these are the tools", and mixing them makes the keys-registered assertion nonsense.
+- **Why empty for the stub:** the stub runs no model and offers no tool. An empty inventory refuses every grant, which is default deny (I4). A stub that claimed an inventory would let a grant pass validation against a driver that cannot honour it.
+- **Reverse:** delete the method and the three implementations; `validateToolGrants` then has no caller that can produce its argument, as before.
+
+### D-P5-06: P5 stops at the scaffold; the egress allowlist becomes P10
+
+- **Problem:** the Claude Code CLI has to run inside the sandbox — a driver that runs the model on the host is outside the mount table, which is the whole of `I1.driver-executes-inside-the-sandbox`. `LocalDockerProvider` gives every container `--network none` and refuses `mode: 'allowlist'` by name (D-P2-07, "enforcing one needs a filtering proxy the container is forced through... Reverse: implement the proxy, then accept the mode"). No unit owned that reversal. So a container cannot reach the model API, and five of P5's seven capability claims — `subagents`, `hooks`, `mcp`, `parallelism`, `stablePrefixCaching` — cannot be proven.
+- **Chosen:** stop P5, add **P10 — Sandbox egress allowlist** to `DECOMPOSITION.md` and to F1's dependency graph, make P5 depend on it, and resume P5 on this branch once P10 has shipped and been reviewed.
+- **Why not fold it into P5:** it is a change to the sandbox's network posture, in another unit's package, and bundling it with a new driver makes one pull request where a reviewer has to hold both in mind at once — the shape the `gate-change` label exists to stop passing casually. It also needs its own conformance: that a non-allowlisted host is unreachable is an assertion about the sandbox, not about a driver.
+- **Why not ship P5 with five claims pending:** that is what the ledger was fixed in advance to prevent. Five capability claims left as declarations with nothing behind them is the state I8 exists to end, and handing them forward a second time with a new reason is still handing them forward.
+- **What stays on the branch:** the reconciliation mechanism (D-P5-02 through D-P5-04) and `declaredTools()` (D-P5-05). Both are independent of egress and correct as they stand.
+- **Reverse:** delete P10 from the three documents and the `UnitId` union, and decide again between the two rejected options.
