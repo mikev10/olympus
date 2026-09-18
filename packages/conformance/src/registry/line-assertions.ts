@@ -40,7 +40,7 @@ function stateOf(outcome: RunOutcome, context: string): RunState {
 }
 
 /** Wraps a Vault so a test can act between two of its calls; every method forwards. */
-function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void>; afterCommit?: (count: number) => void }): Vault {
+function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void>; beforeCommit?: (s: RunState) => void; afterCommit?: (count: number) => void }): Vault {
   let commits = 0;
   return {
     read: (ref) => inner.read(ref),
@@ -55,6 +55,7 @@ function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void
     recordTaskResult: (runId, r) => inner.recordTaskResult(runId, r),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
+      hooks.beforeCommit?.(s);
       const stored = await inner.commitRunState(s, ifVersion);
       commits += 1;
       hooks.afterCommit?.(commits);
@@ -265,7 +266,7 @@ export const STATION_MISSING_CAPABILITY_REFUSED: LocalAssertion = runtime({
 export const TASK_ATTEMPTS_ARE_BOUNDED: LocalAssertion = runtime({
   id: 'I5.task-attempts-are-bounded',
   title:
-    'a task whose gate keeps failing parks with iterations-exhausted after the build contract\'s maxIterations, and one whose driver keeps failing parks with retries-exhausted after retry.max; both counts are committed run state, and a resume with a working driver refuses the parked run rather than resetting them',
+    'a task whose gate keeps failing parks with iterations-exhausted after the build contract\'s maxIterations, and one whose driver keeps failing parks with retries-exhausted after retry.max; both counts are committed run state, and a resume with a working driver refuses the parked run rather than resetting them; a run killed inside an attempt and resumed invokes the driver again, spends a start for it, and parks with starts-exhausted rather than replaying one attempt without bound',
   run: async () => {
     const { STATION_CONTRACTS } = await import('@olympus-ai/core');
     const { maxIterations, retry } = STATION_CONTRACTS.build;
@@ -296,6 +297,46 @@ export const TASK_ATTEMPTS_ARE_BOUNDED: LocalAssertion = runtime({
       const resumed = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components() }), 'I5 resume');
       if (resumed.transition.reason !== 'parked') throw new Error(`I5: a resume with a working driver unparked the task ('${resumed.transition.reason}')`);
       if (JSON.stringify((await rig.state()).attempts) !== JSON.stringify(before.attempts)) throw new Error('I5: a resume changed the spent attempt counts');
+    });
+
+    // The window neither half above can see: a kill *inside* an attempt, after
+    // the task is committed `running` and before its result is recorded. The
+    // resume invokes the driver again; that invocation is spent, and enough of
+    // them park the task rather than replaying one attempt forever (A-P4-06).
+    await withLine('p4-i5-replay-', async (rig) => {
+      const { startRun, resumeRun } = await api();
+      const driver = await stubDriver();
+      const bound = maxIterations * (retry.max + 1);
+      const invocations = (): number => driver.requests.filter((r) => r.taskId === HELLO_TASK).length;
+
+      for (let spent = 0; spent < bound; spent += 1) {
+        const base = await rig.components({ driver, reviewer: driver });
+        const killed = around(base.vault, {
+          beforeCommit: (s) => {
+            if (s.tasks[HELLO_TASK] === 'verifying') throw new Error('killed in flight');
+          },
+        });
+        const components = { ...base, vault: killed };
+        let stopped = false;
+        try {
+          await (spent === 0 ? startRun(await rig.request(components)) : resumeRun({ runId: rig.runId, components }));
+        } catch (error) {
+          stopped = (error as Error).message === 'killed in flight';
+          if (!stopped) throw error;
+        }
+        if (!stopped) throw new Error(`I5: replay ${String(spent)} was not killed inside the attempt`);
+        const attempts = (await rig.state()).attempts[HELLO_TASK];
+        if (attempts?.starts !== spent + 1) throw new Error(`I5: after replay ${String(spent)} run state records ${JSON.stringify(attempts)}`);
+        if (attempts.iterations !== 1) throw new Error(`I5: a replay spent an iteration; run state records ${JSON.stringify(attempts)}`);
+        if (invocations() !== spent + 1) throw new Error(`I5: replay ${String(spent)} invoked the driver ${String(invocations())} times in total`);
+      }
+
+      const parked = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components({ driver, reviewer: driver }) }), 'I5 replay bound');
+      const t = parked.transition;
+      if (t.reason !== 'parked' || t.cause !== 'starts-exhausted' || t.limit !== bound) {
+        throw new Error(`I5: replaying past the invocation bound ended as ${JSON.stringify(t)}`);
+      }
+      if (invocations() !== bound) throw new Error(`I5: the parking resume invoked the driver again (${String(invocations())} total)`);
     });
   },
 });

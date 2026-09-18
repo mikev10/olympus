@@ -30,6 +30,7 @@ import {
   grantedContext,
   locksHeldLeaving,
   M1_STATIONS,
+  maxStarts,
   nextStep,
   parkRefusal,
   seatReviewer,
@@ -183,7 +184,7 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       const attempts: Record<TaskId, TaskAttempts> = {};
       for (const task of ctx.graph.tasks) {
         tasks[task.id] = 'pending';
-        attempts[task.id] = { iterations: 0, retries: 0 };
+        attempts[task.id] = { iterations: 0, retries: 0, starts: 0 };
       }
       await commit(ctx, { phase: 'exiting', tasks, attempts });
       return undefined;
@@ -275,8 +276,10 @@ async function recordTamper(
   return { ok: false, reason: 'lock-tamper', tampered, message: `a locked artifact changed at ${station}: ${paths}` };
 }
 
+const EMPTY_ATTEMPTS: TaskAttempts = { iterations: 0, retries: 0, starts: 0 };
+
 function attemptsOf(state: RunState, task: Task): TaskAttempts {
-  return Object.hasOwn(state.attempts, task.id) ? (state.attempts[task.id] ?? { iterations: 0, retries: 0 }) : { iterations: 0, retries: 0 };
+  return Object.hasOwn(state.attempts, task.id) ? (state.attempts[task.id] ?? EMPTY_ATTEMPTS) : EMPTY_ATTEMPTS;
 }
 
 function statusOf(state: RunState, task: Task): TaskStatus {
@@ -284,17 +287,29 @@ function statusOf(state: RunState, task: Task): TaskStatus {
 }
 
 /**
- * Starts an attempt at a task: a new iteration, counted and committed before
- * the driver is called, unless the task was already running when the run
- * stopped, in which case the attempt in flight is run again, already counted.
+ * Starts an attempt at a task, counted and committed before the driver is
+ * called. A task already `running` was in flight when the run stopped: the
+ * attempt is run again, so it costs no iteration — but it is another
+ * invocation, and `starts` counts it. Past the station's invocation bound the
+ * task parks rather than being replayed into the same attempt forever
+ * (A-P4-06).
  */
-async function startAttempt(ctx: LineContext, task: Task): Promise<void> {
-  if (statusOf(ctx.state, task) === 'running') return;
+async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+  const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
+  const replay = statusOf(ctx.state, task) === 'running';
+  const attempt: TaskAttempts = replay
+    ? { ...spent, starts: spent.starts + 1 }
+    : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1 };
+  if (attempt.starts > maxStarts(contract)) {
+    await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'parked' }, attempts: { ...ctx.state.attempts, [task.id]: spent } });
+    return parkRefusal(ctx.state, task);
+  }
   await commit(ctx, {
     tasks: { ...ctx.state.tasks, [task.id]: 'running' },
-    attempts: { ...ctx.state.attempts, [task.id]: { iterations: spent.iterations + 1, retries: 0 } },
+    attempts: { ...ctx.state.attempts, [task.id]: attempt },
   });
+  return undefined;
 }
 
 /**
@@ -304,7 +319,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<void> {
 async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
-  const attempts = { ...ctx.state.attempts, [task.id]: { iterations: spent.iterations, retries: spent.retries + 1 } };
+  const attempts = { ...ctx.state.attempts, [task.id]: { ...spent, retries: spent.retries + 1 } };
   if (spent.retries + 1 > contract.retry.max) {
     await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'parked' }, attempts });
     return parkRefusal(ctx.state, task);
@@ -437,7 +452,8 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   // Read before the iteration is spent: context that changed under the check costs no budget.
   if (drifted.length > 0) return recordTamper(ctx, 'build', task, drifted, { phase: 'context' }, null);
 
-  await startAttempt(ctx, task);
+  const started = await startAttempt(ctx, task);
+  if (started !== undefined) return started;
   const offered: Partial<Record<ContextGrant, string>> = {
     'locked-spec': spec.text,
     'acceptance-tests': tests.text,
@@ -564,7 +580,8 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const drifted = [...spec.tampered, ...tests.tampered];
   if (drifted.length > 0) return recordTamper(ctx, 'review', task, drifted, { phase: 'context' }, null);
 
-  await startAttempt(ctx, task);
+  const started = await startAttempt(ctx, task);
+  if (started !== undefined) return started;
   // Everything the line has is offered, the author's narrative and the plan
   // included; grantedContext is what keeps a seat to its contract.
   const offered: Partial<Record<ContextGrant, string>> = {

@@ -202,13 +202,23 @@ export function refusalOf(outcome: RunOutcome, context: string): Extract<RunOutc
   return outcome;
 }
 
-/** The part of a run state two runs of the same work must agree on: everything but versions, timestamps, and content hashes that carry them. */
+/**
+ * The part of a run state two runs of the same work must agree on: everything
+ * but versions, timestamps, and content hashes that carry them.
+ *
+ * `attempts.starts` is deliberately not here. It counts driver invocations, and
+ * an interrupted run makes more of them than an uninterrupted one by design — a
+ * replayed attempt is spent, not free (A-P4-06). `startsAtLeast` carries the
+ * part that must still hold: a resume never invokes the driver fewer times than
+ * the work required, so a resume cannot buy itself a cheaper run.
+ */
 export function comparable(state: RunState): unknown {
   return {
     station: state.station,
     phase: state.phase,
     tasks: state.tasks,
-    attempts: state.attempts,
+    attempts: Object.fromEntries(Object.entries(state.attempts).map(([id, a]) => [id, { iterations: a.iterations, retries: a.retries }])),
+    startsAtLeast: Object.fromEntries(Object.entries(state.attempts).map(([id, a]) => [id, a.starts >= a.iterations])),
     results: Object.keys(state.results).sort(),
     evidence: state.evidenceRefs.length,
     violations: state.violations.length,

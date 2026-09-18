@@ -257,23 +257,33 @@ function depsPassed(state: RunState, task: Task): boolean {
   return task.dependsOn.every((dep) => Object.hasOwn(state.tasks, dep) && state.tasks[dep] === 'passed');
 }
 
+/**
+ * The most times a station may invoke a driver for one task: every iteration
+ * spending every retry. An uninterrupted run cannot exceed it, so a run that
+ * does is replaying an attempt a stop left in flight rather than progressing,
+ * and the task parks instead of spending without bound (A-P4-06).
+ */
+export function maxStarts(contract: StationContract): number {
+  return contract.maxIterations * (contract.retry.max + 1);
+}
+
 /** Why a parked task was parked, read back from its attempt counts against the contract of the station it parked at. */
 export function parkRefusal(state: RunState, task: Task, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
   const attempts = Object.hasOwn(state.attempts, task.id) ? state.attempts[task.id] : undefined;
-  const retryLimit = contracts[state.station].retry.max;
-  const byRetries = attempts !== undefined && attempts.retries > retryLimit;
-  const cause: ParkCause = byRetries ? 'retries-exhausted' : 'iterations-exhausted';
-  const limit = byRetries ? retryLimit : contracts[task.station].maxIterations;
-  return {
-    ok: false,
-    reason: 'parked',
-    task: task.id,
-    cause,
-    limit,
-    message: byRetries
-      ? `task ${task.id} parked at ${state.station}: its driver or sandbox failed more than ${String(limit)} retries`
-      : `task ${task.id} parked: its gate failed on all ${String(limit)} iterations`,
-  };
+  const at = contracts[state.station];
+  const startLimit = maxStarts(at);
+  const retryLimit = at.retry.max;
+  const byStarts = attempts !== undefined && attempts.starts >= startLimit && attempts.iterations < contracts[task.station].maxIterations;
+  const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
+  const cause: ParkCause = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
+  const limit = byStarts ? startLimit : byRetries ? retryLimit : contracts[task.station].maxIterations;
+  const message =
+    byStarts
+      ? `task ${task.id} parked at ${state.station}: its driver was invoked ${String(limit)} times, the most an uninterrupted run could, without the task finishing`
+      : byRetries
+        ? `task ${task.id} parked at ${state.station}: its driver or sandbox failed more than ${String(limit)} retries`
+        : `task ${task.id} parked: its gate failed on all ${String(limit)} iterations`;
+  return { ok: false, reason: 'parked', task: task.id, cause, limit, message };
 }
 
 /**

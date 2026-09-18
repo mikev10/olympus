@@ -1446,6 +1446,51 @@ maintainer settled that and three scope questions before work began.
   execution window too, and it needs Vault and sandbox operations that do not
   exist. The read-and-hash closes the window this unit opened.
 
+### A-P4-06: an attempt counts the work, a start counts the invocation
+
+- **Surfaced by P4's external review, finding 4**, and left open in the triage
+  because closing it needed a contract change rather than a review fix. The
+  triage recommended counting every invocation as an iteration; that is not what
+  landed, and the reason is worth keeping.
+- **What was wrong:** `startAttempt` returned early for a task already
+  `running`, so a run killed between the commit that marks a task running and
+  the commit that records its result invoked the driver again for free.
+  Reproduced: three kills in that window, three driver calls, one recorded
+  iteration, and a budget of three untouched. Neither existing assertion could
+  see it — `I5.task-attempts-are-bounded` tested uninterrupted failures and the
+  resume of an already-parked run, and the resume assertion placed its kills
+  only after commits.
+- **Why it is worth fixing, which is not what the finding said.** Framed as an
+  attack it is weak: timing kills into that window repeatedly needs host-level
+  control, and anything with host-level control has better levers. Framed as
+  spend it is strong: an OOM on a large context, or a restart loop during a
+  deploy, lands in that window by itself, with no attacker, and bills for every
+  replay while recording none of them.
+- **Chosen:** `TaskAttempts` gains `starts`, incremented before *every* driver
+  invocation including a replay, and bounded by `maxStarts(contract)` —
+  `maxIterations * (retry.max + 1)`, the most an uninterrupted run of that
+  station could invoke a driver. Past it the task parks with a new `ParkCause`
+  arm, `starts-exhausted`. `iterations` and `retries` keep their meaning
+  exactly: they measure work, and a replay costs neither.
+- **Why two counters rather than one.** Counting a replay as an iteration is a
+  line of code, and it makes a crash cost a unit of *work*: `build.maxIterations`
+  is 3, so three unlucky restarts would park a task that was going to pass,
+  turning a transient infrastructure failure into a parked run needing an
+  operator. Separating them keeps the crash budget loose and the work budget
+  tight. It is also the more honest record: an auditor reading run state can see
+  that a task took three iterations and five invocations, and the gap is the
+  fact — not something to collapse into one number.
+- **What the accept criterion now says.** It named "attempt counts" and meant
+  all of them, which made "identical after a resume" and "bounded invocations"
+  contradictory — one says a kill costs nothing, the other says it must cost
+  something. It now names which counts must match (iterations and retries) and
+  what must hold of the other (`starts` never below the work required). The
+  purpose it was written for — a resume cannot reset a bound — is unchanged and
+  strictly better served. `comparable()` splits the same way, and the assertion
+  was shown to fail with the replay count removed.
+- **Reverse:** count a replay as an iteration, and drop `starts`. Simpler by one
+  field, and it prices a power cut at a third of a task's budget.
+
 ### D-P4-11: the external review's ten findings, and what each one earned
 
 - **Six held and were reproduced as tests** before anything was changed:
@@ -1461,7 +1506,9 @@ maintainer settled that and three scope questions before work began.
   half of 5 that P4 cannot close — the plan is a file in the tree the reviewer
   is mounted — is now `I6.review-seat-reads-only-its-grants`, owned by P6, and
   the pending baseline for I6 rises from 0 to 1 to carry it.
-- **Open, and the maintainer's:** finding 4. See the Known limits entry below.
+- **Open at triage, since resolved:** finding 4. It needed a contract amendment
+  rather than a review fix, so it was left for the maintainer, who took it.
+  Landed as A-P4-06 above, after P4 merged.
 - **Finding 1 is about the prompt**, and it is the most useful thing in the
   reply. The threat model said the motivated party controls the arguments to the
   exported entry points, and `ComponentGraph` and `Vault` *are* arguments, so it
@@ -1473,20 +1520,6 @@ maintainer settled that and three scope questions before work began.
 
 ### Known limits, stated now
 
-- **An attempt is bounded per iteration, not per invocation** (the external
-  review's finding 4, reproduced). `startAttempt` does not count an attempt that
-  was already `running` when the run stopped, so a process killed in the window
-  between the `running` commit and the commit that records the result runs the
-  driver again for free. Three kills in that window produced three driver calls
-  against one recorded iteration. Counting every physical invocation would close
-  it and would break the accept criterion that a run killed after any committed
-  state resumes to the *same* attempt counts as an uninterrupted one — the two
-  properties cannot both hold, because one says a kill costs nothing and the
-  other says it must cost something. That is a contract disagreement, not a
-  review fix, so it is not resolved here. **The recommendation to the maintainer
-  is to amend:** a bounded spend is what I5 is for, the criterion's stated
-  purpose — that a resume cannot reset a bound — survives a stricter count, and
-  an unbounded spend under a kill loop is the worse failure.
 - **A crash between a Vault write and the run state that records it.** Between a station's `lock` and its commit, a resume re-locks and the Vault refuses the already-locked path. Between `recordAdmission` and the first run state, no resume can find the run. Both fail closed, loudly, and neither is silent; both need an operator. The first would be closed by a Vault read of the lock manifest, the second by a lookup of an admission without state. Neither exists, and neither is added here.
 - **Review verdicts are recorded, not interpreted** (D-P4-07).
 - **Protected-path escalation has no input** until tamper analysis exists (P7). The machine consumes `protectedPathsTouched`, and the line passes an empty list; `SKELETON_LINE` says so.

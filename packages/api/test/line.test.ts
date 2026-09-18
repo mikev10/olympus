@@ -99,6 +99,21 @@ class FailsFirstCheck extends DelegatingSandbox {
   }
 }
 
+/** A kill: throws before the commit lands, so every Vault write before it is durable and the commit is not. */
+class KillsBeforeCommit extends DelegatingVault {
+  readonly when: (s: RunState) => boolean;
+
+  constructor(inner: Vault, when: (s: RunState) => boolean) {
+    super(inner);
+    this.when = when;
+  }
+
+  override commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
+    if (this.when(s)) throw new Error('killed');
+    return this.inner.commitRunState(s, ifVersion);
+  }
+}
+
 class ThrowingDriver extends DelegatingDriver {
   calls = 0;
 
@@ -122,7 +137,7 @@ describe('hello at L1', () => {
       station: 'integrate',
       phase: 'exiting',
       tasks: { [hello]: 'passed', [helloReview]: 'passed' },
-      attempts: { [hello]: { iterations: 1, retries: 0 }, [helloReview]: { iterations: 1, retries: 0 } },
+      attempts: { [hello]: { iterations: 1, retries: 0, starts: 1 }, [helloReview]: { iterations: 1, retries: 0, starts: 1 } },
       violations: [],
       approvals: [],
     });
@@ -193,7 +208,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const state = refusedState(outcome);
     expect(driver.requests).toHaveLength(3);
     expect(state.tasks[hello]).toBe('parked');
-    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0 });
+    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3 });
     expect(state.evidenceRefs).toHaveLength(3);
     for (const ref of state.evidenceRefs) {
       const bundle = await read<EvidenceBundle>(components.vault, ref);
@@ -231,7 +246,7 @@ describe('retries are bounded (I5)', () => {
     expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'retries-exhausted', limit: 2 } });
     expect(driver.calls).toBe(3);
     const state = refusedState(outcome);
-    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3 });
+    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3 });
 
     // A resume with a driver that works does not get the task back: parked is parked.
     const resumed = await resumeRun({ runId, components });
@@ -311,6 +326,46 @@ describe('approvals gate the station (I4)', () => {
     // The second visit is approved in its own right, and the run then goes on.
     expect(await approveStation({ runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
     expect(await resumeRun({ runId, components })).toMatchObject({ at: 'integrate' });
+  });
+});
+
+describe('a replayed attempt is spent, not free (I5)', () => {
+    test('a kill between the running commit and the result runs the driver again, and the replay is counted', async () => {
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const base = stubComponents(workspace, { driver, reviewer: driver });
+    // The commit after `running` is the one recording the result and moving the task to verifying.
+    const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying';
+
+    const first = { ...base, vault: new KillsBeforeCommit(base.vault, kill) };
+    await expect(startRun(runRequest(runId, workspace, first))).rejects.toThrow('killed');
+    expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 1, retries: 0, starts: 1 } } });
+
+    // Each resume runs the driver again; each one is counted, and the iteration is not re-spent.
+    for (const starts of [2, 3]) {
+      const components = { ...base, vault: new KillsBeforeCommit(base.vault, kill) };
+      await expect(resumeRun({ runId, components })).rejects.toThrow('killed');
+      expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 1, retries: 0, starts } } });
+    }
+    expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(3);
+  });
+
+  test('replays past the station invocation bound park the task rather than spending forever', async () => {
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const base = stubComponents(workspace, { driver, reviewer: driver });
+    const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying';
+    // build: maxIterations 3, retry.max 2, so nine driver calls is the most an uninterrupted run could make.
+    const bound = STATION_CONTRACTS.build.maxIterations * (STATION_CONTRACTS.build.retry.max + 1);
+
+    await expect(startRun(runRequest(runId, workspace, { ...base, vault: new KillsBeforeCommit(base.vault, kill) }))).rejects.toThrow('killed');
+    for (let i = 1; i < bound; i += 1) {
+      await expect(resumeRun({ runId, components: { ...base, vault: new KillsBeforeCommit(base.vault, kill) } })).rejects.toThrow('killed');
+    }
+    expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
+
+    // The next resume does not reach the driver at all.
+    const parked = await resumeRun({ runId, components: base });
+    expect(parked).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
+    expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
   });
 });
 

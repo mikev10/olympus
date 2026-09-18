@@ -64,8 +64,11 @@ export interface TamperedPath { path: string; expected: string; actual: string; 
  * Why a task stopped being attempted. `iterations-exhausted`: its gate failed
  * on every one of the contract's `maxIterations` builds. `retries-exhausted`:
  * its driver or sandbox failed more times than the contract's `retry.max`.
+ * `starts-exhausted`: the driver was invoked more times than any uninterrupted
+ * run of the station could invoke it, which is a run being replayed into the
+ * same attempt rather than making progress (A-P4-06).
  */
-export type ParkCause = 'iterations-exhausted' | 'retries-exhausted';
+export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted';
 
 /**
  * A refusal to advance. `reason` is a closed set and selects the payload a

@@ -99,15 +99,28 @@ export interface TaskGraph {
 export type StationPhase = 'working' | 'exiting';
 
 /**
- * How much of a task's budget of attempts is spent. Both counts are committed
- * before the attempt they count starts, so a resume can re-run an attempt that
- * was in flight but cannot run one uncounted.
+ * How much of a task's budget is spent. Every count is committed before the
+ * attempt it counts begins, so no attempt runs uncounted.
+ *
+ * `iterations` and `retries` measure work: what the model was asked to do, and
+ * how often the machinery under it failed. `starts` measures invocations, and
+ * the two are not the same number. A run stopped between the commit that marks
+ * a task `running` and the commit that records its result leaves an attempt in
+ * flight; the resume runs the driver again, which costs money and spends no
+ * iteration. `starts` is what makes that replay visible and bounded (A-P4-06).
  */
 export interface TaskAttempts {
-  /** Builds started. Bounded by the build contract's `maxIterations`. */
+  /** Builds the model was asked for. Bounded by the build contract's `maxIterations`. */
   readonly iterations: number;
   /** Driver or sandbox failures in the current iteration. Bounded by the station contract's `retry.max`; a new iteration starts at zero. */
   readonly retries: number;
+  /**
+   * Times the driver was actually invoked for this task, including every
+   * replay of an attempt a stop left in flight. Never lower than `iterations`;
+   * the gap between them is how often the run was interrupted mid-attempt.
+   * Bounded by `maxStarts` for the station.
+   */
+  readonly starts: number;
 }
 
 /** A human's approval of one station exit at one level, recorded by the runtime (I4). */
