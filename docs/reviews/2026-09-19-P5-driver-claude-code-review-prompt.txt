@@ -1,0 +1,160 @@
+The code under review is in the attached file
+`2026-09-19-P5-driver-claude-code-review-bundle.txt` (SHA-256
+5dbb1ef8d4ab05e2195912f5ce9d9519a52d9ab368ce84095e87d409952607d8) — the full
+contents of every changed file, with the commit range at its top. If that file
+is not present in this conversation, stop and say so; do not review from the
+description below alone.
+
+You are reviewing a driver that runs an AI coding CLI inside a container, and
+the conformance assertions that are supposed to prove it does, in a TypeScript
+project. You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A runtime carries software work through a fixed line of stations, and a
+"driver" is the component that actually runs a model on a task. This driver
+runs the Claude Code CLI. The runtime provisions a container first — with a
+mount table, an egress allowlist, and resource limits — and hands the driver a
+handle to it. The driver is supposed to have no way to run anything except
+inside that container, and to give the model a credential without that
+credential landing anywhere the model or another process can read it.
+
+Alongside the driver is a registry of executable assertions. Each capability
+the driver declares about itself must map to an assertion that fails when the
+capability is removed. Some of those assertions live in the driver package's
+own test suite rather than in the registry; the registry counts one only after
+reconciling it against a JSON report that the driver package's test run writes,
+which is bound to the source tree by a content hash.
+
+It must hold against a capable, motivated party trying to obtain a capability
+that policy did not grant, reach a filesystem or network the container was not
+given, read the credential, or make the conformance registry report a
+capability as proven when the assertion behind it did not run. Assume no
+deceptive intent — only that the easiest path gets taken.
+
+That party controls what the model returns — every token of narrative, every
+tool call it asks for, and the contents of the workspace directory the
+container mounts as writable. It also controls the timing of failures: a
+process killed mid-run, a container that dies, a test run interrupted. It does
+not control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process.
+
+The invariants at stake:
+
+I1 — No agent writes to the Vault, at any autonomy level, in any repository, in
+any role, under any trigger. This is enforced at the mount layer, not in
+application code. For this unit it means the driver must run the model inside
+the provisioned container and nowhere else: a driver that ran the CLI on the
+host would be outside the mount table entirely.
+
+I2 — The runtime derives status; the model never reports it. The task result
+type has no status field. What the model says it did is a claim, stored
+separately from evidence, and the two are diffed later.
+
+I3 — An agent may not be judged by an artifact it can write. Specifications and
+acceptance tests are hashed before the build stage and re-verified at every
+station transition.
+
+I4 — Default deny. A capability not granted in policy is not available. Adding
+one is an explicit, versioned edit to a policy file.
+
+I5 — Fail closed. A missing required check, an absent capability, an
+unsupported input, or a shrunken test enumeration is a refusal — never a silent
+degrade, never a warning that lets the run continue.
+
+I6 — Reviewers never share the author's model family. The model family is an
+explicit value a driver assigns; it is never inferred from a driver id, a
+provider string, or a model name.
+
+I8 — Every capability claim maps to an executable assertion that fails when the
+capability is deleted. Documentation asserting that a subsystem is wired is not
+evidence that it is.
+
+The mechanisms that matter most:
+
+- The driver holds a sandbox provider and issues every command through it;
+  the credential travels to the CLI as an environment value on that call.
+- The tool grant on a request is turned into CLI arguments that are supposed to
+  decide which tools exist in the session, including for tools contributed by
+  external MCP servers, which the driver inspects before running the task.
+- The stream the CLI writes is parsed into events, usage counters, and a claim,
+  with several conditions treated as refusals rather than as results.
+- The reconciliation path: a run report written by one package's test suite,
+  bound to the tree by a content hash, read by the registry to decide whether
+  an assertion in another package counts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- the compiler's neutral role format (M2) — emit from hardcoded roles for now
+- wiring the driver into the station line. `packages/api` keeps `StubDriver`,
+  and `SKELETON_LINE` still refuses every run above L1 until P6. Replacing the
+  stub with the real component is I1's deliverable, stated there in those
+  words; a driver that ships already wired would be judged by the line rather
+  than by its own suite
+- prompt and role *content* beyond what one task needs to run. The driver
+  renders whatever `CompiledRole.instructions` it is handed; what those
+  instructions should say is the compiler's (M2)
+- cost and cache reporting above `Usage`. The driver measures one task; per-run
+  aggregation and the rate it implies are R2
+- standing up computer use inside the sandbox. `computerUse` is declared
+  `false` and the assertion proves the absence, the same way
+  `sandbox.computerUse` does; a container with a display is R3
+- the Codex driver (M2). One driver is enough to prove the contract is neutral;
+  two are what prove reviewer independence, and F1 already says M1 must not
+  claim that
+
+The unit identifiers above (M2, P6, R2, R3, I1, S1) and any decision
+identifiers you encounter in the code's comments refer to planning documents
+you do not have. They name future work or past reasoning; treat anything listed
+here as deliberately absent rather than as a defect, and do not try to resolve
+the identifiers themselves.
+
+THE QUESTION
+
+How would you obtain a tool, a network destination, a filesystem path, or a
+credential that the request did not grant — and separately, how would you make
+the conformance registry report one of this driver's capabilities as proven
+when the assertion behind it did not actually run, or ran against different
+code?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete
+bypass or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
