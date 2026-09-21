@@ -14,7 +14,7 @@
  * prove its point, and the prompts ask for one word wherever a word will do.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
@@ -96,6 +96,18 @@ export async function withDriver<T>(
   const vaultDir = join(base, 'vault');
   await mkdir(workspaceDir, { recursive: true });
   await mkdir(vaultDir, { recursive: true });
+  // The container runs as a fixed user, and a bind mount carries the host's
+  // ownership straight through: a workspace owned by any other uid is not
+  // writable by the task, and the one thing the task is supposed to be able to
+  // write is its workspace. On a developer's machine the two usually coincide
+  // and this is a no-op; on a GitHub runner they do not -- the runner is uid
+  // 1001 and the image's user is 1000 -- and without this the I1 assertion
+  // fails having proved nothing about where commands ran.
+  //
+  // This makes the *fixture* usable. It does not fix the underlying constraint,
+  // which is recorded as a known limit: a runtime that creates a workspace as a
+  // uid the image does not run as hands the agent a read-only workspace.
+  await chmod(workspaceDir, 0o777);
   const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
   // A Vault root that exists and holds nothing: the provider requires one, and
   // no mount here may be it, sit inside it, or contain it (I1).
