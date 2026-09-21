@@ -60,7 +60,9 @@ on every unit gives two independent passes and makes disagreement between them
 a signal in its own right. The family-rotation bookkeeping is retired: there is
 no repeat to record when both run every time.
 
-**Subscription sign-in, not API keys.** `codex login` against a ChatGPT
+**Codex by subscription sign-in; Gemini by paid API key** (amended 2026-09-21). The original decision was subscription sign-in for both. Google has since retired the OAuth path for individual accounts in the Gemini CLI — it now fails with "This client is no longer supported for Gemini Code Assist for individuals." The remaining options were a Gemini API key or Vertex AI. A **paid** key was chosen over a free one because Google's API terms say free-tier content is used "to provide, improve, and develop Google products and services" and that "human reviewers may read, annotate, and process your API input and output" — and the bundle is the full source of every changed file, sent on every unit. The paid tier carries no such use. The cost is about $0.20 per review at ~100k input tokens against Gemini 3.1 Pro, which is not a consideration at one unit per session. A side benefit: the key arrives as an environment variable, so Gemini's scratch config home holds nothing at all, which is stricter isolation than a copied credential file.
+
+**Subscription sign-in for Codex.** `codex login` against a ChatGPT
 Plus/Pro account and a Google account for Gemini. One interactive browser login
 each, cached, headless afterward. A bundle is roughly 100k input tokens; on
 metered keys that is a real per-unit cost on both sides, twice over.
