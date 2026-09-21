@@ -1001,9 +1001,25 @@ describe('geminiArgv', () => {
     expect(argv).toContain('stream-json');
   });
 
-  it('never enables yolo mode, which would auto-approve every tool', () => {
+  it("runs in the CLI's own read-only mode", () => {
+    expect(argv).toContain('--approval-mode');
+    expect(argv).toContain('plan');
+  });
+
+  it('does not use the deprecated allowed-tools flag', () => {
+    expect(argv).not.toContain('--allowed-tools');
+  });
+
+  it('never resumes a prior session', () => {
+    expect(argv).not.toContain('--resume');
+    expect(argv).not.toContain('-r');
+  });
+
+  it('never enables yolo or auto-edit, which would auto-approve tool calls', () => {
     expect(argv).not.toContain('--yolo');
     expect(argv).not.toContain('-y');
+    expect(argv).not.toContain('yolo');
+    expect(argv).not.toContain('auto_edit');
   });
 });
 
@@ -1102,8 +1118,26 @@ export function codexArgv(options: { readonly finalMessagePath: string }): reado
  * carries the committed prompt verbatim; `-p` carries only the injection.
  */
 export function geminiArgv(options: { readonly bundleName: string }): readonly string[] {
-  return ['--output-format', 'stream-json', '-e', 'none', '-p', `@${options.bundleName}`];
+  return [
+    '--output-format', 'stream-json',
+    '--approval-mode', 'plan',
+    '-e', 'none',
+    '-p', `@${options.bundleName}`,
+  ];
 }
+```
+
+**AMENDED from the CLI's own `--help`, read while blocked on its login:**
+
+- `--approval-mode plan` is documented by the CLI as "read-only mode". Use it. It is a cleaner guarantee than the earlier plan's reliance on `--allowed-tools`, which the help now marks **DEPRECATED** in favour of a policy engine. Do NOT use `--allowed-tools`.
+- **Never** `-y` / `--yolo`, and never `--approval-mode yolo` or `auto_edit`. All three auto-approve tool calls, which is the opposite of what this needs.
+- `-e/--extensions` is more dangerous than it looks: the help says "If not provided, **all extensions are used**". Omitting it is a contamination vector, not a neutral default. `-e none` is the idiom recon reported, but the flag takes a list of extension *names*, so `none` may be read as one. **The probe must confirm `-e none` yields zero extensions**, and if it does not, the answer is a scratch config home with no extensions installed rather than a flag.
+- Gemini has **session persistence** — `--session-id`, `--session-file`, `--list-sessions`, `--delete-session`, `-r/--resume`. Never pass `--resume`, and confirm session storage lands inside the isolated config home rather than the real one.
+- `--skip-trust` exists and may be Gemini's analogue of the `--skip-git-repo-check` that Codex turned out to require. The probe must establish whether a headless run in an untrusted scratch directory prompts or hangs without it. A hang is what the timeout is for, but a flag is better than a timeout.
+- `--allowed-mcp-server-names` exists, so MCP servers are reachable through settings. The isolated config home holding no `settings.json` is what prevents that; the flag is a second line, not the first.
+- **There is no config-home environment variable anywhere in the flag list** — no `GEMINI_DIR`, `GEMINI_HOME`, or `GEMINI_CONFIG_DIR`. The help's auth error names only `GEMINI_API_KEY`, `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_GENAI_USE_GCA`, and points at `~/.gemini/settings.json`. So the `HOME`-override fallback is the likely mechanism, and the clean-room assertion that refuses when isolation cannot be proved stops being defensive: it becomes the thing standing between a reviewer and the maintainer's global `GEMINI.md`.
+
+```ts
 
 interface EventPath {
   readonly event: string;
