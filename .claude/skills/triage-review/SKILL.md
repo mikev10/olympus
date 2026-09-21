@@ -57,10 +57,23 @@ about a file that never arrived is indistinguishable from a finding about one
 that did.
 
 **Where one family counted and the other did not, the unit has one review, not
-two.** Name both outcomes, say which pass is missing, and stop. Whether to
-rerun the family that failed or to triage a single reply is the maintainer's
-decision; a triage that proceeds quietly on one reply reads afterwards as
-though the unit had two.
+two.** Name both outcomes. A single counted review is a real review — it is what
+the manual loop produced for years — so it is not refused and that work is not
+thrown away.
+
+**Recommend re-running the family that failed, first.** It is one command and no
+human effort, which is the whole point of the automation, and a second
+independent pass is worth more than careful reasoning about the absence of one.
+Proceeding on one review is the deliberate exception, taken by the maintainer,
+not the default this skill picks on their behalf.
+
+If the maintainer proceeds on one, the header records exactly that:
+`Cross-family agreement:` reads `not available — only <family> counted; <other
+family> was <outcome>`. **That field is never left blank, and never written as
+though both families reported.** Every other mistake in a triage is catchable by
+rereading the code; this one is not, because a later reader has no way to see a
+pass that was never made. A record that overstates its own scrutiny is worse
+than one that admits a gap.
 
 ## 2. Head each reply with its provenance
 
@@ -94,7 +107,8 @@ triage file by name.>
   no extensions, in a scratch config home holding only a credential file. The
   clean-room proof is the manifest's `cleanRoom`.>
 - **Cross-family agreement:** <which of this review's findings the other family
-  raised too, and which it raised alone>
+  raised too, and which it raised alone; or, where only one family counted,
+  `not available` with the other family's outcome named>
 - **Date:** <date>
 - **Bundle:** `<date>-<UNIT>-<slug>-review-bundle.txt`, SHA-256 `<hash>` (the
   manifest's `bundleSha256`), base `<sha>` (`<tag>`), head `<sha>` (<what that
@@ -143,6 +157,11 @@ two findings that share a file name are often about different things.
   from what it is called reads identically to both. **Agreement is never a
   substitute for verification.** Every finding, paired or alone, is still
   checked against the cited code in step 4.
+
+**With one counted review there is nothing to pair.** Say so — "one review, no
+cross-family pass" — and go to step 4. Running the comparison over a single set
+of findings produces an absence of agreement, and an absence of agreement reads
+afterwards like disagreement.
 
 ## 4. Verify every finding before acting on any of them
 
