@@ -1617,7 +1617,14 @@ git commit -m "Tooling: triage two reviews, and verify without the author in the
 **Files:**
 - Modify: `.claude/skills/ship-unit/SKILL.md` (step 6)
 - Modify: `docs/plan/WORKFLOW.md` (the unit loop, steps 5–6)
+- Modify: `docs/plan/WORKFLOW-DIAGRAM.md` (the numbered walk-through and the artifact table)
+- Modify: `.claude/skills/review-request/SKILL.md` (two stale references to a single pasted reply)
 - Modify: `docs/decisions.md` (append)
+
+**AMENDED — two files were missing from this plan's coverage,** found by Task 10's implementer rather than by me. Both still describe the loop as it was before automation, and a document that describes a loop nobody runs is worse than no document: the next reader follows it.
+
+- `docs/plan/WORKFLOW-DIAGRAM.md:74` says "Run the external review in the other chat: attach the bundle, paste the prompt", and its artifact table at lines 92-93 names `<date>-<UNIT>-<slug>-review.md` as a single reply and calls the prompt "The text you paste into the reviewer's chat". There are now two replies, one per family, each with a manifest and a stripped session log, and nothing is pasted.
+- `.claude/skills/review-request/SKILL.md:34` says `triage-review` adds `-review.md`; it now adds `-review-codex.md` and `-review-gemini.md`. Line 337 says the review runs "on the maintainer's clock" and that `triage-review` "stores the reply" — singular, and no longer on a human's clock.
 
 - [ ] **Step 1: Restate ship-unit's chaining rationale**
 
@@ -1630,6 +1637,12 @@ Replace "External review — temporary chat, different model family than last un
 - [ ] **Step 3: Append the decision record**
 
 Add an entry to `docs/decisions.md` recording that external review moved from human-witnessed to self-attested with artifact corroboration; what the corroboration consists of; that it raises the cost of fabrication rather than eliminating it; and that no PR body, README line, or capability claim may imply a human witnessed a review. Copy the spec's "What this does not prove" section rather than paraphrasing it loosely.
+
+- [ ] **Step 3a: Update the two files this plan originally missed**
+
+In `docs/plan/WORKFLOW-DIAGRAM.md`, rewrite the numbered walk-through step that tells the maintainer to open another chat, and correct the artifact table: the prompt and bundle are no longer handed to a person, and the reply row becomes two rows plus the manifest and session-log rows the runner writes. Keep the table's existing shape and its closing sentence about which artifacts are records.
+
+In `.claude/skills/review-request/SKILL.md`, fix the two stale references at lines 34 and 337 — the per-family reply filenames, and the claim that the review runs on the maintainer's clock. Do not touch anything else in that file; its prompt template and generator were settled in Task 9 and are not in scope here.
 
 - [ ] **Step 4: Verify no tracked file gained a forbidden reference**
 
