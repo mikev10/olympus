@@ -19,7 +19,7 @@
 - **The runtime derives status; it is never declared.** The run outcome is computed from exit code, timeout, and integrity verdict by one function. No field is set by hand.
 - **The reviewer's reply is untrusted data, never instruction.** It is written to disk verbatim and read as evidence. Nothing in it is executed, and no part of it is ever interpolated into a prompt as an instruction.
 - **Default deny.** The clean room is asserted with an allowlist of files that may exist, not a blocklist of known-bad names.
-- **A secret never enters a committed artifact.** `GEMINI_API_KEY` reaches the CLI as an environment variable. The manifest records `envOverrides`, and the manifest is committed — so it records variable NAMES and redacts any value whose name matches `/(_KEY|_TOKEN|_SECRET|PASSWORD)$/i`, writing `"<redacted>"` in its place. The same rule binds stderr capture, the stripped session log, and every error message: a refusal that prints the environment is a refusal that commits the key. Verify by grepping a real manifest for the key's first characters before the first commit that contains one.
+- **A secret never enters a committed artifact — and the type system enforces it.** The manifest is committed. `Invocation.cli.envOverrides` is a branded `RedactedEnv` that only `redactEnv()` can construct, and `redactEnv` is **default-deny**: values are recorded verbatim only for names in `RECORDABLE_ENV` (`CODEX_HOME`, `HOME`, `USERPROFILE`), and every other value becomes `"<redacted>"`. (This replaced an earlier name-suffix blocklist, which missed `DATABASE_URL=postgres://user:pass@host`.) `Invocation.api.url` is a branded `KeylessUrl` that only `keylessUrl()` can construct, and it refuses any URL with a query string or credentials. Both brands are proved by `@ts-expect-error` tests that fail typecheck if either brand is ever widened. The same rule binds stderr capture, the session log and every error message: an error that echoes a URL or an environment is an error that commits the key.
 - **Never write `.plan/` followed by a filename in any tracked file.** CI greps for it (`ci.yml`, "Nothing under .plan/ is tracked or referenced") and fails the build. `CLAUDE.md` is the only exempt file.
 - **No Mermaid in any document.** ASCII diagrams only — Mermaid does not render in Azure DevOps.
 - **Protected paths touched deliberately:** `package.json`, `.github/workflows/ci.yml`, and `.gitignore` match patterns in `.github/protected-paths.txt`. The PR description must declare each as an intended change, with the reason. Note that `vitest.tooling.config.ts` is NOT protected: the pattern anchors on `vitest.` immediately followed by `config` or `workspace`, which `vitest.tooling.config.ts` does not satisfy.
@@ -1224,8 +1224,9 @@ git commit -m "Tooling: the reviewer is handed the bundle, and the vendor counts
 - Create: `scripts/review-runner/test/scratch.test.ts`
 
 **Interfaces:**
-- Consumes: `Family` (Task 5), `CleanRoomProof` and `AllowedContents` (Task 4).
-- Produces: `codexArgv`, `codexModel`, `codexUsage`, `codexApprovalPolicy`, `runCli`, `CliResult`, `DEFAULT_TIMEOUT_MS`; `buildCodexScratch`, `listRecursive`, `removeScratch`, `redactEnv`.
+- Consumes: `Family` (Task 5), `CleanRoomProof` and `AllowedContents` (Task 4), `redactEnv` and `Invocation` (Task 7).
+- Produces: `codexArgv`, `codexModel`, `codexUsage`, `codexApprovalPolicy`, `runCli`, `CliResult`, `DEFAULT_TIMEOUT_MS`; `buildCodexScratch`, `listRecursive`, `removeScratch`.
+- **Consumes `redactEnv` and `RedactedEnv` from `evidence.ts` (shipped in Task 7). Do NOT define another redaction function** — `RedactedEnv` is a brand whose single construction site is `redactEnv`, and a second constructor would be a second way to bypass it.
 
 Codex still needs a scratch config home: the real `~/.codex` on this machine holds `memories_1.sqlite`, `thread_history_1.sqlite`, `goals_1.sqlite` and `archived_sessions/`. A reviewer reached through it could carry memory of the author's prior conversations. The work directory, however, is now **empty** — the bundle arrives on stdin, so there is nothing for a tool to read and no sandbox read to be blocked.
 
@@ -1235,7 +1236,7 @@ Codex still needs a scratch config home: the real `~/.codex` on this machine hol
   - `codexModel(rolloutJsonl)` reads `world_state` → `payload.state.collaboration_mode.model`, returns `null` when absent, and returns `null` for `--json` stdout (the model is not there — this was measured)
   - `codexUsage(rolloutJsonl)` returns `payload.usage.input_tokens` from `token_usage_record`, or `null`
   - `codexApprovalPolicy(rolloutJsonl)` returns the recorded `approval_policy` string, or `null`
-  - `redactEnv({ CODEX_HOME: '/s', GEMINI_API_KEY: 'AIza…', OPENAI_API_KEY: 'sk-…', GH_TOKEN: 't' })` keeps `CODEX_HOME` and replaces the other three values with `"<redacted>"`
+  - the env map Codex runs with is passed through `redactEnv` before it reaches any `Invocation`, and a test builds a Codex `Invocation` from a real env map containing a key-shaped `OPENAI_API_KEY` and asserts that value appears nowhere in `JSON.stringify` of the result
 
   And `test/scratch.test.ts`:
   - `buildCodexScratch` produces a config home holding exactly `auth.json` and a work dir holding **nothing**
@@ -1256,7 +1257,7 @@ Codex still needs a scratch config home: the real `~/.codex` on this machine hol
 - Create: `scripts/review-runner/test/gemini.test.ts`
 
 **Interfaces:**
-- Consumes: `Invocation` (Task 7).
+- Consumes: `Invocation`, `keylessUrl` and `KeylessUrl` (Task 7). The request URL MUST be built through `keylessUrl`; it is the brand's only constructor and it refuses a query string, so a key cannot be placed in the URL even by mistake.
 - Produces: `GEMINI_MODEL`, `geminiRequest`, `parseGeminiResponse`, `callGemini`, `GeminiResult`.
 
 The Gemini **CLI is not used.** Measured on 2026-09-21: `@file` inlines ~2000 lines and the model then navigates the rest with `grep_search`; a 400 KB stdin hangs before sending, by file redirect and by pipe. A direct `generateContent` call ingested the whole bundle — `promptTokenCount` 126,072 — and, because the request offers **no tools**, the model has nothing to navigate with. It also loads no `GEMINI.md`, no `settings.json`, no extensions and no sessions, so there is no clean room to build for this family at all.
@@ -1321,7 +1322,7 @@ if (invokedDirectly) await main();
 9. `ingestion = verifyIngestion(payloadBytes, inputTokens)`; `integrity = verifyEcho(markers, reply)`; `outcome = outcomeOf({ exitCode, timedOut, ingestion, integrity })`.
 10. Write the three files above. The reply file holds the reply and nothing else.
 11. **Codex:** record `postRunFileCount`, then `removeScratch` — only after steps 8 and 10 have read what they need.
-12. **Before exiting, grep the manifest just written for the first 8 characters of every environment value whose name matches the secret pattern.** If any appears, delete all three files and exit non-zero. This is the Global Constraint's verification made structural rather than left to a reader.
+12. **Before exiting, search all three files just written for the first 8 characters of every environment value whose name is NOT in `RECORDABLE_ENV`** — which includes `GEMINI_API_KEY` and `OPENAI_API_KEY`. If any appears, delete all three files and exit non-zero. The branded types make this unreachable by construction; this check is the belt to their braces, and it covers the reply and session log, which the brands do not.
 13. Print the outcome, the model, and the ingested token count against the floor. Exit 0 only when the outcome is `counted`.
 
 - [ ] **Step 3: Verify** `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`.
