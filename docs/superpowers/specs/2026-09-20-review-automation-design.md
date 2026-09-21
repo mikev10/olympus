@@ -81,6 +81,23 @@ the one step in this loop that cannot be undone. Deleting a file afterward
 recovers nothing. Sending the source of every changed file to two vendors stays
 a deliberate act, costing one command per unit.
 
+## Amended after measurement: how the bundle reaches the reviewer
+
+**This section overrides the runner and clean-room sections below wherever they disagree.** They describe a design in which each reviewer reads the bundle from a file. On 2026-09-21 that was measured, and neither did:
+
+- **Gemini CLI, `@bundle.txt`:** 32,893 input tokens against ~126,000 for the whole bundle. It inlined roughly the first 2000 lines, then called `read_file` and `grep_search` to find what it was asked for, and answered correctly without reading the middle. A reviewer that greps for answers reviews only what it chose to look at — and a grep tool can jump straight to the end nonce, so the nonce alone does not catch it.
+- **Gemini CLI, bundle on stdin:** hung before sending any request, by file redirect and by pipe.
+- **Codex CLI, bundle as a file:** "file access blocked by policy". On Windows, `--sandbox read-only` blocks reading even the working directory. It reported the values as unavailable rather than inventing them, and the echo check would have refused it — the safeguards held; the path did not.
+
+What was measured to work, and what the design now is:
+
+- **The bundle is inlined into the prompt.** Neither reviewer is asked to read a file. The work directory Codex runs in is empty.
+- **Codex stays a CLI:** `codex exec -` with the payload on stdin. 127,096 input tokens; reproduced the bundle's final line verbatim. It still needs the scratch `CODEX_HOME`, because the real one holds memory and conversation history.
+- **Gemini becomes a direct `generateContent` API call.** 126,072 prompt tokens; reproduced the final line verbatim. The request offers **no tools**, so the model has nothing to navigate with. An API call loads no `GEMINI.md`, no settings, no extensions and no sessions, so **there is no clean room to build for this family at all.** The model must be named in the request, so `gemini-3.1-pro-preview` is pinned — with the reported `modelVersion` recorded separately and **no automatic fallback**, because a silent downgrade to a weaker model is a weaker adversary nobody chose.
+- **A second integrity check, stronger than the nonce:** the vendor-reported input token count must reach a floor of the payload's bytes divided by 5. Measured ratios were 3.18 and 3.20 bytes per token, so an honest run clears it easily, while both measured failures (32,893 and 24,181 tokens) fall far beneath it. It is measured by the vendor's API rather than reported by the model, so a reviewer cannot fake it, and it catches navigation as well as truncation. The nonce stays as an independent second check.
+
+The maintainer approved this on 2026-09-21. The Gemini CLI installed in Task 1 is no longer used.
+
 ## The runner
 
 `scripts/run-external-review.ts <UNIT> <codex|gemini>`, invoked as

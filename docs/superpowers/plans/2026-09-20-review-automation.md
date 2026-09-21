@@ -34,10 +34,13 @@
 | `scripts/run-external-review.ts` | CLI entry: parse args, orchestrate, exit non-zero on refusal |
 | `scripts/review-runner/integrity.ts` | Read the bundle's markers; verify the reply echoed them |
 | `scripts/review-runner/cleanroom.ts` | Judge a scratch-directory listing against an allowlist |
-| `scripts/review-runner/scratch.ts` | Build and tear down the scratch dirs; list them recursively |
+| `scripts/review-runner/scratch.ts` | Build and tear down Codex's scratch config home and its empty work dir; list them recursively |
 | `scripts/review-runner/evidence.ts` | Manifest type, outcome derivation, session-log stripping |
 | `scripts/review-runner/artifacts.ts` | Resolve a unit id to its committed prompt and bundle |
-| `scripts/review-runner/invoke.ts` | Per-family argv construction; spawn with a hard timeout |
+| `scripts/review-runner/payload.ts` | Compose the exact text sent to both reviewers: prompt, then the bundle inlined |
+| `scripts/review-runner/ingestion.ts` | Judge the vendor-reported input token count against a floor |
+| `scripts/review-runner/codex.ts` | Codex CLI argv, rollout-log parsing, spawn with stdin and a hard timeout, env redaction |
+| `scripts/review-runner/gemini.ts` | Gemini direct API request, response parsing — no CLI, no tools |
 | `scripts/review-runner/test/*.test.ts` | vitest suites, one per module, mirroring `packages/*/test/` |
 | `vitest.tooling.config.ts` | Root config so `scripts/` tests run; packages are unaffected |
 | `tsconfig.tooling.json` | Typecheck `scripts/` — `pnpm -r typecheck` cannot see it |
@@ -937,547 +940,363 @@ git commit -m "Tooling: resolve a unit to the prompt and bundle that were commit
 
 ---
 
-### Task 7: Per-family argv, scratch construction, and spawn with a hard timeout
+### Task 7: The payload, the ingestion floor, and the manifest's new fields
+
+**REWRITTEN 2026-09-21 after the Gemini probe.** The original Tasks 7 and 8 assumed each reviewer would read the bundle from a file. Measured, neither did. Gemini's CLI inlined about 25k tokens of `@bundle.txt` — consistent with an undocumented ~2000-line cutoff — then called `read_file` and `grep_search` to find the answers it needed, and answered correctly without reading the middle. Codex, under `--sandbox read-only` on Windows, could not read a file in its own working directory at all ("file access blocked by policy"). Two stdin variants of the Gemini CLI hung before sending anything.
+
+What was measured to work: **the bundle inlined into the prompt.** Codex via `codex exec -` with the payload on stdin ingested 127,096 input tokens; Gemini via a direct `generateContent` API call ingested 126,072. Both reproduced the bundle's final line verbatim. The maintainer approved: Codex stays a CLI, Gemini becomes a direct API call, and neither reviewer is ever asked to read a file.
+
+This task builds the pure pieces both transports share. Tasks 7B and 7C build the transports; Task 8 wires them.
 
 **Files:**
-- Create: `scripts/review-runner/invoke.ts`
+- Create: `scripts/review-runner/payload.ts`
+- Create: `scripts/review-runner/ingestion.ts`
+- Modify: `scripts/review-runner/evidence.ts`
+- Create: `scripts/review-runner/test/payload.test.ts`
+- Create: `scripts/review-runner/test/ingestion.test.ts`
+- Modify: `scripts/review-runner/test/evidence.test.ts`
+
+**Interfaces:**
+- Consumes: `EchoVerdict` (Task 3), `CleanRoomProof` (Task 4), `Family` and `Outcome` (Task 5).
+- Produces: `composePayload`, `BEGIN`, `END`, `sha256`; `verifyIngestion`, `IngestionVerdict`, `BYTES_PER_TOKEN_FLOOR`; `Invocation`; a revised `Manifest` and a revised `outcomeOf` taking `ingestion`.
+
+- [ ] **Step 1: Write the failing payload tests**
+
+Create `scripts/review-runner/test/payload.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { BEGIN, END, composePayload, sha256 } from '../payload.ts';
+
+const PROMPT = 'Review the bundle.\n';
+const NAME = '2026-09-21-P6-x-review-bundle.txt';
+const BUNDLE = [
+  'BASE: reviewed/P5',
+  'HEAD: abc1234',
+  '===== a.ts =====',
+  'export const a = 1;',
+  '',
+  '=== BUNDLE END === 0123456789abcdef0123456789abcdef',
+  '',
+].join('\n');
+
+describe('composePayload', () => {
+  const payload = composePayload(PROMPT, NAME, BUNDLE);
+
+  it('puts the prompt first and the bundle between the delimiters', () => {
+    expect(payload.startsWith('Review the bundle.')).toBe(true);
+    expect(payload.indexOf(BEGIN)).toBeGreaterThan(payload.indexOf('Review the bundle.'));
+    expect(payload.indexOf(END)).toBeGreaterThan(payload.indexOf(BEGIN));
+  });
+
+  it('names the bundle file on the opening delimiter, so the prompt reference resolves', () => {
+    expect(payload).toContain(`${BEGIN} ${NAME}`);
+  });
+
+  it('keeps the nonce as the last line before the closing delimiter', () => {
+    const lines = payload.split('\n');
+    const endAt = lines.indexOf(END);
+    expect(lines[endAt - 1]).toBe('=== BUNDLE END === 0123456789abcdef0123456789abcdef');
+  });
+
+  it('carries the bundle text unchanged between the delimiters', () => {
+    const inner = payload.slice(payload.indexOf('\n', payload.indexOf(BEGIN)) + 1, payload.indexOf(`\n${END}`));
+    expect(inner).toBe(BUNDLE.replace(/\n+$/, ''));
+  });
+
+  it('uses delimiters that no reviewer could mistake for a section header or the nonce line', () => {
+    // A delimiter shaped like either would be reported back as "the last
+    // section" or "the last line", failing every run's echo check.
+    for (const d of [BEGIN, END]) {
+      expect(/^===== (.+) =====$/.test(d)).toBe(false);
+      expect(d.startsWith('=== BUNDLE END ===')).toBe(false);
+    }
+  });
+
+  it('is deterministic, so the recorded hash identifies exactly what was sent', () => {
+    expect(sha256(composePayload(PROMPT, NAME, BUNDLE))).toBe(sha256(payload));
+    expect(sha256(payload)).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+```
+
+- [ ] **Step 2: Write the failing ingestion tests**
+
+Create `scripts/review-runner/test/ingestion.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { BYTES_PER_TOKEN_FLOOR, verifyIngestion } from '../ingestion.ts';
+
+// Measured against the real 403,661-byte P5 bundle on 2026-09-21.
+const BYTES = 403_661;
+
+describe('verifyIngestion', () => {
+  it('accepts the Codex measurement: 127,096 input tokens', () => {
+    expect(verifyIngestion(BYTES, 127_096).kind).toBe('complete');
+  });
+
+  it('accepts the Gemini measurement: 126,072 input tokens', () => {
+    expect(verifyIngestion(BYTES, 126_072).kind).toBe('complete');
+  });
+
+  it('rejects the measured @-injection failure: ~33k tokens, the rest navigated by grep', () => {
+    expect(verifyIngestion(BYTES, 32_893).kind).toBe('short');
+  });
+
+  it('rejects the measured blocked-read failure: the system prompt alone', () => {
+    expect(verifyIngestion(BYTES, 24_181).kind).toBe('short');
+  });
+
+  it('refuses when the vendor reported no token count, rather than assuming', () => {
+    expect(verifyIngestion(BYTES, null).kind).toBe('unreported');
+  });
+
+  it('records the floor it applied, so a reader can check the arithmetic', () => {
+    const v = verifyIngestion(BYTES, 127_096);
+    expect(v.floor).toBe(Math.floor(BYTES / BYTES_PER_TOKEN_FLOOR));
+  });
+});
+```
+
+- [ ] **Step 3: Run both and confirm they fail on unresolvable modules**
+
+Run: `pnpm test:tooling`
+Expected: FAIL — cannot resolve `../payload.ts` and `../ingestion.ts`.
+
+- [ ] **Step 4: Implement `payload.ts`**
+
+```ts
+import { createHash } from 'node:crypto';
+
+/**
+ * The delimiters around the inlined bundle. They must not resemble anything the
+ * reviewer is asked to find. The bundle's section headers are `===== path =====`
+ * and its last line is `=== BUNDLE END === <nonce>`; a delimiter shaped like
+ * either would be reported back as "the last section" or "the last line", and
+ * every run would fail its echo check.
+ */
+export const BEGIN = '<<<BEGIN REVIEW BUNDLE>>>';
+export const END = '<<<END REVIEW BUNDLE>>>';
+
+/**
+ * The exact text sent to BOTH reviewers. Neither is asked to read a file: on
+ * 2026-09-21 Gemini's CLI navigated a file with grep instead of reading it, and
+ * Codex's read-only sandbox on Windows could not read one at all. Inlined, both
+ * ingested the whole bundle. The opening delimiter names the bundle file so the
+ * committed prompt's reference to it by filename still resolves.
+ */
+export function composePayload(promptText: string, bundleFileName: string, bundleText: string): string {
+  return `${promptText.trimEnd()}\n\n${BEGIN} ${bundleFileName}\n${bundleText.replace(/\n+$/, '')}\n${END}\n`;
+}
+
+export function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+```
+
+- [ ] **Step 5: Implement `ingestion.ts`**
+
+```ts
+/**
+ * Bytes per token measured on a real 403,661-byte bundle: 3.18 for Codex
+ * (127,096 input tokens) and 3.20 for Gemini (126,072). The floor divides by 5,
+ * well below both, so tokenizer variance cannot fail an honest run — while the
+ * two measured failures (32,893 tokens when Gemini navigated with grep; 24,181
+ * when Codex could not read the file) land far beneath it.
+ *
+ * This is the strongest integrity signal in the design, stronger than the nonce:
+ * the count is measured by the vendor's API, not reported by the model, so a
+ * reviewer cannot fake it. It catches truncation AND navigation — a reviewer that
+ * reads selectively ingests a fraction of the bundle.
+ */
+export const BYTES_PER_TOKEN_FLOOR = 5;
+
+export type IngestionVerdict =
+  | { readonly kind: 'complete'; readonly inputTokens: number; readonly floor: number }
+  | { readonly kind: 'short'; readonly inputTokens: number; readonly floor: number }
+  | { readonly kind: 'unreported'; readonly floor: number };
+
+export function verifyIngestion(payloadBytes: number, inputTokens: number | null): IngestionVerdict {
+  const floor = Math.floor(payloadBytes / BYTES_PER_TOKEN_FLOOR);
+  if (inputTokens === null) return { kind: 'unreported', floor };
+  return inputTokens >= floor
+    ? { kind: 'complete', inputTokens, floor }
+    : { kind: 'short', inputTokens, floor };
+}
+```
+
+- [ ] **Step 6: Revise `evidence.ts`**
+
+Replace the manifest's `argv` and `envOverrides` with a discriminated `invocation`, make the Codex-only fields nullable, and add the payload and ingestion fields:
+
+```ts
+import type { IngestionVerdict } from './ingestion.ts';
+
+/** How the reviewer was reached. Neither variant ever holds a secret's value. */
+export type Invocation =
+  | {
+      readonly kind: 'cli';
+      readonly command: string;
+      readonly argv: readonly string[];
+      /** Names map to values, except any name matching /(_KEY|_TOKEN|_SECRET|PASSWORD)$/i,
+       *  whose value is the literal string "<redacted>". */
+      readonly envOverrides: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: 'api';
+      readonly method: 'POST';
+      /** The endpoint, which carries no key: the key travels in a header. */
+      readonly url: string;
+      readonly modelRequested: string;
+      /** Header NAMES only. Values are never recorded. */
+      readonly headerNames: readonly string[];
+    };
+```
+
+In `Manifest`: remove `argv` and `envOverrides`; add `invocation: Invocation`, `payloadSha256: string`, `payloadBytes: number`, `ingestion: IngestionVerdict`; change `cleanRoom` to `CleanRoomProof | null` with a doc comment saying `null` means the transport loads no local configuration at all (the API call), which is different from an empty listing; change `postRunFileCount` to `number | null` for the same reason.
+
+Revise `outcomeOf` to take `ingestion` and check it before the echo verdict, because it is the harder fact — measured by the vendor rather than reported by the model:
+
+```ts
+export function outcomeOf(run: {
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly ingestion: IngestionVerdict;
+  readonly integrity: EchoVerdict;
+}): Outcome {
+  if (run.timedOut || run.exitCode !== 0) return 'FAILED';
+  if (run.ingestion.kind !== 'complete') return 'INTEGRITY_FAILED';
+  if (run.integrity.kind === 'failed') return 'INTEGRITY_FAILED';
+  if (run.integrity.kind === 'unverified') return 'INTEGRITY_UNVERIFIED';
+  return 'counted';
+}
+```
+
+The `Outcome` union does not change — four members, and Tasks 10 and 12 are written against them. An ingestion failure is an integrity failure; the manifest's `ingestion` field records which cause applied.
+
+- [ ] **Step 7: Update the evidence tests**
+
+Every existing `outcomeOf` call gains `ingestion: { kind: 'complete', inputTokens: 127_096, floor: 80_732 }`. Add:
+
+```ts
+  it('fails a run whose vendor-reported ingestion fell short, even if the echo verified', () => {
+    expect(outcomeOf({
+      exitCode: 0, timedOut: false,
+      ingestion: { kind: 'short', inputTokens: 32_893, floor: 80_732 },
+      integrity: { kind: 'verified' },
+    })).toBe('INTEGRITY_FAILED');
+  });
+
+  it('fails a run whose vendor reported no token count', () => {
+    expect(outcomeOf({
+      exitCode: 0, timedOut: false,
+      ingestion: { kind: 'unreported', floor: 80_732 },
+      integrity: { kind: 'verified' },
+    })).toBe('INTEGRITY_FAILED');
+  });
+```
+
+The first of those is the case that matters most: a reviewer that grepped its way to the nonce would echo every marker correctly and still ingest a fraction of the bundle. Only the vendor's count catches it.
+
+- [ ] **Step 8: Run everything**
+
+Run: `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`
+Expected: all pass. The count rises by the new tests; none of the 35 existing tests may be deleted except where their `outcomeOf` call gained the `ingestion` argument.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add scripts/review-runner/payload.ts scripts/review-runner/ingestion.ts scripts/review-runner/evidence.ts \
+        scripts/review-runner/test/payload.test.ts scripts/review-runner/test/ingestion.test.ts \
+        scripts/review-runner/test/evidence.test.ts
+git commit -m "Tooling: the reviewer is handed the bundle, and the vendor counts it"
+```
+
+---
+
+### Task 7B: The Codex transport — scratch home, empty work dir, payload on stdin
+
+**Files:**
+- Create: `scripts/review-runner/codex.ts`
 - Create: `scripts/review-runner/scratch.ts`
-- Create: `scripts/review-runner/test/invoke.test.ts`
+- Create: `scripts/review-runner/test/codex.test.ts`
 - Create: `scripts/review-runner/test/scratch.test.ts`
 
 **Interfaces:**
-- Consumes: `Family` from Task 5; `CleanRoomProof` from Task 4.
-- Produces: `codexArgv(o)`, `geminiArgv(o)`, `modelFromEvents(family, jsonl)`, `listRecursive(dir)`, `buildScratch(o)`, `removeScratch(dirs)`, `runCli(o)`. Task 8 calls all of them.
+- Consumes: `Family` (Task 5), `CleanRoomProof` and `AllowedContents` (Task 4).
+- Produces: `codexArgv`, `codexModel`, `codexUsage`, `codexApprovalPolicy`, `runCli`, `CliResult`, `DEFAULT_TIMEOUT_MS`; `buildCodexScratch`, `listRecursive`, `removeScratch`, `redactEnv`.
 
-**The empty allowlist is now load-bearing, not an edge case.** Gemini's config home holds no credential file, so its `AllowedContents.configFiles` is `[]` and its proof listing must be `[]` too. Task 4's review left exactly this combination untested as a deferred minor; it is now the ordinary Gemini path and must have a test. Confirm `assertCleanRoom({configHome: [], workDir: [bundle]}, {configFiles: [], workFiles: [bundle]})` passes, and that adding any stray file to that empty config home still throws.
+Codex still needs a scratch config home: the real `~/.codex` on this machine holds `memories_1.sqlite`, `thread_history_1.sqlite`, `goals_1.sqlite` and `archived_sessions/`. A reviewer reached through it could carry memory of the author's prior conversations. The work directory, however, is now **empty** — the bundle arrives on stdin, so there is nothing for a tool to read and no sandbox read to be blocked.
 
-Read the probe note from Task 1 before writing `buildScratch` — the environment variable that isolates Gemini and the credential filenames both come from there. **If the probe recorded that no variable isolates a CLI, implement the `HOME` fallback it names; do not invent a third mechanism.**
+- [ ] **Step 1: Write the failing tests** — `test/codex.test.ts` covering, at minimum:
+  - `codexArgv` contains `--sandbox read-only`, `--ignore-user-config`, `--skip-git-repo-check`, `--json`, `-o <path>`, and ends with `-`
+  - `codexArgv` does NOT contain `--ask-for-approval` (it does not exist in codex-cli 0.155.1 and aborts the run), nor `workspace-write`, `danger-full-access`, or `--yolo`
+  - `codexModel(rolloutJsonl)` reads `world_state` → `payload.state.collaboration_mode.model`, returns `null` when absent, and returns `null` for `--json` stdout (the model is not there — this was measured)
+  - `codexUsage(rolloutJsonl)` returns `payload.usage.input_tokens` from `token_usage_record`, or `null`
+  - `codexApprovalPolicy(rolloutJsonl)` returns the recorded `approval_policy` string, or `null`
+  - `redactEnv({ CODEX_HOME: '/s', GEMINI_API_KEY: 'AIza…', OPENAI_API_KEY: 'sk-…', GH_TOKEN: 't' })` keeps `CODEX_HOME` and replaces the other three values with `"<redacted>"`
 
-- [ ] **Step 1: Write the failing argv tests**
+  And `test/scratch.test.ts`:
+  - `buildCodexScratch` produces a config home holding exactly `auth.json` and a work dir holding **nothing**
+  - `listRecursive` returns forward-slash relative paths, including nested ones, on Windows and Linux alike — Task 4's review flagged separator normalisation as this function's responsibility
+  - `assertCleanRoom(proof, { configFiles: ['auth.json'], workFiles: [] })` passes on a fresh scratch and throws once any file is added to the work dir — **the empty work-dir allowlist is now the ordinary path, and Task 4's review left it untested**
+  - `removeScratch` deletes what it is given
 
-Create `scripts/review-runner/test/invoke.test.ts`:
+- [ ] **Step 2: Confirm they fail**, then **Step 3: implement.** `runCli` spawns with `shell: false`, writes the payload to stdin and ENDS the stream (an unclosed stdin makes the CLI wait on it), and kills on `DEFAULT_TIMEOUT_MS = 900_000`. `redactEnv` is the only path by which an environment map may reach a manifest.
 
-```ts
-import { describe, expect, it } from 'vitest';
-import { codexArgv, geminiArgv, modelFromEvents, usageFromEvents } from '../invoke.ts';
+- [ ] **Step 4: Verify** `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`, then **commit** with a message recording that the work dir is empty because the bundle is on stdin, and why.
 
-describe('codexArgv', () => {
-  const argv = codexArgv({ finalMessagePath: '/s/last.txt' });
+---
 
-  it('is read-only', () => {
-    expect(argv).toContain('--sandbox');
-    expect(argv).toContain('read-only');
-  });
+### Task 7C: The Gemini transport — a direct API call, no CLI, no tools
 
-  it('does NOT pass --ask-for-approval, which this CLI version does not have', () => {
-    // codex-cli 0.155.1 aborts on the flag before reaching the network.
-    // `exec` already records "approval_policy":"never" in its rollout log.
-    expect(argv).not.toContain('--ask-for-approval');
-  });
+**Files:**
+- Create: `scripts/review-runner/gemini.ts`
+- Create: `scripts/review-runner/test/gemini.test.ts`
 
-  it('skips the git repo check, because a scratch work dir is never a repo', () => {
-    expect(argv).toContain('--skip-git-repo-check');
-  });
+**Interfaces:**
+- Consumes: `Invocation` (Task 7).
+- Produces: `GEMINI_MODEL`, `geminiRequest`, `parseGeminiResponse`, `callGemini`, `GeminiResult`.
 
-  it('ignores the user config and emits machine-readable events', () => {
-    expect(argv).toContain('--ignore-user-config');
-    expect(argv).toContain('--json');
-  });
+The Gemini **CLI is not used.** Measured on 2026-09-21: `@file` inlines ~2000 lines and the model then navigates the rest with `grep_search`; a 400 KB stdin hangs before sending, by file redirect and by pipe. A direct `generateContent` call ingested the whole bundle — `promptTokenCount` 126,072 — and, because the request offers **no tools**, the model has nothing to navigate with. It also loads no `GEMINI.md`, no `settings.json`, no extensions and no sessions, so there is no clean room to build for this family at all.
 
-  it('reads the prompt from stdin, so the committed prompt goes in unmodified', () => {
-    expect(argv.at(-1)).toBe('-');
-  });
+**The model is pinned, which the rest of this design avoids, and the reason must be written into the code.** An API call has to name a model; a CLI can pick its own default. So `GEMINI_MODEL = 'gemini-3.1-pro-preview'` is a named constant, the request records it as `modelRequested`, and the manifest separately records the response's `modelVersion`. **There is no automatic fallback to another model.** A `-preview` model can be retired; when it is, the call must fail loudly (HTTP 404) rather than quietly downgrade the adversary to a weaker one. The probe script used a fallback loop for convenience — production code must not.
 
-  it('never enables a write sandbox or auto-approval', () => {
-    expect(argv).not.toContain('--yolo');
-    expect(argv).not.toContain('workspace-write');
-    expect(argv).not.toContain('danger-full-access');
-  });
-});
+- [ ] **Step 1: Write the failing tests** — `test/gemini.test.ts` covering, at minimum:
+  - `geminiRequest(payload)` returns a URL ending `models/gemini-3.1-pro-preview:generateContent` that contains **no key and no query string**
+  - its body has exactly one user part carrying the payload, and **no `tools` field and no `toolConfig` field** — assert their absence explicitly; this is the property that stops the model navigating
+  - its `headerNames` include `x-goog-api-key` and `content-type`, and the builder never receives or returns the key's value
+  - `parseGeminiResponse` extracts the reply from `candidates[0].content.parts[*].text` (joined), `modelVersion`, and `usageMetadata.promptTokenCount`; returns `null` for any absent field rather than guessing
+  - `parseGeminiResponse` on a response with no candidates, or a `finishReason` other than `STOP`, reports that plainly rather than returning an empty reply that would read as a review that found nothing
 
-describe('geminiArgv', () => {
-  const argv = geminiArgv({ bundleName: 'b-review-bundle.txt' });
+- [ ] **Step 2: Confirm they fail**, then **Step 3: implement.** `callGemini` reads `GEMINI_API_KEY` from `process.env` at call time, sends it only in the `x-goog-api-key` header, and refuses before sending if it is absent. Use the global `fetch` with an `AbortSignal.timeout(DEFAULT_TIMEOUT_MS)`. On a non-2xx response, the error it throws must carry the status and the response body **but never the request headers** — an error that echoes its request is an error that commits the key.
 
-  it('injects the bundle as prompt content rather than fetching it with a tool', () => {
-    expect(argv).toContain('-p');
-    expect(argv).toContain('@b-review-bundle.txt');
-  });
-
-  it('loads no extensions and streams JSON so the model id is recoverable', () => {
-    expect(argv).toContain('-e');
-    expect(argv).toContain('none');
-    expect(argv).toContain('stream-json');
-  });
-
-  it("runs in the CLI's own read-only mode", () => {
-    expect(argv).toContain('--approval-mode');
-    expect(argv).toContain('plan');
-  });
-
-  it('does not use the deprecated allowed-tools flag', () => {
-    expect(argv).not.toContain('--allowed-tools');
-  });
-
-  it('never resumes a prior session', () => {
-    expect(argv).not.toContain('--resume');
-    expect(argv).not.toContain('-r');
-  });
-
-  it('never enables yolo or auto-edit, which would auto-approve tool calls', () => {
-    expect(argv).not.toContain('--yolo');
-    expect(argv).not.toContain('-y');
-    expect(argv).not.toContain('yolo');
-    expect(argv).not.toContain('auto_edit');
-  });
-});
-
-describe('modelFromEvents', () => {
-  it('reads the model from a Gemini init event', () => {
-    const jsonl = '{"type":"init","model":"gemini-3-pro-preview"}\n{"type":"chunk"}';
-    expect(modelFromEvents('gemini', jsonl)).toBe('gemini-3-pro-preview');
-  });
-
-  it('reads the model from a Codex rollout world_state record, nested', () => {
-    // Measured shape: world_state → payload.state.collaboration_mode.model
-    const jsonl = [
-      '{"type":"session_meta"}',
-      '{"type":"world_state","payload":{"state":{"collaboration_mode":{"model":"gpt-6-astra"}}}}',
-      '{"type":"token_usage_record","payload":{"usage":{"total_tokens":1}}}',
-    ].join('\n');
-    expect(modelFromEvents('codex', jsonl)).toBe('gpt-6-astra');
-  });
-
-  it('returns null rather than guessing when no event names a model', () => {
-    expect(modelFromEvents('codex', '{"type":"session_meta"}')).toBeNull();
-  });
-
-  it('returns null when the nested path is present but not a string', () => {
-    const jsonl = '{"type":"world_state","payload":{"state":{"collaboration_mode":{}}}}';
-    expect(modelFromEvents('codex', jsonl)).toBeNull();
-  });
-
-  it('does not find a Codex model in --json stdout, because it is not there', () => {
-    const stdout = [
-      '{"type":"thread.started"}',
-      '{"type":"turn.started"}',
-      '{"type":"turn.completed","usage":{"input_tokens":10}}',
-    ].join('\n');
-    expect(modelFromEvents('codex', stdout)).toBeNull();
-  });
-});
-
-describe('usageFromEvents', () => {
-  it('reads Codex usage from the rollout token_usage_record', () => {
-    const jsonl = '{"type":"token_usage_record","payload":{"usage":{"total_tokens":98123,"cached":4}}}';
-    expect(usageFromEvents('codex', jsonl)).toEqual({ total_tokens: 98123, cached: 4 });
-  });
-
-  it('keeps only numeric fields', () => {
-    const jsonl = '{"type":"result","stats":{"total":5,"model":"m"}}';
-    expect(usageFromEvents('gemini', jsonl)).toEqual({ total: 5 });
-  });
-
-  it('returns null when no usage record is present', () => {
-    expect(usageFromEvents('codex', '{"type":"session_meta"}')).toBeNull();
-  });
-});
-```
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run: `pnpm test:tooling`
-Expected: FAIL — cannot resolve `../invoke.ts`.
-
-- [ ] **Step 3: Implement the argv and model-extraction half**
-
-Create `scripts/review-runner/invoke.ts`:
-
-```ts
-import { spawn } from 'node:child_process';
-import type { Family } from './evidence.ts';
-
-/**
- * Measured against codex-cli 0.155.1, not assumed:
- *
- * - There is NO `--ask-for-approval` flag; passing it aborts before the network.
- *   `exec` already records `"approval_policy":"never"` in its rollout log, so the
- *   behaviour is the default. The manifest asserts on that recorded policy.
- * - `--skip-git-repo-check` is REQUIRED. The scratch work dir is not a git repo
- *   and codex otherwise refuses: "Not inside a trusted directory".
- * - The trailing `-` reads the committed prompt from stdin, unmodified. stdin
- *   must be closed explicitly or the CLI waits on it; `runCli` ends the stream.
- */
-export function codexArgv(options: { readonly finalMessagePath: string }): readonly string[] {
-  return [
-    'exec',
-    '--sandbox', 'read-only',
-    '--ignore-user-config',
-    '--skip-git-repo-check',
-    '--json',
-    '-o', options.finalMessagePath,
-    '-',
-  ];
-}
-
-/**
- * The bundle is injected as prompt content, not fetched by a tool. In
- * non-interactive mode a tool call awaiting confirmation blocks forever rather
- * than failing, so a `read_file` path would hang instead of erroring. stdin
- * carries the committed prompt verbatim; `-p` carries only the injection.
- */
-export function geminiArgv(options: { readonly bundleName: string }): readonly string[] {
-  return [
-    '--output-format', 'stream-json',
-    '--approval-mode', 'plan',
-    '-e', 'none',
-    '-p', `@${options.bundleName}`,
-  ];
-}
-```
-
-**AMENDED from the CLI's own `--help`, read while blocked on its login:**
-
-- `--approval-mode plan` is documented by the CLI as "read-only mode". Use it. It is a cleaner guarantee than the earlier plan's reliance on `--allowed-tools`, which the help now marks **DEPRECATED** in favour of a policy engine. Do NOT use `--allowed-tools`.
-- **Never** `-y` / `--yolo`, and never `--approval-mode yolo` or `auto_edit`. All three auto-approve tool calls, which is the opposite of what this needs.
-- `-e/--extensions` is more dangerous than it looks: the help says "If not provided, **all extensions are used**". Omitting it is a contamination vector, not a neutral default. `-e none` is the idiom recon reported, but the flag takes a list of extension *names*, so `none` may be read as one. **The probe must confirm `-e none` yields zero extensions**, and if it does not, the answer is a scratch config home with no extensions installed rather than a flag.
-- Gemini has **session persistence** — `--session-id`, `--session-file`, `--list-sessions`, `--delete-session`, `-r/--resume`. Never pass `--resume`, and confirm session storage lands inside the isolated config home rather than the real one.
-- `--skip-trust` exists and may be Gemini's analogue of the `--skip-git-repo-check` that Codex turned out to require. The probe must establish whether a headless run in an untrusted scratch directory prompts or hangs without it. A hang is what the timeout is for, but a flag is better than a timeout.
-- `--allowed-mcp-server-names` exists, so MCP servers are reachable through settings. The isolated config home holding no `settings.json` is what prevents that; the flag is a second line, not the first.
-- **There is no config-home environment variable anywhere in the flag list** — no `GEMINI_DIR`, `GEMINI_HOME`, or `GEMINI_CONFIG_DIR`. The help's auth error names only `GEMINI_API_KEY`, `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_GENAI_USE_GCA`, and points at `~/.gemini/settings.json`. So the `HOME`-override fallback is the likely mechanism, and the clean-room assertion that refuses when isolation cannot be proved stops being defensive: it becomes the thing standing between a reviewer and the maintainer's global `GEMINI.md`.
-
-```ts
-
-interface EventPath {
-  readonly event: string;
-  readonly path: readonly string[];
-}
-
-/**
- * Where each CLI actually puts the model id. Measured, not assumed.
- *
- * For Codex the model is NOT in `--json` stdout at all — stdout carries only
- * thread.started / turn.started / item.completed / turn.completed. It lives in
- * the on-disk rollout log. So the caller passes the ROLLOUT LOG text for codex
- * and the stream-json stdout for gemini.
- */
-const MODEL_AT: Readonly<Record<Family, EventPath>> = {
-  codex: { event: 'world_state', path: ['payload', 'state', 'collaboration_mode', 'model'] },
-  gemini: { event: 'init', path: ['model'] },
-};
-
-const USAGE_AT: Readonly<Record<Family, EventPath>> = {
-  codex: { event: 'token_usage_record', path: ['payload', 'usage'] },
-  gemini: { event: 'result', path: ['stats'] },
-};
-
-/** Records the model the CLI reported. Neither CLI's lineup is documented, so
- *  nothing is pinned and nothing is assumed; absent means null, never a guess. */
-export function modelFromEvents(family: Family, jsonl: string): string | null {
-  const found = valueAt(jsonl, MODEL_AT[family]);
-  return typeof found === 'string' && found !== '' ? found : null;
-}
-
-/** Token usage, from the only record that carries a total. */
-export function usageFromEvents(family: Family, jsonl: string): Readonly<Record<string, number>> | null {
-  const found = valueAt(jsonl, USAGE_AT[family]);
-  if (typeof found !== 'object' || found === null || Array.isArray(found)) return null;
-  const numbers: Record<string, number> = {};
-  for (const [key, value] of Object.entries(found)) {
-    if (typeof value === 'number') numbers[key] = value;
-  }
-  return Object.keys(numbers).length > 0 ? numbers : null;
-}
-
-function valueAt(jsonl: string, spec: EventPath): unknown {
-  for (const line of jsonl.split(/\r?\n/)) {
-    if (line.trim() === '') continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!isRecord(record)) continue;
-    if (record.type !== spec.event) continue;
-    let cursor: unknown = record;
-    for (const key of spec.path) {
-      if (!isRecord(cursor)) { cursor = undefined; break; }
-      cursor = cursor[key];
-    }
-    if (cursor !== undefined) return cursor;
-  }
-  return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export interface CliResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number | null;
-  readonly timedOut: boolean;
-}
-
-/** A hang must fail, not wait. The timeout is the only thing standing between a
- *  confirmation-blocked CLI and a session that never returns. */
-export function runCli(options: {
-  readonly command: string;
-  readonly argv: readonly string[];
-  readonly cwd: string;
-  readonly env: Readonly<Record<string, string>>;
-  readonly stdin: string;
-  readonly timeoutMs: number;
-}): Promise<CliResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(options.command, [...options.argv], {
-      cwd: options.cwd,
-      env: { ...options.env },
-      shell: false,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, options.timeoutMs);
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
-    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code, timedOut });
-    });
-
-    child.stdin.end(options.stdin, 'utf8');
-  });
-}
-
-export const DEFAULT_TIMEOUT_MS = 900_000;
-```
-
-- [ ] **Step 4: Write the failing scratch tests**
-
-Create `scripts/review-runner/test/scratch.test.ts`:
-
-```ts
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { listRecursive, removeScratch } from '../scratch.ts';
-
-describe('listRecursive', () => {
-  it('returns relative paths with forward slashes, nested files included', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-scratch-'));
-    writeFileSync(join(root, 'auth.json'), '{}');
-    mkdirSync(join(root, 'sessions', '2026'), { recursive: true });
-    writeFileSync(join(root, 'sessions', '2026', 'rollout.jsonl'), '{}');
-
-    expect(listRecursive(root).sort()).toEqual(['auth.json', 'sessions/2026/rollout.jsonl']);
-    removeScratch([root]);
-  });
-
-  it('returns an empty list for an empty directory', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-scratch-'));
-    expect(listRecursive(root)).toEqual([]);
-    removeScratch([root]);
-  });
-});
-
-describe('removeScratch', () => {
-  it('deletes the directories it is given', () => {
-    const root = mkdtempSync(join(tmpdir(), 'olympus-scratch-'));
-    writeFileSync(join(root, 'f.txt'), 'x');
-    removeScratch([root]);
-    expect(existsSync(root)).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 5: Run the tests to verify they fail**
-
-Run: `pnpm test:tooling`
-Expected: FAIL — cannot resolve `../scratch.ts`.
-
-- [ ] **Step 6: Implement scratch construction**
-
-Create `scripts/review-runner/scratch.ts`. Use the environment variable name and credential filenames recorded in the Task 1 probe note:
-
-```ts
-import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { Family } from './evidence.ts';
-
-export interface ScratchDirs {
-  readonly configHome: string;
-  readonly workDir: string;
-}
-
-/** Forward slashes so a listing compares identically on Windows and Linux, and
- *  so the manifest reads the same whoever produced it. */
-export function listRecursive(dir: string): readonly string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (entry.isFile()) {
-      const rel = join(entry.parentPath, entry.name).slice(dir.length + 1);
-      out.push(rel.split('\\').join('/'));
-    }
-  }
-  return out;
-}
-
-export function removeScratch(dirs: readonly string[]): void {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-}
-
-export function buildScratch(options: {
-  readonly family: Family;
-  readonly credentialSourcePath: string;
-  readonly credentialFileName: string;
-  readonly bundleSourcePath: string;
-  readonly bundleFileName: string;
-}): ScratchDirs {
-  const configHome = mkdtempSync(join(tmpdir(), `olympus-review-cfg-${options.family}-`));
-  const workDir = mkdtempSync(join(tmpdir(), `olympus-review-work-${options.family}-`));
-  // Codex authenticates from a copied auth.json. Gemini authenticates from
-  // GEMINI_API_KEY in the environment, so its config home stays EMPTY — which
-  // is stricter isolation than a credential file, and makes its allowlist `[]`.
-  if (options.credentialFileName !== undefined && options.credentialSourcePath !== undefined) {
-    copyFileSync(options.credentialSourcePath, join(configHome, options.credentialFileName));
-  }
-  copyFileSync(options.bundleSourcePath, join(workDir, options.bundleFileName));
-  return { configHome, workDir };
-}
-
-/** The variable that isolates each CLI's config home. Filled from the Task 1
- *  probe: neither is documented, and a wrong name silently loads the real
- *  global instruction file instead of failing. */
-export function isolationEnv(family: Family, configHome: string): Readonly<Record<string, string>> {
-  if (family === 'codex') return { CODEX_HOME: configHome };
-  // Gemini exposes no config-home variable in its entire flag list, so the
-  // config home is redirected by overriding HOME (and USERPROFILE on Windows).
-  // The API key is passed through separately by the caller and must never be
-  // recorded by value. Confirm the exact mechanism against the probe note.
-  return { HOME: configHome, USERPROFILE: configHome };
-}
-```
-
-- [ ] **Step 7: Run all tests and typecheck**
-
-Run: `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`
-Expected: all PASS.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add scripts/review-runner/invoke.ts scripts/review-runner/scratch.ts \
-        scripts/review-runner/test/invoke.test.ts scripts/review-runner/test/scratch.test.ts
-git commit -m "Tooling: how each CLI is invoked, and the room it is invoked in"
-```
+- [ ] **Step 4: Verify** `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`, then **commit**.
 
 ---
 
 ### Task 8: The entry point
 
+**REWRITTEN with Task 7.** `node scripts/run-external-review.ts <UNIT> <codex|gemini> [--dry-run]`.
+
 **Files:**
 - Create: `scripts/run-external-review.ts`
 - Create: `scripts/review-runner/test/entry.test.ts`
 
-**Interfaces:**
-- Consumes: every module from Tasks 3–7.
-- Produces: the command `node scripts/run-external-review.ts <UNIT> <codex|gemini> [--dry-run]`.
+**Output filenames — fixed by the shipped `triage-review` and `run-review` skills, which were written first.** Do not rename them; those skills look for exactly these:
 
-- [ ] **Step 1: Write the failing test for argument parsing and the refusal path**
-
-Create `scripts/review-runner/test/entry.test.ts`:
-
-```ts
-import { describe, expect, it } from 'vitest';
-import { parseArgs } from '../../run-external-review.ts';
-
-describe('parseArgs', () => {
-  it('accepts a unit and a family', () => {
-    expect(parseArgs(['P5', 'codex'])).toEqual({ unit: 'P5', family: 'codex', dryRun: false });
-  });
-
-  it('accepts --dry-run, which builds and asserts the clean room but invokes nothing', () => {
-    expect(parseArgs(['P5', 'gemini', '--dry-run'])).toEqual({ unit: 'P5', family: 'gemini', dryRun: true });
-  });
-
-  it('refuses an unknown family rather than defaulting to one', () => {
-    expect(() => parseArgs(['P5', 'grok'])).toThrow(/codex|gemini/);
-  });
-
-  it('refuses a missing family', () => {
-    expect(() => parseArgs(['P5'])).toThrow(/usage/i);
-  });
-});
+```
+docs/reviews/<date>-<UNIT>-<slug>-review-<family>.md              the raw reply, nothing prepended
+docs/reviews/<date>-<UNIT>-<slug>-review-<family>.run.json        the Manifest
+docs/reviews/<date>-<UNIT>-<slug>-review-<family>.session.jsonl   provenance records, no message bodies
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+For Codex the `.session.jsonl` is the rollout log stripped to `CODEX_KEEP`. For Gemini there is no session; write one JSON line holding the response's `modelVersion`, `responseId` and `usageMetadata`, with the candidate text removed — it is already the review file.
 
-Run: `pnpm test:tooling`
-Expected: FAIL — cannot resolve `../../run-external-review.ts`.
+- [ ] **Step 1: Write the failing `parseArgs` tests** — a unit and a family; `--dry-run`; refuses an unknown family rather than defaulting; refuses a missing family with a usage line. `parseArgs` narrows the family with a type predicate, not a cast.
 
-- [ ] **Step 3: Implement the entry point**
-
-Create `scripts/run-external-review.ts`. Export `parseArgs` so it is testable, and guard `main()` as shown below so importing the module in a test does not run it.
-
-```ts
-import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { findUnitArtifacts } from './review-runner/artifacts.ts';
-import { assertCleanRoom } from './review-runner/cleanroom.ts';
-import {
-  CODEX_KEEP, GEMINI_KEEP, outcomeOf, stripSessionLog,
-  type Family, type Manifest,
-} from './review-runner/evidence.ts';
-import { bundleMarkers, verifyEcho } from './review-runner/integrity.ts';
-import {
-  DEFAULT_TIMEOUT_MS, codexArgv, geminiArgv, modelFromEvents, runCli,
-} from './review-runner/invoke.ts';
-import { buildScratch, isolationEnv, listRecursive, removeScratch } from './review-runner/scratch.ts';
-
-export interface Args {
-  readonly unit: string;
-  readonly family: Family;
-  readonly dryRun: boolean;
-}
-
-const FAMILIES = ['codex', 'gemini'] as const;
-const REVIEWS_DIR = join('docs', 'reviews');
-
-/** A predicate, not a cast. The project's own review standard treats casts as a
- *  language escape hatch worth flagging, and this costs the same. */
-function isFamily(value: string): value is Family {
-  return (FAMILIES as readonly string[]).includes(value);
-}
-
-export function parseArgs(argv: readonly string[]): Args {
-  const [unit, family, ...rest] = argv;
-  if (unit === undefined || family === undefined) {
-    throw new Error('usage: node scripts/run-external-review.ts <UNIT> <codex|gemini> [--dry-run]');
-  }
-  if (!isFamily(family)) {
-    throw new Error(`unknown reviewer family "${family}": expected codex or gemini`);
-  }
-  const unknown = rest.filter((flag) => flag !== '--dry-run');
-  if (unknown.length > 0) throw new Error(`unknown flag(s): ${unknown.join(', ')}`);
-  return { unit, family, dryRun: rest.includes('--dry-run') };
-}
-```
-
-Guard `main()` with a `process.argv[1]` comparison, **not** `import.meta.main` — that landed in Node 24 and CI runs Node 22, where the typecheck would reject the property:
+- [ ] **Step 2: Implement.** Guard `main()` with a `process.argv[1]` comparison, not `import.meta.main` (Node 24 only; CI runs 22):
 
 ```ts
 import { realpathSync } from 'node:fs';
@@ -1489,44 +1308,35 @@ const invokedDirectly =
 if (invokedDirectly) await main();
 ```
 
-The rest of `main()` follows this order, and **every failure exits non-zero without writing a review file**:
+`main()`, in this order. **Every failure exits non-zero and writes no review file.**
 
-1. `findUnitArtifacts(readdirSync(REVIEWS_DIR), args.unit)`.
-2. Refuse unless both files are committed and unmodified — shell out to `git status --porcelain -- <paths>` and require empty output, and `git ls-files --error-unmatch <paths>`.
-3. Read the bundle, compute `bundleSha256` with `createHash('sha256')`, and `bundleMarkers(bundleText)`.
-3a. **Refuse pre-flight if `markers.endNonce === null`**, before building any scratch directory and before contacting any vendor. A bundle with no end nonce can never reach `counted`, so sending it spends the full source of every changed file on two third-party services in exchange for a result that cannot count. Exit non-zero with a message saying the bundle predates the end-nonce convention and must be regenerated by `review-request`. This is the structural form of the two shell assertions Task 9 added to the generator: those catch a missing nonce at bundle-creation time, this catches it before egress.
-4. `buildScratch(...)` using the credential filenames from the probe note.
-5. `listRecursive` both dirs, then `assertCleanRoom(proof, allowed)`. On `CleanRoomError`, remove the scratch dirs and exit non-zero. **This listing is the `cleanRoom` proof stored in the manifest**, captured before the CLI runs — a single Codex turn leaves ~332 files and ~34MB of auto-fetched vendor plugin cache in the config home, so an exact-allowlist assertion can only ever hold beforehand.
-6. If `args.dryRun`, print the proof and exit 0 without invoking anything.
-7. `runCli(...)` with `codexArgv`/`geminiArgv`, `isolationEnv(...)` merged over a minimal env, the committed prompt as stdin, and `DEFAULT_TIMEOUT_MS`.
-8. Extract the reply: Codex from the `-o` file, Gemini from the `result` event's `response` field.
-9. **Read the provenance source per family, before any cleanup.** For Codex, find the rollout log inside the scratch config home at `sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-id>.jsonl` (glob it; there will be exactly one) and read it — that file is the *only* place the model id and a `total_tokens` figure exist. For Gemini, the stream-json stdout is the source. Then `modelFromEvents(family, source)` and `usageFromEvents(family, source)`.
-10. `verifyEcho(markers, replyText)` then `outcomeOf({ exitCode, timedOut, integrity })`.
-11. Write `<date>-<UNIT>-<slug>-review-<family>.md` with the raw reply and nothing else — **no header, no edit**; `triage-review` prepends the provenance header later.
-12. Write `<date>-<UNIT>-<slug>-review-<family>.run.json` (the `Manifest`) and `<date>-<UNIT>-<slug>-review-<family>.session.jsonl` via `stripSessionLog` over the family's provenance source with the family's keep-set. Record `postRunFileCount` from a second `listRecursive` of the config home so the vendor-cache growth stays visible.
-13. `removeScratch([configHome, workDir])` — **only after step 9 and 12 have read what they need out of it.**
-14. Print the outcome and exit 0 only when it is `counted`; otherwise exit non-zero so a caller cannot mistake a refusal for a review.
+1. `findUnitArtifacts(readdirSync('docs/reviews'), unit)`.
+2. Refuse unless the prompt and bundle are committed and unmodified (`git ls-files --error-unmatch` and an empty `git status --porcelain -- <paths>`).
+3. Read both; `bundleMarkers(bundleText)`.
+4. **Refuse pre-flight if `markers.endNonce === null`**, before any scratch directory or network call. Such a bundle can never reach `counted`, so sending it spends the full source of every changed file on a third party for nothing. Tell the maintainer to regenerate it with `review-request`.
+5. `payload = composePayload(promptText, bundleFileName, bundleText)`; record `payloadSha256` and `payloadBytes`.
+6. **Codex:** `buildCodexScratch`; `listRecursive` both dirs; `assertCleanRoom(proof, { configFiles: ['auth.json'], workFiles: [] })`. That listing is the `cleanRoom` proof — captured BEFORE the run, because one Codex turn leaves ~332 files of vendor cache behind it. **Gemini:** `cleanRoom` is `null`; nothing local is loaded.
+7. If `--dry-run`, print the payload hash and byte count, the clean-room proof (Codex) or the request URL and header names (Gemini), and exit 0 without contacting anyone.
+8. **Codex:** `runCli` with `codexArgv`, env `{ CODEX_HOME: configHome }`, stdin = payload. Read the reply from the `-o` file. Find the single rollout log under `sessions/` in the scratch home and read it — the ONLY place the model id and input token count exist. Refuse if `codexApprovalPolicy` is anything but `"never"`. **Gemini:** `callGemini(payload)`.
+9. `ingestion = verifyIngestion(payloadBytes, inputTokens)`; `integrity = verifyEcho(markers, reply)`; `outcome = outcomeOf({ exitCode, timedOut, ingestion, integrity })`.
+10. Write the three files above. The reply file holds the reply and nothing else.
+11. **Codex:** record `postRunFileCount`, then `removeScratch` — only after steps 8 and 10 have read what they need.
+12. **Before exiting, grep the manifest just written for the first 8 characters of every environment value whose name matches the secret pattern.** If any appears, delete all three files and exit non-zero. This is the Global Constraint's verification made structural rather than left to a reader.
+13. Print the outcome, the model, and the ingested token count against the floor. Exit 0 only when the outcome is `counted`.
 
-- [ ] **Step 4: Run the tests and typecheck**
+- [ ] **Step 3: Verify** `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`.
 
-Run: `pnpm test:tooling && pnpm typecheck:tooling && pnpm lint`
-Expected: all PASS.
-
-- [ ] **Step 5: Verify the dry run refuses cleanly on a real unit**
-
-Run: `node scripts/run-external-review.ts P5 gemini --dry-run`
-Expected: prints the clean-room proof and exits 0, or refuses with a named reason and exits non-zero. It must invoke no CLI and write no file into `docs/reviews/`.
-
-Confirm nothing was written: `git status --porcelain docs/reviews/` must be empty.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Dry-run both families against P5 and confirm the pre-flight refusal**
 
 ```bash
-git add scripts/run-external-review.ts scripts/review-runner/test/entry.test.ts
-git commit -m "Tooling: the runner, refusing by default"
+node scripts/run-external-review.ts P5 codex --dry-run
+node scripts/run-external-review.ts P5 gemini --dry-run
+git status --porcelain docs/reviews/   # must be empty
 ```
 
----
+Expected: both REFUSE at step 4, because P5's bundle predates the end nonce. That refusal is the success condition for this step — it proves no egress happens for a bundle that can never count.
+
+- [ ] **Step 5: Commit.**
 
 ### Task 9: Teach the prompt to prove the bundle arrived whole, and add the run-review skill
 
@@ -1765,6 +1575,6 @@ Note in the PR that this tooling is unexercised as a counted review until a unit
 
 **Spec coverage.** Every spec section maps to a task: the runner (2, 7, 8), clean room (1, 4, 7), bundle integrity (3, 9), manifest and stripped session log (5), unit resolution (6), subagent placement (10), skill and document changes (9, 10, 11), what-this-does-not-prove (11 step 3), the two probes (1), naming (8 step 10, 12). The "both families in parallel" decision lands in Task 9's run-review skill. The "no model pinned" decision lands in Task 7's `modelFromEvents`. The "ship-unit stops" decision lands in Task 11 step 1.
 
-**Placeholder scan.** One deliberate blank remains: `isolationEnv` in Task 7 step 6 carries `GEMINI_DIR` as a placeholder because the correct variable name is not documented and is measured in Task 1 step 4. The task text names the probe note as its source and forbids inventing an alternative. Task 1 must complete before Task 7 for this reason.
+**Placeholder scan.** The original plan carried one deliberate blank — a `GEMINI_DIR` placeholder for an undocumented config-home variable. The probe made it moot: Gemini is no longer reached through its CLI, so there is no config home to redirect. Tasks 7, 7B, 7C and 8 were rewritten on 2026-09-21 and contain no placeholders.
 
 **Type consistency.** `Family` is defined once in `evidence.ts` and imported by `invoke.ts`, `scratch.ts`, and the entry point. `EchoVerdict` is defined in `integrity.ts`, consumed by `outcomeOf` and stored on `Manifest`. `CleanRoomProof` is defined in `cleanroom.ts`, produced from `listRecursive`, stored on `Manifest`. `bundleMarkers`/`verifyEcho`, `codexArgv`/`geminiArgv`, `listRecursive`/`removeScratch`/`buildScratch`/`isolationEnv`, and `findUnitArtifacts` keep the same names in their defining task, their tests, and the entry point's import list.
