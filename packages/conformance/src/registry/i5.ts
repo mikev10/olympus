@@ -422,6 +422,24 @@ export const I5: InvariantEntry = {
   ],
   pending: [
     pending({
+      id: 'I5.workspace-is-writable-by-the-task',
+      owner: 'P6',
+      reason:
+        'A container runs as a fixed user and a bind mount carries the host\'s ownership through unchanged, so a '
+        + 'workspace created by any other uid is read-only to the task that was handed it. Nothing refuses: the agent '
+        + 'simply cannot write, its tool calls fail, and the run reads as a model that chose not to act rather than a '
+        + 'mount the runtime got wrong. That is the silent degrade this invariant exists to prevent, and it is worse '
+        + 'than an outright failure because the evidence looks like a model decision. Found on a GitHub runner during '
+        + 'P5, where the runner is uid 1001 and the driver image runs as 1000; it passed on a developer machine whose '
+        + 'daemon does not enforce host ownership the same way, so it is a defect that only appears on the hosts that '
+        + 'matter most. P5\'s harness widened its own temporary directory to keep its assertion honest, which fixes a '
+        + 'fixture and not the constraint. Closing it means SandboxSpec carrying the user a container runs as, so the '
+        + 'provider can match the container to the workspace it was given, and an assertion that provisions a '
+        + 'workspace owned by another uid and requires a refusal rather than an unwritable mount. P6 owns it because '
+        + 'it is the first unit to collect a diff in a sandbox it provisions, so it is the first whose correctness '
+        + 'depends on the workspace being writable by the task. Recorded by P5 as D-A-CI-03.',
+    }),
+    pending({
       id: 'I5.unsafe-declaration-survives-composition',
       owner: 'P6',
       reason:
