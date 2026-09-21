@@ -170,17 +170,18 @@ reword them. They are what separates a useful review from a list of style
 opinions.
 
 ```
-The code under review is in the attached file
+The code under review is in the file
 `<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — the full contents of
-every changed file, with the commit range at its top. If that file is not
-present in this conversation, stop and say so; do not review from the
-description below alone. Before reviewing, state on four separate lines: the
-BASE: value from the bundle's first lines, the HEAD: value, the file path in the
-bundle's final `===== <path> =====` header, and the 32-character value on the
-bundle's very last line, which begins `=== BUNDLE END ===`. If you cannot read
-all four, say so and stop — a partially received bundle produces findings about
-code you were not shown. Copy the last of these exactly; it is the only one of
-the four that proves you reached the end of the file.
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
 
 You are reviewing <what: e.g. the conformance testing infrastructure> of a
 TypeScript project. You have the source and nothing else — no design documents,
@@ -273,6 +274,15 @@ has to be the last line. A bundle built before this convention has no tail proof
 in it at all; the runner records those runs as `unverified` rather than trusting
 them, because a check that could not have been put to the reviewer is not a check
 the reviewer passed.
+
+The paragraph asking for the four values also has to survive two delivery modes:
+one family reads the bundle from its working directory with its own read-only
+tool, the other receives it injected into the prompt text, and a chat reviewer
+gets it as an attachment. That is why it names every way the bundle can arrive
+and commits to none of them. An editor who only ever runs one family will read
+that as clumsy and simplify it back to "the attached file", and the other family
+will then report the bundle missing on every run — a refusal indistinguishable
+from diligence.
 
 **What the nonce does not prove.** It proves the tail was delivered. It does not
 prove the middle was read. A model can receive a whole bundle and reason about a
