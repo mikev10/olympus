@@ -151,7 +151,14 @@ export function parseGeminiResponse(response: unknown): GeminiResult {
   const parts = asArray(getPath(candidate, ['content', 'parts']));
   const texts: string[] = [];
   for (const part of parts) {
-    const text = getPath(asRecord(part), ['text']);
+    const partRecord = asRecord(part);
+    // Gemini 3.1 Pro is a thinking model: a part flagged thought === true
+    // carries the model's private reasoning, not its answer. Splicing that
+    // into the reply would commit the model's working to a review file as
+    // though it were a finding, so it is skipped. Checked strictly against
+    // `true` so a part with `thought` absent or false is still included.
+    if (getPath(partRecord, ['thought']) === true) continue;
+    const text = getPath(partRecord, ['text']);
     if (typeof text === 'string') texts.push(text);
   }
 

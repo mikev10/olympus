@@ -135,6 +135,56 @@ describe('parseGeminiResponse', () => {
     expect(result.incompleteReason).toBe('no text parts');
   });
 
+  it('excludes a thought part\'s text from the reply, keeping only the answer part', () => {
+    const response = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              { text: 'the model privately reasoning about the bundle', thought: true },
+              { text: 'the actual review findings' },
+            ],
+          },
+          finishReason: 'STOP',
+        },
+      ],
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.reply).toBe('the actual review findings');
+    expect(result.reply).not.toContain('privately reasoning');
+  });
+
+  it('includes a part explicitly marked thought: false', () => {
+    const response = {
+      candidates: [
+        { content: { parts: [{ text: 'the actual review findings', thought: false }] }, finishReason: 'STOP' },
+      ],
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.reply).toBe('the actual review findings');
+  });
+
+  it('reports plainly, rather than an empty reply, when every text part is a thought part', () => {
+    const response = {
+      candidates: [
+        {
+          content: { parts: [{ text: 'only private reasoning here', thought: true }] },
+          finishReason: 'STOP',
+        },
+      ],
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.complete).toBe(false);
+    expect(result.reply).toBeNull();
+    expect(result.incompleteReason).toBe('no text parts');
+  });
+
   it('reports plainly when the candidate has no content.parts at all', () => {
     const response = {
       candidates: [{ finishReason: 'STOP' }],
