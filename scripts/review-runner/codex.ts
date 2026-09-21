@@ -205,21 +205,17 @@ export function codexUsage(rolloutJsonl: string): number | null {
  * read back from what the CLI itself recorded, not asserted by the caller —
  * is the only evidence a run could not have been prompted for approval.
  *
- * The exact field path within `turn_context` was not directly measured (see
- * task-7B report). `world_state` and `token_usage_record`, the two record
- * types whose shape WAS measured, both nest their fields under a `payload`
- * key, so `payload.approval_policy` is checked first. A top-level field on the
- * same record is checked second: it costs nothing (the record is already
- * confirmed `turn_context`) and covers the case where `turn_context` is shaped
- * differently from the other two.
+ * Measured 2026-09-21 against codex-cli 0.155.1 with a real call:
+ * `approval_policy` occurs exactly once in the rollout log, on `turn_context`,
+ * at `payload.approval_policy`. No other location is read. If a future Codex
+ * version drops or relocates the field, this must return `null` and cause a
+ * refusal upstream — not guess at a second location nobody has verified.
  */
 export function codexApprovalPolicy(rolloutJsonl: string): string | null {
   for (const record of parseJsonl(rolloutJsonl)) {
     if (record.type !== 'turn_context') continue;
-    const nested = getPath(record, ['payload', 'approval_policy']);
-    if (typeof nested === 'string') return nested;
-    const flat = getPath(record, ['approval_policy']);
-    if (typeof flat === 'string') return flat;
+    const policy = getPath(record, ['payload', 'approval_policy']);
+    if (typeof policy === 'string') return policy;
   }
   return null;
 }

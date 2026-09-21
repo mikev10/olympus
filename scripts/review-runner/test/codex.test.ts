@@ -161,23 +161,22 @@ describe('codexUsage', () => {
 });
 
 describe('codexApprovalPolicy', () => {
-  // Judgment call (see task-7B report): the exact field path for approval_policy
-  // within turn_context was not directly measured. world_state and
-  // token_usage_record, the two record types whose shape WAS measured, both nest
-  // their payload under a `payload` key, so payload.approval_policy is checked
-  // first. A top-level field on the same record is checked second, since it
-  // cannot cost a false positive (the record type is still turn_context) and
-  // guards against turn_context being shaped differently from the other two.
+  // Measured 2026-09-21 against codex-cli 0.155.1 with a real call:
+  // approval_policy occurs exactly once in the rollout log, on turn_context,
+  // at payload.approval_policy.
   it('reads approval_policy nested under payload on a turn_context record', () => {
     const rollout = '{"type":"turn_context","payload":{"approval_policy":"never","model_context_window":258400}}';
 
     expect(codexApprovalPolicy(rollout)).toBe('never');
   });
 
-  it('reads approval_policy from a turn_context record where it is a top-level field', () => {
+  // Negative: proves there is no top-level fallback. A real rollout log never
+  // puts approval_policy here, so a record shaped like this must refuse
+  // (return null) rather than have something read it anyway.
+  it('returns null for a turn_context record with only a top-level approval_policy, since no such location is read', () => {
     const rollout = '{"type":"turn_context","approval_policy":"never","model_context_window":258400}';
 
-    expect(codexApprovalPolicy(rollout)).toBe('never');
+    expect(codexApprovalPolicy(rollout)).toBeNull();
   });
 
   it('returns null when no turn_context record is present', () => {
