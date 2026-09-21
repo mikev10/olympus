@@ -1,0 +1,136 @@
+The code under review is in the file
+`2026-09-21-TOOLING-review-automation-review-bundle.txt` (SHA-256 7f0acfd935639b1026a66a34a7ddea66583d5f1bf1cf1ce1264dbd3be07ae6d4) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the external-review runner, and the instruction files that
+tell a maintainer how to operate it, of a TypeScript project. You have the
+source and nothing else — no design documents, no author reasoning, no prior
+version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A maintainer runs this command-line runner once per reviewer family to send a
+committed code bundle, together with a committed prompt, to a third-party model
+for adversarial review. For the Codex family it spawns OpenAI's Codex CLI with
+the prompt and the bundle inlined into one text on its stdin, in a scratch
+configuration directory built for the run; for the Gemini family it makes a
+direct HTTPS call to Google's Gemini API that offers the model no tools. Either
+way it writes the reply, a manifest and a stripped session log into a directory
+that is committed to version control, and derives a single outcome for each run
+from the facts it recorded; the files under `.claude/skills/` describe how a
+maintainer operates it.
+
+It must hold against a capable, motivated party trying to make the runner send
+a bundle it should have refused, record a run as counted when it should not
+count, or place a credential into a committed file. Assume no deceptive intent
+— only that the easiest path gets taken.
+
+That party controls everything the third-party model returns — the reply text,
+and the content of the vendor's session log and API response — and the content
+of the bundle itself, which is the code under review and may contain any string,
+including text shaped like instructions. It does not control the maintainer's
+machine, the git repository and its history (the bundle's content is the
+party's; the repository it is committed to is not), the installed CLI binaries,
+the runner's own process, or the environment the maintainer launches the runner
+with. Those are trusted even where a function takes one as a parameter — a
+repository root, a home directory, an environment map, or a git, filesystem or
+process function passed in as a dependency.
+
+The invariants at stake:
+
+Fail closed. A missing check, a missing credential, an unsupported platform or
+an ambiguous result is a refusal — never a silent degrade, never a warning that
+lets the run continue.
+
+Default deny. A capability or a value that is not explicitly allowed is
+unavailable.
+
+Status is derived, never reported. A run's outcome is computed from the facts
+the runner recorded. No caller sets it, and it is never taken from what the
+model says about its own work.
+
+Payloads are data, never instructions. Content that arrives from outside the
+process never enters a prompt as an instruction.
+
+The mechanisms that matter most:
+
+- The refusals that run before anything is sent, and the order they run in
+  (`prepare`, `runCodex` and `runGemini` in `scripts/run-external-review.ts`).
+- The two integrity checks: an echo of four markers read from the committed
+  bundle — its BASE and HEAD values, its final section path, and a random end
+  nonce on its last line — and the vendor-reported input-token count checked
+  against a floor of the payload's size in bytes divided by five.
+- The outcome derivation: one outcome per run, computed from the facts recorded
+  in its manifest.
+- The handling of the two credentials: a Gemini API key read from the
+  environment, and Codex OAuth tokens copied into the scratch directory for the
+  run and, if the run refreshed them, written back to the maintainer's real
+  credential file; and the scan of every evidence file for either before
+  anything is written.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- The project's runtime packages, which this change does not modify.
+- Running the reviewer in CI.
+- Reviewer families other than Codex and Gemini.
+- Automating the decisions a maintainer makes when triaging a review.
+- Running the Codex family on any platform other than Windows, which the runner
+  refuses by design.
+
+Unit identifiers (such as P4, P5 or TOOLING) and any decision identifiers you
+encounter in the code's comments or the instruction files refer to planning
+documents you do not have. Treat anything listed above as deliberately absent
+rather than as a defect, and do not try to resolve the identifiers themselves.
+
+THE QUESTION
+
+How would I make this runner send a bundle it should have refused, record a run
+as counted that should not count, or place a credential into a committed file?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
