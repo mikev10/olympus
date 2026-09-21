@@ -81,8 +81,19 @@ a deliberate act, costing one command per unit.
 
 ## The runner
 
-`scripts/run-external-review.sh <UNIT> <codex|gemini>`. Tracked, not generated:
-a generated script proves nothing about what ran.
+`scripts/run-external-review.ts <UNIT> <codex|gemini>`, invoked as
+`node scripts/run-external-review.ts P5 codex`. Tracked, not generated: a
+generated script proves nothing about what ran.
+
+**TypeScript rather than shell** (amended 2026-09-20, after the design was
+approved). The repository has no tracked `.sh` file, so a shell runner would set
+a precedent; its testable logic — the clean-room assertion, the integrity echo,
+the manifest — is pure functions over inputs, which `bats-core` would have to be
+added to exercise; and the fragile part on Windows is exactly the path and
+environment handling that shell does worst. TypeScript uses the `vitest ^4.1.11`
+already installed at the workspace root, obeys the project's strict/no-`any`
+convention, and runs directly on Node 24 via native type stripping with no build
+step.
 
 Per invocation:
 
