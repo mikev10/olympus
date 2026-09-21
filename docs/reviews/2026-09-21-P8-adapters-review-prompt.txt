@@ -1,0 +1,194 @@
+The code under review is in the attached file
+`2026-09-21-P8-adapters-review-bundle.txt` (SHA-256
+e7f1a0099bb95a758955a984c594607c8928e240be37175200c2720c39f0e362) — the full
+contents of every changed file, with the commit range at its top. If that file
+is not present in this conversation, stop and say so; do not review from the
+description below alone.
+
+This is a pre-merge code review of our own open-source project, requested by
+the author of the change, on a branch that has not been merged. The purpose is
+to find enforcement gaps and incorrect assertions while they are still cheap to
+fix. Nothing here is a third party's system.
+
+You are reviewing the test-framework adapters of a TypeScript project: the
+code that reads another repository's tests, coverage, and configuration so a
+runtime can judge work done in that repository, and the code that runs a
+command-line scenario against it. You have the source and nothing else — no
+design documents, no author reasoning, no prior version, no conversation that
+produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+A runtime has AI agents change a target repository and then decides, from
+evidence it collects itself, whether the work is done. These adapters are how
+it understands a TypeScript repository tested with vitest or jest: which files
+are test suites, what each test file asserts and whether a change weakened or
+removed an assertion, which tests are skipped or focused, how much of the
+changed code the tests executed, and which configuration files changed. They
+read two directory trees — the repository before the change ("base") and after
+it ("head") — on the runtime's own host, and they are meant to parse and never
+execute anything in them. A separate adapter runs a command-line scenario
+inside the sandbox container and compares what the process did against a
+locked expectation, on the host. An adapter set records which of these
+controls exist for a repository, and the most autonomous level of operation is
+refused whenever any control is missing.
+
+Two contract changes land with it: a check result now carries the runtime's
+verdict on whether an expectation held, and the gate that decides pass or fail
+reads that verdict instead of the process's exit code; and a sandbox command
+can now be given standard input. The commit range also carries two small
+changes that landed between reviews — a CI workflow change and a permissions
+change in another package's test harness — which are in the bundle and in
+scope.
+
+These properties have to hold even when the repository under analysis is shaped
+in the least convenient way the code allows. Assume no deceptive intent — only
+that the easiest path gets taken, and that anything the code does not prevent
+will eventually happen by accident.
+
+What the code must treat as untrusted: every file in the base and head trees —
+their contents, names, sizes, and types, including symbolic links, directories
+where files are expected, and special files — and therefore every test file,
+every framework config file, and the package.json. Also the contents of the
+coverage report, which is written by a test run in which the repository's own
+code executed. Also the process a command-line scenario runs: its output, its
+exit code, what it does with its input, and anything it does inside the
+container before or during the check.
+
+What the code may treat as trusted: the paths the runtime passes in (the two
+tree roots, the location of the coverage report, and the directory the
+report's file paths are relative to); the scenario's input and expectation,
+which come from acceptance criteria locked before the agent worked; the sandbox
+provider, which is runtime-selected even where a function takes one as an
+argument; and code running inside the runtime's own process. A finding that
+depends on one of those being hostile is out of scope, because the trust
+boundary sits outside them.
+
+The invariants at stake:
+
+I1 — No agent writes to the Vault, at any autonomy level, in any repository, in
+any role, under any trigger. It is enforced at the mount layer, which only
+holds for code that runs inside the container. For this unit it means nothing
+from the repository under analysis may run on the host: a config that is
+loaded, a tool that is spawned, or a module that is imported by a computed name
+would run agent-written code outside the mount table.
+
+I2 — The runtime derives status; the model never reports it. For this unit it
+means a behavioral check's pass or fail is the runtime's own comparison, made
+where the process under test cannot reach it, and a process's own exit code
+never stands in for that verdict.
+
+I3 — An agent may not be judged by an artifact it can write. The expectation a
+scenario is compared against comes from locked acceptance criteria, never from
+the implementation.
+
+I5 — Fail closed. A missing required check, an absent capability, an
+unsupported stack or configuration, an unreadable input, or a shrunken test
+enumeration is a refusal — never a silent degrade, never a default that lets
+the run continue, never a number reported for something that could not be
+measured.
+
+I8 — Every capability claim maps to an executable assertion that fails when the
+capability is deleted. Documentation asserting that a subsystem is wired is not
+evidence that it is.
+
+The mechanisms that matter most:
+
+- Test discovery: framework configs are read from their syntax tree, a binding
+  is followed only when nothing else in the file refers to it, per-version
+  discovery defaults are applied, and anything that cannot be resolved is
+  refused rather than enumerated with defaults.
+- Assertion comparison: how two lists of parsed assertions are paired, and the
+  rule that decides which changes are reported as weakened, removed, or a
+  widened tolerance.
+- Reading agent-written trees on the host: link and special-file handling,
+  size caps, the in-process line diff, and how the coverage report is parsed
+  and its paths mapped onto the head tree.
+- Judging a command-line scenario: validation of the scenario's shape, the
+  command issued through the sandbox provider with its input, the comparison on
+  the host, and the gate rule that a result carrying an expectation is judged
+  by it rather than by its exit code.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- `MutationAdapter` — M3. Return `null` and list it in `unavailableControls()`.
+- a `BehavioralAdapter` of kind `http` (P11). An HTTP request has to originate
+  on the sandbox's network, and a client inside the product's container is a
+  client the product can replace, so what it observed would be the product's
+  report of itself. P11 adds a probe that shares the sandbox's network and not
+  its filesystem. Until then `unavailableControls()` names `behavioral:http`,
+  the gap stated rather than filled with a judge that can be forged
+- a `BehavioralAdapter` of kind `browser` (R3). `unavailableControls()` names
+  it, so the gap is stated rather than hidden
+- wiring the L3 refusal into run admission. The admission record would have to
+  carry the set so a resume cannot restate it, and `SKELETON_LINE` refuses
+  every run above L1 until P6 deletes it, so an admission assertion could not
+  fail for the right reason before then. Owed to P6 as
+  `I5.adapter-refusal-enforced-at-admission`
+- assembling a `TamperReport`: renames, moves, snapshot regeneration, coverage
+  delta, protected-path touches (P7). P8 supplies the framework-specific
+  parsing P7 compares with
+- executing a `VerificationManifest`, filling `CheckResult.suiteCount`, and the
+  fresh sandbox at base+diff (P6)
+- readiness probes and the ceiling they derive (R1)
+- any stack other than TypeScript with vitest or jest
+
+The unit identifiers above (M3, P6, P7, P11, R1, R3) and any decision
+identifiers you encounter in the code's comments refer to planning documents
+you do not have. They name future work or past reasoning; treat anything listed
+here as deliberately absent rather than as a defect, and do not try to resolve
+the identifiers themselves.
+
+THE QUESTION
+
+Where does this code fail to enforce what it claims to enforce?
+
+Two areas in particular. First: can a repository shaped by an agent make these
+adapters under-report — a weakened or deleted assertion read as unchanged, a
+skip or focus marker missed, a test file left out of or added to the
+enumeration without the refusal that should follow, a changed line counted as
+covered, a changed config file missed — or make the host read, follow, or
+execute something the repository chose?
+
+Second: can a check pass the gate although its expectation did not hold, can a
+scenario's verdict be influenced by the process it judges, or can an adapter
+set be admitted at the most autonomous level while it lacks a control?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete
+bypass or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
