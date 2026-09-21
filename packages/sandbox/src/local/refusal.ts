@@ -22,7 +22,9 @@ export type RefusalLayer =
   /** The sandbox's wall-clock budget is spent. */
   | 'lifetime'
   /** The handle is not one this provider issued, or the command is empty. */
-  | 'handle';
+  | 'handle'
+  /** A variable named in `ExecOptions.env` is not a usable name, or has no value to pass. */
+  | 'environment';
 
 export class SandboxRefusal extends Error {
   override readonly name = 'SandboxRefusal';

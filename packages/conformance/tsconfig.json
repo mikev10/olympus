@@ -13,7 +13,8 @@
       "@olympus-ai/sandbox": ["../sandbox/src/index.ts"],
       "@olympus-ai/triggers": ["../triggers/src/index.ts"],
       "@olympus-ai/adapters": ["../adapters/src/index.ts"],
-      "@olympus-ai/api": ["../api/src/index.ts"]
+      "@olympus-ai/api": ["../api/src/index.ts"],
+      "@olympus-ai/driver-claude-code": ["../drivers/claude-code/src/index.ts"]
     }
   },
   // fixtures/types is deliberately absent: those files fail to compile by

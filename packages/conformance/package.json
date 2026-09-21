@@ -7,6 +7,11 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vitest": "./src/kit/vitest.ts",
+    "./reporter": "./src/kit/reporter.ts"
+  },
   "sideEffects": false,
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

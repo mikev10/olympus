@@ -21,6 +21,13 @@ export interface CliResult {
 export interface CliOptions {
   /** Milliseconds before the child is killed and `timedOut` is thrown. Omitted means no bound. */
   readonly timeoutMs?: number;
+  /**
+   * Added to the environment of the `docker` process itself, never to `args`.
+   * `docker exec -e NAME` with no `=value` tells the CLI to read that name
+   * from its own environment, which is how a secret reaches a container
+   * without appearing in anyone's argv.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** Thrown when a call exceeded its bound. The caller decides what the bound meant. */
@@ -44,7 +51,12 @@ export class DockerUnavailable extends Error {
 export function dockerCli(executable: string, args: string[], options: CliOptions = {}): Promise<CliResult> {
   return new Promise((resolvePromise, rejectPromise) => {
     const started = performance.now();
-    const child = spawn(executable, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(executable, args, {
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let timer: NodeJS.Timeout | undefined;

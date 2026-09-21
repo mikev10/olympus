@@ -23,9 +23,9 @@
 ^tsconfig\.base\.json$
 ^package\.json$
 ^pnpm-workspace\.yaml$
-^packages/[^/]+/package\.json$
-^packages/[^/]+/tsconfig(\.[^/]+)?\.json$
+^packages/([^/]+/)?[^/]+/package\.json$
+^packages/([^/]+/)?[^/]+/tsconfig(\.[^/]+)?\.json$
 (^|/)vitest\.(config|workspace)\.
 ^packages/conformance/
-^packages/[^/]+/src/.*types\.ts$
+^packages/([^/]+/)?[^/]+/src/.*types\.ts$
 ^packages/core/src/driver/contract\.ts$

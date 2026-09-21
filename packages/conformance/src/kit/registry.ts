@@ -4,12 +4,14 @@
  * assertions, and renders the report CI prints.
  */
 import { PENDING_BASELINE_FILE, type PendingBaseline } from './baseline.js';
+import { reconcileExternalAssertion, type ReconciliationVerdict } from './reconcile.js';
 import {
   INVARIANT_IDS,
   UNITS,
   type Assertion,
   type ClaimEntry,
   type ClaimId,
+  type ExternalAssertion,
   type InvariantEntry,
   type InvariantId,
   type InvariantState,
@@ -49,8 +51,10 @@ export interface ClaimReport {
 export interface RegistryEvaluation {
   readonly invariants: readonly InvariantReport[];
   readonly claims: readonly ClaimReport[];
-  /** Structural defects: duplicate ids, unknown owners, missing states, an external assertion, a pending count over its baseline. Empty when the registry is sound. */
+  /** Structural defects: duplicate ids, unknown owners, missing states, an unreconciled external assertion, a pending count over its baseline. Empty when the registry is sound. */
   readonly problems: readonly string[];
+  /** One verdict per external assertion, keyed by assertion id. */
+  readonly external: ReadonlyMap<string, ReconciliationVerdict>;
   readonly counts: {
     readonly asserted: number;
     readonly partial: number;
@@ -58,11 +62,16 @@ export interface RegistryEvaluation {
     readonly missing: number;
     readonly assertions: number;
     readonly external: number;
+    /** External assertions reconciled against a passing test in the owning package's own run. */
+    readonly externalAccepted: number;
     readonly pendingEntries: number;
     /** Sum of the baseline over every entry that has one; undefined when no baseline was supplied. */
     readonly pendingBaseline: number | undefined;
   };
 }
+
+/** Decides whether one external assertion ran and passed. Injectable so the kit's own tests need no sibling package. */
+export type ExternalReconciler = (assertion: ExternalAssertion) => ReconciliationVerdict;
 
 export interface EvaluateOptions {
   /**
@@ -70,11 +79,27 @@ export interface EvaluateOptions {
    * every entry must have one and no entry's pending count may exceed it.
    */
   readonly baseline?: PendingBaseline;
+  /**
+   * How an external assertion is reconciled against the owning package's own
+   * test run. Defaults to the real one, which reads that package's run report:
+   * an evaluation that took no reconciler would otherwise accept an external
+   * assertion on the strength of nothing, which is the state this option
+   * exists to end.
+   */
+  readonly reconcile?: ExternalReconciler;
 }
 
-/** Only local assertions count as live: an external one is refused and is not coverage. */
-export function stateOf(entry: { assertions: readonly Assertion[]; pending: readonly PendingAssertion[] }): InvariantState {
-  if (entry.assertions.some((a) => a.kind === 'local')) return entry.pending.length > 0 ? 'partial' : 'asserted';
+/**
+ * Live assertions are the local ones plus every external one reconciled
+ * against a passing test in the owning package's own run. An external
+ * assertion that was not reconciled is not coverage and does not count.
+ */
+export function stateOf(
+  entry: { assertions: readonly Assertion[]; pending: readonly PendingAssertion[] },
+  accepted: ReadonlySet<string> = new Set(),
+): InvariantState {
+  const live = entry.assertions.some((a) => a.kind === 'local' || accepted.has(a.id));
+  if (live) return entry.pending.length > 0 ? 'partial' : 'asserted';
   if (entry.pending.length > 0) return 'pending';
   return 'missing';
 }
@@ -84,12 +109,11 @@ function isUnitId(value: string): value is UnitId {
 }
 
 /**
- * The pending assertion that must land before an external assertion can be
+ * The assertion that had to land before an external assertion could be
  * accepted: reconciling the ids the registry lists against the tests the
- * owning package actually ran and passed. Until then a package, a file, and
- * a quoted id can all exist while the test is skipped or the id sits in a
- * comment, so presence is not evidence and every external assertion is a
- * problem.
+ * owning package actually ran and passed. Paid by P5 in `kit/reconcile.ts`.
+ * The id is still named on every refusal, so a rejected external assertion
+ * points at the mechanism that rejected it.
  */
 export const EXTERNAL_RECONCILIATION_ID = 'I8.external-assertion-execution-reconciled';
 
@@ -98,6 +122,8 @@ function validateEntry(
   entry: { assertions: readonly Assertion[]; pending: readonly PendingAssertion[] },
   seen: Map<string, string>,
   problems: string[],
+  external: Map<string, ReconciliationVerdict>,
+  reconcile: ExternalReconciler,
 ): void {
   const prefix = `${ownerId}.`;
   const belongs = (id: string): boolean => id === ownerId || id.startsWith(prefix);
@@ -108,9 +134,9 @@ function validateEntry(
     seen.set(a.id, ownerId);
     if (a.title.trim() === '') problems.push(`${a.id}: empty title`);
     if (a.kind === 'external') {
-      problems.push(
-        `${a.id}: external assertions are refused until execution reconciliation exists (${EXTERNAL_RECONCILIATION_ID})`,
-      );
+      const verdict = reconcile(a);
+      external.set(a.id, verdict);
+      if (!verdict.ok) problems.push(`${verdict.detail} (${EXTERNAL_RECONCILIATION_ID}: ${verdict.refusal})`);
     }
   }
   for (const p of entry.pending) {
@@ -151,8 +177,13 @@ function ratchet(
 
 export function evaluateRegistry(registry: Registry, options: EvaluateOptions = {}): RegistryEvaluation {
   const baseline = options.baseline;
+  const reconcile = options.reconcile ?? reconcileExternalAssertion;
   const problems: string[] = [];
   const seen = new Map<string, string>();
+  const external = new Map<string, ReconciliationVerdict>();
+  /** The ids reconciled so far. An entry's own externals are resolved before its state is derived. */
+  const accepted = (): ReadonlySet<string> =>
+    new Set([...external].filter(([, verdict]) => verdict.ok).map(([id]) => id));
 
   const invariants: InvariantReport[] = [];
   for (const id of INVARIANT_IDS) {
@@ -163,8 +194,8 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
       invariants.push({ id, title: '', state: 'missing', assertions: [], pending: [], baseline: undefined });
       continue;
     }
-    validateEntry(id, entry, seen, problems);
-    const state = stateOf(entry);
+    validateEntry(id, entry, seen, problems, external, reconcile);
+    const state = stateOf(entry, accepted());
     if (state === 'missing') problems.push(`${id}: missing (no assertion and no pending owner)`);
     const allowed = ratchet(id, baseline?.invariants, entry.pending.length, problems);
     invariants.push({ id, title: entry.title, state, assertions: entry.assertions, pending: entry.pending, baseline: allowed });
@@ -176,8 +207,8 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
   const claims: ClaimReport[] = [];
   for (const [id, entry] of Object.entries(registry.claims) as Array<[ClaimId, ClaimEntry]>) {
     if (!id.startsWith('driver.') && !id.startsWith('sandbox.')) problems.push(`${id}: not a capability claim`);
-    validateEntry(id, entry, seen, problems);
-    const state = stateOf(entry);
+    validateEntry(id, entry, seen, problems, external, reconcile);
+    const state = stateOf(entry, accepted());
     if (state === 'missing') problems.push(`${id}: missing (no assertion and no pending owner)`);
     const allowed = ratchet(id, baseline?.claims, entry.pending.length, problems);
     claims.push({ id, state, assertions: entry.assertions, pending: entry.pending, baseline: allowed });
@@ -198,6 +229,7 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
     invariants,
     claims,
     problems,
+    external,
     counts: {
       asserted: all.filter((r) => r.state === 'asserted').length,
       partial: all.filter((r) => r.state === 'partial').length,
@@ -205,6 +237,7 @@ export function evaluateRegistry(registry: Registry, options: EvaluateOptions = 
       missing: all.filter((r) => r.state === 'missing').length,
       assertions: assertions.length,
       external: assertions.filter((a) => a.kind === 'external').length,
+      externalAccepted: [...external.values()].filter((v) => v.ok).length,
       pendingEntries: all.reduce((n, r) => n + r.pending.length, 0),
       pendingBaseline: baseline === undefined ? undefined : all.reduce((n, r) => n + (r.baseline ?? 0), 0),
     },
@@ -256,8 +289,10 @@ export function formatReport(evaluation: RegistryEvaluation): string {
   }
   lines.push('');
   const c = evaluation.counts;
+  const externalNote =
+    c.external === 0 ? '' : ` (${String(c.external)} external, ${String(c.externalAccepted)} reconciled)`;
   lines.push(
-    `Assertions: ${String(c.assertions)} (${String(c.external)} external)  asserted: ${String(c.asserted)}  partial: ${String(c.partial)}  pending: ${String(c.pending)}  missing: ${String(c.missing)}`,
+    `Assertions: ${String(c.assertions)}${externalNote}  asserted: ${String(c.asserted)}  partial: ${String(c.partial)}  pending: ${String(c.pending)}  missing: ${String(c.missing)}`,
   );
   lines.push('');
   lines.push(`Pending entries: ${String(c.pendingEntries)}${baselineNote(c.pendingEntries, c.pendingBaseline)}; each names the unit that owes the assertion`);

@@ -69,10 +69,11 @@ jobs:
       # nothing about it. Checked here so a missing daemon fails with this
       # message, and the image is pulled here so a cold-cache pull is never
       # timed against a wall-clock assertion.
-      - name: Docker daemon and the pinned test image
+      - name: Docker daemon and the pinned test images
         run: |
           docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
           docker pull --quiet alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+          docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 
       - name: Typecheck
         run: pnpm typecheck
@@ -80,7 +81,25 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Before the recursive test command, and the order is not incidental
+      # (D-P5-23). The registry reconciles this package's external assertions
+      # against a run report only this suite writes, and pnpm runs conformance
+      # first because the kit is the driver's dependency. From a cold checkout
+      # there is no report, all nine refuse, and the recursive run aborts
+      # before the driver package is ever reached.
+      #
+      # These assertions call a real model and refuse rather than skip without
+      # a credential (I5). A fork pull request has no secret and fails here,
+      # which is the correct outcome: a capability claim proven by a test that
+      # did not run is worse than one reported pending.
+      - name: Driver assertions, which write the conformance run report
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm --filter @olympus-ai/driver-claude-code test
+
       - name: Test
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm test
 
       # scripts/ is not a workspace package, so `pnpm -r typecheck` and

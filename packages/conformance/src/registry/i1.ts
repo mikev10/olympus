@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { compileError, pending, runtime } from '../kit/assert.js';
+import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
 
@@ -169,16 +169,13 @@ export const I1: InvariantEntry = {
         });
       },
     }),
-  ],
-  pending: [
-    pending({
+    external({
       id: 'I1.driver-executes-inside-the-sandbox',
-      owner: 'P5',
-      reason:
-        'TaskRequest hands a driver a SandboxHandle, and nothing in the contract lets the driver run anything inside it. ' +
-        'A driver with no path into the sandbox runs the model on the host, outside the mount table where I1 is enforced. ' +
-        'P5 must give the driver an exec path into the provisioned sandbox, with P2 on the provider side, and assert that ' +
-        "a task's commands run inside the sandbox and nowhere else. Surfaced by S1 (docs/decisions.md, owed contract gaps).",
+      title: "a task's commands run inside the provisioned sandbox and nowhere else, and a driver with no provider cannot be constructed",
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
     }),
   ],
+  pending: [],
 };

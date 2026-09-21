@@ -7,7 +7,9 @@
  * strictness as the contracts (kit/fixtures.ts). Runtime assertions are plain
  * functions. Lint-backed assertions read ESLint's resolved configuration and
  * lint a fixture (kit/eslint.ts). Another package contributes an assertion
- * with `invariantTest` and the registry lists it as external.
+ * with `invariantTest`, adds `ConformanceRunReporter` to its vitest config,
+ * and the registry counts it once it reconciles against that package's own
+ * run (kit/reconcile.ts).
  */
 export * from './kit/types.js';
 export * from './kit/workspace.js';
@@ -18,4 +20,7 @@ export * from './kit/assert.js';
 export * from './kit/eslint.js';
 export * from './kit/scan.js';
 export * from './kit/vitest.js';
+export * from './kit/run-report.js';
+export * from './kit/reconcile.js';
+export * from './kit/reporter.js';
 export { REGISTRY } from './registry/index.js';

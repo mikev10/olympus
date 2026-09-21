@@ -1739,6 +1739,251 @@ choices inside the fixes were not forced by the findings and are recorded here.
 - **What the failure actually was:** it failed closed — the sandbox could reach nothing afterwards — but silently. The provider did not notice, `exec` kept working, and the run would have failed later somewhere else for a reason nothing in the evidence explains. Silence was the defect, not unavailability.
 - **Reverse:** delete `portOf` and parse with `Number` again.
 
+## P5: Driver: Claude Code
+
+### D-P5-01: The unit spec was completed before the code, not after
+
+- **Ambiguous:** `DECOMPOSITION.md`'s P5 entry had Scope, Deliver, Out of scope, and Conformance, and none of the other five parts F1 §"Sub-Plan Rules" requires — no acceptance criteria, no invariant line, no ledger, no statement of where the package lives, no list of the contract changes it needs.
+- **Chosen:** write all five first, in their own commit, and take the three decisions they turn on with the maintainer before any code: capability claims are proven against a real model call inside the sandbox and never skipped; `Driver` gains `declaredTools()` in this unit's pull request; the driver holds the `SandboxProvider` that provisioned its handle.
+- **Why:** P4's entry gained the same five before P4 started. An acceptance criterion written after the implementation is a description of what was built, not a test of it, and the ledger in particular only constrains anything if it is fixed before the work that would edit it.
+- **Reverse:** the commit is documentation only; revert it and the entry is thin again.
+
+### D-P5-02: An external assertion is reconciled against a report the package writes, not by re-running it
+
+- **Ambiguous:** `I8.external-assertion-execution-reconciled` requires the registry to read "that package's own test run" and refuse an id that did not run, without saying how the registry gets it. The registry cannot import a sibling's tests (D-F3-04, the workspace cycle).
+- **Chosen:** the owning package adds `ConformanceRunReporter` to its vitest config; the reporter writes `.conformance/run.json` at the end of every run, passing or failing, holding each test that carried an assertion id, its state, its file, and a hash over every input file in the package. `kit/reconcile.ts` recomputes that hash and accepts the assertion only when the named test passed, in the named file, against the tree being evaluated. Ten refusals, each with its own name and message.
+- **Why:** the alternative — the registry spawning each owning package's suite itself — needs no artifact and cannot go stale, but it runs every external assertion twice. For P5 that is a second set of model calls for an answer the first run already has, and for P2 a second container fleet. A content hash buys the same freshness guarantee for one run. An mtime comparison would not: a checkout, a cache restore, and a clock skew all move mtimes without moving content.
+- **Why the reporter and not a wrapper script:** it runs in-process on every outcome, so a failing suite overwrites the report a passing one left instead of leaving it behind to vouch for code that no longer passes. And `vitest.config.*` is a protected path, so adding it to a package is an acknowledged edit rather than a quiet one.
+- **Reverse:** delete `kit/reconcile.ts`, `kit/run-report.ts`, and `kit/reporter.ts`, restore the unconditional refusal in `validateEntry`, and re-register the pending entry with P5 as owner.
+
+### D-P5-03: The report is a build artifact and is never committed
+
+- **Ambiguous:** nothing said whether a run report belongs in the repository. It is evidence, and this repository tracks evidence — review bundles are tracked deliberately.
+- **Chosen:** `.conformance/` is gitignored.
+- **Why:** a review bundle is what a reviewer saw, fixed forever. A run report is what one machine's run recorded a moment ago, and it is meaningless away from the tree it hashes. A committed one would be a claim about a run nobody can see, asserted by the party being judged — the shape I2 rejects everywhere else. The tree hash makes a stale one harmless anyway: it is refused, not believed.
+- **Reverse:** remove the `.gitignore` entry. Nothing reads a report from git.
+
+### D-P5-04: Workspace discovery follows the globs in `pnpm-workspace.yaml`
+
+- **Ambiguous:** `workspacePackages()` scanned `packages/` one level deep, which was the whole workspace until P5 put a package at `packages/drivers/claude-code`.
+- **Chosen:** read the globs from `pnpm-workspace.yaml` and expand each. Only a trailing `/*` is supported; any other pattern throws rather than matching nothing.
+- **Why:** a hard-coded level would have stopped seeing a package pnpm does see, and every scan built on the list — the fixture-path map, the I9 source inventory, the inline-suppression scan — would have skipped it and reported clean. A silently smaller inventory is the failure mode worth spending a parser on. Throwing on an unsupported pattern is the same rule one level up: an empty result must never be mistaken for an empty workspace (I5).
+- **Reverse:** restore the single-level scan; the driver package then needs to move up a level.
+
+### D-P5-05: `Driver` gains `declaredTools()`, landed early on the unit branch
+
+- **Ambiguous:** `I4.driver-tool-inventory-validated` says P5 owes "the driver-side half — a Driver that declares its tools". Where that declaration lives was not settled: a method on the contract, a field on `DriverCapabilities`, or an export from the driver package alone.
+- **Chosen:** a method on `Driver`. `StubDriver` returns the empty list, and `DelegatingDriver` and the line's test double forward it.
+- **Why:** `validateToolGrants(policy, inventory)` is generic over drivers, so the inventory has to be obtainable from a `Driver` and not from one package that happens to export it — otherwise the Codex driver (M2) reopens the gap instead of satisfying it. `DriverCapabilities` was rejected because it holds feature flags: "MCP works" is a different statement from "these are the tools", and mixing them makes the keys-registered assertion nonsense.
+- **Why empty for the stub:** the stub runs no model and offers no tool. An empty inventory refuses every grant, which is default deny (I4). A stub that claimed an inventory would let a grant pass validation against a driver that cannot honour it.
+- **Reverse:** delete the method and the three implementations; `validateToolGrants` then has no caller that can produce its argument, as before.
+
+### D-P5-06: P5 stops at the scaffold; the egress allowlist becomes P10
+
+- **Problem:** the Claude Code CLI has to run inside the sandbox — a driver that runs the model on the host is outside the mount table, which is the whole of `I1.driver-executes-inside-the-sandbox`. `LocalDockerProvider` gives every container `--network none` and refuses `mode: 'allowlist'` by name (D-P2-07, "enforcing one needs a filtering proxy the container is forced through... Reverse: implement the proxy, then accept the mode"). No unit owned that reversal. So a container cannot reach the model API, and five of P5's seven capability claims — `subagents`, `hooks`, `mcp`, `parallelism`, `stablePrefixCaching` — cannot be proven.
+- **Chosen:** stop P5, add **P10 — Sandbox egress allowlist** to `DECOMPOSITION.md` and to F1's dependency graph, make P5 depend on it, and resume P5 on this branch once P10 has shipped and been reviewed.
+- **Why not fold it into P5:** it is a change to the sandbox's network posture, in another unit's package, and bundling it with a new driver makes one pull request where a reviewer has to hold both in mind at once — the shape the `gate-change` label exists to stop passing casually. It also needs its own conformance: that a non-allowlisted host is unreachable is an assertion about the sandbox, not about a driver.
+- **Why not ship P5 with five claims pending:** that is what the ledger was fixed in advance to prevent. Five capability claims left as declarations with nothing behind them is the state I8 exists to end, and handing them forward a second time with a new reason is still handing them forward.
+- **What stays on the branch:** the reconciliation mechanism (D-P5-02 through D-P5-04) and `declaredTools()` (D-P5-05). Both are independent of egress and correct as they stand.
+- **Reverse:** delete P10 from the three documents and the `UnitId` union, and decide again between the two rejected options.
+
+### D-P5-07: The credential is an environment value on the exec, and the exec contract grows a slot for one
+
+- **Ambiguous:** the unit entry says credentials "arrive as an environment variable on the exec, never as a mount and never inside a prompt", and `SandboxProvider.exec(h, cmd)` has nowhere to put one. Three readings were open: amend `exec`, amend `SandboxSpec` so the value is set when the container is created, or wrap the command in `sh -c 'KEY=... claude ...'` and change no contract.
+- **Chosen:** `exec(h, cmd, options?: ExecOptions)`, with `env` a name-to-value map. The provider passes `docker exec --env NAME` — the name alone — and puts the value in the environment of the `docker` process it spawns, so the secret travels through the daemon API and appears in no argument vector: not the one this process spawns, not the one the command runs under inside the container. Landed in this pull request as **A-P5-02**.
+- **Why not `SandboxSpec`:** that is the machinery P10 already uses for the proxy variables, so it was the cheaper edit. But it puts the secret in `docker create`'s argv and then in the container's configuration for its whole life, readable by anything that can inspect it, and it contradicts the entry's own words. A credential that outlives the command it was for is a credential with a longer window than it needs.
+- **Why not the shell wrapper:** it changes no contract and leaks the secret twice — into the host's `docker exec` argv and into the process table inside the container. An argv is world-readable to anything that can list processes, and a credential is exactly what this exists to carry.
+- **What the provider refuses:** a name that is not a plain environment-variable name, and a name with no value. Both are the fail-closed case (I5): a command that lost its credential does not fail where the credential was lost, it fails later inside the model runner with an authentication message that says nothing about the provider having dropped it. A new `environment` refusal layer names which control declined, so an assertion can require the right refusal rather than merely some error.
+- **Reverse:** delete `ExecOptions`, the `environment` layer, and `environmentPassthrough`; the driver then has no way to authenticate that is not a mount or a prompt.
+
+### D-P5-08: The image is built by this package, from two pinned inputs
+
+- **Ambiguous:** every other image in the repository is pulled by digest — `packages/sandbox` pins an alpine, P10 pins a node. No published image carries the Claude Code CLI, so the same pattern was not available.
+- **Chosen:** a `Dockerfile` in this package, built on demand, with the base pinned by digest and the CLI pinned to an exact version. The tag carries the version, so raising the version builds a different image rather than replacing one under the same name.
+- **Why pinned to an exact version and never a range:** a range makes the image a function of the day it was built, and the tool inventory asserts against what that image's CLI offers. An inventory checked against a moving CLI proves nothing about the CLI a run will use.
+- **Why nothing from the repository is copied in:** the workspace arrives at run time as the sandbox's one writable mount, so a stale image cannot serve a task an old copy of the tree. The image holds the runner, never the work.
+- **Why the build runs on the host:** it needs a package registry, and the sandbox's allowlist grants the model API alone. Building inside the sandbox would mean widening egress to npm for every run, which is a larger hole than the build is worth.
+- **Reverse:** publish an image carrying the CLI and pin it by digest like the others; `ensureImage` then becomes a pull.
+
+### D-P5-09: The tool grant reaches `--tools`, which decides what exists, not `--allowedTools`, which decides what needs approval
+
+- **Ambiguous:** the CLI has two flags that both look like a grant. `--allowedTools` pre-approves uses of tools that are present; `--tools` sets which built-in tools the session has at all.
+- **Chosen:** `--tools`, with the granted list and nothing else. An empty grant produces `--tools ''`, which is a session with no tools.
+- **Why:** the acceptance criterion is that "a tool outside the grant is unavailable to the model, not merely unused". `--allowedTools` leaves the tool in the session and changes what happens when it is used, which is a different and weaker statement. Default deny is about what exists (I4).
+- **What this made visible:** the CLI silently drops a tool name it does not know — `--tools "Read,NoSuchTool"` produces a session with `Read`. So a policy could grant a tool that never existed and read as though the grant had taken effect. The driver therefore refuses a grant outside `declaredTools()` before the task starts, rather than relying on the CLI to notice.
+- **Reverse:** pass `--allowedTools` instead. The narrow-grant assertion then fails, because the session still holds the tools.
+
+### D-P5-10: The stable prefix is appended to the default system prompt, with the per-machine sections moved out of it
+
+- **Ambiguous:** `TaskRequest.stablePrefix` could replace the CLI's system prompt (`--system-prompt`) or be appended to it (`--append-system-prompt`). Either is identical across a run, so either could be cached.
+- **Chosen:** append, plus `--exclude-dynamic-system-prompt-sections`.
+- **Why append:** replacing the default prompt removes the instructions that make the tools usable, so the session stops behaving like the CLI whose capabilities this unit is asserting. The driver renders what it is handed (the compiler's content is M2's); it should not also be deciding that the runner's own prompt is unwanted.
+- **Why the dynamic sections are excluded:** cwd, environment information, memory paths and git status sit in the default prompt and change between tasks. Left in, they sit *before* the appended prefix and break the cacheable span, so two tasks in one run would each write the cache and neither would read it. The cache-read assertion turns on this flag, which is why it is not a tuning detail.
+- **Reverse:** use `--system-prompt` and drop the exclusion; the caching assertion then measures a prefix the CLI composes rather than the one the contract splits.
+
+### D-P5-11: `parallelism` is 1, and the driver enforces it rather than declaring it
+
+- **Ambiguous:** the CLI can run several sessions in one container, so a number above one was available. The claim's text is "the driver runs the declared number of tasks concurrently under one provenance id", which says nothing about which number.
+- **Chosen:** `parallelism: 1`, with one in-flight invocation per sandbox handle. A second task on the same sandbox waits.
+- **Why not a larger number:** the container's CPU, memory and PID limits come from the `SandboxSpec`, which the driver does not choose. A driver claiming four concurrent tasks would be claiming something the sandbox, not the driver, decides — and I8 asks for a claim that fails when the capability is deleted, not one that fails when the limits are tight.
+- **Why enforced rather than merely declared:** a declared number nothing enforces is a capability claim with nothing behind it, which is the state this unit exists to end. The assertion counts invocations inside the sandbox rather than timing the caller's promises, because two `runTask` calls created together begin at the same instant whatever the driver does.
+- **Reverse:** delete the per-sandbox lock and raise the number; the assertion then has to observe that many invocations overlapping, and the sandbox's limits become part of what it is testing.
+
+### D-P5-12: `steering` is false, and `steer()` is absent rather than present and throwing
+
+- **Ambiguous:** the CLI can take a message mid-turn over `--input-format stream-json`, so `steering: true` was reachable with more work. The contract makes `steer()` optional.
+- **Chosen:** declare false and omit the method. The driver runs one CLI invocation per task and does not hold a session open to deliver a message into.
+- **Why absent and not throwing:** a method that exists and refuses is a capability declared false and present, which is the direction the assertion refuses as firmly as the other. `'steer' in driver` is the check, and it reads the same as the declaration.
+- **Why not implement it:** holding the session open changes the shape of every invocation — stdin stays attached, the process outlives the call, and cancellation becomes the driver's problem — for a capability nothing in M1 uses. A capability is what the driver does, not what the tool could do.
+- **Reverse:** hold the session open over `--input-format stream-json`, add `steer()`, and flip the flag. The assertion's second half then has to change, because absence would no longer be what it is asserting.
+
+### D-P5-13: MCP servers belong to the driver; the request's grants choose which of them start
+
+- **Ambiguous:** the claim says "the MCP servers named in `TaskRequest.tools` are reachable from a task, and no other server is", but `TaskRequest` carries tool names and no server configuration. An `mcp__<server>__<tool>` grant names a server that has to come from somewhere.
+- **Chosen:** the servers are a driver option; the request's grants select from them. The session is started with `--strict-mcp-config` and a configuration holding only the servers its grants actually name.
+- **Why the grants select rather than the driver loading all of them:** "no other server is loaded" is then a fact about the session rather than about what the model chose to use. A server nothing granted is absent, not merely unused (I4).
+- **Why a grant naming an unheld server refuses:** the CLI drops an unknown MCP tool the same way it drops an unknown built-in, so without the refusal a policy could name a server that does not exist and get a session that looks configured.
+- **Why the MCP names are not in `declaredTools()`:** they belong to whichever server a request configures, not to the driver. Naming them in the inventory would be claiming an inventory the driver does not have. They are checked against the server map instead.
+- **Reverse:** add an MCP field to `TaskRequest` and let the request carry its own servers. That is an F2 amendment, and it would give a request a way to start a process the policy layer never saw.
+
+### D-P5-14: A run that never reached the model is a refusal, never a `TaskResult`
+
+- **Ambiguous:** the CLI exits zero on an authentication failure. It retries ten times over about three minutes and then writes a result message with `is_error: true`, `api_error_status: 401`, and an apology in the `result` field. Read naively, that is a completed task whose narrative says it failed.
+- **Chosen:** refuse. An API status the CLI gave up on, a session that never started, a credential from a source this driver did not arrange, and a missing result message are each a refusal with its own message.
+- **Why:** a `TaskResult` says a task ran, and the runtime derives status from evidence that assumes one did (I2). Returning a result whose narrative is "Failed to authenticate" hands the runtime a claim to diff against evidence that does not exist, and the failure then surfaces somewhere that cannot explain it. The driver knows why, here, and says so (I5).
+- **What is *not* a refusal:** a task that ran and concluded something disappointing. The model's verdict on its own work is a claim and goes in `AgentClaim`, where the runtime can disagree with it.
+- **Reverse:** return a `TaskResult` for any run that produced a result message. The refusals become narratives and the evidence layer inherits them.
+
+### D-P5-15: The reporter is named as a string in `vitest.config.ts`, not imported into it
+
+- **Problem:** importing `ConformanceRunReporter` into a package's vitest config fails at load. A config file is bundled and loaded by Node before vite's resolver exists, so the kit's `./run-report.js` specifiers are resolved by Node against files that are `.ts`.
+- **Chosen:** `@olympus-ai/conformance` gains two subpath entries — `./vitest` and `./reporter` — and a package names the reporter as `reporters: ['default', '@olympus-ai/conformance/reporter']`. Vitest then loads the module through its own runner, which resolves `.js` to `.ts`.
+- **Why subpaths rather than importing the package root:** the root re-exports the registry, which imports every sibling package, so typechecking a driver package would drag the whole registry in with it. `./vitest` and `./reporter` reach nothing but `node:` modules and two kit files. Published entries, not a sibling's `src/`, so the import rule holds.
+- **Reverse:** remove the `exports` block and the default export on the reporter; a package contributing external assertions then has no way to write a run report.
+
+### D-P5-16: A claim id is not kebab-case, and `invariantTest` had never been told
+
+- **Problem:** `validateAssertionId` required every id to be `<family>.<kebab-name>`, so `driver.computerUse` was refused outright. Every claim id is held equal to a key of `DriverCapabilities` or `SandboxCapabilities` by a generated fixture, and those keys are camelCase.
+- **Chosen:** two shapes. An invariant assertion stays `I<n>.` plus kebab-case; a claim is `driver.` or `sandbox.` plus a capability key exactly as the interface spells it.
+- **Why it went unnoticed:** the registry constructs its own claim entries directly and never goes through `invariantTest`, and no package had contributed a claim from its own suite before. The first real use of an interface is where the friction is, which is the reason `WORKFLOW.md` treats amendments as expected rather than exceptional.
+- **Reverse:** restore the single kebab-case shape; no claim id can then be written by a contributing package.
+
+### D-P5-17: The declared inventory omits a tool the CLI sometimes offers
+
+- **Ambiguous:** the CLI's default tool set is not stable between sessions — one probe of the pinned version offered `DesignSync` and another did not, from the same image and the same flags. Granting it by name produced a session without it.
+- **Chosen:** leave it out of `DECLARED_TOOLS`. The driver always passes `--tools`, so a tool outside the inventory is never in a session, and a policy that granted it would be refused before the task started.
+- **Why leaving it out is the fail-closed direction:** declaring a tool the CLI will not reliably grant would make the inventory assertion flaky and, worse, would let policy grant something that silently is not there. An inventory that is smaller than what the runner can do costs a capability; one that is larger costs the meaning of a grant.
+- **Reverse:** add it and require the assertion to tolerate its absence, which is the same as not asserting the inventory.
+
+### D-P5-18: An MCP server's other tools are named as disallowed, after asking the CLI what they are
+
+- **Problem, found by running it rather than reasoning about it:** `--tools` governs the built-in set only. An MCP server contributes its whole tool list to a session, so a request granting `mcp__probe__ping` against a server that also offers `mcp__probe__ungranted` produced a session holding both. Reproduced against the pinned CLI: the session's own startup report listed `["mcp__probe__ping","mcp__probe__ungranted"]`. That is a tool available to the model that policy never granted, which is exactly what I4 forbids, and no narrower grant fixes it because the names come from the server rather than from the driver.
+- **Chosen:** the driver asks the CLI what the servers offer before it runs the task, and names every tool beyond the grant in `--disallowedTools`. The inspection starts a session with no tools and reads the list it prints; the CLI prints its session before it calls anything, so this costs a process and no tokens, and it is bounded by `timeout` so a CLI that cannot start does not sit retrying until the sandbox's wall-clock limit ends it.
+- **Why named one by one:** a server-wide pattern was tried first and is worse than useless. `--disallowedTools mcp__probe` empties the session of that server's tools, and a following `--allowedTools mcp__probe__ping` does not bring the granted one back — the session comes up with nothing. Exact names are the only form that removes a tool and leaves its sibling.
+- **Why removal and not refusal of use:** `--disallowedTools` with an exact name takes the tool out of the session's list entirely, so this is absence rather than a denial at use time. That is the same standard `--tools` meets for the built-ins, and it is what "unavailable to the model, not merely unused" asks for.
+- **Why an inspection rather than a declared inventory:** the driver cannot know a server's tools — that is the server's business, and a driver that hard-coded them would be wrong the first time a server was upgraded. Asking is the only honest way to get the list, and the answer is the CLI's rather than the model's.
+- **What happens when the inspection fails:** the task is refused and not started. Running it would mean offering the model tools nobody can enumerate, which is the fail-closed case (I5) and not a reason to proceed with a narrower claim.
+- **Why no pending entry was added in exchange:** the gap was found inside this unit and closed inside it. The ledger is unchanged: I4 drops from 2 to 1 and stays there.
+- **Reverse:** delete `#ungrantedMcpTools` and the `--disallowedTools` argument. A granted server's other tools are then in every session that loads it, and the `driver.mcp` assertion fails on the tool it expects to be absent.
+
+### D-P5-19: "zero on the first task" is not measurable, and the assertion measures the growth instead
+
+- **Problem:** the acceptance criterion reads "`cacheReadTokens` is zero on the first task of a run and non-zero on a second task that shares its `stablePrefix`". Run against the real API, the first task read 6373 tokens from cache. The criterion is not wrong about the mechanism; it is wrong about what a first task can observe. The CLI's own system prompt is large, identical between sessions, and cached account-wide with a short time-to-live, so by the time this assertion runs, six earlier assertions in the same suite have already warmed it. A "first" task is only first within its own two-task pair.
+- **Chosen:** the stable prefix carries a nonce generated once per harness, so the exact prefix has never been presented to the cache by any session before this run. Three assertions replace the zero: the first task must *write* cache, the second must read strictly more than the first, and the second must write strictly less than the first.
+- **Why that is the stronger test, not the weaker one:** the difference between the two reads is the stable prefix, and it exists only because the prefix sits in the cacheable span. A driver that concatenated the prefix and the suffix into one turn would leave the CLI's system prompt unchanged between the two tasks, so both would read the same amount and the comparison would not move. The zero-based form could not distinguish those two drivers at all once the account was warm — it would fail for both, for a reason that has nothing to do with either.
+- **Why a nonce rather than a cold account:** waiting out the cache's time-to-live would make the assertion take minutes and would still be a race against anything else using the same account. A prefix nobody has ever sent is cold by construction, on any account, at any time.
+- **What is not claimed:** an absolute number. How many tokens the second task reads depends on the CLI's own prompt, which this unit does not control and should not pin. The assertion is about the direction the numbers move when the prefix is shared, which is what the contract's split exists to produce.
+- **The entry should be corrected:** `DECOMPOSITION.md`'s P5 acceptance line still says zero on the first task. It is amended to the growth form, with this entry as the reason, rather than left to read as a criterion that was quietly not met.
+- **Reverse:** drop the nonce and assert zero again. The assertion then passes only against an account that has made no Claude Code call in the preceding few minutes, which is a property of the machine rather than of the driver.
+
+## P5 amendments to the contracts
+
+### A-P5-01: `Driver` gains `declaredTools()`
+
+Landed earlier on this branch and recorded as **D-P5-05**. The driver-side half of `I4.driver-tool-inventory-validated`: `validateToolGrants(policy, inventory)` has taken a mandatory inventory since P3 and nothing in the repository could produce one.
+
+### A-P5-02: `SandboxProvider.exec` gains `ExecOptions`, and the refusal layers gain `environment`
+
+`exec(h, cmd, options?: ExecOptions)`, where `ExecOptions.env` is a name-to-value map the implementation must keep out of every argument vector. Reasoned in **D-P5-07**.
+
+Not named in P5's entry, which listed `declaredTools()` alone. It is named here, in the pull request body, and in the entry itself, because a contract change nobody flagged is the kind that passes review by not being looked at. The entry's own requirement — that the credential reach the CLI as an environment variable on the exec — could not be met without it; the alternatives were a mount, which the entry forbids, or a secret in an argv.
+
+Both implementations and the test wrapper carry the parameter: `LocalDockerProvider` passes `--env NAME` and sets the value on the `docker` process, `StubSandboxProvider` sets it on the child it spawns, and `DelegatingSandbox` forwards it. `ExecOptions` is optional, so every existing call site is unchanged.
+
+## P5 amendment: external adversarial review
+
+Nineteen findings across two reviewers, seventeen held in full, two in part,
+none rejected. Sixteen were fixed on the branch. The full triage, with the
+reproductions, is `docs/reviews/2026-09-20-P5-driver-claude-code-triage.md`.
+Three limits could not be closed inside this unit and are recorded here.
+
+### D-P5-20: the credential is kept out of every argv, and that is all it is kept out of
+
+- **Problem:** the driver passes the model credential as an environment value on the exec, and both the code and its tests read as though that made it unreachable. It does not. Demonstrated in a container during the review: a child of the credentialed process printed it, and a *later* exec that was given no credential at all read it out of `/proc`. The CLI and every tool a task runs share a user, so anything the model can run can read it.
+- **What the mechanism does buy, stated exactly:** the value is in no argument vector on the host or in the guest, so it is not visible to anything that can only list processes; and it is not on the mount table, so it does not persist for the sandbox's life or appear in a diff of the tree. Against the alternative the unit entry forbade — a mounted secret — that is a real improvement. It is not confidentiality from the model, and the comments claimed otherwise.
+- **Chosen:** correct the claim rather than weaken the check. The comments now say what holds, and the limit is registered as `I4.model-credential-not-readable-by-the-task`, pending, owned by P6.
+- **Why not fix it here:** the fix is that the credential never enters the container. P10 already interposes a proxy on the only route out, so the natural shape is authentication at that layer, with the sandbox holding a short-lived token or nothing. That spans the sandbox, the proxy and the driver; it is an architecture change, not a review fix, and doing half of it in the driver would produce a control that reads as complete and is not.
+- **Reverse:** move authentication to the egress layer and delete `CREDENTIAL_VARIABLE` from the driver. The pending entry is then paid.
+
+### D-P5-21: a task's processes outlive the task, and the driver is the wrong place to fix it
+
+- **Problem:** `#serialized` bounds one foreground `provider.exec` per sandbox handle. It does not bound what a task leaves behind, and a sandbox is persistent by declaration (P2). Demonstrated: a process detached by one exec was still running when a later exec looked. A task granted `Bash` can leave a process that keeps reading and writing the workspace, and reaching whatever the sandbox permits, while a later task holding a narrower grant runs beside it.
+- **Why that matters and is not merely untidy:** the later task's grant is then not what is running in its sandbox. Default deny is a statement about what a task can reach, and a process from the previous task is something it can reach that policy never granted it.
+- **Chosen:** register `I4.task-capabilities-do-not-outlive-the-task`, pending, owned by P6, and raise the baseline for it.
+- **Why not a sweep in the driver:** killing stray processes between tasks is a few lines and would close the demonstrated case. It would also be a control the driver cannot actually enforce — it races anything started between the sweep and the next invocation, and it cannot see a process that re-parents itself. A partial control that reads like a complete one is worse than a stated limit, because the limit is visible in the registry and the sweep would not be.
+- **Why P6:** it collects base and diff in a fresh sandbox, so it is the first unit whose correctness depends on a task's sandbox holding nothing from an earlier one.
+- **Reverse:** give the sandbox a per-task process boundary, or one container per task, and pay the entry.
+
+### D-P5-22: what the run report still does not bind, said plainly
+
+- **Problem:** the review's second reframing was that "does the report hash match the current package" is the wrong question, and the right one is whether the report identifies one completed execution of that assertion against the complete inputs being evaluated. Three of the four gaps it named are now closed — the hash covers every workspace package the run executes, it is taken before the run as well as after, and the reported test must be the assertion the registry registers rather than any test carrying its id.
+- **What is still not bound:** the root configuration and the lockfile, and the identity of the container image the assertions ran in. The image is bound from the other direction — its tag is now derived from the Dockerfile, the base digest and the CLI version, so different inputs cannot share a tag — but the report does not record which image ran, so a report cannot be checked against one.
+- **Chosen:** state it here rather than add a fourth pending entry. The registry's pending list is for work an invariant is waiting on; this is a known incompleteness in a mechanism that already has an assertion, and the assertion's own text names what it covers.
+- **Why not close it now:** recording the image digest means the reporter knowing which image the tests used, which means the harness telling it, which is a channel that does not exist. Hashing the lockfile is easy and was not done for a worse reason — it would make every report in the workspace mismatch on any dependency change, including ones the package does not use. Both want a decision about how coarse the binding should be, and that decision belongs with whoever next touches reconciliation rather than to a review fix.
+- **Reverse:** extend `packageTreeHash` to the root manifests and record the image digest in the report.
+
+### D-P5-23: `pnpm -r test` cannot go green from cold, and the order is not incidental
+
+- **Found during P5's acceptance run.** The recursive test command runs packages in dependency order, and `@olympus-ai/conformance` is a dependency of the driver package, so conformance runs *first*. Conformance reconciles the driver's external assertions against a run report only the driver's own suite writes. From a cold tree there is no fresh report, conformance refuses all nine, and pnpm aborts the recursive run before the driver package ever runs — so the command cannot repair itself by running again.
+- **Chosen:** state the order rather than engineer around it. The acceptance sequence is the driver package's suite first, then `pnpm -r test`, then `pnpm conformance`.
+- **Why not make the driver a dependency of conformance so pnpm orders it first:** that is the workspace cycle D-F3-04 exists to prevent. The kit deliberately has no package dependency on any sibling, which is what lets any package devDepend on the kit; inverting it for scheduling would trade a structural guarantee for a convenience.
+- **Why not have conformance run the owning package's suite itself:** that is the option D-P5-02 rejected, and for the same reason — it would re-run every external assertion, which for this driver means a second set of model calls for an answer the first run already has.
+- **What this is, honestly:** a rough edge in a mechanism that is otherwise doing exactly what it should. The refusal is correct every time it fires; it is the recovery that is awkward, because the command that would fix the state is the one the failure prevents from running.
+- **Reverse:** a root script that runs the owning suites before the registry, so one command has the order built into it. Worth doing when a second package contributes external assertions; with one, a documented order costs less than a script that hides it.
+
+## Amendment: CI gets a credential, and the order the gate needs
+
+P5 shipped nine assertions that call a real model and refuse rather than skip
+without a credential. CI had none, so `v2` went red the moment P5 merged. This
+is the amendment WORKFLOW.md expects between a unit and the next one.
+
+### D-A-CI-01: an Actions secret, not identity federation
+
+- **Ambiguous:** the console offers workload identity federation, which lists GitHub Actions among its providers, and a short-lived token beats a long-lived secret on every axis that matters. It was the recommendation until it was checked.
+- **Why it does not work here:** federation is detected by the Anthropic SDKs and the `ant` CLI, which read `ANTHROPIC_FEDERATION_RULE_ID` and friends and exchange a JWT. The thing that authenticates in this unit is neither — it is the Claude Code CLI running inside a container, whose own documentation says authentication is `ANTHROPIC_API_KEY` or an `apiKeyHelper` command. The driver then *refuses* a session whose reported `apiKeySource` is anything else, deliberately (D-P5-07): a credential the driver did not arrange is one it cannot account for.
+- **Chosen:** `secrets.ANTHROPIC_API_KEY`, passed as an environment value to the two steps that need it.
+- **What it would take to change later:** the CLI accepting a federated identity, the driver forwarding the federation variables through `ExecOptions.env`, and the `apiKeySource` check learning a second acceptable answer. Each is small; none can be assumed, and the first is not ours.
+- **Use a separate key for CI, with a spend limit.** P5's own review established that the credential is readable by anything a task runs (D-P5-20). In CI that task is running model-generated commands on a machine nobody is watching, which is a worse place to hold a key than a laptop is. A key scoped to CI can be revoked without touching a developer's.
+- **Reverse:** delete the two `env:` blocks. CI goes red again, honestly.
+
+### D-A-CI-02: the driver's suite runs before the recursive test command
+
+- **Problem:** a credential alone would not have fixed CI. From a cold checkout there is no run report, so conformance refuses all nine external assertions, and `pnpm test` aborts on that failure before it reaches the package whose suite writes the report. The command cannot repair itself — D-P5-23, met in the one place it actually bites.
+- **Chosen:** an explicit step that runs the driver package's suite first, with a comment saying why it cannot be reordered away.
+- **The cost, stated:** `pnpm test` then runs that suite a second time, so a CI run makes roughly eighteen model calls rather than nine. They are small calls on the cheapest model and the duplication buys the workflow staying the same four commands a contributor runs locally. A root script that owned the order would remove the waste and hide the constraint; that trade is worth making when a second package contributes external assertions, not before.
+- **Reverse:** delete the step. CI fails from cold on every run.
+
+### D-A-CI-03: the image's user is fixed, and a workspace owned by anyone else is read-only
+
+- **Found by CI, not by the machine it was written on.** `I1.driver-executes-inside-the-sandbox` passed locally and failed on a GitHub runner with an empty workspace: the marker the task was asked to write never appeared. Nothing about the assertion was wrong — the task genuinely could not write.
+- **Cause:** the image runs as its base's `node` user, uid 1000. A bind mount carries the host's ownership through unchanged, and a GitHub-hosted runner is uid 1001, so the workspace was owned by a user the container is not. The reasoning when `USER node` was chosen (D-P5-08's commit) was that 1000 "is the uid a checkout on an ordinary Linux host and on CI already belongs to". That is true of many hosts and false of the one that matters here.
+- **Chosen now:** the test harness makes its temporary workspace world-writable before provisioning. That makes the fixture usable and changes nothing about what the assertion requires — the marker must still appear on the host carrying the *container's* hostname, which is the whole of the claim.
+- **What is not fixed, and is the real limit:** a runtime that creates a workspace as a uid the image does not run as hands the agent a read-only workspace. The agent then fails to write for a reason nothing in the evidence explains, which is precisely the silent degrade I5 exists to prevent — it would look like a model that chose not to write. Closing it properly means the sandbox spec carrying the user a container runs as, so the provider can match the container to the workspace it was given. That is a contract change in `packages/sandbox`, not a driver change.
+- **Why not run the container as root instead:** it removes the problem and removes the property the non-root user buys — a model that rewrites the CLI it is running under is currently refused by the filesystem rather than by trust.
+- **Why not chmod in the driver:** the driver does not own the workspace. Something handed it a mount table; widening permissions on a caller's directory is not a driver's decision to make silently.
+- **Reverse:** drop the `chmod` and the assertion fails on any host whose uid is not 1000.
+- **Promoted to the ledger before P6 starts.** This entry began as prose, which is findable and not counted. `I5.workspace-is-writable-by-the-task` is now a pending registry entry owned by P6, and the I5 baseline rises from 5 to 6 to say so in the diff. The reason is D-P5-01's: a ledger only constrains the work if it is fixed before the work that would edit it, so an obligation written after P6 starts is a description of what P6 did rather than a claim on it.
+
 ## Tooling: external review automation
 
 Step 5 of the unit loop stopped being something a human does. `/run-review <id>`

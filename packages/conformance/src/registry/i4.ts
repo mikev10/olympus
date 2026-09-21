@@ -1,4 +1,4 @@
-import { compileError, pending, runtime } from '../kit/assert.js';
+import { compileError, external, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
 import {
@@ -263,8 +263,42 @@ export const I4: InvariantEntry = {
       },
     }),
     APPROVAL_OUTCOME_GATES_THE_STATION,
+    external({
+      id: 'I4.driver-tool-inventory-validated',
+      title:
+        'the CLI session offers exactly the tools the task granted and no wider set, every declared tool is one the CLI really has, '
+        + 'and a grant outside the declaration is refused before the task starts',
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
+    }),
   ],
   pending: [
+    pending({
+      id: 'I4.task-capabilities-do-not-outlive-the-task',
+      owner: 'P6',
+      reason:
+        'A sandbox is persistent by declaration (P2), and the driver serialises the foreground exec but not what a '
+        + 'task leaves behind. Demonstrated during P5\'s external review: a process detached by one exec was still '
+        + 'running when a later exec looked for it. A task granted Bash can therefore leave a process that keeps '
+        + 'reading and writing the workspace, and reaching whatever the sandbox permits, while a later task holding a '
+        + 'narrower grant runs beside it -- so the earlier task\'s capabilities are available during the later one, '
+        + 'which is what default deny forbids. Bounding it means a process boundary the sandbox enforces or a '
+        + 'container per task; a driver-side sweep would be a partial control that reads like a complete one. P6 '
+        + 'collects a diff in a fresh sandbox and is where per-task isolation has to become real. Surfaced by P5.',
+    }),
+    pending({
+      id: 'I4.model-credential-not-readable-by-the-task',
+      owner: 'P6',
+      reason:
+        'The model credential reaches the CLI as an environment value on the exec, which keeps it out of every '
+        + 'argument vector and off the mount table. It does not keep it from the model: the CLI and any tool the task '
+        + 'runs share a user, so the value is readable from the process environment. Demonstrated during P5\'s '
+        + 'external review -- a child printed it, and a later exec given no credential at all read it out of /proc. '
+        + 'Closing it means the credential never enters the container: authentication at the egress layer the '
+        + 'allowlist proxy already interposes (P10), with the sandbox holding a short-lived token or nothing at all. '
+        + 'That spans the sandbox, the proxy and the driver, so it is not a driver change. Surfaced by P5.',
+    }),
     pending({
       id: 'I4.writable-globs-enforced-on-the-diff',
       owner: 'P6',
@@ -276,16 +310,6 @@ export const I4: InvariantEntry = {
         + 'collects itself; a driver\'s file-write events miss any write the driver does not observe, so checking '
         + 'them would read stronger than it is (D-P4-01). P6 collects base+diff in a fresh sandbox and must refuse a '
         + 'change outside the granted globs, and assert the refusal. Surfaced by P4.',
-    }),
-    pending({
-      id: 'I4.driver-tool-inventory-validated',
-      owner: 'P5',
-      reason:
-        'validateToolGrants takes the inventory of tools a driver offers as a mandatory argument, and nothing '
-        + 'can yet produce a real one: DriverCapabilities holds feature flags and no tool list, so a policy can '
-        + 'still grant a tool no driver exposes and only a hand-written inventory would notice. P5 owes the '
-        + 'driver-side half — a Driver that declares its tools — and the assertion that a grant outside that '
-        + `declaration is refused. Split from P3's half by D-P3-04; the F2 known gap records both.`,
     }),
   ],
 };

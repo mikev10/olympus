@@ -123,6 +123,7 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
     requests,
     provenanceId: () => inner.provenanceId(),
     capabilities: () => ({ ...inner.capabilities(), ...options.capabilities }),
+    declaredTools: () => inner.declaredTools(),
     resolveModel,
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       requests.push(req);
