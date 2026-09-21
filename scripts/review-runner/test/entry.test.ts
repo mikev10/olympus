@@ -22,8 +22,10 @@ import {
 import type { Manifest } from '../evidence.ts';
 import { RECORDABLE_ENV, keylessUrl, outcomeOf, redactEnv } from '../evidence.ts';
 import type { GeminiResult } from '../gemini.ts';
+import { RequestTimeoutError } from '../gemini.ts';
 import type { IngestionVerdict } from '../ingestion.ts';
 import type { EchoVerdict } from '../integrity.ts';
+import { sha256 } from '../payload.ts';
 import { buildCodexScratch, removeScratch } from '../scratch.ts';
 
 // A key-shaped-but-fake value: realistic enough that a naive substring check
@@ -65,10 +67,36 @@ describe('findLeakedSecrets', () => {
     expect(JSON.stringify(leaked)).not.toContain(FAKE_KEY.slice(0, 8));
   });
 
-  it('matches on the first eight characters alone, so a truncated copy is still caught', () => {
-    expect(findLeakedSecrets([`prefix ${FAKE_KEY.slice(0, 8)} only`], { GEMINI_API_KEY: FAKE_KEY })).toEqual([
+  it('matches a long value on its full text, or on its last 20 characters alone', () => {
+    expect(findLeakedSecrets([`the key ${FAKE_KEY} in full`], { GEMINI_API_KEY: FAKE_KEY })).toEqual(['GEMINI_API_KEY']);
+    // A copy missing its start is still caught: the tail is what is unique.
+    expect(findLeakedSecrets([`tail ${FAKE_KEY.slice(-20)} only`], { GEMINI_API_KEY: FAKE_KEY })).toEqual([
       'GEMINI_API_KEY',
     ]);
+    expect(findLeakedSecrets([`tail ${FAKE_KEY.slice(-19)} only`], { GEMINI_API_KEY: FAKE_KEY })).toEqual([]);
+  });
+
+  it('does not trip on a different OpenAI project key, though every such key begins "sk-proj-"', () => {
+    const key = 'sk-proj-Qx7vN2mKp9Lw4Rt8Yz3Bc6Hd1Fj5Gs0Ae2Uo7Iy9Tr4We';
+    const reply = 'The fixture uses the placeholder sk-proj-dummydummydummydummydummydummy as its key.';
+
+    expect(findLeakedSecrets([reply], { OPENAI_API_KEY: key })).toEqual([]);
+  });
+
+  it('does not trip on another JWT that shares its header, though every such token begins "eyJhbGci"', () => {
+    const otherJwt = 'eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJvdGhlciJ9.b3RoZXJzaWduYXR1cmVvdGhlcg';
+    const reply = `A test fixture carries the id token ${otherJwt}.`;
+
+    expect(findLeakedSecrets([reply], {}, authJsonSecrets(AUTH_JSON))).toEqual([]);
+    expect(findLeakedSecrets([`${reply} ${ACCESS_TOKEN}`], {}, authJsonSecrets(AUTH_JSON))).toEqual([AUTH_JSON_LABEL]);
+  });
+
+  it('matches a value shorter than 24 characters only in full', () => {
+    const env = { MY_SERVICE_TOKEN: 'svc-live-0f9e8d7c6b' };
+
+    expect(findLeakedSecrets(['connects with svc-live-0f9e8d7'], env)).toEqual([]);
+    expect(findLeakedSecrets(['ends in live-0f9e8d7c6b'], env)).toEqual([]);
+    expect(findLeakedSecrets(['connects with svc-live-0f9e8d7c6b'], env)).toEqual(['MY_SERVICE_TOKEN']);
   });
 
   it('never reports a RECORDABLE_ENV name, whose value the manifest records by design', () => {
@@ -181,6 +209,10 @@ const AUTH_JSON = JSON.stringify({
 
 const ACCESS_TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJkdW1teSJ9.YWNjZXNzc2lnbmF0dXJl';
 
+// The same file after Codex refreshed it: the same account, a rotated token.
+const ROTATED_TOKEN = 'rt_rotatedNewTokenRotatedNewToken';
+const REFRESHED_AUTH_JSON = AUTH_JSON.replace(REFRESH_TOKEN, ROTATED_TOKEN);
+
 describe('authJsonSecrets', () => {
   it('collects every string under tokens and nothing else in the file', () => {
     expect(authJsonSecrets(AUTH_JSON)).toEqual([
@@ -233,10 +265,10 @@ describe('authRefreshed', () => {
 describe('reconcileAuthAfterRun', () => {
   const REAL = '/home/maintainer/.codex/auth.json';
   const SCRATCH = '/tmp/olympus-codex-scratch-x/config/auth.json';
-  // Its first eight characters differ from REFRESH_TOKEN's, so a hit on it can
+  // It shares no 20-character tail with REFRESH_TOKEN, so a hit on it can
   // only come from the post-run file.
-  const ROTATED = 'rt_rotatedNewTokenRotatedNewToken';
-  const REFRESHED_JSON = AUTH_JSON.replace(REFRESH_TOKEN, ROTATED);
+  const ROTATED = ROTATED_TOKEN;
+  const REFRESHED_JSON = REFRESHED_AUTH_JSON;
 
   /** An in-memory filesystem that records every write-side call in order. */
   function fakeFs(files: Record<string, string>): { fs: AuthFs; calls: string[]; files: Map<string, Uint8Array> } {
@@ -465,6 +497,7 @@ function codexFacts(overrides: Partial<Omit<Manifest, 'outcome'>> = {}): Omit<Ma
     recordedApprovalPolicy: 'never',
     bundleSha256: 'b'.repeat(64),
     integrity: VERIFIED,
+    replySha256: 'c'.repeat(64),
     ...overrides,
   };
 }
@@ -774,14 +807,52 @@ describe('guardScratch', () => {
   it('stops listening once released', () => {
     const { host, fire, listening } = fakeHost();
     const removed: string[] = [];
-    const release = guardScratch(scratch, (s) => removed.push(s.root), host);
+    const guard = guardScratch(scratch, (s) => removed.push(s.root), host);
 
     expect(listening()).toBe(3);
-    release();
+    guard.release();
     fire('SIGINT');
 
     expect(listening()).toBe(0);
     expect(removed).toEqual([]);
+  });
+
+  it('once the bundle is being sent, reports the egress, writes the credential back, and only then removes the scratch', () => {
+    const { host, fire, exits } = fakeHost();
+    const steps: string[] = [];
+    const errors = vi.spyOn(console, 'error').mockImplementation((line: unknown) => {
+      steps.push(`print ${String(line)}`);
+    });
+    try {
+      const guard = guardScratch(scratch, () => steps.push('remove'), host);
+      guard.sending('codex', () => steps.push('write-back'));
+
+      fire('SIGTERM');
+
+      expect(steps).toHaveLength(3);
+      expect(steps[0]).toMatch(/^print .*bundle WAS sent to OpenAI/);
+      expect(steps[0]).toMatch(/no evidence was written because the run was interrupted/i);
+      expect(steps.slice(1)).toEqual(['write-back', 'remove']);
+      expect(exits).toEqual([143]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it('before the bundle is sent, a signal removes the scratch without claiming any egress', () => {
+    const { host, fire } = fakeHost();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const removed: string[] = [];
+      guardScratch(scratch, (s) => removed.push(s.root), host);
+
+      fire('SIGINT');
+
+      expect(removed).toEqual([scratch.root]);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 
@@ -796,6 +867,8 @@ describe('main: egress order', () => {
   const ECHO = `base 1111111 head 2222222 last section packages/core/src/a.ts nonce ${NONCE}`;
   const EGRESS = /^(runCli|callGemini)$/;
   const WRITE = /^(write|rename|authFs\.(write|rename|remove)) /;
+  /** What the stand-in `git log` reports as the commit that last touched the artifacts. */
+  const LAST_TOUCHED = '4a1f0c3e9b8d7a6f5e4d3c2b1a0f9e8d7c6b5a49';
 
   type Family = 'codex' | 'gemini';
 
@@ -803,6 +876,11 @@ describe('main: egress order', () => {
     readonly nonce?: boolean;
     readonly untracked?: boolean;
     readonly modified?: boolean;
+    /** The artifacts' last commit is not on the upstream. */
+    readonly unpushed?: boolean;
+    /** The branch has no upstream at all. */
+    readonly noUpstream?: boolean;
+    readonly platform?: NodeJS.Platform;
     readonly env?: Readonly<Record<string, string | undefined>>;
     readonly contaminate?: boolean;
     /** Appended to the reviewer's reply. */
@@ -810,13 +888,22 @@ describe('main: egress order', () => {
     readonly authReadThrows?: boolean;
     /** The stand-in makes the -o path a directory, so reading the reply throws (EISDIR). */
     readonly replyReadThrows?: boolean;
+    readonly removeThrows?: boolean;
+    /** The stand-in Gemini call rejects with this. */
+    readonly geminiRejects?: () => Error;
+    /** The signal the maintainer sends while the vendor call is in flight. The
+     *  stand-in Codex refreshes its credential first. The call never settles. */
+    readonly interrupt?: 'SIGINT' | 'SIGTERM';
   }
 
   interface Harness {
     readonly deps: RunnerDeps;
     readonly calls: string[];
+    readonly gitCalls: string[];
     readonly reviews: string;
     readonly home: string;
+    /** Signal listeners still registered on the stand-in process. */
+    readonly listening: () => number;
   }
 
   const temps: string[] = [];
@@ -851,15 +938,30 @@ describe('main: egress order', () => {
     writeFileSync(join(home, '.codex', 'auth.json'), AUTH_JSON);
 
     const calls: string[] = [];
+    const gitCalls: string[] = [];
+    const listeners = new Map<string, Array<() => void>>();
+    const fire = (event: string): void => {
+      for (const listener of listeners.get(event) ?? []) listener();
+    };
+    const listening = (): number => [...listeners.values()].reduce((sum, list) => sum + list.length, 0);
     const reply = `## Findings\n${ECHO}\n${options.replyExtra ?? ''}`;
     const deps: RunnerDeps = {
       repoRoot: root,
       homeDir: home,
       env: { CODEX_JS: join(install, 'bin', 'codex.js'), GEMINI_API_KEY: FAKE_KEY, ...options.env },
+      platform: options.platform ?? 'win32',
       git: (_cwd, args) => {
+        gitCalls.push(args.join(' '));
+        if (args[0] === 'rev-parse' && args.includes('@{u}')) {
+          if (options.noUpstream === true) throw new Error("fatal: no upstream configured for branch 'test-branch'");
+          return 'origin/test-branch\n';
+        }
         if (args[0] === 'rev-parse') return 'test-branch\n';
         if (args[0] === 'ls-files' && options.untracked === true) throw new Error('did not match any file known to git');
         if (args[0] === 'status' && options.modified === true) return ` M ${args[3] ?? ''}\n`;
+        if (args[0] === 'log') return `${LAST_TOUCHED}\n`;
+        // `merge-base --is-ancestor` exits 1 when it is not, which execFileSync throws.
+        if (args[0] === 'merge-base' && options.unpushed === true) throw new Error('Command failed: git merge-base');
         return '';
       },
       runCli: (spawnOptions) => {
@@ -867,6 +969,11 @@ describe('main: egress order', () => {
         // A stand-in Codex: the reply to -o, and a rollout log shaped like the measured one.
         const out = spawnOptions.args[spawnOptions.args.indexOf('-o') + 1] ?? '';
         const codexHome = spawnOptions.env.CODEX_HOME ?? '';
+        if (options.interrupt !== undefined) {
+          writeFileSync(join(codexHome, 'auth.json'), REFRESHED_AUTH_JSON);
+          fire(options.interrupt);
+          return new Promise<never>(() => undefined);
+        }
         if (options.replyReadThrows === true) mkdirSync(out);
         else writeFileSync(out, reply);
         const sessions = join(codexHome, 'sessions', '2026', '09', '21');
@@ -885,6 +992,11 @@ describe('main: egress order', () => {
       },
       callGemini: () => {
         calls.push('callGemini');
+        if (options.interrupt !== undefined) {
+          fire(options.interrupt);
+          return new Promise<never>(() => undefined);
+        }
+        if (options.geminiRejects !== undefined) return Promise.reject(options.geminiRejects());
         const result: GeminiResult = {
           reply,
           modelVersion: 'test-model',
@@ -905,6 +1017,8 @@ describe('main: egress order', () => {
       },
       removeScratch: (scratch) => {
         calls.push('removeScratch');
+        // The root stays registered in `temps`, so afterEach still removes it.
+        if (options.removeThrows === true) throw new Error('EBUSY: resource busy or locked');
         removeScratch(scratch);
       },
       writeFile: (path, content) => {
@@ -931,9 +1045,19 @@ describe('main: egress order', () => {
           calls.push(`authFs.remove ${path}`);
         },
       },
-      signals: { on: () => undefined, off: () => undefined, exit: () => undefined },
+      signals: {
+        on: (event, listener) => {
+          listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        },
+        off: (event, listener) => {
+          listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== listener));
+        },
+        exit: (code) => {
+          calls.push(`exit ${String(code)}`);
+        },
+      },
     };
-    return { deps, calls, reviews, home };
+    return { deps, calls, gitCalls, reviews, home, listening };
   }
 
   /** An earlier FAILED attempt, so any archive that ran would show as a rename. */
@@ -964,6 +1088,8 @@ describe('main: egress order', () => {
     },
     { name: 'an artifact is not committed', families: ['codex', 'gemini'], options: { untracked: true } },
     { name: 'an artifact has uncommitted changes', families: ['codex', 'gemini'], options: { modified: true } },
+    { name: 'the artifacts are committed but not pushed', families: ['codex', 'gemini'], options: { unpushed: true } },
+    { name: 'the branch has no upstream', families: ['codex', 'gemini'], options: { noUpstream: true } },
     { name: 'the bundle has no end nonce', families: ['codex', 'gemini'], options: { nonce: false } },
     {
       name: 'a counted review is present',
@@ -979,6 +1105,7 @@ describe('main: egress order', () => {
         writeFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-${family}.run.json`), `\uFEFF{"outcome":"counted"}`);
       },
     },
+    { name: 'the platform is not Windows', families: ['codex'], options: { platform: 'linux' } },
     { name: 'the Codex entry point cannot be resolved', families: ['codex'], options: { env: { CODEX_JS: join(tmpdir(), 'no-such-codex', 'codex.js') } } },
     { name: 'there is no Codex credential', families: ['codex'], setup: (h) => {
         rmSync(join(h.home, '.codex', 'auth.json'));
@@ -1073,5 +1200,141 @@ describe('main: egress order', () => {
 
     expect(await main([UNIT, 'codex'], h.deps)).toBe(0);
     expect(h.calls.filter((call) => call.startsWith('write '))).toHaveLength(3);
+  });
+
+  it('checks that the commit which last touched the prompt and bundle is on the upstream, and names the push when it is not', async () => {
+    const pushed = harness();
+
+    expect(await main([UNIT, 'gemini', '--dry-run'], pushed.deps)).toBe(0);
+    expect(pushed.gitCalls).toContain(`log -1 --format=%H -- docs/reviews/${PROMPT} docs/reviews/${BUNDLE}`);
+    expect(pushed.gitCalls).toContain(`merge-base --is-ancestor ${LAST_TOUCHED} @{u}`);
+
+    for (const options of [{ unpushed: true }, { noUpstream: true }]) {
+      const errors = vi.mocked(console.error);
+      errors.mockClear();
+      const h = harness(options);
+
+      expect(await main([UNIT, 'gemini', '--dry-run'], h.deps)).toBe(1);
+      expect(errors.mock.calls.flat().join('\n')).toMatch(/push/i);
+    }
+  });
+
+  it('codex: refuses on any platform but Windows, where its read isolation was measured; gemini runs no local tool and is unaffected', async () => {
+    for (const platform of ['linux', 'darwin'] as const) {
+      const errors = vi.mocked(console.error);
+      errors.mockClear();
+      const h = harness({ platform });
+
+      expect(await main([UNIT, 'codex'], h.deps)).toBe(1);
+      expect(h.calls).not.toContain('runCli');
+      expect(h.calls).not.toContain('buildScratch');
+      expect(errors.mock.calls.flat().join('\n')).toMatch(/measured only on Windows/);
+    }
+
+    const gemini = harness({ platform: 'linux' });
+    expect(await main([UNIT, 'gemini'], gemini.deps)).toBe(0);
+  });
+
+  for (const family of ['codex', 'gemini'] as const) {
+    it(`${family}: the manifest's replySha256 is the SHA-256 of the reply file's bytes as written`, async () => {
+      const h = harness({ replyExtra: 'Non-ASCII survives: café — ✓\n' });
+
+      expect(await main([UNIT, family], h.deps)).toBe(0);
+      const stem = `2026-09-21-${UNIT}-probe-review-${family}`;
+      const manifest = JSON.parse(readFileSync(join(h.reviews, `${stem}.run.json`), 'utf8')) as Manifest; // JSON-parse boundary: the file this run just wrote.
+      expect(manifest.replySha256).toBe(sha256(readFileSync(join(h.reviews, `${stem}.md`))));
+    });
+  }
+
+  it('codex: replySha256 is null when no reply file is written', async () => {
+    const h = harness({ replyReadThrows: true });
+
+    expect(await main([UNIT, 'codex'], h.deps)).toBe(1);
+    const stem = `2026-09-21-${UNIT}-probe-review-codex`;
+    const manifest = JSON.parse(readFileSync(join(h.reviews, `${stem}.run.json`), 'utf8')) as Manifest; // JSON-parse boundary: the file this run just wrote.
+    expect(existsSync(join(h.reviews, `${stem}.md`))).toBe(false);
+    expect(manifest.replySha256).toBeNull();
+  });
+
+  const timeouts: ReadonlyArray<readonly [string, () => Error]> = [
+    ["fetch's TimeoutError", () => new DOMException('The operation was aborted due to timeout', 'TimeoutError')],
+    ["fetch's AbortError", () => new DOMException('This operation was aborted', 'AbortError')],
+    [
+      "undici's header timeout",
+      () => new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' }) }),
+    ],
+    [
+      "undici's body timeout",
+      () => new TypeError('fetch failed', { cause: Object.assign(new Error('Body Timeout Error'), { code: 'UND_ERR_BODY_TIMEOUT' }) }),
+    ],
+    ["the https transport's own timeout", () => new RequestTimeoutError()],
+  ];
+
+  for (const [name, rejection] of timeouts) {
+    it(`gemini: records ${name} as timedOut: true, and the run as FAILED`, async () => {
+      const h = harness({ geminiRejects: rejection });
+
+      expect(await main([UNIT, 'gemini'], h.deps)).toBe(1);
+      const manifest = JSON.parse(
+        readFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-gemini.run.json`), 'utf8'),
+      ) as Manifest; // JSON-parse boundary: the file this run just wrote.
+      expect(manifest.timedOut).toBe(true);
+      expect(manifest.outcome).toBe('FAILED');
+    });
+  }
+
+  it('gemini: records a failure that is not a timeout as timedOut: false', async () => {
+    const refused = (): Error =>
+      new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+    const h = harness({ geminiRejects: refused });
+
+    expect(await main([UNIT, 'gemini'], h.deps)).toBe(1);
+    const manifest = JSON.parse(
+      readFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-gemini.run.json`), 'utf8'),
+    ) as Manifest; // JSON-parse boundary: the file this run just wrote.
+    expect(manifest.timedOut).toBe(false);
+    expect(manifest.outcome).toBe('FAILED');
+  });
+
+  it('codex: a scratch that cannot be removed is reported, but a counted run stays counted and the signal guard is still released', async () => {
+    const h = harness({ removeThrows: true });
+
+    expect(await main([UNIT, 'codex'], h.deps)).toBe(0);
+    expect(h.listening()).toBe(0);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toMatch(/could not be removed/);
+  });
+
+  it('codex: Ctrl-C mid-run says the bundle was sent, writes the refreshed credential back, then removes the scratch', async () => {
+    const h = harness({ interrupt: 'SIGINT' });
+
+    void main([UNIT, 'codex'], h.deps);
+    await vi.waitFor(() => {
+      expect(h.calls).toContain('exit 130');
+    });
+
+    const at = (prefix: string): number => h.calls.findIndex((call) => call.startsWith(prefix));
+    expect(at('runCli')).toBeGreaterThanOrEqual(0);
+    expect(at('authFs.write ')).toBeGreaterThan(at('runCli'));
+    expect(at('authFs.rename ')).toBeGreaterThan(at('authFs.write '));
+    expect(at('removeScratch')).toBeGreaterThan(at('authFs.rename '));
+    expect(at('exit 130')).toBeGreaterThan(at('removeScratch'));
+    expect(h.calls.filter((call) => call.startsWith('write '))).toEqual([]);
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(printed).toMatch(/bundle WAS sent to OpenAI/);
+    expect(printed).toMatch(/no evidence was written because the run was interrupted/i);
+  });
+
+  it('gemini: SIGTERM mid-call says the bundle was sent to Google and that no evidence was written', async () => {
+    const h = harness({ interrupt: 'SIGTERM' });
+
+    void main([UNIT, 'gemini'], h.deps);
+    await vi.waitFor(() => {
+      expect(h.calls).toContain('exit 143');
+    });
+
+    const printed = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(printed).toMatch(/bundle WAS sent to Google/);
+    expect(printed).toMatch(/no evidence was written because the run was interrupted/i);
+    expect(h.calls.filter((call) => call.startsWith('write '))).toEqual([]);
   });
 });

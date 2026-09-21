@@ -1,8 +1,14 @@
+import type { Socket } from 'node:net';
+import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { FetchLike } from '../gemini.ts';
 import {
   GEMINI_MODEL,
+  RequestTimeoutError,
   callGemini,
   geminiRequest,
+  httpsFetch,
+  isTimeout,
   parseGeminiResponse,
 } from '../gemini.ts';
 
@@ -215,6 +221,18 @@ describe('parseGeminiResponse', () => {
     expect(result.incompleteReason).toBe('no text parts');
   });
 
+  it('treats a candidate whose finishReason is absent as an incomplete reply, not a complete one', () => {
+    const response = {
+      candidates: [{ content: { parts: [{ text: 'text with no finish reason' }] } }],
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.complete).toBe(false);
+    expect(result.reply).toBeNull();
+    expect(result.incompleteReason).toBe('no finishReason');
+  });
+
   it('reports plainly when the candidate has no content.parts at all', () => {
     const response = {
       candidates: [{ finishReason: 'STOP' }],
@@ -288,6 +306,26 @@ describe('callGemini', () => {
     expect(JSON.stringify(error)).not.toContain(FAKE_KEY);
   });
 
+  it('hands fetch an AbortSignal on init.signal, live when the call is made and fired at the time limit', async () => {
+    const seen: { signal?: AbortSignal; abortedAtCall?: boolean } = {};
+    const fetchImpl: FetchLike = (_url, init) => {
+      seen.signal = init.signal;
+      seen.abortedAtCall = init.signal.aborted;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          reject(new Error('ended by the signal'));
+        });
+      });
+    };
+
+    await expect(
+      callGemini('bundle text', { env: { GEMINI_API_KEY: FAKE_KEY }, fetchImpl, timeoutMs: 50 }),
+    ).rejects.toThrow('ended by the signal');
+    expect(seen.signal).toBeInstanceOf(AbortSignal);
+    expect(seen.abortedAtCall).toBe(false);
+    expect(seen.signal?.aborted).toBe(true);
+  });
+
   it('does not retry with a different model on a non-2xx response — it just fails', async () => {
     let callCount = 0;
     const fetchImpl = () => {
@@ -348,5 +386,52 @@ describe('callGemini', () => {
 
       await expect(callGemini('bundle text', { fetchImpl })).rejects.toThrow(/GEMINI_API_KEY/);
     });
+  });
+});
+
+describe('httpsFetch', () => {
+  it('gives up at the limit its signal carries, against a loopback server that accepts and never answers', async () => {
+    // Loopback only: the server is this process, and nothing leaves the machine.
+    const sockets: Socket[] = [];
+    const server = createServer((socket) => {
+      sockets.push(socket);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    try {
+      const started = Date.now();
+      let caught: unknown;
+      try {
+        await httpsFetch(`https://127.0.0.1:${String(port)}/v1beta/models/m:generateContent`, {
+          method: 'POST',
+          headers: { 'x-goog-api-key': FAKE_KEY, 'content-type': 'application/json' },
+          body: '{}',
+          signal: AbortSignal.timeout(200),
+        });
+      } catch (err) {
+        caught = err;
+      }
+      const elapsed = Date.now() - started;
+
+      expect(caught).toBeInstanceOf(RequestTimeoutError);
+      expect(isTimeout(caught)).toBe(true);
+      // It connected and waited on a silent peer until the signal, not less and not much more.
+      expect(sockets).toHaveLength(1);
+      expect(elapsed).toBeGreaterThanOrEqual(150);
+      expect(elapsed).toBeLessThan(10_000);
+      // Nothing about the request, its headers least of all, rides on the error.
+      const error = caught instanceof Error ? caught : new Error('not an Error');
+      expect(`${String(error)} ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`).not.toContain(FAKE_KEY);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    }
   });
 });

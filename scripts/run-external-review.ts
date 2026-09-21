@@ -12,7 +12,7 @@ import { codexApprovalPolicy, codexArgv, codexModel, codexUsage, resolveCodexEnt
 import type { Family, Invocation, Manifest } from './review-runner/evidence.ts';
 import { CODEX_KEEP, RECORDABLE_ENV, outcomeOf, redactEnv, stripSessionLog } from './review-runner/evidence.ts';
 import type { GeminiResult } from './review-runner/gemini.ts';
-import { GEMINI_MODEL, GeminiRequestError, callGemini, geminiRequest } from './review-runner/gemini.ts';
+import { GEMINI_MODEL, GeminiRequestError, callGemini, geminiRequest, isTimeout } from './review-runner/gemini.ts';
 import { verifyIngestion } from './review-runner/ingestion.ts';
 import type { BundleMarkers } from './review-runner/integrity.ts';
 import { bundleMarkers, verifyEcho } from './review-runner/integrity.ts';
@@ -68,7 +68,13 @@ export function parseArgs(argv: readonly string[]): RunArgs {
   return { unit, family, dryRun };
 }
 
-const SECRET_PREFIX_LENGTH = 8;
+/** Shorter values are never searched for: they occur in ordinary text. */
+const SECRET_MIN_LENGTH = 8;
+
+/** A value this long or longer is searched for by its last
+ *  `SECRET_TAIL_LENGTH` characters, which its full value contains too. */
+const SECRET_TAIL_MIN_LENGTH = 24;
+const SECRET_TAIL_LENGTH = 20;
 
 /** Searched for whenever they are set. Neither reviewer can reach the
  *  environment, so any bug of ours that dumps `process.env` wholesale carries
@@ -79,11 +85,11 @@ const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i;
 
 /** An absolute filesystem path, POSIX or Windows. A variable that says where a
  *  credential lives (GOOGLE_APPLICATION_CREDENTIALS, AWS_SHARED_CREDENTIALS_FILE)
- *  holds a path, not the credential, and paths are what a manifest records: on
- *  Linux and macOS its value's first eight characters match the manifest's own
- *  paths, and every run's evidence would be withheld after the bundle was sent.
- *  Such a value is skipped only when the path also exists on disk: a secret
- *  that merely begins with "/" almost never names an existing file. */
+ *  holds a path, not the credential, and paths are what manifests record and
+ *  replies quote: a reply naming that file would withhold every file after
+ *  the bundle was sent. Such a value is skipped only when the path also exists
+ *  on disk: a secret that merely begins with "/" almost never names an
+ *  existing file. */
 const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;
 
 /** What `findLeakedSecrets` reports for a hit on the copied credential file.
@@ -98,13 +104,18 @@ export const AUTH_JSON_LABEL = 'auth.json';
  * only for values that are secrets. Measured before this was narrowed: a
  * reply quoting any path under C:\Users tripped APPDATA, TEMP and seven more.
  *
- * Searches for the first eight characters of the value of every canary
- * variable, of every variable whose name says it is a secret, and of every
- * string in `authSecrets`. A secret-named value that is the absolute path of an
- * existing file is skipped; the canaries never are. Returns the variable
- * NAMES, plus `AUTH_JSON_LABEL` for a credential-file hit. It never returns,
- * logs, or throws a value: the caller prints what this returns, so returning a
- * value would print it.
+ * Searches for the value of every canary variable, of every variable whose
+ * name says it is a secret, and of every string in `authSecrets`: in full, or,
+ * for a value of 24 characters or more, by its last 20 characters alone, so a
+ * copy missing its start is still caught. Never by a prefix. `sk-proj-` begins
+ * every OpenAI project key, `sk-ant-a` every Anthropic key, and `eyJhbGci`
+ * every JWT in auth.json, so a reply quoting any placeholder in one of those
+ * formats would withhold every file after the bundle was sent. A key's tail is
+ * its own; a JWT's is its signature. A secret-named value that is the absolute
+ * path of an existing file is skipped; the canaries never are. Returns the
+ * variable NAMES, plus `AUTH_JSON_LABEL` for a credential-file hit. It never
+ * returns, logs, or throws a value: the caller prints what this returns, so
+ * returning a value would print it.
  */
 export function findLeakedSecrets(
   contents: readonly string[],
@@ -112,9 +123,9 @@ export function findLeakedSecrets(
   authSecrets: readonly string[] = [],
 ): readonly string[] {
   const appears = (value: string): boolean => {
-    if (value.length < SECRET_PREFIX_LENGTH) return false;
-    const prefix = value.slice(0, SECRET_PREFIX_LENGTH);
-    return contents.some((text) => text.includes(prefix));
+    if (value.length < SECRET_MIN_LENGTH) return false;
+    const needle = value.length >= SECRET_TAIL_MIN_LENGTH ? value.slice(-SECRET_TAIL_LENGTH) : value;
+    return contents.some((text) => text.includes(needle));
   };
 
   const leaked: string[] = [];
@@ -334,6 +345,15 @@ const WRITE_BACK_NOTICE: Readonly<Record<WriteBack, string | null>> = {
     'original was left in place. If Codex asks you to log in, run `codex login`.',
 };
 
+/** Prints what the write-back did, where there is anything to say. */
+function reportWriteBack(postRunAuth: PostRunAuth): void {
+  const notice = WRITE_BACK_NOTICE[postRunAuth.writeBack];
+  if (notice !== null) console.error(notice);
+  if (postRunAuth.leftoverTemp !== null) {
+    console.error(`The temp file ${postRunAuth.leftoverTemp} holds the refreshed credential and could not be removed. Delete it.`);
+  }
+}
+
 /** Everything `runCli` needs for the Codex child except its stdin. */
 export interface CodexSpawn {
   readonly command: string;
@@ -358,6 +378,10 @@ export interface CodexSpawn {
  * USERPROFILE, WINDIR) from the parent whenever they are missing. Measured the
  * same day with a stand-in child that printed its variable names. None is a
  * secret, and the list is closed, so no API key can arrive by that route.
+ *
+ * All of this was measured on Windows only, where the read-only sandbox also
+ * blocked every file read. That is why the runner refuses Codex elsewhere
+ * (`CODEX_PLATFORM`).
  */
 export function codexSpawn(scratch: CodexScratch, entry: string, replyPath: string): CodexSpawn {
   return {
@@ -366,6 +390,23 @@ export function codexSpawn(scratch: CodexScratch, entry: string, replyPath: stri
     cwd: scratch.workDir,
     env: { CODEX_HOME: scratch.configHome },
   };
+}
+
+/**
+ * The only platform the Codex family runs on. There, measured twice, the
+ * read-only sandbox blocked every file read, so the reviewer could not reach
+ * the maintainer's files. Codex's documentation suggests its read-only sandbox
+ * permits reads anywhere on macOS and Linux. Unmeasured, so refused, before
+ * egress: lifting this takes the measurement, not a flag.
+ */
+const CODEX_PLATFORM: NodeJS.Platform = 'win32';
+
+function codexPlatformRefusal(platform: NodeJS.Platform): string {
+  return (
+    'the Codex family runs only on Windows. Its read isolation has been measured only on Windows, where the ' +
+    `read-only sandbox blocked every file read; on ${platform} it has not been measured, and it must be before ` +
+    'Codex runs there.'
+  );
 }
 
 /**
@@ -515,39 +556,98 @@ const PROCESS_SIGNALS: SignalHost = {
 };
 
 /**
+ * Removes the scratch by the path it holds. A failure is reported, never
+ * thrown: it cannot change a finished run's exit code, and nothing that must
+ * run after it is skipped.
+ */
+function removeScratchOrReport(scratch: CodexScratch, remove: (scratch: CodexScratch) => void): void {
+  try {
+    remove(scratch);
+  } catch {
+    console.error(`The scratch directory ${scratch.root} holds a copy of your Codex credential and could not be removed. Delete it.`);
+  }
+}
+
+/** Who each family's bundle goes to. */
+const VENDOR: Readonly<Record<Family, string>> = { codex: 'OpenAI (codex)', gemini: 'Google (gemini)' };
+
+/** The one line a run interrupted after egress leaves. No evidence file is
+ *  written from a signal handler, so this line is the only record of it. */
+function interruptedNotice(family: Family): string {
+  return `interrupted: the bundle WAS sent to ${VENDOR[family]}. No evidence was written because the run was interrupted.`;
+}
+
+export interface ScratchGuard {
+  /**
+   * Called immediately before the bundle is sent. From then on a signal
+   * prints `interruptedNotice`, runs `writeBack`, and only then removes the
+   * scratch: a credential Codex refreshed lives only in the scratch copy, so
+   * removing it first would lose it. `writeBack` must not throw.
+   */
+  readonly sending: (family: Family, writeBack: () => void) => void;
+  readonly release: () => void;
+}
+
+/**
  * Keeps the credential copy from outliving an interrupted run. From the moment
- * the scratch exists until the returned release is called, Ctrl-C, SIGTERM or
- * a process exit removes it: the one directory this run created, identified
- * by the path the scratch holds and never by a name or a pattern. A signal
- * then exits the way it would have (130 and 143).
+ * the scratch exists until `release`, Ctrl-C, SIGTERM or a process exit
+ * removes it: the one directory this run created, identified by the path the
+ * scratch holds and never by a name or a pattern. A signal then exits the way
+ * it would have (130 and 143). All of it is synchronous: a signal handler
+ * gets no later turn.
  */
 export function guardScratch(
   scratch: CodexScratch,
   remove: (scratch: CodexScratch) => void,
   host: SignalHost = PROCESS_SIGNALS,
-): () => void {
+): ScratchGuard {
+  let sent: { readonly family: Family; readonly writeBack: () => void } | null = null;
   const cleanUp = (): void => {
-    try {
-      remove(scratch);
-    } catch {
-      console.error(`The scratch directory ${scratch.root} holds a copy of your Codex credential and could not be removed. Delete it.`);
+    removeScratchOrReport(scratch, remove);
+  };
+  const interrupted = (code: number) => (): void => {
+    const egress = sent;
+    if (egress !== null) {
+      console.error(interruptedNotice(egress.family));
+      egress.writeBack();
     }
-  };
-  const onSigint = (): void => {
     cleanUp();
-    host.exit(130);
+    host.exit(code);
   };
-  const onSigterm = (): void => {
-    cleanUp();
-    host.exit(143);
-  };
+  const onSigint = interrupted(130);
+  const onSigterm = interrupted(143);
   host.on('SIGINT', onSigint);
   host.on('SIGTERM', onSigterm);
   host.on('exit', cleanUp);
+  return {
+    sending: (family, writeBack) => {
+      sent = { family, writeBack };
+    },
+    release: () => {
+      host.off('SIGINT', onSigint);
+      host.off('SIGTERM', onSigterm);
+      host.off('exit', cleanUp);
+    },
+  };
+}
+
+/**
+ * The Gemini counterpart, which has no scratch to guard: from the call until
+ * the returned release, a signal prints `interruptedNotice` and exits the way
+ * it would have.
+ */
+export function guardEgress(family: Family, host: SignalHost = PROCESS_SIGNALS): () => void {
+  const interrupted = (code: number) => (): void => {
+    console.error(interruptedNotice(family));
+    host.exit(code);
+  };
+  const onSigint = interrupted(130);
+  const onSigterm = interrupted(143);
+  host.on('SIGINT', onSigint);
+  host.on('SIGTERM', onSigterm);
   return () => {
     host.off('SIGINT', onSigint);
     host.off('SIGTERM', onSigterm);
-    host.off('exit', cleanUp);
   };
 }
 
@@ -560,6 +660,7 @@ export interface RunnerDeps {
   readonly repoRoot: string;
   readonly homeDir: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly platform: NodeJS.Platform;
   readonly git: (cwd: string, args: readonly string[]) => string;
   readonly runCli: (options: RunCliOptions) => Promise<CliResult>;
   readonly callGemini: (payload: string) => Promise<GeminiResult>;
@@ -567,7 +668,8 @@ export interface RunnerDeps {
   readonly buildScratch: (authJsonSource: string) => CodexScratch;
   /** rm of the scratch root. */
   readonly removeScratch: (scratch: CodexScratch) => void;
-  readonly writeFile: (path: string, content: string) => void;
+  /** Writes exactly these bytes, so a hash of them is a hash of the file. */
+  readonly writeFile: (path: string, bytes: Uint8Array) => void;
   readonly rename: (from: string, to: string) => void;
   readonly authFs: AuthFs;
   readonly signals: SignalHost;
@@ -578,14 +680,15 @@ export function defaultDeps(): RunnerDeps {
     repoRoot: REPO_ROOT,
     homeDir: homedir(),
     env: process.env,
+    platform: process.platform,
     git: (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
     runCli,
     // callGemini reads GEMINI_API_KEY from process.env at call time.
     callGemini: (payload) => callGemini(payload),
     buildScratch: buildCodexScratch,
     removeScratch,
-    writeFile: (path, content) => {
-      writeFileSync(path, content, 'utf8');
+    writeFile: (path, bytes) => {
+      writeFileSync(path, bytes);
     },
     rename: (from, to) => {
       renameSync(from, to);
@@ -623,6 +726,39 @@ function isTracked(deps: RunnerDeps, path: string): boolean {
   }
 }
 
+/**
+ * Step 2's second half: committed AND pushed. A reader can check that the
+ * reviewer was not steered, and that the prompt was not edited after the
+ * reply came back, only against a commit that left the machine before the
+ * bundle did; a local-only commit can be rewritten along with everything else
+ * local. So the commit that last touched either artifact must be an ancestor
+ * of the branch's upstream.
+ */
+function assertPushed(deps: RunnerDeps, promptPath: string, bundlePath: string): void {
+  const lastTouched = deps.git(deps.repoRoot, ['log', '-1', '--format=%H', '--', promptPath, bundlePath]).trim();
+  if (lastTouched === '') throw new Error(`step 2: no commit touches ${promptPath} or ${bundlePath}`);
+
+  let upstream: string;
+  try {
+    upstream = deps.git(deps.repoRoot, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']).trim();
+  } catch (err) {
+    throw new Error(
+      'step 2: the current branch has no upstream, so the prompt and bundle cannot have been pushed. ' +
+        'They must be pushed before any reviewer sees them: push the branch, then run again.',
+      { cause: err },
+    );
+  }
+  try {
+    deps.git(deps.repoRoot, ['merge-base', '--is-ancestor', lastTouched, '@{u}']);
+  } catch (err) {
+    throw new Error(
+      `step 2: commit ${lastTouched}, which last touched the prompt and bundle, is not on ${upstream}. ` +
+        'They must be pushed before any reviewer sees them: push, then run again.',
+      { cause: err },
+    );
+  }
+}
+
 /** Steps 1 to 5. Every throw here is a refusal before egress: nothing is written. */
 function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
   const at = (relative: string): string => join(deps.repoRoot, relative);
@@ -650,6 +786,7 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
       throw new Error(`step 2: ${path} has uncommitted changes`);
     }
   }
+  assertPushed(deps, promptPath, bundlePath);
 
   // A counted or unreadable manifest is refused here, early. An earlier
   // FAILED attempt is not: its files are archived just before egress, once
@@ -832,12 +969,13 @@ async function runCodex(
   deps: RunnerDeps,
 ): Promise<number> {
   // Step 6, still before egress: every throw is a refusal.
+  if (deps.platform !== CODEX_PLATFORM) return refuse(new Error(codexPlatformRefusal(deps.platform)), env);
   const realAuthPath = join(deps.homeDir, '.codex', 'auth.json');
   let entry: string;
   let cliVersion: string;
   let scratch: CodexScratch;
   try {
-    entry = resolveCodexEntry(deps.env, process.platform, process.execPath);
+    entry = resolveCodexEntry(deps.env, deps.platform, process.execPath);
     cliVersion = codexCliVersion(entry);
     if (!existsSync(realAuthPath)) throw new Error('no Codex credential at ~/.codex/auth.json; run `codex login` first');
     scratch = deps.buildScratch(realAuthPath);
@@ -845,7 +983,7 @@ async function runCodex(
     return refuse(err, env);
   }
 
-  const releaseGuard = guardScratch(scratch, deps.removeScratch, deps.signals);
+  const guard = guardScratch(scratch, deps.removeScratch, deps.signals);
   try {
     // Listed BEFORE the run: one Codex turn leaves ~332 files of vendor cache
     // behind it, so a listing taken afterwards proves nothing about the input.
@@ -887,6 +1025,12 @@ async function runCodex(
       envOverrides: redactEnv(spawnSpec.env),
     };
 
+    // Interrupted from here on, the run says the bundle was sent and still
+    // writes a refreshed credential back before the scratch goes.
+    guard.sending('codex', () => {
+      reportWriteBack(reconcileAuthAfterRun(scratchAuthPath, realAuthPath, authCopiedIn, deps.authFs));
+    });
+
     const startedAt = new Date();
     let result: CliResult | null = null;
     let runError: unknown = null;
@@ -901,11 +1045,7 @@ async function runCodex(
     // credential Codex refreshed goes back to the maintainer, and its new
     // tokens join the set nothing may leak. This never throws.
     const postRunAuth = reconcileAuthAfterRun(scratchAuthPath, realAuthPath, authCopiedIn, deps.authFs);
-    const notice = WRITE_BACK_NOTICE[postRunAuth.writeBack];
-    if (notice !== null) console.error(notice);
-    if (postRunAuth.leftoverTemp !== null) {
-      console.error(`The temp file ${postRunAuth.leftoverTemp} holds the refreshed credential and could not be removed. Delete it.`);
-    }
+    reportWriteBack(postRunAuth);
     const secrets = [...authSecrets, ...postRunAuth.refreshedSecrets];
 
     const exitCode = result === null ? null : result.exitCode;
@@ -962,6 +1102,7 @@ async function runCodex(
     }
 
     // Step 9.
+    const replyFile = reply === null ? null : evidenceFile(p.outputs.reply, reply);
     const manifest = buildManifest({
       unit: args.unit,
       family: 'codex',
@@ -982,15 +1123,17 @@ async function runCodex(
       recordedApprovalPolicy,
       bundleSha256: p.bundleSha256,
       integrity: verifyEcho(p.markers, reply ?? ''),
+      replySha256: replyFile === null ? null : sha256(replyFile.bytes),
     });
     const session = rollout === null ? '' : stripSessionLog(rollout, CODEX_KEEP);
 
     // Steps 10 to 13. The scratch goes in the `finally`, once everything above
     // has read what it needs from it.
-    return finish(args, manifest, evidenceFiles(p.outputs, manifest, reply, session), env, secrets, deps);
+    return finish(args, manifest, evidenceFiles(p.outputs, manifest, replyFile, session), env, secrets, deps);
   } finally {
-    deps.removeScratch(scratch);
-    releaseGuard();
+    // Neither may stop the other, nor change a finished run's exit code.
+    removeScratchOrReport(scratch, deps.removeScratch);
+    guard.release();
   }
 }
 
@@ -1029,7 +1172,9 @@ async function runGemini(
 
   if (archiveBeforeEgress(p, false, env, deps) === null) return 1;
 
-  // Step 8. From here every path writes evidence that the bundle was sent.
+  // Step 8. From here every path writes evidence that the bundle was sent,
+  // and an interruption says so.
+  const releaseEgress = guardEgress('gemini', deps.signals);
   const startedAt = new Date();
   let result: GeminiResult | null = null;
   let timedOut = false;
@@ -1037,9 +1182,11 @@ async function runGemini(
   try {
     result = await deps.callGemini(p.payload);
   } catch (err) {
-    if (err instanceof Error && err.name === 'TimeoutError') timedOut = true;
+    timedOut = isTimeout(err);
     if (err instanceof GeminiRequestError) httpStatus = err.status;
     console.error(`the Gemini call failed: ${printable(messageOf(err), env)}`);
+  } finally {
+    releaseEgress();
   }
   const endedAt = new Date();
 
@@ -1062,6 +1209,7 @@ async function runGemini(
   };
 
   // Step 9.
+  const replyFile = reply === null ? null : evidenceFile(p.outputs.reply, reply);
   const manifest = buildManifest({
     unit: args.unit,
     family: 'gemini',
@@ -1082,6 +1230,7 @@ async function runGemini(
     recordedApprovalPolicy: null,
     bundleSha256: p.bundleSha256,
     integrity: verifyEcho(p.markers, reply ?? ''),
+    replySha256: replyFile === null ? null : sha256(replyFile.bytes),
   });
 
   // No session exists for the api transport. This one line is its provenance,
@@ -1094,7 +1243,7 @@ async function runGemini(
   if (httpStatus !== null) sessionRecord.httpStatus = httpStatus;
 
   // Steps 10 to 13.
-  return finish(args, manifest, evidenceFiles(p.outputs, manifest, reply, JSON.stringify(sessionRecord)), env, [], deps);
+  return finish(args, manifest, evidenceFiles(p.outputs, manifest, replyFile, JSON.stringify(sessionRecord)), env, [], deps);
 }
 
 function numericFields(record: Readonly<Record<string, unknown>> | null): Readonly<Record<string, number>> | null {
@@ -1108,26 +1257,35 @@ function numericFields(record: Readonly<Record<string, unknown>> | null): Readon
 
 interface EvidenceFile {
   readonly path: string;
+  /** What the leak check searches. */
   readonly content: string;
+  /** `content` encoded once: exactly what is written, and what a hash of the
+   *  file is taken from. */
+  readonly bytes: Uint8Array;
+}
+
+function evidenceFile(path: string, content: string): EvidenceFile {
+  return { path, content, bytes: Buffer.from(content, 'utf8') };
 }
 
 /**
- * The files a run that reached the vendor leaves, as the exact strings to be
+ * The files a run that reached the vendor leaves, as the exact bytes to be
  * written. The manifest comes first, being the record that the bundle was
  * sent. The reply file holds the reply and nothing else, and exists only when
- * there is one.
+ * there is one; it is built before the manifest, whose `replySha256` is
+ * hashed from its bytes.
  */
 function evidenceFiles(
   outputs: OutputPaths,
   manifest: Manifest,
-  reply: string | null,
+  replyFile: EvidenceFile | null,
   session: string,
 ): readonly EvidenceFile[] {
   const files: EvidenceFile[] = [
-    { path: outputs.manifest, content: `${JSON.stringify(manifest, null, 2)}\n` },
-    { path: outputs.session, content: session === '' ? '' : `${session}\n` },
+    evidenceFile(outputs.manifest, `${JSON.stringify(manifest, null, 2)}\n`),
+    evidenceFile(outputs.session, session === '' ? '' : `${session}\n`),
   ];
-  if (reply !== null) files.push({ path: outputs.reply, content: reply });
+  if (replyFile !== null) files.push(replyFile);
   return files;
 }
 
@@ -1168,7 +1326,7 @@ function finish(
   const written: string[] = [];
   for (const file of files) {
     try {
-      deps.writeFile(join(deps.repoRoot, file.path), file.content);
+      deps.writeFile(join(deps.repoRoot, file.path), file.bytes);
     } catch (err) {
       const before = written.length === 0 ? 'nothing else was written' : `${written.join(', ')} were written first`;
       throw new Error(`writing ${file.path} failed (${before}): ${messageOf(err)}`, { cause: err });

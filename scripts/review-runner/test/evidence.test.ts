@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KeylessUrl, RedactedEnv } from '../evidence.ts';
-import { CODEX_KEEP, GEMINI_KEEP, keylessUrl, outcomeOf, redactEnv, stripSessionLog } from '../evidence.ts';
+import { CODEX_KEEP, keylessUrl, outcomeOf, redactEnv, stripSessionLog } from '../evidence.ts';
 
 describe('outcomeOf', () => {
   // An api run: no approval policy exists to record.
@@ -161,13 +161,5 @@ describe('stripSessionLog', () => {
   it('skips unparseable lines rather than throwing', () => {
     const out = stripSessionLog('{"type":"session_meta"}\nnot json\n\n', CODEX_KEEP);
     expect(out).toBe('{"type":"session_meta"}');
-  });
-
-  it('keeps Gemini stream-json init and result events', () => {
-    const jsonl = ['{"type":"init","model":"m"}', '{"type":"chunk","text":"x"}', '{"type":"result","stats":{}}'].join('\n');
-    const out = stripSessionLog(jsonl, GEMINI_KEEP);
-    expect(out).toContain('init');
-    expect(out).toContain('result');
-    expect(out).not.toContain('chunk');
   });
 });

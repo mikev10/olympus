@@ -21,6 +21,10 @@ export function composePayload(promptText: string, bundleFileName: string, bundl
   return `${promptText.trimEnd()}\n\n${BEGIN} ${bundleFileName}\n${bundleText.replace(/\n+$/, '')}\n${END}\n`;
 }
 
-export function sha256(text: string): string {
-  return createHash('sha256').update(text, 'utf8').digest('hex');
+/** A string is hashed as its UTF-8 bytes; bytes are hashed as they are. */
+export function sha256(data: string | Uint8Array): string {
+  const hash = createHash('sha256');
+  if (typeof data === 'string') hash.update(data, 'utf8');
+  else hash.update(data);
+  return hash.digest('hex');
 }

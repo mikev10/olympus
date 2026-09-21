@@ -116,6 +116,9 @@ describe('removeScratch', () => {
   it('deletes what it is given', () => {
     const authJson = fixtureAuthJson();
     const scratch = buildCodexScratch(authJson);
+    // Registered like every other scratch here: if removeScratch regressed, the
+    // credential copy would otherwise outlive the test.
+    cleanupRoots.push(scratch.root);
 
     expect(existsSync(scratch.root)).toBe(true);
 

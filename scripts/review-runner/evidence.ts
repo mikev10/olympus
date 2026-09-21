@@ -96,6 +96,11 @@ export interface Manifest {
   readonly recordedApprovalPolicy: string | null;
   readonly bundleSha256: string;
   readonly integrity: EchoVerdict;
+  /** SHA-256 of the exact bytes written to the reply `.md`, hashed from the
+   *  buffer that was written; null when no reply file was written. It ties the
+   *  committed reply to this run: a reply edited afterwards, a triage header
+   *  prepended to it included, no longer matches. `outcomeOf` does not read it. */
+  readonly replySha256: string | null;
   readonly outcome: Outcome;
 }
 
@@ -141,9 +146,6 @@ export function outcomeOf(run: OutcomeFacts): Outcome {
 export const CODEX_KEEP: readonly string[] = [
   'session_meta', 'turn_context', 'world_state', 'token_usage_record',
 ];
-
-/** Gemini stream-json events carrying the model id and the token breakdown. */
-export const GEMINI_KEEP: readonly string[] = ['init', 'result'];
 
 /**
  * The full rollout log restates the entire bundle. Committing that per family

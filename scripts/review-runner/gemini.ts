@@ -1,3 +1,4 @@
+import { request as httpsRequest } from 'node:https';
 import type { KeylessUrl } from './evidence.ts';
 import { keylessUrl } from './evidence.ts';
 import { DEFAULT_TIMEOUT_MS } from './codex.ts';
@@ -188,11 +189,11 @@ export function parseGeminiResponse(response: unknown): GeminiResult {
 
 /**
  * A fetch-shaped function, injectable so tests never have to touch the
- * network. The global `fetch` satisfies this type structurally, so callers
- * that want the real network do not have to pass anything at all. Narrower
- * than `typeof fetch` on purpose: `json()` returns `Promise<unknown>` here,
- * not `Promise<any>`, so nothing downstream of a real or fake response is
- * implicitly `any`.
+ * network. `httpsFetch` is the default; the global `fetch` also satisfies this
+ * type structurally, but see `httpsFetch` for why it is not the default.
+ * Narrower than `typeof fetch` on purpose: `json()` returns `Promise<unknown>`
+ * here, not `Promise<any>`, so nothing downstream of a real or fake response
+ * is implicitly `any`.
  */
 export type FetchLike = (
   input: string,
@@ -210,13 +211,109 @@ export type FetchLike = (
   readonly text: () => Promise<string>;
 }>;
 
+/**
+ * Raised by `httpsFetch` when its signal ends a request before the response
+ * is complete. Named `TimeoutError`, as `fetch`'s own is, because the only
+ * signal `callGemini` passes is its time limit. The cause is the signal's
+ * reason; nothing about the request rides on it.
+ */
+export class RequestTimeoutError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('the Gemini API request was abandoned: it did not complete within its time limit', options);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * The default transport: one HTTPS request whose only time limit is
+ * `init.signal`, which bounds the whole exchange, from connecting to the last
+ * byte of the body. Not the global `fetch`: measured on Node 24.19, its undici
+ * transport gives up on any response whose headers take longer than 300 s
+ * (`UND_ERR_HEADERS_TIMEOUT`), whatever signal is passed, and a non-streaming
+ * `generateContent` sends no headers until the whole review is generated. A
+ * long review was cut off at five minutes, and still billed, so
+ * DEFAULT_TIMEOUT_MS was never the limit that applied. `node:https` sets no
+ * limit of its own.
+ *
+ * A timeout rejects with `RequestTimeoutError`; any other failure is the
+ * socket's own error, which names an address or a code and never a header.
+ */
+export const httpsFetch: FetchLike = (input, init) =>
+  new Promise((resolve, reject) => {
+    const { signal } = init;
+    if (signal.aborted) {
+      reject(new RequestTimeoutError({ cause: signal.reason }));
+      return;
+    }
+    const body = Buffer.from(init.body, 'utf8');
+    const req = httpsRequest(input, {
+      method: init.method,
+      headers: { ...init.headers, 'content-length': String(body.length) },
+      // A connection of its own, closed after the response, so no pooled
+      // socket keeps the process alive once the run is over.
+      agent: false,
+    });
+    const onAbort = (): void => {
+      reject(new RequestTimeoutError({ cause: signal.reason }));
+      req.destroy();
+    };
+    const fail = (err: Error): void => {
+      signal.removeEventListener('abort', onAbort);
+      reject(err);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    req.on('error', fail);
+    req.on('response', (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      res.on('error', fail);
+      res.on('end', () => {
+        signal.removeEventListener('abort', onAbort);
+        const text = Buffer.concat(chunks).toString('utf8');
+        const status = res.statusCode ?? 0;
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          statusText: res.statusMessage ?? '',
+          text: () => Promise.resolve(text),
+          json: () =>
+            new Promise<unknown>((parsed) => {
+              parsed(JSON.parse(text));
+            }),
+        });
+      });
+    });
+    req.end(body);
+  });
+
+/** undici's own header and body time limits, reachable only when a real
+ *  `fetch` is injected. They reach the caller as `TypeError('fetch failed')`
+ *  with the code on its cause. */
+const UNDICI_TIMEOUT_CODES: readonly string[] = ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'];
+
+/**
+ * True when a failed Gemini call ran out of time rather than failing outright:
+ * `httpsFetch`'s `RequestTimeoutError`, a `fetch` TimeoutError or AbortError,
+ * or an undici header or body timeout. A timeout recorded as anything else
+ * would let the manifest say the vendor failed when the run gave up waiting.
+ */
+export function isTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err instanceof RequestTimeoutError || err.name === 'TimeoutError' || err.name === 'AbortError') return true;
+  const cause: unknown = err.cause;
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return false;
+  return typeof cause.code === 'string' && UNDICI_TIMEOUT_CODES.includes(cause.code);
+}
+
 export interface CallGeminiOptions {
   /** Defaults to `process.env`. Injectable so a real key never has to touch
    *  an actual environment variable in a test. */
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Defaults to the global `fetch`. Injectable so tests never touch the
-   *  network. */
+  /** Defaults to `httpsFetch`. Injectable so tests never touch the network. */
   readonly fetchImpl?: FetchLike;
+  /** Bounds the whole request. Defaults to DEFAULT_TIMEOUT_MS. */
   readonly timeoutMs?: number;
 }
 
@@ -263,7 +360,7 @@ export async function callGemini(payload: string, options: CallGeminiOptions = {
     if (value !== undefined) headers[name] = value;
   }
 
-  const fetchImpl: FetchLike = options.fetchImpl ?? fetch;
+  const fetchImpl: FetchLike = options.fetchImpl ?? httpsFetch;
   const response = await fetchImpl(request.url, {
     method: 'POST',
     headers,
