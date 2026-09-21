@@ -44,7 +44,8 @@ who runs each step, and where one Claude session ends and the next begins.
  ║  sends the bundle out of the ║
  ║  repo — this cannot be undone║
  ║  each run: reply, manifest,  ║
- ║  stripped session log        ║
+ ║  session record; committed   ║
+ ║  untouched                   ║
  ╚══════════════╤═══════════════╝
                 │ only a `counted` outcome is a review
                 ▼
@@ -94,10 +95,10 @@ who runs each step, and where one Claude session ends and the next begins.
 |---|---|---|
 | `<date>-<UNIT>-<slug>-review-prompt.txt` | `review-request` | The instructions the runner sends, verbatim |
 | `<date>-<UNIT>-<slug>-review-bundle.txt` | `review-request` | What goes with them: every changed file, in full |
-| `<date>-<UNIT>-<slug>-review-codex.md` | `run-review` | Codex's reply, untouched. `triage-review` prepends a provenance header and changes nothing beneath it |
+| `<date>-<UNIT>-<slug>-review-codex.md` | `run-review` | Codex's reply, as the runner wrote it and committed untouched. `triage-review` checks it against the manifest's `replySha256`, then prepends a provenance header and changes nothing beneath it |
 | `<date>-<UNIT>-<slug>-review-gemini.md` | `run-review` | Gemini's reply, on the same terms |
-| `<date>-<UNIT>-<slug>-review-<family>.run.json` | `run-review` | That run's manifest: the exact argv, the clean-room listing, exit code, timestamps and wall-clock, CLI version, the model the CLI reported, token usage, the bundle's SHA-256, and the integrity verdict |
-| `<date>-<UNIT>-<slug>-review-<family>.session.jsonl` | `run-review` | The CLI's own session log, metadata records only, message bodies stripped |
+| `<date>-<UNIT>-<slug>-review-<family>.run.json` | `run-review` | That run's manifest. How the reviewer was reached: for Codex the command, argv and redacted environment; for Gemini the method, the keyless URL, the model requested and header names only. The pre-run clean-room listing, `null` for Gemini, which loads no local configuration. Exit code and whether it timed out, timestamps and wall-clock, the CLI version (for Gemini, the API version), the model the vendor reported, token usage and the ingestion verdict against the payload's size and SHA-256, the post-run file count and recorded approval policy (Codex only, `null` for Gemini), the bundle's SHA-256, the echo verdict, the reply's SHA-256, and the derived outcome |
+| `<date>-<UNIT>-<slug>-review-<family>.session.jsonl` | `run-review` | For Codex, its rollout log stripped to the `session_meta`, `turn_context`, `world_state` and `token_usage_record` records, message bodies dropped. For Gemini, which has no session, one line: the response's `modelVersion`, `responseId` and `usageMetadata`, and the HTTP status of a failed call |
 | `<date>-<UNIT>-<slug>-triage.md` | `triage-review` | What each finding turned out to be, and what was done |
 
 Only the first two leave the repository, and the runner is what sends them. The

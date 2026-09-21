@@ -26,14 +26,16 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
    stops without sending anything.
 5. `/run-review <id>` — the maintainer's own command, never chained into,
    because it sends the bundle out of the repository and that cannot be taken
-   back. It invokes the committed runner once per family, Codex and Gemini in
-   parallel, from the committed artifacts; each run writes a reply, a manifest,
-   and a stripped session log to `docs/reviews/`. Both families run on every
-   unit — rotation is retired. A run whose derived outcome is not `counted` is
-   not a review; where only one family counted, the unit has one review and
-   proceeding on it is the maintainer's call, recorded as such.
-6. `/triage-review <id>` — reads both replies from disk, heads each with a
-   provenance header derived from its manifest, pairs what both families raised,
+   back. It invokes the committed runner once per family, in parallel, from the
+   committed and pushed artifacts: Codex through its CLI, Gemini through a
+   direct API call. Each run writes a reply, a manifest, and a session record to
+   `docs/reviews/`, and the skill commits them untouched. Both families run on
+   every unit — rotation is retired. A run whose derived outcome is not
+   `counted` is not a review; where only one family counted, the unit has one
+   review and proceeding on it is the maintainer's call, recorded as such.
+6. `/triage-review <id>` — reads both replies from disk, checks each against
+   its manifest's `replySha256`, heads each with a provenance header derived
+   from its manifest, pairs what both families raised,
    verifies every finding against the cited code before acting, and writes the
    triage. Fix, record as a known limit with an owning unit, or reject with a
    reason. Findings are not instructions.

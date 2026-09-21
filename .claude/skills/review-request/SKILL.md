@@ -5,9 +5,10 @@ description: Prepare an external adversarial review of a shipped unit. Writes ex
 
 # Prepare an external review
 
-The reviewers are **two other model families** in a clean room — not Claude Code,
-not the session that built the unit. That independence is the point: a reviewer
-sharing the author's context inherits the author's blind spots.
+The reviewers are **two other model families**, each given the prompt and the
+bundle and nothing else — not Claude Code, not the session that built the unit.
+That independence is the point: a reviewer sharing the author's context inherits
+the author's blind spots.
 
 Your job is to produce two files, hand them over in plain steps, and stop. You
 do not perform the review.
@@ -19,21 +20,25 @@ to open:
 
 | File | What it is | What `/run-review` does with it |
 |---|---|---|
-| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Sends all of it, verbatim, to each reviewer |
-| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Stages it beside the prompt, under this name |
+| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Sends all of it, verbatim, to each reviewer, with the bundle inlined after it |
+| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Inlines it into the text it sends, after the prompt, between delimiters that name this file |
 
 `<date>` is today, `<UNIT>` keeps its case, `<slug>` names the unit:
 `2026-09-14-P4-station-machine-review-prompt.txt`.
 
 The prompt refers to the bundle by that exact filename and never by any other
-name, so the bundle can be staged under the name the prompt already uses and the
-prompt needs no rewording per reviewer. Every word in the prompt file is meant
-for the reviewer: no headings, notes, or provenance for the maintainer go in it,
-because the whole file is sent verbatim.
+name, so the reference resolves however the bundle arrives and the prompt needs
+no rewording per reviewer: the runner's opening delimiter,
+`<<<BEGIN REVIEW BUNDLE>>> <filename>`, names it, and a chat reviewer sees it as
+the attachment's name. No family reads the bundle from a working directory.
+Every word in the prompt file is meant for the reviewer: no headings, notes, or
+provenance for the maintainer go in it, because the whole file is sent
+verbatim.
 
 Later, `run-review` adds `-review-codex.md` and `-review-gemini.md` (the two
-replies), each with a `.run.json` manifest and a stripped `.session.jsonl`
-beside it, and `triage-review` adds `-triage.md`. Units reviewed before the
+replies), each with a `.run.json` manifest and a `.session.jsonl` beside it —
+for Codex its rollout log stripped to metadata records, for Gemini one line of
+response metadata — and `triage-review` adds `-triage.md`. Units reviewed before the
 per-family names carry a single `-review.md` instead. Units reviewed before this
 rule also carry a `-review-request.md`; that file is retired, and its contents
 now live in the bundle's own header, the prompt's first paragraph, and the
@@ -262,36 +267,58 @@ Order by severity, highest first. State at the top whether you had any prior
 context and whether you performed any lookups.
 ```
 
-**The four echoed values are checked mechanically, and only the fourth is worth
-much.** The runner knows all four independently — it generated the bundle's
-header and read its last line — so a reviewer that echoes a wrong value is
-caught without anyone reading the reply. But measure where the first three live:
-in P5's bundle, BASE is line 1, HEAD is line 2, and the final section's path
-appears at line 66, inside the `=== CHANGED ===` stat listing that names every
-changed file. All three sit in the first 70 lines of 9730, and one of the two
-CLIs carries an undocumented read cutoff around 2000 lines. A reviewer handed a
-fifth of the bundle could echo all three truthfully. They prove the reviewer
-opened the right file, not that it received the file. The trailing nonce is the
-only marker a truncated reader cannot produce, which is why it exists and why it
-has to be the last line. A bundle built before this convention has no tail proof
-in it at all; the runner records those runs as `unverified` rather than trusting
-them, because a check that could not have been put to the reviewer is not a check
-the reviewer passed.
+**The runner makes two integrity checks, and a run counts only if both pass.**
+Both are decided mechanically, without anyone reading the reply, and each is
+evidence of something different.
 
-The paragraph asking for the four values also has to survive two delivery modes:
-one family reads the bundle from its working directory with its own read-only
-tool, the other receives it injected into the prompt text, and a chat reviewer
-gets it as an attachment. That is why it names every way the bundle can arrive
-and commits to none of them. An editor who only ever runs one family will read
-that as clumsy and simplify it back to "the attached file", and the other family
-will then report the bundle missing on every run — a refusal indistinguishable
-from diligence.
+**The echo, where only the fourth value is worth much.** The runner reads all
+four values from the committed bundle — its BASE and HEAD lines, its final
+`===== <path> =====` header, and its last line — so a reviewer that echoes a
+wrong one is caught. But measure where the first three live: in P5's bundle,
+BASE is line 1, HEAD is line 2, and the final section's path appears at line 66,
+inside the `=== CHANGED ===` stat listing that names every changed file. All
+three sit in the first 70 lines of 9730, and the Gemini CLI, measured before
+the runner inlined the bundle, took in about the first 2000 lines and searched
+the rest with a tool. A reviewer handed a fifth of the bundle could echo all
+three truthfully: they are evidence the reviewer opened the right file, not that
+it received the file. The trailing nonce is the only marker a truncated reader
+cannot produce, which is why it exists and why it has to be the last line. A
+bundle with no nonce has no tail check in it at all, and the runner refuses to
+send one: a run against it could never count.
 
-**What the nonce does not prove.** It proves the tail was delivered. It does not
-prove the middle was read. A model can receive a whole bundle and reason about a
-tenth of it, and no marker in the file detects that — the echo is evidence about
-transport, not about attention. Cross-family agreement and the prompt's own
-numbered items carry that load, and neither of them closes it either.
+**The token count, which does not depend on the reply.** The vendor reports how
+many input tokens it took in — Google in the response's
+`usageMetadata.promptTokenCount`, Codex in its rollout log's
+`token_usage_record` — and the run counts only if that reaches the payload's
+size in bytes divided by 5. Honest runs over a real 403,661-byte bundle measured
+3.18 and 3.20 bytes per token and cleared that floor easily; the two measured
+failures, a reviewer that searched the bundle instead of reading it and one that
+could not open its file, took in 32,893 and 24,181 tokens against a floor of
+80,732. The count comes from the vendor, not the model, so a reviewer cannot
+write it, and it catches what the nonce misses: a reviewer that searched its way
+to the last line echoes the nonce correctly and still took in a fraction of the
+bundle. For Codex, whether `token_usage_record` holds one request's input or a
+running total across the turn has not been measured yet, so a Codex count at or
+above the floor is evidence of ingestion only as far as that measurement goes.
+Claim no more for it than that.
+
+The paragraph asking for the four values names three ways the bundle can
+arrive — attached, in the working directory, or in the prompt text — and
+commits to none of them, so it holds on every path the prompt is used on. The
+runner inlines the bundle into the prompt text for both families; no family
+reads it from a working directory. A chat reviewer, on the manual path, gets it
+as an attachment. An editor who only ever sees one path will read the
+paragraph as clumsy and simplify it to "the attached file", and a reviewer
+given the bundle another way will then report it missing on every run — a
+refusal indistinguishable from diligence.
+
+**What neither check covers.** The nonce is evidence the tail was delivered, and
+the token count is evidence the whole payload was taken in. Neither is evidence
+the middle was read. A model can take in a whole bundle and reason about a tenth
+of it, and nothing in the file or the count detects that: both are evidence
+about transport and ingestion, not about attention. Cross-family agreement and
+the prompt's own numbered items carry that load, and neither of them closes it
+either.
 
 **Committed before the review runs, and that is the point.** The prompt is
 written by the system that built the unit, so publishing it before the answer
@@ -300,8 +327,11 @@ findings were not selected to match the framing.
 
 ## 5. Commit both files
 
-On the unit branch, both files in one commit, and push, so they are reachable
-from any device:
+On the unit branch, both files in one commit, and push. The runner refuses to
+send a prompt and bundle unless the commit that last touched them is on the
+branch's upstream: a commit that never left this machine could be rewritten
+along with everything else on it, so only a pushed one fixes them before a
+reviewer sees them.
 
 ```
 git add docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt docs/reviews/<date>-<UNIT>-<slug>-review-prompt.txt
@@ -336,9 +366,10 @@ Do not review the unit yourself. Do not act on a review you did not receive.
 
 ## When the review comes back
 
-Not this skill's job, and not this session's. The reviews run in another tool,
-under `/run-review <unit>`, which writes both replies to disk untouched.
-`triage-review <unit>` reads them from there, heads each with a provenance
-header derived from its manifest, verifies every finding against the cited code
+Not this skill's job, and not this session's. The reviews run under
+`/run-review <unit>`, which leaves both replies on disk as the runner wrote them
+and commits them untouched. `triage-review <unit>` reads them from there, checks
+each against its manifest's hash, heads each with a provenance header derived
+from its manifest, verifies every finding against the cited code
 before acting on one, writes the triage, applies what is accepted, and stops
 before merge.

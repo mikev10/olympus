@@ -1,6 +1,7 @@
 # Automating the external review
 
-**Status:** design approved 2026-09-20. Not yet built.
+**Status:** design approved 2026-09-20, amended after measurement 2026-09-21,
+and built on this branch.
 **Branch:** `tooling/review-automation`, off `v2` at `c49adf3`.
 
 ## The problem
@@ -21,8 +22,9 @@ writes the prompt, commits both, and pushes — **before any reviewer sees them.
 That ordering is the property that lets a later reader check the reviewer was
 not steered, and automation does not touch it.
 
-A new `run-review` invokes two third-party CLIs against those committed
-artifacts and writes their replies untouched. `triage-review` reads the replies
+A new `run-review` sends those committed artifacts to two third-party
+reviewers — OpenAI through the Codex CLI, Google through a direct Gemini API
+call — and writes their replies untouched. `triage-review` reads the replies
 from disk instead of from a paste.
 
 ```
@@ -30,10 +32,11 @@ from disk instead of from a paste.
                                |
   5. /run-review <id>          NEW. one committed script, twice, in parallel:
         +----------------+     +----------------+
-        |  codex exec    |     |  gemini        |   each in its own scratch
-        |  scratch CODEX |     |  scratch cfg   |   cwd + scratch config home
-        |  _HOME, ro     |     |  -e none, ro   |   holding only a cred file
-        +-------+--------+     +-------+--------+
+        |  codex exec    |     |  Gemini API    |   Codex: scratch cwd and a
+        |  scratch CODEX |     |  generate-     |   scratch config home holding
+        |  _HOME, ro     |     |  Content       |   only auth.json. Gemini: no
+        |  bundle stdin  |     |  no tools      |   local config at all. Both:
+        +-------+--------+     +-------+--------+   bundle inlined in the prompt
                 |                      |
                 v                      v
          -review-codex.md       -review-gemini.md        raw reply, untouched
@@ -60,17 +63,20 @@ on every unit gives two independent passes and makes disagreement between them
 a signal in its own right. The family-rotation bookkeeping is retired: there is
 no repeat to record when both run every time.
 
-**Codex by subscription sign-in; Gemini by paid API key** (amended 2026-09-21). The original decision was subscription sign-in for both. Google has since retired the OAuth path for individual accounts in the Gemini CLI — it now fails with "This client is no longer supported for Gemini Code Assist for individuals." The remaining options were a Gemini API key or Vertex AI. A **paid** key was chosen over a free one because Google's API terms say free-tier content is used "to provide, improve, and develop Google products and services" and that "human reviewers may read, annotate, and process your API input and output" — and the bundle is the full source of every changed file, sent on every unit. The paid tier carries no such use. The cost is about $0.20 per review at ~100k input tokens against Gemini 3.1 Pro, which is not a consideration at one unit per session. A side benefit: the key arrives as an environment variable, so Gemini's scratch config home holds nothing at all, which is stricter isolation than a copied credential file.
+**Codex by subscription sign-in; Gemini by paid API key** (amended 2026-09-21). The original decision was subscription sign-in for both. Google has since retired the OAuth path for individual accounts in the Gemini CLI — it now fails with "This client is no longer supported for Gemini Code Assist for individuals." The remaining options were a Gemini API key or Vertex AI. A **paid** key was chosen over a free one because Google's API terms say free-tier content is used "to provide, improve, and develop Google products and services" and that "human reviewers may read, annotate, and process your API input and output" — and the bundle is the full source of every changed file, sent on every unit. The paid tier carries no such use. The cost is about $0.20 per review at ~100k input tokens against Gemini 3.1 Pro, which is not a consideration at one unit per session. A side benefit: the key arrives as an environment variable and goes into one request header at call time, so no credential file is copied for Gemini at all.
 
 **Subscription sign-in for Codex.** `codex login` against a ChatGPT
-Plus/Pro account and a Google account for Gemini. One interactive browser login
-each, cached, headless afterward. A bundle is roughly 100k input tokens; on
-metered keys that is a real per-unit cost on both sides, twice over.
+Plus/Pro account: one interactive browser login, cached, headless afterward. A
+bundle is roughly 100k input tokens, so a metered Codex key would be a real
+per-unit cost; the subscription carries it. Gemini's side is the paid key above.
 
-**No model is pinned.** Neither CLI's model lineup is canonically documented and
-both have churned. The runner records the model the CLI reports rather than
-asserting one — the same discipline the runtime uses for status: derive, never
-declare.
+**Codex's model is not pinned; Gemini's is** (amended 2026-09-21). Codex's
+model lineup is not canonically documented and has churned, so the runner
+records the model Codex reports rather than asserting one — the same discipline
+the runtime uses for status: derive, never declare. A direct API call has to
+name its model, so Gemini's is pinned to `gemini-3.1-pro-preview`, with no
+fallback; the manifest records both the model requested and the `modelVersion`
+Google reports.
 
 **`ship-unit` stops after the artifacts.** It keeps chaining into
 `review-request` and then prints `/run-review <id>` and stops. Its documented

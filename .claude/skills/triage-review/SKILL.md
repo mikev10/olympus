@@ -19,7 +19,7 @@ docs/reviews/<date>-<UNIT>-<slug>-review-<family>.run.json
 **Ask the maintainer for nothing.** A review file holds the reply and nothing
 else — the runner writes no header — and everything a header needs is in the
 manifest beside it, in the prompt and bundle files, and in the reply itself.
-The model is the manifest's `modelReported`; where that is `null` the CLI
+The model is the manifest's `modelReported`; where that is `null` the vendor
 reported no model, and that is a fact to record, not a question to put to the
 maintainer.
 
@@ -43,16 +43,18 @@ is triaged.
 
 | Outcome | Why it is not triaged |
 |---|---|
-| `FAILED` | Non-zero exit or timeout. Nothing usable came back. |
-| `INTEGRITY_FAILED` | The bundle carried an end nonce, the reviewer was asked to echo it, and the reply did not contain every required marker — truncation, an ignored instruction, or a mistranscribed nonce. The bundle's completeness is unknown. |
-| `INTEGRITY_UNVERIFIED` | The bundle carries no end nonce at all, so no tail proof could exist and none was asked for. An artifact-age problem with no reviewer implication: every bundle generated before the nonce convention is permanently in this state. |
+| `FAILED` | A non-zero exit, a timeout, or a Gemini reply that came back incomplete: nothing usable came back. Also a Codex run whose recorded approval policy was anything but `"never"`, which could have been prompted mid-review. |
+| `INTEGRITY_FAILED` | The vendor-reported input token count fell short of the floor or was not reported at all; or the reply did not contain every required bundle marker — truncation, navigation, an ignored instruction, or a mistranscribed nonce. What the reviewer took in is unknown. |
+| `INTEGRITY_UNVERIFIED` | Cannot occur from this runner. It would mean a bundle with no end nonce, and the runner refuses such a bundle before sending it. |
 
-**The two integrity states are different facts, and a reader acts on the
-difference.** `INTEGRITY_FAILED` says a reviewer was asked to prove the tail of
-the bundle arrived and did not. `INTEGRITY_UNVERIFIED` says no one was ever
-asked, so calling it a reviewer failing a check accuses a reviewer of failing
-something never put to them. Both refuse, for the same reason and not the same
-fault: neither can show the reviewer received the whole bundle, and a finding
+**The two integrity checks are different facts, and the manifest keeps them
+apart.** `ingestion` is the vendor's own count of the input it took in, set
+against a floor of the payload's bytes divided by 5: `short` or `unreported`
+there means the reviewer may not have taken in the whole bundle, whatever its
+reply says. `integrity` is the echo: `failed`, with the missing markers named in
+`absent`, means the reply did not repeat what the bundle's tail holds. Name
+which one failed. Both refuse, for the same reason and not the same fault:
+neither leaves the reply standing as a review of the whole bundle, and a finding
 about a file that never arrived is indistinguishable from a finding about one
 that did.
 
@@ -77,8 +79,24 @@ than one that admits a gap.
 
 ## 2. Head each reply with its provenance
 
-The runner stored both replies, verbatim and tracked. The header below is what
-is missing from each, and it is the only thing this skill adds to a review file.
+The runner wrote both replies verbatim, and `run-review` committed them
+untouched. The header below is what is missing from each, and it is the only
+thing this skill adds to a review file.
+
+**First, confirm each reply is the one its run wrote.** Before prepending
+anything, hash the reply file and compare the result with its manifest's
+`replySha256`, the SHA-256 of the bytes the runner wrote:
+
+```
+sha256sum docs/reviews/<date>-<UNIT>-<slug>-review-<family>.md
+```
+
+**If they differ, or the manifest carries no `replySha256`, refuse to triage
+that reply, and say which.** A reply that does not match its manifest is not
+the text the run recorded, and no header can make it so. Once the header is
+prepended the file stops matching, as it should: the untouched reply stays in
+the commit `run-review` made, and `git show <that commit>:<path> | sha256sum`
+still reproduces the manifest's value.
 
 Neither file is regenerable: the same prompt tomorrow returns different
 findings. The triage cites findings by family and number — `codex-3`,
@@ -87,9 +105,9 @@ number no longer names a finding.
 
 **Never edit the reviewer's text.** Prepend the header; change nothing beneath
 it, including formatting, mistakes, and any citation artifacts the reviewer's
-tool inserted. The manifest and the stripped session log beside it are not
-edited at all: they are what shows the reply came back from a vendor CLI rather
-than from the session that wrote the code.
+tool inserted. The manifest and the session record beside it are not edited at
+all: they are what corroborates that the reply came back from the vendor —
+Codex's CLI or Gemini's API — rather than from the session that wrote the code.
 
 ### The header
 
@@ -103,9 +121,15 @@ triage file by name.>
 
 - **Reviewer:** <the manifest's `modelReported`, or `none reported` where it is
   null>. Family: <the manifest's `family`>.
-  <The recorded invocation: a headless CLI run, read-only and non-interactive,
-  no extensions, in a scratch config home holding only a credential file. The
-  clean-room proof is the manifest's `cleanRoom`.>
+  <The recorded invocation, which differs by family; follow the manifest's
+  `invocation.kind`.
+  Codex (`cli`): a headless `codex exec` run under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+  Gemini (`api`): a direct `generateContent` API call to `modelRequested`,
+  offering no tools. `cleanRoom` is `null` because an API call loads no local
+  configuration. Never describe a Gemini review as a CLI run.>
 - **Cross-family agreement:** <which of this review's findings the other family
   raised too, and which it raised alone; or, where only one family counted,
   `not available` with the other family's outcome named>
@@ -285,6 +309,7 @@ and stop.
 ## Never
 
 - Triage a review whose manifest `outcome` is not `counted`
+- Triage a reply whose SHA-256 does not equal its manifest's `replySha256`
 - Fix a finding that does not hold, or that was not verified against the code
 - Treat agreement between the two families as a substitute for verification
 - Weaken a check, a test, or an acceptance criterion to satisfy a finding
