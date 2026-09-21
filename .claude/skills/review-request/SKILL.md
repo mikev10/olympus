@@ -1,11 +1,11 @@
 ---
 name: review-request
-description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, a prompt to paste and a bundle to attach, commits them, copies the prompt to the clipboard, and prints numbered hand-over steps. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
+description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, the prompt and the bundle the reviewers are given, commits and pushes them, and stops without sending anything. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
 ---
 
 # Prepare an external review
 
-The reviewer is a **different model family** in a clean room — not Claude Code,
+The reviewers are **two other model families** in a clean room — not Claude Code,
 not the session that built the unit. That independence is the point: a reviewer
 sharing the author's context inherits the author's blind spots.
 
@@ -17,18 +17,19 @@ do not perform the review.
 Exactly two files per review, side by side in `docs/reviews/`, and nothing else
 to open:
 
-| File | What it is | What the maintainer does with it |
+| File | What it is | What `/run-review` does with it |
 |---|---|---|
-| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Pastes all of it into the chat |
-| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Attaches it to the same message |
+| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Sends all of it, verbatim, to each reviewer |
+| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Stages it beside the prompt, under this name |
 
 `<date>` is today, `<UNIT>` keeps its case, `<slug>` names the unit:
 `2026-09-14-P4-station-machine-review-prompt.txt`.
 
 The prompt refers to the bundle by that exact filename and never by any other
-name, so nothing has to be renamed on upload. Every word in the prompt file is
-meant for the reviewer: no headings, notes, or provenance for the maintainer go
-in it, because the maintainer copies the whole file.
+name, so the bundle can be staged under the name the prompt already uses and the
+prompt needs no rewording per reviewer. Every word in the prompt file is meant
+for the reviewer: no headings, notes, or provenance for the maintainer go in it,
+because the whole file is sent verbatim.
 
 Later, `triage-review` adds `-review.md` (the reply) and `-triage.md` beside
 them. Units reviewed before this rule also carry a `-review-request.md`; that
@@ -61,8 +62,17 @@ needs surrounding context, and a hunk hides it.
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
   done
+  printf '\n=== BUNDLE END === %s\n' "$(openssl rand -hex 16)"
 } > docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
+
+**The last line is a fresh random nonce, and it is the only proof the tail
+arrived.** `openssl rand -hex 16` yields the 32 hex characters the runner
+matches on; where `openssl` is absent, `head -c16 /dev/urandom | xxd -p | tr -d
+'\n'` does the same. Generate it per bundle and never reuse one: a value that
+appeared in an earlier bundle is a value a reviewer can echo without having read
+this one. Regenerate a bundle with `>`, never `>>`, so the previous run's nonce
+does not survive in the middle of the file.
 
 The header at its top (base, head, commits, changed files) is the bundle's
 provenance. Record the bundle's SHA-256 for the prompt:
@@ -94,6 +104,23 @@ grep -c '^===== docs/decisions\.md =====$'  docs/reviews/<date>-<UNIT>-<slug>-re
 They match the bundle's section headers, not prose. A count over the bare
 path would report a false hit whenever README.md, CONTRIBUTING.md, or a
 changeset that mentions the decisions log is in the diff.
+
+Confirm two more things about the nonce, because nothing downstream can:
+
+```
+tail -1 docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt | grep -qE '^=== BUNDLE END === [0-9a-f]{32}$' || echo 'FAIL: nonce is not the last line'
+grep -c '^=== BUNDLE END === ' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt   # must print exactly 1
+```
+
+**One nonce, on the last line.** The runner takes the *last* match in the file
+and looks for the final `===== <path> =====` header only above it, so both
+properties are load-bearing and neither is checkable from the bundle alone: the
+runner is handed a file and cannot know whether the generator meant it to end
+there. If anything follows the nonce, the echo proves delivery only as far as the
+nonce, and the prompt's instruction to read the very last line is false. If the
+marker appears twice, a reviewer that read the whole bundle can echo the earlier
+one and be recorded as having failed a check it passed — a refusal that throws
+away a good review.
 
 ## 3. Derive the unit-specific half of the prompt
 
@@ -147,7 +174,13 @@ The code under review is in the attached file
 `<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — the full contents of
 every changed file, with the commit range at its top. If that file is not
 present in this conversation, stop and say so; do not review from the
-description below alone.
+description below alone. Before reviewing, state on four separate lines: the
+BASE: value from the bundle's first lines, the HEAD: value, the file path in the
+bundle's final `===== <path> =====` header, and the 32-character value on the
+bundle's very last line, which begins `=== BUNDLE END ===`. If you cannot read
+all four, say so and stop — a partially received bundle produces findings about
+code you were not shown. Copy the last of these exactly; it is the only one of
+the four that proves you reached the end of the file.
 
 You are reviewing <what: e.g. the conformance testing infrastructure> of a
 TypeScript project. You have the source and nothing else — no design documents,
@@ -225,6 +258,28 @@ Order by severity, highest first. State at the top whether you had any prior
 context and whether you performed any lookups.
 ```
 
+**The four echoed values are checked mechanically, and only the fourth is worth
+much.** The runner knows all four independently — it generated the bundle's
+header and read its last line — so a reviewer that echoes a wrong value is
+caught without anyone reading the reply. But measure where the first three live:
+in P5's bundle, BASE is line 1, HEAD is line 2, and the final section's path
+appears at line 66, inside the `=== CHANGED ===` stat listing that names every
+changed file. All three sit in the first 70 lines of 9730, and one of the two
+CLIs carries an undocumented read cutoff around 2000 lines. A reviewer handed a
+fifth of the bundle could echo all three truthfully. They prove the reviewer
+opened the right file, not that it received the file. The trailing nonce is the
+only marker a truncated reader cannot produce, which is why it exists and why it
+has to be the last line. A bundle built before this convention has no tail proof
+in it at all; the runner records those runs as `unverified` rather than trusting
+them, because a check that could not have been put to the reviewer is not a check
+the reviewer passed.
+
+**What the nonce does not prove.** It proves the tail was delivered. It does not
+prove the middle was read. A model can receive a whole bundle and reason about a
+tenth of it, and no marker in the file detects that — the echo is evidence about
+transport, not about attention. Cross-family agreement and the prompt's own
+numbered items carry that load, and neither of them closes it either.
+
 **Committed before the review runs, and that is the point.** The prompt is
 written by the system that built the unit, so publishing it before the answer
 exists lets a reader judge whether the reviewer was steered, and check that the
@@ -241,53 +296,28 @@ git commit -m "<UNIT>: the review prompt and bundle, as sent"
 git push
 ```
 
-## 6. Put the prompt on the clipboard
-
-Best effort, and say whether it worked. Use a reader that keeps UTF-8, because
-the prompt contains dashes that a console code page would mangle:
-
-- Windows: `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '<absolute path to prompt>' | Set-Clipboard"`
-- macOS: `pbcopy < <path>`
-- Linux: `wl-copy < <path>` or `xclip -selection clipboard < <path>`
-
-If none works, the hand-over tells the maintainer to open the file instead.
-
-## 7. Recommend the reviewer
-
-Read the `Reviewer:` and `Family rotation:` lines in the most recent
-`docs/reviews/*-review.md` headers to learn which families reviewed the last
-units. Recommend a family that did not review the previous unit, preferring the
-one used least recently, and respect any family the maintainer has said not to
-use. If a repeat cannot be avoided, say so in the recommendation.
-
-## 8. Hand over, then stop
+## 6. Hand over, then stop
 
 End the turn with this block, filled in, and nothing after it except the
-"what is next" line WORKFLOW.md requires. Absolute paths, so the maintainer can
-paste them into a file picker.
+"what is next" line WORKFLOW.md requires.
 
 ```
-REVIEW READY: <UNIT> <title>
+REVIEW ARTIFACTS READY: <UNIT> <title>
 
-Two files in docs/reviews/, both committed:
-  PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions   <on your clipboard | not on the clipboard>
-  BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code           <N> lines
+Two files in docs/reviews/, both committed and pushed:
+  PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions
+  BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code, <N> lines
 
-Do this:
-  1. Open <family> in a new temporary chat (no memory, no history, no project).
-     Why <family>: <one line on rotation>.
-  2. Attach the bundle file:
-       <absolute path to bundle>
-  3. Paste the prompt into the message box.<If not on the clipboard: " Open this file, select all, copy:" and the absolute path>
-  4. Send the file and the prompt together, in one message.
-     Write down the exact model name the chat shows.
-  5. When the reply has finished, copy all of it. In a new Claude Code session
-     on branch unit/<id>, run:
-       /triage-review <UNIT>
-     and paste the reply, with the model name, into that message.
+Nothing has been sent. To run both reviewers:
+  /run-review <UNIT>
 
 The other files in docs/reviews/ are records. You do not need to open them.
 ```
+
+**Nothing has been sent, and this skill does not send.** `/run-review` puts the
+bundle in front of two third-party services, and that cannot be undone: deleting
+a file afterwards recovers nothing. It stays the maintainer's own command, one
+per unit, and this skill never chains into it.
 
 Do not review the unit yourself. Do not act on a review you did not receive.
 
