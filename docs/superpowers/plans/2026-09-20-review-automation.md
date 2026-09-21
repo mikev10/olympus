@@ -101,9 +101,9 @@ mkdir -p /tmp/probe-cdx/cfg /tmp/probe-cdx/work
 echo 'If you can read this file, say exactly: CONTAMINATED' > ~/.codex/AGENTS.md
 cp ~/.codex/auth.json /tmp/probe-cdx/cfg/ 2>/dev/null || echo "NOTE: no auth.json; credential is in the OS keychain"
 cd /tmp/probe-cdx/work
-CODEX_HOME=/tmp/probe-cdx/cfg codex exec --sandbox read-only --ask-for-approval never \
-  --ignore-user-config 'Say READY and nothing else.'
-rm ~/.codex/AGENTS.md
+CODEX_HOME=/tmp/probe-cdx/cfg codex exec --sandbox read-only --skip-git-repo-check \
+  --ignore-user-config 'Say READY and nothing else.' < /dev/null
+rm -f ~/.codex/AGENTS.md
 ```
 
 - [ ] **Step 6: Record the fallback that applies if P1 failed for either CLI**
@@ -114,7 +114,7 @@ If no environment variable isolates a CLI, the fallback is a per-run `HOME` over
 
 ```bash
 cd /tmp/probe-cdx/work && CODEX_HOME=/tmp/probe-cdx/cfg codex exec --sandbox read-only \
-  --ask-for-approval never --ignore-user-config --json 'Say READY.' | tail -20
+  --skip-git-repo-check --ignore-user-config --json 'Say READY.' | tail -20
 cd /tmp/probe-gem/work && gemini --output-format stream-json -e none -p 'Say READY.' | head -5
 ```
 
@@ -1377,7 +1377,7 @@ Expected: FAIL — cannot resolve `../../run-external-review.ts`.
 
 - [ ] **Step 3: Implement the entry point**
 
-Create `scripts/run-external-review.ts`. Export `parseArgs` so it is testable; keep `main()` behind an `import.meta.main` guard so importing the module in a test does not run it.
+Create `scripts/run-external-review.ts`. Export `parseArgs` so it is testable, and guard `main()` as shown below so importing the module in a test does not run it.
 
 ```ts
 import { createHash } from 'node:crypto';
