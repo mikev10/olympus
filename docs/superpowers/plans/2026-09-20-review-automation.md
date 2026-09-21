@@ -21,7 +21,7 @@
 - **Default deny.** The clean room is asserted with an allowlist of files that may exist, not a blocklist of known-bad names.
 - **Never write `.plan/` followed by a filename in any tracked file.** CI greps for it (`ci.yml`, "Nothing under .plan/ is tracked or referenced") and fails the build. `CLAUDE.md` is the only exempt file.
 - **No Mermaid in any document.** ASCII diagrams only — Mermaid does not render in Azure DevOps.
-- **Protected paths touched deliberately:** `package.json` and `vitest.tooling.config.ts` match `.github/protected-paths.txt`. The PR description must declare both as intended changes, with the reason.
+- **Protected paths touched deliberately:** `package.json`, `.github/workflows/ci.yml`, and `.gitignore` match patterns in `.github/protected-paths.txt`. The PR description must declare each as an intended change, with the reason. Note that `vitest.tooling.config.ts` is NOT protected — the pattern is `(^|/)vitest.(config|workspace).`, which requires `vitest.` immediately followed by `config` or `workspace`, so `vitest.tooling.config.ts` does not match it.
 - **No changeset.** No published package changes. If the maintainer's `changesets` check disagrees, stop and ask rather than inventing a changeset for a tooling directory.
 - Node 22 in CI runs the *tests* through vitest, which transpiles TypeScript itself. Native type stripping is needed only for the maintainer's direct `node scripts/run-external-review.ts` invocation locally.
 
@@ -1647,7 +1647,7 @@ Expected: all PASS. The conformance registry must report no invariant moving to 
 
 - [ ] **Step 4: Open the pull request into v2**
 
-The PR description must declare, with reasons: that `package.json` and `vitest.tooling.config.ts` are protected paths changed deliberately to bring `scripts/` under the existing checks; that external review is now self-attested with artifact corroboration, not human-witnessed; that `ship-unit` deliberately does not chain into the sending step; and what the P5 smoke test measured, including the reported models and token counts.
+The PR description must declare, with reasons: that `package.json`, `.github/workflows/ci.yml`, and `.gitignore` are protected paths changed deliberately, the first two to bring `scripts/` under the existing checks and the third to keep the session workspace out of the repository; that external review is now self-attested with artifact corroboration, not human-witnessed; that `ship-unit` deliberately does not chain into the sending step; and what the P5 smoke test measured, including the reported models and token counts.
 
 - [ ] **Step 5: The first counted review is the next unit's**
 
