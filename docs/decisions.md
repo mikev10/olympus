@@ -1948,3 +1948,25 @@ Three limits could not be closed inside this unit and are recorded here.
 - **Why not have conformance run the owning package's suite itself:** that is the option D-P5-02 rejected, and for the same reason — it would re-run every external assertion, which for this driver means a second set of model calls for an answer the first run already has.
 - **What this is, honestly:** a rough edge in a mechanism that is otherwise doing exactly what it should. The refusal is correct every time it fires; it is the recovery that is awkward, because the command that would fix the state is the one the failure prevents from running.
 - **Reverse:** a root script that runs the owning suites before the registry, so one command has the order built into it. Worth doing when a second package contributes external assertions; with one, a documented order costs less than a script that hides it.
+
+## Amendment: CI gets a credential, and the order the gate needs
+
+P5 shipped nine assertions that call a real model and refuse rather than skip
+without a credential. CI had none, so `v2` went red the moment P5 merged. This
+is the amendment WORKFLOW.md expects between a unit and the next one.
+
+### D-A-CI-01: an Actions secret, not identity federation
+
+- **Ambiguous:** the console offers workload identity federation, which lists GitHub Actions among its providers, and a short-lived token beats a long-lived secret on every axis that matters. It was the recommendation until it was checked.
+- **Why it does not work here:** federation is detected by the Anthropic SDKs and the `ant` CLI, which read `ANTHROPIC_FEDERATION_RULE_ID` and friends and exchange a JWT. The thing that authenticates in this unit is neither — it is the Claude Code CLI running inside a container, whose own documentation says authentication is `ANTHROPIC_API_KEY` or an `apiKeyHelper` command. The driver then *refuses* a session whose reported `apiKeySource` is anything else, deliberately (D-P5-07): a credential the driver did not arrange is one it cannot account for.
+- **Chosen:** `secrets.ANTHROPIC_API_KEY`, passed as an environment value to the two steps that need it.
+- **What it would take to change later:** the CLI accepting a federated identity, the driver forwarding the federation variables through `ExecOptions.env`, and the `apiKeySource` check learning a second acceptable answer. Each is small; none can be assumed, and the first is not ours.
+- **Use a separate key for CI, with a spend limit.** P5's own review established that the credential is readable by anything a task runs (D-P5-20). In CI that task is running model-generated commands on a machine nobody is watching, which is a worse place to hold a key than a laptop is. A key scoped to CI can be revoked without touching a developer's.
+- **Reverse:** delete the two `env:` blocks. CI goes red again, honestly.
+
+### D-A-CI-02: the driver's suite runs before the recursive test command
+
+- **Problem:** a credential alone would not have fixed CI. From a cold checkout there is no run report, so conformance refuses all nine external assertions, and `pnpm test` aborts on that failure before it reaches the package whose suite writes the report. The command cannot repair itself — D-P5-23, met in the one place it actually bites.
+- **Chosen:** an explicit step that runs the driver package's suite first, with a comment saying why it cannot be reordered away.
+- **The cost, stated:** `pnpm test` then runs that suite a second time, so a CI run makes roughly eighteen model calls rather than nine. They are small calls on the cheapest model and the duplication buys the workflow staying the same four commands a contributor runs locally. A root script that owned the order would remove the waste and hide the constraint; that trade is worth making when a second package contributes external assertions, not before.
+- **Reverse:** delete the step. CI fails from cold on every run.
