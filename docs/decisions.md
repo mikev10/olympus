@@ -1,8 +1,10 @@
 # Decisions
 
 Calls made while executing a unit where the spec was silent, ambiguous, or in
-tension with the environment. Each entry records what was unclear, what was
-chosen, why, and how to reverse it. Newest units at the bottom.
+tension with the environment, and calls taken outside any unit where what
+changed was the gates or the tooling that runs them. Each entry records what was
+unclear, what was chosen, why, and how to reverse it. Newest units at the
+bottom.
 
 ## F2: Contracts
 
