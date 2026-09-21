@@ -3,27 +3,54 @@ import { CODEX_KEEP, GEMINI_KEEP, outcomeOf, stripSessionLog } from '../evidence
 
 describe('outcomeOf', () => {
   const ok = { exitCode: 0, timedOut: false } as const;
+  const ingested = { kind: 'complete', inputTokens: 127_096, floor: 80_732 } as const;
 
   it('counts a clean run whose echo verified', () => {
-    expect(outcomeOf({ ...ok, integrity: { kind: 'verified' } })).toBe('counted');
+    expect(outcomeOf({ ...ok, ingestion: ingested, integrity: { kind: 'verified' } })).toBe('counted');
   });
 
   it('fails a timeout regardless of everything else', () => {
-    expect(outcomeOf({ exitCode: 0, timedOut: true, integrity: { kind: 'verified' } })).toBe('FAILED');
+    expect(
+      outcomeOf({ exitCode: 0, timedOut: true, ingestion: ingested, integrity: { kind: 'verified' } }),
+    ).toBe('FAILED');
   });
 
   it('fails a non-zero exit before looking at integrity', () => {
-    expect(outcomeOf({ exitCode: 1, timedOut: false, integrity: { kind: 'verified' } })).toBe('FAILED');
+    expect(
+      outcomeOf({ exitCode: 1, timedOut: false, ingestion: ingested, integrity: { kind: 'verified' } }),
+    ).toBe('FAILED');
   });
 
   it('reports a mismatched echo as INTEGRITY_FAILED', () => {
-    expect(outcomeOf({ ...ok, integrity: { kind: 'failed', absent: ['head'] } })).toBe('INTEGRITY_FAILED');
+    expect(
+      outcomeOf({ ...ok, ingestion: ingested, integrity: { kind: 'failed', absent: ['head'] } }),
+    ).toBe('INTEGRITY_FAILED');
   });
 
   it('reports an absent echo as INTEGRITY_UNVERIFIED, which still does not count', () => {
-    const o = outcomeOf({ ...ok, integrity: { kind: 'unverified', absent: ['base', 'head', 'finalSection'] } });
+    const o = outcomeOf({
+      ...ok,
+      ingestion: ingested,
+      integrity: { kind: 'unverified', absent: ['base', 'head', 'finalSection'] },
+    });
     expect(o).toBe('INTEGRITY_UNVERIFIED');
     expect(o).not.toBe('counted');
+  });
+
+  it('fails a run whose vendor-reported ingestion fell short, even if the echo verified', () => {
+    expect(outcomeOf({
+      exitCode: 0, timedOut: false,
+      ingestion: { kind: 'short', inputTokens: 32_893, floor: 80_732 },
+      integrity: { kind: 'verified' },
+    })).toBe('INTEGRITY_FAILED');
+  });
+
+  it('fails a run whose vendor reported no token count', () => {
+    expect(outcomeOf({
+      exitCode: 0, timedOut: false,
+      ingestion: { kind: 'unreported', floor: 80_732 },
+      integrity: { kind: 'verified' },
+    })).toBe('INTEGRITY_FAILED');
   });
 });
 

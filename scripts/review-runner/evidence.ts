@@ -1,16 +1,42 @@
 import type { CleanRoomProof } from './cleanroom.ts';
+import type { IngestionVerdict } from './ingestion.ts';
 import type { EchoVerdict } from './integrity.ts';
 
 export type Family = 'codex' | 'gemini';
 
 export type Outcome = 'counted' | 'INTEGRITY_FAILED' | 'INTEGRITY_UNVERIFIED' | 'FAILED';
 
+/** How the reviewer was reached. Neither variant ever holds a secret's value. */
+export type Invocation =
+  | {
+      readonly kind: 'cli';
+      readonly command: string;
+      readonly argv: readonly string[];
+      /** Names map to values, except any name matching /(_KEY|_TOKEN|_SECRET|PASSWORD)$/i,
+       *  whose value is the literal string "<redacted>". */
+      readonly envOverrides: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: 'api';
+      readonly method: 'POST';
+      /** The endpoint, which carries no key: the key travels in a header. */
+      readonly url: string;
+      readonly modelRequested: string;
+      /** Header NAMES only. Values are never recorded. */
+      readonly headerNames: readonly string[];
+    };
+
 export interface Manifest {
   readonly unit: string;
   readonly family: Family;
-  readonly argv: readonly string[];
-  readonly envOverrides: Readonly<Record<string, string>>;
-  readonly cleanRoom: CleanRoomProof;
+  readonly invocation: Invocation;
+  /** null means this transport loads no local configuration home at all — the
+   *  API call, which reads no GEMINI.md, no settings.json, no extensions and no
+   *  sessions. That is a different fact from an empty listing: an empty listing
+   *  is a clean room that was built and then proved empty, while null is a
+   *  transport that never had a clean room to build. Do not treat them as
+   *  equivalent. */
+  readonly cleanRoom: CleanRoomProof | null;
   readonly exitCode: number | null;
   readonly timedOut: boolean;
   readonly startedAt: string;
@@ -19,10 +45,15 @@ export interface Manifest {
   readonly cliVersion: string;
   readonly modelReported: string | null;
   readonly tokenUsage: Readonly<Record<string, number>> | null;
+  readonly payloadSha256: string;
+  readonly payloadBytes: number;
+  readonly ingestion: IngestionVerdict;
   /** Files in the config home AFTER the run. A Codex turn leaves ~332 files of
    *  auto-fetched vendor plugin cache; recording the count keeps that visible
-   *  without committing it. */
-  readonly postRunFileCount: number;
+   *  without committing it. null carries the same meaning as `cleanRoom: null`
+   *  above — this transport loads no local configuration home at all, which is
+   *  a different fact from a count of zero. */
+  readonly postRunFileCount: number | null;
   /** Read back from the rollout log, not asserted by the caller. Codex has no
    *  `--ask-for-approval` flag, so this recorded value is the only evidence the
    *  run could not have been prompted. The runner refuses a value other than
@@ -35,15 +66,21 @@ export interface Manifest {
 
 /**
  * The outcome is derived, never declared. One function computes it from the
- * three facts that decide it, so no caller can set a field claiming a review
+ * facts that decide it, so no caller can set a field claiming a review
  * counted when it did not. Only `counted` may be triaged as a review.
+ * Ingestion is checked before the echo verdict because it is the harder fact:
+ * measured by the vendor rather than reported by the model. A reviewer that
+ * grepped its way to the nonce would echo every marker correctly and still
+ * have ingested only a fraction of the bundle; only the token count catches it.
  */
 export function outcomeOf(run: {
   readonly exitCode: number | null;
   readonly timedOut: boolean;
+  readonly ingestion: IngestionVerdict;
   readonly integrity: EchoVerdict;
 }): Outcome {
   if (run.timedOut || run.exitCode !== 0) return 'FAILED';
+  if (run.ingestion.kind !== 'complete') return 'INTEGRITY_FAILED';
   if (run.integrity.kind === 'failed') return 'INTEGRITY_FAILED';
   if (run.integrity.kind === 'unverified') return 'INTEGRITY_UNVERIFIED';
   return 'counted';
