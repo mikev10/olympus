@@ -7,7 +7,7 @@ import type { UnitArtifacts } from './review-runner/artifacts.ts';
 import { findUnitArtifacts } from './review-runner/artifacts.ts';
 import type { CleanRoomProof } from './review-runner/cleanroom.ts';
 import { assertCleanRoom } from './review-runner/cleanroom.ts';
-import type { CliResult } from './review-runner/codex.ts';
+import type { CliResult, RunCliOptions } from './review-runner/codex.ts';
 import { codexApprovalPolicy, codexArgv, codexModel, codexUsage, resolveCodexEntry, runCli } from './review-runner/codex.ts';
 import type { Family, Invocation, Manifest } from './review-runner/evidence.ts';
 import { CODEX_KEEP, RECORDABLE_ENV, outcomeOf, redactEnv, stripSessionLog } from './review-runner/evidence.ts';
@@ -77,6 +77,15 @@ const CANARY_ENV: readonly string[] = ['GEMINI_API_KEY', 'OPENAI_API_KEY'];
 
 const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i;
 
+/** An absolute filesystem path, POSIX or Windows. A variable that says where a
+ *  credential lives (GOOGLE_APPLICATION_CREDENTIALS, AWS_SHARED_CREDENTIALS_FILE)
+ *  holds a path, not the credential, and paths are what a manifest records: on
+ *  Linux and macOS its value's first eight characters match the manifest's own
+ *  paths, and every run's evidence would be withheld after the bundle was sent.
+ *  Such a value is skipped only when the path also exists on disk: a secret
+ *  that merely begins with "/" almost never names an existing file. */
+const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;
+
 /** What `findLeakedSecrets` reports for a hit on the copied credential file.
  *  A label, never the field or its value. */
 export const AUTH_JSON_LABEL = 'auth.json';
@@ -91,9 +100,11 @@ export const AUTH_JSON_LABEL = 'auth.json';
  *
  * Searches for the first eight characters of the value of every canary
  * variable, of every variable whose name says it is a secret, and of every
- * string in `authSecrets`. Returns the variable NAMES, plus `AUTH_JSON_LABEL`
- * for a credential-file hit. It never returns, logs, or throws a value: the
- * caller prints what this returns, so returning a value would print it.
+ * string in `authSecrets`. A secret-named value that is the absolute path of an
+ * existing file is skipped; the canaries never are. Returns the variable
+ * NAMES, plus `AUTH_JSON_LABEL` for a credential-file hit. It never returns,
+ * logs, or throws a value: the caller prints what this returns, so returning a
+ * value would print it.
  */
 export function findLeakedSecrets(
   contents: readonly string[],
@@ -109,11 +120,24 @@ export function findLeakedSecrets(
   const leaked: string[] = [];
   for (const [name, value] of Object.entries(env)) {
     if (RECORDABLE_ENV.includes(name)) continue;
-    if (!CANARY_ENV.includes(name) && !SECRET_NAME.test(name)) continue;
+    const canary = CANARY_ENV.includes(name);
+    if (!canary && !SECRET_NAME.test(name)) continue;
+    // Local and silent: the value is used as a path here and never reported.
+    if (!canary && ABSOLUTE_PATH.test(value) && existsSync(value)) continue;
     if (appears(value)) leaked.push(name);
   }
   if (authSecrets.some(appears)) leaked.push(AUTH_JSON_LABEL);
   return leaked;
+}
+
+function parseAuthJson(authJsonText: string): unknown {
+  try {
+    return JSON.parse(authJsonText);
+  } catch {
+    // Not the parser's message: V8 quotes the offending text in it, and that
+    // text is a credential.
+    throw new Error('auth.json is not valid JSON, so its tokens cannot be checked for');
+  }
 }
 
 /**
@@ -130,14 +154,7 @@ export function findLeakedSecrets(
  * Codex adds could do the same.
  */
 export function authJsonSecrets(authJsonText: string): readonly string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(authJsonText);
-  } catch {
-    // Not the parser's message: V8 quotes the offending text in it, and that
-    // text is a credential.
-    throw new Error('auth.json is not valid JSON, so its tokens cannot be checked for');
-  }
+  const parsed = parseAuthJson(authJsonText);
 
   const secrets: string[] = [];
   const walk = (value: unknown): void => {
@@ -153,6 +170,17 @@ export function authJsonSecrets(authJsonText: string): readonly string[] {
     if ('OPENAI_API_KEY' in parsed && typeof parsed.OPENAI_API_KEY === 'string') secrets.push(parsed.OPENAI_API_KEY);
   }
   return secrets;
+}
+
+/** `tokens.account_id`, when `tokens` is a non-empty object carrying one as a
+ *  string; otherwise null. */
+function accountIdOf(authJsonText: string): string | null {
+  const parsed = parseAuthJson(authJsonText);
+  if (typeof parsed !== 'object' || parsed === null || !('tokens' in parsed)) return null;
+  const tokens = parsed.tokens;
+  if (typeof tokens !== 'object' || tokens === null || Array.isArray(tokens)) return null;
+  if (Object.keys(tokens).length === 0 || !('account_id' in tokens)) return null;
+  return typeof tokens.account_id === 'string' ? tokens.account_id : null;
 }
 
 /** True when Codex rewrote its credential during the run. Byte for byte:
@@ -191,7 +219,9 @@ export type WriteBack =
   | 'written-back'
   | 'real-file-changed'
   | 'scratch-missing'
+  | 'read-failed'
   | 'unparseable'
+  | 'not-this-account'
   | 'write-failed';
 
 export interface PostRunAuth {
@@ -199,6 +229,9 @@ export interface PostRunAuth {
   /** Credentials found only in the post-run file. Searched for alongside the
    *  ones copied in, since a refreshed token is as secret as the old one. */
   readonly refreshedSecrets: readonly string[];
+  /** A temp file holding the refreshed credential that could not be removed
+   *  after a failed write-back. Its path, never its contents. */
+  readonly leftoverTemp: string | null;
 }
 
 /**
@@ -210,12 +243,18 @@ export interface PostRunAuth {
  * is written back over the real file: exactly the bytes Codex wrote, which is
  * what Codex itself does in normal use.
  *
- * Written only when the real file still holds the bytes that were copied in:
- * if it changed meanwhile, something else refreshed it, and overwriting it
- * would replace a credential this run never saw. Written atomically, to a
+ * This is the one write this program makes outside the repository, to a live
+ * credential, so it is guarded four ways. The post-run file must parse, and
+ * must hold a non-empty `tokens` object whose `account_id` equals the
+ * copied-in one: a different account's credential never replaces the
+ * maintainer's login. The real file must still hold the bytes that were copied
+ * in: if it changed meanwhile, something else refreshed it, and overwriting it
+ * would replace a credential this run never saw. And the write is atomic, a
  * sibling temp file renamed over the original, so no partial write is ever
- * left in its place. A post-run file that is not valid JSON is never written
- * back.
+ * left in its place.
+ *
+ * Never throws. Every failure is reported in the result, so nothing here can
+ * stop a run whose bundle was sent from writing its evidence.
  */
 export function reconcileAuthAfterRun(
   scratchAuthPath: string,
@@ -223,19 +262,40 @@ export function reconcileAuthAfterRun(
   copiedIn: Uint8Array,
   fs: AuthFs = NODE_AUTH_FS,
 ): PostRunAuth {
-  if (!fs.exists(scratchAuthPath)) return { writeBack: 'scratch-missing', refreshedSecrets: [] };
-  const after = fs.readFile(scratchAuthPath);
-  if (!authRefreshed(copiedIn, after)) return { writeBack: 'unchanged', refreshedSecrets: [] };
+  const result = (writeBack: WriteBack, refreshedSecrets: readonly string[] = [], leftoverTemp: string | null = null) => ({
+    writeBack,
+    refreshedSecrets,
+    leftoverTemp,
+  });
 
-  let refreshedSecrets: readonly string[];
+  let after: Uint8Array;
   try {
-    refreshedSecrets = authJsonSecrets(new TextDecoder().decode(after));
+    if (!fs.exists(scratchAuthPath)) return result('scratch-missing');
+    after = fs.readFile(scratchAuthPath);
   } catch {
-    return { writeBack: 'unparseable', refreshedSecrets: [] };
+    return result('read-failed');
   }
+  if (!authRefreshed(copiedIn, after)) return result('unchanged');
 
-  if (!fs.exists(realAuthPath) || authRefreshed(copiedIn, fs.readFile(realAuthPath))) {
-    return { writeBack: 'real-file-changed', refreshedSecrets };
+  const decoder = new TextDecoder();
+  let refreshedSecrets: readonly string[];
+  let accountAfter: string | null;
+  let accountBefore: string | null;
+  try {
+    refreshedSecrets = authJsonSecrets(decoder.decode(after));
+    accountAfter = accountIdOf(decoder.decode(after));
+    accountBefore = accountIdOf(decoder.decode(copiedIn));
+  } catch {
+    return result('unparseable');
+  }
+  if (accountAfter === null || accountAfter !== accountBefore) return result('not-this-account', refreshedSecrets);
+
+  try {
+    if (!fs.exists(realAuthPath) || authRefreshed(copiedIn, fs.readFile(realAuthPath))) {
+      return result('real-file-changed', refreshedSecrets);
+    }
+  } catch {
+    return result('read-failed', refreshedSecrets);
   }
 
   const temp = `${realAuthPath}.olympus-${String(process.pid)}.tmp`;
@@ -243,10 +303,14 @@ export function reconcileAuthAfterRun(
     fs.writeFile(temp, after);
     fs.rename(temp, realAuthPath);
   } catch {
-    fs.remove(temp);
-    return { writeBack: 'write-failed', refreshedSecrets };
+    try {
+      fs.remove(temp);
+    } catch {
+      return result('write-failed', refreshedSecrets, temp);
+    }
+    return result('write-failed', refreshedSecrets);
   }
-  return { writeBack: 'written-back', refreshedSecrets };
+  return result('written-back', refreshedSecrets);
 }
 
 const WRITE_BACK_NOTICE: Readonly<Record<WriteBack, string | null>> = {
@@ -256,9 +320,15 @@ const WRITE_BACK_NOTICE: Readonly<Record<WriteBack, string | null>> = {
     'The Codex credential was refreshed during the run, but ~/.codex/auth.json changed meanwhile, so it was ' +
     'left as it is. If Codex asks you to log in, run `codex login`.',
   'scratch-missing': 'The scratch auth.json was gone after the run; ~/.codex/auth.json was left as it is.',
+  'read-failed':
+    'Reading an auth.json after the run failed, so ~/.codex/auth.json was left as it is and any refreshed ' +
+    'tokens could not be searched for.',
   'unparseable':
     'The scratch auth.json changed during the run but is not valid JSON, so it was not written back and its ' +
     'contents could not be searched for.',
+  'not-this-account':
+    'The scratch auth.json changed during the run but does not hold a non-empty tokens object for the same ' +
+    'account_id, so it was not written back.',
   'write-failed':
     'The Codex credential was refreshed during the run, but writing it back to ~/.codex/auth.json failed; the ' +
     'original was left in place. If Codex asks you to log in, run `codex login`.',
@@ -299,30 +369,14 @@ export function codexSpawn(scratch: CodexScratch, entry: string, replyPath: stri
 }
 
 /**
- * The exit code `outcomeOf` sees for a codex run whose rollout log records an
- * approval policy other than "never". Codex 0.155.1 has no
- * `--ask-for-approval` flag, so the recorded policy is the only evidence the
- * run could not have been prompted; without it the run is treated as failed.
- */
-const APPROVAL_NOT_NEVER_EXIT = 1;
-
-/**
  * Assembles the manifest from facts already computed. The parameter type has
  * no `outcome`, and the spread puts the derived one last, so an `outcome`
- * smuggled in on a wider object is overwritten rather than recorded. The
- * manifest keeps the process's real exit code; only the value handed to
- * `outcomeOf` is replaced, and `recordedApprovalPolicy` beside it shows why.
+ * smuggled in on a wider object is overwritten rather than recorded. Every
+ * fact `outcomeOf` decides from is a field of the manifest, so the manifest
+ * reproduces its own outcome.
  */
 export function buildManifest(facts: Omit<Manifest, 'outcome'>): Manifest {
-  const approvalNotNever = facts.family === 'codex' && facts.recordedApprovalPolicy !== 'never';
-  const exitCode = approvalNotNever && facts.exitCode === 0 ? APPROVAL_NOT_NEVER_EXIT : facts.exitCode;
-  const outcome = outcomeOf({
-    exitCode,
-    timedOut: facts.timedOut,
-    ingestion: facts.ingestion,
-    integrity: facts.integrity,
-  });
-  return { ...facts, outcome };
+  return { ...facts, outcome: outcomeOf(facts) };
 }
 
 /** The three outputs of one run, as suffixes of `<date>-<UNIT>-<slug>-review-<family>`. */
@@ -335,18 +389,23 @@ export interface ArchiveMove {
 
 export type ArchivePlan =
   | { readonly kind: 'counted' }
+  | { readonly kind: 'unreadable' }
   | { readonly kind: 'archive'; readonly moves: readonly ArchiveMove[] };
 
 function escapeForRegExp(literal: string): string {
   return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function recordedOutcome(manifestText: string): unknown {
+/** A manifest's `outcome`, or null when the text is not a manifest this
+ *  runner could have written: not JSON (a BOM from a Windows editor, merge
+ *  conflict markers), not an object, or no string `outcome`. */
+function recordedOutcome(manifestText: string): string | null {
   try {
     const parsed: unknown = JSON.parse(manifestText);
-    return typeof parsed === 'object' && parsed !== null && 'outcome' in parsed ? parsed.outcome : undefined;
+    if (typeof parsed !== 'object' || parsed === null || !('outcome' in parsed)) return null;
+    return typeof parsed.outcome === 'string' ? parsed.outcome : null;
   } catch {
-    return undefined;
+    return null;
   }
 }
 
@@ -355,14 +414,24 @@ function recordedOutcome(manifestText: string): unknown {
  * directory listing and the current manifest's text (null when there is none).
  *
  * A manifest recording `counted` means a real review exists, and a rerun must
- * never supersede it. Anything else is a failed attempt whose files are the
- * record that the bundle was sent, so they are kept, not overwritten: each is
- * renamed with `.attempt-<N>` before its extension, N the lowest number not yet
- * used for this stem. The fixed names are then free for the new run, which is
- * what the shipped skills read, and an archived name matches none of them.
+ * never supersede it. A manifest that cannot be read might be one, so it
+ * refuses too: a guard that failed open on bad input would not be a guard.
+ * Anything else is a failed attempt whose files are the record that the bundle
+ * was sent, so they are kept, not overwritten: each is renamed with
+ * `.attempt-<N>` before its extension, N the lowest number not yet used for
+ * this stem. The fixed names are then free for the new run, which is what the
+ * shipped skills read, and an archived name matches none of them.
+ *
+ * Per stem, deliberately: a regenerated bundle has a new date because it is
+ * different code, and warrants its own review. This protects one bundle's
+ * counted review from being overwritten, not the unit forever.
  */
 export function planArchive(fileNames: readonly string[], stem: string, manifestText: string | null): ArchivePlan {
-  if (manifestText !== null && recordedOutcome(manifestText) === 'counted') return { kind: 'counted' };
+  if (manifestText !== null) {
+    const outcome = recordedOutcome(manifestText);
+    if (outcome === null) return { kind: 'unreadable' };
+    if (outcome === 'counted') return { kind: 'counted' };
+  }
 
   const attempt = new RegExp(`^${escapeForRegExp(stem)}\\.attempt-(\\d+)\\.`);
   const used = new Set<number>();
@@ -380,19 +449,150 @@ export function planArchive(fileNames: readonly string[], stem: string, manifest
   return { kind: 'archive', moves };
 }
 
+/** A rename failed part-way through an archive. `renamed` is what had
+ *  already moved, so the refusal can say so rather than claim nothing was
+ *  touched. Rolling a partial archive back is deferred. */
+export class ArchiveError extends Error {
+  readonly renamed: readonly ArchiveMove[];
+
+  constructor(message: string, renamed: readonly ArchiveMove[], options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ArchiveError';
+    this.renamed = renamed;
+  }
+}
+
 /**
  * Plans the archive for `stem` in `dir` and, unless this is a dry run, carries
- * it out. A counted review is returned as such with nothing renamed; the caller
- * refuses.
+ * it out. A counted or unreadable manifest is returned as such with nothing
+ * renamed; the caller refuses.
  */
-export function archiveEarlierAttempt(dir: string, stem: string, dryRun: boolean): ArchivePlan {
+export function archiveEarlierAttempt(
+  dir: string,
+  stem: string,
+  dryRun: boolean,
+  rename: (from: string, to: string) => void = renameSync,
+): ArchivePlan {
   const manifestPath = join(dir, `${stem}.run.json`);
   const manifestText = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : null;
   const plan = planArchive(readdirSync(dir), stem, manifestText);
   if (plan.kind === 'archive' && !dryRun) {
-    for (const move of plan.moves) renameSync(join(dir, move.from), join(dir, move.to));
+    const renamed: ArchiveMove[] = [];
+    for (const move of plan.moves) {
+      try {
+        rename(join(dir, move.from), join(dir, move.to));
+      } catch (err) {
+        throw new ArchiveError(`archiving ${move.from} failed: ${messageOf(err)}`, renamed, { cause: err });
+      }
+      renamed.push(move);
+    }
   }
   return plan;
+}
+
+type ScratchEvent = 'SIGINT' | 'SIGTERM' | 'exit';
+
+/** The process surface the scratch cleanup registers on, injectable so tests
+ *  never install a real signal handler. */
+export interface SignalHost {
+  readonly on: (event: ScratchEvent, listener: () => void) => void;
+  readonly off: (event: ScratchEvent, listener: () => void) => void;
+  readonly exit: (code: number) => void;
+}
+
+const PROCESS_SIGNALS: SignalHost = {
+  on: (event, listener) => {
+    if (event === 'exit') process.on('exit', listener);
+    else process.on(event, listener);
+  },
+  off: (event, listener) => {
+    if (event === 'exit') process.off('exit', listener);
+    else process.off(event, listener);
+  },
+  exit: (code) => {
+    process.exit(code);
+  },
+};
+
+/**
+ * Keeps the credential copy from outliving an interrupted run. From the moment
+ * the scratch exists until the returned release is called, Ctrl-C, SIGTERM or
+ * a process exit removes it: the one directory this run created, identified
+ * by the path the scratch holds and never by a name or a pattern. A signal
+ * then exits the way it would have (130 and 143).
+ */
+export function guardScratch(
+  scratch: CodexScratch,
+  remove: (scratch: CodexScratch) => void,
+  host: SignalHost = PROCESS_SIGNALS,
+): () => void {
+  const cleanUp = (): void => {
+    try {
+      remove(scratch);
+    } catch {
+      console.error(`The scratch directory ${scratch.root} holds a copy of your Codex credential and could not be removed. Delete it.`);
+    }
+  };
+  const onSigint = (): void => {
+    cleanUp();
+    host.exit(130);
+  };
+  const onSigterm = (): void => {
+    cleanUp();
+    host.exit(143);
+  };
+  host.on('SIGINT', onSigint);
+  host.on('SIGTERM', onSigterm);
+  host.on('exit', cleanUp);
+  return () => {
+    host.off('SIGINT', onSigint);
+    host.off('SIGTERM', onSigterm);
+    host.off('exit', cleanUp);
+  };
+}
+
+/**
+ * Everything the runner touches beyond its own memory and plain reads, so a
+ * test can prove what happens before egress with no network, no real Codex
+ * and no write. `defaultDeps()` supplies the real ones.
+ */
+export interface RunnerDeps {
+  readonly repoRoot: string;
+  readonly homeDir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly git: (cwd: string, args: readonly string[]) => string;
+  readonly runCli: (options: RunCliOptions) => Promise<CliResult>;
+  readonly callGemini: (payload: string) => Promise<GeminiResult>;
+  /** mkdtemp and the credential copy. */
+  readonly buildScratch: (authJsonSource: string) => CodexScratch;
+  /** rm of the scratch root. */
+  readonly removeScratch: (scratch: CodexScratch) => void;
+  readonly writeFile: (path: string, content: string) => void;
+  readonly rename: (from: string, to: string) => void;
+  readonly authFs: AuthFs;
+  readonly signals: SignalHost;
+}
+
+export function defaultDeps(): RunnerDeps {
+  return {
+    repoRoot: REPO_ROOT,
+    homeDir: homedir(),
+    env: process.env,
+    git: (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+    runCli,
+    // callGemini reads GEMINI_API_KEY from process.env at call time.
+    callGemini: (payload) => callGemini(payload),
+    buildScratch: buildCodexScratch,
+    removeScratch,
+    writeFile: (path, content) => {
+      writeFileSync(path, content, 'utf8');
+    },
+    rename: (from, to) => {
+      renameSync(from, to);
+    },
+    authFs: NODE_AUTH_FS,
+    signals: PROCESS_SIGNALS,
+  };
 }
 
 interface OutputPaths {
@@ -414,31 +614,25 @@ interface Prepared {
   readonly outputs: OutputPaths;
 }
 
-function git(args: readonly string[]): string {
-  return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
-
-function isTracked(path: string): boolean {
+function isTracked(deps: RunnerDeps, path: string): boolean {
   try {
-    git(['ls-files', '--error-unmatch', '--', path]);
+    deps.git(deps.repoRoot, ['ls-files', '--error-unmatch', '--', path]);
     return true;
   } catch {
     return false;
   }
 }
 
-function repoPath(relative: string): string {
-  return join(REPO_ROOT, relative);
-}
-
 /** Steps 1 to 5. Every throw here is a refusal before egress: nothing is written. */
-function prepare(args: RunArgs): Prepared {
+function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
+  const at = (relative: string): string => join(deps.repoRoot, relative);
+
   // Step 1.
   let artifacts: UnitArtifacts;
   try {
-    artifacts = findUnitArtifacts(readdirSync(repoPath(REVIEWS_DIR)), args.unit);
+    artifacts = findUnitArtifacts(readdirSync(at(REVIEWS_DIR)), args.unit);
   } catch (err) {
-    const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+    const branch = deps.git(deps.repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
     throw new Error(
       `step 1: no committed review prompt and bundle were found for unit ${args.unit} in ${REVIEWS_DIR}/ ` +
         `on branch ${branch} (${messageOf(err)}). Run review-request for ${args.unit}, or switch to the ` +
@@ -451,26 +645,26 @@ function prepare(args: RunArgs): Prepared {
 
   // Step 2.
   for (const path of [promptPath, bundlePath]) {
-    if (!isTracked(path)) throw new Error(`step 2: ${path} is not committed`);
-    if (git(['status', '--porcelain', '--', path]) !== '') {
+    if (!isTracked(deps, path)) throw new Error(`step 2: ${path} is not committed`);
+    if (deps.git(deps.repoRoot, ['status', '--porcelain', '--', path]) !== '') {
       throw new Error(`step 2: ${path} has uncommitted changes`);
     }
   }
 
-  // A counted review is refused here, early. An earlier FAILED attempt is not:
-  // its files are archived just before egress, once every other refusal has
-  // had its chance, so a rerun is one command.
+  // A counted or unreadable manifest is refused here, early. An earlier
+  // FAILED attempt is not: its files are archived just before egress, once
+  // every other refusal has had its chance, so a rerun is one command.
   const stem = `${artifacts.date}-${args.unit}-${artifacts.slug}-review-${args.family}`;
   const base = `${REVIEWS_DIR}/${stem}`;
   const outputs: OutputPaths = { reply: `${base}.md`, manifest: `${base}.run.json`, session: `${base}.session.jsonl` };
-  const manifestText = existsSync(repoPath(outputs.manifest)) ? readFileSync(repoPath(outputs.manifest), 'utf8') : null;
-  if (planArchive(readdirSync(repoPath(REVIEWS_DIR)), stem, manifestText).kind === 'counted') {
-    throw new Error(countedRefusal(outputs.manifest));
-  }
+  const manifestText = existsSync(at(outputs.manifest)) ? readFileSync(at(outputs.manifest), 'utf8') : null;
+  const plan = planArchive(readdirSync(at(REVIEWS_DIR)), stem, manifestText);
+  if (plan.kind === 'counted') throw new Error(countedRefusal(outputs.manifest));
+  if (plan.kind === 'unreadable') throw new Error(unreadableRefusal(outputs.manifest));
 
   // Step 3.
-  const promptText = readFileSync(repoPath(promptPath), 'utf8');
-  const bundleText = readFileSync(repoPath(bundlePath), 'utf8');
+  const promptText = readFileSync(at(promptPath), 'utf8');
+  const bundleText = readFileSync(at(bundlePath), 'utf8');
   const markers = bundleMarkers(bundleText);
 
   // Step 4. A bundle with no end nonce can reach INTEGRITY_UNVERIFIED at best,
@@ -501,6 +695,13 @@ function countedRefusal(manifestPath: string): string {
   return `${manifestPath} records a counted review. A rerun would supersede a real review, so this family is not run again.`;
 }
 
+function unreadableRefusal(manifestPath: string): string {
+  return (
+    `${manifestPath} exists but cannot be read as a manifest, so whether it records a counted review is ` +
+    'unknown. Nothing was archived. Repair or remove it, then run again.'
+  );
+}
+
 /**
  * Called immediately before egress, after every other refusal, and in a dry
  * run in place of it. Returns the moves made (or, in a dry run, the moves that
@@ -510,16 +711,26 @@ function archiveBeforeEgress(
   p: Prepared,
   dryRun: boolean,
   env: Readonly<Record<string, string>>,
+  deps: RunnerDeps,
 ): readonly ArchiveMove[] | null {
   let plan: ArchivePlan;
   try {
-    plan = archiveEarlierAttempt(repoPath(REVIEWS_DIR), p.stem, dryRun);
+    plan = archiveEarlierAttempt(join(deps.repoRoot, REVIEWS_DIR), p.stem, dryRun, deps.rename);
   } catch (err) {
-    refuse(err, env);
+    if (err instanceof ArchiveError && err.renamed.length > 0) {
+      const renamed = err.renamed.map((move) => `${move.from} -> ${move.to}`).join(', ');
+      refuse(err, env, `Nothing was sent. Already renamed in ${REVIEWS_DIR}/ before the failure: ${renamed}.`);
+    } else {
+      refuse(err, env);
+    }
     return null;
   }
   if (plan.kind === 'counted') {
     refuse(new Error(countedRefusal(p.outputs.manifest)), env);
+    return null;
+  }
+  if (plan.kind === 'unreadable') {
+    refuse(new Error(unreadableRefusal(p.outputs.manifest)), env);
     return null;
   }
   if (!dryRun) {
@@ -564,7 +775,7 @@ function geminiApiVersion(url: string): string {
   return `api:${service}/${version}`;
 }
 
-function definedEnv(env: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
+function definedEnv(env: Readonly<Record<string, string | undefined>>): Readonly<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value !== undefined) out[name] = value;
@@ -590,9 +801,13 @@ function printable(
   return names.length === 0 ? text : `(withheld: the text contains a secret from ${names.join(', ')})`;
 }
 
-function refuse(err: unknown, env: Readonly<Record<string, string>>): number {
+function refuse(
+  err: unknown,
+  env: Readonly<Record<string, string>>,
+  aftermath = 'Nothing was sent and nothing was written.',
+): number {
   console.error(`refused: ${printable(messageOf(err), env)}`);
-  console.error('Nothing was sent and nothing was written.');
+  console.error(aftermath);
   return 1;
 }
 
@@ -610,21 +825,27 @@ function listing(paths: readonly string[]): string {
   return paths.length === 0 ? '(empty)' : paths.join(', ');
 }
 
-async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string, string>>): Promise<number> {
+async function runCodex(
+  args: RunArgs,
+  p: Prepared,
+  env: Readonly<Record<string, string>>,
+  deps: RunnerDeps,
+): Promise<number> {
   // Step 6, still before egress: every throw is a refusal.
-  const realAuthPath = join(homedir(), '.codex', 'auth.json');
+  const realAuthPath = join(deps.homeDir, '.codex', 'auth.json');
   let entry: string;
   let cliVersion: string;
   let scratch: CodexScratch;
   try {
-    entry = resolveCodexEntry(process.env, process.platform, process.execPath);
+    entry = resolveCodexEntry(deps.env, process.platform, process.execPath);
     cliVersion = codexCliVersion(entry);
     if (!existsSync(realAuthPath)) throw new Error('no Codex credential at ~/.codex/auth.json; run `codex login` first');
-    scratch = buildCodexScratch(realAuthPath);
+    scratch = deps.buildScratch(realAuthPath);
   } catch (err) {
     return refuse(err, env);
   }
 
+  const releaseGuard = guardScratch(scratch, deps.removeScratch, deps.signals);
   try {
     // Listed BEFORE the run: one Codex turn leaves ~332 files of vendor cache
     // behind it, so a listing taken afterwards proves nothing about the input.
@@ -643,7 +864,7 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
 
     // Step 7.
     if (args.dryRun) {
-      const wouldArchive = archiveBeforeEgress(p, true, env);
+      const wouldArchive = archiveBeforeEgress(p, true, env, deps);
       if (wouldArchive === null) return 1;
       printDryRunHeader(args, p);
       console.log(`  codex           ${cliVersion}, read from its installed package.json`);
@@ -653,7 +874,7 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
       return 0;
     }
 
-    if (archiveBeforeEgress(p, false, env) === null) return 1;
+    if (archiveBeforeEgress(p, false, env, deps) === null) return 1;
 
     // Step 8. From here the bundle has left the machine, so every path below
     // writes evidence that it did.
@@ -670,7 +891,7 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
     let result: CliResult | null = null;
     let runError: unknown = null;
     try {
-      result = await runCli({ ...spawnSpec, stdin: p.payload });
+      result = await deps.runCli({ ...spawnSpec, stdin: p.payload });
     } catch (err) {
       runError = err;
     }
@@ -678,10 +899,13 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
 
     // First, whatever happened, while the scratch home still exists: a
     // credential Codex refreshed goes back to the maintainer, and its new
-    // tokens join the set nothing may leak.
-    const postRunAuth = reconcileAuthAfterRun(scratchAuthPath, realAuthPath, authCopiedIn);
+    // tokens join the set nothing may leak. This never throws.
+    const postRunAuth = reconcileAuthAfterRun(scratchAuthPath, realAuthPath, authCopiedIn, deps.authFs);
     const notice = WRITE_BACK_NOTICE[postRunAuth.writeBack];
     if (notice !== null) console.error(notice);
+    if (postRunAuth.leftoverTemp !== null) {
+      console.error(`The temp file ${postRunAuth.leftoverTemp} holds the refreshed credential and could not be removed. Delete it.`);
+    }
     const secrets = [...authSecrets, ...postRunAuth.refreshedSecrets];
 
     const exitCode = result === null ? null : result.exitCode;
@@ -693,20 +917,38 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
       console.error(`codex did not complete; the tail of its stderr:\n${printable(stderrTail, env, secrets)}`);
     }
 
-    const replyText = existsSync(replyPath) ? readFileSync(replyPath, 'utf8') : '';
+    // Every read from here to the evidence write is guarded: the bundle has
+    // been sent, so a failed read must leave a non-counted run on record, not
+    // none. A missing fact already derives a non-counted outcome: a null reply
+    // fails the echo, and a null token count is `unreported` ingestion. A
+    // failure is reported by its error message only, never file contents.
+    const readAfterRun = (read: () => string | null, what: string): string | null => {
+      try {
+        return read();
+      } catch (err) {
+        console.error(`reading ${what} after the run failed: ${printable(messageOf(err), env, secrets)}`);
+        return null;
+      }
+    };
+
+    const replyText = readAfterRun(() => (existsSync(replyPath) ? readFileSync(replyPath, 'utf8') : null), 'the reply');
     const reply = replyText === '' ? null : replyText;
 
     // The rollout log is the ONLY place the model id, the input token count
     // and the approval policy exist. Anything but exactly one is read as none.
-    const rollouts = listRecursive(scratch.configHome).filter(
-      (path) => path.startsWith('sessions/') && path.endsWith('.jsonl'),
-    );
+    let configListing: readonly string[] | null = null;
+    try {
+      configListing = listRecursive(scratch.configHome);
+    } catch (err) {
+      console.error(`listing the scratch config home after the run failed: ${printable(messageOf(err), env, secrets)}`);
+    }
+    const rollouts = (configListing ?? []).filter((path) => path.startsWith('sessions/') && path.endsWith('.jsonl'));
     const [onlyRollout, ...otherRollouts] = rollouts;
     const rollout =
       onlyRollout !== undefined && otherRollouts.length === 0
-        ? readFileSync(join(scratch.configHome, onlyRollout), 'utf8')
+        ? readAfterRun(() => readFileSync(join(scratch.configHome, onlyRollout), 'utf8'), 'the rollout log')
         : null;
-    if (rollout === null) {
+    if (configListing !== null && rollouts.length !== 1) {
       console.error(`expected exactly one rollout log under sessions/, found ${String(rollouts.length)}`);
     }
 
@@ -736,24 +978,28 @@ async function runCodex(args: RunArgs, p: Prepared, env: Readonly<Record<string,
       payloadSha256: p.payloadSha256,
       payloadBytes: p.payloadBytes,
       ingestion: verifyIngestion(p.payloadBytes, inputTokens),
-      postRunFileCount: listRecursive(scratch.configHome).length,
+      postRunFileCount: configListing === null ? null : configListing.length,
       recordedApprovalPolicy,
       bundleSha256: p.bundleSha256,
       integrity: verifyEcho(p.markers, reply ?? ''),
     });
     const session = rollout === null ? '' : stripSessionLog(rollout, CODEX_KEEP);
 
-    // Step 10, then step 11: the scratch goes only once everything above has
-    // read what it needs from it.
-    const written = writeEvidence(p.outputs, manifest, reply, session);
-    removeScratch(scratch);
-    return finish(args, manifest, written, env, secrets);
+    // Steps 10 to 13. The scratch goes in the `finally`, once everything above
+    // has read what it needs from it.
+    return finish(args, manifest, evidenceFiles(p.outputs, manifest, reply, session), env, secrets, deps);
   } finally {
-    removeScratch(scratch);
+    deps.removeScratch(scratch);
+    releaseGuard();
   }
 }
 
-async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string, string>>): Promise<number> {
+async function runGemini(
+  args: RunArgs,
+  p: Prepared,
+  env: Readonly<Record<string, string>>,
+  deps: RunnerDeps,
+): Promise<number> {
   // Step 6: nothing local is loaded, so there is no clean room to build.
   let cliVersion: string;
   const request = geminiRequest(p.payload);
@@ -765,7 +1011,7 @@ async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string
 
   // Step 7.
   if (args.dryRun) {
-    const wouldArchive = archiveBeforeEgress(p, true, env);
+    const wouldArchive = archiveBeforeEgress(p, true, env, deps);
     if (wouldArchive === null) return 1;
     printDryRunHeader(args, p);
     console.log(`  request         POST ${request.url}`);
@@ -781,7 +1027,7 @@ async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string
     return refuse(new Error('GEMINI_API_KEY is not set'), env);
   }
 
-  if (archiveBeforeEgress(p, false, env) === null) return 1;
+  if (archiveBeforeEgress(p, false, env, deps) === null) return 1;
 
   // Step 8. From here every path writes evidence that the bundle was sent.
   const startedAt = new Date();
@@ -789,7 +1035,7 @@ async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string
   let timedOut = false;
   let httpStatus: number | null = null;
   try {
-    result = await callGemini(p.payload);
+    result = await deps.callGemini(p.payload);
   } catch (err) {
     if (err instanceof Error && err.name === 'TimeoutError') timedOut = true;
     if (err instanceof GeminiRequestError) httpStatus = err.status;
@@ -799,7 +1045,7 @@ async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string
 
   // The api transport has no process exit code. Only a completed call whose
   // reply parsed as complete is 0, so an incomplete reply reaches `outcomeOf`
-  // as a failure and can never be counted.
+  // as a failure and can never be counted. The manifest records exactly this.
   const exitCode = result?.complete === true ? 0 : 1;
   if (result !== null && !result.complete) {
     console.error(`the Gemini reply was incomplete: ${result.incompleteReason ?? 'no reason given'}`);
@@ -847,9 +1093,8 @@ async function runGemini(args: RunArgs, p: Prepared, env: Readonly<Record<string
   };
   if (httpStatus !== null) sessionRecord.httpStatus = httpStatus;
 
-  // Step 10.
-  const written = writeEvidence(p.outputs, manifest, reply, JSON.stringify(sessionRecord));
-  return finish(args, manifest, written, env);
+  // Steps 10 to 13.
+  return finish(args, manifest, evidenceFiles(p.outputs, manifest, reply, JSON.stringify(sessionRecord)), env, [], deps);
 }
 
 function numericFields(record: Readonly<Record<string, unknown>> | null): Readonly<Record<string, number>> | null {
@@ -861,46 +1106,77 @@ function numericFields(record: Readonly<Record<string, unknown>> | null): Readon
   return out;
 }
 
+interface EvidenceFile {
+  readonly path: string;
+  readonly content: string;
+}
+
 /**
- * Step 10. The reply file holds the reply and nothing else, and is written
- * only when there is one. The manifest and the session log are written for
- * every run that reached the vendor, counted or not.
+ * The files a run that reached the vendor leaves, as the exact strings to be
+ * written. The manifest comes first, being the record that the bundle was
+ * sent. The reply file holds the reply and nothing else, and exists only when
+ * there is one.
  */
-function writeEvidence(
+function evidenceFiles(
   outputs: OutputPaths,
   manifest: Manifest,
   reply: string | null,
   session: string,
-): readonly string[] {
-  const files: Array<readonly [string, string]> = [
-    [outputs.manifest, `${JSON.stringify(manifest, null, 2)}\n`],
-    [outputs.session, session === '' ? '' : `${session}\n`],
+): readonly EvidenceFile[] {
+  const files: EvidenceFile[] = [
+    { path: outputs.manifest, content: `${JSON.stringify(manifest, null, 2)}\n` },
+    { path: outputs.session, content: session === '' ? '' : `${session}\n` },
   ];
-  if (reply !== null) files.unshift([outputs.reply, reply]);
-  for (const [path, content] of files) writeFileSync(repoPath(path), content, 'utf8');
-  return files.map(([path]) => path);
+  if (reply !== null) files.push({ path: outputs.reply, content: reply });
+  return files;
 }
 
-/** Steps 12 and 13. */
+/**
+ * Steps 12, 10 and 13, in that order. The leak check runs on the strings about
+ * to be written, before ANY of them is: a hit writes none, so there is nothing
+ * to roll back and no path by which a credential reaches the disk unchecked.
+ * Never committing a secret outranks leaving evidence; the message keeps the
+ * fact of egress on record.
+ */
 function finish(
   args: RunArgs,
   manifest: Manifest,
-  written: readonly string[],
+  files: readonly EvidenceFile[],
   env: Readonly<Record<string, string>>,
-  authSecrets: readonly string[] = [],
+  authSecrets: readonly string[],
+  deps: RunnerDeps,
 ): number {
+  // Step 12.
   const leaked = findLeakedSecrets(
-    written.map((path) => readFileSync(repoPath(path), 'utf8')),
+    files.map((file) => file.content),
     env,
     authSecrets,
   );
   if (leaked.length > 0) {
-    for (const path of written) rmSync(repoPath(path), { force: true });
-    console.error(`refused: the files written for this run contained a secret from ${leaked.join(', ')}.`);
-    console.error('All of them were deleted. The bundle WAS sent; this run left no evidence file.');
+    console.error(
+      `withheld: the evidence for this run contained a credential from ${leaked.join(', ')}, so none of its ` +
+        'files were written.',
+    );
+    console.error(
+      `The bundle WAS sent to ${args.family}. This message is the only record of that egress; ` +
+        `the run's outcome was ${manifest.outcome}.`,
+    );
     return 1;
   }
 
+  // Step 10.
+  const written: string[] = [];
+  for (const file of files) {
+    try {
+      deps.writeFile(join(deps.repoRoot, file.path), file.content);
+    } catch (err) {
+      const before = written.length === 0 ? 'nothing else was written' : `${written.join(', ')} were written first`;
+      throw new Error(`writing ${file.path} failed (${before}): ${messageOf(err)}`, { cause: err });
+    }
+    written.push(file.path);
+  }
+
+  // Step 13.
   const ingestion = manifest.ingestion;
   const ingested =
     ingestion.kind === 'unreported'
@@ -913,8 +1189,8 @@ function finish(
   return manifest.outcome === 'counted' ? 0 : 1;
 }
 
-export async function main(argv: readonly string[]): Promise<number> {
-  const env = definedEnv(process.env);
+export async function main(argv: readonly string[], deps: RunnerDeps = defaultDeps()): Promise<number> {
+  const env = definedEnv(deps.env);
 
   let args: RunArgs;
   try {
@@ -926,13 +1202,15 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let prepared: Prepared;
   try {
-    prepared = prepare(args);
+    prepared = prepare(args, deps);
   } catch (err) {
     return refuse(err, env);
   }
 
   try {
-    return await (args.family === 'codex' ? runCodex(args, prepared, env) : runGemini(args, prepared, env));
+    return await (args.family === 'codex'
+      ? runCodex(args, prepared, env, deps)
+      : runGemini(args, prepared, env, deps));
   } catch (err) {
     // Anything unforeseen still exits non-zero, and its text passes the same
     // check as every other message rather than reaching Node's uncaught dump.

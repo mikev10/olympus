@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertCleanRoom } from '../cleanroom.ts';
 import { buildCodexScratch, listRecursive, removeScratch } from '../scratch.ts';
 
@@ -40,6 +40,22 @@ describe('buildCodexScratch', () => {
     cleanupRoots.push(scratch.root);
 
     expect(existsSync(join(scratch.configHome, 'auth.json'))).toBe(true);
+  });
+
+  it('removes the directory it created when a step after mkdtemp fails, then rethrows', () => {
+    // A private temp dir, so "nothing left behind" is checked in a directory
+    // no other test writes to. os.tmpdir() reads these at call time.
+    const privateTmp = mkdtempSync(join(tmpdir(), 'olympus-scratch-private-tmp-'));
+    cleanupRoots.push(privateTmp);
+    vi.stubEnv('TMPDIR', privateTmp);
+    vi.stubEnv('TEMP', privateTmp);
+    vi.stubEnv('TMP', privateTmp);
+    try {
+      expect(() => buildCodexScratch(join(privateTmp, 'no-such-auth.json'))).toThrow(/ENOENT/);
+      expect(readdirSync(privateTmp)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -27,9 +27,16 @@ export function buildCodexScratch(authJsonSource: string): CodexScratch {
   const root = mkdtempSync(join(tmpdir(), 'olympus-codex-scratch-'));
   const configHome = join(root, 'config');
   const workDir = join(root, 'work');
-  mkdirSync(configHome, { recursive: true });
-  mkdirSync(workDir, { recursive: true });
-  copyFileSync(authJsonSource, join(configHome, 'auth.json'));
+  try {
+    mkdirSync(configHome, { recursive: true });
+    mkdirSync(workDir, { recursive: true });
+    copyFileSync(authJsonSource, join(configHome, 'auth.json'));
+  } catch (err) {
+    // The caller never receives `root` from a throw, so only this function can
+    // remove it, and a failed or partial copy may hold the credential.
+    rmSync(root, { recursive: true, force: true });
+    throw err;
+  }
   return { root, configHome, workDir };
 }
 

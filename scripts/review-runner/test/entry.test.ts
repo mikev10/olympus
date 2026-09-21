@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthFs } from '../../run-external-review.ts';
+import type { AuthFs, RunnerDeps, SignalHost } from '../../run-external-review.ts';
 import {
+  ArchiveError,
   AUTH_JSON_LABEL,
   USAGE,
   archiveEarlierAttempt,
@@ -12,14 +13,18 @@ import {
   buildManifest,
   codexSpawn,
   findLeakedSecrets,
+  guardScratch,
+  main,
   parseArgs,
   planArchive,
   reconcileAuthAfterRun,
 } from '../../run-external-review.ts';
 import type { Manifest } from '../evidence.ts';
 import { RECORDABLE_ENV, keylessUrl, outcomeOf, redactEnv } from '../evidence.ts';
+import type { GeminiResult } from '../gemini.ts';
 import type { IngestionVerdict } from '../ingestion.ts';
 import type { EchoVerdict } from '../integrity.ts';
+import { buildCodexScratch, removeScratch } from '../scratch.ts';
 
 // A key-shaped-but-fake value: realistic enough that a naive substring check
 // would find it if it leaked anywhere it should not.
@@ -106,6 +111,56 @@ describe('findLeakedSecrets', () => {
 
     expect(leaked).toEqual([AUTH_JSON_LABEL]);
     expect(JSON.stringify(leaked)).not.toContain(REFRESH_TOKEN.slice(0, 8));
+  });
+
+  it('reports nothing when no value appears', () => {
+    expect(findLeakedSecrets(['a clean reply'], { GEMINI_API_KEY: FAKE_KEY, OPENAI_API_KEY: 'sk-proj-dummydummy' })).toEqual(
+      [],
+    );
+  });
+
+  it('reports every leaking name, across every file', () => {
+    const env = { GEMINI_API_KEY: FAKE_KEY, OPENAI_API_KEY: 'sk-proj-dummydummy', CODEX_HOME: '/scratch/config' };
+    const leaked = findLeakedSecrets(['clean manifest', `session ${env.OPENAI_API_KEY}`, `reply ${FAKE_KEY}`], env);
+
+    expect([...leaked].sort()).toEqual(['GEMINI_API_KEY', 'OPENAI_API_KEY']);
+  });
+
+  it('skips a secret-named variable whose value is the path of an existing file: it names a credential, it is not one', () => {
+    // A manifest records paths beside it, so matching the path would withhold
+    // every run's evidence after the bundle was sent.
+    const dir = mkdtempSync(join(tmpdir(), 'olympus-credentials-file-'));
+    try {
+      const credentialsFile = join(dir, 'key.json');
+      writeFileSync(credentialsFile, '{}');
+      const output = `the scratch was at ${join(dir, 'scratch')}`;
+
+      expect(findLeakedSecrets([output], { GOOGLE_APPLICATION_CREDENTIALS: credentialsFile })).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still searches a secret that merely starts with "/", since it names no existing file', () => {
+    const env = { MY_SERVICE_TOKEN: '/notafile-SecretSecret123' };
+
+    expect(findLeakedSecrets(['the token is /notafile-SecretSecret123'], env)).toEqual(['MY_SERVICE_TOKEN']);
+  });
+
+  it('never skips GEMINI_API_KEY or OPENAI_API_KEY, even when the value is the path of an existing file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'olympus-canary-path-'));
+    try {
+      const existing = join(dir, 'file');
+      writeFileSync(existing, '');
+      const output = `found ${existing}`;
+
+      expect([...findLeakedSecrets([output], { GEMINI_API_KEY: existing, OPENAI_API_KEY: existing })].sort()).toEqual([
+        'GEMINI_API_KEY',
+        'OPENAI_API_KEY',
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -218,7 +273,7 @@ describe('reconcileAuthAfterRun', () => {
 
     const result = reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), fs);
 
-    expect(result).toEqual({ writeBack: 'unchanged', refreshedSecrets: [] });
+    expect(result).toEqual({ writeBack: 'unchanged', refreshedSecrets: [], leftoverTemp: null });
     expect(calls).toEqual([]);
   });
 
@@ -276,9 +331,75 @@ describe('reconcileAuthAfterRun', () => {
       },
     };
 
-    expect(reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), failing).writeBack).toBe('write-failed');
+    const result = reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), failing);
+
+    expect(result.writeBack).toBe('write-failed');
+    expect(result.leftoverTemp).toBeNull();
     expect(calls[1]).toMatch(/^remove /);
     expect(Buffer.from(files.get(REAL) ?? []).toString()).toBe(AUTH_JSON);
+  });
+
+  it('reports the temp file by PATH, never contents, when removing it fails too', () => {
+    const { fs } = fakeFs({ [REAL]: AUTH_JSON, [SCRATCH]: REFRESHED_JSON });
+    const failing: AuthFs = {
+      ...fs,
+      rename: () => {
+        throw new Error('EPERM');
+      },
+      remove: () => {
+        throw new Error('EBUSY');
+      },
+    };
+
+    const result = reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), failing);
+
+    expect(result.writeBack).toBe('write-failed');
+    expect(result.leftoverTemp).not.toBeNull();
+    expect(dirname(result.leftoverTemp ?? '')).toBe(dirname(REAL));
+    expect(result.leftoverTemp).not.toContain(ROTATED.slice(0, 8));
+  });
+
+  it("never writes back a different account's credential", () => {
+    const otherAccount = REFRESHED_JSON.replace('00000000-0000-4000-8000-000000000000', '11111111-1111-4111-8111-111111111111');
+    const { fs, calls } = fakeFs({ [REAL]: AUTH_JSON, [SCRATCH]: otherAccount });
+
+    const result = reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), fs);
+
+    expect(result.writeBack).toBe('not-this-account');
+    expect(result.refreshedSecrets).toContain(ROTATED);
+    expect(calls).toEqual([]);
+  });
+
+  it('never writes back a file whose tokens object is empty or missing', () => {
+    for (const scratch of [JSON.stringify({ tokens: {} }), JSON.stringify({ OPENAI_API_KEY: null })]) {
+      const { fs, calls } = fakeFs({ [REAL]: AUTH_JSON, [SCRATCH]: scratch });
+
+      expect(reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), fs).writeBack).toBe('not-this-account');
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('reports a failed read instead of throwing, so the run still writes its evidence', () => {
+    const { fs, calls } = fakeFs({ [REAL]: AUTH_JSON, [SCRATCH]: REFRESHED_JSON });
+    const scratchUnreadable: AuthFs = {
+      ...fs,
+      readFile: () => {
+        throw new Error('EACCES');
+      },
+    };
+    const realUnreadable: AuthFs = {
+      ...fs,
+      readFile: (path) => {
+        if (path === REAL) throw new Error('EACCES');
+        return fs.readFile(path);
+      },
+    };
+
+    expect(reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), scratchUnreadable).writeBack).toBe('read-failed');
+    const second = reconcileAuthAfterRun(SCRATCH, REAL, Buffer.from(AUTH_JSON), realUnreadable);
+    expect(second.writeBack).toBe('read-failed');
+    expect(second.refreshedSecrets).toContain(ROTATED);
+    expect(calls).toEqual([]);
   });
 });
 
@@ -312,19 +433,6 @@ describe('codexSpawn', () => {
     expect(spawnSpec.cwd).toBe('/scratch/work');
     expect(spawnSpec.args[0]).toBe('/codex/bin/codex.js');
     expect(spawnSpec.args).toContain('/scratch/last-message.txt');
-  });
-
-  it('reports nothing when no value appears', () => {
-    expect(findLeakedSecrets(['a clean reply'], { GEMINI_API_KEY: FAKE_KEY, OPENAI_API_KEY: 'sk-proj-dummydummy' })).toEqual(
-      [],
-    );
-  });
-
-  it('reports every leaking name, across every file', () => {
-    const env = { GEMINI_API_KEY: FAKE_KEY, OPENAI_API_KEY: 'sk-proj-dummydummy', CODEX_HOME: '/scratch/config' };
-    const leaked = findLeakedSecrets(['clean manifest', `session ${env.OPENAI_API_KEY}`, `reply ${FAKE_KEY}`], env);
-
-    expect([...leaked].sort()).toEqual(['GEMINI_API_KEY', 'OPENAI_API_KEY']);
   });
 });
 
@@ -386,7 +494,7 @@ describe('buildManifest', () => {
     expect(buildManifest(facts)).toEqual({ ...facts, outcome: 'counted' });
   });
 
-  it("takes its outcome from outcomeOf's answer, across every combination of the deciding facts", () => {
+  it('reproduces its own outcome: outcomeOf(manifest) equals manifest.outcome on every outcome path', () => {
     const ingestions: readonly IngestionVerdict[] = [
       COMPLETE,
       { kind: 'short', inputTokens: 24_181, floor: 80_732 },
@@ -397,20 +505,30 @@ describe('buildManifest', () => {
       { kind: 'failed', absent: ['endNonce'] },
       { kind: 'unverified', absent: ['endNonce'] },
     ];
+    const policies = ['never', 'on-request', null];
+    const seen = new Set<string>();
 
     for (const facts of [codexFacts, geminiFacts]) {
       for (const exitCode of [0, 1, null]) {
         for (const timedOut of [false, true]) {
-          for (const ingestion of ingestions) {
-            for (const integrity of integrities) {
-              const manifest = buildManifest(facts({ exitCode, timedOut, ingestion, integrity }));
+          for (const recordedApprovalPolicy of policies) {
+            for (const ingestion of ingestions) {
+              for (const integrity of integrities) {
+                const manifest = buildManifest(facts({ exitCode, timedOut, recordedApprovalPolicy, ingestion, integrity }));
+                // Through JSON, as a verifier reading the committed file would.
+                const reread = JSON.parse(JSON.stringify(manifest)) as Manifest; // JSON-parse boundary: round-trip of a Manifest.
 
-              expect(manifest.outcome).toBe(outcomeOf({ exitCode, timedOut, ingestion, integrity }));
+                expect(outcomeOf(manifest)).toBe(manifest.outcome);
+                expect(outcomeOf(reread)).toBe(manifest.outcome);
+                seen.add(manifest.outcome);
+              }
             }
           }
         }
       }
     }
+    // Every one of the four outcomes was exercised.
+    expect([...seen].sort()).toEqual(['FAILED', 'INTEGRITY_FAILED', 'INTEGRITY_UNVERIFIED', 'counted']);
   });
 
   it('ignores an outcome smuggled in on a wider object and derives its own', () => {
@@ -424,10 +542,11 @@ describe('buildManifest', () => {
       const manifest = buildManifest(codexFacts({ recordedApprovalPolicy }));
 
       expect(manifest.outcome).toBe('FAILED');
-      // The process's real exit code is what the manifest records; the
-      // recorded policy beside it is what shows why the run failed.
+      // Codex's real exit code is what the manifest records, with no synthetic
+      // stand-in; the recorded policy beside it is what the outcome turns on.
       expect(manifest.exitCode).toBe(0);
       expect(manifest.recordedApprovalPolicy).toBe(recordedApprovalPolicy);
+      expect(outcomeOf(manifest)).toBe('FAILED');
     }
   });
 
@@ -469,12 +588,25 @@ describe('planArchive', () => {
     });
   });
 
-  it('archives outputs whose manifest is missing or unreadable, since neither can show a counted review', () => {
+  it('archives outputs that have no manifest at all', () => {
     expect(planArchive([`${STEM}.md`], STEM, null)).toEqual({
       kind: 'archive',
       moves: [{ from: `${STEM}.md`, to: `${STEM}.attempt-1.md` }],
     });
-    expect(planArchive(CURRENT, STEM, '{"outcome": "counted"')).toMatchObject({ kind: 'archive' });
+  });
+
+  it('refuses, and plans no move, over a manifest it cannot read: the guard fails closed', () => {
+    const unreadable = [
+      `\uFEFF${COUNTED_MANIFEST}`, // a BOM from a Windows editor
+      `<<<<<<< HEAD\n${COUNTED_MANIFEST}\n=======\n${FAILED_MANIFEST}\n>>>>>>> branch\n`, // conflict markers
+      '{"outcome": "counted"', // truncated
+      JSON.stringify({ unit: 'P5' }), // no outcome
+      JSON.stringify({ outcome: 1 }), // not a string outcome
+      '[]',
+    ];
+    for (const text of unreadable) {
+      expect(planArchive(CURRENT, STEM, text)).toEqual({ kind: 'unreadable' });
+    }
   });
 
   it('plans nothing when no earlier output exists, and ignores the other family', () => {
@@ -555,5 +687,391 @@ describe('archiveEarlierAttempt', () => {
 
     expect(plan).toMatchObject({ kind: 'archive', moves: [{ to: `${STEM}.attempt-1.md` }, {}, {}] });
     expect(readdirSync(dir).sort()).toEqual([...CURRENT].sort());
+  });
+
+  it('refuses over an unreadable manifest and renames nothing', () => {
+    writeRun(`\uFEFF${COUNTED_MANIFEST}`);
+
+    expect(archiveEarlierAttempt(dir, STEM, false)).toEqual({ kind: 'unreadable' });
+    expect(readdirSync(dir).sort()).toEqual([...CURRENT].sort());
+  });
+
+  it('names what was already renamed when a rename fails part-way', () => {
+    writeRun(FAILED_MANIFEST);
+    let calls = 0;
+    const failSecond = (from: string, to: string): void => {
+      calls += 1;
+      if (calls === 2) throw new Error('EBUSY');
+      renameSync(from, to);
+    };
+
+    let caught: unknown;
+    try {
+      archiveEarlierAttempt(dir, STEM, false, failSecond);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ArchiveError);
+    expect(caught instanceof ArchiveError ? caught.renamed : []).toEqual([
+      { from: `${STEM}.md`, to: `${STEM}.attempt-1.md` },
+    ]);
+  });
+});
+
+describe('guardScratch', () => {
+  const scratch = { root: '/tmp/olympus-codex-scratch-abc', configHome: '/tmp/olympus-codex-scratch-abc/config', workDir: '/tmp/olympus-codex-scratch-abc/work' };
+
+  function fakeHost(): { host: SignalHost; fire: (event: string) => void; exits: number[]; listening: () => number } {
+    const listeners = new Map<string, Array<() => void>>();
+    const exits: number[] = [];
+    const host: SignalHost = {
+      on: (event, listener) => {
+        listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+      },
+      off: (event, listener) => {
+        listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== listener));
+      },
+      exit: (code) => {
+        exits.push(code);
+      },
+    };
+    const fire = (event: string): void => {
+      for (const listener of listeners.get(event) ?? []) listener();
+    };
+    const listening = (): number => [...listeners.values()].reduce((sum, list) => sum + list.length, 0);
+    return { host, fire, exits, listening };
+  }
+
+  it('removes exactly the scratch it holds on Ctrl-C, then exits 130', () => {
+    const { host, fire, exits } = fakeHost();
+    const removed: string[] = [];
+    guardScratch(scratch, (s) => removed.push(s.root), host);
+
+    fire('SIGINT');
+
+    expect(removed).toEqual([scratch.root]);
+    expect(exits).toEqual([130]);
+  });
+
+  it('removes it on SIGTERM (exit 143) and on process exit', () => {
+    const term = fakeHost();
+    const removedOnTerm: string[] = [];
+    guardScratch(scratch, (s) => removedOnTerm.push(s.root), term.host);
+    term.fire('SIGTERM');
+
+    const exit = fakeHost();
+    const removedOnExit: string[] = [];
+    guardScratch(scratch, (s) => removedOnExit.push(s.root), exit.host);
+    exit.fire('exit');
+
+    expect(removedOnTerm).toEqual([scratch.root]);
+    expect(term.exits).toEqual([143]);
+    expect(removedOnExit).toEqual([scratch.root]);
+    expect(exit.exits).toEqual([]);
+  });
+
+  it('stops listening once released', () => {
+    const { host, fire, listening } = fakeHost();
+    const removed: string[] = [];
+    const release = guardScratch(scratch, (s) => removed.push(s.root), host);
+
+    expect(listening()).toBe(3);
+    release();
+    fire('SIGINT');
+
+    expect(listening()).toBe(0);
+    expect(removed).toEqual([]);
+  });
+});
+
+// main, wired to spies. These are the executable form of the property the
+// runner exists for: nothing is sent, written or renamed before every refusal
+// has had its chance, and a dry run contacts no one.
+describe('main: egress order', () => {
+  const UNIT = 'Z9';
+  const PROMPT = `2026-09-21-${UNIT}-probe-review-prompt.txt`;
+  const BUNDLE = `2026-09-21-${UNIT}-probe-review-bundle.txt`;
+  const NONCE = '0123456789abcdef0123456789abcdef';
+  const ECHO = `base 1111111 head 2222222 last section packages/core/src/a.ts nonce ${NONCE}`;
+  const EGRESS = /^(runCli|callGemini)$/;
+  const WRITE = /^(write|rename|authFs\.(write|rename|remove)) /;
+
+  type Family = 'codex' | 'gemini';
+
+  interface Options {
+    readonly nonce?: boolean;
+    readonly untracked?: boolean;
+    readonly modified?: boolean;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    readonly contaminate?: boolean;
+    /** Appended to the reviewer's reply. */
+    readonly replyExtra?: string;
+    readonly authReadThrows?: boolean;
+    /** The stand-in makes the -o path a directory, so reading the reply throws (EISDIR). */
+    readonly replyReadThrows?: boolean;
+  }
+
+  interface Harness {
+    readonly deps: RunnerDeps;
+    readonly calls: string[];
+    readonly reviews: string;
+    readonly home: string;
+  }
+
+  const temps: string[] = [];
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function harness(options: Options = {}): Harness {
+    const root = mkdtempSync(join(tmpdir(), 'olympus-main-test-'));
+    temps.push(root);
+    const reviews = join(root, 'docs', 'reviews');
+    mkdirSync(reviews, { recursive: true });
+    writeFileSync(join(reviews, PROMPT), 'Review the bundle.\n');
+    const tail = options.nonce === false ? [] : [`=== BUNDLE END === ${NONCE}`];
+    writeFileSync(
+      join(reviews, BUNDLE),
+      ['BASE: 1111111', 'HEAD: 2222222', '', '===== packages/core/src/a.ts =====', 'export const a = 1;', ...tail, ''].join('\n'),
+    );
+    const install = join(root, 'codex-install');
+    mkdirSync(join(install, 'bin'), { recursive: true });
+    writeFileSync(join(install, 'bin', 'codex.js'), '');
+    writeFileSync(join(install, 'package.json'), JSON.stringify({ version: '0.0.0-test' }));
+    const home = join(root, 'home');
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    writeFileSync(join(home, '.codex', 'auth.json'), AUTH_JSON);
+
+    const calls: string[] = [];
+    const reply = `## Findings\n${ECHO}\n${options.replyExtra ?? ''}`;
+    const deps: RunnerDeps = {
+      repoRoot: root,
+      homeDir: home,
+      env: { CODEX_JS: join(install, 'bin', 'codex.js'), GEMINI_API_KEY: FAKE_KEY, ...options.env },
+      git: (_cwd, args) => {
+        if (args[0] === 'rev-parse') return 'test-branch\n';
+        if (args[0] === 'ls-files' && options.untracked === true) throw new Error('did not match any file known to git');
+        if (args[0] === 'status' && options.modified === true) return ` M ${args[3] ?? ''}\n`;
+        return '';
+      },
+      runCli: (spawnOptions) => {
+        calls.push('runCli');
+        // A stand-in Codex: the reply to -o, and a rollout log shaped like the measured one.
+        const out = spawnOptions.args[spawnOptions.args.indexOf('-o') + 1] ?? '';
+        const codexHome = spawnOptions.env.CODEX_HOME ?? '';
+        if (options.replyReadThrows === true) mkdirSync(out);
+        else writeFileSync(out, reply);
+        const sessions = join(codexHome, 'sessions', '2026', '09', '21');
+        mkdirSync(sessions, { recursive: true });
+        writeFileSync(
+          join(sessions, 'rollout-test.jsonl'),
+          [
+            { type: 'turn_context', payload: { approval_policy: 'never' } },
+            { type: 'world_state', payload: { state: { collaboration_mode: { model: 'test-model' } } } },
+            { type: 'token_usage_record', payload: { usage: { input_tokens: 1000 } } },
+          ]
+            .map((record) => JSON.stringify(record))
+            .join('\n'),
+        );
+        return Promise.resolve({ exitCode: 0, timedOut: false, stdout: '', stderr: '' });
+      },
+      callGemini: () => {
+        calls.push('callGemini');
+        const result: GeminiResult = {
+          reply,
+          modelVersion: 'test-model',
+          promptTokenCount: 1000,
+          responseId: 'resp-test',
+          usageMetadata: { promptTokenCount: 1000 },
+          complete: true,
+          incompleteReason: null,
+        };
+        return Promise.resolve(result);
+      },
+      buildScratch: (source) => {
+        calls.push('buildScratch');
+        const scratch = buildCodexScratch(source);
+        temps.push(scratch.root);
+        if (options.contaminate === true) writeFileSync(join(scratch.configHome, 'AGENTS.md'), 'contaminant');
+        return scratch;
+      },
+      removeScratch: (scratch) => {
+        calls.push('removeScratch');
+        removeScratch(scratch);
+      },
+      writeFile: (path, content) => {
+        calls.push(`write ${basename(path)}`);
+        writeFileSync(path, content);
+      },
+      rename: (from, to) => {
+        calls.push(`rename ${basename(from)}`);
+        renameSync(from, to);
+      },
+      authFs: {
+        exists: (path) => existsSync(path),
+        readFile: (path) => {
+          if (options.authReadThrows === true) throw new Error('EACCES');
+          return readFileSync(path);
+        },
+        writeFile: (path) => {
+          calls.push(`authFs.write ${path}`);
+        },
+        rename: (from) => {
+          calls.push(`authFs.rename ${from}`);
+        },
+        remove: (path) => {
+          calls.push(`authFs.remove ${path}`);
+        },
+      },
+      signals: { on: () => undefined, off: () => undefined, exit: () => undefined },
+    };
+    return { deps, calls, reviews, home };
+  }
+
+  /** An earlier FAILED attempt, so any archive that ran would show as a rename. */
+  function earlierFailedAttempt(h: Harness, family: Family): void {
+    const stem = `2026-09-21-${UNIT}-probe-review-${family}`;
+    writeFileSync(join(h.reviews, `${stem}.md`), 'an earlier reply');
+    writeFileSync(join(h.reviews, `${stem}.run.json`), JSON.stringify({ outcome: 'FAILED' }));
+    writeFileSync(join(h.reviews, `${stem}.session.jsonl`), '');
+  }
+
+  function expectNothingSentOrWritten(h: Harness, listingBefore: readonly string[]): void {
+    expect(h.calls.filter((call) => EGRESS.test(call))).toEqual([]);
+    expect(h.calls.filter((call) => WRITE.test(call))).toEqual([]);
+    expect(readdirSync(h.reviews).sort()).toEqual([...listingBefore].sort());
+    // A scratch that was built was removed: the credential copy did not outlive the refusal.
+    if (h.calls.includes('buildScratch')) expect(h.calls).toContain('removeScratch');
+  }
+
+  const refusals: ReadonlyArray<{
+    readonly name: string;
+    readonly families: readonly Family[];
+    readonly options?: Options;
+    readonly setup?: (h: Harness, family: Family) => void;
+  }> = [
+    { name: 'the review artifacts are missing', families: ['codex', 'gemini'], setup: (h) => {
+        rmSync(join(h.reviews, PROMPT));
+      },
+    },
+    { name: 'an artifact is not committed', families: ['codex', 'gemini'], options: { untracked: true } },
+    { name: 'an artifact has uncommitted changes', families: ['codex', 'gemini'], options: { modified: true } },
+    { name: 'the bundle has no end nonce', families: ['codex', 'gemini'], options: { nonce: false } },
+    {
+      name: 'a counted review is present',
+      families: ['codex', 'gemini'],
+      setup: (h, family) => {
+        writeFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-${family}.run.json`), JSON.stringify({ outcome: 'counted' }));
+      },
+    },
+    {
+      name: 'an unreadable manifest is present',
+      families: ['codex', 'gemini'],
+      setup: (h, family) => {
+        writeFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-${family}.run.json`), `\uFEFF{"outcome":"counted"}`);
+      },
+    },
+    { name: 'the Codex entry point cannot be resolved', families: ['codex'], options: { env: { CODEX_JS: join(tmpdir(), 'no-such-codex', 'codex.js') } } },
+    { name: 'there is no Codex credential', families: ['codex'], setup: (h) => {
+        rmSync(join(h.home, '.codex', 'auth.json'));
+      },
+    },
+    { name: 'the clean room fails', families: ['codex'], options: { contaminate: true } },
+    { name: 'GEMINI_API_KEY is missing', families: ['gemini'], options: { env: { GEMINI_API_KEY: undefined } } },
+  ];
+
+  for (const refusal of refusals) {
+    for (const family of refusal.families) {
+      it(`${family}: refuses when ${refusal.name}, with no vendor call and no write or rename`, async () => {
+        const h = harness(refusal.options);
+        earlierFailedAttempt(h, family);
+        refusal.setup?.(h, family);
+        const listingBefore = readdirSync(h.reviews);
+
+        expect(await main([UNIT, family], h.deps)).toBe(1);
+        expectNothingSentOrWritten(h, listingBefore);
+      });
+    }
+  }
+
+  for (const family of ['codex', 'gemini'] as const) {
+    it(`${family}: --dry-run contacts no one and writes or renames nothing, even with an attempt to archive`, async () => {
+      const h = harness();
+      earlierFailedAttempt(h, family);
+      const listingBefore = readdirSync(h.reviews);
+
+      expect(await main([UNIT, family, '--dry-run'], h.deps)).toBe(0);
+      expectNothingSentOrWritten(h, listingBefore);
+    });
+
+    it(`${family}: a run that passes every refusal archives, then sends once, then writes its evidence`, async () => {
+      const h = harness();
+      earlierFailedAttempt(h, family);
+      const vendor = family === 'codex' ? 'runCli' : 'callGemini';
+
+      expect(await main([UNIT, family], h.deps)).toBe(0);
+
+      const renames = h.calls.flatMap((call, i) => (call.startsWith('rename ') ? [i] : []));
+      const writes = h.calls.flatMap((call, i) => (call.startsWith('write ') ? [i] : []));
+      const sent = h.calls.indexOf(vendor);
+      expect(h.calls.filter((call) => EGRESS.test(call))).toEqual([vendor]);
+      expect(renames).toHaveLength(3);
+      expect(Math.max(...renames)).toBeLessThan(sent);
+      expect(writes).toHaveLength(3);
+      expect(Math.min(...writes)).toBeGreaterThan(sent);
+      const manifest = JSON.parse(
+        readFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-${family}.run.json`), 'utf8'),
+      ) as Manifest; // JSON-parse boundary: the file this run just wrote.
+      expect(manifest.outcome).toBe('counted');
+      expect(outcomeOf(manifest)).toBe('counted');
+    });
+  }
+
+  it('gemini: a reply carrying GEMINI_API_KEY is checked before writing, so no file is written at all', async () => {
+    const h = harness({ replyExtra: `the key is ${FAKE_KEY}` });
+    const listingBefore = readdirSync(h.reviews);
+
+    expect(await main([UNIT, 'gemini'], h.deps)).toBe(1);
+    expect(h.calls).toContain('callGemini');
+    expect(h.calls.filter((call) => call.startsWith('write '))).toEqual([]);
+    expect(readdirSync(h.reviews).sort()).toEqual([...listingBefore].sort());
+  });
+
+  it('codex: a reply carrying a credential-file token writes no file at all, and the scratch is still removed', async () => {
+    const h = harness({ replyExtra: `token ${REFRESH_TOKEN}` });
+
+    expect(await main([UNIT, 'codex'], h.deps)).toBe(1);
+    expect(h.calls).toContain('runCli');
+    expect(h.calls.filter((call) => call.startsWith('write '))).toEqual([]);
+    expect(h.calls.at(-1)).toBe('removeScratch');
+  });
+
+  it('codex: a reply that cannot be read still leaves a manifest recording a non-counted run', async () => {
+    const h = harness({ replyReadThrows: true });
+
+    expect(await main([UNIT, 'codex'], h.deps)).toBe(1);
+    const stem = `2026-09-21-${UNIT}-probe-review-codex`;
+    const manifest = JSON.parse(readFileSync(join(h.reviews, `${stem}.run.json`), 'utf8')) as Manifest; // JSON-parse boundary: the file this run just wrote.
+    expect(manifest.outcome).not.toBe('counted');
+    expect(manifest.outcome).toBe('INTEGRITY_FAILED');
+    expect(outcomeOf(manifest)).toBe(manifest.outcome);
+    // The reply is treated as null, so no reply file is written.
+    expect(existsSync(join(h.reviews, `${stem}.md`))).toBe(false);
+    expect(existsSync(join(h.reviews, `${stem}.session.jsonl`))).toBe(true);
+  });
+
+  it('codex: a failed read in the credential write-back cannot stop the run writing its evidence', async () => {
+    const h = harness({ authReadThrows: true });
+
+    expect(await main([UNIT, 'codex'], h.deps)).toBe(0);
+    expect(h.calls.filter((call) => call.startsWith('write '))).toHaveLength(3);
   });
 });

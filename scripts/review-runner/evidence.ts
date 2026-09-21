@@ -91,12 +91,24 @@ export interface Manifest {
   readonly postRunFileCount: number | null;
   /** Read back from the rollout log, not asserted by the caller. Codex has no
    *  `--ask-for-approval` flag, so this recorded value is the only evidence the
-   *  run could not have been prompted. The runner refuses a value other than
-   *  "never" for codex. */
+   *  run could not have been prompted. `outcomeOf` fails a cli run whose value
+   *  is anything but "never". */
   readonly recordedApprovalPolicy: string | null;
   readonly bundleSha256: string;
   readonly integrity: EchoVerdict;
   readonly outcome: Outcome;
+}
+
+/** The facts the outcome is decided by. Every one is a manifest field, so
+ *  `outcomeOf(manifest)` reproduces the outcome the manifest records, and a
+ *  verifier re-deriving it gets the same answer. */
+export interface OutcomeFacts {
+  readonly invocation: { readonly kind: Invocation['kind'] };
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly recordedApprovalPolicy: string | null;
+  readonly ingestion: IngestionVerdict;
+  readonly integrity: EchoVerdict;
 }
 
 /**
@@ -108,13 +120,11 @@ export interface Manifest {
  * grepped its way to the nonce would echo every marker correctly and still
  * have ingested only a fraction of the bundle; only the token count catches it.
  */
-export function outcomeOf(run: {
-  readonly exitCode: number | null;
-  readonly timedOut: boolean;
-  readonly ingestion: IngestionVerdict;
-  readonly integrity: EchoVerdict;
-}): Outcome {
+export function outcomeOf(run: OutcomeFacts): Outcome {
   if (run.timedOut || run.exitCode !== 0) return 'FAILED';
+  // A cli run whose recorded policy is not "never" could have been prompted,
+  // and nothing else can show it was not.
+  if (run.invocation.kind === 'cli' && run.recordedApprovalPolicy !== 'never') return 'FAILED';
   if (run.ingestion.kind !== 'complete') return 'INTEGRITY_FAILED';
   if (run.integrity.kind === 'failed') return 'INTEGRITY_FAILED';
   if (run.integrity.kind === 'unverified') return 'INTEGRITY_UNVERIFIED';

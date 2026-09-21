@@ -3,7 +3,9 @@ import type { KeylessUrl, RedactedEnv } from '../evidence.ts';
 import { CODEX_KEEP, GEMINI_KEEP, keylessUrl, outcomeOf, redactEnv, stripSessionLog } from '../evidence.ts';
 
 describe('outcomeOf', () => {
-  const ok = { exitCode: 0, timedOut: false } as const;
+  // An api run: no approval policy exists to record.
+  const api = { invocation: { kind: 'api' }, recordedApprovalPolicy: null } as const;
+  const ok = { ...api, exitCode: 0, timedOut: false } as const;
   const ingested = { kind: 'complete', inputTokens: 127_096, floor: 80_732 } as const;
 
   it('counts a clean run whose echo verified', () => {
@@ -12,14 +14,29 @@ describe('outcomeOf', () => {
 
   it('fails a timeout regardless of everything else', () => {
     expect(
-      outcomeOf({ exitCode: 0, timedOut: true, ingestion: ingested, integrity: { kind: 'verified' } }),
+      outcomeOf({ ...api, exitCode: 0, timedOut: true, ingestion: ingested, integrity: { kind: 'verified' } }),
     ).toBe('FAILED');
   });
 
   it('fails a non-zero exit before looking at integrity', () => {
     expect(
-      outcomeOf({ exitCode: 1, timedOut: false, ingestion: ingested, integrity: { kind: 'verified' } }),
+      outcomeOf({ ...api, exitCode: 1, timedOut: false, ingestion: ingested, integrity: { kind: 'verified' } }),
     ).toBe('FAILED');
+  });
+
+  it('counts a cli run only when its recorded approval policy is exactly "never"', () => {
+    const cli = { invocation: { kind: 'cli' }, exitCode: 0, timedOut: false, ingestion: ingested } as const;
+
+    expect(outcomeOf({ ...cli, recordedApprovalPolicy: 'never', integrity: { kind: 'verified' } })).toBe('counted');
+    for (const recordedApprovalPolicy of ['on-request', 'untrusted', 'on-failure', 'Never', '', null]) {
+      expect(outcomeOf({ ...cli, recordedApprovalPolicy, integrity: { kind: 'verified' } })).toBe('FAILED');
+    }
+  });
+
+  it('does not apply the approval rule to an api run, which has no policy to record', () => {
+    expect(outcomeOf({ ...ok, recordedApprovalPolicy: null, ingestion: ingested, integrity: { kind: 'verified' } })).toBe(
+      'counted',
+    );
   });
 
   it('reports a mismatched echo as INTEGRITY_FAILED', () => {
@@ -40,7 +57,7 @@ describe('outcomeOf', () => {
 
   it('fails a run whose vendor-reported ingestion fell short, even if the echo verified', () => {
     expect(outcomeOf({
-      exitCode: 0, timedOut: false,
+      ...api, exitCode: 0, timedOut: false,
       ingestion: { kind: 'short', inputTokens: 32_893, floor: 80_732 },
       integrity: { kind: 'verified' },
     })).toBe('INTEGRITY_FAILED');
@@ -48,7 +65,7 @@ describe('outcomeOf', () => {
 
   it('fails a run whose vendor reported no token count', () => {
     expect(outcomeOf({
-      exitCode: 0, timedOut: false,
+      ...api, exitCode: 0, timedOut: false,
       ingestion: { kind: 'unreported', floor: 80_732 },
       integrity: { kind: 'verified' },
     })).toBe('INTEGRITY_FAILED');
