@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CODEX_KEEP, GEMINI_KEEP, outcomeOf, stripSessionLog } from '../evidence.ts';
+import type { KeylessUrl, RedactedEnv } from '../evidence.ts';
+import { CODEX_KEEP, GEMINI_KEEP, keylessUrl, outcomeOf, redactEnv, stripSessionLog } from '../evidence.ts';
 
 describe('outcomeOf', () => {
   const ok = { exitCode: 0, timedOut: false } as const;
@@ -51,6 +52,69 @@ describe('outcomeOf', () => {
       ingestion: { kind: 'unreported', floor: 80_732 },
       integrity: { kind: 'verified' },
     })).toBe('INTEGRITY_FAILED');
+  });
+});
+
+describe('redactEnv', () => {
+  it('keeps CODEX_HOME, HOME, and USERPROFILE verbatim', () => {
+    const out = redactEnv({ CODEX_HOME: '/s', HOME: '/home/x', USERPROFILE: 'C:\\Users\\x' });
+    expect(out.CODEX_HOME).toBe('/s');
+    expect(out.HOME).toBe('/home/x');
+    expect(out.USERPROFILE).toBe('C:\\Users\\x');
+  });
+
+  it('redacts key-shaped secrets and leaks their value nowhere in the result', () => {
+    const secret = 'AIzaSyDummyDummyDummyDummyDummyDummy12';
+    const out = redactEnv({ GEMINI_API_KEY: secret, OPENAI_API_KEY: 'sk-DummyDummyDummy', GH_TOKEN: 'ghp_DummyDummy' });
+    expect(out.GEMINI_API_KEY).toBe('<redacted>');
+    expect(out.OPENAI_API_KEY).toBe('<redacted>');
+    expect(out.GH_TOKEN).toBe('<redacted>');
+    // Asserting only the field equals "<redacted>" would miss a value leaked
+    // under a different key; check the whole serialized result instead.
+    expect(JSON.stringify(out)).not.toContain(secret);
+    expect(JSON.stringify(out)).not.toContain('sk-DummyDummyDummy');
+    expect(JSON.stringify(out)).not.toContain('ghp_DummyDummy');
+  });
+
+  it('redacts DATABASE_URL, the case the default-deny ruling exists for', () => {
+    const out = redactEnv({ DATABASE_URL: 'postgres://user:pass@host/db' });
+    expect(out.DATABASE_URL).toBe('<redacted>');
+  });
+
+  it('will not accept an unredacted environment map where a RedactedEnv is required', () => {
+    const plain: Readonly<Record<string, string>> = { CODEX_HOME: '/s' };
+    // @ts-expect-error a plain map must go through redactEnv
+    const branded: RedactedEnv = plain;
+    expect(branded).toBe(plain);
+  });
+});
+
+describe('keylessUrl', () => {
+  it('accepts a plain endpoint with no query string and no credentials', () => {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent';
+    expect(keylessUrl(url)).toBe(url);
+  });
+
+  it('refuses a URL carrying a key in its query string, without echoing the key', () => {
+    let message = '';
+    try {
+      keylessUrl('https://example.com/x?key=AIzaDummy');
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).not.toBe('');
+    expect(message).not.toContain('AIzaDummy');
+  });
+
+  it('refuses a URL carrying embedded credentials', () => {
+    expect(() => keylessUrl('https://user:pass@host/x')).toThrow();
+  });
+
+  it('will not accept a plain string where a KeylessUrl is required', () => {
+    const plain = 'https://example.com';
+    // @ts-expect-error a plain string must go through keylessUrl
+    const branded: KeylessUrl = plain;
+    expect(branded).toBe(plain);
   });
 });
 

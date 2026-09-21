@@ -6,21 +6,56 @@ export type Family = 'codex' | 'gemini';
 
 export type Outcome = 'counted' | 'INTEGRITY_FAILED' | 'INTEGRITY_UNVERIFIED' | 'FAILED';
 
+/** An environment map that has been through `redactEnv`: every value is either
+ *  allowlisted as a non-secret or the literal string "<redacted>". `redactEnv`
+ *  is the only function that may produce one — a plain `Record<string, string>`
+ *  cannot be assigned where this type is required. */
+export type RedactedEnv = Readonly<Record<string, string>> & { readonly __brand: 'RedactedEnv' };
+
+/** A URL proved to carry no query string and no embedded credentials.
+ *  `keylessUrl` is the only function that may produce one. */
+export type KeylessUrl = string & { readonly __brand: 'KeylessUrl' };
+
+/** The only environment values a manifest may record verbatim. Every other
+ *  variable's value becomes "<redacted>". Default deny, because a name pattern
+ *  cannot anticipate every secret: DATABASE_URL carries a password and matches
+ *  no _KEY/_TOKEN/_SECRET suffix. */
+export const RECORDABLE_ENV: readonly string[] = ['CODEX_HOME', 'HOME', 'USERPROFILE'];
+
+export function redactEnv(env: Readonly<Record<string, string>>): RedactedEnv {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    out[name] = RECORDABLE_ENV.includes(name) ? value : '<redacted>';
+  }
+  // The single construction site of the brand: every value above is either an
+  // allowlisted non-secret or the literal "<redacted>".
+  return out as RedactedEnv;
+}
+
+export function keylessUrl(url: string): KeylessUrl {
+  const parsed = new URL(url);
+  if (parsed.search !== '' || parsed.username !== '' || parsed.password !== '') {
+    // Do not include `url` in this message: an error that echoes a URL carrying
+    // a key is an error that commits the key.
+    throw new Error('refusing a URL with a query string or credentials: a key must travel in a header');
+  }
+  // The single construction site of the brand.
+  return url as KeylessUrl;
+}
+
 /** How the reviewer was reached. Neither variant ever holds a secret's value. */
 export type Invocation =
   | {
       readonly kind: 'cli';
       readonly command: string;
       readonly argv: readonly string[];
-      /** Names map to values, except any name matching /(_KEY|_TOKEN|_SECRET|PASSWORD)$/i,
-       *  whose value is the literal string "<redacted>". */
-      readonly envOverrides: Readonly<Record<string, string>>;
+      readonly envOverrides: RedactedEnv;
     }
   | {
       readonly kind: 'api';
       readonly method: 'POST';
       /** The endpoint, which carries no key: the key travels in a header. */
-      readonly url: string;
+      readonly url: KeylessUrl;
       readonly modelRequested: string;
       /** Header NAMES only. Values are never recorded. */
       readonly headerNames: readonly string[];
