@@ -21,7 +21,7 @@
 - **Default deny.** The clean room is asserted with an allowlist of files that may exist, not a blocklist of known-bad names.
 - **Never write `.plan/` followed by a filename in any tracked file.** CI greps for it (`ci.yml`, "Nothing under .plan/ is tracked or referenced") and fails the build. `CLAUDE.md` is the only exempt file.
 - **No Mermaid in any document.** ASCII diagrams only — Mermaid does not render in Azure DevOps.
-- **Protected paths touched deliberately:** `package.json`, `.github/workflows/ci.yml`, and `.gitignore` match patterns in `.github/protected-paths.txt`. The PR description must declare each as an intended change, with the reason. Note that `vitest.tooling.config.ts` is NOT protected — the pattern is `(^|/)vitest.(config|workspace).`, which requires `vitest.` immediately followed by `config` or `workspace`, so `vitest.tooling.config.ts` does not match it.
+- **Protected paths touched deliberately:** `package.json`, `.github/workflows/ci.yml`, and `.gitignore` match patterns in `.github/protected-paths.txt`. The PR description must declare each as an intended change, with the reason. Note that `vitest.tooling.config.ts` is NOT protected: the pattern anchors on `vitest.` immediately followed by `config` or `workspace`, which `vitest.tooling.config.ts` does not satisfy.
 - **No changeset.** No published package changes. If the maintainer's `changesets` check disagrees, stop and ask rather than inventing a changeset for a tooling directory.
 - Node 22 in CI runs the *tests* through vitest, which transpiles TypeScript itself. Native type stripping is needed only for the maintainer's direct `node scripts/run-external-review.ts` invocation locally.
 
