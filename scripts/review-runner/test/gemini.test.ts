@@ -91,6 +91,36 @@ describe('parseGeminiResponse', () => {
     expect(result.promptTokenCount).toBeNull();
   });
 
+  it('returns responseId and usageMetadata verbatim from the top level of the response', () => {
+    const usageMetadata = {
+      promptTokenCount: 126_072,
+      candidatesTokenCount: 4_210,
+      totalTokenCount: 131_902,
+      serviceTier: 'standard',
+    };
+    const response = {
+      candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+      responseId: 'resp-abc123',
+      usageMetadata,
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.responseId).toBe('resp-abc123');
+    expect(result.usageMetadata).toEqual(usageMetadata);
+  });
+
+  it('returns null, not a guess, for responseId and usageMetadata when they are absent', () => {
+    const response = {
+      candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+    };
+
+    const result = parseGeminiResponse(response);
+
+    expect(result.responseId).toBeNull();
+    expect(result.usageMetadata).toBeNull();
+  });
+
   it('reports plainly, rather than an empty reply, when there are no candidates at all', () => {
     const result = parseGeminiResponse({ modelVersion: 'gemini-3.1-pro-preview' });
 

@@ -75,6 +75,12 @@ export interface GeminiResult {
   readonly modelVersion: string | null;
   /** Null when absent from the response, never guessed. */
   readonly promptTokenCount: number | null;
+  /** The response's top-level `responseId`. Null when absent, never guessed. */
+  readonly responseId: string | null;
+  /** The response's top-level `usageMetadata`, verbatim. It carries token
+   *  counts and `serviceTier`, never candidate text, so it can be recorded
+   *  as-is. Null when absent or not an object, never guessed. */
+  readonly usageMetadata: Readonly<Record<string, unknown>> | null;
   readonly complete: boolean;
   /** Why `complete` is false: the candidate's `finishReason` when it was
    *  anything other than "STOP", or a plain description when there was no
@@ -130,9 +136,18 @@ export function parseGeminiResponse(response: unknown): GeminiResult {
   const promptTokenCountRaw = getPath(record, ['usageMetadata', 'promptTokenCount']);
   const promptTokenCount = typeof promptTokenCountRaw === 'number' ? promptTokenCountRaw : null;
 
+  const responseIdRaw = getPath(record, ['responseId']);
+  const responseId = typeof responseIdRaw === 'string' ? responseIdRaw : null;
+
+  const usageMetadataRaw = getPath(record, ['usageMetadata']);
+  const usageMetadata =
+    typeof usageMetadataRaw === 'object' && usageMetadataRaw !== null && !Array.isArray(usageMetadataRaw)
+      ? asRecord(usageMetadataRaw)
+      : null;
+
   const candidates = asArray(getPath(record, ['candidates']));
   if (candidates.length === 0) {
-    return { reply: null, modelVersion, promptTokenCount, complete: false, incompleteReason: 'no candidates' };
+    return { reply: null, modelVersion, promptTokenCount, responseId, usageMetadata, complete: false, incompleteReason: 'no candidates' };
   }
 
   const candidate = asRecord(candidates[0]);
@@ -143,6 +158,8 @@ export function parseGeminiResponse(response: unknown): GeminiResult {
       reply: null,
       modelVersion,
       promptTokenCount,
+      responseId,
+      usageMetadata,
       complete: false,
       incompleteReason: finishReason ?? 'no finishReason',
     };
@@ -163,10 +180,10 @@ export function parseGeminiResponse(response: unknown): GeminiResult {
   }
 
   if (texts.length === 0) {
-    return { reply: null, modelVersion, promptTokenCount, complete: false, incompleteReason: 'no text parts' };
+    return { reply: null, modelVersion, promptTokenCount, responseId, usageMetadata, complete: false, incompleteReason: 'no text parts' };
   }
 
-  return { reply: texts.join(''), modelVersion, promptTokenCount, complete: true, incompleteReason: null };
+  return { reply: texts.join(''), modelVersion, promptTokenCount, responseId, usageMetadata, complete: true, incompleteReason: null };
 }
 
 /**
