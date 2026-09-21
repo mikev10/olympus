@@ -24,12 +24,39 @@ export interface VerificationManifest {
   checks: CheckSpec[];
 }
 
+/** One way a behavioral check's observation differed from its locked expectation. */
+export interface ExpectationMismatch {
+  field: string;                      // the expectation that did not hold, e.g. `exitCode` or `stdoutIncludes[1]`
+  expected: string;
+  observed: string;
+}
+
+/**
+ * The runtime's comparison of what a check observed against what it was
+ * expected to observe, made where the code under test cannot reach it (I2).
+ * The two arms keep the verdict and the evidence for it from disagreeing: an
+ * expectation that held carries no mismatch, and one that failed names at
+ * least one (A-P8-01).
+ */
+export type ExpectationOutcome =
+  | { held: true }
+  | { held: false; mismatches: [ExpectationMismatch, ...ExpectationMismatch[]] };
+
 /** Produced by the runtime executing CheckSpec in a fresh sandbox. Never by an agent. */
 export interface CheckResult {
   checkId: string;
   exitCode: number;                   // the check's own process, not the agent session's
   stdout: string; stderr: string;
   suiteCount: number | null;
+  /**
+   * `null` for a check whose exit code is its whole result. A behavioral
+   * check's exit code is the product's: it can be 0 while the output is
+   * wrong, and non-zero because the scenario expects an error. So when this
+   * is present it is the verdict, a gate fails the check when `held` is false,
+   * and the exit code is evidence rather than a verdict (A-P8-01). Required:
+   * omission is not representable.
+   */
+  expectation: ExpectationOutcome | null;
   durationMs: number;
   startedAt: string;
 }

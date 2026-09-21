@@ -1,5 +1,6 @@
 import { compileError, pending } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 
 /** I2: The runtime derives status; the model never reports it. */
@@ -32,7 +33,14 @@ export const I2: InvariantEntry = {
         'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
       fixture: 'i2/records-are-readonly.ts',
     }),
+    compileError({
+      id: 'I2.check-result-declares-expectation',
+      title:
+        'CheckResult.expectation is required, null for a check with none; a held expectation carries no mismatch and a failed one at least one',
+      fixture: 'i2/check-result-declares-expectation.ts',
+    }),
     RESUME_DERIVES_STATE_FROM_THE_VAULT,
+    UNMET_EXPECTATION_FAILS_THE_GATE,
   ],
   pending: [
     pending({

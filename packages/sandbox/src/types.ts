@@ -46,9 +46,17 @@ export interface ExecResult { exitCode: number; stdout: string; stderr: string; 
  * and a value that is absent, rather than running the command without it: a
  * command that silently loses its credential fails somewhere later, for a
  * reason nothing in the evidence explains (I5).
+ *
+ * `stdin` is written to the command's standard input, UTF-8, and the stream is
+ * then closed. It exists so a behavioral scenario can feed its process input
+ * without a shell wrapper inside the container, which would put part of the
+ * scenario where the code under test can reach it (A-P8-02). Omitted, the
+ * command has no standard input attached. An implementation that cannot
+ * deliver the bytes MUST refuse rather than run the command without them.
  */
 export interface ExecOptions {
   readonly env?: Readonly<Record<string, string>>;
+  readonly stdin?: string;
 }
 
 /**

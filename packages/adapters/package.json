@@ -12,10 +12,19 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@olympus-ai/core": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
-    "@olympus-ai/sandbox": "workspace:*"
+    "@olympus-ai/sandbox": "workspace:*",
+    "picomatch": "4.0.7",
+    "tinyglobby": "0.2.17",
+    "typescript": "6.0.3"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.3",
+    "vitest": "^4.1.11"
   }
 }

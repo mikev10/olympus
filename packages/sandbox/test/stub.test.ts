@@ -95,6 +95,18 @@ describe('exec', () => {
     expect(result.stdout).toBe(literal);
   });
 
+  test('stdin reaches the command and is then closed (A-P8-02)', async () => {
+    const echo = 'let s = ""; process.stdin.on("data", (c) => { s += c; }); process.stdin.on("end", () => { process.stdout.write(s.toUpperCase()); });';
+    const result = await provider.exec(handle, ['node', '-e', echo], { stdin: 'fed through stdin\n' });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('FED THROUGH STDIN\n');
+  });
+
+  test('a command that exits without reading its stdin still reports its own result', async () => {
+    const result = await provider.exec(handle, ['node', '-e', 'process.exit(4)'], { stdin: 'x'.repeat(1 << 20) });
+    expect(result.exitCode).toBe(4);
+  });
+
   test('files written by one exec are there for the next: persistent is true', async () => {
     await provider.exec(handle, ['node', '-e', 'require("node:fs").writeFileSync("kept.txt", "kept")']);
     const next = await provider.exec(handle, ['node', '-e', 'process.stdout.write(require("node:fs").readFileSync("kept.txt", "utf8"))']);

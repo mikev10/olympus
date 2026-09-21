@@ -1981,3 +1981,111 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **Why not chmod in the driver:** the driver does not own the workspace. Something handed it a mount table; widening permissions on a caller's directory is not a driver's decision to make silently.
 - **Reverse:** drop the `chmod` and the assertion fails on any host whose uid is not 1000.
 - **Promoted to the ledger before P6 starts.** This entry began as prose, which is findable and not counted. `I5.workspace-is-writable-by-the-task` is now a pending registry entry owned by P6, and the I5 baseline rises from 5 to 6 to say so in the diff. The reason is D-P5-01's: a ledger only constrains the work if it is fixed before the work that would edit it, so an obligation written after P6 starts is a description of what P6 did rather than a claim on it.
+
+## P8: Adapters (TypeScript)
+
+### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code
+
+- **Ambiguous:** `DECOMPOSITION.md`'s P8 entry had scope, a delivery line, one out-of-scope item, and a conformance line. It had no acceptance criteria, no ledger, and no statement of where its adapters run.
+- **Chosen:** the missing parts were written first and committed to `v2` (7ab5fe0), on three decisions taken with the maintainer: test, coverage, and manifest adapters parse on the host and execute nothing (D-P8-04); the L3 refusal ships as a pure function and its wiring is owed to P6 (D-P8-03); and a behavioral verdict is decided by a runner inside the sandbox.
+- **The third was wrong, and was reversed before code (2db255c).** It was recommended because it needed no contract change, which is the cost of an option, not a reason to choose it. Checked against the provider afterwards: `LocalDockerProvider` passes no `--read-only` and no `--user` (`packages/sandbox/src/local/provider.ts`, `runArgsFor`), and the image is the caller's, so anything that ran in the container before the runner — the product, an install script — could replace it and forge every verdict after it. The judge moved to the host (D-P8-02), which costs two amendments (A-P8-01, A-P8-02), and HTTP became P11 because its client cannot leave the product's network.
+- **Reverse:** the two commits are documentation only.
+
+### D-P8-02: A behavioral scenario runs in the sandbox and is judged on the host
+
+- **Ambiguous:** `BehavioralAdapter.run` returns a `CheckResult`, whose only verdict-bearing field is `exitCode`, "the check's own process". For a behavioral check the process is the product, whose exit code says nothing about whether its output was right.
+- **Chosen:** the CLI adapter runs the scenario's argument vector through `provider.exec`, with its stdin, and compares the raw `ExecResult` against `expected` in the runtime's process. The outcome goes in `CheckResult.expectation` (A-P8-01); the exit code stays the product's and is evidence.
+- **Why not a runner in the container:** see D-P8-01. A comparator inside the container is reachable by the code it judges, and whether it can be replaced depends on image properties the sandbox does not enforce.
+- **Why not synthesise the exit code on the host:** it would record a number no process returned, in a project whose claim is evidence an auditor can trust.
+- **What remains in the container:** the product and its interpreter. What a scenario observes is what running that command in that container produces, which is the behavior under test.
+- **`expected.exitCode` defaults to 0.** A scenario that says nothing about exit status has not agreed to a crash, and one that tests a failure states the code it expects.
+- **Reverse:** return to a runner (D-P8-01's original option) and drop A-P8-01.
+
+### D-P8-03: The L3 refusal is a pure function; wiring it into admission is P6's
+
+- **Ambiguous:** the entry's conformance line says "L3 is refused when a control is missing" without saying where.
+- **Chosen:** `adapterAdmission(set, level)` in `packages/adapters`, refusing at L3 with every missing control named and never returning a lower level. The controls are derived from the set's slots and unioned with its own `unavailableControls()`, so a set that under-reports is still refused.
+- **Why not wire it now:** the admission record would have to carry the set so a resume cannot restate it (P4's rule), which is a Vault-side change; and `SKELETON_LINE` refuses every run above L1 until P6 deletes it, so an admission assertion could not fail for the right reason before then. P6 is the unit that deletes `SKELETON_LINE`, so the wiring lands with it, as `I5.adapter-refusal-enforced-at-admission`.
+- **Reverse:** wire it into `startRun` admission and pay the pending entry.
+
+### D-P8-04: A config is parsed, never loaded
+
+- **Ambiguous:** a framework config is code, and running it is the only way to know every value it produces.
+- **Chosen:** `packages/adapters/src/static.ts` reads a config module's syntax tree. Readable: literals, arrays and objects of them, top-level `const` bindings, `as`/`satisfies`/parentheses, `defineConfig`/`defineProject` from vitest or vite with an object or a synchronous arrow returning one, and `configDefaults`/`defaultInclude`/`defaultExclude` from vitest and `defaults` from `jest-config`, resolved for the declared major. Anything else a discovery setting depends on is refused as `unresolvable-config`, naming the file and the setting.
+- **Two rules keep a static read honest.** A `const` is followed only when nothing else in the module refers to it, because a second reference is a place it could be changed before the framework reads it (`config.test.include.push(...)`). An imported known value may be referenced any number of times, but only as a plain read — spread into an array or used as a value — never called on, assigned through, or passed to a function.
+- **Why:** loading the config runs agent-written code on the host, which is the whole of `I1.adapters-execute-nothing-on-the-host`. Running it in the sandbox instead would answer from a file the agent can edit, about which files it will be judged by.
+- **The cost:** a config that computes its test settings is refused. That is loud, and it is the right answer for a tree whose author is the agent being judged.
+- **Reverse:** none that keeps the property. Loading configs inside the sandbox is the alternative, with the cost above.
+
+### D-P8-05: Discovery rules are copied from each supported major's published source
+
+- **Ambiguous:** "vitest and jest" names no versions, and the defaults differ between majors: vitest 3 excludes `dist/` and config files where vitest 4 excludes only `node_modules` and `.git`; jest 30 treats `.mts` and `.cts` as tests where jest 29 does not.
+- **Chosen:** vitest 3 and 4, jest 29 and 30. Each rule was read from the published package, not from documentation: vitest 4.1.11 and 3.2.4 `dist/chunks/defaults.*.js` and `constants.*.js`; jest-config 30.2.0 `build/index.js` and 29.7.0 `build/Defaults.js`/`constants.js`; jest-util `globsToMatcher` and @jest/core `SearchSource` at both versions; jest-runtime's haste options for the crawl. A repository whose declared range selects any other major, or more than one (`*`, `>=3`, `^3 || ^4`, a tag, a URL, `workspace:`), is refused as `unsupported-version`.
+- **Why the declared range and not the lockfile:** the lockfile is exact, but three formats would need parsing and the range already names the major for every range a real project writes. A range that does not name one is refused, not guessed.
+- **Reverse:** add a major by adding its rules to `versions.ts`, copied from its own source.
+
+### D-P8-06: Two departures from framework fidelity, both toward the safe side
+
+- **Symbolic links are never followed.** vitest's glob follows them by default; here `followSymbolicLinks: false`. jest ignores them unless `haste.enableSymlinks` is set, and that setting is refused. A link in an agent-written tree can name any file the runtime's user can read.
+- **Every directory a config names must resolve inside the repository.** `root`, `test.dir`, `rootDir`, and `roots` outside it are refused rather than walked.
+- **A `vitest.workspace` or `vitest.projects` file is refused under vitest 4**, where the runner itself ignores it. Over-strict by one inert file, and loud; several projects are not enumerated by this package in any case.
+- **`<rootDir>` inside a jest regex is substituted escaped.** jest substitutes it raw, so a root containing a regex metacharacter matches differently there; escaped is what the pattern's author meant.
+- **Reverse:** each is a one-line option in `discovery.ts`.
+
+### D-P8-07: A suite is a test file
+
+- **Ambiguous:** `enumerateSuites(dir): string[]` and `CheckSpec.expectedSuiteCount` do not say whether a suite is a file, a `describe` block, or a test.
+- **Chosen:** a file. It is what jest's own "Test Suites" line counts, it is what both frameworks' discovery produces, and it can be counted without running anything. Case-level reduction inside a file is visible through `parseAssertions` and `compareAssertions`, which is how P7 finds it.
+- **Reverse:** a finer unit would need the framework's own collection, which runs the tests.
+
+### D-P8-08: An assertion that changed is weakened unless its new form provably checks at least as much
+
+- **Ambiguous:** `AssertionDelta` has `weakened`, `removed`, and `toleranceWidened` and no definition of any of them.
+- **Chosen:** identical assertions pair first, wherever they moved, so line shifts, reformatting, reordering, and a renamed file lose nothing. What remains pairs by subject, same file first and then nearest line. A pair differing only by a wider tolerance is `toleranceWidened`. A pair is dropped only when the new form provably implies the old: an existence check turned into an equality, a message added to `toThrow`, stricter equality on the same arguments, `toHaveBeenCalled` turned into `toHaveBeenCalledWith`, a negation removed. Every other difference — a new negation, looser equality, fewer arguments, a changed expected value — is `weakened`. A `before` assertion with no pair is `removed`.
+- **Why a changed expected value is weakened:** the locked assertion no longer checks what it did, which is the false-done this unit's consumers exist to catch. It is reported for a reviewer rather than assumed to be a legitimate edit.
+- **Why fail closed on unknown pairs:** a matcher this package has no rank for is compared conservatively; the cost is a report a reviewer dismisses, not a weakening nobody saw.
+- **Reverse:** `atLeastAsStrong` in `assertions.ts`.
+
+### D-P8-09: Changed-line coverage counts what istanbul counts, and a file the suite never loaded is uncovered
+
+- **Chosen:** a changed line of `head` counts when a statement starts on it, istanbul's own line rule (lib-coverage `getLineCoverage`), and is covered when one of those statements ran. A changed source file the report does not mention counts the lines on which a statement starts, read from its syntax tree, all uncovered. Test files, config files, and declaration files are not lines the suite must cover. When no executable line changed, the answer is 1.
+- **The report's paths are the container's.** `sourceRoot` is required and names the directory the report's paths are under (e.g. `/workspace`). A report that names files and none under it is refused as a report on another tree.
+- **The repository's own coverage exclusions are not honoured.** They are config the agent can write. A changed line in an excluded file counts as uncovered; policy thresholds, not this adapter, decide what that is worth.
+- **Reverse:** `coverage.ts`.
+
+### D-P8-10: Changed lines are computed in process, bounded
+
+- **Chosen:** Myers's O(ND) algorithm over the span left after the common prefix and suffix, capped at 1000 edits. A larger change is a rewrite, and every line in the rewritten span counts as changed: it can only count a line that did not change, never miss one that did. Two hundred generated cases assert it agrees with a longest-common-subsequence oracle.
+- **Why not `git diff`:** a repository's `.git/config` is agent-writable and can name an external diff program or a text converter that git runs.
+- **Reverse:** `line-diff.ts`.
+
+### D-P8-11: Config files are named by path pattern; files a config names by path are policy's
+
+- **Chosen:** `config-files.ts` lists manifests and lockfiles, package-manager config (`.npmrc`, `.pnpmfile.cjs`), compiler, test-runner, coverage, lint, and format configs, `.gitignore`, `.gitattributes`, and `.env*`, at any depth. `node_modules` is not walked: what is installed is decided by the manifests and lockfiles this adapter reports, and by the install the verification run performs.
+- **Not listed:** setup files, custom transformers, and test environments a config names by path. They are code that runs inside the test process and can neuter an assertion, and which of them an agent may touch is the policy's protected-path list, which P7 enforces. Noted for P7.
+- **Reverse:** edit the list.
+
+### D-P8-12: A jest pattern that can take exponential time is refused
+
+- **Problem found while writing discovery:** `testRegex`, `testPathIgnorePatterns`, and `modulePathIgnorePatterns` are regular expressions the runtime evaluates on the host, against paths the same agent chose. `(a+)+$` against a crafted path hangs the matcher, and the matcher is the service (I9).
+- **Chosen:** a pattern is refused when a quantified group contains a quantifier or an alternation, or when it uses a backreference. jest's defaults and every pattern in its documentation pass.
+- **Reverse:** `assertLinearPattern` in `discovery.ts`.
+
+### D-P8-13: Known limits, stated
+
+- **A path handed to `parseAssertions` or `detectSkipMarkers` is checked for a link at its last component only.** Enumeration never descends through a link, so a path that came from `enumerateSuites` has none; a caller that builds its own path through a linked directory is outside what this package checks. Checking every component would refuse ordinary system paths (macOS's `/var` is a link), and Node has no root-relative open to do it properly.
+- **Filters in the pinned command are not seen.** `vitest run src/` or `jest --testPathPattern x` narrow what runs, and the adapters enumerate from config alone. The command's grammar is P6's (`I5.check-command-has-a-grammar`).
+- **jest's absolute-path patterns depend on where the tree is.** A custom `testRegex` that matches a directory name above the repository matches on one host and not another; jest behaves the same way.
+- **In-source tests, multi-project configs, and type-level tests are refused, not enumerated.**
+
+## P8 amendments to the contracts
+
+### A-P8-01: `CheckResult` gains a required `expectation`
+
+`expectation: ExpectationOutcome | null`, where `ExpectationOutcome` is `{ held: true } | { held: false; mismatches: [ExpectationMismatch, ...ExpectationMismatch[]] }`. Reasoned in **D-P8-02**. Required rather than optional for the reason `suiteCount` is: a result that could omit it would let a gate read a product's exit code as a verdict. The two arms make a held expectation with a mismatch, and a failed one without, unrepresentable.
+
+`FailedCheck.cause` gains `'expectation'`, and the verify station's gate (`requiredShortfall`, now `packages/api/src/gate.ts` and exported) judges a result that carries an expectation by it and not by its exit code, since a scenario may expect a non-zero exit. Every check the S1 line runs records `null` and is judged as before. The reviewer's evidence facts carry `expectationHeld` beside each exit code. Asserted by `I2.check-result-declares-expectation` and `I2.unmet-expectation-fails-the-gate`.
+
+### A-P8-02: `ExecOptions` gains `stdin`
+
+A CLI scenario that feeds input had nowhere to put it, and the alternative, a shell wrapper in the container, puts part of the scenario where the product can reach it. `LocalDockerProvider` passes `--interactive` and writes the bytes to the `docker` process; `StubSandboxProvider` writes to its child. A command that exits without reading its input still reports its own exit code; any other failure to deliver the bytes refuses the command. Asserted in both providers' own suites.
