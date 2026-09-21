@@ -83,6 +83,15 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # scripts/ is not a workspace package, so `pnpm -r typecheck` and
+      # `pnpm -r test` cannot see it. Without these two steps the review
+      # runner would ship untypechecked and untested.
+      - name: Typecheck tooling
+        run: pnpm typecheck:tooling
+
+      - name: Test tooling
+        run: pnpm test:tooling
+
       # Runs the registry meta-test on its own so its report is the last
       # thing in the log: every invariant's state, every pending entry, and
       # the unit that owes it. A `missing` invariant fails this step.
