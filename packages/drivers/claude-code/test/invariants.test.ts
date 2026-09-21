@@ -16,8 +16,8 @@ import { readFile, readdir } from 'node:fs/promises';
 import { expect } from 'vitest';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { TaskId } from '@olympus-ai/core';
-import { CREDENTIAL_VARIABLE, DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver } from '../src/index.js';
-import { WORKDIR, credential, withDriver, type Harness } from './harness.js';
+import { DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver } from '../src/index.js';
+import { WORKDIR, withDriver } from './harness.js';
 
 /**
  * A marker only a process inside the container can write, and only into the
@@ -82,67 +82,36 @@ invariantTest(
       // grant had taken effect.
       await expect(h.driver.runTask(h.request({ tools: ['Read', 'Telepathy'] }))).rejects.toThrow(/does not declare/);
 
-      // Every declared tool is one the CLI really offers. Granting the whole
-      // inventory must produce exactly the inventory: a name the CLI does not
-      // know is dropped, so a declaration that had gone stale comes back short.
-      const all = await h.driver.runTask(
+      // Every check below goes through `driver.runTask` and reads the session
+      // the driver itself started. An earlier version of this assertion built
+      // its own `claude` invocation with its own `--tools`, which meant the
+      // registered assertion still passed with `--tools` deleted from the
+      // driver: it was testing the CLI's flag, not the driver's use of it.
+      // That is the "passes when the property is deleted" failure I8 exists to
+      // catch, and it is why the driver's own path is the only path here.
+      const narrow = await h.driver.runTask(
+        h.request({ taskId: 'i4-narrow' as TaskId, tools: ['Read'], variableSuffix: 'Reply with the single word: ok' }),
+      );
+      expect(narrow.claim.narrative).not.toBe('');
+      expect(h.driver.sessionFor('i4-narrow' as TaskId)?.tools).toEqual(['Read']);
+
+      // An empty grant is an empty session: default deny, applied to what the
+      // model can actually reach rather than to what it is asked to avoid.
+      await h.driver.runTask(
+        h.request({ taskId: 'i4-empty' as TaskId, tools: [], variableSuffix: 'Reply with the single word: ok' }),
+      );
+      expect(h.driver.sessionFor('i4-empty' as TaskId)?.tools).toEqual([]);
+
+      // And every declared tool is one the CLI really offers. Granting the
+      // whole inventory must produce exactly the inventory: a name the CLI does
+      // not know is dropped, so a declaration gone stale comes back short --
+      // and the driver refuses a session narrower than its grant, so this fails
+      // loudly rather than quietly.
+      await h.driver.runTask(
         h.request({ taskId: 'i4-inventory' as TaskId, tools: [...DECLARED_TOOLS], variableSuffix: 'Reply with the single word: ok' }),
       );
-      expect(all.claim.narrative).not.toBe('');
-      const offered = await sessionTools(h, [...DECLARED_TOOLS]);
+      const offered = h.driver.sessionFor('i4-inventory' as TaskId)?.tools ?? [];
       expect([...offered].sort((a, b) => a.localeCompare(b))).toEqual([...DECLARED_TOOLS].sort((a, b) => a.localeCompare(b)));
-
-      // A narrower grant is narrower in the session, not merely unused: the
-      // tool is absent, so the model has nothing to decline to use (I4).
-      const narrow = await sessionTools(h, ['Read']);
-      expect(narrow).toEqual(['Read']);
-      expect(narrow).not.toContain('Bash');
-
-      // And an empty grant is an empty session. Default deny, applied to the
-      // thing the model can actually reach.
-      expect(await sessionTools(h, [])).toEqual([]);
     });
   },
 );
-
-/**
- * The tools a session comes up with for a given grant, read from the CLI's own
- * `init` message rather than from anything the model says.
- *
- * Run directly through the provider rather than through `runTask`, because
- * what is under test is the session's tool list and not a turn: three grants
- * would otherwise be three model calls for an answer the CLI prints before it
- * makes one.
- */
-async function sessionTools(h: Harness, tools: string[]): Promise<string[]> {
-  // Bounded by `timeout` rather than by a budget flag. The CLI prints its
-  // session before it calls anything and then keeps retrying; without a bound
-  // an inspection would sit there until the sandbox's own wall-clock limit
-  // ended it, which is ten minutes per grant for an answer that arrives in one
-  // second.
-  const argv = [
-    'sh',
-    '-c',
-    `cd ${WORKDIR} && exec timeout 30 "$@"`,
-    'driver',
-    'claude',
-    '--print', 'unused: the session is inspected before any turn',
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--model', 'haiku',
-    '--tools', tools.join(','),
-    '--setting-sources', '',
-    '--strict-mcp-config',
-    '--permission-mode', 'bypassPermissions',
-    '--permission-prompts', 'none',
-    '--no-session-persistence',
-  ];
-  const ran = await h.provider.exec(h.handle, argv, { env: { [CREDENTIAL_VARIABLE]: credential() } });
-  for (const line of ran.stdout.split('\n')) {
-    if (!line.includes('"subtype":"init"')) continue;
-    const parsed: unknown = JSON.parse(line);
-    const list = (parsed as { tools?: unknown }).tools;
-    if (Array.isArray(list)) return list.filter((t): t is string => typeof t === 'string');
-  }
-  throw new Error(`the CLI printed no session for the grant ${JSON.stringify(tools)}; stdout began ${ran.stdout.slice(0, 300)}`);
-}

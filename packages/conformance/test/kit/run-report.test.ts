@@ -70,6 +70,7 @@ describe('packageTreeHash', () => {
     writeRunReport(dir, {
       version: RUN_REPORT_VERSION,
       package: '@olympus-ai/sample',
+      startedFromHash: before,
       treeHash: before,
       generatedAt: new Date().toISOString(),
       tests: [],
@@ -97,6 +98,7 @@ describe('readRunReport', () => {
     const report = {
       version: RUN_REPORT_VERSION,
       package: '@olympus-ai/sample',
+      startedFromHash: 'abc',
       treeHash: 'abc',
       generatedAt: '2026-01-01T00:00:00.000Z',
       tests: [{ id: 'I1.x', name: '[I1.x] a title', state: 'passed' as const, module: 'test/x.test.ts' }],
@@ -118,6 +120,7 @@ describe('readRunReport', () => {
       JSON.stringify({
         version: RUN_REPORT_VERSION,
         package: '@olympus-ai/sample',
+        startedFromHash: 'abc',
         treeHash: 'abc',
         generatedAt: '2026-01-01T00:00:00.000Z',
         tests: [{ id: 'I1.x', name: '[I1.x] a title', state: 'probably-fine', module: 'test/x.test.ts' }],

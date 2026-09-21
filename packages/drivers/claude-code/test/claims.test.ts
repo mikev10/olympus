@@ -20,7 +20,7 @@ import { expect } from 'vitest';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { RoleId, TaskId } from '@olympus-ai/core';
 import { DECLARED_TOOLS, HOOK_SETTINGS, artifactFiles } from '../src/index.js';
-import { MCP_SERVER_SOURCE, WORKDIR, withDriver } from './harness.js';
+import { MCP_SERVER_SOURCE, withDriver } from './harness.js';
 
 invariantTest(
   'driver.subagents',
@@ -58,12 +58,17 @@ invariantTest(
   'driver.hooks',
   'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported',
   async () => {
-    const settingsPath = `${WORKDIR}/.claude/settings.json`;
+    // Outside the workspace mount, because the driver refuses a settings file
+    // the agent can write: a hook is a command that runs outside the task's
+    // tool grant, and one read from the tree being worked on is a capability
+    // arriving from the work rather than from policy (I3, I4).
+    const settingsDir = '/tmp/driver-settings';
+    const settingsPath = `${settingsDir}/settings.json`;
     await withDriver(
       async (h) => {
         // The hook points come from emitArtifacts, written through the sandbox
         // like everything else, and the session is started with that file.
-        await h.driver.emitArtifacts([{ role: 'builder' as RoleId, instructions: 'unused here' }], `${WORKDIR}/.claude`);
+        await h.driver.emitArtifacts([{ role: 'builder' as RoleId, instructions: 'unused here' }], settingsDir);
         const written = await h.provider.exec(h.handle, ['cat', settingsPath]);
         expect(written.exitCode).toBe(0);
         for (const point of Object.keys(HOOK_SETTINGS)) expect(written.stdout).toContain(point);

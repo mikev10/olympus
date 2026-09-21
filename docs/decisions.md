@@ -1907,3 +1907,35 @@ Landed earlier on this branch and recorded as **D-P5-05**. The driver-side half 
 Not named in P5's entry, which listed `declaredTools()` alone. It is named here, in the pull request body, and in the entry itself, because a contract change nobody flagged is the kind that passes review by not being looked at. The entry's own requirement — that the credential reach the CLI as an environment variable on the exec — could not be met without it; the alternatives were a mount, which the entry forbids, or a secret in an argv.
 
 Both implementations and the test wrapper carry the parameter: `LocalDockerProvider` passes `--env NAME` and sets the value on the `docker` process, `StubSandboxProvider` sets it on the child it spawns, and `DelegatingSandbox` forwards it. `ExecOptions` is optional, so every existing call site is unchanged.
+
+## P5 amendment: external adversarial review
+
+Nineteen findings across two reviewers, seventeen held in full, two in part,
+none rejected. Sixteen were fixed on the branch. The full triage, with the
+reproductions, is `docs/reviews/2026-09-20-P5-driver-claude-code-triage.md`.
+Three limits could not be closed inside this unit and are recorded here.
+
+### D-P5-20: the credential is kept out of every argv, and that is all it is kept out of
+
+- **Problem:** the driver passes the model credential as an environment value on the exec, and both the code and its tests read as though that made it unreachable. It does not. Demonstrated in a container during the review: a child of the credentialed process printed it, and a *later* exec that was given no credential at all read it out of `/proc`. The CLI and every tool a task runs share a user, so anything the model can run can read it.
+- **What the mechanism does buy, stated exactly:** the value is in no argument vector on the host or in the guest, so it is not visible to anything that can only list processes; and it is not on the mount table, so it does not persist for the sandbox's life or appear in a diff of the tree. Against the alternative the unit entry forbade — a mounted secret — that is a real improvement. It is not confidentiality from the model, and the comments claimed otherwise.
+- **Chosen:** correct the claim rather than weaken the check. The comments now say what holds, and the limit is registered as `I4.model-credential-not-readable-by-the-task`, pending, owned by P6.
+- **Why not fix it here:** the fix is that the credential never enters the container. P10 already interposes a proxy on the only route out, so the natural shape is authentication at that layer, with the sandbox holding a short-lived token or nothing. That spans the sandbox, the proxy and the driver; it is an architecture change, not a review fix, and doing half of it in the driver would produce a control that reads as complete and is not.
+- **Reverse:** move authentication to the egress layer and delete `CREDENTIAL_VARIABLE` from the driver. The pending entry is then paid.
+
+### D-P5-21: a task's processes outlive the task, and the driver is the wrong place to fix it
+
+- **Problem:** `#serialized` bounds one foreground `provider.exec` per sandbox handle. It does not bound what a task leaves behind, and a sandbox is persistent by declaration (P2). Demonstrated: a process detached by one exec was still running when a later exec looked. A task granted `Bash` can leave a process that keeps reading and writing the workspace, and reaching whatever the sandbox permits, while a later task holding a narrower grant runs beside it.
+- **Why that matters and is not merely untidy:** the later task's grant is then not what is running in its sandbox. Default deny is a statement about what a task can reach, and a process from the previous task is something it can reach that policy never granted it.
+- **Chosen:** register `I4.task-capabilities-do-not-outlive-the-task`, pending, owned by P6, and raise the baseline for it.
+- **Why not a sweep in the driver:** killing stray processes between tasks is a few lines and would close the demonstrated case. It would also be a control the driver cannot actually enforce — it races anything started between the sweep and the next invocation, and it cannot see a process that re-parents itself. A partial control that reads like a complete one is worse than a stated limit, because the limit is visible in the registry and the sweep would not be.
+- **Why P6:** it collects base and diff in a fresh sandbox, so it is the first unit whose correctness depends on a task's sandbox holding nothing from an earlier one.
+- **Reverse:** give the sandbox a per-task process boundary, or one container per task, and pay the entry.
+
+### D-P5-22: what the run report still does not bind, said plainly
+
+- **Problem:** the review's second reframing was that "does the report hash match the current package" is the wrong question, and the right one is whether the report identifies one completed execution of that assertion against the complete inputs being evaluated. Three of the four gaps it named are now closed — the hash covers every workspace package the run executes, it is taken before the run as well as after, and the reported test must be the assertion the registry registers rather than any test carrying its id.
+- **What is still not bound:** the root configuration and the lockfile, and the identity of the container image the assertions ran in. The image is bound from the other direction — its tag is now derived from the Dockerfile, the base digest and the CLI version, so different inputs cannot share a tag — but the report does not record which image ran, so a report cannot be checked against one.
+- **Chosen:** state it here rather than add a fourth pending entry. The registry's pending list is for work an invariant is waiting on; this is a known incompleteness in a mechanism that already has an assertion, and the assertion's own text names what it covers.
+- **Why not close it now:** recording the image digest means the reporter knowing which image the tests used, which means the harness telling it, which is a channel that does not exist. Hashing the lockfile is easy and was not done for a worse reason — it would make every report in the workspace mismatch on any dependency change, including ones the package does not use. Both want a decision about how coarse the binding should be, and that decision belongs with whoever next touches reconciliation rather than to a review fix.
+- **Reverse:** extend `packageTreeHash` to the root manifests and record the image digest in the report.

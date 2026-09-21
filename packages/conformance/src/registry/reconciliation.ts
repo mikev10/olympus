@@ -31,10 +31,11 @@ import type { ExternalAssertion, WorkspacePackage } from '../index.js';
 const PACKAGE_NAME = '@olympus-ai/reconciliation-fixture';
 const TEST_FILE = 'test/live.test.ts';
 const ASSERTION_ID = 'I8.fixture-assertion';
+const ASSERTION_TITLE = 'a fixture assertion, registered as living in another package';
 
 const ASSERTION: ExternalAssertion = external({
   id: ASSERTION_ID,
-  title: 'a fixture assertion, registered as living in another package',
+  title: ASSERTION_TITLE,
   level: 'runtime',
   package: PACKAGE_NAME,
   file: TEST_FILE,
@@ -43,7 +44,7 @@ const ASSERTION: ExternalAssertion = external({
 function passingTest(overrides: Partial<ReportedTest> = {}): ReportedTest {
   return {
     id: ASSERTION_ID,
-    name: `[${ASSERTION_ID}] a fixture assertion`,
+    name: `[${ASSERTION_ID}] ${ASSERTION_TITLE}`,
     state: 'passed',
     module: TEST_FILE,
     ...overrides,
@@ -62,7 +63,7 @@ async function withFixturePackage(body: (pkg: FixturePackage) => Promise<void>):
   try {
     await writeFile(join(dir, 'package.json'), `${JSON.stringify({ name: PACKAGE_NAME, private: true }, null, 2)}\n`, 'utf8');
     mkdirSync(join(dir, 'test'), { recursive: true });
-    await writeFile(join(dir, TEST_FILE), `invariantTest('${ASSERTION_ID}', 'a fixture assertion', () => undefined);\n`, 'utf8');
+    await writeFile(join(dir, TEST_FILE), `invariantTest('${ASSERTION_ID}', '${ASSERTION_TITLE}', () => undefined);\n`, 'utf8');
     const entry: WorkspacePackage = {
       name: PACKAGE_NAME,
       dir,
@@ -79,6 +80,7 @@ async function withFixturePackage(body: (pkg: FixturePackage) => Promise<void>):
         writeRunReport(dir, {
           version: RUN_REPORT_VERSION,
           package: PACKAGE_NAME,
+          startedFromHash: packageTreeHash(dir),
           treeHash: packageTreeHash(dir),
           generatedAt: new Date().toISOString(),
           tests,
@@ -157,5 +159,26 @@ export async function assertReconciliationRefuses(): Promise<void> {
     requireAccepted(pkg, 'a freshly reported passing test');
     await writeFile(join(pkg.dir, TEST_FILE), '// the assertion was deleted after the report was written\n', 'utf8');
     requireRefused(only, 'tree-changed', 'a report written before the package was edited');
+  });
+
+  // A test whose name carries the id but is not the registered assertion. The
+  // id alone proved only that some passing test in the file quoted it, which a
+  // one-line tautology satisfies; the registry's own title is what makes the
+  // report point at the assertion rather than at a name.
+  await withFixturePackage(async (pkg) => {
+    const only = [pkg.entry];
+    pkg.report([passingTest({ name: `[${ASSERTION_ID}] coverage` })]);
+    await Promise.resolve();
+    requireRefused(only, 'title-mismatch', 'a passing test carrying the id under a different title');
+  });
+
+  // A run whose inputs moved while it was running. The results belong to the
+  // tree it started against and the hash to the tree it ended against, so the
+  // report is evidence about neither.
+  await withFixturePackage(async (pkg) => {
+    const only = [pkg.entry];
+    pkg.report([passingTest()], { startedFromHash: 'a-tree-that-is-not-this-one' });
+    await Promise.resolve();
+    requireRefused(only, 'tree-moved-during-run', 'a run whose source changed between its start and its end');
   });
 }

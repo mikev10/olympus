@@ -56,6 +56,22 @@ export class ConformanceRunReporter implements Reporter {
     this.packageDir = options.packageDir ?? process.cwd();
   }
 
+  /**
+   * The hash of the inputs as they were before any test module loaded.
+   *
+   * Hashing only at the end blesses whatever is on disk when the run finishes,
+   * which is not necessarily what ran: a suite that takes minutes against a
+   * real model loads its source at the start, and an edit made while it runs
+   * produces results from one tree carrying the hash of another. Editing during
+   * a long run is ordinary work, not an attack, which is what makes it worth
+   * closing.
+   */
+  private startedFromHash: string | undefined;
+
+  onTestRunStart(): void {
+    this.startedFromHash = packageTreeHash(this.packageDir);
+  }
+
   onTestRunEnd(testModules: readonly TestModule[]): void {
     const tests: ReportedTest[] = [];
     for (const module of testModules) {
@@ -65,7 +81,11 @@ export class ConformanceRunReporter implements Reporter {
         tests.push({
           id,
           name: test.fullName,
-          state: test.result().state satisfies ReportedTestState,
+          // A test vitest collected but never ran has no result. The type says
+          // it always does; the guard is here because a crash in the reporter
+          // writes no report at all, which refuses for the wrong reason and
+          // hides whatever actually went wrong in the suite.
+          state: (test.result() as { state?: ReportedTestState } | undefined)?.state ?? 'pending',
           module: module.relativeModuleId,
         });
       }
@@ -73,8 +93,11 @@ export class ConformanceRunReporter implements Reporter {
     const report: ConformanceRunReport = {
       version: RUN_REPORT_VERSION,
       package: packageName(this.packageDir),
-      // Hashed after the run, so a test that wrote into its own package tree
-      // invalidates the report it is part of rather than being blessed by it.
+      // Both ends. Hashing after the run keeps a test that wrote into its own
+      // tree from being blessed by the report it is part of; hashing before it
+      // keeps a run whose source changed underneath it from being blessed
+      // either. Reconciliation requires the two to agree.
+      startedFromHash: this.startedFromHash ?? '',
       treeHash: packageTreeHash(this.packageDir),
       generatedAt: new Date().toISOString(),
       tests,

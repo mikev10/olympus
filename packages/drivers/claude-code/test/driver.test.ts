@@ -21,8 +21,9 @@ import {
   parseStream,
   sessionIdFor,
   shellQuote,
-  writeFileScript,
+  writeFileArgv,
   DECLARED_TOOLS,
+  ARTIFACT_CONTENT,
 } from '../src/index.js';
 
 const HANDLE = 'sandbox-1' as SandboxHandle;
@@ -34,6 +35,14 @@ class RecordingProvider implements SandboxProvider {
   readonly calls: Array<{ cmd: string[]; env: Readonly<Record<string, string>> | undefined }> = [];
   stdout = '';
   exitCode = 0;
+  /**
+   * Answers for successive `claude` invocations, in order; the last one repeats
+   * once the queue is spent. A task that uses MCP runs two: the inspection,
+   * which sees every tool the servers offer, and the task itself, which sees
+   * the grant. One canned answer cannot model both.
+   */
+  readonly claudeReplies: string[] = [];
+  private claudeCalls = 0;
 
   provision(_spec: SandboxSpec): Promise<SandboxHandle> {
     return Promise.resolve(HANDLE);
@@ -41,7 +50,12 @@ class RecordingProvider implements SandboxProvider {
 
   exec(_h: SandboxHandle, cmd: string[], options?: { env?: Readonly<Record<string, string>> }): Promise<{ exitCode: number; stdout: string; stderr: string; durationMs: number }> {
     this.calls.push({ cmd, env: options?.env });
-    return Promise.resolve({ exitCode: this.exitCode, stdout: this.stdout, stderr: '', durationMs: 5 });
+    let stdout = this.stdout;
+    if (cmd.includes('claude') && this.claudeReplies.length > 0) {
+      stdout = this.claudeReplies[Math.min(this.claudeCalls, this.claudeReplies.length - 1)] ?? this.stdout;
+      this.claudeCalls += 1;
+    }
+    return Promise.resolve({ exitCode: this.exitCode, stdout, stderr: '', durationMs: 5 });
   }
 
   destroy(_h: SandboxHandle): Promise<void> {
@@ -71,13 +85,13 @@ function request(overrides: Partial<TaskRequest> = {}): TaskRequest {
 }
 
 /** A minimal stream that satisfies every refusal, so a test can vary one thing. */
-function stream(parts: { tools?: string[]; usage?: Record<string, number>; extra?: string[] } = {}): string {
+function stream(parts: { tools?: string[]; servers?: Array<{ name: string; status: string }>; usage?: Record<string, number>; extra?: string[] } = {}): string {
   const init = {
     type: 'system',
     subtype: 'init',
     session_id: '11111111-2222-5333-a444-555566667777',
     tools: parts.tools ?? ['Read'],
-    mcp_servers: [],
+    mcp_servers: parts.servers ?? [],
     agents: ['claude'],
     model: 'claude-sonnet-5',
     apiKeySource: CREDENTIAL_VARIABLE,
@@ -113,9 +127,12 @@ function inspectionCall(provider: RecordingProvider): string[] {
   return provider.calls.find((call) => call.cmd.includes('claude') && !call.cmd.includes('--append-system-prompt'))?.cmd ?? [];
 }
 
-/** The shell script that wrote the MCP configuration into the container. */
+/**
+ * The MCP configuration the driver wrote into the container. It travels as an
+ * environment value, never on the command line, so this reads it from there.
+ */
 function configWrite(provider: RecordingProvider): string {
-  return provider.calls.find((call) => !call.cmd.includes('claude'))?.cmd.join(' ') ?? '';
+  return provider.calls.find((call) => call.env?.[ARTIFACT_CONTENT]?.includes('mcpServers') === true)?.env?.[ARTIFACT_CONTENT] ?? '';
 }
 
 describe('construction', () => {
@@ -221,6 +238,10 @@ describe('grants the driver refuses before spending anything (I4, I5)', () => {
     const driver = driverWith(provider, {
       mcpServers: { used: { command: 'node' }, unused: { command: 'node' } },
     });
+    provider.claudeReplies.push(
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: [{ name: 'used', status: 'connected' }] }),
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: [{ name: 'used', status: 'connected' }] }),
+    );
     await driver.runTask(request({ tools: ['Read', 'mcp__used__thing'] }));
 
     // The configuration is a file written into the container, so the argv
@@ -237,7 +258,13 @@ describe('grants the driver refuses before spending anything (I4, I5)', () => {
     // The inspection session reports both of the server's tools; the task
     // granted one. `--tools` cannot narrow an MCP server's contribution, so the
     // other has to be named.
-    provider.stdout = stream({ tools: ['mcp__used__thing', 'mcp__used__other'] });
+    const connected = [{ name: 'used', status: 'connected' }];
+    provider.claudeReplies.push(
+      // The inspection sees everything the server offers ...
+      stream({ tools: ['mcp__used__thing', 'mcp__used__other'], servers: connected }),
+      // ... and the task, with the other one disallowed, sees only the grant.
+      stream({ tools: ['mcp__used__thing'], servers: connected }),
+    );
     const driver = driverWith(provider, { mcpServers: { used: { command: 'node' } } });
     await driver.runTask(request({ tools: ['mcp__used__thing'] }));
 
@@ -269,9 +296,73 @@ describe('grants the driver refuses before spending anything (I4, I5)', () => {
     const provider = new RecordingProvider();
     provider.stdout = stream();
     const driver = driverWith(provider, { mcpServers: { used: { command: 'node' } } });
+    provider.claudeReplies.push(
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: [{ name: 'used', status: 'connected' }] }),
+      stream({ tools: ['Read', 'mcp__used__thing'], servers: [{ name: 'used', status: 'connected' }] }),
+    );
     await driver.runTask(request({ tools: ['Read', 'mcp__used__thing'] }));
     const cmd = taskCall(provider)?.cmd ?? [];
     expect(cmd[cmd.indexOf('--tools') + 1]).toBe('Read');
+  });
+});
+
+describe('the session must match the grant (I4, I5)', () => {
+  test('a session offering a tool the request did not grant refuses', async () => {
+    const provider = new RecordingProvider();
+    // The CLI came up with Bash although only Read was granted. Whether that is
+    // a CLI change, a settings file, or a server contributing tools does not
+    // matter: the model can reach something policy did not grant.
+    provider.stdout = stream({ tools: ['Read', 'Bash'] });
+    await expect(driverWith(provider).runTask(request({ tools: ['Read'] }))).rejects.toThrow(/offers 'Bash', which the request did not grant/);
+  });
+
+  test('a session missing a tool the request granted refuses rather than running narrower', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream({ tools: [] });
+    await expect(driverWith(provider).runTask(request({ tools: ['Read'] }))).rejects.toThrow(/does not offer 'Read'/);
+  });
+
+  test('a denied tool use refuses: the task did not run under what it was granted', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream().replace('"permission_denials":[]', '"permission_denials":[{"tool_name":"Bash"}]');
+    // The stub stream carries no denials by default, so add the field.
+    provider.stdout = provider.stdout.replace('"num_turns":1', '"num_turns":1,"permission_denials":[{"tool_name":"Bash"}]');
+    await expect(driverWith(provider).runTask(request())).rejects.toThrow(/tool use\(s\) denied/);
+  });
+
+  test('an MCP server that did not connect refuses before the task runs', async () => {
+    const provider = new RecordingProvider();
+    provider.claudeReplies.push(stream({ tools: ['mcp__used__thing'], servers: [{ name: 'used', status: 'failed' }] }));
+    const driver = driverWith(provider, { mcpServers: { used: { command: 'node' } } });
+    await expect(driver.runTask(request({ tools: ['mcp__used__thing'] }))).rejects.toThrow(/did not connect during inspection/);
+  });
+
+  test('an inspection that cannot find a granted MCP tool refuses', async () => {
+    const provider = new RecordingProvider();
+    provider.claudeReplies.push(stream({ tools: [], servers: [{ name: 'used', status: 'connected' }] }));
+    const driver = driverWith(provider, { mcpServers: { used: { command: 'node' } } });
+    await expect(driver.runTask(request({ tools: ['mcp__used__thing'] }))).rejects.toThrow(/did not find granted MCP tool/);
+  });
+});
+
+describe('execution configuration the agent could write (I3, I4)', () => {
+  test('a settings file inside the workspace is refused at construction', () => {
+    expect(() => driverWith(new RecordingProvider(), { workdir: '/workspace', settingsPath: '/workspace/.claude/settings.json' }))
+      .toThrow(/inside the workspace/);
+  });
+
+  test('a settings file outside the workspace is accepted and reaches the CLI', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    const driver = driverWith(provider, { workdir: '/workspace', settingsPath: '/tmp/settings.json' });
+    await driver.runTask(request());
+    const cmd = taskCall(provider)?.cmd ?? [];
+    expect(cmd[cmd.indexOf('--settings') + 1]).toBe('/tmp/settings.json');
+  });
+
+  test('a path that merely starts with the workspace name is not inside it', () => {
+    expect(() => driverWith(new RecordingProvider(), { workdir: '/workspace', settingsPath: '/workspace-settings/s.json' }))
+      .not.toThrow();
   });
 });
 
@@ -408,10 +499,21 @@ describe('artifacts', () => {
     expect(provider.calls.every((c) => c.cmd[0] === 'sh')).toBe(true);
   });
 
-  test('a here-document delimiter is quoted, so nothing in the content is read as shell syntax', () => {
-    const script = writeFileScript('/t/a.md', 'rm -rf / && echo $(whoami)');
-    expect(script).toContain("<<'FACTORY_ARTIFACT_EOF'");
-    expect(script).toContain('rm -rf / && echo $(whoami)');
+  test('the content is never on the command line, so no byte of it can end a quoting construct', async () => {
+    const provider = new RecordingProvider();
+    const driver = driverWith(provider);
+    driver.useSandbox(HANDLE);
+    // The line that broke the here-document this replaced. It is content now,
+    // not syntax, and it reaches the file through an environment value.
+    const hostile = ['first', 'FACTORY_ARTIFACT_EOF', 'touch /tmp/INJECTED'].join(String.fromCharCode(10));
+    await driver.emitArtifacts([{ role: 'r' as TaskRequest['role'], instructions: hostile }], '/t');
+    for (const call of provider.calls) {
+      expect(call.cmd.join(' ')).not.toContain('touch /tmp/INJECTED');
+      expect(call.cmd.join(' ')).not.toContain('FACTORY_ARTIFACT_EOF');
+    }
+    const wrote = provider.calls.find((call) => call.env?.[ARTIFACT_CONTENT]?.includes('FACTORY_ARTIFACT_EOF') === true);
+    expect(wrote).toBeDefined();
+    expect(wrote?.cmd).toEqual(writeFileArgv('/t/agents/r.md'));
   });
 });
 

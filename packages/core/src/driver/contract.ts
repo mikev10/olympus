@@ -26,8 +26,18 @@ export interface ModelIdentity {
  * I8: every `true` here is a capability claim. The conformance suite
  * (packages/conformance) must hold an executable assertion per capability
  * that fails when that capability is removed.
+ *
+ * A type alias, not an interface, and the difference is load-bearing. An
+ * interface can be reopened by any other compilation unit: a driver could
+ * `declare module` a new capability into it, satisfy its own typecheck, and
+ * leave the conformance program -- which compiles separately -- seeing a key
+ * set that never grew. The generated fixture holding the registry equal to
+ * `keyof DriverCapabilities` would still pass, and the new capability would
+ * have no registry entry and no assertion. A type alias cannot be reopened,
+ * so the only way to add a capability is to add it here, where the fixture
+ * sees it.
  */
-export interface DriverCapabilities {
+export type DriverCapabilities = {
   subagents: boolean;
   hooks: boolean;
   mcp: boolean;
@@ -35,7 +45,7 @@ export interface DriverCapabilities {
   computerUse: boolean;
   steering: boolean;          // supports steer()
   stablePrefixCaching: boolean;
-}
+};
 
 export type DriverCapability = keyof DriverCapabilities;
 

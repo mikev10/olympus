@@ -36,6 +36,8 @@ export type ReconciliationRefusal =
   | 'report-version'
   | 'report-foreign'
   | 'tree-changed'
+  | 'tree-moved-during-run'
+  | 'title-mismatch'
   | 'id-not-run'
   | 'file-mismatch'
   | 'test-skipped'
@@ -119,6 +121,17 @@ export function reconcileExternalAssertion(
     );
   }
 
+  // The inputs did not move while the run was happening. A report whose two
+  // hashes disagree describes results from one tree carrying the identity of
+  // another, and neither is evidence about the tree in front of us.
+  if (report.startedFromHash !== report.treeHash) {
+    return refuse(
+      'tree-moved-during-run',
+      `${assertion.id}: ${assertion.package} started its run against ${report.startedFromHash.slice(0, 12)} and ended against `
+        + `${report.treeHash.slice(0, 12)}; the source changed while the tests were running, so the results belong to neither tree`,
+    );
+  }
+
   const carrying = report.tests.filter((t) => t.id === assertion.id);
   if (carrying.length === 0) {
     return refuse(
@@ -144,6 +157,22 @@ export function reconcileExternalAssertion(
     return refuse(
       'file-mismatch',
       `${assertion.id}: the registry says ${assertion.package} ${assertion.file}, and it passed in ${ran}`,
+    );
+  }
+
+  // The test that passed is the assertion the registry registered, not merely
+  // a passing test whose name carries the id. Matching on the id alone proved
+  // "a test in this file quoted this id", which `test('[driver.hooks] x', () =>
+  // {})` satisfies, and so does any test nested under a describe block named
+  // for the id. The name `invariantTest` builds is `[id] title`, so requiring
+  // it binds the report to the registry's own words -- and a title that drifts
+  // between the two is then a refusal rather than a silent divergence.
+  const expected = `[${assertion.id}] ${assertion.title}`;
+  if (inNamedFile.name !== expected) {
+    return refuse(
+      'title-mismatch',
+      `${assertion.id}: the registry registers '${expected}' and ${assertion.package} reported '${inNamedFile.name}'. `
+        + 'A passing test carrying the id is not the assertion unless it is the one the registry names',
     );
   }
 

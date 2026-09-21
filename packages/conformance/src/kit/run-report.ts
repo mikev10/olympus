@@ -23,8 +23,8 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
-import { toPosix, walkFiles } from './workspace.js';
+import { dirname, join, relative, resolve } from 'node:path';
+import { toPosix, walkFiles, workspacePackages } from './workspace.js';
 
 /** Directory, relative to a package root, holding the report. Gitignored. */
 export const RUN_REPORT_DIR = '.conformance';
@@ -40,7 +40,7 @@ export const RUN_REPORT_PATH = `${RUN_REPORT_DIR}/${RUN_REPORT_NAME}`;
  * rather than read optimistically: a field this kit expects and that kit never
  * wrote would otherwise read as absent, and absent means "did not run".
  */
-export const RUN_REPORT_VERSION = 1;
+export const RUN_REPORT_VERSION = 2;
 
 /**
  * The four states vitest reports. `pending` means collected but never
@@ -63,6 +63,12 @@ export interface ConformanceRunReport {
   readonly version: number;
   /** package.json `name` of the package that ran. */
   readonly package: string;
+  /**
+   * The hash taken before the run started. Equal to `treeHash` on a run whose
+   * inputs did not move underneath it; different when they did, which is a
+   * report about two trees and evidence about neither.
+   */
+  readonly startedFromHash: string;
   /** Hash over every input file in the package at the moment the run ended. */
   readonly treeHash: string;
   readonly generatedAt: string;
@@ -76,9 +82,23 @@ export interface ConformanceRunReport {
  */
 const NOT_INPUT = ['node_modules', 'dist', 'coverage', '.git', RUN_REPORT_DIR];
 
+/**
+ * Extensions that are inputs to a run. An allow-list rather than a deny-list:
+ * a directory holds whatever a tool left in it -- an editor's scratch file, a
+ * log, a coverage fragment written after the run started -- and hashing those
+ * makes the report mismatch for reasons that have nothing to do with the code.
+ * The failure is closed, so it costs a re-run rather than a false pass, but a
+ * check that refuses at random teaches people to re-run until it passes.
+ */
+const INPUT_EXTENSIONS = ['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.md', ''];
+
 /** Files never hashed: incremental-build state, which changes without the source changing. */
 function isInput(path: string): boolean {
-  return !path.endsWith('.tsbuildinfo');
+  if (path.endsWith('.tsbuildinfo')) return false;
+  const base = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+  const dot = base.lastIndexOf('.');
+  const extension = dot <= 0 ? '' : base.slice(dot);
+  return INPUT_EXTENSIONS.includes(extension);
 }
 
 /**
@@ -90,15 +110,71 @@ function isInput(path: string): boolean {
  * collision). Sorted, so directory-read order never changes the answer.
  */
 export function packageTreeHash(dir: string): string {
-  const files = walkFiles(dir, { extensions: [''], skipDirs: NOT_INPUT }).filter(isInput);
   const hash = createHash('sha256');
-  for (const file of files.sort()) {
-    const rel = toPosix(relative(dir, file));
-    const content = readFileSync(file);
-    hash.update(`${String(rel.length)}:${rel}:${String(content.length)}:`);
-    hash.update(content);
+  for (const root of executionInputs(dir)) {
+    const files = walkFiles(root.dir, { extensions: [''], skipDirs: NOT_INPUT }).filter(isInput);
+    hash.update(`package:${root.name}:`);
+    for (const file of files.sort()) {
+      const rel = toPosix(relative(root.dir, file));
+      const content = readFileSync(file);
+      hash.update(`${String(rel.length)}:${rel}:${String(content.length)}:`);
+      hash.update(content);
+    }
   }
   return hash.digest('hex');
+}
+
+/**
+ * Every package whose source the run executes: the owning package and each
+ * workspace package it depends on, transitively, in a stable order.
+ *
+ * One directory is not the tree being evaluated. The driver's assertions run
+ * the sandbox provider and the contracts, so a report that hashed only the
+ * driver stayed valid across a change to `@olympus-ai/sandbox` -- and
+ * `I1.driver-executes-inside-the-sandbox` is an assertion *about* that
+ * provider. The registry would have accepted yesterday's evidence for today's
+ * mount layer.
+ *
+ * A workspace dependency is one resolved through the workspace rather than the
+ * registry; a versioned dependency is pinned by the lockfile, which is hashed
+ * separately as a root input.
+ */
+function executionInputs(dir: string): Array<{ name: string; dir: string }> {
+  const byName = new Map(workspacePackages().map((pkg) => [pkg.name, pkg]));
+  const owner = workspacePackages().find((pkg) => toPosix(resolve(pkg.dir)) === toPosix(resolve(dir)));
+  const roots: Array<{ name: string; dir: string }> = [];
+  const seen = new Set<string>();
+
+  const visit = (name: string, packageDir: string): void => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    roots.push({ name, dir: packageDir });
+    for (const dependency of workspaceDependenciesOf(packageDir)) {
+      const resolved = byName.get(dependency);
+      if (resolved !== undefined) visit(resolved.name, resolved.dir);
+    }
+  };
+
+  visit(owner?.name ?? toPosix(resolve(dir)), dir);
+  roots.sort((a, b) => a.name.localeCompare(b.name));
+  return roots;
+}
+
+/** Dependency names in a package manifest that resolve through the workspace. */
+function workspaceDependenciesOf(dir: string): string[] {
+  const manifest = join(dir, 'package.json');
+  if (!existsSync(manifest)) return [];
+  const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null) return [];
+  const names: string[] = [];
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    const block: unknown = (parsed as Record<string, unknown>)[field];
+    if (typeof block !== 'object' || block === null) continue;
+    for (const [name, range] of Object.entries(block as Record<string, unknown>)) {
+      if (typeof range === 'string' && range.startsWith('workspace:')) names.push(name);
+    }
+  }
+  return names;
 }
 
 /** `[I1.some-assertion] a title` -> `I1.some-assertion`; undefined when the name carries no id. */
@@ -131,17 +207,18 @@ export function readRunReport(packageDir: string): ConformanceRunReport | undefi
     throw new Error(`conformance: ${toPosix(file)} is not a run report`);
   }
   const record: Record<string, unknown> = { ...parsed };
-  const { version, package: name, treeHash, generatedAt, tests } = record;
+  const { version, package: name, startedFromHash, treeHash, generatedAt, tests } = record;
   if (
     typeof version !== 'number'
     || typeof name !== 'string'
+    || typeof startedFromHash !== 'string'
     || typeof treeHash !== 'string'
     || typeof generatedAt !== 'string'
     || !Array.isArray(tests)
   ) {
     throw new Error(`conformance: ${toPosix(file)} is missing fields a run report must have`);
   }
-  return { version, package: name, treeHash, generatedAt, tests: tests.map(toReportedTest(file)) };
+  return { version, package: name, startedFromHash, treeHash, generatedAt, tests: tests.map(toReportedTest(file)) };
 }
 
 function toReportedTest(file: string): (value: unknown) => ReportedTest {

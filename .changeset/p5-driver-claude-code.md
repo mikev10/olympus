@@ -45,3 +45,15 @@ the absence they declare. `pending-baseline.json` drops I1 from 1 to 0, I4 from
 `./reporter`, so a package can contribute an external assertion without pulling
 the registry into its own typecheck, and `validateAssertionId` now accepts a
 capability claim id spelled the way the capability interface spells it.
+
+Two external reviews, nineteen findings, sixteen fixed on the branch. The
+driver now compares the session the CLI actually started against the grant and
+refuses either direction, which is the backstop every other tool-grant
+assumption rests on. `emitArtifacts` no longer writes through a here-document,
+which content carrying the delimiter could close. Execution configuration is
+refused when it sits where the agent can write it. Reconciliation binds a
+report to every workspace package the run executed, to the tree as it was
+before the run as well as after, and to the assertion the registry registers
+rather than any test whose name carries its id. Capability shapes are type
+aliases, so a capability cannot be added from a compilation unit the registry
+does not see.

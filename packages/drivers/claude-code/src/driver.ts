@@ -98,7 +98,6 @@ const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
 export interface McpServerConfig {
   readonly command: string;
   readonly args?: readonly string[];
-  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** `mcp__<server>__<tool>`: how the CLI names a tool a server provides. */
@@ -147,6 +146,35 @@ interface Invocation {
   readonly env: Record<string, string>;
 }
 
+/**
+ * A settings file that decides what runs may not live where the agent can
+ * write.
+ *
+ * `--settings` carries the hook commands, and a hook is a command the CLI runs
+ * outside the task's tool grant. A settings file on the workspace mount is a
+ * file a task with `Write` can edit, so a later task granted nothing but
+ * `Read` would still execute whatever the earlier one put there — a capability
+ * arriving from the tree being worked on rather than from policy (I3, I4).
+ *
+ * The runtime may put it anywhere it likes that the workspace does not cover.
+ * The driver refuses the one placement that cannot be safe rather than trying
+ * to guess which of the others is.
+ */
+function requireSettingsOutsideWorkspace(path: string | undefined, workdir: string): string | undefined {
+  if (path === undefined) return undefined;
+  // Container paths, always POSIX: the workdir is a mount target, not a host path.
+  const root = workdir.replace(/\/+$/, '');
+  if (path === root || path.startsWith(`${root}/`)) {
+    refuse(
+      'capability',
+      `the settings file ${path} is inside the workspace ${workdir}, which the agent can write. ` +
+        'A hook command read from the workspace runs outside the tool grant of the task that loads it, so the driver ' +
+        'refuses rather than taking execution configuration from the tree being worked on (I3, I4).',
+    );
+  }
+  return path;
+}
+
 function requireCredential(explicit: string | undefined): string {
   const credential = explicit ?? process.env[CREDENTIAL_VARIABLE];
   if (credential === undefined || credential.trim() === '') {
@@ -187,10 +215,17 @@ export class ClaudeCodeDriver implements Driver {
    */
   readonly #sessions = new Map<TaskId, SessionInit>();
   /**
-   * The handle `emitArtifacts` writes through. The contract gives that method
-   * a target directory and no handle, so the driver must already hold one; a
-   * driver asked to emit before it has been given a sandbox refuses rather
-   * than writing to the host.
+   * The handle `emitArtifacts` writes through. The contract gives that method a
+   * target directory and no handle, so the driver must already hold one; a
+   * driver asked to emit before it has been given a sandbox refuses rather than
+   * writing to the host.
+   *
+   * Set only by `useSandbox`, never by running a task. One driver serves every
+   * sandbox, and `#serialized` bounds concurrency per handle rather than across
+   * them, so a task starting on a second sandbox would otherwise retarget this
+   * field while a task on the first was still running — and that task's
+   * artifacts would land in the other sandbox's mount table. The caller names
+   * the sandbox it means; the driver does not infer one from whatever ran last.
    */
   #artifactSandbox: SandboxHandle | undefined;
 
@@ -204,7 +239,7 @@ export class ClaudeCodeDriver implements Driver {
     this.#workdir = options.workdir ?? '/workspace';
     this.#models = options.models ?? TIER_MODELS;
     this.#mcpServers = options.mcpServers ?? {};
-    this.#settingsPath = options.settingsPath;
+    this.#settingsPath = requireSettingsOutsideWorkspace(options.settingsPath, this.#workdir);
   }
 
   provenanceId(): string {
@@ -295,7 +330,6 @@ export class ClaudeCodeDriver implements Driver {
     const ungranted = await this.#ungrantedMcpTools(req, servers, configPath);
     const invocation = this.#invocationFor(req, identity, asRole, configPath, ungranted);
 
-    this.#artifactSandbox = req.sandbox;
     const exec = await this.#provider.exec(req.sandbox, invocation.argv, { env: invocation.env });
     const stream = parseStream(exec.stdout);
     const init = this.#refuseUnusableStream(req, exec.exitCode, exec.stderr, stream);
@@ -348,7 +382,7 @@ export class ClaudeCodeDriver implements Driver {
       refuse('provider', 'emitArtifacts has no sandbox to write into; call useSandbox() with the handle the run provisioned (I1)');
     }
     for (const file of artifactFiles(roles, targetDir)) {
-      const written = await this.#provider.exec(handle, ['sh', '-c', writeFileScript(file.path, file.content)]);
+      const written = await this.#provider.exec(handle, writeFileArgv(file.path), { env: { [ARTIFACT_CONTENT]: file.content } });
       if (written.exitCode !== 0) {
         refuse('invocation', `writing ${file.path} inside the sandbox failed with exit code ${String(written.exitCode)}: ${written.stderr.trim()}`);
       }
@@ -466,6 +500,28 @@ export class ClaudeCodeDriver implements Driver {
           'The task was not started: running it would mean offering the model tools nobody can enumerate (I4, I5).',
       );
     }
+    // An `init` line is not an enumeration. A server that came up failed, or
+    // was still connecting, contributes no tools to the list, so a disallow
+    // list computed from it would be short by exactly the tools that server
+    // offers -- and the task would then run holding them. Every configured
+    // server has to be connected, and every granted tool has to be present,
+    // before the absence of a name means anything (I5).
+    const unconnected = init.mcpServers.filter((server) => server.status !== 'connected');
+    if (unconnected.length > 0) {
+      refuse(
+        'invocation',
+        `MCP server(s) ${unconnected.map((server) => `${server.name} (${server.status})`).join(', ')} did not connect during inspection, ` +
+          'so what they offer is unknown and the tools to disallow cannot be computed',
+      );
+    }
+    const enumerated = new Set(init.tools);
+    const absent = req.tools.filter((tool) => mcpServerOf(tool) !== undefined && !enumerated.has(tool));
+    if (absent.length > 0) {
+      refuse(
+        'grant',
+        `the inspection did not find granted MCP tool(s) ${absent.join(', ')}; the servers offer a different set than the request names`,
+      );
+    }
     const granted = new Set(req.tools);
     return init.tools.filter((tool) => mcpServerOf(tool) !== undefined && !granted.has(tool));
   }
@@ -481,20 +537,25 @@ export class ClaudeCodeDriver implements Driver {
    * one, invented a tool list rather than saying it had none. A path has no
    * spaces and is what the documented file form expects.
    *
-   * It lives in the container's own filesystem, not the workspace mount: the
-   * configuration is the runtime's, and a file the agent could edit between
-   * tasks would be a way to name a server policy never granted (I3). Nothing
-   * secret is in it — the credential travels as an environment value, never as
-   * a file.
+   * It lives in the container's own filesystem rather than the workspace mount,
+   * which keeps it out of the tree a task works on and out of any diff. That is
+   * all the location buys. The driver and the agent's own commands run as the
+   * same user, so a process the agent started can rewrite this file between the
+   * inspection and the run. What makes that pointless is not where the file
+   * sits but `#refuseSessionUnlikeGrant`, which compares the session the CLI
+   * actually started against the grant and refuses a tool nobody granted
+   * however it arrived.
+   *
+   * Nothing secret is in it, and `McpServerConfig` has no field that could
+   * carry one: a server environment was removed from the type rather than left
+   * as a place a caller might put a token the agent could then read.
    */
   async #writeMcpConfig(req: TaskRequest, servers: Record<string, McpServerConfig>): Promise<string | undefined> {
     if (Object.keys(servers).length === 0) return undefined;
     const path = `/tmp/mcp-${sessionIdFor(req.taskId)}.json`;
-    const written = await this.#provider.exec(req.sandbox, [
-      'sh',
-      '-c',
-      writeFileScript(path, JSON.stringify({ mcpServers: servers })),
-    ]);
+    const written = await this.#provider.exec(req.sandbox, writeFileArgv(path), {
+      env: { [ARTIFACT_CONTENT]: JSON.stringify({ mcpServers: servers }) },
+    });
     if (written.exitCode !== 0) {
       refuse('invocation', `the MCP configuration could not be written to ${path}: ${written.stderr.trim()}`);
     }
@@ -602,7 +663,89 @@ export class ClaudeCodeDriver implements Driver {
     if (result.isError && result.numTurns === 0) {
       refuse('invocation', `the CLI took no turn for task ${req.taskId}: ${result.terminalReason ?? 'no reason given'}`);
     }
+    // Nothing was refused mid-task. Under `bypassPermissions` there is nothing
+    // to prompt and therefore nothing to deny, so a denial means the task ran
+    // with less than it was granted, and the result describes work done under
+    // conditions the request did not ask for (I5).
+    if (result.permissionDenials.length > 0) {
+      refuse(
+        'grant',
+        `task ${req.taskId} had ${String(result.permissionDenials.length)} tool use(s) denied ` +
+          `(${result.permissionDenials.join(', ')}), so it did not run under the capabilities it was granted`,
+      );
+    }
+    this.#refuseSessionUnlikeGrant(req, init);
     return init;
+  }
+
+  /**
+   * The session the CLI actually started must offer exactly what the request
+   * granted: no more, and no less.
+   *
+   * Everything else in this driver is an argument it hopes the CLI honours --
+   * `--tools`, `--disallowedTools`, `--mcp-config`, `--strict-mcp-config`. This
+   * is the one place that checks. The CLI prints what the session came up with
+   * before it takes a turn, so the check costs nothing, and it is the backstop
+   * for every assumption those flags rest on. Two of those assumptions were
+   * already wrong before anyone read the session report: an inline MCP
+   * configuration silently produced no servers at all, and a granted server
+   * contributed tools nobody granted.
+   *
+   * Both directions refuse. A tool the session holds and the request did not
+   * grant is a capability arriving from somewhere other than policy, which is
+   * the whole of I4. A tool the request granted and the session does not hold
+   * is a grant that did not take effect, and a task that runs anyway produces a
+   * result describing work done under conditions nobody asked for, which is the
+   * silent degrade I5 refuses.
+   */
+  #refuseSessionUnlikeGrant(req: TaskRequest, init: SessionInit): void {
+    const granted = new Set(req.tools);
+    const offered = new Set(init.tools);
+    const ungranted = [...offered].filter((tool) => !granted.has(tool)).sort((a, b) => a.localeCompare(b));
+    const missing = [...granted].filter((tool) => !offered.has(tool)).sort((a, b) => a.localeCompare(b));
+    if (ungranted.length > 0) {
+      refuse(
+        'grant',
+        `the session for task ${req.taskId} offers ${ungranted.map((t) => `'${t}'`).join(', ')}, which the request did not grant. ` +
+          'A capability the model can reach and policy did not grant is the failure I4 exists to prevent.',
+      );
+    }
+    if (missing.length > 0) {
+      refuse(
+        'grant',
+        `the session for task ${req.taskId} does not offer ${missing.map((t) => `'${t}'`).join(', ')}, which the request granted. ` +
+          'The grant did not take effect, and a task run without it would describe work done under conditions nobody asked for (I5).',
+      );
+    }
+    const configured = new Set(Object.keys(this.#mcpServersFor(req)));
+    const loaded = init.mcpServers.map((server) => server.name);
+    const unexpected = loaded.filter((name) => !configured.has(name));
+    if (unexpected.length > 0) {
+      refuse(
+        'grant',
+        `the session for task ${req.taskId} loaded MCP server(s) ${unexpected.join(', ')}, which this driver did not configure`,
+      );
+    }
+    const broken = init.mcpServers.filter((server) => server.status !== 'connected');
+    if (broken.length > 0) {
+      refuse(
+        'invocation',
+        `the session for task ${req.taskId} has MCP server(s) ${broken.map((b) => `${b.name} (${b.status})`).join(', ')} that are not connected; ` +
+          'the granted tools were not reachable',
+      );
+    }
+  }
+
+  /** The servers this request's grants name. `#mcpConfigFor` refuses an unheld one; this one is for a grant already validated. */
+  #mcpServersFor(req: TaskRequest): Record<string, McpServerConfig> {
+    const wanted: Record<string, McpServerConfig> = {};
+    for (const tool of req.tools) {
+      const server = mcpServerOf(tool);
+      if (server === undefined) continue;
+      const config = this.#mcpServers[server];
+      if (config !== undefined) wanted[server] = config;
+    }
+    return wanted;
   }
 
   #emit(event: DriverEvent): void {
@@ -741,11 +884,32 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+/** The variable the artifact's bytes travel in. Never a here-document, and never an argument. */
+export const ARTIFACT_CONTENT = 'DRIVER_ARTIFACT_CONTENT';
+
 /**
- * A here-document that writes `content` to `path` with no expansion inside it.
- * The delimiter is quoted, so nothing in the content is read as shell syntax.
+ * The command that writes an artifact, with the content nowhere in it.
+ *
+ * It was a here-document, and a here-document ends at its delimiter wherever
+ * that delimiter appears. Content carrying a line reading
+ * `FACTORY_ARTIFACT_EOF` closed the document early and the rest of the file ran
+ * as shell -- demonstrated, not theorised: a role whose instructions contained
+ * that line executed `touch` inside the container. Quoting the delimiter stops
+ * expansion *inside* the document; it does nothing about a line that ends it.
+ *
+ * `CompiledRole.instructions` is compiler output (M2), and a compiler's input
+ * is a specification an agent may have written, so these bytes are not the
+ * runtime's own. They now travel as an environment value and reach the file
+ * through `printf %s`, which writes its argument literally. The only things on
+ * the argv are the variable's name and the path, and `--` ends option parsing
+ * so a path beginning with a dash cannot become a flag.
  */
-export function writeFileScript(path: string, content: string): string {
-  const quoted = shellQuote(path);
-  return `mkdir -p "$(dirname ${quoted})" && cat > ${quoted} <<'FACTORY_ARTIFACT_EOF'\n${content}\nFACTORY_ARTIFACT_EOF`;
+export function writeFileArgv(path: string): string[] {
+  return [
+    'sh',
+    '-c',
+    `mkdir -p "$(dirname -- "$1")" && printf %s "$${ARTIFACT_CONTENT}" > "$1"`,
+    'driver',
+    path,
+  ];
 }

@@ -275,6 +275,31 @@ export const I4: InvariantEntry = {
   ],
   pending: [
     pending({
+      id: 'I4.task-capabilities-do-not-outlive-the-task',
+      owner: 'P6',
+      reason:
+        'A sandbox is persistent by declaration (P2), and the driver serialises the foreground exec but not what a '
+        + 'task leaves behind. Demonstrated during P5\'s external review: a process detached by one exec was still '
+        + 'running when a later exec looked for it. A task granted Bash can therefore leave a process that keeps '
+        + 'reading and writing the workspace, and reaching whatever the sandbox permits, while a later task holding a '
+        + 'narrower grant runs beside it -- so the earlier task\'s capabilities are available during the later one, '
+        + 'which is what default deny forbids. Bounding it means a process boundary the sandbox enforces or a '
+        + 'container per task; a driver-side sweep would be a partial control that reads like a complete one. P6 '
+        + 'collects a diff in a fresh sandbox and is where per-task isolation has to become real. Surfaced by P5.',
+    }),
+    pending({
+      id: 'I4.model-credential-not-readable-by-the-task',
+      owner: 'P6',
+      reason:
+        'The model credential reaches the CLI as an environment value on the exec, which keeps it out of every '
+        + 'argument vector and off the mount table. It does not keep it from the model: the CLI and any tool the task '
+        + 'runs share a user, so the value is readable from the process environment. Demonstrated during P5\'s '
+        + 'external review -- a child printed it, and a later exec given no credential at all read it out of /proc. '
+        + 'Closing it means the credential never enters the container: authentication at the egress layer the '
+        + 'allowlist proxy already interposes (P10), with the sandbox holding a short-lived token or nothing at all. '
+        + 'That spans the sandbox, the proxy and the driver, so it is not a driver change. Surfaced by P5.',
+    }),
+    pending({
       id: 'I4.writable-globs-enforced-on-the-diff',
       owner: 'P6',
       reason:

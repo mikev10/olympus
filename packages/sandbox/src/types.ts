@@ -54,10 +54,15 @@ export interface ExecOptions {
 /**
  * I8: every capability claimed here needs an executable conformance assertion
  * (packages/conformance) that fails when the capability is removed.
+ *
+ * A type alias rather than an interface, for the reason `DriverCapabilities`
+ * gives: an interface can be reopened from another compilation unit, and a
+ * capability added that way is invisible to the program that holds the
+ * registry equal to this type's keys.
  */
-export interface SandboxCapabilities {
+export type SandboxCapabilities = {
   computerUse: boolean; gpu: boolean; os: 'linux' | 'macos'; persistent: boolean; remote: boolean;
-}
+};
 
 /**
  * M1 implements a local Docker provider only. Remote workers and pools arrive

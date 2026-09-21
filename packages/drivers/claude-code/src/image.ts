@@ -13,6 +13,8 @@
  * to run a model runner, and neither should move because the other did.
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { refuse } from './refusal.js';
@@ -23,8 +25,27 @@ export const BASE_IMAGE = 'node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b8
 /** The CLI, by exact version. Never a range: a range makes the image a function of the day it was built. */
 export const CLI_VERSION = '2.1.277';
 
-/** The tag the built image carries. */
-export const DRIVER_IMAGE = `factory-claude-code:${CLI_VERSION}`;
+/**
+ * The tag the built image carries, derived from everything that decides what is
+ * in it: the Dockerfile's bytes, the base digest, and the CLI version.
+ *
+ * A tag naming the CLI version alone does not identify the image. `ensureImage`
+ * returns as soon as the daemon holds the tag, so changing the Dockerfile or
+ * the base while leaving the CLI version alone left every machine that had
+ * built the old one running it -- old runtime bytes under a report that hashes
+ * the new source and blesses the result as current. Deriving the tag from the
+ * inputs makes that impossible: different inputs are a different tag, and a
+ * different tag is a build.
+ */
+export function imageTag(): string {
+  const dockerfile = readFileSync(join(imageContext(), 'Dockerfile'));
+  const digest = createHash('sha256')
+    .update(`${BASE_IMAGE}\n${CLI_VERSION}\n`)
+    .update(dockerfile)
+    .digest('hex')
+    .slice(0, 16);
+  return `factory-claude-code:${CLI_VERSION}-${digest}`;
+}
 
 /** The directory holding the Dockerfile, resolved from this module rather than from the caller's cwd. */
 export function imageContext(): string {
@@ -78,11 +99,12 @@ export interface EnsureImageOptions {
 export async function ensureImage(options: EnsureImageOptions = {}): Promise<string> {
   const executable = options.executable ?? 'docker';
   const timeoutMs = options.timeoutMs ?? 600_000;
+  const tag = imageTag();
 
-  const present = await docker(executable, ['image', 'inspect', DRIVER_IMAGE], 60_000).catch((error: unknown) => {
-    refuse('image', `the Docker daemon could not be reached to look for ${DRIVER_IMAGE}: ${String(error)}`);
+  const present = await docker(executable, ['image', 'inspect', tag], 60_000).catch((error: unknown) => {
+    refuse('image', `the Docker daemon could not be reached to look for ${tag}: ${String(error)}`);
   });
-  if (present.exitCode === 0) return DRIVER_IMAGE;
+  if (present.exitCode === 0) return tag;
 
   const built = await docker(
     executable,
@@ -90,15 +112,15 @@ export async function ensureImage(options: EnsureImageOptions = {}): Promise<str
       'build',
       '--build-arg', `BASE=${BASE_IMAGE}`,
       '--build-arg', `CLI_VERSION=${CLI_VERSION}`,
-      '--tag', DRIVER_IMAGE,
+      '--tag', tag,
       imageContext(),
     ],
     timeoutMs,
   ).catch((error: unknown) => {
-    refuse('image', `building ${DRIVER_IMAGE} did not finish: ${String(error)}`);
+    refuse('image', `building ${tag} did not finish: ${String(error)}`);
   });
   if (built.exitCode !== 0) {
-    refuse('image', `building ${DRIVER_IMAGE} failed with exit code ${String(built.exitCode)}: ${built.stderr.trim()}`);
+    refuse('image', `building ${tag} failed with exit code ${String(built.exitCode)}: ${built.stderr.trim()}`);
   }
-  return DRIVER_IMAGE;
+  return tag;
 }
