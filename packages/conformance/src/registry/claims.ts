@@ -46,10 +46,10 @@ const DRIVER: Array<[ClaimId, ClaimEntry]> = [
   driverClaim('driver.subagents', "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult"),
   driverClaim('driver.hooks', 'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported'),
   driverClaim('driver.mcp', "the MCP servers a task's grants name are reachable from that task, and no other server is loaded"),
-  driverClaim('driver.parallelism', 'the driver runs the declared number of tasks concurrently under one provenance id: one, enforced'),
-  driverClaim('driver.computerUse', 'computerUse is declared false and is absent: no declared tool drives a display, and the container has none'),
+  driverClaim('driver.parallelism', 'the driver runs the declared number of tasks concurrently under one provenance id: one, enforced, so a second task on a sandbox waits for the first'),
+  driverClaim('driver.computerUse', 'computerUse is declared false and is absent: no declared tool drives a display, and a session granted the whole inventory offers none'),
   driverClaim('driver.steering', 'steering is declared false and there is no steer(): a running task has no runtime message channel, in both directions'),
-  driverClaim('driver.stablePrefixCaching', 'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix'),
+  driverClaim('driver.stablePrefixCaching', 'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix and differs only in variableSuffix'),
 ];
 
 /** One assertion per sandbox claim: observe the provisioned container, then require the declaration to match. */
