@@ -24,6 +24,7 @@
 - **Protected paths touched deliberately:** `package.json`, `.github/workflows/ci.yml`, and `.gitignore` match patterns in `.github/protected-paths.txt`. The PR description must declare each as an intended change, with the reason. Note that `vitest.tooling.config.ts` is NOT protected: the pattern anchors on `vitest.` immediately followed by `config` or `workspace`, which `vitest.tooling.config.ts` does not satisfy.
 - **No changeset.** No published package changes. If the maintainer's `changesets` check disagrees, stop and ask rather than inventing a changeset for a tooling directory.
 - Node 22 in CI runs the *tests* through vitest, which transpiles TypeScript itself. Native type stripping is needed only for the maintainer's direct `node scripts/run-external-review.ts` invocation locally.
+- **`scripts/` imports `.ts` specifiers, `packages/` imports `.js`, and this is deliberate.** A directly-executed TypeScript file has no compiled sibling to point at: Node's native type stripping resolves `./dep.ts` and fails `ERR_MODULE_NOT_FOUND` on `./dep.js`. `allowImportingTsExtensions` is therefore set in `tsconfig.tooling.json` ONLY — putting it in `tsconfig.base.json` would let every package import `.ts` and corrupt their emitted output. Do not normalise `scripts/` to match `packages/`; it typechecks either way and only one of them runs.
 
 ## File Structure
 
@@ -265,11 +266,13 @@ git add vitest.tooling.config.ts tsconfig.tooling.json package.json \
 git commit -m "Tooling: scripts/ is typechecked and tested, or CI is lying"
 ```
 
-Note in the commit body that `package.json` and a `vitest.config.*` pattern are both protected paths under `.github/protected-paths.txt`, changed here deliberately to bring `scripts/` under the existing four checks.
+Note in the commit body that `package.json` and `.github/workflows/ci.yml` are protected paths under `.github/protected-paths.txt`, changed here deliberately to bring `scripts/` under the existing four checks. (`vitest.tooling.config.ts` is not protected — see Global Constraints.)
 
 ---
 
 ### Task 3: Bundle markers and echo verification
+
+**AMENDED during execution — the code blocks below are superseded.** As written, this task's three markers were all inside the bundle's first 70 lines, so `verifyEcho` returned `verified` for a reviewer that read 20% of the file. The shipped module adds a fourth marker, `endNonce`, extracted from a `=== BUNDLE END === <32 hex>` line that Task 9's generator appends as the bundle's literal last line, and `verified` now requires it. `finalSection` is taken as the last section header BEFORE the nonce line. See commits 82b85b3, a2819a4, 9b997cf and the ledger's Task 3 rulings for what actually shipped.
 
 The defence against a silently truncated bundle. A reviewer that read two-thirds of the code and reported confidently on it is the worst outcome in this design, because nothing downstream can tell.
 
@@ -1477,23 +1480,49 @@ git commit -m "Tooling: the runner, refusing by default"
 ### Task 9: Teach the prompt to prove the bundle arrived whole, and add the run-review skill
 
 **Files:**
-- Modify: `.claude/skills/review-request/SKILL.md` (step 4 template; steps 6–8)
+- Modify: `.claude/skills/review-request/SKILL.md` (step 2 bundle generator; step 4 template; steps 6–8)
 - Create: `.claude/skills/run-review/SKILL.md`
+
+**AMENDED after Task 3's review.** The original three echoed markers were measured to be worthless. Against the real P5 bundle, `BASE` is line 1, `HEAD` is line 2, and the final section's path appears at line 66 inside the `=== CHANGED ===` git-diff-stat listing — all inside the first 70 lines of 9730. A reviewer reading the first 20% could echo all three truthfully and score `verified`. `integrity.ts` now requires a fourth marker, a random nonce on the bundle's last line, and **this task owns the generator that creates it.** Without Step 0 below, the nonce never exists and every review reads `INTEGRITY_UNVERIFIED` forever — a check that always refuses is as useless as one that always passes.
+
+- [ ] **Step 0: Make the bundle generator append the end nonce**
+
+In `review-request/SKILL.md` step 2, the bundle is built by a `{ ... } > <bundle>` block. Append the nonce as the **literal last line**, after the loop that cats each changed file:
+
+```bash
+  printf '\n=== BUNDLE END === %s\n' "$(openssl rand -hex 16)"
+```
+
+`openssl rand -hex 16` yields the 32 hex characters `integrity.ts` matches on. If `openssl` is unavailable, use `head -c16 /dev/urandom | xxd -p | tr -d '\n'`. State in the skill that the value must be **freshly generated per bundle** and must be the file's last line, because `bundleMarkers` takes the last match and a truncated reader must not be able to know it.
+
+Two invariants this task must assert, because `integrity.ts` cannot enforce either and the nonce's whole value rests on them (raised by Task 3's re-review):
+
+```bash
+tail -1 docs/reviews/<bundle> | grep -qE '^=== BUNDLE END === [0-9a-f]{32}$' || echo 'FAIL: nonce is not the last line'
+grep -c '^=== BUNDLE END === ' docs/reviews/<bundle>   # must print exactly 1
+```
+
+Add both beside the two `grep -c` confirmations already in step 2 that prove no `.plan/` or `docs/decisions.md` content leaked into the bundle.
 
 - [ ] **Step 1: Add the echo items to the prompt template**
 
 In `review-request/SKILL.md`, inside the fenced prompt template, the first paragraph currently ends "…do not review from the description below alone." Append to that paragraph:
 
 ```
-Before reviewing, state on three separate lines: the BASE: value from the
-bundle's first lines, the HEAD: value, and the file path in the bundle's final
-`===== <path> =====` header. If you cannot read all three, say so and stop —
-a partially received bundle produces findings about code you were not shown.
+Before reviewing, state on four separate lines: the BASE: value from the
+bundle's first lines, the HEAD: value, the file path in the bundle's final
+`===== <path> =====` header, and the 32-character value on the bundle's very
+last line, which begins `=== BUNDLE END ===`. If you cannot read all four, say
+so and stop — a partially received bundle produces findings about code you were
+not shown. Copy the last of these exactly; it is the only one of the four that
+proves you reached the end of the file.
 ```
 
 - [ ] **Step 2: Note why the template changed**
 
-Immediately below the fenced template, add a paragraph in the skill's own voice explaining that the three echoed values are known to the runner independently, so a mismatch is caught mechanically; that a reply echoing none of them is recorded as unverified rather than trusted; and that the check exists because an undocumented read cutoff would otherwise yield a confident review of code nobody was shown.
+Immediately below the fenced template, add a paragraph in the skill's own voice explaining: that the four echoed values are known to the runner independently, so a mismatch is caught mechanically; that the first three all sit within the bundle's first seventy lines and therefore prove only that the reviewer opened the right file, not that it received all of it; that the trailing nonce is the only marker a truncated reader cannot produce; and that a bundle generated before this convention is recorded as `unverified` rather than trusted, because no tail proof exists in it.
+
+State the limit honestly in the same paragraph: **the nonce proves the tail was delivered, not that the middle was read.** A model can receive a whole bundle and reason about only part of it, and no marker detects that. Cross-family agreement and the prompt's own numbered items carry that load.
 
 - [ ] **Step 3: Replace steps 6–8**
 
