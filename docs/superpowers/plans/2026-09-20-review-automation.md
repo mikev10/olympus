@@ -645,17 +645,22 @@ describe('stripSessionLog', () => {
     const jsonl = [
       '{"type":"session_meta","id":"s1"}',
       '{"type":"response_item","text":"the entire 400KB bundle restated"}',
-      '{"type":"token_usage_record","input":98000}',
-      '{"type":"turn_context","model":"some-model"}',
+      '{"type":"event_msg","text":"also a message body"}',
+      '{"type":"token_usage_record","payload":{"usage":{"total_tokens":98000}}}',
+      '{"type":"turn_context","model_context_window":258400}',
+      '{"type":"world_state","payload":{"state":{"collaboration_mode":{"model":"gpt-6-astra"}}}}',
     ].join('\n');
 
     const out = stripSessionLog(jsonl, CODEX_KEEP);
 
     expect(out).not.toContain('400KB bundle restated');
-    expect(out.split('\n')).toHaveLength(3);
+    expect(out).not.toContain('also a message body');
+    expect(out.split('\n')).toHaveLength(4);
     expect(out).toContain('session_meta');
     expect(out).toContain('token_usage_record');
     expect(out).toContain('turn_context');
+    // world_state is the only record carrying the resolved model id.
+    expect(out).toContain('gpt-6-astra');
   });
 
   it('skips unparseable lines rather than throwing', () => {
@@ -704,6 +709,15 @@ export interface Manifest {
   readonly cliVersion: string;
   readonly modelReported: string | null;
   readonly tokenUsage: Readonly<Record<string, number>> | null;
+  /** Files in the config home AFTER the run. A Codex turn leaves ~332 files of
+   *  auto-fetched vendor plugin cache; recording the count keeps that visible
+   *  without committing it. */
+  readonly postRunFileCount: number;
+  /** Read back from the rollout log, not asserted by the caller. Codex has no
+   *  `--ask-for-approval` flag, so this recorded value is the only evidence the
+   *  run could not have been prompted. The runner refuses a value other than
+   *  "never" for codex. */
+  readonly recordedApprovalPolicy: string | null;
   readonly bundleSha256: string;
   readonly integrity: EchoVerdict;
   readonly outcome: Outcome;
@@ -725,8 +739,16 @@ export function outcomeOf(run: {
   return 'counted';
 }
 
-/** Codex rollout record types worth keeping as provenance. */
-export const CODEX_KEEP: readonly string[] = ['session_meta', 'turn_context', 'token_usage_record'];
+/**
+ * Codex rollout record types worth keeping as provenance. All four are measured
+ * present in a real rollout log. `world_state` carries the resolved model id and
+ * `token_usage_record` the only total_tokens figure the CLI emits anywhere.
+ * `event_msg` and `response_item` are deliberately absent: they are the message
+ * bodies this stripping exists to drop.
+ */
+export const CODEX_KEEP: readonly string[] = [
+  'session_meta', 'turn_context', 'world_state', 'token_usage_record',
+];
 
 /** Gemini stream-json events carrying the model id and the token breakdown. */
 export const GEMINI_KEEP: readonly string[] = ['init', 'result'];
@@ -926,16 +948,24 @@ Create `scripts/review-runner/test/invoke.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { codexArgv, geminiArgv, modelFromEvents } from '../invoke.ts';
+import { codexArgv, geminiArgv, modelFromEvents, usageFromEvents } from '../invoke.ts';
 
 describe('codexArgv', () => {
   const argv = codexArgv({ finalMessagePath: '/s/last.txt' });
 
-  it('is read-only and never asks for approval', () => {
+  it('is read-only', () => {
     expect(argv).toContain('--sandbox');
     expect(argv).toContain('read-only');
-    expect(argv).toContain('--ask-for-approval');
-    expect(argv).toContain('never');
+  });
+
+  it('does NOT pass --ask-for-approval, which this CLI version does not have', () => {
+    // codex-cli 0.155.1 aborts on the flag before reaching the network.
+    // `exec` already records "approval_policy":"never" in its rollout log.
+    expect(argv).not.toContain('--ask-for-approval');
+  });
+
+  it('skips the git repo check, because a scratch work dir is never a repo', () => {
+    expect(argv).toContain('--skip-git-repo-check');
   });
 
   it('ignores the user config and emits machine-readable events', () => {
@@ -980,13 +1010,48 @@ describe('modelFromEvents', () => {
     expect(modelFromEvents('gemini', jsonl)).toBe('gemini-3-pro-preview');
   });
 
-  it('reads the model from a Codex turn_context record', () => {
-    const jsonl = '{"type":"session_meta"}\n{"type":"turn_context","model":"gpt-5.1-codex"}';
-    expect(modelFromEvents('codex', jsonl)).toBe('gpt-5.1-codex');
+  it('reads the model from a Codex rollout world_state record, nested', () => {
+    // Measured shape: world_state → payload.state.collaboration_mode.model
+    const jsonl = [
+      '{"type":"session_meta"}',
+      '{"type":"world_state","payload":{"state":{"collaboration_mode":{"model":"gpt-6-astra"}}}}',
+      '{"type":"token_usage_record","payload":{"usage":{"total_tokens":1}}}',
+    ].join('\n');
+    expect(modelFromEvents('codex', jsonl)).toBe('gpt-6-astra');
   });
 
   it('returns null rather than guessing when no event names a model', () => {
     expect(modelFromEvents('codex', '{"type":"session_meta"}')).toBeNull();
+  });
+
+  it('returns null when the nested path is present but not a string', () => {
+    const jsonl = '{"type":"world_state","payload":{"state":{"collaboration_mode":{}}}}';
+    expect(modelFromEvents('codex', jsonl)).toBeNull();
+  });
+
+  it('does not find a Codex model in --json stdout, because it is not there', () => {
+    const stdout = [
+      '{"type":"thread.started"}',
+      '{"type":"turn.started"}',
+      '{"type":"turn.completed","usage":{"input_tokens":10}}',
+    ].join('\n');
+    expect(modelFromEvents('codex', stdout)).toBeNull();
+  });
+});
+
+describe('usageFromEvents', () => {
+  it('reads Codex usage from the rollout token_usage_record', () => {
+    const jsonl = '{"type":"token_usage_record","payload":{"usage":{"total_tokens":98123,"cached":4}}}';
+    expect(usageFromEvents('codex', jsonl)).toEqual({ total_tokens: 98123, cached: 4 });
+  });
+
+  it('keeps only numeric fields', () => {
+    const jsonl = '{"type":"result","stats":{"total":5,"model":"m"}}';
+    expect(usageFromEvents('gemini', jsonl)).toEqual({ total: 5 });
+  });
+
+  it('returns null when no usage record is present', () => {
+    expect(usageFromEvents('codex', '{"type":"session_meta"}')).toBeNull();
   });
 });
 ```
@@ -1005,16 +1070,22 @@ import { spawn } from 'node:child_process';
 import type { Family } from './evidence.ts';
 
 /**
- * `codex exec` already defaults to a read-only sandbox with approval hardcoded
- * to never. Both are passed explicitly anyway, so the manifest's recorded argv
- * states the intent rather than resting on a default that can change.
+ * Measured against codex-cli 0.155.1, not assumed:
+ *
+ * - There is NO `--ask-for-approval` flag; passing it aborts before the network.
+ *   `exec` already records `"approval_policy":"never"` in its rollout log, so the
+ *   behaviour is the default. The manifest asserts on that recorded policy.
+ * - `--skip-git-repo-check` is REQUIRED. The scratch work dir is not a git repo
+ *   and codex otherwise refuses: "Not inside a trusted directory".
+ * - The trailing `-` reads the committed prompt from stdin, unmodified. stdin
+ *   must be closed explicitly or the CLI waits on it; `runCli` ends the stream.
  */
 export function codexArgv(options: { readonly finalMessagePath: string }): readonly string[] {
   return [
     'exec',
     '--sandbox', 'read-only',
-    '--ask-for-approval', 'never',
     '--ignore-user-config',
+    '--skip-git-repo-check',
     '--json',
     '-o', options.finalMessagePath,
     '-',
@@ -1031,15 +1102,48 @@ export function geminiArgv(options: { readonly bundleName: string }): readonly s
   return ['--output-format', 'stream-json', '-e', 'none', '-p', `@${options.bundleName}`];
 }
 
-const MODEL_EVENT: Readonly<Record<Family, readonly string[]>> = {
-  codex: ['turn_context', 'session_meta'],
-  gemini: ['init'],
+interface EventPath {
+  readonly event: string;
+  readonly path: readonly string[];
+}
+
+/**
+ * Where each CLI actually puts the model id. Measured, not assumed.
+ *
+ * For Codex the model is NOT in `--json` stdout at all — stdout carries only
+ * thread.started / turn.started / item.completed / turn.completed. It lives in
+ * the on-disk rollout log. So the caller passes the ROLLOUT LOG text for codex
+ * and the stream-json stdout for gemini.
+ */
+const MODEL_AT: Readonly<Record<Family, EventPath>> = {
+  codex: { event: 'world_state', path: ['payload', 'state', 'collaboration_mode', 'model'] },
+  gemini: { event: 'init', path: ['model'] },
+};
+
+const USAGE_AT: Readonly<Record<Family, EventPath>> = {
+  codex: { event: 'token_usage_record', path: ['payload', 'usage'] },
+  gemini: { event: 'result', path: ['stats'] },
 };
 
 /** Records the model the CLI reported. Neither CLI's lineup is documented, so
  *  nothing is pinned and nothing is assumed; absent means null, never a guess. */
 export function modelFromEvents(family: Family, jsonl: string): string | null {
-  const wanted = MODEL_EVENT[family];
+  const found = valueAt(jsonl, MODEL_AT[family]);
+  return typeof found === 'string' && found !== '' ? found : null;
+}
+
+/** Token usage, from the only record that carries a total. */
+export function usageFromEvents(family: Family, jsonl: string): Readonly<Record<string, number>> | null {
+  const found = valueAt(jsonl, USAGE_AT[family]);
+  if (typeof found !== 'object' || found === null || Array.isArray(found)) return null;
+  const numbers: Record<string, number> = {};
+  for (const [key, value] of Object.entries(found)) {
+    if (typeof value === 'number') numbers[key] = value;
+  }
+  return Object.keys(numbers).length > 0 ? numbers : null;
+}
+
+function valueAt(jsonl: string, spec: EventPath): unknown {
   for (const line of jsonl.split(/\r?\n/)) {
     if (line.trim() === '') continue;
     let record: unknown;
@@ -1048,12 +1152,20 @@ export function modelFromEvents(family: Family, jsonl: string): string | null {
     } catch {
       continue;
     }
-    if (typeof record !== 'object' || record === null || Array.isArray(record)) continue;
-    const typed = record as Record<string, unknown>;
-    if (typeof typed.type !== 'string' || !wanted.includes(typed.type)) continue;
-    if (typeof typed.model === 'string' && typed.model !== '') return typed.model;
+    if (!isRecord(record)) continue;
+    if (record.type !== spec.event) continue;
+    let cursor: unknown = record;
+    for (const key of spec.path) {
+      if (!isRecord(cursor)) { cursor = undefined; break; }
+      cursor = cursor[key];
+    }
+    if (cursor !== undefined) return cursor;
   }
-  return null;
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export interface CliResult {
@@ -1289,21 +1401,39 @@ export interface Args {
   readonly dryRun: boolean;
 }
 
-const FAMILIES: readonly string[] = ['codex', 'gemini'];
+const FAMILIES = ['codex', 'gemini'] as const;
 const REVIEWS_DIR = join('docs', 'reviews');
+
+/** A predicate, not a cast. The project's own review standard treats casts as a
+ *  language escape hatch worth flagging, and this costs the same. */
+function isFamily(value: string): value is Family {
+  return (FAMILIES as readonly string[]).includes(value);
+}
 
 export function parseArgs(argv: readonly string[]): Args {
   const [unit, family, ...rest] = argv;
   if (unit === undefined || family === undefined) {
     throw new Error('usage: node scripts/run-external-review.ts <UNIT> <codex|gemini> [--dry-run]');
   }
-  if (!FAMILIES.includes(family)) {
+  if (!isFamily(family)) {
     throw new Error(`unknown reviewer family "${family}": expected codex or gemini`);
   }
   const unknown = rest.filter((flag) => flag !== '--dry-run');
   if (unknown.length > 0) throw new Error(`unknown flag(s): ${unknown.join(', ')}`);
-  return { unit, family: family as Family, dryRun: rest.includes('--dry-run') };
+  return { unit, family, dryRun: rest.includes('--dry-run') };
 }
+```
+
+Guard `main()` with a `process.argv[1]` comparison, **not** `import.meta.main` — that landed in Node 24 and CI runs Node 22, where the typecheck would reject the property:
+
+```ts
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (invokedDirectly) await main();
 ```
 
 The rest of `main()` follows this order, and **every failure exits non-zero without writing a review file**:
@@ -1312,15 +1442,16 @@ The rest of `main()` follows this order, and **every failure exits non-zero with
 2. Refuse unless both files are committed and unmodified — shell out to `git status --porcelain -- <paths>` and require empty output, and `git ls-files --error-unmatch <paths>`.
 3. Read the bundle, compute `bundleSha256` with `createHash('sha256')`, and `bundleMarkers(bundleText)`.
 4. `buildScratch(...)` using the credential filenames from the probe note.
-5. `listRecursive` both dirs, then `assertCleanRoom(proof, allowed)`. On `CleanRoomError`, remove the scratch dirs and exit non-zero.
+5. `listRecursive` both dirs, then `assertCleanRoom(proof, allowed)`. On `CleanRoomError`, remove the scratch dirs and exit non-zero. **This listing is the `cleanRoom` proof stored in the manifest**, captured before the CLI runs — a single Codex turn leaves ~332 files and ~34MB of auto-fetched vendor plugin cache in the config home, so an exact-allowlist assertion can only ever hold beforehand.
 6. If `args.dryRun`, print the proof and exit 0 without invoking anything.
 7. `runCli(...)` with `codexArgv`/`geminiArgv`, `isolationEnv(...)` merged over a minimal env, the committed prompt as stdin, and `DEFAULT_TIMEOUT_MS`.
 8. Extract the reply: Codex from the `-o` file, Gemini from the `result` event's `response` field.
-9. `verifyEcho(markers, replyText)` then `outcomeOf({ exitCode, timedOut, integrity })`.
-10. Write `<date>-<UNIT>-<slug>-review-<family>.md` with the raw reply and nothing else — **no header, no edit**; `triage-review` prepends the provenance header later.
-11. Write `<date>-<UNIT>-<slug>-review-<family>.run.json` (the `Manifest`) and `<date>-<UNIT>-<slug>-review-<family>.session.jsonl` via `stripSessionLog` with the family's keep-set.
-12. `removeScratch([configHome, workDir])`.
-13. Print the outcome and exit 0 only when it is `counted`; otherwise exit non-zero so a caller cannot mistake a refusal for a review.
+9. **Read the provenance source per family, before any cleanup.** For Codex, find the rollout log inside the scratch config home at `sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-id>.jsonl` (glob it; there will be exactly one) and read it — that file is the *only* place the model id and a `total_tokens` figure exist. For Gemini, the stream-json stdout is the source. Then `modelFromEvents(family, source)` and `usageFromEvents(family, source)`.
+10. `verifyEcho(markers, replyText)` then `outcomeOf({ exitCode, timedOut, integrity })`.
+11. Write `<date>-<UNIT>-<slug>-review-<family>.md` with the raw reply and nothing else — **no header, no edit**; `triage-review` prepends the provenance header later.
+12. Write `<date>-<UNIT>-<slug>-review-<family>.run.json` (the `Manifest`) and `<date>-<UNIT>-<slug>-review-<family>.session.jsonl` via `stripSessionLog` over the family's provenance source with the family's keep-set. Record `postRunFileCount` from a second `listRecursive` of the config home so the vendor-cache growth stays visible.
+13. `removeScratch([configHome, workDir])` — **only after step 9 and 12 have read what they need out of it.**
+14. Print the outcome and exit 0 only when it is `counted`; otherwise exit non-zero so a caller cannot mistake a refusal for a review.
 
 - [ ] **Step 4: Run the tests and typecheck**
 
