@@ -31,10 +31,13 @@ prompt needs no rewording per reviewer. Every word in the prompt file is meant
 for the reviewer: no headings, notes, or provenance for the maintainer go in it,
 because the whole file is sent verbatim.
 
-Later, `triage-review` adds `-review.md` (the reply) and `-triage.md` beside
-them. Units reviewed before this rule also carry a `-review-request.md`; that
-file is retired, and its contents now live in the bundle's own header, the
-prompt's first paragraph, and the review header written at triage.
+Later, `run-review` adds `-review-codex.md` and `-review-gemini.md` (the two
+replies), each with a `.run.json` manifest and a stripped `.session.jsonl`
+beside it, and `triage-review` adds `-triage.md`. Units reviewed before the
+per-family names carry a single `-review.md` instead. Units reviewed before this
+rule also carry a `-review-request.md`; that file is retired, and its contents
+now live in the bundle's own header, the prompt's first paragraph, and the
+review header written at triage.
 
 ## 1. Determine the range
 
@@ -333,7 +336,9 @@ Do not review the unit yourself. Do not act on a review you did not receive.
 
 ## When the review comes back
 
-Not this skill's job, and not this session's. The review runs in another tool,
-on the maintainer's clock. `triage-review <unit>` stores the reply with its
-provenance header, verifies every finding against the cited code before acting
-on one, writes the triage, applies what is accepted, and stops before merge.
+Not this skill's job, and not this session's. The reviews run in another tool,
+under `/run-review <unit>`, which writes both replies to disk untouched.
+`triage-review <unit>` reads them from there, heads each with a provenance
+header derived from its manifest, verifies every finding against the cited code
+before acting on one, writes the triage, applies what is accepted, and stops
+before merge.
