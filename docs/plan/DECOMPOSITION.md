@@ -201,10 +201,35 @@
 **Conformance:** a fixture suite of taxonomy items — `assertEqual(x,5)` → `assertTrue(x)` is caught, and a rename that drops three cases counts as a deletion.
 
 ### P8 — Adapters (TypeScript)
-**Scope:** `AdapterSet` from F2 §9 for vitest and jest.
-**Deliver:** `TestFrameworkAdapter`, `CoverageAdapter` (c8/istanbul), `ManifestAdapter`, `BehavioralAdapter` for CLI and HTTP.
-**Out of scope:** `MutationAdapter` — M3. Return `null` and list it in `unavailableControls()`.
+**Scope:** `AdapterSet` from F2 §9 for vitest and jest. The per-framework knowledge the rest of the line consumes: P6 enumerates suites and reads coverage through it, P7 compares assertions and finds skip markers through it, and R1 derives a ceiling from what it lacks.
+**Deliver:** `TestFrameworkAdapter` for vitest and for jest, `CoverageAdapter` over the istanbul JSON report that c8 and istanbul both emit, `ManifestAdapter`, `BehavioralAdapter` for CLI and HTTP, stack detection that builds an `AdapterSet` for a repository, and the L3 refusal as a pure function over a set.
+**Where it lives:** `packages/adapters`. The test, coverage, and manifest adapters run on the host and execute nothing: they parse test files to an AST (`typescript`, pinned exactly to the workspace's version), enumerate test files without loading any config, read a coverage report some other process produced, and diff two directory trees in process. `base` and `head` are those two trees, never git refs, and the package never spawns `git`, whose repository config an agent can write. A framework config file is code, so it is read as bytes and never loaded. Only `BehavioralAdapter` touches a sandbox, because its signature already takes a `SandboxHandle`: it is constructed with the `SandboxProvider` that provisioned the handle, as the P5 driver is, and runs every scenario through `provider.exec`.
+**A behavioral verdict is an exit code.** `CheckResult` carries no pass field, so the check's own process decides: a fixed runner the adapter passes on the argument vector — never a file in the workspace — runs the scenario, compares what it observed against `expected`, prints both, and exits 0 only when every expectation held. A gate that reads only `exitCode` cannot pass an unmet expectation, and no contract changes.
+**Out of scope:**
+- `MutationAdapter` — M3. Return `null` and list it in `unavailableControls()`.
+- a `BehavioralAdapter` of kind `browser` (R3). `unavailableControls()` names it, so the gap is stated rather than hidden
+- wiring the L3 refusal into run admission. The admission record would have to carry the set so a resume cannot restate it, and `SKELETON_LINE` refuses every run above L1 until P6 deletes it, so an admission assertion could not fail for the right reason before then. Owed to P6 as `I5.adapter-refusal-enforced-at-admission`
+- assembling a `TamperReport`: renames, moves, snapshot regeneration, coverage delta, protected-path touches (P7). P8 supplies the framework-specific parsing P7 compares with
+- executing a `VerificationManifest`, filling `CheckResult.suiteCount`, and the fresh sandbox at base+diff (P6)
+- readiness probes and the ceiling they derive (R1)
+- any stack other than TypeScript with vitest or jest
 **Conformance:** `unavailableControls()` is non-empty and L3 is refused when a control is missing (I5).
+**Accept:**
+- stack detection builds the vitest set for a vitest repository and the jest set for a jest one; a repository with neither, or with both, gets `test: null` and a set that names it — never a guess
+- `unavailableControls()` names every `null` slot and every behavioral kind the set does not carry. `mutation` and `behavioral:browser` are named for every set P8 can build, so no set clears L3 at M1
+- the L3 refusal refuses a set with any unavailable control, naming each, and does not refuse at L0–L2. It refuses or allows; it never returns a lower level
+- for both frameworks: `expect(x).toBe(5)` changed to `expect(x).toBeTruthy()` is `weakened`; a deleted assertion is `removed`; `toBeCloseTo(v, 5)` changed to `toBeCloseTo(v, 2)` is `toleranceWidened`; an unchanged file compares empty
+- `detectSkipMarkers` names `.skip`, `.only`, `.todo`, `xit`/`xtest`/`xdescribe`, `fit`/`fdescribe`, `skipIf`/`runIf`, vitest's `.fails`, and jest's `.failing`
+- `enumerateSuites` returns test files — a suite is one file, which is what jest's own "Test Suites" line counts — and deleting one shrinks the list
+- `changedLineCoverage` reads an istanbul JSON report; a changed line in a file the report does not mention counts as uncovered; a missing or malformed report refuses rather than returning a number
+- `detectConfigChanges` names every config file added, removed, or modified between two trees
+- a behavioral scenario whose `input` or `expected` has an unrecognised shape is refused, naming the field; a scenario runs inside the sandbox, and an unmet expectation exits non-zero. Requires a Docker daemon and fails closed without one, as P2's suite does
+- no file in `packages/adapters` executes repository code on the host
+- **the ledger.** Paid: `I5.unsupported-stack-is-loud`. Added live: `I1.adapters-execute-nothing-on-the-host`. Added pending: `I5.adapter-refusal-enforced-at-admission` (P6). So `pending-baseline.json` leaves I5 at 6, and the diff in `registry/i5.ts` shows the swap
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I5 is the subject — a stack that lacks a control says so and cannot run autonomously, and a missing coverage report is a refusal, never a zero. I1 is where an adapter could quietly run agent-written code on the host by loading a config or spawning a tool. I2 is that a behavioral verdict comes from the runtime's comparison, never from the product's own report. I3 is that `expected` comes from locked acceptance criteria; the adapter takes it as given and cannot check its source.
+**Known limit, stated now:** the behavioral runner shares a container with the code under test. That code can kill the runner, which reads as a failure; the posture is recorded as a known limit rather than claimed closed.
 
 ### P9 — API + CLI
 **Scope:** the runtime as a service (I9).
