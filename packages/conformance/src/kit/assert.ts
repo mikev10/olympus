@@ -229,10 +229,11 @@ interface ExternalSpec {
 
 /**
  * An assertion another package runs in its own suite with `invariantTest`.
- * The registry refuses every external assertion until it can reconcile the
- * ids it lists against the tests that package actually ran and passed
- * (pending `I8.external-assertion-execution-reconciled`). The constructor
- * stays so that unit has the shape to target.
+ * The registry counts one only after reconciling it against that package's
+ * own run report: the named test must have run, in the named file, and
+ * passed, against the tree being evaluated (`kit/reconcile.ts`,
+ * `I8.external-assertion-execution-reconciled`). Registering one is a claim
+ * about another suite, and every way that claim can be false is a refusal.
  */
 export function external(spec: ExternalSpec): ExternalAssertion {
   return { kind: 'external', ...spec };

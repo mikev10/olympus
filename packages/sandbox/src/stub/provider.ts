@@ -9,7 +9,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import type { ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 
 async function isDirectory(path: string): Promise<boolean> {
   try {
@@ -57,14 +57,24 @@ export class StubSandboxProvider implements SandboxProvider {
     return handle;
   }
 
-  exec(h: SandboxHandle, cmd: string[]): Promise<ExecResult> {
+  exec(h: SandboxHandle, cmd: string[], options: ExecOptions = {}): Promise<ExecResult> {
     const cwd = this.workspaces.get(h);
     if (cwd === undefined) return Promise.reject(new Error(`StubSandboxProvider: unknown handle ${h}`));
     const [file, ...args] = cmd;
     if (file === undefined) return Promise.reject(new Error('StubSandboxProvider: empty command'));
+    // The value is set on the child alone, never appended to `args`. The stub enforces nothing
+    // else a SandboxSpec implies, but leaking a credential into an argv is a habit worth not
+    // having in the one implementation that runs on a developer's own machine.
+    const env = options.env === undefined ? undefined : { ...process.env, ...options.env };
     return new Promise((resolve, reject) => {
       const started = performance.now();
-      const child = spawn(file, args, { cwd, shell: false, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      const child = spawn(file, args, {
+        cwd,
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        ...(env === undefined ? {} : { env }),
+      });
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       child.stdout.on('data', (chunk: Buffer) => {

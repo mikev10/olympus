@@ -55,6 +55,16 @@ export class StubDriver implements Driver {
     return { subagents: false, hooks: false, mcp: false, parallelism: 1, computerUse: false, steering: false, stablePrefixCaching: false };
   }
 
+  /**
+   * The stub runs no model and therefore offers no tool. Empty, so every tool
+   * a policy grants is refused against it (I4): a stub that claimed an
+   * inventory would let a grant pass validation on the strength of a driver
+   * that cannot honour it.
+   */
+  declaredTools(): readonly string[] {
+    return [];
+  }
+
   /** Every tier resolves to the stub model; the family is assigned deliberately, never inferred (I6). */
   resolveModel(_tier: ModelTier): ModelIdentity {
     return { provider: 'stub', family: 'stub' as ModelFamily, model: 'stub', version: '0' };

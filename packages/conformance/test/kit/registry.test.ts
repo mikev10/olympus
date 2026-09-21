@@ -223,23 +223,50 @@ describe('pending baseline', () => {
 describe('external assertions', () => {
   const ref = (id: `I1.${string}`) =>
     external({ id, title: 'x', level: 'runtime', package: '@olympus-ai/sandbox', file: 'test/mount.test.ts' });
+  const withRef = (id: `I1.${string}` = 'I1.mount-rejects-second-rw'): Registry =>
+    fullRegistry({ I1: { title: 'x', assertions: [ref(id)], pending: [] } });
 
-  test('are refused: the registry cannot tell a registered id from one that runs, so none is accepted until reconciliation exists', () => {
+  test('an unreconciled one is refused, with the reason the reconciler gave', () => {
     // The package, file, and id can all exist and the assertion can still be
     // skipped, or the id can sit in a comment. Presence is not execution.
-    const registry = fullRegistry({ I1: { title: 'x', assertions: [ref('I1.mount-rejects-second-rw')], pending: [] } });
-    const evaluation = evaluateRegistry(registry);
+    const evaluation = evaluateRegistry(withRef(), {
+      reconcile: () => ({ ok: false, refusal: 'id-not-run', detail: 'I1.mount-rejects-second-rw: nothing ran it' }),
+    });
     expect(evaluation.problems).toEqual([
-      'I1.mount-rejects-second-rw: external assertions are refused until execution reconciliation exists ' +
-        '(I8.external-assertion-execution-reconciled)',
+      'I1.mount-rejects-second-rw: nothing ran it (I8.external-assertion-execution-reconciled: id-not-run)',
       'I1: missing (no assertion and no pending owner)',
     ]);
     expect(evaluation.counts.external).toBe(1);
+    expect(evaluation.counts.externalAccepted).toBe(0);
   });
 
-  test('a refused external assertion does not count as coverage: an entry with nothing else is missing', () => {
-    const registry = fullRegistry({ I1: { title: 'x', assertions: [ref('I1.mount-rejects-second-rw')], pending: [] } });
-    expect(evaluateRegistry(registry).invariants.find((r) => r.id === 'I1')?.state).toBe('missing');
+  test('an unreconciled one does not count as coverage: an entry with nothing else is missing', () => {
+    const evaluation = evaluateRegistry(withRef(), {
+      reconcile: () => ({ ok: false, refusal: 'report-missing', detail: 'no report' }),
+    });
+    expect(evaluation.invariants.find((r) => r.id === 'I1')?.state).toBe('missing');
+  });
+
+  test('a reconciled one is coverage: the entry is asserted and the verdict says where it ran', () => {
+    const evaluation = evaluateRegistry(withRef(), {
+      reconcile: () => ({ ok: true, ranIn: '@olympus-ai/sandbox test/mount.test.ts' }),
+    });
+    expect(evaluation.problems).toEqual([]);
+    expect(evaluation.invariants.find((r) => r.id === 'I1')?.state).toBe('asserted');
+    expect(evaluation.counts.externalAccepted).toBe(1);
+    expect(evaluation.external.get('I1.mount-rejects-second-rw')).toEqual({
+      ok: true,
+      ranIn: '@olympus-ai/sandbox test/mount.test.ts',
+    });
+  });
+
+  test('the default reconciler is the real one: with no option supplied, an assertion nothing ran is still refused', () => {
+    // The option exists so this file needs no sibling package, not so an
+    // evaluation can opt out of the check. A permissive default would accept
+    // every external assertion in every caller that forgot to pass one.
+    const evaluation = evaluateRegistry(withRef());
+    expect(evaluation.counts.externalAccepted).toBe(0);
+    expect(evaluation.problems.join('\n')).toContain('I8.external-assertion-execution-reconciled');
   });
 });
 

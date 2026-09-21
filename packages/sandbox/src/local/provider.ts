@@ -12,7 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
-import type { ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
@@ -163,6 +163,57 @@ function proxyEnvironment(): string[] {
     '--env', `NO_PROXY=${loopback}`,
     '--env', `no_proxy=${loopback}`,
   ];
+}
+
+/**
+ * A plain environment-variable name: a letter or underscore, then letters,
+ * digits, and underscores. Narrower than POSIX allows, deliberately — a name
+ * outside this set is far more likely to be a caller building `NAME=value`
+ * into the key than a variable anyone meant to set.
+ */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Turns the names and values a caller asked for into `docker exec` flags and
+ * an environment for the `docker` process itself.
+ *
+ * `-e NAME` with no `=value` makes the CLI read that name from its own
+ * environment, so the value travels through the daemon API and appears in no
+ * argument vector — not the one this process spawns, and not the one the
+ * command runs under inside the container. A secret in an argv is readable by
+ * anything that can list processes, and a credential is exactly what this
+ * exists to carry.
+ *
+ * Every refusal here is the fail-closed one (I5): a command that lost its
+ * credential does not fail where the credential was lost. It fails later,
+ * inside the model runner, with a message about authentication that says
+ * nothing about the provider having dropped it.
+ */
+function environmentPassthrough(env: Readonly<Record<string, string>> | undefined): {
+  flags: string[];
+  values: Record<string, string> | undefined;
+} {
+  if (env === undefined) return { flags: [], values: undefined };
+  const names = Object.keys(env);
+  if (names.length === 0) return { flags: [], values: undefined };
+
+  const flags: string[] = [];
+  const values: Record<string, string> = {};
+  for (const name of names) {
+    if (!ENV_NAME.test(name)) {
+      refuse('environment', `${JSON.stringify(name)} is not an environment variable name; a name is a letter or underscore followed by letters, digits, and underscores`);
+    }
+    // `noUncheckedIndexedAccess` makes this `string | undefined`, which is the
+    // honest type: a caller can pass an explicit `undefined` as easily as omit
+    // a key, and both must refuse rather than send an empty value through.
+    const value = env[name];
+    if (value === undefined) {
+      refuse('environment', `${name} was named in ExecOptions.env with no value; the command was not started rather than run without it`);
+    }
+    flags.push('--env', name);
+    values[name] = value;
+  }
+  return { flags, values };
 }
 
 function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
@@ -323,10 +374,11 @@ export class LocalDockerProvider implements SandboxProvider {
     return handle;
   }
 
-  async exec(h: SandboxHandle, cmd: string[]): Promise<ExecResult> {
+  async exec(h: SandboxHandle, cmd: string[], options: ExecOptions = {}): Promise<ExecResult>  {
     const sandbox = this.#require(h);
     if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
     if (cmd.length === 0) refuse('handle', 'the command is empty; there is nothing to run');
+    const passthrough = environmentPassthrough(options.env);
 
     const remaining = sandbox.controls.deadline - performance.now();
     const budget = String(sandbox.controls.limits.wallClockMs);
@@ -336,7 +388,11 @@ export class LocalDockerProvider implements SandboxProvider {
     }
 
     try {
-      const result = await dockerCli(this.#executable, ['exec', sandbox.controls.containerId, ...cmd], { timeoutMs: remaining });
+      const result = await dockerCli(
+        this.#executable,
+        ['exec', ...passthrough.flags, sandbox.controls.containerId, ...cmd],
+        { timeoutMs: remaining, ...(passthrough.values === undefined ? {} : { env: passthrough.values }) },
+      );
       return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: result.durationMs };
     } catch (error) {
       if (!(error instanceof CliTimeout)) throw error;

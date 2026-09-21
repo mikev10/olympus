@@ -35,12 +35,34 @@ export interface SandboxSpec {
 export interface ExecResult { exitCode: number; stdout: string; stderr: string; durationMs: number; }
 
 /**
+ * Per-command options. `env` exists so a credential can reach a process inside
+ * the sandbox without becoming a mount: a secret on the mount table is a file
+ * the agent can read, copy, and exfiltrate for the sandbox's whole life, and a
+ * secret in a prompt is a secret the model has seen.
+ *
+ * Implementations MUST keep the value out of every argument vector, on the
+ * host and in the guest alike, because an argv is world-readable in a process
+ * table. They MUST refuse a name that is not a plain environment-variable name
+ * and a value that is absent, rather than running the command without it: a
+ * command that silently loses its credential fails somewhere later, for a
+ * reason nothing in the evidence explains (I5).
+ */
+export interface ExecOptions {
+  readonly env?: Readonly<Record<string, string>>;
+}
+
+/**
  * I8: every capability claimed here needs an executable conformance assertion
  * (packages/conformance) that fails when the capability is removed.
+ *
+ * A type alias rather than an interface, for the reason `DriverCapabilities`
+ * gives: an interface can be reopened from another compilation unit, and a
+ * capability added that way is invisible to the program that holds the
+ * registry equal to this type's keys.
  */
-export interface SandboxCapabilities {
+export type SandboxCapabilities = {
   computerUse: boolean; gpu: boolean; os: 'linux' | 'macos'; persistent: boolean; remote: boolean;
-}
+};
 
 /**
  * M1 implements a local Docker provider only. Remote workers and pools arrive
@@ -49,7 +71,7 @@ export interface SandboxCapabilities {
 export interface SandboxProvider {
   readonly id: string;
   provision(spec: SandboxSpec): Promise<SandboxHandle>;
-  exec(h: SandboxHandle, cmd: string[]): Promise<ExecResult>;
+  exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
   destroy(h: SandboxHandle): Promise<void>;
   capabilities(): SandboxCapabilities;
 }

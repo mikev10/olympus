@@ -15,6 +15,9 @@ let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'conformance-workspace-'));
   mkdirSync(join(root, 'packages'));
+  // A temp root is a workspace only if it says so: workspacePackages reads the
+  // globs from pnpm-workspace.yaml rather than assuming one level under packages/.
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), ['packages:', '  - packages/*', ''].join('\n'));
 });
 
 afterEach(() => {
