@@ -119,21 +119,22 @@ describe('verifyEcho', () => {
     if (v.kind === 'failed') expect(v.absent).toEqual(['finalSection']);
   });
 
-  it('fails when a bundle predates the nonce convention, even if reply echoes base, head, finalSection', () => {
+  it('returns unverified when a bundle predates the nonce convention, even if reply echoes base, head, finalSection', () => {
     // This was the critical defect: old bundles without nonce would verify when
-    // they should not. Now a missing nonce always returns failed, proving the
-    // bundle cannot be verified without the tail marker.
+    // they should not. `unverified` here is not a reviewer problem (they failed a check),
+    // but an artifact-age problem (the check was never put to them). The distinction
+    // matters for triage: a nonce-less bundle cannot be checked, period.
     const reply = 'BASE reviewed/P10, HEAD 1f485e2, last packages/sandbox/src/mount.ts. Findings:';
     const v = verifyEcho(markersWithoutNonce, reply);
-    expect(v.kind).toBe('failed');
-    if (v.kind === 'failed') expect(v.absent).toEqual(['endNonce']);
+    expect(v.kind).toBe('unverified');
+    if (v.kind === 'unverified') expect(v.absent).toEqual(['endNonce']);
   });
 
-  it('fails when a bundle has no nonce, even if reply echoes nothing', () => {
+  it('returns unverified when a bundle has no nonce, even if reply echoes nothing', () => {
     const reply = 'Here are my findings. 1. foo.ts:12 — unclear.';
     const v = verifyEcho(markersWithoutNonce, reply);
-    expect(v.kind).toBe('failed');
-    if (v.kind === 'failed') expect(v.absent).toEqual(['endNonce']);
+    expect(v.kind).toBe('unverified');
+    if (v.kind === 'unverified') expect(v.absent).toEqual(['endNonce']);
   });
 
   it('handles file content that contains a fake section header after the real final section', () => {

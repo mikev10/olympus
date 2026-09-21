@@ -13,8 +13,16 @@ export interface BundleMarkers {
   readonly endNonce: string | null;
 }
 
+/**
+ * Three outcomes. `verified` when the tail proof is present and echoed. `failed`
+ * when a tail proof is demanded (bundle has nonce) but not satisfied by the reply.
+ * `unverified` when no tail proof could exist (bundle predates the nonce convention)
+ * — not the same as a reviewer failing the check. Only `verified` counts as success;
+ * both `failed` and `unverified` are refusals, but they diagnose different problems.
+ */
 export type EchoVerdict =
   | { readonly kind: 'verified' }
+  | { readonly kind: 'unverified'; readonly absent: readonly string[] }
   | { readonly kind: 'failed'; readonly absent: readonly string[] };
 
 const SECTION_HEADER = /^===== (.+) =====$/;
@@ -64,18 +72,12 @@ function fieldValue(lines: readonly string[], field: string): string {
   return value;
 }
 
-/**
- * Verify the reviewer received the whole bundle. Only a nonce at the tail can
- * prove delivery of the tail; without it, no other marker set is sufficient.
- * Two outcomes: `verified` when all markers are echoed (nonce exists and all
- * four are present), or `failed` when the nonce is absent or any marker is
- * missing. A bundle predating the nonce convention cannot be verified.
- */
 export function verifyEcho(markers: BundleMarkers, replyText: string): EchoVerdict {
-  // No tail proof is possible: this bundle predates the end nonce. Never
-  // `verified`, whatever else the reply echoed.
+  // Bundle predates the nonce convention: no tail proof could exist. This is an
+  // artifact-age problem, not a reviewer problem. The check was never put to this
+  // reviewer; they cannot fail a check that did not apply to them.
   if (markers.endNonce === null) {
-    return { kind: 'failed', absent: ['endNonce'] };
+    return { kind: 'unverified', absent: ['endNonce'] };
   }
   const expected: ReadonlyArray<readonly [string, string]> = [
     ['base', markers.base],
