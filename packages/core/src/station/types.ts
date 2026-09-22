@@ -39,8 +39,12 @@ export interface FailedCheck {
   checkId: string;
   /** The check's own exit code, or null when it produced no result because it could not be started. */
   exitCode: number | null;
-  /** What fails it: a non-zero exit, no result at all, or a suite count that is unknown or below what was expected (I5). */
-  cause: 'exit-code' | 'no-result' | 'suite-count';
+  /**
+   * What fails it: a non-zero exit, no result at all, a suite count that is
+   * unknown or below what was expected (I5), or an expectation the runtime's
+   * comparison found did not hold, whatever the exit code (A-P8-01).
+   */
+  cause: 'exit-code' | 'no-result' | 'suite-count' | 'expectation';
 }
 
 /**

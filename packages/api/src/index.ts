@@ -8,6 +8,7 @@
  * I9: nothing here assumes a terminal, a TTY, or a foreground process. The
  * conformance scan I9.api-never-touches-a-terminal asserts it.
  */
+export * from './gate.js';
 export * from './safety.js';
 export * from './run.js';
 export * from './validate.js';

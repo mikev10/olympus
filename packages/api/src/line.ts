@@ -63,6 +63,7 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, IntegrityViolation } from '@olympus-ai/integrity';
+import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, EvidenceBundle } from '@olympus-ai/vault';
 import type { ComponentGraph, RunOutcome } from './run.js';
@@ -489,7 +490,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
       try {
         // Whitespace split and no shell is the whole command grammar until P6 declares one.
         const exec = await sandbox.exec(handle, check.command.split(/\s+/));
-        results.push({ checkId: check.id, exitCode: exec.exitCode, stdout: exec.stdout, stderr: exec.stderr, suiteCount: null, durationMs: exec.durationMs, startedAt });
+        results.push({ checkId: check.id, exitCode: exec.exitCode, stdout: exec.stdout, stderr: exec.stderr, suiteCount: null, expectation: null, durationMs: exec.durationMs, startedAt });
         unstarted.push(undefined);
       } catch (error) {
         // There is no exit code to record and none is invented; a required check with no result fails the gate.
@@ -530,18 +531,12 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   return undefined;
 }
 
-/** Why a required check fails the gate, in the runtime's terms, or undefined when it does not. */
-function requiredShortfall(check: CheckSpec, result: CheckResult | undefined): FailedCheck | undefined {
-  if (!check.required) return undefined;
-  if (result === undefined) return { checkId: check.id, exitCode: null, cause: 'no-result' };
-  if (result.exitCode !== 0) return { checkId: check.id, exitCode: result.exitCode, cause: 'exit-code' };
-  if (check.expectedSuiteCount !== undefined && (result.suiteCount === null || result.suiteCount < check.expectedSuiteCount)) {
-    return { checkId: check.id, exitCode: result.exitCode, cause: 'suite-count' };
-  }
-  return undefined;
-}
-
-/** The latest evidence bundle per reviewed task, as the runtime's facts only: check ids and exit codes, never the claim beside them. */
+/**
+ * The latest evidence bundle per reviewed task, as the runtime's facts only:
+ * check ids, exit codes, and whether an expectation held, never the claim
+ * beside them. A reviewer shown a behavioral check's exit code alone would
+ * read the product's 0 as a pass the gate did not give (A-P8-01).
+ */
 async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promise<string> {
   const latest = new Map<TaskId, EvidenceBundle>();
   for (const ref of ctx.state.evidenceRefs) {
@@ -549,7 +544,7 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
     if (tasks.includes(bundle.taskId)) latest.set(bundle.taskId, bundle);
   }
   return JSON.stringify(
-    [...latest.values()].map((b) => ({ taskId: b.taskId, checks: b.checks.map(({ checkId, exitCode, suiteCount }) => ({ checkId, exitCode, suiteCount })) })),
+    [...latest.values()].map((b) => ({ taskId: b.taskId, checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })) })),
   );
 }
 

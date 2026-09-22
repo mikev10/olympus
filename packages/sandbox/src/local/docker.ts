@@ -10,6 +10,7 @@
  * one process per call, which is nothing beside pulling an image.
  */
 import { spawn } from 'node:child_process';
+import { writeStdin } from '../stdin.js';
 
 export interface CliResult {
   readonly exitCode: number;
@@ -28,6 +29,8 @@ export interface CliOptions {
    * without appearing in anyone's argv.
    */
   readonly env?: Readonly<Record<string, string>>;
+  /** Written to the `docker` process's standard input, which is then closed. Omitted means none is attached. */
+  readonly stdin?: string;
 }
 
 /** Thrown when a call exceeded its bound. The caller decides what the bound meant. */
@@ -53,7 +56,7 @@ export function dockerCli(executable: string, args: string[], options: CliOption
     const started = performance.now();
     const child = spawn(executable, args, {
       shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
     });
@@ -69,6 +72,15 @@ export function dockerCli(executable: string, args: string[], options: CliOption
       finish();
     };
 
+    if (options.stdin !== undefined) {
+      writeStdin(child.stdin, options.stdin, (error) => {
+        child.kill('SIGKILL');
+        settle(() => {
+          rejectPromise(new Error(`the command's standard input could not be delivered: ${error.message}`));
+        });
+      });
+    }
+
     if (options.timeoutMs !== undefined) {
       timer = setTimeout(() => {
         const elapsed = performance.now() - started;
@@ -79,6 +91,9 @@ export function dockerCli(executable: string, args: string[], options: CliOption
       }, options.timeoutMs);
     }
 
+    // Both are 'pipe' above, so Node always creates them; the conditional stdin entry is what
+    // hides that from spawn's overloads.
+    if (child.stdout === null || child.stderr === null) throw new Error('docker was spawned without output pipes');
     child.stdout.on('data', (chunk: Buffer) => {
       stdout.push(chunk);
     });

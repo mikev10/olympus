@@ -390,8 +390,15 @@ export class LocalDockerProvider implements SandboxProvider {
     try {
       const result = await dockerCli(
         this.#executable,
-        ['exec', ...passthrough.flags, sandbox.controls.containerId, ...cmd],
-        { timeoutMs: remaining, ...(passthrough.values === undefined ? {} : { env: passthrough.values }) },
+        // `--interactive` keeps the container process's stdin attached to the one `docker` is given
+        // (A-P8-02). Without it the bytes would reach the CLI and stop there, and the command would
+        // run as if it had been handed nothing.
+        ['exec', ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
+        {
+          timeoutMs: remaining,
+          ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
+          ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+        },
       );
       return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: result.durationMs };
     } catch (error) {
