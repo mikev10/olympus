@@ -1,3 +1,70 @@
+# External review of P8, codex, 2026-09-21
+
+An adversarial pre-merge review of P8 (Adapters, TypeScript): the vitest and
+jest adapters, coverage and config-change detection, the CLI behavioral
+adapter judged on the host, and the two contract amendments (A-P8-01, A-P8-02),
+with the CI and harness changes that landed between reviews. One of two
+reviews run from the same prompt and bundle; the other is
+`2026-09-21-P8-adapters-review-gemini.md`. Both are triaged in
+`2026-09-21-P8-adapters-triage.md`, which cites this review's findings as
+`codex-1` to `codex-15`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: config home `[auth.json]`, working directory `[]`. Exit 0, not
+  timed out, 164.8 s. Ingestion `complete`: 129,505 input tokens against a
+  floor of 81,757. Integrity `verified`: the reply echoes every required bundle
+  marker. Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `98993e73d4b4846985ca2b2420a9a8ec51349884b27f667277db1b933444cac7`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini raised the same mechanism as codex-2
+  (gemini-2: the report decides the coverage denominator) and as codex-8
+  (gemini-3: `test['skip']` and other forms hide a marker). Related but not
+  the same mechanism: codex-7 and gemini-4 (a config's runtime effect differs
+  from its static reading, by different constructions), and codex-1 and
+  gemini-1 (the host reads outside the repository, through an ancestor link
+  and through a `..` glob respectively). Every other finding here codex raised
+  alone.
+- **Date:** 2026-09-21 (run started 2026-09-22T02:15:10Z UTC).
+- **Bundle:** `2026-09-21-P8-adapters-review-bundle.txt`, SHA-256
+  `193da6d987db4d6f2ecb888114ef99a825013064419bdcf1a1b981328f218468` (the
+  manifest's `bundleSha256`), base `6d32e07` (`reviewed/P5`), head `bf8cb44`
+  (P8: Adapters (TypeScript)). It held the full contents of 53 of the 56 files
+  changed in that range: all source, tests, changesets, the CI workflow, and
+  the lockfile. It excluded `docs/decisions.md`, `docs/plan/DECOMPOSITION.md`,
+  and `docs/plan/F1-spine.md`, as the prompt states ("no design documents").
+  Prompt: `2026-09-21-P8-adapters-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated that it had no prior
+  project context, that it performed no external lookups, and that local tool
+  execution was blocked, so it ran no tests and did not verify the bundle's
+  hash itself. This is a self-report and cannot be independently verified,
+  although the read-only sandbox and the empty working directory are recorded
+  in the manifest.
+- **Coverage, and any gap:** all seven numbered items were answered. Items 1,
+  3, 4, and 5 are covered by findings 1–15. Item 2, tautological checks: it
+  found no wholly tautological test, but found several whose titles claim more
+  than they prove (the linked-directory fixture, the outcome type, the
+  host-execution scan). Item 6, sound mechanisms: the host-side CLI judge, the
+  gate's `requiredShortfall`, the adapter-set L3 refusal, the in-process line
+  diff, static config parsing as a no-execution measure, leaf-link and UTF-8
+  refusal, size checks, the CI credential change, and the harness permission
+  change. Item 7, framing: the framing is right, but the guarantee needs a
+  declared supported subset, and the acceptance question should be "does every
+  construct the adapter cannot establish as safe become an explicit refusal?"
+  Every finding carries the label "factually wrong". None is labelled unclear
+  or a tradeoff.
+- **Citations:** line numbers are positions within the bundle's file sections,
+  as the reviewer says, and are treated as hints. Each finding was located by
+  the construct it describes. Codex's numbers fell on or within a few lines of
+  the construct.
+
+---
+
 BASE: reviewed/P5  
 HEAD: bf8cb44  
 pnpm-lock.yaml  

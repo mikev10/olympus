@@ -232,11 +232,15 @@ export function stringsOf(node: ts.Expression, scope: ModuleScope, label: string
 
 /**
  * A property access on an imported binding whose value this package knows
- * for the framework version in use, e.g. `configDefaults.exclude`. Every
- * reference to the binding in the module must be a plain read — spread into
- * an array, or the value of a property or an element — because a reference
- * that calls a method on it, assigns through it, or passes it to a function
- * is a place it could have been changed.
+ * for the framework version in use, e.g. `configDefaults.exclude`.
+ *
+ * A known value is a live array the framework also holds, so what matters is
+ * whether this module can still reach it when the framework reads it. One
+ * reference is the read being resolved, and there is nothing else to change
+ * it. More than one, and every reference has to be a copy — a spread — since
+ * anything else hands the array itself to a name that can be pushed to:
+ * `const holder = { list: configDefaults.exclude }` reads plainly and mutates
+ * the framework's own defaults through `holder.list`.
  */
 function knownValue(node: ts.Expression, scope: ModuleScope): readonly string[] | Unresolvable | undefined {
   const path: string[] = [];
@@ -250,21 +254,22 @@ function knownValue(node: ts.Expression, scope: ModuleScope): readonly string[] 
   if (binding === undefined) return undefined;
   const resolve = scope.known(binding.module, binding.imported);
   if (resolve === undefined) return undefined;
-  const touched = (scope.references.get(current.text) ?? []).find((reference) => !isPlainRead(reference));
+  const references = scope.references.get(current.text) ?? [];
+  const touched = references.length <= 1 ? undefined : references.find((reference) => !isCopy(reference));
   if (touched !== undefined) {
-    return new Unresolvable(`\`${current.text}\` is used at ${where(scope, touched)} in a way that could change it before it is read`);
+    return new Unresolvable(
+      `\`${current.text}\` is read at ${where(scope, touched)} without copying it, and is read more than once in the config, `
+      + 'so one of those references could change the value another reads; spread it instead',
+    );
   }
   return resolve(path) ?? new Unresolvable(`\`${[current.text, ...path].join('.')}\` is not a value this package knows`);
 }
 
-/** A reference read and never written, called, or handed to anything: `x.y` spread into an array or used as a value. */
-function isPlainRead(reference: ts.Identifier): boolean {
+/** A reference that takes a copy rather than the value itself: `[...configDefaults.exclude]`. */
+function isCopy(reference: ts.Identifier): boolean {
   let outer: ts.Node = reference;
   while (ts.isPropertyAccessExpression(outer.parent) && outer.parent.expression === outer) outer = outer.parent;
-  const parent = outer.parent;
-  return ts.isSpreadElement(parent)
-    || ts.isArrayLiteralExpression(parent)
-    || (ts.isPropertyAssignment(parent) && parent.initializer === outer);
+  return ts.isSpreadElement(outer.parent) || ts.isSpreadAssignment(outer.parent);
 }
 
 /** Whether a call's callee is the named export of one of `modules`. */
@@ -283,6 +288,7 @@ export function isCallTo(node: ts.Expression, scope: ModuleScope, name: string, 
  */
 export function exportedConfig(scope: ModuleScope, label: string): ts.Expression | Unresolvable {
   const found: ts.Expression[] = [];
+  let assignments = 0;
   for (const statement of scope.sf.statements) {
     if (ts.isExportAssignment(statement) && statement.isExportEquals !== true) found.push(statement.expression);
     if (ts.isExpressionStatement(statement) && ts.isBinaryExpression(statement.expression)
@@ -291,11 +297,22 @@ export function exportedConfig(scope: ModuleScope, label: string): ts.Expression
       if (ts.isPropertyAccessExpression(target) && ts.isIdentifier(target.expression)
         && target.expression.text === 'module' && target.name.text === 'exports') {
         found.push(statement.expression.right);
+        assignments++;
       }
     }
   }
   const [first, ...rest] = found;
   if (first === undefined) return new Unresolvable(`${label} has no \`export default\` and no \`module.exports =\``);
   if (rest.length > 0) return new Unresolvable(`${label} exports its config ${String(found.length)} times`);
+  /*
+   * `module.exports = { testMatch: [...] }` followed by `module.exports.testMatch = [...]` exports
+   * the second value and states the first. Every mention of `module` or `exports` beyond the one
+   * assignment found above is a place the exported config is something other than what it was
+   * assigned, so the config is not one that can be read from its source.
+   */
+  const mentions = (scope.references.get('module')?.length ?? 0) + (scope.references.get('exports')?.length ?? 0);
+  if (mentions > assignments) {
+    return new Unresolvable(`${label} refers to \`module\` or \`exports\` outside its single export assignment, which could change the config after it is set`);
+  }
   return unwrap(first);
 }

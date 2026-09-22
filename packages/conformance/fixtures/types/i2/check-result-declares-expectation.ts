@@ -22,6 +22,14 @@ export const none: CheckResult = { ...result, expectation: null };
 export const optional: CheckResult = { ...result, expectation: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type 'ExpectationOutcome | null'
 
 export const held: ExpectationOutcome = { held: true };
-export const heldWithMismatches: ExpectationOutcome = { held: true, mismatches: [] }; // expect-error TS2353: 'mismatches' does not exist
+
+// The same disagreement, assembled before it is annotated: excess properties are checked on a
+// fresh literal only, so the arms have to exclude the other's evidence rather than merely omit it.
+const assembled = { held: true as const, mismatches: [{ field: 'stdout', expected: 'a', observed: 'b' }] };
+export const indirect: ExpectationOutcome = assembled; // expect-error TS2322: Types of property 'mismatches' are incompatible
+export function emptied(outcome: ExpectationOutcome): void {
+  if (!outcome.held) outcome.mismatches.pop(); // expect-error TS2339: Property 'pop' does not exist on type 'readonly [ExpectationMismatch, ...ExpectationMismatch[]]'
+}
+export const heldWithMismatches: ExpectationOutcome = { held: true, mismatches: [] }; // expect-error TS2322: Type 'never[]' is not assignable to type 'readonly [ExpectationMismatch, ...ExpectationMismatch[]]'
 export const failedWithNone: ExpectationOutcome = { held: false, mismatches: [] }; // expect-error TS2322: Source has 0 element(s) but target requires 1
 export const failed: ExpectationOutcome = { held: false, mismatches: [{ field: 'stdout', expected: 'a', observed: 'b' }] };

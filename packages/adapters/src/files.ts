@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import { constants, type Dirent } from 'node:fs';
 import { lstat, open, readdir, readlink, type FileHandle } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { describe, refuse } from './refusal.js';
 
 /** The cap on one source, test, or config file the adapters parse. */
@@ -40,6 +40,38 @@ export function toPosix(path: string): string {
   return sep === '/' ? path : path.split(sep).join('/');
 }
 
+/**
+ * Refuses when any component between `root` and `path` is a link or is not a
+ * directory. `lstat` and `O_NOFOLLOW` protect the last component of a path
+ * and say nothing about its ancestors, so a config naming `linked/tests`,
+ * where `linked` is a link out of the repository, otherwise walks a tree the
+ * repository does not contain.
+ *
+ * `root` itself is the runtime's own path and is not inspected: the runtime
+ * may sit under a system link (macOS's `/var`), and what is checked here is
+ * only what the repository under analysis chose. A component that does not
+ * exist ends the walk, because absence is the caller's to interpret.
+ */
+export async function assertUnlinkedDescent(root: string, path: string, label: string): Promise<void> {
+  const offset = relative(resolve(root), resolve(path));
+  if (offset === '' || offset.startsWith('..') || isAbsolute(offset)) return;
+  let current = resolve(root);
+  for (const part of offset.split(sep)) {
+    current = join(current, part);
+    let entry;
+    try {
+      entry = await lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      refuse('unsafe-path', `${label}: ${current} cannot be inspected: ${describe(error)}`);
+    }
+    if (entry.isSymbolicLink()) {
+      refuse('unsafe-path', `${label} reaches ${path} through ${current}, a symbolic link, which is never followed: it can name any directory on the host`);
+    }
+    if (!entry.isDirectory()) refuse('unsafe-path', `${label} reaches ${path} through ${current}, which is not a directory`);
+  }
+}
+
 async function openRegular(path: string): Promise<FileHandle> {
   let link;
   try {
@@ -59,6 +91,31 @@ async function openRegular(path: string): Promise<FileHandle> {
   }
 }
 
+/** What one `read` asks for, so a file that grows while it is read costs this much more and no more. */
+const READ_CHUNK = 1024 * 1024;
+
+/**
+ * At most `capBytes` bytes of an open file, read in bounded steps. The cap is
+ * enforced while the bytes arrive rather than after they have all been
+ * buffered: `readFile` would allocate whatever size its own `fstat` reported,
+ * which is not the size the caller checked and is not bounded by anything the
+ * caller decided.
+ */
+async function readBounded(handle: FileHandle, path: string, capBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK, capBytes + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+    if (bytesRead === 0) return Buffer.concat(chunks, total);
+    total += bytesRead;
+    if (total > capBytes) {
+      refuse('too-large', `${path} is over the ${String(capBytes)}-byte cap for a file the adapters read whole`);
+    }
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+}
+
 /**
  * The file's text, decoded as UTF-8 with no replacement: a byte sequence that
  * is not UTF-8 is refused rather than parsed as something it is not.
@@ -71,9 +128,8 @@ export async function readRegularFile(path: string, capBytes: number): Promise<s
     if (stats.size > capBytes) {
       refuse('too-large', `${path} is ${String(stats.size)} bytes, over the ${String(capBytes)}-byte cap for a file the adapters read whole`);
     }
-    const bytes = await handle.readFile();
-    // The file can grow between the stat and the read.
-    if (bytes.length > capBytes) refuse('too-large', `${path} grew past the ${String(capBytes)}-byte cap while it was read`);
+    // The file can grow between the stat and the read, so the read carries the cap too.
+    const bytes = await readBounded(handle, path, capBytes);
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
@@ -151,7 +207,7 @@ export interface TreeChange {
   readonly change: ChangeKind;
 }
 
-async function sameEntry(before: TreeEntry, after: TreeEntry): Promise<boolean> {
+async function sameEntry(path: string, before: TreeEntry, after: TreeEntry): Promise<boolean> {
   if (before.kind !== after.kind) return false;
   switch (before.kind) {
     case 'symlink':
@@ -159,8 +215,10 @@ async function sameEntry(before: TreeEntry, after: TreeEntry): Promise<boolean> 
     case 'file':
       return (await hashRegularFile(before.absolute)) === (await hashRegularFile(after.absolute));
     case 'other':
-      // Never opened: a FIFO would block the read forever. Presence on both sides is all that is compared.
-      return true;
+      // A FIFO, a socket, or a device at a selected path: never opened, because the read would
+      // never end, and never called unchanged either. Two unreadable entries are not evidence of
+      // equality, and an input that cannot be read is a refusal (I5).
+      return refuse('unsafe-path', `${path} is a special file in both trees, which cannot be read and so cannot be compared`);
   }
 }
 
@@ -184,7 +242,7 @@ export async function diffTrees(
     const now = after.get(path);
     if (was === undefined) changes.push({ path, change: 'added' });
     else if (now === undefined) changes.push({ path, change: 'removed' });
-    else if (!(await sameEntry(was, now))) changes.push({ path, change: 'modified' });
+    else if (!(await sameEntry(path, was, now))) changes.push({ path, change: 'modified' });
   }
   return changes;
 }

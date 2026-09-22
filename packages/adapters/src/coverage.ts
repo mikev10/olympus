@@ -73,18 +73,35 @@ function lineHits(key: string, entry: unknown): LineHits {
   return lines;
 }
 
-/** The lines on which a statement istanbul would instrument starts, for a file the report does not mention. */
+/**
+ * The lines on which something istanbul would instrument starts, read from
+ * the source on the host.
+ *
+ * It follows istanbul-lib-instrument's own visitor rather than "a TypeScript
+ * statement starts here", because the two differ in three places that decide
+ * whether a changed line is an obligation. A variable declaration carries no
+ * counter of its own: the counter goes on each declarator's initialiser,
+ * which is a line of its own where the value is written under the name. An
+ * arrow function with an expression body has that body counted, since the
+ * instrumenter rewrites it into a block with a return. A class property's
+ * initialiser is counted the same way.
+ */
 function executableLines(text: string, fileName: string): Set<number> {
   const sf = parseModule(text, fileName);
   const lines = new Set<number>();
+  const add = (node: ts.Node): void => {
+    lines.add(sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1);
+  };
   const visit = (node: ts.Node): void => {
     const typeOnly = ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
       || ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node) || ts.isExportDeclaration(node)
       || (ts.isModuleDeclaration(node) && node.modifiers?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword) === true);
     if (typeOnly) return;
     const counted = ts.isStatement(node) && !ts.isBlock(node) && !ts.isEmptyStatement(node)
-      && !ts.isFunctionDeclaration(node) && !ts.isClassDeclaration(node);
-    if (counted) lines.add(sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1);
+      && !ts.isFunctionDeclaration(node) && !ts.isClassDeclaration(node) && !ts.isVariableStatement(node);
+    if (counted) add(node);
+    if ((ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) && node.initializer !== undefined) add(node.initializer);
+    if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) add(node.body);
     node.forEachChild(visit);
   };
   visit(sf);
@@ -141,7 +158,13 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
       const before = change === 'added' ? '' : await readRegularFile(join(base, path), SOURCE_FILE_CAP);
       const changed = changedLines(change === 'added' ? [] : splitLines(before), splitLines(after));
       const hits = report.get(path);
-      const executable = hits === undefined ? executableLines(after, path) : new Set(hits.keys());
+      // The report may add obligations and never remove one. Taking the denominator from the
+      // report alone lets the file being judged decide what counts: an entry with an empty
+      // statement map, or one an `istanbul ignore` comment thinned out, would leave nothing to
+      // cover and read as covered in full. The repository's own exclusions are not honoured
+      // (D-P8-09), and an ignore comment is one of them.
+      const executable = executableLines(after, path);
+      for (const line of hits?.keys() ?? []) executable.add(line);
       for (const line of changed) {
         if (!executable.has(line)) continue;
         total++;

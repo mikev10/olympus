@@ -61,19 +61,48 @@ describe.each(adapters)('%s', (_, adapter) => {
     ['a dropped message', "expect(f).toThrow('boom');", 'expect(f).toThrow();'],
     ['a strict assert loosened', 'assert.strictEqual(a, b);', 'assert.equal(a, b);'],
     ['a chai equality turned into existence', 'expect(x).to.equal(1);', 'expect(x).to.exist;'],
+    // A negation removed contradicts what it replaced; it does not imply it.
+    ['a negation removed', 'expect(x).not.toBe(5);', 'expect(x).toBe(5);'],
+    ['a negated matcher loosened', 'expect(x).not.toStrictEqual(y);', 'expect(x).not.toEqual(y);'],
+    // An equality against a value the old check ruled out is not the old check made stricter.
+    ['truthiness pinned to a falsy value', 'expect(x).toBeTruthy();', 'expect(x).toBe(0);'],
+    ['definedness pinned to undefined', 'expect(x).toBeDefined();', 'expect(x).toBe(undefined);'],
+    ['existence pinned to a value nothing can read', 'expect(x).toBeTruthy();', 'expect(x).toBe(later);'],
+    ['an instance check turned into an equality', 'expect(x).toBeInstanceOf(Error);', 'expect(x).toBe(e);'],
   ])('%s is weakened', async (_, before, after) => {
     const delta = await compare(adapter, before, after);
     expect(delta.weakened).toHaveLength(1);
   });
 
+  test('narrowing the tolerance of a negated matcher lets more values through, and is reported', async () => {
+    const delta = await compare(adapter, 'expect(r).not.toBeCloseTo(0.3, 2);', 'expect(r).not.toBeCloseTo(0.3, 5);');
+    expect(delta.toleranceWidened).toEqual([expect.objectContaining({ tolerance: 0.000005 })]);
+  });
+
   test.each([
     ['existence turned into equality', 'expect(x).toBeDefined();', 'expect(x).toBe(5);'],
+    ['truthiness pinned to a truthy value', 'expect(x).toBeTruthy();', "expect(x).toStrictEqual('ok');"],
     ['a message added', 'expect(f).toThrow();', "expect(f).toThrow('boom');"],
     ['stricter equality', 'expect(x).toEqual(y);', 'expect(x).toStrictEqual(y);'],
-    ['a negation removed', 'expect(x).not.toBe(5);', 'expect(x).toBe(5);'],
     ['a tolerance narrowed', 'expect(r).toBeCloseTo(0.3, 2);', 'expect(r).toBeCloseTo(0.3, 5);'],
   ])('%s is not reported', async (_, before, after) => {
     expect(await compare(adapter, before, after)).toEqual({ weakened: [], removed: [], toleranceWidened: [] });
+  });
+
+  test('a string literal keeps the spaces inside it: two expectations, not one reformatted', async () => {
+    const delta = await compare(adapter, "expect(out).toBe('a  b');", "expect(out).toBe('a b');");
+    expect(delta.weakened).toHaveLength(1);
+  });
+
+  test("a subject's type argument is part of what it asserts", async () => {
+    const delta = await compare(adapter, 'expectTypeOf<Actual>().toEqualTypeOf<Expected>();', 'expectTypeOf<any>().toEqualTypeOf<Expected>();');
+    expect([...delta.weakened, ...delta.removed]).toHaveLength(1);
+  });
+
+  test('a standalone assertType is an assertion, and removing it is a removal', async () => {
+    expect((await parsed(adapter, 'assertType<Expected>(value);')).map((a) => a.operator)).toEqual(['assertType']);
+    const delta = await compare(adapter, 'assertType<Expected>(value);', '');
+    expect(delta.removed).toHaveLength(1);
   });
 
   test('expect.assertions and the chai property forms are assertions too', async () => {
@@ -125,5 +154,44 @@ describe.each(adapters)('%s', (_, adapter) => {
       'ctx.skip: context',
       'skip: destructured',
     ]);
+  });
+
+  test('a declarer renamed by its import, reached through a key, or wrapped in parentheses still carries its markers', async () => {
+    const root = await repo({
+      'a.test.ts': [
+        "import { test as check, describe as group } from 'vitest';",
+        "check.only('focused', () => {});",
+        "test['skip']('by key', () => {});",
+        "(test).skip('parenthesised', () => {});",
+        "group.skip('renamed suite', () => {});",
+        "test('renamed context', ({ skip: omit }) => { omit(); });",
+      ].join('\n'),
+    });
+    expect(await adapter.detectSkipMarkers(join(root, 'a.test.ts'))).toEqual([
+      'test.only: focused',
+      'test.skip: by key',
+      'test.skip: parenthesised',
+      'describe.skip: renamed suite',
+      'omit: renamed context',
+    ]);
+  });
+
+  test('a fixture extended into a new binding is a declarer under its new name', async () => {
+    const root = await repo({
+      'a.test.ts': [
+        "import { test as base } from 'vitest';",
+        'const myTest = base.extend({ user: async ({}, use) => { await use(1); } });',
+        "myTest.skip('fixture test', () => {});",
+      ].join('\n'),
+    });
+    expect(await adapter.detectSkipMarkers(join(root, 'a.test.ts'))).toEqual(['test.extend({ user: async ({}, use) => { await use(1); } }).skip: fixture test']);
+  });
+
+  test.each([
+    ['handed to another function', "register(test);\ntest('x', () => {});"],
+    ['selected by a computed key', "test[marker]('x', () => {});"],
+  ])('a declarer %s is refused, never reported as a file with no markers', async (_, body) => {
+    const root = await repo({ 'a.test.ts': body });
+    await expect(adapter.detectSkipMarkers(join(root, 'a.test.ts'))).rejects.toThrow(AdapterRefusal);
   });
 });

@@ -2,7 +2,7 @@ import { mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunId } from '@olympus-ai/core';
 import type { LockEntry, LockVerdict } from '@olympus-ai/vault';
-import { compileError, runtime } from '../kit/assert.js';
+import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { STATION_LOCKS_THE_ADMITTED_ARTIFACT, TRANSITION_REVERIFIES_LOCKS } from './line-assertions.js';
 import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
@@ -198,5 +198,23 @@ export const I3: InvariantEntry = {
     TRANSITION_REVERIFIES_LOCKS,
     STATION_LOCKS_THE_ADMITTED_ARTIFACT,
   ],
-  pending: [],
+  pending: [
+    pending({
+      id: 'I3.coverage-report-is-not-writable-by-the-suite',
+      owner: 'P6',
+      reason:
+        'Changed-line coverage is read from the istanbul report a check run writes, and that run executes the '
+        + "repository's own code: its tests, and whatever its package scripts do around them. So the artifact the "
+        + 'coverage number is derived from is one the agent being judged can write. P8 closed the half of this that '
+        + 'parsing can close — the report can no longer decide which lines count, only which of them ran, because '
+        + "the denominator is now the union of the report's statements and the executable lines read from the head "
+        + 'tree on the host (external review, codex-2 and gemini-2). The other half cannot be closed by reading the '
+        + 'report more carefully: a hit count claiming a line ran cannot be told apart from one that did, by anyone '
+        + 'who was not there when it ran. Closing it means the run that produces the report, which is P6: coverage '
+        + 'collected where the suite cannot rewrite it afterwards, or counted from an instrumentation the repository '
+        + 'does not supply, with an assertion that a forged report does not raise the number. Until then a coverage '
+        + 'figure is evidence about a suite that cooperated, not proof against one that did not. Recorded by P8 as '
+        + 'D-P8-14.',
+    }),
+  ],
 };

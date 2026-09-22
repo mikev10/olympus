@@ -111,10 +111,26 @@ export const ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST: LocalAssertion = runtime({
           const loads = callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === 'require');
           const first = node.arguments[0];
           if (loads && (first === undefined || !ts.isStringLiteral(first))) hits.push(`${at()} loads a module by a computed name`);
-          if (ts.isIdentifier(callee) && (callee.text === 'eval' || callee.text === 'Function')) hits.push(`${at()} calls ${callee.text}`);
         }
-        if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
-          hits.push(`${at()} constructs a Function`);
+        /*
+         * Every mention of `eval` or `Function`, not only a direct call of one. `eval` reached
+         * under another name — `globalThis['eval']`, `(0, eval)`, a binding taken from either —
+         * runs exactly the same code, so matching the shape of the call is matching a spelling
+         * rather than the capability. A reference is enough to report: nothing in these adapters
+         * has any use for one.
+         */
+        if (ts.isIdentifier(node) && (node.text === 'eval' || node.text === 'Function')
+          && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) {
+          hits.push(`${at()} refers to ${node.text}`);
+        }
+        if (ts.isElementAccessExpression(node)) {
+          const key = node.argumentExpression;
+          if ((ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && (key.text === 'eval' || key.text === 'Function')) {
+            hits.push(`${at()} reaches ${key.text} by name`);
+          }
+        }
+        if (ts.isPropertyAccessExpression(node) && (node.name.text === 'eval' || node.name.text === 'Function')) {
+          hits.push(`${at()} reaches ${node.name.text} as a property`);
         }
       });
     }

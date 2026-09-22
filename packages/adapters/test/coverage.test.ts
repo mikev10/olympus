@@ -3,6 +3,7 @@
  * change detection: both compare two trees an agent could have written.
  */
 import { rm } from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { AdapterRefusal, ConfigManifestAdapter, IstanbulCoverageAdapter, VitestAdapter } from '../src/index.js';
@@ -28,6 +29,13 @@ async function trees(before: Record<string, string>, after: Record<string, strin
   return { base: await repo({ ...manifest, ...before }), head: await repo({ ...manifest, ...after }) };
 }
 
+/** A unix socket at `path`: a special file, made without spawning anything. */
+async function listenAt(path: string): Promise<Server> {
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(path, done));
+  return server;
+}
+
 async function adapterFor(report: unknown): Promise<IstanbulCoverageAdapter> {
   const dir = await repo({ 'coverage-final.json': typeof report === 'string' ? report : JSON.stringify(report) });
   return new IstanbulCoverageAdapter({ report: join(dir, 'coverage-final.json'), sourceRoot: SOURCE_ROOT, tests: new VitestAdapter(4) });
@@ -51,6 +59,32 @@ describe('changedLineCoverage', () => {
     );
     const adapter = await adapterFor({ '/workspace/src/a.ts': entry('/workspace/src/a.ts', { 1: 1 }) });
     expect(await adapter.changedLineCoverage(base, head)).toBe(0);
+  });
+
+  test('a report that states no statement for a changed file does not thereby excuse it', async () => {
+    const { base, head } = await trees({ 'src/a.ts': 'export const a = 1;\n' }, { 'src/a.ts': 'export const a = 2;\n' });
+    // The entry exists and its statement map is empty, which is what an agent writes to be judged
+    // against nothing, and what `istanbul ignore` leaves behind.
+    const adapter = await adapterFor({ '/workspace/src/a.ts': { path: '/workspace/src/a.ts', statementMap: {}, s: {}, fnMap: {}, f: {}, branchMap: {}, b: {} } });
+    expect(await adapter.changedLineCoverage(base, head)).toBe(0);
+  });
+
+  test('a line the report omits is still an obligation, and only a recorded hit covers it', async () => {
+    const { base, head } = await trees(
+      { 'src/a.ts': 'export const a = 1;\nexport const b = 1;\n' },
+      { 'src/a.ts': 'export const a = 2;\nexport const b = 2;\n' },
+    );
+    // The report states line 1 and ran it; line 2 is missing from the statement map, as an
+    // `istanbul ignore` comment would leave it.
+    const adapter = await adapterFor({ '/workspace/src/a.ts': entry('/workspace/src/a.ts', { 1: 1 }) });
+    expect(await adapter.changedLineCoverage(base, head)).toBe(0.5);
+  });
+
+  test("an arrow's expression body is executable, where the report mentions the file and where it does not", async () => {
+    const { base, head } = await trees({ 'src/a.ts': 'export const f = () =>\n  1;\n' }, { 'src/a.ts': 'export const f = () =>\n  2;\n' });
+    expect(await (await adapterFor({})).changedLineCoverage(base, head)).toBe(0);
+    const ran = await adapterFor({ '/workspace/src/a.ts': entry('/workspace/src/a.ts', { 1: 1, 2: 3 }) });
+    expect(await ran.changedLineCoverage(base, head)).toBe(1);
   });
 
   test('test files, config files, and declaration files are not lines the suite must cover', async () => {
@@ -105,6 +139,23 @@ describe('detectConfigChanges', () => {
       'src/a.ts': 'const a = 2;',
     });
     expect(await new ConfigManifestAdapter().detectConfigChanges(base, head)).toEqual(['jest.config.js', 'package.json', 'tsconfig.json']);
+  });
+
+  // A socket is the one special file a test can make without spawning anything, and Windows has
+  // no such entry in its filesystem at all. CI runs on Linux, where this runs.
+  describe.runIf(process.platform !== 'win32')('special files', () => {
+    test('a special file at a config path is refused, never called unchanged', async () => {
+      const base = await repo({ 'package.json': '{}' });
+      const head = await repo({ 'package.json': '{}' });
+      const servers = await Promise.all([listenAt(join(base, '.npmrc')), listenAt(join(head, '.npmrc'))]);
+      try {
+        const error = await new ConfigManifestAdapter().detectConfigChanges(base, head).then(() => undefined, (e: unknown) => e);
+        expect(error).toBeInstanceOf(AdapterRefusal);
+        expect((error as AdapterRefusal).reason).toBe('unsafe-path');
+      } finally {
+        for (const server of servers) server.close();
+      }
+    });
   });
 
   test('a config file rewritten to the same bytes is unchanged', async () => {

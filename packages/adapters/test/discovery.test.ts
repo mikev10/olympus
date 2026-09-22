@@ -3,12 +3,13 @@
  * anything the repository holds, and refused wherever the config cannot be
  * read that way.
  */
+import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { AdapterRefusal, JestAdapter, VitestAdapter } from '../src/index.js';
 import { assertLinearPattern, globsToMatcher } from '../src/discovery.js';
-import { cleanup, linkDirectory, pkg, repo } from './repo.js';
+import { cleanup, linkDirectory, pkg, repo, write } from './repo.js';
 
 afterEach(cleanup);
 
@@ -95,7 +96,8 @@ describe('vitest', () => {
 
   test.each([
     ['a computed include', "export default { test: { include: process.env.CI ? ['a'] : ['b'] } };", 'unresolvable-config'],
-    ['a spread of an unknown object', 'import base from "./base"; export default { ...base };', 'unresolvable-config'],
+    // A package import, so what is refused is the spread and not the import.
+    ['a spread of an unknown object', 'import base from "some-preset"; export default { ...base };', 'unresolvable-config'],
     ['mergeConfig', "import { mergeConfig } from 'vitest/config'; export default mergeConfig({}, {});", 'unresolvable-config'],
     ['a block-bodied factory', "import { defineConfig } from 'vitest/config'; export default defineConfig(() => { return {}; });", 'unresolvable-config'],
     ['a binding changed after it is declared', "const c = { test: { include: ['a'] } }; c.test.include.push('b'); export default c;", 'unresolvable-config'],
@@ -128,6 +130,72 @@ describe('vitest', () => {
     const root = await repo({ 'package.json': pkg({ vitest: '4' }), 'a.test.ts': '' });
     await linkDirectory(outside, join(root, 'linked'));
     expect(names(root, await vitest.enumerateSuites(root))).toEqual(['a.test.ts']);
+  });
+
+  test('test.dir is refused when it reaches its directory through a link, which lexical containment accepts', async () => {
+    const outside = await repo({ 'tests/escape.test.ts': '' });
+    const root = await repo({ 'package.json': pkg({ vitest: '4' }), 'vitest.config.ts': "export default { test: { dir: 'linked/tests' } };\n" });
+    await linkDirectory(outside, join(root, 'linked'));
+    expect((await refusal(vitest.enumerateSuites(root))).reason).toBe('unsafe-path');
+  });
+
+  test('a config that mutates its own export after setting it is refused, not read as the first value', async () => {
+    const root = await repo({
+      'package.json': pkg({ jest: '30' }),
+      'jest.config.js': "module.exports = { testMatch: ['**/*.test.ts'] };\nmodule.exports.testMatch = ['**/*.check.ts'];\n",
+      'a.test.ts': '',
+      'a.check.ts': '',
+    });
+    expect((await refusal(jest.enumerateSuites(root))).reason).toBe('unresolvable-config');
+  });
+
+  test('a known default read twice without copying is refused: one reference can change what the other reads', async () => {
+    const root = await repo({
+      'package.json': pkg({ vitest: '4' }),
+      'vitest.config.ts': [
+        "import { configDefaults } from 'vitest/config';",
+        'const holder = { list: configDefaults.exclude };',
+        "holder.list.push('**/*');",
+        'export default { test: { exclude: [...configDefaults.exclude] } };',
+      ].join('\n'),
+      'a.test.ts': '',
+    });
+    expect((await refusal(vitest.enumerateSuites(root))).reason).toBe('unresolvable-config');
+  });
+
+  test.each([
+    ['a side-effect import of repository code', "import './mutator.js';\nexport default {};"],
+    ['a named import of repository code', "import { x } from './helpers.js';\nexport default { test: {} };"],
+    ['a require of repository code', "const x = require('./helpers.js');\nmodule.exports = {};"],
+  ])('%s in a config is refused: it runs when the framework loads the config', async (_, config) => {
+    const root = await repo({ 'package.json': pkg({ vitest: '4' }), 'vitest.config.ts': config, 'a.test.ts': '' });
+    expect((await refusal(vitest.enumerateSuites(root))).reason).toBe('unsupported-feature');
+  });
+
+  test('a type-only import, and a package import, are left alone', async () => {
+    const root = await repo({
+      'package.json': pkg({ vitest: '4' }),
+      'vitest.config.ts': [
+        "import type { UserConfig } from 'vitest/config';",
+        "import { configDefaults } from 'vitest/config';",
+        "export default { test: { exclude: [...configDefaults.exclude], include: ['**/*.spec.ts'] } } satisfies UserConfig;",
+      ].join('\n'),
+      'a.spec.ts': '',
+      'a.test.ts': '',
+    });
+    expect(names(root, await vitest.enumerateSuites(root))).toEqual(['a.spec.ts']);
+  });
+
+  test.each([
+    ['a pattern that climbs out of the repository', "['../secret/**/*.test.ts']"],
+    ['an absolute pattern', "['/etc/**/*.test.ts']"],
+  ])('%s is refused rather than globbed', async (_, include) => {
+    const root = await repo({
+      'package.json': pkg({ vitest: '4' }),
+      'vitest.config.ts': `export default { test: { include: ${include} } };\n`,
+      'a.test.ts': '',
+    });
+    expect((await refusal(vitest.enumerateSuites(root))).reason).toBe('unresolvable-config');
   });
 });
 
@@ -191,11 +259,51 @@ describe('jest', () => {
     ['both testMatch and testRegex', { 'jest.config.json': '{"testMatch": ["**/*.t.ts"], "testRegex": "x"}' }, 'unresolvable-config'],
     ['an async config factory', { 'jest.config.js': 'module.exports = async () => ({});' }, 'unresolvable-config'],
     ['symlinks enabled', { 'jest.config.json': '{"haste": {"enableSymlinks": true}}' }, 'unsupported-feature'],
-    ['a pattern that can take exponential time', { 'jest.config.json': '{"testRegex": "(a+)+$"}' }, 'unsupported-feature'],
+    ['a pattern that cannot be matched in one pass', { 'jest.config.json': '{"testRegex": "(a)\\\\1$"}' }, 'unsupported-feature'],
     ['roots outside the repository', { 'jest.config.json': '{"roots": ["<rootDir>/.."]}' }, 'unresolvable-config'],
   ])('%s is refused', async (_, files, reason) => {
     const root = await repo({ 'package.json': pkg({ jest: '30' }), 'a.test.ts': '', ...files });
     expect((await refusal(jest.enumerateSuites(root))).reason).toBe(reason);
+  });
+
+  test('a testRegex that would backtrack for minutes enumerates at once, against a path chosen to provoke it', async () => {
+    const root = await repo({
+      'package.json': pkg({ jest: '30' }, { jest: { testRegex: 'a*a*a*a*a*a*a*a*b\\.ts$' } }),
+      [`${'a'.repeat(200)}b.ts`]: '',
+      [`${'a'.repeat(200)}.ts`]: '',
+    });
+    const started = performance.now();
+    expect(names(root, await jest.enumerateSuites(root))).toEqual([`${'a'.repeat(200)}b.ts`]);
+    expect(performance.now() - started).toBeLessThan(5000);
+  });
+
+  test('a root that reaches its directory through a link is refused, and nothing outside is enumerated', async () => {
+    const outside = await repo({ 'tests/escape.test.ts': '' });
+    const root = await repo({ 'package.json': pkg({ jest: '30' }, { jest: { roots: ['<rootDir>/linked/tests'] } }) });
+    await linkDirectory(outside, join(root, 'linked'));
+    expect((await refusal(jest.enumerateSuites(root))).reason).toBe('unsafe-path');
+  });
+});
+
+describe('a config is read, never run', () => {
+  /*
+   * The scan in packages/conformance proves no adapter source names a way to run code. This
+   * proves the property the scan exists to protect, from the outside: a config that writes a file
+   * the moment it is evaluated leaves no such file behind. It fails whenever parsing is replaced
+   * by loading, however that loading is spelled, and it would fail against a `jiti`, a dynamic
+   * `import`, or a `require` the scan had not been taught to recognise.
+   */
+  test.each([
+    ['vitest', 'vitest.config.ts', pkg({ vitest: '4' }), (marker: string) => `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\nmodule.exports = { test: { include: ['**/*.test.ts'] } };\n`],
+    ['jest', 'jest.config.js', pkg({ jest: '30' }), (marker: string) => `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\nmodule.exports = { testMatch: ['**/*.test.ts'] };\n`],
+  ])('%s: a config that would write a file when it is evaluated writes nothing', async (name, configFile, manifest, body) => {
+    const root = await repo({ 'package.json': manifest, 'a.test.ts': '' });
+    const marker = join(root, 'evaluated.txt');
+    await write(root, { [configFile]: body(marker.replaceAll('\\', '/')) });
+    const adapter = name === 'vitest' ? vitest : jest;
+    // Whether it enumerates or refuses is the config's business; that nothing ran is not.
+    await adapter.enumerateSuites(root).catch(() => undefined);
+    expect(existsSync(marker)).toBe(false);
   });
 });
 
@@ -208,12 +316,79 @@ describe('pattern safety', () => {
     '(?:spec|test)\\.ts$',
     '(?:x)+',
     '(?<name>a)b',
-    'a(?=b)',
+    // Shapes a backtracking engine takes exponential time over. They are matched here in one
+    // pass, so there is nothing to refuse: the cost no longer depends on the shape.
+    '(a+)+',
+    '(a|aa)*',
+    '(x*)*y',
+    '(?:a+)+',
+    '(?:a|b)*',
   ])('%s is accepted', (pattern) => {
-    expect(assertLinearPattern(pattern, 'test')).toBeInstanceOf(RegExp);
+    expect(assertLinearPattern(pattern, 'test').source).toBe(pattern);
   });
 
-  test.each(['(a+)+', '(a|aa)*', '(x*)*y', '(a)\\1', '(?:a+)+', '(?:a|b)*', '(?<n>a)\\k<n>'])('%s is refused', (pattern) => {
+  test.each([
+    ['a backreference', '(a)\\1'],
+    ['a named backreference', '(?<n>a)\\k<n>'],
+    ['a lookahead', 'a(?=b)'],
+    ['a negative lookahead', 'a(?!b)'],
+    ['a lookbehind', '(?<=a)b'],
+    ['a unicode property escape', '\\p{L}+'],
+    ['an unclosed group', '(a'],
+  ])('%s is refused: it cannot be matched in one pass', (_, pattern) => {
     expect(() => assertLinearPattern(pattern, 'test')).toThrow(AdapterRefusal);
+  });
+
+  test('a pattern that a backtracking engine takes a high power of the path to match is matched at once', () => {
+    const pattern = assertLinearPattern('a*a*a*a*a*a*a*a*b$', 'test');
+    const path = `/repo/${'a'.repeat(4000)}.ts`;
+    const started = performance.now();
+    expect(pattern.test(path)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  /** A grammar of what the matcher accepts, so the cases are patterns it must agree with RegExp on. */
+  function pattern(next: () => number): string {
+    const atom = (): string => {
+      const pick = next() % 8;
+      if (pick === 0) return 'a';
+      if (pick === 1) return 'b';
+      if (pick === 2) return '/';
+      if (pick === 3) return '.';
+      if (pick === 4) return '\\.';
+      if (pick === 5) return '[ab]';
+      if (pick === 6) return '[^a/]';
+      return '\\d';
+    };
+    const piece = (depth: number): string => {
+      const body = depth > 0 && next() % 4 === 0 ? `(${expression(depth - 1)})` : atom();
+      const quantifier = next() % 5;
+      if (quantifier === 0) return `${body}*`;
+      if (quantifier === 1) return `${body}+`;
+      if (quantifier === 2) return `${body}?`;
+      if (quantifier === 3) return `${body}{1,2}`;
+      return body;
+    };
+    const sequence = (depth: number): string => Array.from({ length: 1 + (next() % 3) }, () => piece(depth)).join('');
+    const expression = (depth: number): string =>
+      Array.from({ length: 1 + (next() % 2) }, () => sequence(depth)).join('|');
+    const anchors = next() % 4;
+    const body = expression(2);
+    return `${anchors === 1 ? '^' : ''}${body}${anchors === 2 ? '$' : ''}`;
+  }
+
+  test.each(Array.from({ length: 300 }, (_, seed) => seed))('seed %i: the same answer as the engine it replaces', (seed) => {
+    let state = seed + 1;
+    const next = (): number => {
+      state = (state * 1103515245 + 12345) % 2 ** 31;
+      return state >>> 8;
+    };
+    const source = pattern(next);
+    const compiled = assertLinearPattern(source, 'oracle');
+    const engine = new RegExp(source);
+    for (let i = 0; i < 12; i++) {
+      const input = Array.from({ length: next() % 9 }, () => 'ab/.9x'[next() % 6] ?? 'a').join('');
+      expect([source, input, compiled.test(input)]).toEqual([source, input, engine.test(input)]);
+    }
   });
 });

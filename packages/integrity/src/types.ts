@@ -37,10 +37,17 @@ export interface ExpectationMismatch {
  * The two arms keep the verdict and the evidence for it from disagreeing: an
  * expectation that held carries no mismatch, and one that failed names at
  * least one (A-P8-01).
+ *
+ * `mismatches?: never` on the held arm is what makes that true of every
+ * assignment rather than of fresh object literals alone: excess properties
+ * are only checked on a literal written at the point of assignment, so
+ * without it a value built first and annotated afterwards carries both a
+ * verdict and evidence against it. The failed arm's tuple is readonly for the
+ * same reason: a tuple typed as non-empty can still be emptied by `pop`.
  */
 export type ExpectationOutcome =
-  | { held: true }
-  | { held: false; mismatches: [ExpectationMismatch, ...ExpectationMismatch[]] };
+  | { readonly held: true; readonly mismatches?: never }
+  | { readonly held: false; readonly mismatches: readonly [ExpectationMismatch, ...ExpectationMismatch[]] };
 
 /** Produced by the runtime executing CheckSpec in a fresh sandbox. Never by an agent. */
 export interface CheckResult {

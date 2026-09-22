@@ -18,8 +18,35 @@ const EXPECT_METHODS: ReadonlySet<string> = new Set(['soft', 'poll']);
 /** Calls on `expect` itself that assert something about the test: `expect.assertions(2)`. */
 const EXPECT_META: ReadonlySet<string> = new Set(['assertions', 'hasAssertions']);
 
+/**
+ * A node's source text with whitespace between tokens collapsed, so that
+ * reformatting a file changes no assertion, and with the inside of every
+ * literal left exactly as written, so that `'a  b'` and `'a b'` stay the two
+ * different expectations they are.
+ */
 function text(node: ts.Node, sf: ts.SourceFile): string {
-  return node.getText(sf).replace(/\s+/g, ' ').trim();
+  const start = node.getStart(sf);
+  const source = node.getText(sf);
+  const literals: Array<readonly [number, number]> = [];
+  const collect = (n: ts.Node): void => {
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isRegularExpressionLiteral(n)
+      || n.kind === ts.SyntaxKind.TemplateHead || n.kind === ts.SyntaxKind.TemplateMiddle
+      || n.kind === ts.SyntaxKind.TemplateTail || ts.isJsxText(n)) {
+      literals.push([n.getStart(sf) - start, n.getEnd() - start]);
+    }
+    n.forEachChild(collect);
+  };
+  collect(node);
+  literals.sort((a, b) => a[0] - b[0]);
+  let out = '';
+  let at = 0;
+  for (const [from, to] of literals) {
+    if (from < at) continue; // a literal inside one already kept verbatim
+    out += source.slice(at, from).replace(/\s+/g, ' ');
+    out += source.slice(from, to);
+    at = to;
+  }
+  return (out + source.slice(at).replace(/\s+/g, ' ')).trim();
 }
 
 function lineOf(node: ts.Node, sf: ts.SourceFile): number {
@@ -79,7 +106,9 @@ export function extractAssertions(sf: ts.SourceFile, file: string): Assertion[] 
   const out: Assertion[] = [];
   const visit = (node: ts.Node): void => {
     if (isSubjectCall(node)) {
-      const subject = node.arguments.map((a) => text(a, sf));
+      // The subject's own type arguments are part of what it asserts: `expectTypeOf<Actual>()` and
+      // `expectTypeOf<any>()` check different things through the same matcher.
+      const subject = [...node.arguments.map((a) => text(a, sf)), ...(node.typeArguments ?? []).map((t) => `<${text(t, sf)}>`)];
       const names: string[] = [];
       const args: string[] = [...subject];
       let lastCallArgs: readonly ts.Expression[] = [];
@@ -99,13 +128,16 @@ export function extractAssertions(sf: ts.SourceFile, file: string): Assertion[] 
           break;
         }
       }
-      // A subject with no matcher after it asserts nothing, and is not recorded.
+      const callee = node.expression;
+      const root = ts.isIdentifier(callee) ? callee.text : text(callee, sf);
       if (names.length > 0) {
         const operator = names.join('.');
-        const callee = node.expression;
-        const root = ts.isIdentifier(callee) ? callee.text : text(callee, sf);
         const qualified = root === 'expect' ? operator : `${root}:${operator}`;
         out.push(assertion(file, lineOf(node, sf), qualified, args, toleranceOf(operator, lastCallArgs)));
+      } else if (root === 'assertType') {
+        // `assertType<T>(value)` takes no matcher: the call is the assertion, and deleting it
+        // deletes a check. `expect(x)` with no matcher, by contrast, asserts nothing.
+        out.push(assertion(file, lineOf(node, sf), 'assertType', args, undefined));
       }
     } else if (ts.isCallExpression(node)) {
       const operator = isAssertCall(node);
@@ -149,19 +181,62 @@ const EXISTENCE: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * What a literal's source text says about the value: `true` when it is
+ * certainly that, `false` when it is certainly not, and `undefined` when the
+ * text is not a literal this can read, which fails closed everywhere it is
+ * used.
+ */
+function literalIs(kind: 'truthy' | 'defined' | 'null' | 'falsy' | 'undefined', argument: string | undefined): boolean | undefined {
+  if (argument === undefined) return undefined;
+  const t = argument.trim();
+  let truthy: boolean;
+  if (/^-?(?:0[box][\da-f_]+|\d[\d_]*(?:\.[\d_]*)?(?:e[+-]?\d+)?n?)$/i.test(t)) truthy = Number(t.replace(/[_n]/g, '')) !== 0;
+  else if (/^(['"]).*\1$/s.test(t) || /^`[^`]*`$/s.test(t)) truthy = t.length > 2;
+  else if (t === 'true') truthy = true;
+  else if (t === 'false' || t === 'null' || t === 'undefined' || t === 'void 0' || t === 'NaN') truthy = false;
+  else if (/^[[{]/.test(t) || /^\/.*\/[dgimsuvy]*$/s.test(t)) truthy = true;
+  else return undefined; // an identifier, a call, a template with holes: unknown, so not provable
+  switch (kind) {
+    case 'truthy': return truthy;
+    case 'falsy': return !truthy;
+    case 'defined': return t !== 'undefined' && t !== 'void 0';
+    case 'null': return t === 'null';
+    case 'undefined': return t === 'undefined' || t === 'void 0';
+  }
+}
+
+/** What an existence check demands of a value, for the matchers where an equality can prove it. */
+const EXISTENCE_DEMANDS: ReadonlyMap<string, 'truthy' | 'defined' | 'null' | 'falsy' | 'undefined'> = new Map([
+  ['toBeUndefined', 'undefined'],
+  ['toBeTruthy', 'truthy'], ['ok', 'truthy'], ['isOk', 'truthy'], ['isTrue', 'truthy'], ['true', 'truthy'], ['assert', 'truthy'],
+  ['toBeDefined', 'defined'], ['isDefined', 'defined'], ['exist', 'defined'], ['exists', 'defined'],
+  ['toBeFalsy', 'falsy'], ['isNotOk', 'falsy'], ['isFalse', 'falsy'], ['false', 'falsy'],
+  ['toBeNull', 'null'],
+]);
+
+/**
  * Whether `after` provably checks at least what `before` did on the same
  * subject. Everything else that differs is a weakening: this is the
  * direction that fails closed, because a changed assertion is reported for a
  * reviewer rather than assumed harmless.
  */
 function atLeastAsStrong(before: Assertion, after: Assertion): boolean {
-  if (negated(after.operator) !== negated(before.operator)) return !negated(after.operator);
+  // A negation removed does not imply what it replaced, it contradicts it: `not.toBe(5)` becoming
+  // `toBe(5)` is the assertion turned inside out. Neither does a negation added. And under a
+  // negation every rule below runs backwards — a looser matcher negated is a stronger claim — so
+  // a negated pair that is not identical is reported rather than reasoned about.
+  if (negated(after.operator) || negated(before.operator)) return false;
   const was = matcher(before.operator);
   const now = matcher(after.operator);
   const wasRank = EQUALITY_LADDER.get(was);
   const nowRank = EQUALITY_LADDER.get(now);
-  // From "it exists" to "it equals this": the new check implies the old one.
-  if ((EXISTENCE.has(was) || before.operator === 'assert') && nowRank !== undefined) return true;
+  // From "it exists" to "it equals this", where the value it is now pinned to is one the old
+  // check would have accepted. `toBeTruthy()` becoming `toBe(0)`, or `toBeDefined()` becoming
+  // `toBe(undefined)`, pins the subject to a value the old assertion ruled out.
+  if (EXISTENCE.has(was) && nowRank !== undefined) {
+    const demand = EXISTENCE_DEMANDS.get(was);
+    return demand !== undefined && literalIs(demand, after.args[1]) === true;
+  }
   if (was === now && after.args.length > before.args.length
     && before.args.every((arg, i) => after.args[i] === arg)) return true; // `toThrow()` → `toThrow('x')`
   if (was === 'toHaveBeenCalled' && now === 'toHaveBeenCalledWith') return true;
@@ -223,7 +298,11 @@ export function compareAssertions(before: readonly Assertion[], after: readonly 
     // An approximate matcher's arguments are the subject, the value, and then what sets the tolerance.
     const sameValue = a.operator === b.operator && a.args.slice(0, 2).join('\u0000') === b.args.slice(0, 2).join('\u0000');
     if (sameValue && a.tolerance !== undefined && b.tolerance !== undefined) {
-      if (a.tolerance > b.tolerance) delta.toleranceWidened.push(a);
+      // Under a negation the tolerance runs the other way: `not.toBeCloseTo(v, 2)` becoming
+      // `not.toBeCloseTo(v, 3)` narrows the band the value must stay out of, so more values pass.
+      // What is reported either way is the change that lets more through.
+      const letsMoreThrough = negated(a.operator) ? a.tolerance < b.tolerance : a.tolerance > b.tolerance;
+      if (letsMoreThrough) delta.toleranceWidened.push(a);
       continue;
     }
     if (!atLeastAsStrong(b, a)) delta.weakened.push(a);
