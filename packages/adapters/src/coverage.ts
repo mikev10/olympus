@@ -127,7 +127,10 @@ export class IstanbulCoverageAdapter implements CoverageAdapter {
       throw error;
     }
     if (!isRecord(value)) refuse('malformed-report', `${report} is not a JSON object keyed by file`);
-    const prefix = `${toPosix(sourceRoot).replace(/\/+$/, '')}/`;
+    // Both sides are normalised the same way, and by separator rather than by host: a report
+    // written on Windows names its files with backslashes wherever it is read, and `toPosix`
+    // converts the separator of the host doing the reading, which on Linux is already `/`.
+    const prefix = `${sourceRoot.replaceAll('\\', '/').replace(/\/+$/, '')}/`;
     const files = new Map<string, LineHits>();
     const keys = Object.keys(value);
     for (const key of keys) {

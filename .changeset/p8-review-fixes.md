@@ -51,3 +51,9 @@ nested-quantifier shapes that were refused before are matched safely now.
 `ExpectationOutcome`'s arms exclude each other's evidence and its tuple is
 readonly, so a held outcome carrying mismatches, and a failed one emptied with
 `pop`, are compile errors rather than merely unusual.
+
+Not from the reviews: a coverage report keyed by Windows paths is matched
+against its `sourceRoot` by separator rather than by host. `toPosix` converts
+the separator of the host doing the reading, so on Linux the prefix kept its
+backslashes and matched nothing, and the report was refused as one about
+another tree.

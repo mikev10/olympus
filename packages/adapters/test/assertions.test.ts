@@ -76,7 +76,10 @@ describe.each(adapters)('%s', (_, adapter) => {
 
   test('narrowing the tolerance of a negated matcher lets more values through, and is reported', async () => {
     const delta = await compare(adapter, 'expect(r).not.toBeCloseTo(0.3, 2);', 'expect(r).not.toBeCloseTo(0.3, 5);');
-    expect(delta.toleranceWidened).toEqual([expect.objectContaining({ tolerance: 0.000005 })]);
+    // The band itself is `10 ** -5 / 2`, which is not the same float on every platform, so what
+    // is asserted is which assertion was reported and not what the arithmetic rounded to.
+    expect(delta.toleranceWidened.map((a) => a.operator)).toEqual(['not.toBeCloseTo()']);
+    expect(delta.weakened).toEqual([]);
   });
 
   test.each([
