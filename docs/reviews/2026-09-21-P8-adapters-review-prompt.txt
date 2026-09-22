@@ -1,9 +1,15 @@
-The code under review is in the attached file
-`2026-09-21-P8-adapters-review-bundle.txt` (SHA-256
-e7f1a0099bb95a758955a984c594607c8928e240be37175200c2720c39f0e362) — the full
-contents of every changed file, with the commit range at its top. If that file
-is not present in this conversation, stop and say so; do not review from the
-description below alone.
+The code under review is in the file
+`2026-09-21-P8-adapters-review-bundle.txt` (SHA-256 193da6d987db4d6f2ecb888114ef99a825013064419bdcf1a1b981328f218468) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
 
 This is a pre-merge code review of our own open-source project, requested by
 the author of the change, on a branch that has not been merged. The purpose is
