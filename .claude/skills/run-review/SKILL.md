@@ -168,6 +168,20 @@ The floor is the payload's size in bytes divided by 5. Honest runs measured 3.18
 and 3.20 bytes per token, so a reviewer that took in the whole payload clears it
 easily.
 
+**Where the numbers come from, and what they are worth.** The input token count
+is produced by Google's API service or by the locally installed Codex process,
+never by the model whose text is under review, so the model cannot write it.
+That is the claim; "cannot be faked" is not. A vendor whose service or CLI
+fabricates its telemetry defeats every check in this design (D-TOOLING-02). And
+a count at or above the floor is a lower bound — a payload of about this size was
+taken in — not proof that every byte arrived, and not evidence of attention.
+
+**The bundle reaches the model as text, and that cannot be otherwise.** A
+reviewer that follows an instruction planted in the bundle satisfies both
+integrity checks exactly as an honest one does. The payload's delimiters carry
+the bundle's own nonce, so the bundle cannot forge the line that closes it, but
+nothing available prevents instruction-following (D-TOOLING-03).
+
 Report the outcome and stop. In particular:
 
 - **Do not retry silently.** A second run that counts, reported on its own,
@@ -188,6 +202,10 @@ Report the outcome and stop. In particular:
 
 - `withheld:` a credential appeared in one of the run's outputs, so the runner
   wrote none of them. The bundle was sent, and there is no manifest to quote.
+  The scan behind it is an accidental-plaintext-leak detector: a contiguous
+  substring test over the exact bytes about to be written. It is a tripwire for
+  this tool's own bugs, and it would not stop a party that knew a credential and
+  could encode it (D-TOOLING-04). Treat a hit as a bug here, not as an attack.
 - `interrupted:` the run was stopped by Ctrl-C or SIGTERM after sending. The
   bundle was sent, and no evidence was written.
 

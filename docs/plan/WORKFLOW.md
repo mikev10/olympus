@@ -32,7 +32,12 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
    `docs/reviews/`, and the skill commits them untouched. Both families run on
    every unit — rotation is retired. A run whose derived outcome is not
    `counted` is not a review; where only one family counted, the unit has one
-   review and proceeding on it is the maintainer's call, recorded as such.
+   review and proceeding on it is the maintainer's call, recorded as such. The
+   outcome rests on telemetry from the vendor's API service and the local CLI,
+   not from the model under review — a lower bound on what was ingested, not
+   proof every byte arrived, and no defence against a vendor that fabricates it
+   (D-TOOLING-02). The bundle reaches the model as text, so a reviewer that
+   followed an instruction inside it passes both checks (D-TOOLING-03).
 6. `/triage-review <id>` — reads both replies from disk, checks each against
    its manifest's `replySha256`, heads each with a provenance header derived
    from its manifest, pairs what both families raised,

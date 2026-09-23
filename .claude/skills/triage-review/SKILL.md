@@ -28,6 +28,12 @@ bundle, with no repository access and no way to run anything, produces
 findings that do not hold: line numbers drift, absent files get reasoned
 about, and a mechanism's purpose gets inferred from its name.
 
+**And a `counted` outcome does not say the reply came from the prompt.** The
+bundle reaches the model as text, so a reviewer that followed an instruction
+planted in the code under review passes both integrity checks exactly as an
+honest one does (D-TOOLING-03). Verification against the cited code is what
+catches that, as it catches every other finding that does not hold.
+
 **The failure this skill exists to prevent is agreeing.** A plausible finding
 from a strong reviewer is easy to fix without first checking whether it
 describes the code. Every such fix is a change with no defect behind it,
@@ -48,11 +54,13 @@ is triaged.
 | `INTEGRITY_UNVERIFIED` | Cannot occur from this runner. It would mean a bundle with no end nonce, and the runner refuses such a bundle before sending it. |
 
 **The two integrity checks are different facts, and the manifest keeps them
-apart.** `ingestion` is the vendor's own count of the input it took in, set
-against a floor of the payload's bytes divided by 5: `short` or `unreported`
-there means the reviewer may not have taken in the whole bundle, whatever its
-reply says. `integrity` is the echo: `failed`, with the missing markers named in
-`absent`, means the reply did not repeat what the bundle's tail holds. Name
+apart.** `ingestion` is a count produced by Google's API service or by the local
+Codex process — not by the model whose text you are reading — set against a floor
+of the payload's bytes divided by 5. A count at or above it is a lower bound,
+that a payload of about this size was taken in; `short` or `unreported` means the
+reviewer may not have taken in the whole bundle, whatever its reply says.
+`integrity` is the echo: `failed`, with the missing markers named in `absent`,
+means the reply did not repeat what the bundle's tail holds. Name
 which one failed. Both refuse, for the same reason and not the same fault:
 neither leaves the reply standing as a review of the whole bundle, and a finding
 about a file that never arrived is indistinguishable from a finding about one

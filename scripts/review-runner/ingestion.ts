@@ -5,10 +5,20 @@
  * two measured failures (32,893 tokens when Gemini navigated with grep; 24,181
  * when Codex could not read the file) land far beneath it.
  *
- * This is the strongest integrity signal in the design, stronger than the nonce:
- * the count is measured by the vendor's API, not reported by the model, so a
- * reviewer cannot fake it. It catches truncation AND navigation — a reviewer that
- * reads selectively ingests a fraction of the bundle.
+ * The strongest integrity signal in the design, and worth what its source is
+ * worth. The count is produced by the vendor's API service — Google's
+ * `usageMetadata.promptTokenCount` — or by the locally installed Codex process,
+ * in its own rollout log. Neither comes from the model whose text is under
+ * review, and the model is the untrusted party here: it cannot set this number.
+ * The API service and the installed CLI are trusted, and against a vendor that
+ * fabricates its own telemetry no check in this design holds (D-TOOLING-02).
+ * "Cannot be faked" is the wrong claim unless it names who cannot fake it.
+ *
+ * What it proves is a lower bound: a count at or above the floor says a payload
+ * of about this size was taken in. It is not proof that every byte arrived, and
+ * it is not evidence of attention — a model can take in a whole bundle and reason
+ * about a tenth of it. It does catch truncation AND navigation: a reviewer that
+ * reads selectively takes in a fraction of the bundle.
  */
 export const BYTES_PER_TOKEN_FLOOR = 5;
 

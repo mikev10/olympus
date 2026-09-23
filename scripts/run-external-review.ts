@@ -104,6 +104,15 @@ const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;
 export const AUTH_JSON_LABEL = 'auth.json';
 
 /**
+ * An accidental-plaintext-leak detector, and nothing more. It is a contiguous
+ * substring test: a credential split across an array of single characters,
+ * base64-encoded, or spelled out defeats it by construction, and no substring
+ * scanner defeats a party that knows a credential and can emit arbitrary text.
+ * That party does not exist on the paths this runner uses — the Gemini key
+ * travels only in a request header and the Codex child's environment holds
+ * CODEX_HOME alone — so the gap is recorded as a limit (D-TOOLING-04) rather
+ * than implied away by describing this as a leak *prevention*.
+ *
  * The tripwire for our own bugs, and deliberately NOT default-deny. This is
  * the opposite question from `redactEnv`'s: a miss there WRITES a secret, so
  * redaction treats every variable as one; a false positive here DESTROYS

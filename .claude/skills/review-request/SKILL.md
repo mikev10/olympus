@@ -339,21 +339,29 @@ cannot produce, which is why it exists and why it has to be the last line. A
 bundle with no nonce has no tail check in it at all, and the runner refuses to
 send one: a run against it could never count.
 
-**The token count, which does not depend on the reply.** The vendor reports how
-many input tokens it took in — Google in the response's
-`usageMetadata.promptTokenCount`, Codex in its rollout log's
-`token_usage_record` — and the run counts only if that reaches the payload's
-size in bytes divided by 5. Honest runs over a real 403,661-byte bundle measured
-3.18 and 3.20 bytes per token and cleared that floor easily; the two measured
-failures, a reviewer that searched the bundle instead of reading it and one that
-could not open its file, took in 32,893 and 24,181 tokens against a floor of
-80,732. The count comes from the vendor, not the model, so a reviewer cannot
-write it, and it catches what the nonce misses: a reviewer that searched its way
-to the last line echoes the nonce correctly and still took in a fraction of the
-bundle. For Codex, whether `token_usage_record` holds one request's input or a
-running total across the turn has not been measured yet, so a Codex count at or
-above the floor is evidence of ingestion only as far as that measurement goes.
-Claim no more for it than that.
+**The token count, which does not depend on the reply.** The vendor's own
+software reports how many input tokens it took in — Google's API service in the
+response's `usageMetadata.promptTokenCount`, the locally installed Codex process
+in its rollout log's `token_usage_record` — and the run counts only if that
+reaches the payload's size in bytes divided by 5. Honest runs over a real
+403,661-byte bundle measured 3.18 and 3.20 bytes per token and cleared that floor
+easily; the two measured failures, a reviewer that searched the bundle instead of
+reading it and one that could not open its file, took in 32,893 and 24,181 tokens
+against a floor of 80,732. It catches what the nonce misses: a reviewer that
+searched its way to the last line echoes the nonce correctly and still took in a
+fraction of the bundle.
+
+**Say who cannot fake the count, not that it cannot be faked.** It is produced by
+the API service and by the local CLI process, never by the model whose text is
+under review, so the *model* cannot write it — and that is the whole of the
+claim. A vendor whose service or CLI fabricates its telemetry defeats this check
+and every other one here, which is recorded as a limit rather than defended
+(D-TOOLING-02). What the count proves is a lower bound: that a payload of about
+this size was taken in, not that every byte of it arrived, and not that any of it
+was attended to. For Codex, whether `token_usage_record` holds one request's
+input or a running total across the turn has not been measured yet, so a Codex
+count at or above the floor is evidence of ingestion only as far as that
+measurement goes. Claim no more for it than that.
 
 The paragraph asking for the four values names three ways the bundle can
 arrive — attached, in the working directory, or in the prompt text — and
@@ -366,8 +374,13 @@ given the bundle another way will then report it missing on every run — a
 refusal indistinguishable from diligence.
 
 **What neither check covers.** The nonce is evidence the tail was delivered, and
-the token count is evidence the whole payload was taken in. Neither is evidence
-the middle was read. A model can take in a whole bundle and reason about a tenth
+the token count is evidence that a payload of about the right size was taken in.
+Neither is evidence the middle was read, and neither says anything about whether
+the reviewer did as the prompt asked rather than as the bundle asked: a reply
+that echoes all four markers because the bundle instructed it to satisfies both
+checks exactly as an honest one does. The bundle has to reach the model as text,
+so the project's rule that payloads are data and never instructions does not hold
+for it (D-TOOLING-03). A model can take in a whole bundle and reason about a tenth
 of it, and nothing in the file or the count detects that: both are evidence
 about transport and ingestion, not about attention. Cross-family agreement and
 the prompt's own numbered items carry that load, and neither of them closes it

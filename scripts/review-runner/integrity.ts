@@ -99,6 +99,15 @@ function fieldValue(lines: readonly string[], field: string): string {
   return value;
 }
 
+/**
+ * What this cannot separate: a reply that echoes the four markers because the
+ * bundle told it to satisfies this check exactly as an honest one does. The
+ * material under review has to reach the model as text, so the project's rule
+ * that payloads are data and never instructions does not hold for the bundle
+ * (D-TOOLING-03). The payload's nonce-bearing delimiters stop the bundle forging
+ * the boundary; they do not stop a model following an instruction inside it, and
+ * nothing available does.
+ */
 export function verifyEcho(markers: BundleMarkers, replyText: string): EchoVerdict {
   // Bundle predates the nonce convention: no tail proof could exist. This is an
   // artifact-age problem, not a reviewer problem. The check was never put to this
