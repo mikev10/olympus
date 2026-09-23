@@ -1,3 +1,60 @@
+# External review of P6, gemini, 2026-09-22
+
+An adversarial pre-merge review of P6 (Verification + evidence), the same
+scope as its companion `2026-09-22-P6-verification-evidence-review-codex.md`,
+from the same prompt and bundle. Both are triaged in
+`2026-09-22-P6-verification-evidence-triage.md`. This reply reported no
+findings, so the triage cites none from it by number.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call (`POST` to the v1beta
+  `models/gemini-3.1-pro-preview:generateContent` endpoint) to
+  `modelRequested` `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is
+  `null` because an API call loads no local configuration. Exit 0, not timed
+  out, 293.4 s. Ingestion `complete`: 168,513 prompt tokens against a floor of
+  109,895. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `7e4a43ee9302fdc69b2596149c333154ce330f33efdb833c2ccf34fb7ab4c8d2`, which
+  matched the manifest's `replySha256` before this header was prepended.
+  **This is the third Gemini run.** The first two, kept beside it as
+  `…-review-gemini.attempt-1.md` and `…attempt-2.md` with their manifests, were
+  `INTEGRITY_FAILED`: ingestion was complete (168,432 tokens against 109,828),
+  but the echo failed, with `base`, `head`, `finalSection`, and `endNonce` all
+  absent from the reply. Neither is triaged. Between the second and third runs
+  the runner was changed to repeat the echo request after the bundle
+  (`72e046d`), so this run's payload (549,478 bytes, SHA-256 `48a2a01b…`) is
+  337 bytes longer than the payload of codex's run and of the first two
+  attempts (549,141 bytes, `bb9858ac…`). The bundle and the prompt are
+  byte-identical across all four runs.
+- **Cross-family agreement:** none. This reply raised no findings. Its item-6
+  assessment named as sound three mechanisms that codex disputes: symlink and
+  traversal handling in the tree operations (codex-1), the exact-key check
+  preventing an injected `status` (codex-6), and the writability refusal
+  (codex-8). The triage records which account the code bore out.
+- **Date:** 2026-09-22 (run started 2026-09-23T16:20:15Z UTC).
+- **Bundle:** `2026-09-22-P6-verification-evidence-review-bundle.txt`, SHA-256
+  `434fb474e8ef1b712ee1b8780a4100c449e681adcdb0d7205eb490c074378aff` (the
+  manifest's `bundleSha256`), base `9f30317` (`reviewed/TOOLING`), head
+  `de95c2e` (P6: Verification + evidence). It held the full contents of 47 of
+  the 51 files changed in that range and excluded the four design documents,
+  as the prompt states. Prompt:
+  `2026-09-22-P6-verification-evidence-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated that it had no prior
+  context about the project and performed no lookups. This is a self-report
+  and cannot be independently verified; an API call offering no tools had no
+  means of lookup in any case.
+- **Coverage, and any gap:** items 4, 6, and 7 are answered in sections headed
+  with those numbers. Items 1, 2, and 3 are answered by one sentence — no
+  bypasses, no tautological checks, nothing that fails open — with no
+  construction offered. **Item 5, configuration satisfied without doing what
+  it appears to do, is not answered.** Item 7, framing: the framing is right.
+- **Citations:** the reply cites functions and files by name, not line. Its
+  section numbers are the prompt's item numbers, not finding numbers.
+
+---
+
 BASE: reviewed/TOOLING
 HEAD: de95c2e
 ===== pnpm-lock.yaml =====

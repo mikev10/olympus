@@ -1,3 +1,68 @@
+# External review of P6, codex, 2026-09-22
+
+An adversarial pre-merge review of P6 (Verification + evidence): the
+runtime-owned base and diff trees, the verify station's checks on a task's own
+diff, the gate inputs, admission's recorded controls, the review seat's view,
+and the sandbox's container user. One of two reviews run from the same prompt
+and bundle; the other is `2026-09-22-P6-verification-evidence-review-gemini.md`.
+Both are triaged in `2026-09-22-P6-verification-evidence-triage.md`, which
+cites this review's findings as `codex-1` to `codex-8`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: config home `[auth.json]`, working directory `[]`. Exit 0, not
+  timed out, 329.8 s. Ingestion `complete`: 164,521 input tokens against a
+  floor of 109,828. Integrity `verified`: the reply echoes every required
+  bundle marker. Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `2015f0cad8cf74bd2ba0b4345c57ff0d4bbb7597f586d6dee422770759e94393`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** none. Gemini reported no findings, so codex raised
+  every finding here alone. Gemini's item-6 assessment named three mechanisms
+  as sound that codex-1 (symlink handling in the tree operations), codex-6 (the
+  exact-key check), and codex-8 (the writability refusal) dispute; the triage
+  records which account the code bore out.
+- **Date:** 2026-09-22 (run started 2026-09-23T02:37:44Z UTC).
+- **Bundle:** `2026-09-22-P6-verification-evidence-review-bundle.txt`, SHA-256
+  `434fb474e8ef1b712ee1b8780a4100c449e681adcdb0d7205eb490c074378aff` (the
+  manifest's `bundleSha256`), base `9f30317` (`reviewed/TOOLING`), head
+  `de95c2e` (P6: Verification + evidence). It held the full contents of 47 of
+  the 51 files changed in that range: all source, tests, changesets, the
+  conformance registry and baseline, and the lockfile. It excluded
+  `docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, `docs/plan/F1-spine.md`,
+  and `docs/plan/WORKFLOW.md`, as the prompt states ("no design documents").
+  Prompt: `2026-09-22-P6-verification-evidence-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated that it had no prior
+  project context, that it performed no external lookups, and that local
+  commands were blocked, so it ran no reproductions and did not verify the
+  bundle's hash itself. This is a self-report and cannot be independently
+  verified, although the read-only sandbox and the empty working directory are
+  recorded in the manifest.
+- **Coverage, and any gap:** all seven numbered items were answered. Items 1,
+  3, and 5 are covered by findings 1–8. Item 2, tautological checks: none in
+  production code; the fixture's `process.exit(0)` is noted as
+  orchestration-only, and suite counting as enumeration, not execution. Item 4,
+  language escape hatches: none beyond the incomplete result validation in
+  finding 6. Item 6, sound mechanisms: argv without a shell, destroying the
+  build sandbox before collecting its diff, unstarted checks recorded without
+  invented exits, hash-checked materialization, locks held to admission
+  hashes, and the build result's runtime key check. Item 7, framing: the
+  framing is right, but two promises need sharper definitions — preventing
+  writes versus preventing their propagation, and excluding designated
+  narrative channels versus excluding equivalent information an author can
+  copy into a permitted file. Every finding carries the label "factually
+  wrong". None is labelled unclear or a tradeoff.
+- **Citations:** file and line numbers refer to positions in the files as the
+  bundle held them at `de95c2e`. They are hints for locating the construct, not
+  locations in the repository, and the triage verified each against the
+  construct itself.
+
+---
+
 BASE: reviewed/TOOLING  
 HEAD: de95c2e  
 pnpm-lock.yaml  
