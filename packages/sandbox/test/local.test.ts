@@ -72,6 +72,8 @@ function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
     mounts: { workspace: { source: workspace, target: '/workspace', mode: 'rw' }, others: [] },
     egress: { mode: 'deny-all', allow: [] },
     limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 60_000 },
+    // alpine's own default user; what these assertions ran as before SandboxSpec named one
+    user: { uid: 0, gid: 0 },
     ...overrides,
   };
 }
@@ -277,6 +279,43 @@ describe('limits', () => {
   test('a fractional megabyte or process count is refused', async () => {
     const error = await refusal(() => provider.provision(specFor({ limits: { cpus: 0.5, memoryMb: 256.5, pids: 64, wallClockMs: 1000 } })));
     expect(error.layer).toBe('limits');
+  });
+
+  test.each([
+    ['uid', { uid: -1, gid: 0 }],
+    ['gid', { uid: 0, gid: 1.5 }],
+  ])('a user whose %s is not a whole number is refused', async (name, user) => {
+    const error = await refusal(() => provider.provision(specFor({ user })));
+    expect(error.layer).toBe('user');
+    expect(error.message).toContain(name);
+  });
+
+  test("the container's commands run as the user the spec names", async () => {
+    const handle = await provision({ user: { uid: 4321, gid: 4322 }, mounts: { workspace: { source: workspace, target: '/workspace', mode: 'ro' }, others: [] } });
+    const id = await provider.exec(handle, ['sh', '-c', 'echo "$(id -u):$(id -g)"']);
+    expect(id.stdout.trim()).toBe('4321:4322');
+  });
+
+  // A-P6-04. On a host that carries ownership through a bind mount the provider refuses; on one
+  // that maps every container user onto the host user there is nothing to refuse, and the write
+  // must then land. What may never happen is a sandbox handed back whose workspace the task cannot
+  // write, which is the silent degrade the refusal exists for.
+  test('a rw workspace the container user cannot write is refused, or is writable — never mounted unwritable', async () => {
+    const owned = await mkdtemp(join(base, 'owned-'));
+    const stranger = { uid: 54321, gid: 54321 };
+    let handle: SandboxHandle;
+    try {
+      handle = await provision({ user: stranger, mounts: { workspace: { source: owned, target: '/workspace', mode: 'rw' }, others: [] } });
+    } catch (error) {
+      expect(error).toBeInstanceOf(SandboxRefusal);
+      expect((error as SandboxRefusal).layer).toBe('user');
+      expect((error as SandboxRefusal).message).toContain('54321');
+      expect(process.platform).toBe('linux');
+      return;
+    }
+    const wrote = await provider.exec(handle, ['sh', '-c', 'echo written > /workspace/probe']);
+    expect(wrote.exitCode, wrote.stderr).toBe(0);
+    expect(process.platform).not.toBe('linux');
   });
 
   // This is the assertion that guards the single-removal serialisation in `#end`. The wall-clock

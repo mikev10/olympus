@@ -145,7 +145,7 @@ export const UNMET_EXPECTATION_FAILS_THE_GATE: LocalAssertion = runtime({
     'one whose expected non-zero exit held passes it; and a check with no expectation is still judged by its exit code',
   run: async () => {
     const [{ compareCli }, { requiredShortfall }] = await Promise.all([import('@olympus-ai/adapters'), import('@olympus-ai/api')]);
-    const spec = { id: 'greets', kind: 'behavioral' as const, command: 'greet', required: true, timeoutMs: 1000 };
+    const spec = { id: 'greets', kind: 'behavioral' as const, command: ['greet'] as const, required: true, timeoutMs: 1000 };
     const base = { checkId: 'greets', stderr: '', suiteCount: null, durationMs: 1, startedAt: new Date(0).toISOString() };
 
     const wrong = compareCli({ exitCode: 0, stdout: 'hello\n' }, { exitCode: 0, stdout: 'goodbye\n', stderr: '' });

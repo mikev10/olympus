@@ -30,6 +30,15 @@ export interface SandboxSpec {
   mounts: MountTable;
   egress: EgressPolicy;
   limits: { cpus: number; memoryMb: number; pids: number; wallClockMs: number };
+  /**
+   * Who the container's commands run as. Required, so a provider can match the
+   * container to the workspace it was handed: a bind mount carries the host's
+   * ownership through unchanged, and a workspace another uid owns is read-only
+   * to the task. Where the host enforces that ownership an implementation MUST
+   * refuse a rw workspace this user cannot write, never mount it and let the
+   * task fail quietly (I5, A-P6-04).
+   */
+  user: { uid: number; gid: number };
 }
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string; durationMs: number; }

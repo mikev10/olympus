@@ -12,3 +12,13 @@ export * from './gate.js';
 export * from './safety.js';
 export * from './run.js';
 export * from './validate.js';
+export * from './verification.js';
+export {
+  composeDiff,
+  diffDigest,
+  localWorkspaceStore,
+  ownDiff,
+  treeDigest,
+  type ContainerUser,
+  type WorkspaceStore,
+} from './workspace.js';

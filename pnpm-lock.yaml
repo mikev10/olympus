@@ -161,6 +161,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@olympus-ai/adapters':
+        specifier: workspace:*
+        version: link:../adapters
       '@olympus-ai/core':
         specifier: workspace:*
         version: link:../core
@@ -173,6 +176,13 @@ importers:
       '@olympus-ai/vault':
         specifier: workspace:*
         version: link:../vault
+      picomatch:
+        specifier: 4.0.7
+        version: 4.0.7
+    devDependencies:
+      '@types/picomatch':
+        specifier: ^4.0.3
+        version: 4.0.3
 
   packages/conformance:
     dependencies:

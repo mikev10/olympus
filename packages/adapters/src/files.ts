@@ -141,7 +141,7 @@ export async function readRegularFile(path: string, capBytes: number): Promise<s
 }
 
 /** SHA-256 of a regular file, streamed, so a large asset costs memory proportional to nothing. */
-async function hashRegularFile(path: string): Promise<string> {
+export async function hashRegularFile(path: string): Promise<string> {
   const handle = await openRegular(path);
   try {
     const hash = createHash('sha256');

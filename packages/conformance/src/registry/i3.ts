@@ -6,6 +6,7 @@ import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { STATION_LOCKS_THE_ADMITTED_ARTIFACT, TRANSITION_REVERIFIES_LOCKS } from './line-assertions.js';
 import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
+import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -197,6 +198,7 @@ export const I3: InvariantEntry = {
     }),
     TRANSITION_REVERIFIES_LOCKS,
     STATION_LOCKS_THE_ADMITTED_ARTIFACT,
+    LOCKED_PATH_IN_DIFF_IS_TAMPER,
   ],
   pending: [
     pending({

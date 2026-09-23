@@ -83,6 +83,8 @@ export function specFor(dirs: SandboxDirs, mode: 'rw' | 'ro' = 'rw', overrides: 
     mounts: { workspace: { source: dirs.workspace, target: '/workspace', mode }, others: [] },
     egress: { mode: 'deny-all', allow: [] },
     limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 60_000 },
+    // alpine's own default user; what these assertions ran as before SandboxSpec named one
+    user: { uid: 0, gid: 0 },
     ...overrides,
   };
 }

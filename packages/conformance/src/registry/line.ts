@@ -11,7 +11,7 @@
  */
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ComponentGraph, RunOutcome, RunRequest } from '@olympus-ai/api';
+import type { ComponentGraph, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
 import type {
   ApprovalKey,
   ApprovalOutcome,
@@ -51,10 +51,11 @@ export const ARTIFACTS: RunRequest['artifacts'] = {
 
 const M1: readonly string[] = ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'];
 
-function scope(stations: CapabilityScope['stations'], tier: ModelTier): CapabilityScope {
+/** A role's scope as the rig grants it: every path writable unless `writableGlobs` narrows it. */
+export function lineScope(stations: CapabilityScope['stations'], tier: ModelTier, writableGlobs: readonly string[] = ['**']): CapabilityScope {
   return {
     stations,
-    writableGlobs: ['**'],
+    writableGlobs: [...writableGlobs],
     tools: ['read'],
     network: { egress: 'none' },
     tier,
@@ -77,7 +78,7 @@ export async function linePolicy(cells: Partial<Record<ApprovalKey, ApprovalOutc
     globalCap: 2,
     stationCaps: {},
     approvals: { ...auto, ...cells },
-    roles: { ['builder' as RoleId]: scope(['build', 'verify'], 'standard'), ['reviewer' as RoleId]: scope(['review'], 'deep') },
+    roles: { ['builder' as RoleId]: lineScope(['build', 'verify'], 'standard'), ['reviewer' as RoleId]: lineScope(['review'], 'deep') },
     protectedPaths: ['.github/**'],
     triggers: {
       enabled: ['human'],
@@ -143,6 +144,8 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
 export interface LineRig {
   readonly dirs: VaultDirs;
   readonly runId: RunId;
+  /** The runtime's trees for the run: beside the Vault and the workspace, inside neither. */
+  readonly workspaces: WorkspaceStore;
   /** A fresh component graph over the same store, as a new process would open it. */
   components(overrides?: Partial<ComponentGraph>): Promise<ComponentGraph>;
   request(components: ComponentGraph, overrides?: Partial<RunRequest>): Promise<RunRequest>;
@@ -152,8 +155,9 @@ export interface LineRig {
 
 /** The hello fixture in a fresh artifact root, a fresh store beside it, and a way to open both again. */
 export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promise<T>): Promise<T> {
-  return withVaultDirs(prefix, async (dirs) => {
+  return withVaultDirs(prefix, async (dirs, base) => {
     await cp(join(workspaceRoot(), HELLO_FIXTURE), dirs.artifacts, { recursive: true });
+    const workspaces = await storeAt(join(base, 'trees'));
     const runId = `${prefix.replace(/[^A-Za-z0-9]/g, '')}run` as RunId;
     const open = async (): Promise<Vault> => {
       const { LocalVault } = await import('@olympus-ai/vault');
@@ -162,10 +166,11 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
     const rig: LineRig = {
       dirs,
       runId,
+      workspaces,
       components: async (overrides = {}) => {
         const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
         const driver = await stubDriver();
-        return { vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, ...overrides };
+        return { vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces, ...overrides };
       },
       request: async (components, overrides = {}) => ({
         runId,
@@ -181,6 +186,16 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
     };
     return body(rig);
   });
+}
+
+/**
+ * A workspace store at `root`. On a host with uids it runs as this process,
+ * which is who its copies are writable by; on one without, the user is
+ * named, because there is nothing to derive it from.
+ */
+export async function storeAt(root: string): Promise<WorkspaceStore> {
+  const { localWorkspaceStore } = await import('@olympus-ai/api');
+  return process.getuid === undefined ? localWorkspaceStore({ root, user: { uid: 0, gid: 0 } }) : localWorkspaceStore({ root });
 }
 
 export async function writeManifest(dirs: VaultDirs, checks: readonly unknown[]): Promise<void> {

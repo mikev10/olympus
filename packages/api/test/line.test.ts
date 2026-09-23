@@ -196,7 +196,7 @@ describe('hello at L1', () => {
 
 describe('the verdict follows the checks and nothing else (I2)', () => {
   test('a failing check fails the gate whatever the driver claimed; the task is rebuilt, then parks after maxIterations', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, command: 'node -e process.exit(3)' }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
     const driver = new ChosenDriver({ narrative: 'all tests pass' });
     const outcome = await startRun(runRequest(runId, workspace, { ...components, driver, reviewer: driver }));
     expect(outcome).toMatchObject({
@@ -224,7 +224,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
   });
 
   test('a required check that cannot be started has no result and fails the gate', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: 'no-such-program-p4 --version' }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: ['no-such-program-p4', '--version'] }]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('parked');
     const [ref] = state.evidenceRefs;
@@ -233,7 +233,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
   });
 
   test('a failing check that is not required does not fail the gate', async () => {
-    await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: 'node -e process.exit(1)', required: false }]);
+    await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: ['node', '-e', 'process.exit(1)'], required: false }]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('passed');
   });
@@ -274,7 +274,7 @@ describe('locks are re-verified at every transition (I3)', () => {
   });
 
   test('a check that rewrites a locked artifact is refused after the checks, and no evidence is written', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'rewrite', command: "node -e require('node:fs').writeFileSync('spec.md','changed')" }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'rewrite', command: ['node', '-e', "require('node:fs').writeFileSync('spec.md','changed')"] }]);
     const outcome = await startRun(runRequest(runId, workspace, components));
     expect(outcome).toMatchObject({ at: 'verify', transition: { reason: 'lock-tamper' } });
     const state = refusedState(outcome);

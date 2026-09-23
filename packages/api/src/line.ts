@@ -10,13 +10,18 @@
  * - `spec`, `test-design`, `plan`: lock the artifacts the run was admitted
  *   with, and refuse a lock whose hash differs from the admission hash (I3).
  *   `plan` also enters the graph's tasks into run state.
- * - `build`: runs each task through the driver and records the result in the
- *   Vault before anything reads it.
- * - `verify`: runs every check in a fresh sandbox over a read-only workspace and
- *   derives the verdict from exit codes alone (I2). No tamper analysis and no
- *   claim/evidence diff; SKELETON_LINE says so.
+ * - `build`: runs each task through the driver over a fresh copy of the base
+ *   and the diff accepted so far, never over the author's working copy, and
+ *   records the result in the Vault before anything reads it (D-P6-02).
+ * - `verify`: collects the task's own diff, refuses one that touches a locked
+ *   artifact or leaves the task's grant, builds a tree from base and the
+ *   cumulative diff, and runs every check over it in a fresh sandbox, read-only
+ *   and with no egress. The verdict follows the check results alone (I2); the
+ *   claim is diffed against the evidence and never decides anything. No tamper
+ *   analysis; SKELETON_LINE says so.
  * - `review`: seats a reviewer against the authors' recorded model families
- *   (I6) and runs it on context its contract grants.
+ *   (I6) and runs it on context its contract grants, over a view holding only
+ *   the files those grants cover.
  *
  * Locks are re-verified before every task step, after the checks, and on every
  * exit once anything is locked. A mismatch records a violation, and a run with
@@ -65,8 +70,22 @@ import type {
 import type { CheckResult, CheckSpec, IntegrityViolation } from '@olympus-ai/integrity';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, EvidenceBundle } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck } from '@olympus-ai/vault';
 import type { ComponentGraph, RunOutcome } from './run.js';
+import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
+import {
+  attemptPaths,
+  basePath,
+  composeDiff,
+  copyOnly,
+  copyTree,
+  diffDigest,
+  hashAt,
+  materialize,
+  ownDiff,
+  reviewPath,
+  treePath,
+} from './workspace.js';
 
 export interface LineContext {
   readonly run: Run;
@@ -75,6 +94,8 @@ export interface LineContext {
   readonly graph: TaskGraph;
   readonly checks: readonly CheckSpec[];
   readonly components: ComponentGraph;
+  /** The digest of the base the runtime snapshotted at admission. */
+  readonly baseTreeSha256: string;
   /** Replaced by every commit. */
   state: RunState;
 }
@@ -382,13 +403,18 @@ function egressFor(network: { egress: 'none' | string[] }): EgressPolicy {
   return network.egress === 'none' ? { mode: 'deny-all', allow: [] } : { mode: 'allowlist', allow: [...network.egress] };
 }
 
-/** The workspace alone: rw where a task works, ro where checks run, so the checks get a tree they cannot modify (I3). */
-function workspaceOnly(ctx: LineContext, mode: 'rw' | 'ro', egress: EgressPolicy): SandboxSpec {
+/**
+ * One runtime-owned tree and nothing else: rw where a task works, ro where
+ * checks run or a reviewer reads, so the checks get a tree they cannot modify
+ * (I3). The container runs as the user the store made the tree writable by.
+ */
+function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy): SandboxSpec {
   return {
     image: 'none',
-    mounts: { workspace: { source: ctx.run.repo, target: '/workspace', mode }, others: [] },
+    mounts: { workspace: { source, target: '/workspace', mode }, others: [] },
     egress,
     limits: { cpus: 0, memoryMb: 0, pids: 0, wallClockMs: 0 },
+    user: { ...ctx.components.workspaces.user },
   };
 }
 
@@ -400,17 +426,20 @@ function scopeFor(ctx: LineContext, task: Task) {
 }
 
 /**
- * Runs one task through a driver in a fresh sandbox, or reports why it could
- * not. The workspace is mounted as the station's contract allows: a station
- * whose `writeBoundary` grants no glob — `review` — gets a tree it cannot
- * write, rather than the author's own working copy (A-P4-05).
+ * Runs one task through a driver in a fresh sandbox over `workspace`, or
+ * reports why it could not. The tree is mounted as the station's contract
+ * allows: a station whose `writeBoundary` grants no glob — `review` — gets a
+ * tree it cannot write (A-P4-05). The sandbox is destroyed when the task
+ * ends, and with it anything the task left running (I4).
  */
-async function runTask(ctx: LineContext, task: Task, driver: Driver, context: string): Promise<{ ok: true; result: TaskResult } | { ok: false; error: unknown }> {
+async function runTask(
+  ctx: LineContext, task: Task, driver: Driver, context: string, workspace: string,
+): Promise<{ ok: true; result: TaskResult } | { ok: false; error: unknown }> {
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
   const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
   try {
-    const handle = await sandbox.provision(workspaceOnly(ctx, mode, egressFor(scope.network)));
+    const handle = await sandbox.provision(workspaceOnly(ctx, workspace, mode, egressFor(scope.network)));
     try {
       const request: TaskRequest = {
         taskId: task.id,
@@ -438,9 +467,53 @@ function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>):
   return parts.map((p) => `[${p.grant}]\n${p.text}`).join('\n\n');
 }
 
+/** Every artifact the run was admitted with. Each is locked by its station, and none may appear in a task's diff. */
+function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
+  const { spec, acceptanceTests, verificationManifest, taskGraph } = ctx.artifacts;
+  return [...spec, ...acceptanceTests, verificationManifest, taskGraph];
+}
+
+/** A bundle read back from the Vault, checked for the fields the line builds on. */
+async function readBundle(ctx: LineContext, ref: VaultRef): Promise<EvidenceBundle> {
+  const bundle = JSON.parse(decode(await ctx.components.vault.read(ref))) as Partial<EvidenceBundle>;
+  if (typeof bundle.taskId !== 'string' || !Array.isArray(bundle.diff) || typeof bundle.diffSha256 !== 'string') {
+    throw new Error(`line: an evidence bundle in run ${ctx.run.id} does not hold a task and a diff`);
+  }
+  return bundle as EvidenceBundle;
+}
+
+interface Accepted {
+  /** The cumulative diff, relative to base, of the latest task that passed; empty when none has. */
+  readonly diff: readonly DiffEntry[];
+  /** The tree that diff was verified over, where its bytes are read from; the base when no task has passed. */
+  readonly tree: string;
+}
+
+/**
+ * What the run has accepted so far, derived from the Vault: the last bundle
+ * of each task, of the tasks run state records as passed, whichever was
+ * written last. Diffs are cumulative, so the latest one names the whole
+ * accepted tree.
+ */
+async function accepted(ctx: LineContext): Promise<Accepted> {
+  const last = new Map<TaskId, { bundle: EvidenceBundle; at: number }>();
+  for (const [at, ref] of ctx.state.evidenceRefs.entries()) {
+    const bundle = await readBundle(ctx, ref);
+    last.set(bundle.taskId, { bundle, at });
+  }
+  let latest: { bundle: EvidenceBundle; at: number } | undefined;
+  for (const [taskId, entry] of last) {
+    const passed = Object.hasOwn(ctx.state.tasks, taskId) && ctx.state.tasks[taskId] === 'passed';
+    if (passed && (latest === undefined || entry.at > latest.at)) latest = entry;
+  }
+  const { workspaces } = ctx.components;
+  if (latest === undefined) return { diff: [], tree: basePath(workspaces, ctx.run.id) };
+  return { diff: latest.bundle.diff, tree: treePath(workspaces, ctx.run.id, latest.bundle.diffSha256) };
+}
+
 /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
 async function build(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
-  const { driver, vault } = ctx.components;
+  const { driver, vault, workspaces } = ctx.components;
   const capability = capabilityRefusal(STATION_CONTRACTS.build, driver.capabilities());
   if (capability !== undefined) return capability;
   const tampered = await tamperedPaths(ctx);
@@ -455,32 +528,110 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
 
   const started = await startAttempt(ctx, task);
   if (started !== undefined) return started;
+  // A fresh pair for every invocation, a replayed one included: the tree the task is handed is
+  // exactly base and what was accepted, never what an earlier attempt left behind.
+  const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+  const base = await accepted(ctx);
+  await materialize(workspaces, ctx.run.id, start, base.diff, () => base.tree);
+  await copyTree(start, work);
   const offered: Partial<Record<ContextGrant, string>> = {
     'locked-spec': spec.text,
     'acceptance-tests': tests.text,
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
-  const ran = await runTask(ctx, task, driver, joinParts(grantedContext(STATION_CONTRACTS.build, offered)));
+  const ran = await runTask(ctx, task, driver, joinParts(grantedContext(STATION_CONTRACTS.build, offered)), work);
   if (!ran.ok) return spendRetry(ctx, task);
+  // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
+  // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
+  const problems = taskResultProblems(ran.result);
+  if (problems.length > 0) {
+    throw new Error(`line: the driver's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
+  }
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'verifying' }, results: { ...ctx.state.results, [task.id]: ref } });
   return undefined;
 }
 
-/** `verify`: the checks, run where the agent never ran, over a workspace mounted read-only; the verdict follows their exit codes and nothing else (I2). */
+/** Locked artifacts whose content in `tree` is not what was admitted. */
+async function tamperedIn(ctx: LineContext, tree: string): Promise<TamperedPath[]> {
+  const tampered: TamperedPath[] = [];
+  for (const artifact of admittedArtifacts(ctx)) {
+    const actual = (await hashAt(tree, artifact.path)) ?? 'missing';
+    if (actual !== artifact.sha256) tampered.push({ path: artifact.path, expected: artifact.sha256, actual });
+  }
+  return tampered;
+}
+
+/**
+ * I4: a change outside the task's grant is a capability the policy did not
+ * give, collected from the runtime's own diff. It is recorded and the run
+ * does not continue: the refusal rests on evidence, not on the claim.
+ */
+async function recordEscape(ctx: LineContext, task: Task, outside: string[]): Promise<StationRefusal> {
+  const detector = driverAt(ctx, 'verify');
+  const ref = await ctx.components.vault.recordViolation({
+    runId: ctx.run.id,
+    taskId: task.id,
+    kind: 'capability-escape',
+    role: task.role,
+    driverProvenanceId: detector.provenanceId(),
+    contractVersion: detector.contractVersion,
+    detectedAt: new Date().toISOString(),
+    detail: { station: 'verify', phase: 'diff', outsideGrant: outside },
+  });
+  await commit(ctx, { violation: ref, tasks: { ...ctx.state.tasks, [task.id]: 'failed' } });
+  return {
+    ok: false,
+    reason: 'violation',
+    violations: [ref],
+    message: `task ${task.id} changed paths its grant does not cover: ${outside.join(', ')}`,
+  };
+}
+
+/**
+ * `verify`: the task's own diff, held to the locks and the grant; then the
+ * checks, run over a tree built from base and the cumulative diff, where the
+ * agent never ran, mounted read-only with no egress. The verdict follows the
+ * check results and nothing else (I2).
+ */
 async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
-  const { sandbox, vault, driver } = ctx.components;
+  const { sandbox, vault, driver, workspaces } = ctx.components;
   const before = await tamperedPaths(ctx);
   if (before.length > 0) return recordTamper(ctx, 'verify', task, before, { phase: 'before-checks' });
   const result = await readResult(ctx, task);
 
+  const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+  const own = await ownDiff(start, work);
+
+  // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
+  // A locked path in it is the tamper the Vault's own check can no longer see.
+  const admitted = new Map(admittedArtifacts(ctx).map((a) => [a.path, a.sha256]));
+  const locked = own.filter((entry) => admitted.has(entry.path));
+  if (locked.length > 0) {
+    const tampered = locked.map((entry) => ({ path: entry.path, expected: admitted.get(entry.path) ?? 'missing', actual: entry.sha256 ?? 'missing' }));
+    return recordTamper(ctx, 'verify', task, tampered, { phase: 'diff' });
+  }
+  const scope = scopeFor(ctx, task);
+  const outside = writesOutsideGrant(own, scope.writableGlobs, STATION_CONTRACTS.build.writeBoundary.workspaceGlobs);
+  if (outside.length > 0) return recordEscape(ctx, task, outside);
+
+  const prior = await accepted(ctx);
+  const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
+  const diffSha256 = diffDigest(diff);
+  const tree = treePath(workspaces, ctx.run.id, diffSha256);
+  const fromTask = new Set(own.map((entry) => entry.path));
+  await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
+  const built = await tamperedIn(ctx, tree);
+  if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+  const counted = await countSuites(tree);
+
   // Results stay aligned with the specs by position, never matched up by id afterwards.
   const specs = ctx.checks;
   const results: Array<CheckResult | undefined> = [];
-  const unstarted: Array<string | undefined> = [];
+  const unstarted: UnstartedCheck[] = [];
   let handle: SandboxHandle;
   try {
-    handle = await sandbox.provision(workspaceOnly(ctx, 'ro', { mode: 'deny-all', allow: [] }));
+    handle = await sandbox.provision(workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }));
   } catch {
     return spendRetry(ctx, task);
   }
@@ -488,14 +639,22 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     for (const check of specs) {
       const startedAt = new Date().toISOString();
       try {
-        // Whitespace split and no shell is the whole command grammar until P6 declares one.
-        const exec = await sandbox.exec(handle, check.command.split(/\s+/));
-        results.push({ checkId: check.id, exitCode: exec.exitCode, stdout: exec.stdout, stderr: exec.stderr, suiteCount: null, expectation: null, durationMs: exec.durationMs, startedAt });
-        unstarted.push(undefined);
+        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
+        const exec = await sandbox.exec(handle, [...check.command]);
+        results.push({
+          checkId: check.id,
+          exitCode: exec.exitCode,
+          stdout: exec.stdout,
+          stderr: exec.stderr,
+          suiteCount: suiteCountFor(check, counted),
+          expectation: null,
+          durationMs: exec.durationMs,
+          startedAt,
+        });
       } catch (error) {
-        // There is no exit code to record and none is invented; a required check with no result fails the gate.
+        // There is no exit code to record and none is invented; the bundle says why (A-P6-02).
         results.push(undefined);
-        unstarted.push(describe(error));
+        unstarted.push({ checkId: check.id, reason: describe(error) });
       }
     }
   } finally {
@@ -504,7 +663,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const checks = results.filter((r): r is CheckResult => r !== undefined);
 
   // Evidence collected over a changed artifact is not evidence, whatever the provider claims about ro.
-  const after = await tamperedPaths(ctx);
+  const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
 
   const failed: FailedCheck[] = [];
@@ -512,13 +671,32 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     const shortfall = requiredShortfall(check, results[i]);
     if (shortfall !== undefined) failed.push(shortfall);
   });
+  const differences = claimEvidenceDiff(result.claim, own);
+  if (differences.length > 0) {
+    // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
+    // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
+    await vault.recordViolation({
+      runId: ctx.run.id,
+      taskId: task.id,
+      kind: 'claim-mismatch',
+      role: task.role,
+      driverProvenanceId: driver.provenanceId(),
+      contractVersion: driver.contractVersion,
+      detectedAt: new Date().toISOString(),
+      detail: { station: 'verify', claimEvidenceDiff: differences },
+    });
+  }
   const evidence: EvidenceBundle = {
     runId: ctx.run.id,
     taskId: task.id,
     baseCommit: ctx.run.baseCommit,
+    baseTreeSha256: ctx.baseTreeSha256,
+    diff,
+    diffSha256,
     checks,
+    unstarted,
     claim: result.claim,
-    claimEvidenceDiff: [],
+    claimEvidenceDiff: differences,
     collectedBy: 'runtime',
     driverProvenanceId: driver.provenanceId(),
     contractVersion: driver.contractVersion,
@@ -532,9 +710,30 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
 }
 
 /**
+ * The review seat's tree: the files its grants cover and nothing else. The
+ * contract grants the locked spec, the acceptance tests, and the diff, so the
+ * view holds those files as the accepted tree has them; the task graph, the
+ * manifest, and every file the diff does not carry are absent, so a reviewer
+ * with a read tool cannot open what its contract denies it (I6).
+ */
+async function reviewView(ctx: LineContext, task: Task): Promise<string> {
+  const { workspaces } = ctx.components;
+  const grants: readonly ContextGrant[] = STATION_CONTRACTS.review.allowedContext;
+  const keep = new Set<string>();
+  if (grants.includes('locked-spec')) for (const a of ctx.artifacts.spec) keep.add(a.path);
+  if (grants.includes('acceptance-tests')) for (const a of ctx.artifacts.acceptanceTests) keep.add(a.path);
+  const current = await accepted(ctx);
+  if (grants.includes('diff')) for (const entry of current.diff) if (entry.sha256 !== null) keep.add(entry.path);
+  const view = reviewPath(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+  await copyOnly(current.tree, view, [...keep].sort());
+  return view;
+}
+
+/**
  * The latest evidence bundle per reviewed task, as the runtime's facts only:
- * check ids, exit codes, and whether an expectation held, never the claim
- * beside them. A reviewer shown a behavioral check's exit code alone would
+ * check ids, exit codes, whether an expectation held, the checks that never
+ * started, and how many ways the claim and the diff disagree — never the
+ * claim itself. A reviewer shown a behavioral check's exit code alone would
  * read the product's 0 as a pass the gate did not give (A-P8-01).
  */
 async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promise<string> {
@@ -544,7 +743,14 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
     if (tasks.includes(bundle.taskId)) latest.set(bundle.taskId, bundle);
   }
   return JSON.stringify(
-    [...latest.values()].map((b) => ({ taskId: b.taskId, checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })) })),
+    [...latest.values()].map((b) => ({
+      taskId: b.taskId,
+      checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })),
+      unstarted: b.unstarted.map((u) => u.checkId),
+      // How many ways the claim and the diff disagree, and not the paths: a claimed path is a
+      // string the author wrote, and the seat is given no author material (D-P6-03).
+      claimMismatches: b.claimEvidenceDiff.length,
+    })),
   );
 }
 
@@ -586,7 +792,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
     plan: JSON.stringify(ctx.graph.tasks),
   };
-  const ran = await runTask(ctx, task, reviewer, joinParts(grantedContext(contract, offered)));
+  const ran = await runTask(ctx, task, reviewer, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
   if (!ran.ok) return spendRetry(ctx, task);
   const seated = seatReviewer(task.id, authors, ran.result.model, level);
   if (!seated.ok) return seated;

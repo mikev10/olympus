@@ -31,7 +31,7 @@ import {
 
 const runId = 'run-admission' as RunId;
 const ok = { ...HELLO_CHECK, id: 'x' };
-const bad = { ...ok, command: 'node -e process.exit(3)' };
+const bad = { ...ok, command: ['node', '-e', 'process.exit(3)'] };
 
 let workspace: string;
 let components: ComponentGraph;
@@ -93,8 +93,14 @@ describe('S1 finding 3: the verification manifest', () => {
   test('3c: a check whose required flag is not a boolean, or with an empty command, id, or bad suite count, is refused', async () => {
     await writeChecks(workspace, [{ ...bad, required: 'yes' }]);
     await expectInvalid(await start(), 'manifest.checks[0].required', 'not-boolean');
-    await writeChecks(workspace, [{ ...ok, command: '  ' }]);
+    await writeChecks(workspace, [{ ...ok, command: [] }]);
     await expectInvalid(await start(), 'manifest.checks[0].command', 'empty');
+    await writeChecks(workspace, [{ ...ok, command: ['  '] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].command[0]', 'empty');
+    await writeChecks(workspace, [{ ...ok, command: 'node -e process.exit(0)' }]);
+    await expectInvalid(await start(), 'manifest.checks[0].command', 'not-argv');
+    await writeChecks(workspace, [{ ...ok, command: ['node', 7] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].command[1]', 'not-argv');
     await writeChecks(workspace, [{ ...ok, id: '' }]);
     await expectInvalid(await start(), 'manifest.checks[0].id', 'empty');
     await writeChecks(workspace, [{ ...ok, expectedSuiteCount: -1 }]);

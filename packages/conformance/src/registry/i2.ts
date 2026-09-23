@@ -1,7 +1,8 @@
-import { compileError, pending } from '../kit/assert.js';
+import { compileError } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -41,24 +42,9 @@ export const I2: InvariantEntry = {
     }),
     RESUME_DERIVES_STATE_FROM_THE_VAULT,
     UNMET_EXPECTATION_FAILS_THE_GATE,
+    STATUS_DERIVED_FROM_CHECK_RESULTS,
+    TASK_RESULT_KEY_SET_ENFORCED,
+    UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
   ],
-  pending: [
-    pending({
-      id: 'I2.status-derived-from-check-results',
-      owner: 'P6',
-      reason:
-        'The runtime must compute a task\'s status from CheckResult exit codes alone and record where the ' +
-        'claim and the evidence differ (claimEvidenceDiff). Until P6 there is no code that derives status.',
-    }),
-    pending({
-      id: 'I2.unstarted-check-is-in-the-evidence',
-      owner: 'P6',
-      reason:
-        'CheckResult cannot represent a required check that could not be started, so the evidence bundle simply lacks ' +
-        "an entry and the only record of why is the refusal's message. A verdict derived from a fact the evidence does " +
-        'not carry is not auditable. P6 must give the bundle a record for a check that produced no result, with the ' +
-        'reason, and assert that the gate fails on it and that the bundle shows it. Surfaced by S1 (docs/decisions.md, ' +
-        'owed contract gaps).',
-    }),
-  ],
+  pending: [],
 };
