@@ -71,8 +71,9 @@ between them a signal of its own, and there is no rotation to plan or repeat to
 record when both run every time.
 
 The runner resolves the committed artifacts, checks they were pushed, and sends
-each family the prompt with the bundle inlined after it: neither reviewer is
-asked to read a file. The two are reached differently, and only Codex has a
+each family the prompt with the bundle inlined after it, followed by one fixed
+runner sentence repeating the echo request: neither reviewer is asked to read a
+file. The two are reached differently, and only Codex has a
 clean room:
 
 - **Codex** runs as `codex exec`, headless and non-interactive, under a

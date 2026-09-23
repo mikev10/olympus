@@ -39,6 +39,13 @@ line that closes it, and the reviewer can always tell where the material ends.
 That is the whole of what it buys: it is not a defence against a reviewer
 following an instruction it finds inside the bundle.
 
+After the closing delimiter the runner adds one fixed sentence of its own,
+repeating the prompt's request for the four echo values without stating any of
+them. On a large bundle the prompt's opening request sits far from where the
+reviewer starts answering, and Gemini skipped it twice at 540 KB. Keep the
+prompt's own echo request anyway: the reminder repeats it, it does not replace
+it.
+
 Every word in the prompt file is meant for the reviewer: no headings, notes, or
 provenance for the maintainer go in it, because the whole file is sent
 verbatim.
