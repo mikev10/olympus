@@ -28,7 +28,24 @@ import { createHash } from 'node:crypto';
  *
  * `endNonce` is a `string`, not `string | null`: the runner refuses a bundle
  * with no nonce at step 4, before this is reached, and the type says so.
+ *
+ * **The echo request is repeated after the closing delimiter.** On 2026-09-23
+ * Gemini twice skipped the prompt's opening request for the four echo values
+ * when the bundle was 540 KB (P6), though it had honoured the identical prompt
+ * at 398 KB (P8): an instruction read once, ~168k tokens before the model
+ * answers, can be lost. `ECHO_REMINDER` is fixed runner text, the same for
+ * every unit, and it names the four values without stating any of them, so
+ * copying it satisfies no part of the echo check. It lies outside the
+ * delimiters, so it is the runner speaking, not bundle material, and it is
+ * covered by the payload hash like everything else sent.
  */
+export const ECHO_REMINDER =
+  'The review bundle ends at the line above. Before any finding, state on four ' +
+  'separate lines the four values the prompt asked for: the BASE: value, the ' +
+  "HEAD: value, the file path in the bundle's final section header, and the " +
+  "32-character value on the bundle's very last line, copied exactly. If you " +
+  'cannot read all four, say so and stop.';
+
 export function composePayload(
   promptText: string,
   bundleFileName: string,
@@ -37,7 +54,7 @@ export function composePayload(
 ): string {
   const begin = `<<<BEGIN REVIEW BUNDLE ${endNonce}>>>`;
   const end = `<<<END REVIEW BUNDLE ${endNonce}>>>`;
-  return `${promptText.trimEnd()}\n\n${begin} ${bundleFileName}\n${bundleText.replace(/\n+$/, '')}\n${end}\n`;
+  return `${promptText.trimEnd()}\n\n${begin} ${bundleFileName}\n${bundleText.replace(/\n+$/, '')}\n${end}\n\n${ECHO_REMINDER}\n`;
 }
 
 /** A string is hashed as its UTF-8 bytes; bytes are hashed as they are. */

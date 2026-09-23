@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composePayload, sha256 } from '../payload.ts';
+import { composePayload, ECHO_REMINDER, sha256 } from '../payload.ts';
 
 const PROMPT = 'Review the bundle.\n';
 const NAME = '2026-09-21-P6-x-review-bundle.txt';
@@ -57,9 +57,29 @@ describe('composePayload', () => {
 
     expect(lines).toContain('<<<END REVIEW BUNDLE>>>');
     expect(lines.filter((line) => line === END)).toHaveLength(1);
-    // The real closing delimiter is the last line, after everything the bundle
-    // tried: the reviewer can still tell where the material ends.
-    expect(lines.filter((line) => line !== '').at(-1)).toBe(END);
+    // The real closing delimiter follows everything the bundle tried, and only
+    // the runner's own reminder follows it: the reviewer can still tell where
+    // the material ends.
+    const nonEmpty = lines.filter((line) => line !== '');
+    expect(nonEmpty.at(-2)).toBe(END);
+    expect(nonEmpty.at(-1)).toBe(ECHO_REMINDER);
+  });
+
+  it('repeats the echo request after the closing delimiter, so it is the last thing read', () => {
+    const lines = payload.split('\n').filter((line) => line !== '');
+    expect(lines.at(-2)).toBe(END);
+    expect(lines.at(-1)).toMatch(/^The review bundle ends at the line above\. Before any finding, state on four separate lines/);
+  });
+
+  it('keeps the reminder free of any value the echo check looks for', () => {
+    // A reminder that stated a value would let a reviewer pass the check by
+    // copying the runner's own text back.
+    for (const value of ['reviewed/P5', 'abc1234', 'a.ts', NONCE]) {
+      expect(ECHO_REMINDER).not.toContain(value);
+    }
+    expect(/^===== (.+) =====$/.test(ECHO_REMINDER)).toBe(false);
+    expect(ECHO_REMINDER).not.toContain('=== BUNDLE END ===');
+    expect(ECHO_REMINDER).not.toContain('REVIEW BUNDLE ');
   });
 
   it('keeps the nonce as the last line before the closing delimiter', () => {
