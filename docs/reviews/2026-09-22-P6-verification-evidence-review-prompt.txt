@@ -1,0 +1,143 @@
+The code under review is in the file
+`2026-09-22-P6-verification-evidence-review-bundle.txt` (SHA-256 434fb474e8ef1b712ee1b8780a4100c449e681adcdb0d7205eb490c074378aff) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the verification and evidence runtime of a TypeScript project
+that runs autonomous coding agents through a fixed line of stations. You have
+the source and nothing else — no design documents, no author reasoning, no prior
+version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+An agent (driven through a `Driver`) does a build task inside a sandbox, and the
+runtime then decides, without asking the agent, whether the task passed. This
+change moves every task off the author's own working copy onto trees the runtime
+owns: the working tree is snapshotted as a base at admission, each build attempt
+runs over a fresh copy of base plus the diff accepted so far, the runtime
+collects the task's own diff by comparing directory trees in process, and the
+pinned verification checks run over a tree built from base and the cumulative
+diff, mounted read-only with no network. The diff is held to the locked
+artifacts and to the task's writable globs, the agent's claim is diffed against
+it, suite counts are taken from files on the host, and an evidence bundle
+recording all of it is written to the Vault. It also narrows what a review
+seat's workspace holds, records at admission which verification controls the
+repository's stack lacks, and makes a sandbox's container user explicit.
+
+It must hold against a capable, motivated party trying to get a task recorded
+as passed without the work the pinned checks require, or to reach a file,
+capability, or later task it was not granted. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls what the model does inside its sandbox (every file it
+writes, every process it starts, every command it runs, including processes it
+leaves running), the contents of the repository it is handed, and every field of
+the `TaskResult` a driver returns, which may carry keys the type does not name.
+It does not control the components the runtime is wired with — the Vault, the
+sandbox provider, the drivers, and the workspace store are runtime-selected and
+trusted, even where a function takes one as an argument — it does not control
+the verification manifest, the spec, the acceptance tests, or the task graph,
+which are hashed and locked before it runs, and it does not control code running
+inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A task's status is
+  computed from the results of checks the runtime ran. A driver's result has no
+  status field; the agent's narrative is a claim, stored separately from the
+  evidence, and the two are diffed.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build and re-verified at every station transition.
+- Default deny. A capability not granted in policy is not available — including
+  a path outside the task's writable globs, and anything an earlier task leaves
+  behind for a later one.
+- Fail closed. A missing required check, a shrunken suite enumeration, an
+  unrepresentable command, an unwritable workspace, or an unsupported stack is a
+  refusal — never a silent degrade, never a warning that lets the run continue.
+- Reviewers never share the author's model family, and a review seat reads only
+  the context its station contract grants — never the author's narrative or the
+  plan.
+- No agent writes to the Vault, at any level, enforced at the mount layer.
+
+The mechanisms that matter most:
+
+- The tree operations in `packages/api/src/workspace.ts` (snapshot, own diff,
+  diff composition, materialization with per-file hash checks) and how the line
+  in `packages/api/src/line.ts` chooses which trees a task, a verification, and
+  a review seat are given.
+- The verify station's checks on the task's own diff: locked paths, writable
+  globs, the claim/evidence diff, and the lock re-hash in the verified tree.
+- The gate inputs: `suiteCount` from `countSuites`, `unstarted` checks,
+  `requiredShortfall`, and the exact-key check on a driver's result.
+- Admission: the adapter controls recorded in the admission record and
+  `admissionRefusal`, and the base digest re-checked on resume; and the
+  sandbox's container `user` and its writability refusal in
+  `packages/sandbox/src/local/provider.ts`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The identifiers in parentheses name other planned units of work; they mean
+nothing you need to resolve. Absent work listed here is not a defect.
+
+- tamper analysis, and the `SKELETON_LINE` line that says it is missing (P7). P6 removes its own line, the claim/evidence diff, and leaves P7's. Whichever of the two removes the last line puts `I5.unsafe-declaration-survives-composition`'s gap in its place, because an empty declaration is refused by `safety.ts` and a missing one would lift the L1 cap before provenance is compositional
+- deleting `SKELETON_LINE`, and component provenance that survives composition (I1, which replaces every stub with the real component)
+- an L3 run refused at admission end to end, naming each missing control. It cannot fail for the right reason while `SKELETON_LINE` refuses every run above L1 (I1)
+- keeping the model credential out of the container (P12). Authentication belongs at the egress layer, which is the sandbox's, the proxy's, and the driver's, not verification's
+- coverage that cannot be forged by the suite it measures (M3). The suite and the coverage writer share a process, so where the report is written does not decide whether its hit counts are true; mutation testing is the control that does not trust a hit count. Until then a coverage figure is evidence about a suite that cooperated, and nothing P6 builds calls it more
+- tamper-style reading of the diff: weakened assertions, skip markers, deleted tests (P7). P6 counts suites; P7 reads what is in them
+- the merge at `integrate` (I1), per-run cost aggregation (R2), and a verification cache
+
+THE QUESTION
+
+How would an agent get its task recorded as passed without the work the pinned
+checks require — or change a locked artifact, write outside its grant, leave
+something that reaches a later task or the review seat, or show the reviewer
+what its contract denies it — while every check in this code still reports
+that it held?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
