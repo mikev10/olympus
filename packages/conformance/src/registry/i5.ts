@@ -443,7 +443,7 @@ export const I5: InvariantEntry = {
     }),
     pending({
       id: 'I5.unsafe-declaration-survives-composition',
-      owner: 'P6',
+      owner: 'I1',
       reason:
         "unsafeComponents reads each component's `unsafe` property structurally, so a wrapper around a stub that does " +
         'not forward the property carries no declaration and passes as safe. Today that is no route above L1: ' +
@@ -452,7 +452,8 @@ export const I5: InvariantEntry = {
         'wrapped stub would carry a run to L2 or L3. Before SKELETON_LINE is deleted, component provenance must be ' +
         'compositional: trusted metadata a wrapper must propagate, a graph-construction layer that owns provenance, ' +
         'or an equivalent; and the assertion must wrap a stub without forwarding and require the refusal. Recorded by ' +
-        'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01).',
+        'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01). Owned by I1, the unit that replaces every S1 stub ' +
+        'and deletes SKELETON_LINE, rather than by whichever of P6 and P7 lands second (D-P6-01).',
     }),
     pending({
       id: 'I5.policy-document-load-is-hardened',
@@ -481,9 +482,19 @@ export const I5: InvariantEntry = {
         'P8 ships the L3 refusal as a pure function over an AdapterSet (adapterAdmission), asserted by ' +
         'I5.unsupported-stack-is-loud, and nothing calls it when a run is admitted. Wiring it there needs the ' +
         "admission record to carry the set's unavailable controls, so a resume cannot restate them, and an assertion " +
-        'that an L3 run is refused at admission naming each missing control. It cannot fail for the right reason ' +
-        'while SKELETON_LINE refuses every run above L1, and P6 is the unit that deletes SKELETON_LINE, so the ' +
-        'wiring lands with it. Surfaced by P8 (docs/decisions.md, D-P8-03).',
+        'against the admission function that refuses L3 naming each missing control. The end-to-end half, an L3 run ' +
+        'refused through startRun, cannot fail for the right reason while SKELETON_LINE refuses every run above L1, ' +
+        'and is I5.adapter-refusal-refuses-l3-end-to-end, owned by I1 (D-P6-01). Surfaced by P8 (docs/decisions.md, ' +
+        'D-P8-03).',
+    }),
+    pending({
+      id: 'I5.adapter-refusal-refuses-l3-end-to-end',
+      owner: 'I1',
+      reason:
+        'Split from I5.adapter-refusal-enforced-at-admission (D-P6-01). An L3 run started through startRun must be ' +
+        'refused at admission naming each control its adapter set lacks. While SKELETON_LINE declares the line unsafe, ' +
+        'every run above L1 is refused for that reason first, so this assertion would pass whether or not the adapter ' +
+        'refusal is wired. I1 deletes SKELETON_LINE, so the assertion lands with it.',
     }),
     pending({
       id: 'I5.check-command-has-a-grammar',

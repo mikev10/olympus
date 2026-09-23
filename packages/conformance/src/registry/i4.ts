@@ -289,7 +289,7 @@ export const I4: InvariantEntry = {
     }),
     pending({
       id: 'I4.model-credential-not-readable-by-the-task',
-      owner: 'P6',
+      owner: 'P12',
       reason:
         'The model credential reaches the CLI as an environment value on the exec, which keeps it out of every '
         + 'argument vector and off the mount table. It does not keep it from the model: the CLI and any tool the task '
@@ -297,7 +297,8 @@ export const I4: InvariantEntry = {
         + 'external review -- a child printed it, and a later exec given no credential at all read it out of /proc. '
         + 'Closing it means the credential never enters the container: authentication at the egress layer the '
         + 'allowlist proxy already interposes (P10), with the sandbox holding a short-lived token or nothing at all. '
-        + 'That spans the sandbox, the proxy and the driver, so it is not a driver change. Surfaced by P5.',
+        + 'That spans the sandbox, the proxy and the driver, so it is neither a driver change nor a verification one: '
+        + 'owned by P12, split out for it (D-P6-04). Surfaced by P5.',
     }),
     pending({
       id: 'I4.writable-globs-enforced-on-the-diff',

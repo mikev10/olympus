@@ -201,7 +201,7 @@ export const I3: InvariantEntry = {
   pending: [
     pending({
       id: 'I3.coverage-report-is-not-writable-by-the-suite',
-      owner: 'P6',
+      owner: 'M3',
       reason:
         'Changed-line coverage is read from the istanbul report a check run writes, and that run executes the '
         + "repository's own code: its tests, and whatever its package scripts do around them. So the artifact the "
@@ -210,11 +210,12 @@ export const I3: InvariantEntry = {
         + "the denominator is now the union of the report's statements and the executable lines read from the head "
         + 'tree on the host (external review, codex-2 and gemini-2). The other half cannot be closed by reading the '
         + 'report more carefully: a hit count claiming a line ran cannot be told apart from one that did, by anyone '
-        + 'who was not there when it ran. Closing it means the run that produces the report, which is P6: coverage '
+        + 'who was not there when it ran. Closing it means the run that produces the report: coverage '
         + 'collected where the suite cannot rewrite it afterwards, or counted from an instrumentation the repository '
         + 'does not supply, with an assertion that a forged report does not raise the number. Until then a coverage '
         + 'figure is evidence about a suite that cooperated, not proof against one that did not. Recorded by P8 as '
-        + 'D-P8-14.',
+        + 'D-P8-14. Owned by M3, beside mutation testing: the suite and the coverage writer share a process, so no '
+        + 'location for the report decides whether its hit counts are true (D-P6-05).',
     }),
   ],
 };

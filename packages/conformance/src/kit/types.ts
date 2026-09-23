@@ -27,12 +27,12 @@ export const INVARIANTS: Readonly<Record<InvariantId, string>> = {
 };
 
 /**
- * Units that can owe a pending assertion. Phase 1 and 2 units by id, plus the
- * milestones (M2, M3) that own features the M1 boundary defers.
+ * Units that can owe a pending assertion. Phase 1, 2, and 3 units by id, plus
+ * the milestones (M2, M3) that own features the M1 boundary defers.
  */
 export type UnitId =
-  | 'S1' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10'
-  | 'M2' | 'M3';
+  | 'S1' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10' | 'P12'
+  | 'I1' | 'M2' | 'M3';
 
 export const UNITS: Readonly<Record<UnitId, string>> = {
   S1: 'Walking skeleton',
@@ -46,6 +46,8 @@ export const UNITS: Readonly<Record<UnitId, string>> = {
   P8: 'Adapters (TypeScript)',
   P9: 'API + CLI',
   P10: 'Sandbox egress allowlist',
+  P12: 'Credential at the egress layer',
+  I1: 'Integration + M1 proof',
   M2: 'Milestone 2 (compiler, Codex driver, trigger framework)',
   M3: 'Milestone 3 (learning, review panel, mutation testing, L3 canary)',
 };
