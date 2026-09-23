@@ -9,6 +9,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import { writeStdin } from '../stdin.js';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -71,12 +72,21 @@ export class StubSandboxProvider implements SandboxProvider {
       const child = spawn(file, args, {
         cwd,
         shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
         windowsHide: true,
         ...(env === undefined ? {} : { env }),
       });
+      if (options.stdin !== undefined) {
+        writeStdin(child.stdin, options.stdin, (error) => {
+          child.kill();
+          reject(new Error(`StubSandboxProvider: the standard input of ${file} could not be delivered: ${error.message}`));
+        });
+      }
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
+      // Both are 'pipe' above, so Node always creates them; the conditional stdin entry is what
+      // hides that from spawn's overloads.
+      if (child.stdout === null || child.stderr === null) throw new Error(`StubSandboxProvider: ${file} was spawned without output pipes`);
       child.stdout.on('data', (chunk: Buffer) => {
         stdout.push(chunk);
       });

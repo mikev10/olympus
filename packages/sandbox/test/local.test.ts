@@ -330,6 +330,25 @@ describe('lifecycle', () => {
     expect(provider.capabilities().persistent).toBe(true);
   });
 
+  test('stdin reaches the process inside the container and is then closed (A-P8-02)', async () => {
+    const handle = await provision();
+    const result = await provider.exec(handle, ['sh', '-c', 'tr a-z A-Z'], { stdin: 'fed through stdin\n' });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('FED THROUGH STDIN\n');
+  });
+
+  test('a process that exits without reading its stdin still reports its own exit code', async () => {
+    const handle = await provision();
+    const result = await provider.exec(handle, ['sh', '-c', 'exit 4'], { stdin: 'x'.repeat(1 << 20) });
+    expect(result.exitCode).toBe(4);
+  });
+
+  test('without stdin the process reads end of input at once, rather than waiting on a stream nobody feeds', async () => {
+    const handle = await provision();
+    const result = await provider.exec(handle, ['sh', '-c', 'cat; echo done']);
+    expect(result.stdout).toBe('done\n');
+  });
+
   test('a non-zero exit code is reported as it is, not turned into a throw', async () => {
     const handle = await provision();
     const result = await provider.exec(handle, ['sh', '-c', 'echo out; echo err >&2; exit 3']);

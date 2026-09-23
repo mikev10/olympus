@@ -105,13 +105,16 @@ F1 Spine
                  P6 Verification + evidence  [P1, P2, P8]
                  P7 Tamper detection  [P8]
                  P8 Adapters (TypeScript)
+                 P11 Sandbox network probe + HTTP behavioral  [P8, P10]
                  P9 API + CLI  [P4]
                       └─ I1 Integration + M1 proof
 ```
 
-Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10 follow their bracketed dependencies.
+Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10/P11 follow their bracketed dependencies.
 
 P10 is numbered after P9 and ordered before P5, which is what the bracketed dependencies are for. It was added by P5, which found that the Claude Code CLI has to run inside the sandbox and that a `deny-all` container cannot reach the model API — the allowlist P2 refused to fake. A unit is the first real use of an interface, and friction there is information.
+
+P11 was added by P8 the same way. An HTTP behavioral check has to send its request from the sandbox's network, and a client inside the product's container is one the product can replace; the probe that puts the client out of reach changes the sandbox's network posture, so it is its own unit rather than part of P8.
 
 ---
 

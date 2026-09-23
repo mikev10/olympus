@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
 
 /** The nine named, audited operations the Vault contract declares. Nothing else may be reachable on an instance. */
@@ -176,6 +177,7 @@ export const I1: InvariantEntry = {
       package: '@olympus-ai/driver-claude-code',
       file: 'test/invariants.test.ts',
     }),
+    ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST,
   ],
   pending: [],
 };

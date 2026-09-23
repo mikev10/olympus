@@ -10,6 +10,7 @@ export const omitted: CheckResult = { // expect-error TS2741: Property 'suiteCou
   exitCode: result.exitCode,
   stdout: result.stdout,
   stderr: result.stderr,
+  expectation: result.expectation,
   durationMs: result.durationMs,
   startedAt: result.startedAt,
 };

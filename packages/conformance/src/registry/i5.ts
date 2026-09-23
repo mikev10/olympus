@@ -4,6 +4,7 @@ import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { withLine } from './line.js';
+import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
 import {
   BLOCKED_ADDRESS,
   BLOCKED_NAME,
@@ -419,6 +420,7 @@ export const I5: InvariantEntry = {
     STATION_MISSING_CAPABILITY_REFUSED,
     TASK_ATTEMPTS_ARE_BOUNDED,
     OVER_REQUEST_REFUSED_AT_ADMISSION,
+    UNSUPPORTED_STACK_IS_LOUD,
   ],
   pending: [
     pending({
@@ -473,11 +475,15 @@ export const I5: InvariantEntry = {
         'below expectedSuiteCount must fail the gate. Needs the verification runtime P6 delivers.',
     }),
     pending({
-      id: 'I5.unsupported-stack-is-loud',
-      owner: 'P8',
+      id: 'I5.adapter-refusal-enforced-at-admission',
+      owner: 'P6',
       reason:
-        'AdapterSet.unavailableControls() must name every null slot for a stack, and a stack with any must ' +
-        'be refused at L3. Needs the adapter implementations P8 delivers.',
+        'P8 ships the L3 refusal as a pure function over an AdapterSet (adapterAdmission), asserted by ' +
+        'I5.unsupported-stack-is-loud, and nothing calls it when a run is admitted. Wiring it there needs the ' +
+        "admission record to carry the set's unavailable controls, so a resume cannot restate them, and an assertion " +
+        'that an L3 run is refused at admission naming each missing control. It cannot fail for the right reason ' +
+        'while SKELETON_LINE refuses every run above L1, and P6 is the unit that deletes SKELETON_LINE, so the ' +
+        'wiring lands with it. Surfaced by P8 (docs/decisions.md, D-P8-03).',
     }),
     pending({
       id: 'I5.check-command-has-a-grammar',
