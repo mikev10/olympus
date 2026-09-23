@@ -1,62 +1,42 @@
-An analysis of the verification and evidence runtime reveals a high-severity path traversal vulnerability due to incomplete input validation on task IDs, alongside some smaller robustness findings. 
+BASE: reviewed/TOOLING
+HEAD: de95c2e
+===== pnpm-lock.yaml =====
+a2b7ae11bd21003b368d2c3b38cb0731
 
-Here are the concrete findings:
+I have reviewed this bundle with no prior context about the project. No lookups were performed.
 
-### 1. Path Traversal via Unsanitized `task.id` in the Task Graph
-**File:** `packages/api/src/validate.ts`  
-**Line:** 256  
-**Type:** bypass  
-**Severity:** high  
+### Findings
 
-**The specific construction:** 
-The author supplies the `taskGraph.json` artifact at admission, which defines the task IDs. In `parseGraph`, `task.id` is validated only to ensure it is a non-empty string:
-```typescript
-if (!isNonEmptyString(t.id)) report(`${at}.id`, 'empty', `${at}.id must be a non-empty string`);
-```
-This ID is subsequently bound to the `Task` and used directly by the `attemptPaths` and `reviewPath` functions in `workspace.ts` to construct host directories:
-```typescript
-const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
-```
-By submitting a task graph where a task ID contains directory traversal sequences (e.g., `../../../../../../tmp/evil`), the resulting `dir` escapes the secure `WorkspaceStore` root entirely. When the line hits the `build` or `review` station, `materialize` and `copyTree` will be invoked by the runtime process on the host, forcing it to create directories and copy agent-influenced files to arbitrary locations on the host system (e.g., `/tmp/evil.1/start` and `/tmp/evil.1/work`).
+After a thorough adversarial review of the verification, evidence runtime, tree diffing mechanisms, and sandbox provision layers, I found no mechanisms that bypass the protected properties, no tautological checks, and no components that fail open.
 
-**What would resolve it:** 
-Add validation to `parseGraph` rejecting any `task.id` that contains directory separators (`/` or `\`) or `..` segments, mirroring the artifact path validation.
+**6. Mechanisms assessed as sound**
 
-### 2. `taskResultProblems` only validates object shapes, failing to enforce nested property types
-**File:** `packages/api/src/verification.ts`  
-**Line:** 114  
-**Type:** fails open (yielding an uncaught exception / denial of service)  
-**Severity:** medium
+The following mechanisms are highly robust and fulfill the invariants defined in your threat model:
 
-**The specific construction:**
-The `taskResultProblems` validation is tasked with ensuring the `TaskResult` contract is rigorously satisfied before writing to the Vault. However, its helper `extraKeys` only checks for the *presence* of keys and absence of forbidden keys, making no attempt to validate the types of nested elements. 
+- **Tree Operations & Diff Composition (`workspace.ts` & `files.ts`)**
+  The choice to implement directory diffing (`ownDiff` / `diffTrees`) natively via `lstat` and content hashing, rather than relying on `git` or an agent-provided summary, securely wrests control of the diff away from the sandbox. 
+  - **Symlink & Path Traversal Prevention:** `walkTree` does not recurse into symlinks, and special files (FIFOs, devices) are explicitly rejected in `sameEntry` (fail closed). Path parsing splits strictly by `/` ensuring materialized targets cannot traverse upwards with `..` relative to the workspace mount.
+  - **Exclusion Handling:** The `.git` directory is explicitly excluded by `DIFF_WALK`. By completely omitting `.git` from the diff, any malicious agent changes (or deletions) to `.git` are discarded during `materialize`. The next verification clones a pristine `.git` from the `basePath`, enforcing the property that "nothing written under it outlives the task."
+  - **Conflict & Reversion Resolution:** `composeDiff` correctly tracks removals and reversions. If a task reverts a previously modified file back to its `base` hash, the file is safely deleted from the cumulative diff, natively returning it to its exact base state upon materialization.
 
-If a driver returns a claim where `filesChanged` is `[ 123 ]`, `taskResultProblems` allows it through (the key exists, and it's inside an object). It is then committed to the Vault. Later, `verify` reads the Vault record back via `readResult()`, which verifies `Array.isArray(claim.filesChanged)` (which evaluates to true) and passes the object to `claimEvidenceDiff`.
-`claimEvidenceDiff` maps over the array:
-```typescript
-const claimed = new Set(claim.filesChanged.map(normaliseClaimedPath));
-```
-Because `123` is a number, calling `.replace()` inside `normaliseClaimedPath` will throw an unhandled `TypeError`. Because `runLine` has no top-level `try/catch`, this exception will bubble entirely out of the runtime, crashing the service for all users.
+- **Strict Verification Sandboxing (`line.ts`)**
+  The separation of the build sandbox and the verification sandbox guarantees that an agent cannot judge its own work. 
+  - Verification is run over a distinct materialized clone of `base + diff` in a pristine sandbox with a strictly read-only (`ro`) mount.
+  - If an agent somehow managed to escape or corrupt a locked file during verification, `tamperedIn(ctx, tree)` executes *after* the checks run and explicitly drops the evidence bundle in favor of a violation record, denying the agent a passed status.
 
-**What would resolve it:** 
-Enhance `taskResultProblems` (or a dedicated type guard) to strictly enforce the primitive types of the fields, specifically ensuring elements within `filesChanged` are strings.
+- **Gate Inputs & Unstarted Check Handling (`verify` & `taskResultProblems`)**
+  - **Failing Closed on Unstarted:** If a pinned verification command fails to execute (e.g., missing binary), the `sandbox.exec` catch block explicitly records an `undefined` result. The gate's `requiredShortfall` is invoked against `undefined` and reliably flags this as a gate failure, preventing an unexecutable command from yielding a silent pass.
+  - **Strict Schema Enforcement:** `taskResultProblems` relies on `Reflect.ownKeys` to flag any non-contract keys. This explicitly prevents an attacker from injecting a `status: 'passed'` field into a JSON response or via a JavaScript proxy, ensuring the "model never reports it" invariant holds.
 
-### 3. Missing `CheckSpec.timeoutMs` and `CheckSpec.kind` validation allows runtime defaults
-**File:** `packages/api/src/validate.ts`  
-**Line:** 227  
-**Type:** factually wrong / a tradeoff I would have made differently  
-**Severity:** low  
+- **Egress & Mount Enforcement (`provider.ts` & `egress.ts`)**
+  - **Explicit `deny-all`:** In `LocalDockerProvider`, a `deny-all` egress rule does not merely skip proxy setup; it explicitly sets `--network none` in the `docker run` execution array, isolating the container entirely via kernel constraints.
+  - **Write Permission Checks:** By verifying host file ownership against the requested container `uid/gid` (on Linux), it explicitly refuses provisioning rather than mounting an unwritable directory. This prevents the silent degradation where an agent fails the task simply because it lacked file permissions.
 
-**The specific construction:**
-`checkProblems` validates the verification manifest JSON to ensure it adheres to the `CheckSpec` interface. While `id`, `command`, `required`, and `expectedSuiteCount` are checked, `timeoutMs` and `kind` are entirely omitted from validation. 
+- **Lock Verification (`validate.ts` & `vault.ts`)**
+  Locks strictly enforce content integrity. The `tamperedIn` check uses exact byte-hashes, meaning any alteration to artifacts by the agent, even one that technically passes test cases, throws an `IntegrityViolation` and halts the line.
 
-Consequently, a caller can submit a manifest with `timeoutMs: "five"` or `kind: "malicious"`. Because `sandbox.exec` is ultimately driven by the sandbox's remaining wall-clock deadline rather than the individual check's timeout, and `suiteCountFor` defaults gracefully for unknown `kind`s, this does not yield a pass or create an escape. However, it breaches the typed perimeter by allowing completely unsanitized types into the Vault.
+**4. Escape Hatches**
+Type casts (`as Record<string, unknown>`, `as Partial<TaskResult>`) are used directly at JSON/API boundaries. However, they are consistently backed by runtime property and object-type checks immediately following the cast, neutralizing the generic erasure vulnerabilities that typically accompany `as` usage.
 
-**What would resolve it:** 
-Add explicit runtime type validation for `typeof c.timeoutMs === 'number'` and verify that `c.kind` is included within a strict union/set of allowed literals.
-
-### Assessment of Mechanisms
-The core framing and threat modeling are strong. Specifically, the boundary mechanisms generally prove to be sound:
-- **Sandbox execution and mounts:** The `LocalDockerProvider` properly restricts egress and paths. Handling CLI flags by pushing `--env` arguments distinctly from user-provided scripts successfully closes off injection. 
-- **Tree comparison (`ownDiff` & `composeDiff`):** Operating entirely via host-parsed path arrays prevents symbolic-link path escapes inside the sandbox container. `walkTree` correctly stops at directories like `.git` making it impossible for changes inside those ungranted folders to sneak into the next task's run via the cumulative diff.
-- **Reviewer access mapping (`reviewView`):** Limiting reviewer workspaces only to specific paths derived from the locked specs, acceptance tests, and cumulative diff effectively halts unauthorized leakage of the author narrative or `.git/config` payloads.
+**7. Framing**
+The adversarial question is exactly the right framework for evaluating this layer. Since this component dictates the truth of agent task outcomes, assessing it against an active, sandbox-bound attacker ensures that runtime boundaries, diff calculations, and verification isolation do not break under deceptive agent actions. The code rigorously holds to the core tenet: the agent proposes, but the runtime exclusively measures and disposes.
