@@ -345,6 +345,7 @@ order between them is settled before any of them is picked up.
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | — |
 | R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
+| R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
 
 ### R1 — Readiness
 
@@ -435,6 +436,32 @@ through the full line as its own run. Binding:
   work or its judge
 - "goal" is a new artifact. Adding it to the spine's vocabulary is a
   deliberate amendment the unit takes first, as R1 did with `readiness`
+
+### R6 — Driver: any OpenAI-compatible endpoint
+
+The drivers planned so far are two vendors' agent CLIs, Claude Code (P5) and
+Codex (M2). This unit adds one driver for any endpoint that speaks the
+OpenAI-compatible chat API — hosted, self-hosted, or a local open-weight
+model — so a user can run a model with no driver package written for its
+vendor. It is how the runtime's provider neutrality reaches a user without
+waiting on a driver per vendor. Binding:
+
+- the model runs nowhere but the endpoint; the agent loop the endpoint lacks
+  is the driver's, and every tool call it makes goes through `provider.exec`
+  inside the sandbox, as P5's does. A loop that ran a tool on the host is the
+  failure P5's mount table exists to prevent
+- `family` comes from the operator's configuration, stated explicitly, and is
+  never inferred from the endpoint URL, the model name, or a response. A
+  misdeclared family defeats reviewer independence, so the run records the
+  declared family beside the model the endpoint reported, and a mismatch the
+  driver can see refuses rather than warns
+- the endpoint host is the egress allowlist's only entry, and the credential,
+  where there is one, is held at the egress layer (P12). A local endpoint with
+  no credential declares that, and nothing is inferred from its absence
+- capability claims are declared from what the endpoint was measured to
+  support, and each maps to an assertion that fails when it is removed. An
+  endpoint without tool calling, or without usage figures, declares the gap,
+  and `unavailableControls()` refuses the levels that need it
 
 ### Recorded constraint: the Codex driver (M2)
 
