@@ -193,6 +193,14 @@ Binding. Adjacent work becomes an issue, not a commit.
   built by whoever owns the probes.
 - **Any write to the target repository.** A scan is read-only and provisions
   its sandbox with no `rw` mount beyond the checkout it was given.
+- **Provisioning from a repository-supplied environment definition**
+  (`devcontainer.json`, a Dockerfile). The Dev environment pillar times a cold
+  provision. It does not make the target repository the source of the sandbox
+  image. A definition the Build task can edit decides the environment Verify
+  judges it in, and that is an agent writing its own grader (I3). If it is ever
+  built, the definition is locked with the spec, re-verified at every station
+  transition like the acceptance tests, and outside every role's writable
+  globs.
 - **Scheduling, watching, or re-scanning on a timer.** Triggers own that (M2).
 - **Storing the result.** No `Vault` operation for readiness exists, and
   adding one is an amendment owed to the first unit that stores a result.

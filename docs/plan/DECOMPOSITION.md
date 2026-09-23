@@ -362,6 +362,28 @@ P5 captures, so this is derivation and a reporting surface, not collection.
 Bounded by the same rule as R1: derived by the runtime, never reported by a
 model. Blocked on P4 and P9 because it reads finished runs through the API.
 
+It also owes the number the spine's claim is waiting on:
+
+- **Caught false-done rate.** No task reports its own status, so the only
+  "done" an agent ever asserts is ending its attempt. A false-done is an
+  attempt the agent ended whose runtime-derived status is not passing, or one
+  that recorded a `claim-mismatch` violation. The baseline comes from the same
+  runs: a pipeline that trusted the agent's end of turn would have accepted
+  every one of those attempts. Deriving it from the same tasks and the same
+  model, rather than from a separate control run, leaves no confound to argue
+  over.
+- **Rework.** Attempts per task (already bounded and recorded in run state)
+  and the share of changes `review` returned. Cycle time without rework
+  hides the cost of the attempts it took.
+- **Escaped false-done is not measured.** A change that passed every gate and
+  failed later needs a post-merge signal, which `observe` provides (M2+). R2
+  reports the caught rate and says that the escaped rate is not established. It
+  never implies zero.
+
+A reduction is claimed only as the caught rate over a stated window of runs,
+and the README and spine wording changes in the same pull request that first
+reports it.
+
 ### R3 — Behavioral breadth (browser)
 
 `BehavioralAdapter.kind` already admits `'browser'` and P8 ships only `'cli'`
@@ -370,6 +392,18 @@ already names the gap correctly today. This unit implements the browser case:
 a scenario drives the running product and its expectation comes from locked
 acceptance criteria, never from the implementation. M3, with the rest of the
 QA surface.
+
+### Recorded constraint: the Codex driver (M2)
+
+Not specified, and not a unit here. It is recorded so the choice is settled
+before anyone picks up the driver. The Codex driver runs the Codex CLI inside
+the Olympus sandbox, as P5 runs Claude Code, and not a vendor-hosted agent
+harness. The mount-layer Vault protection, the egress allowlist (P10), and the
+credential held at the egress layer (P12) all require the agent to run in a
+container Olympus provisions. A harness running on the vendor's infrastructure
+is outside every one of them. A driver built that way anyway declares those
+controls unavailable, and `unavailableControls()` refuses it above L1. It never
+runs with weaker guarantees than its level claims.
 
 ---
 

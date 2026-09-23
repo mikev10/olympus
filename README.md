@@ -13,10 +13,12 @@ nothing here builds on it.
 ships working code.
 
 **Claim, today.** Olympus produces auditable, tamper-resistant evidence that
-autonomous work is real, and measurably reduces false-done failures: the
-runtime derives what happened from checks it ran itself, and a model's own
-account of its work is stored as a claim beside the evidence, never as the
-verdict.
+autonomous work is real, so that a false-done failure is caught at the gate
+rather than reported as done: the runtime derives what happened from checks it
+ran itself, and a model's own account of its work is stored as a claim beside
+the evidence, never as the verdict. That it *measurably reduces* false-done
+failures is not asserted until outcome measurement (R2) derives the rate from
+finished runs.
 
 The two are kept apart on purpose. The runtime is designed for the mission and
 only the claim is asserted. Olympus does not claim lights-off autonomy. Every

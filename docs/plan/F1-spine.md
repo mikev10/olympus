@@ -11,7 +11,9 @@ This document is the stable extract of the maintainer's master plan, and it is w
 
 **Mission:** a fully autonomous software factory that defines, builds, and ships working code.
 
-**Claim (what we assert today):** Olympus produces auditable, tamper-resistant evidence that autonomous work is real, and measurably reduces false-done failures.
+**Claim (what we assert today):** Olympus produces auditable, tamper-resistant evidence that autonomous work is real, so that a false-done failure is caught at the gate rather than reported as done.
+
+That Olympus *measurably reduces* false-done failures is not asserted yet. Nothing measures a false-done rate until R2 derives one from finished runs (`DECOMPOSITION.md`, Beyond M1). A claim with no measurement behind it is the failure this project exists to catch, so the word waits for the number.
 
 Design for the mission. Market the claim. Never collapse the two.
 
