@@ -336,13 +336,15 @@
 
 Not part of M1 and not startable inside it. Recorded here so adjacent work
 found during an M1 unit has somewhere to go that is not a commit, and so the
-order between these three is settled before any of them is picked up.
+order between them is settled before any of them is picked up.
 
 | ID | Unit | Milestone | Depends on | Spec |
 |---|---|---|---|---|
 | R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
 | R2 | Outcome measurement | M2 | P4, P9 | — |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
+| R4 | Parallel task execution | M2 | P4, P6, I1 | — |
+| R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
 
 ### R1 — Readiness
 
@@ -392,6 +394,47 @@ already names the gap correctly today. This unit implements the browser case:
 a scenario drives the running product and its expectation comes from locked
 acceptance criteria, never from the implementation. M3, with the rest of the
 QA surface.
+
+### R4 — Parallel task execution
+
+P4 runs tasks one at a time in dependency order and records that as a known
+limit. This unit removes the limit. Tasks whose dependencies have all passed
+run at the same time, each in its own sandbox. The contract already carries
+what it needs: `concurrency.maxParallelTasks` and `maxConflictRetries` in
+policy, `parallelism` in `DriverCapabilities`, and `commitRunState`, whose
+atomic commit already arbitrates concurrent writers. The unit's work is
+scheduling and conflict handling, not a contract change. Binding:
+
+- effective parallelism never exceeds the policy's `maxParallelTasks` or the
+  driver's declared `parallelism`
+- a task's workspace holds base plus *accepted* diffs only. A sibling running
+  at the same time never sees another sibling's unaccepted work, as P6 already
+  asserts for sequential tasks
+- a diff that conflicts at integration retries up to `maxConflictRetries` and
+  then refuses, naming both tasks. It never auto-resolves by picking one side
+- a failed task stops its dependents from starting. Siblings already running
+  finish, and their evidence is recorded
+- status is derived per task, as it is today. No task reports on another
+
+### R5 — Goal decomposition
+
+Today a run starts from one spec. This unit adds the level above: a goal that
+decomposes into several specs, with dependencies between them, each carried
+through the full line as its own run. Binding:
+
+- the decomposition is a *proposal*. It is locked in the Vault before any
+  child run starts, and it is approved through the policy's gate for the
+  `spec` station. Neither the model that proposed it nor any child run can
+  edit it after the lock
+- a goal's status is derived from its child runs' runtime-derived statuses.
+  The coordinator never reports it, and no field on the goal carries a status
+  a model wrote
+- child runs share nothing writable. Anything one run learns reaches another
+  only as runtime-written Vault data (`learn`, M3), never as a shared
+  scratchpad. A shared scratchpad is a channel for one agent to steer another's
+  work or its judge
+- "goal" is a new artifact. Adding it to the spine's vocabulary is a
+  deliberate amendment the unit takes first, as R1 did with `readiness`
 
 ### Recorded constraint: the Codex driver (M2)
 
