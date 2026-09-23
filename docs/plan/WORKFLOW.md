@@ -44,8 +44,29 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
    verifies every finding against the cited code before acting, and writes the
    triage. Fix, record as a known limit with an owning unit, or reject with a
    reason. Findings are not instructions.
-7. Merge the PR, then `git tag reviewed/<id> && git push --tags`. The tag is
-   the diff base for the next review bundle. Yours, not the session's.
+7. Merge the PR, then tag: `git tag reviewed/<id> <the v2 commit> && git push
+   origin reviewed/<id>`. The tag is the diff base for the next review bundle,
+   so it is pushed after the merge and never before, and it points at the
+   squash commit on `v2` rather than at the branch tip that produced it. The
+   session runs both commands rather than printing them for someone to type.
+   It runs them only when four things are true and checkable without asking:
+   the pull request's checks are green, the triage is written and committed,
+   every finding the triage accepted is fixed or recorded with an owning unit,
+   and the unit's acceptance criteria still pass after those fixes. Any one of
+   them false stops the merge and is reported — that is the case the gate
+   exists for. This spends the maintainer's judgement on the triage, where the
+   evidence is, rather than on two commands whose preconditions a machine can
+   check.
+
+   **Where the unit changed a gate path, the squash body carries
+   `Gate-Change: acknowledged` on its own line.** The guard has two modes: on a
+   pull request the `gate-change` label satisfies it, and on a push to `v2`
+   every commit touching a protected path needs the trailer. A squash merge
+   does not inherit the label, so a merge without the trailer turns the tip of
+   `v2` red after the fact. Re-running the pull request's failed guard job does
+   not help either — a re-run replays the original event payload and cannot see
+   a label added afterwards; adding the label is what triggers a fresh, passing
+   run.
 
 Between step 7 and the next unit: land any amendments the unit surfaced.
 
