@@ -1,3 +1,59 @@
+# External review of TOOLING, gemini, 2026-09-21
+
+The external-review runner and the four skill files that operate it — the
+automation reviewing its own code, on its first real run. The companion triage
+is `2026-09-21-TOOLING-review-automation-triage.md`.
+
+## Source
+
+- **Reviewer:** `gemini-3.1-pro-preview`. Family: gemini. A direct
+  `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. The
+  manifest's `cleanRoom` is `null` because an API call loads no local
+  configuration — there is no config home, no working directory and no local
+  process, so there is nothing to isolate and nothing to list. This was not a
+  CLI run. API version `api:generativelanguage/v1beta`. The run took 208
+  seconds, ingested 80,536 input tokens against a floor of 56,739, and echoed
+  all four bundle markers. The model requested and the model reported are the
+  same, so nothing was downgraded in transit.
+- **Cross-family agreement:** two of the four were raised by Codex as well.
+  Finding 4 pairs with `codex-3` — untrusted bundle text concatenated into the
+  same prompt as the instructions. Finding 3 pairs with `codex-2` — the
+  credential scan's matching rule is incomplete, though each family reached it
+  by a different construction. Findings 1 and 2 were raised by this family
+  alone, which is not the same as failing to be corroborated: they had no chance
+  of it. Finding 2 is the only finding from either family about the bundle
+  generator rather than the runner.
+- **Date:** 2026-09-21
+- **Bundle:** `2026-09-21-TOOLING-review-automation-review-bundle.txt`, SHA-256
+  `7f0acfd935639b1026a66a34a7ddea66583d5f1bf1cf1ce1264dbd3be07ae6d4`, base
+  `55deeff` (the tip of `v2`), head `eb1fe87` (the branch as it stood before its
+  own review artifacts were committed). It held the 31 files this branch
+  changed: the runner, its nine modules, their tests, the four skill files, the
+  CI workflow and the root configuration. Excluded: `docs/decisions.md`,
+  `docs/plan/`, `docs/reviews/` and `docs/superpowers/` — the last of which
+  holds the design spec, the implementation plan and the record of rulings,
+  withheld for the reason the skill already withholds the decisions log: a
+  reviewer reading author reasoning inherits the conclusions it reached.
+  Prompt: `2026-09-21-TOOLING-review-automation-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed that it had no prior context about
+  the project and performed no lookups while conducting the review. That is a
+  self-report and is not independently verifiable.
+- **Coverage, and any gap:** of the prompt's seven numbered items it answered
+  one (findings 1, 3 and 4) and three (finding 2, which it labelled as failing
+  open). It did not answer two (tautological checks), four (language-specific
+  escape hatches), five (configuration satisfied without doing what it appears
+  to do), six (which mechanisms it assessed as sound) or seven (whether the
+  framing was right). Five of seven items came back empty, and that silence is
+  recorded, not read as endorsement — in particular, this reply says nothing
+  about which mechanisms it judged sound, so nothing here may be read as
+  clearing them. The reply is 3,472 bytes against the other family's 8,924.
+- **Citations:** it cited file and line for each finding. Line numbers are
+  hints: they refer to the text as it was given, not to the repository, and
+  every finding was located by its named construct rather than by line number
+  during triage.
+
+---
+
 I have no prior context about this project, and I performed no lookups while conducting this review.
 
 BASE: 55deeff

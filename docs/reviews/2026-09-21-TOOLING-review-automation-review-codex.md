@@ -1,3 +1,59 @@
+# External review of TOOLING, codex, 2026-09-21
+
+The external-review runner and the four skill files that operate it — the
+automation reviewing its own code, on its first real run. The companion triage
+is `2026-09-21-TOOLING-review-automation-triage.md`.
+
+## Source
+
+- **Reviewer:** `gpt-6-astra`. Family: codex. A headless `codex exec` run under a
+  read-only sandbox, with recorded approval policy `never`, in an empty scratch
+  working directory and a scratch config home holding only `auth.json`, with an
+  environment of `CODEX_HOME` alone. The pre-run listing of both is the
+  manifest's `cleanRoom`: `["auth.json"]` and `[]`. CLI version 0.155.1. The run
+  took 105 seconds, ingested 86,234 input tokens against a floor of 56,739, and
+  echoed all four bundle markers.
+- **Cross-family agreement:** two of the six were raised by Gemini as well.
+  Finding 3 pairs with `gemini-4` — untrusted bundle text concatenated into the
+  same prompt as the instructions. Finding 2 pairs with `gemini-3` — the
+  credential scan's matching rule is incomplete, though each family reached it
+  by a different construction. Findings 1, 4, 5 and 6 were raised by this family
+  alone, which is not the same as failing to be corroborated: they had no chance
+  of it.
+- **Date:** 2026-09-21
+- **Bundle:** `2026-09-21-TOOLING-review-automation-review-bundle.txt`, SHA-256
+  `7f0acfd935639b1026a66a34a7ddea66583d5f1bf1cf1ce1264dbd3be07ae6d4`, base
+  `55deeff` (the tip of `v2`), head `eb1fe87` (the branch as it stood before its
+  own review artifacts were committed). It held the 31 files this branch
+  changed: the runner, its nine modules, their tests, the four skill files, the
+  CI workflow and the root configuration. Excluded: `docs/decisions.md`,
+  `docs/plan/`, `docs/reviews/` and `docs/superpowers/` — the last of which
+  holds the design spec, the implementation plan and the record of rulings,
+  withheld for the reason the skill already withholds the decisions log: a
+  reviewer reading author reasoning inherits the conclusions it reached.
+  Prompt: `2026-09-21-TOOLING-review-automation-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed "Prior context: none. External
+  lookups: none." That is a self-report and is not independently verifiable. It
+  also stated that local command execution was blocked, so it neither ran the
+  tests nor verified the bundle's SHA-256 for itself — consistent with the
+  sandbox the manifest records.
+- **Coverage, and any gap:** of the prompt's seven numbered items it answered
+  one (findings 1-5), two (finding 6, a tautological assertion), three (finding
+  5, which it labelled a failure-open path), four (it stated it found no
+  in-scope exploit requiring casts, declaration merging, module augmentation or
+  generic erasure), six (a closing section naming the mechanisms it assessed as
+  sound, each qualified by the boundary it assessed them within) and seven (it
+  challenged the framing directly, arguing that the trust boundary the prompt
+  drew invalidates two of the guarantees the design claims). Item five, whether
+  the configuration can be satisfied without doing what it appears to do, was
+  not answered separately. That silence is recorded, not read as endorsement.
+- **Citations:** it stated its citations refer to source-file lines. Line
+  numbers are hints either way: they refer to the text as it was given, not to
+  the repository, and every finding was located by its named construct rather
+  than by line number during triage.
+
+---
+
 BASE: 55deeff  
 HEAD: eb1fe87  
 vitest.tooling.config.ts  
