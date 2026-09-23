@@ -1,63 +1,62 @@
-I have reviewed the provided code based on the stated constraints and requirements. I hold no prior context about this project and performed no external lookups.
+An analysis of the verification and evidence runtime reveals a high-severity path traversal vulnerability due to incomplete input validation on task IDs, alongside some smaller robustness findings. 
 
-Here are the findings, ordered by severity.
+Here are the concrete findings:
 
-### 1. Behavioral check expectations are completely ignored (Fail Open)
-**File:** `packages/api/src/line.ts`  
-**Line:** 673 (inside `verify`)  
-**Type:** Ways the configuration can be satisfied without doing what it appears to do / fails open  
-**Severity:** High  
+### 1. Path Traversal via Unsanitized `task.id` in the Task Graph
+**File:** `packages/api/src/validate.ts`  
+**Line:** 256  
+**Type:** bypass  
+**Severity:** high  
 
-**The concrete bypass:** 
-The verification manifest allows defining checks, including behavioral scenarios that rely on specific assertions (e.g., expecting a certain `stdout` string or a specific non-zero `exitCode`). When the runtime parses the manifest in `parseManifest` (`validate.ts`), it copies all fields without pruning unknown ones, meaning a user's `expected` block survives into the `CheckSpec`. 
-
-However, the `verify` function completely bypasses `CliBehavioralAdapter` (which contains the `compareCli` logic to validate expectations). Instead, it runs every check using a plain `sandbox.exec` and hardcodes `expectation: null` in the results:
+**The specific construction:** 
+The author supplies the `taskGraph.json` artifact at admission, which defines the task IDs. In `parseGraph`, `task.id` is validated only to ensure it is a non-empty string:
 ```typescript
-        results.push({
-          // ...
-          suiteCount: suiteCountFor(check, counted),
-          expectation: null, // <-- Hardcoded to null
-          // ...
-        });
+if (!isNonEmptyString(t.id)) report(`${at}.id`, 'empty', `${at}.id must be a non-empty string`);
 ```
-Because the `expectation` is `null`, `requiredShortfall` judges the check solely on its exit code. If a behavioral check expects a failure (`exitCode: 2`) or specific output, but the agent's code simply exits `0` while doing nothing, the gate evaluates the check as passed. The agent bypasses the behavioral requirements entirely.
+This ID is subsequently bound to the `Task` and used directly by the `attemptPaths` and `reviewPath` functions in `workspace.ts` to construct host directories:
+```typescript
+const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
+```
+By submitting a task graph where a task ID contains directory traversal sequences (e.g., `../../../../../../tmp/evil`), the resulting `dir` escapes the secure `WorkspaceStore` root entirely. When the line hits the `build` or `review` station, `materialize` and `copyTree` will be invoked by the runtime process on the host, forcing it to create directories and copy agent-influenced files to arbitrary locations on the host system (e.g., `/tmp/evil.1/start` and `/tmp/evil.1/work`).
 
-**Resolution:** 
-Integrate `CliBehavioralAdapter` into `verify` for checks of kind `behavioral` so that their expectations are actively evaluated, and strictly validate the `expected` block within `parseManifest` to ensure it is structurally sound before admission.
+**What would resolve it:** 
+Add validation to `parseGraph` rejecting any `task.id` that contains directory separators (`/` or `\`) or `..` segments, mirroring the artifact path validation.
 
-### 2. TaskResult validation is vulnerable to generic erasure / type mismatch
+### 2. `taskResultProblems` only validates object shapes, failing to enforce nested property types
 **File:** `packages/api/src/verification.ts`  
-**Line:** 87 (inside `taskResultProblems`)  
-**Type:** Escape hatches specific to the language / Missing Validation  
-**Severity:** Medium  
+**Line:** 114  
+**Type:** fails open (yielding an uncaught exception / denial of service)  
+**Severity:** medium
 
-**The concrete issue:** 
-`taskResultProblems` enforces the exact key set of a `TaskResult` and its nested objects using `Reflect.ownKeys`. However, it only checks that the keys exist; it performs no runtime type checks on the corresponding values (other than checking if `events` is an array). 
+**The specific construction:**
+The `taskResultProblems` validation is tasked with ensuring the `TaskResult` contract is rigorously satisfied before writing to the Vault. However, its helper `extraKeys` only checks for the *presence* of keys and absence of forbidden keys, making no attempt to validate the types of nested elements. 
 
-Because `taskResultProblems` accepts them, a driver or agent could return an invalid inner structure—such as `{ claim: { narrative: "...", filesChanged: null } }`. This invalid payload is successfully recorded to the Vault. Later, when `verify` calls `readResult()`, it strictly checks `Array.isArray(claim.filesChanged)` and instantly throws an unhandled `Error`. Because this `verify` step runs within `runLine` with no `try/catch` wrapping it, the line worker process crashes or the run permanently rejects. Upon resume, it will pick up the task and crash again.
+If a driver returns a claim where `filesChanged` is `[ 123 ]`, `taskResultProblems` allows it through (the key exists, and it's inside an object). It is then committed to the Vault. Later, `verify` reads the Vault record back via `readResult()`, which verifies `Array.isArray(claim.filesChanged)` (which evaluates to true) and passes the object to `claimEvidenceDiff`.
+`claimEvidenceDiff` maps over the array:
+```typescript
+const claimed = new Set(claim.filesChanged.map(normaliseClaimedPath));
+```
+Because `123` is a number, calling `.replace()` inside `normaliseClaimedPath` will throw an unhandled `TypeError`. Because `runLine` has no top-level `try/catch`, this exception will bubble entirely out of the runtime, crashing the service for all users.
 
-**Resolution:** 
-Enhance `taskResultProblems` to validate the runtime types of the required fields (e.g., checking that `filesChanged` is explicitly an array of strings, `narrative` is a string) before admitting the result to the Vault, rather than shifting the structural crash to the downstream consumer.
+**What would resolve it:** 
+Enhance `taskResultProblems` (or a dedicated type guard) to strictly enforce the primitive types of the fields, specifically ensuring elements within `filesChanged` are strings.
 
-### 3. ReadText hashes the active working copy instead of the snapshot
-**File:** `packages/api/src/line.ts`  
-**Line:** 370 (inside `readText`)  
-**Type:** A tradeoff I would have made differently  
-**Severity:** Low  
+### 3. Missing `CheckSpec.timeoutMs` and `CheckSpec.kind` validation allows runtime defaults
+**File:** `packages/api/src/validate.ts`  
+**Line:** 227  
+**Type:** factually wrong / a tradeoff I would have made differently  
+**Severity:** low  
 
-**The concrete issue:** 
-When reading admitted artifacts to provide context to the agent (in `build` and `review`), `readText` reads the file directly from `ctx.run.repo` (the user's active workspace on the host) rather than reading from the isolated base tree snapshot stored inside the runtime's Vault (`basePath(workspaces, ctx.run.id)`). 
+**The specific construction:**
+`checkProblems` validates the verification manifest JSON to ensure it adheres to the `CheckSpec` interface. While `id`, `command`, `required`, and `expectedSuiteCount` are checked, `timeoutMs` and `kind` are entirely omitted from validation. 
 
-While it hashes the read bytes and intentionally fails closed (triggering a `lock-tamper` violation) if the user has modified their local copy since admission, this couples the execution phase back to the volatile host directory. If a user innocently edits their local spec file while a long-running autonomous task is building, the task instantly fails with a tamper violation.
+Consequently, a caller can submit a manifest with `timeoutMs: "five"` or `kind: "malicious"`. Because `sandbox.exec` is ultimately driven by the sandbox's remaining wall-clock deadline rather than the individual check's timeout, and `suiteCountFor` defaults gracefully for unknown `kind`s, this does not yield a pass or create an escape. However, it breaches the typed perimeter by allowing completely unsanitized types into the Vault.
 
-**Resolution:** 
-Read the context text from the runtime-owned `base` snapshot to fully isolate the build process from ongoing host workspace edits.
+**What would resolve it:** 
+Add explicit runtime type validation for `typeof c.timeoutMs === 'number'` and verify that `c.kind` is included within a strict union/set of allowed literals.
 
-### Soundness Assessment
-
-Beyond the behavioral check gap, the core verification mechanisms are exceptionally sound and well-reasoned:
-
-1. **Tree Materialization:** The `ownDiff` and `composeDiff` tree implementations correctly prevent an agent from deleting `.git` (ignored by `walkTree`) or executing symlink traversal attacks. Because `verify` ensures that the diff applies identically via content hashes, malicious symlink manipulation fails closed.
-2. **Lock Checks:** The `tamperedIn` verification applies defense in depth. Even if an agent bypasses case-sensitivity lock checks during the diff step, the subsequent `tamperedIn` check runs `hashAt` on the final materialized `tree`, securely catching any silent overwrites and resulting in a locked tamper failure.
-3. **Sandbox Isolation:** A combination of dropping default network routes, correctly tunneling variables inside the Daemon boundary, and ignoring agent-created symlinks out of the workspace ensure total compliance to invariant I4 (Default Deny).
-4. **Framing:** The adversarial framing is absolutely correct for this context. The code successfully defends against deceptive agent actions inside the `work` environment. Everything evaluates cleanly as zero-trust except where directly granted by policy.
+### Assessment of Mechanisms
+The core framing and threat modeling are strong. Specifically, the boundary mechanisms generally prove to be sound:
+- **Sandbox execution and mounts:** The `LocalDockerProvider` properly restricts egress and paths. Handling CLI flags by pushing `--env` arguments distinctly from user-provided scripts successfully closes off injection. 
+- **Tree comparison (`ownDiff` & `composeDiff`):** Operating entirely via host-parsed path arrays prevents symbolic-link path escapes inside the sandbox container. `walkTree` correctly stops at directories like `.git` making it impossible for changes inside those ungranted folders to sneak into the next task's run via the cumulative diff.
+- **Reviewer access mapping (`reviewView`):** Limiting reviewer workspaces only to specific paths derived from the locked specs, acceptance tests, and cumulative diff effectively halts unauthorized leakage of the author narrative or `.git/config` payloads.
