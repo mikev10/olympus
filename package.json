@@ -13,6 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "pnpm -r test",
+    "test:tooling": "vitest run --config vitest.tooling.config.ts",
+    "typecheck:tooling": "tsc -p tsconfig.tooling.json --noEmit",
     "conformance": "pnpm --filter @olympus-ai/conformance run registry",
     "changeset": "changeset"
   },

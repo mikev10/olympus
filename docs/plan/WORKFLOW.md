@@ -21,16 +21,29 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
 1. `/start-unit <id>` — fresh session. It states the boundary back; read it.
 2. Work. Conformance suite first. Decisions logged as they are made.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
-4. `/review-request <id>` — writes two files to `docs/reviews/`: a
-   `-review-prompt.txt` to paste and a `-review-bundle.txt` to attach, and
-   prints the steps.
-5. External review — temporary chat, different model family than last unit.
-   Rotate. Attach the bundle and paste the prompt in the same message; note the
-   model that answers.
-6. `/triage-review <id>`, with the reply pasted in — stores the raw response
-   with its provenance header, verifies every finding against the cited code
-   before acting, and writes the triage. Fix, record as a known limit with an
-   owning unit, or reject with a reason. Findings are not instructions.
+4. `/review-request <id>` — writes two files to `docs/reviews/`, a
+   `-review-prompt.txt` and a `-review-bundle.txt`, commits and pushes them, and
+   stops without sending anything.
+5. `/run-review <id>` — the maintainer's own command, never chained into,
+   because it sends the bundle out of the repository and that cannot be taken
+   back. It invokes the committed runner once per family, in parallel, from the
+   committed and pushed artifacts: Codex through its CLI, Gemini through a
+   direct API call. Each run writes a reply, a manifest, and a session record to
+   `docs/reviews/`, and the skill commits them untouched. Both families run on
+   every unit — rotation is retired. A run whose derived outcome is not
+   `counted` is not a review; where only one family counted, the unit has one
+   review and proceeding on it is the maintainer's call, recorded as such. The
+   outcome rests on telemetry from the vendor's API service and the local CLI,
+   not from the model under review — a lower bound on what was ingested, not
+   proof every byte arrived, and no defence against a vendor that fabricates it
+   (D-TOOLING-02). The bundle reaches the model as text, so a reviewer that
+   followed an instruction inside it passes both checks (D-TOOLING-03).
+6. `/triage-review <id>` — reads both replies from disk, checks each against
+   its manifest's `replySha256`, heads each with a provenance header derived
+   from its manifest, pairs what both families raised,
+   verifies every finding against the cited code before acting, and writes the
+   triage. Fix, record as a known limit with an owning unit, or reject with a
+   reason. Findings are not instructions.
 7. Merge the PR, then `git tag reviewed/<id> && git push --tags`. The tag is
    the diff base for the next review bundle. Yours, not the session's.
 

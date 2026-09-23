@@ -1,0 +1,378 @@
+import { request as httpsRequest } from 'node:https';
+import type { KeylessUrl } from './evidence.ts';
+import { keylessUrl } from './evidence.ts';
+import { DEFAULT_TIMEOUT_MS } from './codex.ts';
+
+/**
+ * Pinned, which the rest of this design avoids — every other reviewer picks
+ * its own default model, but a direct API call has to name one. There is
+ * deliberately NO fallback list: if this preview model is retired, the call
+ * must fail loudly (a 404 from Google) rather than quietly retry against a
+ * weaker model nobody chose as the adversary. The probe script that measured
+ * this endpoint used a fallback loop for convenience; production code must
+ * not. `modelVersion` on the response is recorded separately (see
+ * `GeminiResult.modelVersion`) so the manifest still shows what actually ran.
+ */
+export const GEMINI_MODEL = 'gemini-3.1-pro-preview';
+
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Measured 2026-09-21: Gemini applies its own default output limit, and a
+// long review that reaches it comes back cut off mid-sentence. Set explicitly
+// so a truncated reply can never be mistaken for a short-but-complete one.
+const MAX_OUTPUT_TOKENS = 32_768;
+
+export interface GeminiPart {
+  readonly text: string;
+}
+
+export interface GeminiContent {
+  readonly role: 'user';
+  readonly parts: readonly GeminiPart[];
+}
+
+export interface GeminiRequestBody {
+  readonly contents: readonly GeminiContent[];
+  readonly generationConfig: { readonly maxOutputTokens: number };
+}
+
+export interface GeminiRequest {
+  readonly url: KeylessUrl;
+  readonly body: GeminiRequestBody;
+  /** Header NAMES only, mirroring `Invocation['headerNames']` — the key's
+   *  value never passes through this builder. `callGemini` is the only place
+   *  it is read, and it goes straight into a header at call time. */
+  readonly headerNames: readonly string[];
+}
+
+/**
+ * Builds the request deterministically from the payload alone — there is no
+ * key parameter for this function to receive or return, so there is nothing
+ * here for a key to leak through. The URL is built through `keylessUrl`,
+ * which refuses a query string, so a key cannot land in the URL even by
+ * mistake.
+ *
+ * The body deliberately carries NO `tools` field and NO `toolConfig` field.
+ * That absence is the entire reason this transport replaced the Gemini CLI:
+ * with no tools offered, the model has nothing to navigate the bundle with
+ * and must read it directly.
+ */
+export function geminiRequest(payload: string): GeminiRequest {
+  return {
+    url: keylessUrl(GEMINI_ENDPOINT),
+    body: {
+      contents: [{ role: 'user', parts: [{ text: payload }] }],
+      generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+    },
+    headerNames: ['x-goog-api-key', 'content-type'],
+  };
+}
+
+export interface GeminiResult {
+  /** The joined reply text. Null whenever `complete` is false — a truncated
+   *  or empty reply must never be handed back looking like a normal one. */
+  readonly reply: string | null;
+  /** Null when absent from the response, never guessed. */
+  readonly modelVersion: string | null;
+  /** Null when absent from the response, never guessed. */
+  readonly promptTokenCount: number | null;
+  /** The response's top-level `responseId`. Null when absent, never guessed. */
+  readonly responseId: string | null;
+  /** The response's top-level `usageMetadata`, verbatim. It carries token
+   *  counts and `serviceTier`, never candidate text, so it can be recorded
+   *  as-is. Null when absent or not an object, never guessed. */
+  readonly usageMetadata: Readonly<Record<string, unknown>> | null;
+  readonly complete: boolean;
+  /** Why `complete` is false: the candidate's `finishReason` when it was
+   *  anything other than "STOP", or a plain description when there was no
+   *  candidate or no text at all. Null when `complete` is true. */
+  readonly incompleteReason: string | null;
+}
+
+/**
+ * Walks a dotted path through parsed JSON, `unknown` all the way down.
+ * Mirrors `codex.ts`'s helper of the same name and job.
+ */
+function getPath(record: Readonly<Record<string, unknown>>, path: readonly string[]): unknown {
+  let cur: unknown = record;
+  for (const key of path) {
+    if (typeof cur !== 'object' || cur === null) return undefined;
+    // JSON-parse boundary: `cur` is known to be a non-null object from the
+    // check above, but objects from JSON.parse carry no index signature.
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  // JSON-parse boundary: narrowed to a non-null, non-array object; anything
+  // else (including an array) becomes an empty record so every lookup below
+  // falls through to "absent" rather than guessing at shape.
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown): readonly unknown[] {
+  // JSON-parse boundary: `Array.isArray` narrows to `any[]`; recast to
+  // `unknown[]` immediately so nothing downstream is implicitly `any`.
+  return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+/**
+ * Reads a Gemini `generateContent` response defensively. `modelVersion` and
+ * `promptTokenCount` are read independently of the candidate and are `null`
+ * when absent, never guessed. A response with no candidates, a
+ * `finishReason` other than `"STOP"`, or a candidate with no text parts is
+ * reported through `incompleteReason` rather than returned as an empty reply
+ * — an empty or truncated reply returned as if normal would read as a review
+ * that found nothing, which is worse than a refusal.
+ */
+export function parseGeminiResponse(response: unknown): GeminiResult {
+  const record = asRecord(response);
+
+  const modelVersionRaw = getPath(record, ['modelVersion']);
+  const modelVersion = typeof modelVersionRaw === 'string' ? modelVersionRaw : null;
+
+  const promptTokenCountRaw = getPath(record, ['usageMetadata', 'promptTokenCount']);
+  const promptTokenCount = typeof promptTokenCountRaw === 'number' ? promptTokenCountRaw : null;
+
+  const responseIdRaw = getPath(record, ['responseId']);
+  const responseId = typeof responseIdRaw === 'string' ? responseIdRaw : null;
+
+  const usageMetadataRaw = getPath(record, ['usageMetadata']);
+  const usageMetadata =
+    typeof usageMetadataRaw === 'object' && usageMetadataRaw !== null && !Array.isArray(usageMetadataRaw)
+      ? asRecord(usageMetadataRaw)
+      : null;
+
+  const candidates = asArray(getPath(record, ['candidates']));
+  if (candidates.length === 0) {
+    return { reply: null, modelVersion, promptTokenCount, responseId, usageMetadata, complete: false, incompleteReason: 'no candidates' };
+  }
+
+  const candidate = asRecord(candidates[0]);
+  const finishReasonRaw = getPath(candidate, ['finishReason']);
+  const finishReason = typeof finishReasonRaw === 'string' ? finishReasonRaw : null;
+  if (finishReason !== 'STOP') {
+    return {
+      reply: null,
+      modelVersion,
+      promptTokenCount,
+      responseId,
+      usageMetadata,
+      complete: false,
+      incompleteReason: finishReason ?? 'no finishReason',
+    };
+  }
+
+  const parts = asArray(getPath(candidate, ['content', 'parts']));
+  const texts: string[] = [];
+  for (const part of parts) {
+    const partRecord = asRecord(part);
+    // Gemini 3.1 Pro is a thinking model: a part flagged thought === true
+    // carries the model's private reasoning, not its answer. Splicing that
+    // into the reply would commit the model's working to a review file as
+    // though it were a finding, so it is skipped. Checked strictly against
+    // `true` so a part with `thought` absent or false is still included.
+    if (getPath(partRecord, ['thought']) === true) continue;
+    const text = getPath(partRecord, ['text']);
+    if (typeof text === 'string') texts.push(text);
+  }
+
+  if (texts.length === 0) {
+    return { reply: null, modelVersion, promptTokenCount, responseId, usageMetadata, complete: false, incompleteReason: 'no text parts' };
+  }
+
+  return { reply: texts.join(''), modelVersion, promptTokenCount, responseId, usageMetadata, complete: true, incompleteReason: null };
+}
+
+/**
+ * A fetch-shaped function, injectable so tests never have to touch the
+ * network. `httpsFetch` is the default; the global `fetch` also satisfies this
+ * type structurally, but see `httpsFetch` for why it is not the default.
+ * Narrower than `typeof fetch` on purpose: `json()` returns `Promise<unknown>`
+ * here, not `Promise<any>`, so nothing downstream of a real or fake response
+ * is implicitly `any`.
+ */
+export type FetchLike = (
+  input: string,
+  init: {
+    readonly method: 'POST';
+    readonly headers: Readonly<Record<string, string>>;
+    readonly body: string;
+    readonly signal: AbortSignal;
+  },
+) => Promise<{
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  readonly json: () => Promise<unknown>;
+  readonly text: () => Promise<string>;
+}>;
+
+/**
+ * Raised by `httpsFetch` when its signal ends a request before the response
+ * is complete. Named `TimeoutError`, as `fetch`'s own is, because the only
+ * signal `callGemini` passes is its time limit. The cause is the signal's
+ * reason; nothing about the request rides on it.
+ */
+export class RequestTimeoutError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('the Gemini API request was abandoned: it did not complete within its time limit', options);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * The default transport: one HTTPS request whose only time limit is
+ * `init.signal`, which bounds the whole exchange, from connecting to the last
+ * byte of the body. Not the global `fetch`: measured on Node 24.19, its undici
+ * transport gives up on any response whose headers take longer than 300 s
+ * (`UND_ERR_HEADERS_TIMEOUT`), whatever signal is passed, and a non-streaming
+ * `generateContent` sends no headers until the whole review is generated. A
+ * long review was cut off at five minutes, and still billed, so
+ * DEFAULT_TIMEOUT_MS was never the limit that applied. `node:https` sets no
+ * limit of its own.
+ *
+ * A timeout rejects with `RequestTimeoutError`; any other failure is the
+ * socket's own error, which names an address or a code and never a header.
+ */
+export const httpsFetch: FetchLike = (input, init) =>
+  new Promise((resolve, reject) => {
+    const { signal } = init;
+    if (signal.aborted) {
+      reject(new RequestTimeoutError({ cause: signal.reason }));
+      return;
+    }
+    const body = Buffer.from(init.body, 'utf8');
+    const req = httpsRequest(input, {
+      method: init.method,
+      headers: { ...init.headers, 'content-length': String(body.length) },
+      // A connection of its own, closed after the response, so no pooled
+      // socket keeps the process alive once the run is over.
+      agent: false,
+    });
+    const onAbort = (): void => {
+      reject(new RequestTimeoutError({ cause: signal.reason }));
+      req.destroy();
+    };
+    const fail = (err: Error): void => {
+      signal.removeEventListener('abort', onAbort);
+      reject(err);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    req.on('error', fail);
+    req.on('response', (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      res.on('error', fail);
+      res.on('end', () => {
+        signal.removeEventListener('abort', onAbort);
+        const text = Buffer.concat(chunks).toString('utf8');
+        const status = res.statusCode ?? 0;
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          statusText: res.statusMessage ?? '',
+          text: () => Promise.resolve(text),
+          json: () =>
+            new Promise<unknown>((parsed) => {
+              parsed(JSON.parse(text));
+            }),
+        });
+      });
+    });
+    req.end(body);
+  });
+
+/** undici's own header and body time limits, reachable only when a real
+ *  `fetch` is injected. They reach the caller as `TypeError('fetch failed')`
+ *  with the code on its cause. */
+const UNDICI_TIMEOUT_CODES: readonly string[] = ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'];
+
+/**
+ * True when a failed Gemini call ran out of time rather than failing outright:
+ * `httpsFetch`'s `RequestTimeoutError`, a `fetch` TimeoutError or AbortError,
+ * or an undici header or body timeout. A timeout recorded as anything else
+ * would let the manifest say the vendor failed when the run gave up waiting.
+ */
+export function isTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err instanceof RequestTimeoutError || err.name === 'TimeoutError' || err.name === 'AbortError') return true;
+  const cause: unknown = err.cause;
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return false;
+  return typeof cause.code === 'string' && UNDICI_TIMEOUT_CODES.includes(cause.code);
+}
+
+export interface CallGeminiOptions {
+  /** Defaults to `process.env`. Injectable so a real key never has to touch
+   *  an actual environment variable in a test. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Defaults to `httpsFetch`. Injectable so tests never touch the network. */
+  readonly fetchImpl?: FetchLike;
+  /** Bounds the whole request. Defaults to DEFAULT_TIMEOUT_MS. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Thrown by `callGemini` for a non-2xx response. Carries the status and the
+ * response body — never the request, never its headers, never the key. Task
+ * 8 writes failures into files, so an error that echoed its request would be
+ * an error that committed the key.
+ */
+export class GeminiRequestError extends Error {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(status: number, statusText: string, body: string) {
+    super(`Gemini API request failed: HTTP ${String(status)} ${statusText} — ${body}`);
+    this.name = 'GeminiRequestError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Reads `GEMINI_API_KEY` from the environment at call time and sends it only
+ * in the `x-goog-api-key` header — built from `geminiRequest`'s own
+ * `headerNames`, never a second independent list — and never in the URL.
+ * Refuses before sending if the key is absent, so a missing key never even
+ * reaches `fetch`.
+ */
+export async function callGemini(payload: string, options: CallGeminiOptions = {}): Promise<GeminiResult> {
+  const env = options.env ?? process.env;
+  const apiKey = env.GEMINI_API_KEY;
+  if (apiKey === undefined || apiKey === '') {
+    throw new Error('GEMINI_API_KEY is not set; refusing to call the Gemini API without a key');
+  }
+
+  const request = geminiRequest(payload);
+  const headerValues: Readonly<Record<string, string>> = {
+    'x-goog-api-key': apiKey,
+    'content-type': 'application/json',
+  };
+  const headers: Record<string, string> = {};
+  for (const name of request.headerNames) {
+    const value = headerValues[name];
+    if (value !== undefined) headers[name] = value;
+  }
+
+  const fetchImpl: FetchLike = options.fetchImpl ?? httpsFetch;
+  const response = await fetchImpl(request.url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(request.body),
+    signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const bodyText = await response.text();
+    throw new GeminiRequestError(response.status, response.statusText, bodyText);
+  }
+
+  const json = await response.json();
+  return parseGeminiResponse(json);
+}

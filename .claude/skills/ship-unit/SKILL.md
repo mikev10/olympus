@@ -95,18 +95,31 @@ stopping to ask. The unit loop's next step is always the external review, so
 halting here only to be told to continue costs a turn and gains nothing.
 
 **Safe to chain**, because `review-request` produces two artifacts and stops: a
-bundle file on disk and a prompt for the maintainer to paste. It opens nothing,
+bundle file on disk and the prompt that will be sent with it. It opens nothing,
 sends nothing, merges nothing, and contacts no reviewer. If the maintainer
 wants neither artifact, there is nothing to undo — delete the file. The human
 gate sits at triage, where every finding is verified against the cited line
 before anything acts on it, and chaining does not move it.
+
+**And the chain stops there, deliberately.** The unit loop's next step after
+`review-request` is `/run-review <id>`, which falsifies those clauses: it sends
+the bundle — the full source of every changed file — to OpenAI and to Google.
+That egress is the one act in the unit loop that cannot be undone, and deleting
+a file afterwards recovers nothing. The reasoning that makes chaining into
+`review-request` free stops applying exactly where sending begins, so the
+maintainer types the next command. Print it, and stop there:
+
+```
+Next: /run-review <id>
+```
 
 **Only on success.** This step is reached only when step 2 passed and step 5
 actually opened a pull request. A failed acceptance criterion stops at step 2
 and never arrives here: a bundle built from a unit that does not pass its own
 gates sends a reviewer at a tree that is about to change.
 
-Do not merge. Do not push to `v2` directly. Do not begin the next unit.
+Do not merge. Do not push to `v2` directly. Do not invoke `run-review`. Do not
+begin the next unit.
 
 ## Never
 

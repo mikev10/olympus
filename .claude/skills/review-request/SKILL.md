@@ -1,13 +1,14 @@
 ---
 name: review-request
-description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, a prompt to paste and a bundle to attach, commits them, copies the prompt to the clipboard, and prints numbered hand-over steps. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
+description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, the prompt and the bundle the reviewers are given, commits and pushes them, and stops without sending anything. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
 ---
 
 # Prepare an external review
 
-The reviewer is a **different model family** in a clean room — not Claude Code,
-not the session that built the unit. That independence is the point: a reviewer
-sharing the author's context inherits the author's blind spots.
+The reviewers are **two other model families**, each given the prompt and the
+bundle and nothing else — not Claude Code, not the session that built the unit.
+That independence is the point: a reviewer sharing the author's context inherits
+the author's blind spots.
 
 Your job is to produce two files, hand them over in plain steps, and stop. You
 do not perform the review.
@@ -17,23 +18,39 @@ do not perform the review.
 Exactly two files per review, side by side in `docs/reviews/`, and nothing else
 to open:
 
-| File | What it is | What the maintainer does with it |
+| File | What it is | What `/run-review` does with it |
 |---|---|---|
-| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Pastes all of it into the chat |
-| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Attaches it to the same message |
+| `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Sends all of it, verbatim, to each reviewer, with the bundle inlined after it |
+| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Inlines it into the text it sends, after the prompt, between delimiters that name this file |
 
 `<date>` is today, `<UNIT>` keeps its case, `<slug>` names the unit:
 `2026-09-14-P4-station-machine-review-prompt.txt`.
 
 The prompt refers to the bundle by that exact filename and never by any other
-name, so nothing has to be renamed on upload. Every word in the prompt file is
-meant for the reviewer: no headings, notes, or provenance for the maintainer go
-in it, because the maintainer copies the whole file.
+name, so the reference resolves however the bundle arrives and the prompt needs
+no rewording per reviewer: the runner's opening delimiter names it, and a chat
+reviewer sees it as the attachment's name. No family reads the bundle from a
+working directory.
 
-Later, `triage-review` adds `-review.md` (the reply) and `-triage.md` beside
-them. Units reviewed before this rule also carry a `-review-request.md`; that
-file is retired, and its contents now live in the bundle's own header, the
-prompt's first paragraph, and the review header written at triage.
+Both of the runner's delimiters carry the bundle's own end nonce —
+`<<<BEGIN REVIEW BUNDLE <nonce>>>> <filename>` and
+`<<<END REVIEW BUNDLE <nonce>>>>` — so no text inside the bundle can spell the
+line that closes it, and the reviewer can always tell where the material ends.
+That is the whole of what it buys: it is not a defence against a reviewer
+following an instruction it finds inside the bundle.
+
+Every word in the prompt file is meant for the reviewer: no headings, notes, or
+provenance for the maintainer go in it, because the whole file is sent
+verbatim.
+
+Later, `run-review` adds `-review-codex.md` and `-review-gemini.md` (the two
+replies), each with a `.run.json` manifest and a `.session.jsonl` beside it —
+for Codex its rollout log stripped to metadata records, for Gemini one line of
+response metadata — and `triage-review` adds `-triage.md`. Units reviewed before the
+per-family names carry a single `-review.md` instead. Units reviewed before this
+rule also carry a `-review-request.md`; that file is retired, and its contents
+now live in the bundle's own header, the prompt's first paragraph, and the
+review header written at triage.
 
 ## 1. Determine the range
 
@@ -56,13 +73,35 @@ needs surrounding context, and a hunk hides it.
   echo "BASE: <base>"; echo "HEAD: $(git rev-parse --short HEAD)"; echo
   echo "=== COMMITS ==="; git log --oneline <base>..HEAD; echo
   echo "=== CHANGED ==="; git diff --stat <base>..HEAD; echo
-  git diff --name-only --diff-filter=ACMR <base>..HEAD | while read -r f; do
+  git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
   done
+  printf '\n=== BUNDLE END === %s\n' "$(openssl rand -hex 16)"
 } > docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
+
+**`-z` and `read -d ''` are load-bearing: do not simplify them back.** Without
+`-z`, `git diff --name-only` wraps any path outside plain ASCII in double quotes
+with C-style escapes — `"caf\303\251.ts"` for a file named `café.ts` — because
+`core.quotePath` is on by default, here and everywhere. The loop's `[ -f "$f" ]`
+test then fails against that literal string and the file is skipped: its contents
+never reach the bundle, nothing is printed, and the generator exits 0. Measured
+in a throwaway repository on 2026-09-21, with `core.quotePath` at its default:
+`café.ts` was dropped from the bundle and every check below still passed. A
+reviewer cannot report a bypass in code it was never shown, and nothing in the
+reply would say a file was missing. `-z` emits raw paths separated by NUL, which
+is the one form no filename can contain, so every name git can produce survives.
+The same `-z` form is used in the section count below, so the two agree.
+
+**The last line is a fresh random nonce, and it is the only proof the tail
+arrived.** `openssl rand -hex 16` yields the 32 hex characters the runner
+matches on; where `openssl` is absent, `head -c16 /dev/urandom | xxd -p | tr -d
+'\n'` does the same. Generate it per bundle and never reuse one: a value that
+appeared in an earlier bundle is a value a reviewer can echo without having read
+this one. Regenerate a bundle with `>`, never `>>`, so the previous run's nonce
+does not survive in the middle of the file.
 
 The header at its top (base, head, commits, changed files) is the bundle's
 provenance. Record the bundle's SHA-256 for the prompt:
@@ -94,6 +133,55 @@ grep -c '^===== docs/decisions\.md =====$'  docs/reviews/<date>-<UNIT>-<slug>-re
 They match the bundle's section headers, not prose. A count over the bare
 path would report a false hit whenever README.md, CONTRIBUTING.md, or a
 changeset that mentions the decisions log is in the diff.
+
+**Confirm the bundle holds one section per changed file.** Nothing downstream
+compares the bundle against the diff it was built from, so a file that is simply
+absent raises nothing anywhere:
+
+```bash
+sections=$(grep -cE '^===== .* =====$' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt)
+expected=$(git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
+  case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
+  echo x
+done | wc -l)
+[ "$sections" -eq "$expected" ] || echo "FAIL: $sections sections for $expected changed files"
+```
+
+The `case` list is the same one the generator excludes by, so the two counts are
+built from the same rule; change one and change the other.
+
+**A mismatch means the bundle must not be sent, whichever way it went.** Fewer
+sections than files means a file the diff lists is missing from the bundle — the
+quoting above is one cause and this check is not specific to it, so treat any
+future cause the same way: find out which file and why before sending anything.
+More sections than files means a changed file's own contents carry a line shaped
+like `===== something =====` at column 0, which is worth knowing for a second
+reason: the runner derives the bundle's final-section marker with that same
+pattern, so it would name a line inside a file rather than the last section, and
+an honest reviewer would echo a value the runner never asked for.
+
+Confirm two more things about the nonce, so a bundle that breaks either is fixed
+here rather than refused at the next run:
+
+```
+tail -1 docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt | grep -qE '^=== BUNDLE END === [0-9a-f]{32}$' || echo 'FAIL: nonce is not the last line'
+grep -c '^=== BUNDLE END === ' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt   # must print exactly 1
+```
+
+**One nonce, on the last line.** Both properties are load-bearing, and both are
+now checked twice. The runner refuses a bundle that breaks either: `bundleMarkers`
+requires the nonce on the last non-empty line and refuses a bundle carrying more
+than one nonce-shaped line, before anything is sent. The two commands above are
+the generator-side check, which finds the same problem here, before the bundle is
+committed, rather than at the next run. Neither replaces the other: what used to
+be true is that these commands were the only check, and a check an operator has
+to remember to run is not a check.
+
+If anything follows the nonce, the echo proves delivery only as far as the
+nonce, and the prompt's instruction to read the very last line is false. If the
+marker appears twice, a reviewer that read the whole bundle can echo the earlier
+one and be recorded as having failed a check it passed — a refusal that throws
+away a good review.
 
 ## 3. Derive the unit-specific half of the prompt
 
@@ -143,11 +231,18 @@ reword them. They are what separates a useful review from a list of style
 opinions.
 
 ```
-The code under review is in the attached file
+The code under review is in the file
 `<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — the full contents of
-every changed file, with the commit range at its top. If that file is not
-present in this conversation, stop and say so; do not review from the
-description below alone.
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
 
 You are reviewing <what: e.g. the conformance testing infrastructure> of a
 TypeScript project. You have the source and nothing else — no design documents,
@@ -225,6 +320,72 @@ Order by severity, highest first. State at the top whether you had any prior
 context and whether you performed any lookups.
 ```
 
+**The runner makes two integrity checks, and a run counts only if both pass.**
+Both are decided mechanically, without anyone reading the reply, and each is
+evidence of something different.
+
+**The echo, where only the fourth value is worth much.** The runner reads all
+four values from the committed bundle — its BASE and HEAD lines, its final
+`===== <path> =====` header, and its last line — so a reviewer that echoes a
+wrong one is caught. But measure where the first three live: in P5's bundle,
+BASE is line 1, HEAD is line 2, and the final section's path appears at line 66,
+inside the `=== CHANGED ===` stat listing that names every changed file. All
+three sit in the first 70 lines of 9730, and the Gemini CLI, measured before
+the runner inlined the bundle, took in about the first 2000 lines and searched
+the rest with a tool. A reviewer handed a fifth of the bundle could echo all
+three truthfully: they are evidence the reviewer opened the right file, not that
+it received the file. The trailing nonce is the only marker a truncated reader
+cannot produce, which is why it exists and why it has to be the last line. A
+bundle with no nonce has no tail check in it at all, and the runner refuses to
+send one: a run against it could never count.
+
+**The token count, which does not depend on the reply.** The vendor's own
+software reports how many input tokens it took in — Google's API service in the
+response's `usageMetadata.promptTokenCount`, the locally installed Codex process
+in its rollout log's `token_usage_record` — and the run counts only if that
+reaches the payload's size in bytes divided by 5. Honest runs over a real
+403,661-byte bundle measured 3.18 and 3.20 bytes per token and cleared that floor
+easily; the two measured failures, a reviewer that searched the bundle instead of
+reading it and one that could not open its file, took in 32,893 and 24,181 tokens
+against a floor of 80,732. It catches what the nonce misses: a reviewer that
+searched its way to the last line echoes the nonce correctly and still took in a
+fraction of the bundle.
+
+**Say who cannot fake the count, not that it cannot be faked.** It is produced by
+the API service and by the local CLI process, never by the model whose text is
+under review, so the *model* cannot write it — and that is the whole of the
+claim. A vendor whose service or CLI fabricates its telemetry defeats this check
+and every other one here, which is recorded as a limit rather than defended
+(D-TOOLING-02). What the count proves is a lower bound: that a payload of about
+this size was taken in, not that every byte of it arrived, and not that any of it
+was attended to. For Codex, whether `token_usage_record` holds one request's
+input or a running total across the turn has not been measured yet, so a Codex
+count at or above the floor is evidence of ingestion only as far as that
+measurement goes. Claim no more for it than that.
+
+The paragraph asking for the four values names three ways the bundle can
+arrive — attached, in the working directory, or in the prompt text — and
+commits to none of them, so it holds on every path the prompt is used on. The
+runner inlines the bundle into the prompt text for both families; no family
+reads it from a working directory. A chat reviewer, on the manual path, gets it
+as an attachment. An editor who only ever sees one path will read the
+paragraph as clumsy and simplify it to "the attached file", and a reviewer
+given the bundle another way will then report it missing on every run — a
+refusal indistinguishable from diligence.
+
+**What neither check covers.** The nonce is evidence the tail was delivered, and
+the token count is evidence that a payload of about the right size was taken in.
+Neither is evidence the middle was read, and neither says anything about whether
+the reviewer did as the prompt asked rather than as the bundle asked: a reply
+that echoes all four markers because the bundle instructed it to satisfies both
+checks exactly as an honest one does. The bundle has to reach the model as text,
+so the project's rule that payloads are data and never instructions does not hold
+for it (D-TOOLING-03). A model can take in a whole bundle and reason about a tenth
+of it, and nothing in the file or the count detects that: both are evidence
+about transport and ingestion, not about attention. Cross-family agreement and
+the prompt's own numbered items carry that load, and neither of them closes it
+either.
+
 **Committed before the review runs, and that is the point.** The prompt is
 written by the system that built the unit, so publishing it before the answer
 exists lets a reader judge whether the reviewer was steered, and check that the
@@ -232,8 +393,11 @@ findings were not selected to match the framing.
 
 ## 5. Commit both files
 
-On the unit branch, both files in one commit, and push, so they are reachable
-from any device:
+On the unit branch, both files in one commit, and push. The runner refuses to
+send a prompt and bundle unless the commit that last touched them is on the
+branch's upstream: a commit that never left this machine could be rewritten
+along with everything else on it, so only a pushed one fixes them before a
+reviewer sees them.
 
 ```
 git add docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt docs/reviews/<date>-<UNIT>-<slug>-review-prompt.txt
@@ -241,59 +405,37 @@ git commit -m "<UNIT>: the review prompt and bundle, as sent"
 git push
 ```
 
-## 6. Put the prompt on the clipboard
-
-Best effort, and say whether it worked. Use a reader that keeps UTF-8, because
-the prompt contains dashes that a console code page would mangle:
-
-- Windows: `powershell -NoProfile -Command "Get-Content -Raw -Encoding UTF8 '<absolute path to prompt>' | Set-Clipboard"`
-- macOS: `pbcopy < <path>`
-- Linux: `wl-copy < <path>` or `xclip -selection clipboard < <path>`
-
-If none works, the hand-over tells the maintainer to open the file instead.
-
-## 7. Recommend the reviewer
-
-Read the `Reviewer:` and `Family rotation:` lines in the most recent
-`docs/reviews/*-review.md` headers to learn which families reviewed the last
-units. Recommend a family that did not review the previous unit, preferring the
-one used least recently, and respect any family the maintainer has said not to
-use. If a repeat cannot be avoided, say so in the recommendation.
-
-## 8. Hand over, then stop
+## 6. Hand over, then stop
 
 End the turn with this block, filled in, and nothing after it except the
-"what is next" line WORKFLOW.md requires. Absolute paths, so the maintainer can
-paste them into a file picker.
+"what is next" line WORKFLOW.md requires.
 
 ```
-REVIEW READY: <UNIT> <title>
+REVIEW ARTIFACTS READY: <UNIT> <title>
 
-Two files in docs/reviews/, both committed:
-  PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions   <on your clipboard | not on the clipboard>
-  BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code           <N> lines
+Two files in docs/reviews/, both committed and pushed:
+  PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions
+  BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code, <N> lines
 
-Do this:
-  1. Open <family> in a new temporary chat (no memory, no history, no project).
-     Why <family>: <one line on rotation>.
-  2. Attach the bundle file:
-       <absolute path to bundle>
-  3. Paste the prompt into the message box.<If not on the clipboard: " Open this file, select all, copy:" and the absolute path>
-  4. Send the file and the prompt together, in one message.
-     Write down the exact model name the chat shows.
-  5. When the reply has finished, copy all of it. In a new Claude Code session
-     on branch unit/<id>, run:
-       /triage-review <UNIT>
-     and paste the reply, with the model name, into that message.
+Nothing has been sent. To run both reviewers:
+  /run-review <UNIT>
 
 The other files in docs/reviews/ are records. You do not need to open them.
 ```
+
+**Nothing has been sent, and this skill does not send.** `/run-review` puts the
+bundle in front of two third-party services, and that cannot be undone: deleting
+a file afterwards recovers nothing. It stays the maintainer's own command, one
+per unit, and this skill never chains into it.
 
 Do not review the unit yourself. Do not act on a review you did not receive.
 
 ## When the review comes back
 
-Not this skill's job, and not this session's. The review runs in another tool,
-on the maintainer's clock. `triage-review <unit>` stores the reply with its
-provenance header, verifies every finding against the cited code before acting
-on one, writes the triage, applies what is accepted, and stops before merge.
+Not this skill's job, and not this session's. The reviews run under
+`/run-review <unit>`, which leaves both replies on disk as the runner wrote them
+and commits them untouched. `triage-review <unit>` reads them from there, checks
+each against its manifest's hash, heads each with a provenance header derived
+from its manifest, verifies every finding against the cited code
+before acting on one, writes the triage, applies what is accepted, and stops
+before merge.

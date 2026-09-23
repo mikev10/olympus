@@ -48,3 +48,7 @@ Thumbs.db
 # sole evidence. They cannot cause recursion: the review-request skill excludes
 # docs/reviews/* from every bundle it builds, so a tracked bundle never appears
 # inside a later one.
+
+# Subagent-driven-development scratch: ledgers, briefs, review packages.
+# Per-plan working directories, never part of the record. Git history is.
+.superpowers/
