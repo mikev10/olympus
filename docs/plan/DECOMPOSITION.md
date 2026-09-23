@@ -23,6 +23,7 @@
 | P9 | API + CLI | 2 | contributor | P4 | 2 |
 | P10 | Sandbox egress allowlist | 2 | maintainer | P2 | 2 |
 | P11 | Sandbox network probe + HTTP behavioral | 2 | maintainer | P8, P10 | 2 |
+| P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
@@ -194,12 +195,50 @@
 ### P6 — Verification + evidence
 **Scope:** the mechanism behind I2.
 **Deliver:** execute `VerificationManifest` in a **fresh** sandbox at base+diff, capture a `CheckResult` per check with its own exit code, detect shrunken suite enumeration, assemble `EvidenceBundle`, compute `claimEvidenceDiff`.
+**Where it lives:** `packages/api`, beside the line whose `verify` station it replaces, in its own module; it depends on `@olympus-ai/adapters` for suite enumeration and tree diffing and on nothing new otherwise. `packages/integrity` stays types-only, because `adapters` already depends on it and a verifier there would close a cycle.
+**Base and diff are trees the runtime owns.** Today every task and every check mounts `run.repo`, the author's own working copy, so "base+diff" names nothing the code can point at. P6 makes it concrete, and never by spawning `git`, whose repository config an agent can write (D-P8-04):
+- at admission the runtime snapshots the working tree into a directory it owns, outside the Vault and outside every mount, and records the snapshot's tree digest
+- each build task runs over a fresh copy of base plus the diffs of every task already passed, in the order they passed, and never over `run.repo`
+- when the task ends the runtime diffs that copy against what it was handed, in process, through the adapters' `diffTrees` (`packages/adapters/src/files.ts`, exported for this; today it is internal). That diff is the task's output: a write the diff does not carry does not propagate, whatever the driver's events say
+- `verify` materializes base plus the diff into another fresh directory, mounts it read-only in a fresh sandbox with `deny-all` egress, and runs the checks there. The agent never ran in that tree, and nothing it left running can reach it
+- `.git` is copied into each workspace and excluded from every diff, so nothing an agent writes under it outlives the task
+**Contract amendments, landed in this unit's pull request**, each an `A-P6-nn` entry in `docs/decisions.md`:
+- `CheckSpec.command` becomes an argument vector, `readonly [string, ...string[]]`. A string with an invented grammar is not representable, and a check that needs a shell names it — `['sh', '-c', '…']` — so the shell is part of what was pinned rather than something the runtime added. A manifest read from the Vault whose command is not a non-empty array of strings is refused, naming the check
+- `EvidenceBundle` gains `unstarted: readonly { checkId: string; reason: string }[]`, a record for a check that produced no result. `CheckResult.exitCode` stays a real process's exit code and is never invented for a check that did not start
+- `EvidenceBundle` gains the digests of the base tree and of the diff it verified, and the diff itself is written to the Vault beside it. `baseCommit` alone does not say which tree the checks ran over: the working copy admitted can differ from the commit, and the diff is what the verdict is about
+- `SandboxSpec` gains the uid and gid a container runs as, so the provider can match the container to the workspace it was handed. `LocalDockerProvider` refuses a workspace that user cannot write, on hosts where the daemon enforces host ownership, rather than mounting it and letting the task fail quietly
+**Out of scope:**
+- tamper analysis, and the `SKELETON_LINE` line that says it is missing (P7). P6 removes its own line, the claim/evidence diff, and leaves P7's. Whichever of the two removes the last line puts `I5.unsafe-declaration-survives-composition`'s gap in its place, because an empty declaration is refused by `safety.ts` and a missing one would lift the L1 cap before provenance is compositional
+- deleting `SKELETON_LINE`, and component provenance that survives composition (I1, which replaces every stub with the real component)
+- an L3 run refused at admission end to end, naming each missing control. It cannot fail for the right reason while `SKELETON_LINE` refuses every run above L1 (I1)
+- keeping the model credential out of the container (P12). Authentication belongs at the egress layer, which is the sandbox's, the proxy's, and the driver's, not verification's
+- coverage that cannot be forged by the suite it measures (M3). The suite and the coverage writer share a process, so where the report is written does not decide whether its hit counts are true; mutation testing is the control that does not trust a hit count. Until then a coverage figure is evidence about a suite that cooperated, and nothing P6 builds calls it more
+- tamper-style reading of the diff: weakened assertions, skip markers, deleted tests (P7). P6 counts suites; P7 reads what is in them
+- the merge at `integrate` (I1), per-run cost aggregation (R2), and a verification cache
 **Conformance:** an agent that runs one passing test file and exits 0 still fails the gate; a missing required check fails closed; a claim/evidence mismatch is recorded as a violation.
+**Accept:**
+- a task's status is derived from the `CheckResult`s of the checks P6 ran and nothing else: a driver that exits 0 and claims success after running one passing test file, while a required check fails, leaves the task `failed`, and no field of `TaskResult` or `AgentClaim` changes the outcome
+- a driver's `TaskResult` is checked against the contract's exact key set where the line receives it, and a result carrying any other key — `status` among them — is refused before it is recorded (D-F3-22)
+- a required check with no result fails the gate, and the evidence bundle shows it in `unstarted` with the reason; a `suiteCount` below `expectedSuiteCount` fails the gate. `suiteCount` is counted by the adapters' `enumerateSuites` over the verified tree on the host, never read from the test runner's output, which the code under test can write. A tree whose suites cannot be enumerated fails the check rather than reporting `null` as a pass
+- `claimEvidenceDiff` names every file the claim lists that the diff does not change, and every file the diff changes that the claim does not list. A non-empty diff records an `IntegrityViolation` of kind `claim-mismatch` in the Vault and is not entered in `RunState.violations`, every entry of which halts the run (`packages/core/src/station/machine.ts`): a halt the claim can trigger would let the model's story decide the outcome. The task's status is unchanged by it, and review sees it beside the evidence. The narrative is never parsed: it is model text, and the file list is the only part of a claim with a fact to compare against
+- a change outside the task's writable globs — the role's `writableGlobs` intersected with the station's `workspaceGlobs` — is refused from the runtime-collected diff, naming each path, before any check runs
+- a process an earlier task left running is not running during a later task, and a later task's workspace holds only base and accepted diffs: an assertion detaches a writer in one task and requires the next to find neither the process nor anything it wrote after the diff was taken
+- the review seat is provisioned over base plus the diff under review, minus every admitted artifact its contract does not grant: a reviewer that opens the admitted task graph and an author-written file outside the diff is refused both
+- a workspace owned by another uid is refused at provisioning rather than mounted unwritable
+- a manifest command that is not a non-empty argument vector is refused, naming the check; an argument containing a space reaches the process as one argument
+- admission records the adapter set's unavailable controls, a resume reads them from the Vault and never from its caller, and the admission function refuses L3 naming each one. Asserted against admission directly; the end-to-end half is I1's
+- `SKELETON_LINE` no longer names the claim/evidence diff and still names tamper analysis, so every run above L1 is still refused
+- **the ledger.** Paid: `I2.status-derived-from-check-results`, `I2.unstarted-check-is-in-the-evidence`, `I4.task-capabilities-do-not-outlive-the-task`, `I4.writable-globs-enforced-on-the-diff`, `I5.workspace-is-writable-by-the-task`, `I5.missing-check-or-shrunken-suite-refuses`, `I5.check-command-has-a-grammar`, `I5.adapter-refusal-enforced-at-admission`, `I6.review-seat-reads-only-its-grants`. Added live: `I2.task-result-key-set-enforced`. Re-owned before this unit starts, in the ledger commit that lands with this entry, which raises the I5 baseline from 6 to 7 for the split: `I5.unsafe-declaration-survives-composition` to I1; `I4.model-credential-not-readable-by-the-task` to P12; `I3.coverage-report-is-not-writable-by-the-suite` to M3; and a new pending `I5.adapter-refusal-refuses-l3-end-to-end`, owned by I1, split from the admission entry. So `pending-baseline.json` lowers I2 from 2 to 0, I4 from 3 to 1, I5 from 7 to 3, and I6 from 1 to 0, and leaves I3 at 1
+- `pnpm typecheck`, `pnpm lint`, `pnpm test` pass; then `pnpm --filter @olympus-ai/driver-claude-code test` runs once, because any change under `packages/` makes its reconciled report stale and it calls a real model; then `pnpm conformance` passes
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I2 is the subject — status from runtime-run checks alone, a claim stored beside the evidence and diffed against it, and a result that cannot smuggle a field in. I3 is that the checks run in a tree the agent never ran in, so nothing it can write judges it. I4 is the writable globs enforced on the only honest input, and a task's reach ending with the task. I5 is every refusal above: an unstarted check, a shrunken suite, an unrepresentable command, an unwritable workspace. I6 is the review seat that can read only what it was granted. I1 must not regress: the snapshots are runtime-owned and never mounted writable anywhere a later task or check can see, and nothing P6 adds writes to the Vault except through named operations.
+**Known limit, stated now:** each task and each verification copies the whole tree, dependencies included, because a `deny-all` verification cannot install them. That costs time and disk on a large repository and nothing in correctness; a copy-on-write or overlay mount is the optimisation, and it is not taken here. A build task that installs dependencies changes paths outside most globs and is refused, which is fail-closed and will read as friction until a role grants them.
 
 ### P7 — Tamper detection — **best first contributor issue**
 **Scope:** `TamperReport` from F2 §6. Pure functions over diffs; no system knowledge required.
 **Deliver:** AST assertion comparison (operators and arguments, not counts), skip/xfail/only detection, deletions including renames, moves, and case-set reduction, snapshot regeneration, coverage delta, protected-path touches.
 **Conformance:** a fixture suite of taxonomy items — `assertEqual(x,5)` → `assertTrue(x)` is caught, and a rename that drops three cases counts as a deletion.
+**`SKELETON_LINE`:** P7 removes the tamper-analysis line. If it is the last line left, P7 puts the composition gap in its place rather than deleting the declaration, because deleting it is I1's (see P6).
 
 ### P8 — Adapters (TypeScript)
 **Scope:** `AdapterSet` from F2 §9 for vitest and jest. The per-framework knowledge the rest of the line consumes: P6 enumerates suites and reads coverage through it, P7 compares assertions and finds skip markers through it, and R1 derives a ceiling from what it lacks.
@@ -242,6 +281,13 @@
 **Depends on:** P8 (the `BehavioralAdapter` shape and `CheckResult.expectation`), P10 (the provider-owned sidecar pattern the probe follows).
 **Specified when it starts.** Scope, out of scope, conformance, and acceptance are written before any code, as P5's and P8's were.
 
+### P12 — Credential at the egress layer
+**Scope:** the model credential never enters the container. The driver's CLI is pointed at an endpoint the provider owns, and the provider authenticates the upstream request; the sandbox holds a placeholder, a short-lived token, or nothing.
+**Why it is its own unit:** P5's external review found that the credential, passed as an environment value on the exec, is readable by any tool the task runs, and P6 found it is not verification's to close. It spans the sandbox, the P10 proxy, and the driver, the shape P10 and P11 were split out for.
+**Depends on:** P5 (the driver and its exec), P10 (the provider-owned proxy the credential moves into).
+**Pays:** `I4.model-credential-not-readable-by-the-task`, re-owned from P6.
+**Specified when it starts.** Scope, out of scope, conformance, and acceptance are written before any code, as P5's and P8's were.
+
 ### P9 — API + CLI
 **Scope:** the runtime as a service (I9).
 **Deliver:** HTTP surface for run lifecycle — create, status, approve, cancel, stream events — and a CLI that is purely a client of it.
@@ -281,7 +327,8 @@
 - modifying a locked test fails the run
 - writing to the Vault fails at the mount layer
 - cost and cache-hit rate reported per run
-- `unavailableControls()` correctly refuses L3
+- `unavailableControls()` correctly refuses L3: an L3 run is refused at admission end to end, naming each missing control (`I5.adapter-refusal-refuses-l3-end-to-end`, split from P6's admission entry)
+- component provenance survives composition, and `SKELETON_LINE` is deleted only after it does: a stub wrapped without forwarding its declaration is still refused above L1 (`I5.unsafe-declaration-survives-composition`, re-owned from P6)
 
 ---
 

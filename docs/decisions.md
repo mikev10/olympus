@@ -2184,3 +2184,39 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Why the exploit needs more access than it saves:** the runner refuses unless both files are tracked, unmodified, and the commit that last touched them is an ancestor of the branch's pushed upstream. That requires push access to the upstream — the same access needed to change the source under review directly. This is missing defence in depth, not an escalation path.
 - **Reverse:** refuse when several pairs match, and drop the count from `UnitArtifacts` and the manifest. That returns the design to one where a legitimate re-bundle cannot be reviewed until a tracked record is deleted, which is why it was not chosen.
 
+
+## P6: Verification + evidence
+
+### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
+
+- **Ambiguous:** `DECOMPOSITION.md`'s P6 entry had scope, a delivery line, and a conformance line. It had no out-of-scope list, no acceptance criteria, no ledger, and no statement of where the verifier lives. It also contradicted the registry: `I5.adapter-refusal-enforced-at-admission` said P6 deletes `SKELETON_LINE`, which P6 cannot do while P7's tamper-analysis line remains, and the admission assertion could not fail for the right reason while any line remains.
+- **Options weighed:** (A) run P7 first, so P6 deletes `SKELETON_LINE` as written, at the cost of taking P7 from the contributor it is reserved for and delaying the unit that owns twelve pending entries; (B) P6 first, and whichever of P6 and P7 lands second inherits deletion and provenance, which lands admission wiring on P7 if P7 is second and stops it being a first issue; (C) neither deletes it — I1 does.
+- **Chosen:** C, with the maintainer. `SKELETON_LINE` is the line's own stub declaration (`packages/api/src/safety.ts`, S1 finding 3), I1's deliverable is replacing every S1 stub, and I1 already accepts on `unavailableControls()` refusing L3. The comment in `safety.ts` and `I5.unsafe-declaration-survives-composition` were order-independent already; only the admission entry's reason assumed P6 went last, and that line is corrected in the ledger commit.
+- **What C costs:** `I5.unsafe-declaration-survives-composition` moves to I1; `I5.adapter-refusal-enforced-at-admission` splits — P6 pays the admission wiring asserted directly, and a new pending `I5.adapter-refusal-refuses-l3-end-to-end` is owned by I1; `UnitId` gains `I1`. `safety.ts` refuses an empty declaration, so whichever of P6 and P7 removes the last line puts the composition gap in its place.
+- **Reverse:** move the two entries back to P6 and make P6 depend on P7.
+
+### D-P6-02: Base and diff are trees the runtime owns, and `git` is never spawned
+
+- **Ambiguous:** "a fresh sandbox at base+diff" named nothing the code could point at. Every build task and every check mounted `run.repo`, the author's own working copy (`packages/api/src/line.ts`, `workspaceOnly`).
+- **Chosen:** the runtime snapshots the working tree at admission into a directory it owns, gives each build task a fresh copy of base plus the diffs already accepted, diffs the task's copy in process with the adapters' `diffTrees`, and materializes base plus diff for verification. `.git` is copied into each workspace and excluded from every diff.
+- **Why:** the diff becomes the only channel from a task to anything after it, so writable globs, claim comparison, and per-task isolation all read one runtime-collected fact. `git` is not used because its repository config is agent-writable (D-P8-04).
+- **Reverse:** mount `run.repo` again; every entry this decision pays reopens.
+
+### D-P6-03: A claim/evidence mismatch is recorded and does not halt the run
+
+- **Ambiguous:** the conformance line says a mismatch "is recorded as a violation", and every entry of `RunState.violations` halts the run (`packages/core/src/station/machine.ts`, the violation refusal).
+- **Chosen:** the violation is written to the Vault with `recordViolation` and not entered in `RunState.violations`. Status is unchanged by it, and review sees it beside the evidence.
+- **Why:** the claim is the model's text. A halt the claim can trigger lets the model's story decide the outcome, the inverse of I2. Only the file list is compared; the narrative is never parsed.
+- **Reverse:** commit the ref to `RunState.violations`.
+
+### D-P6-04: The model credential moves to a new unit, P12
+
+- **Ambiguous:** `I4.model-credential-not-readable-by-the-task` was owned by P6, and its own reason says it spans the sandbox, the P10 proxy, and the driver and is not a driver change.
+- **Chosen:** a new unit, P12, depending on P5 and P10, owns it. The shape is the one P10 and P11 were split out for: a change to the sandbox's network posture does not ride in a verification pull request.
+- **Reverse:** re-own the entry to P6 and delete P12.
+
+### D-P6-05: Unforgeable coverage moves to M3
+
+- **Ambiguous:** `I3.coverage-report-is-not-writable-by-the-suite` asks P6 for coverage the suite cannot forge.
+- **Chosen:** re-owned to M3, beside mutation testing. The suite and the coverage writer share a process, so no location for the report decides whether its hit counts are true; mutation testing is the control that does not trust a hit count. P6 claims nothing about coverage beyond what P8 recorded.
+- **Reverse:** re-own to P6 with a named mechanism that survives in-process forgery.
