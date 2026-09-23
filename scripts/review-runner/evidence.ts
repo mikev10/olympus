@@ -64,6 +64,16 @@ export type Invocation =
 export interface Manifest {
   readonly unit: string;
   readonly family: Family;
+  /** Which committed prompt-and-bundle pair this run was built from, and how
+   *  many pairs matched the unit. Newest-wins is deliberate (see
+   *  `UnitArtifacts.matchingPairs`); recording the count is what turns a silent
+   *  selection into a stated one, so a reader can see that a choice was made
+   *  and which way it went. */
+  readonly artifacts: {
+    readonly promptFile: string;
+    readonly bundleFile: string;
+    readonly matchingPairs: number;
+  };
   readonly invocation: Invocation;
   /** null means this transport loads no local configuration home at all — the
    *  API call, which reads no GEMINI.md, no settings.json, no extensions and no

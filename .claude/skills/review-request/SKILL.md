@@ -28,9 +28,17 @@ to open:
 
 The prompt refers to the bundle by that exact filename and never by any other
 name, so the reference resolves however the bundle arrives and the prompt needs
-no rewording per reviewer: the runner's opening delimiter,
-`<<<BEGIN REVIEW BUNDLE>>> <filename>`, names it, and a chat reviewer sees it as
-the attachment's name. No family reads the bundle from a working directory.
+no rewording per reviewer: the runner's opening delimiter names it, and a chat
+reviewer sees it as the attachment's name. No family reads the bundle from a
+working directory.
+
+Both of the runner's delimiters carry the bundle's own end nonce —
+`<<<BEGIN REVIEW BUNDLE <nonce>>>> <filename>` and
+`<<<END REVIEW BUNDLE <nonce>>>>` — so no text inside the bundle can spell the
+line that closes it, and the reviewer can always tell where the material ends.
+That is the whole of what it buys: it is not a defence against a reviewer
+following an instruction it finds inside the bundle.
+
 Every word in the prompt file is meant for the reviewer: no headings, notes, or
 provenance for the maintainer go in it, because the whole file is sent
 verbatim.
@@ -65,7 +73,7 @@ needs surrounding context, and a hunk hides it.
   echo "BASE: <base>"; echo "HEAD: $(git rev-parse --short HEAD)"; echo
   echo "=== COMMITS ==="; git log --oneline <base>..HEAD; echo
   echo "=== CHANGED ==="; git diff --stat <base>..HEAD; echo
-  git diff --name-only --diff-filter=ACMR <base>..HEAD | while read -r f; do
+  git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
     printf '\n===== %s =====\n' "$f"; cat "$f"
@@ -73,6 +81,19 @@ needs surrounding context, and a hunk hides it.
   printf '\n=== BUNDLE END === %s\n' "$(openssl rand -hex 16)"
 } > docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
 ```
+
+**`-z` and `read -d ''` are load-bearing: do not simplify them back.** Without
+`-z`, `git diff --name-only` wraps any path outside plain ASCII in double quotes
+with C-style escapes — `"caf\303\251.ts"` for a file named `café.ts` — because
+`core.quotePath` is on by default, here and everywhere. The loop's `[ -f "$f" ]`
+test then fails against that literal string and the file is skipped: its contents
+never reach the bundle, nothing is printed, and the generator exits 0. Measured
+in a throwaway repository on 2026-09-21, with `core.quotePath` at its default:
+`café.ts` was dropped from the bundle and every check below still passed. A
+reviewer cannot report a bypass in code it was never shown, and nothing in the
+reply would say a file was missing. `-z` emits raw paths separated by NUL, which
+is the one form no filename can contain, so every name git can produce survives.
+The same `-z` form is used in the section count below, so the two agree.
 
 **The last line is a fresh random nonce, and it is the only proof the tail
 arrived.** `openssl rand -hex 16` yields the 32 hex characters the runner
@@ -113,18 +134,50 @@ They match the bundle's section headers, not prose. A count over the bare
 path would report a false hit whenever README.md, CONTRIBUTING.md, or a
 changeset that mentions the decisions log is in the diff.
 
-Confirm two more things about the nonce, because nothing downstream can:
+**Confirm the bundle holds one section per changed file.** Nothing downstream
+compares the bundle against the diff it was built from, so a file that is simply
+absent raises nothing anywhere:
+
+```bash
+sections=$(grep -cE '^===== .* =====$' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt)
+expected=$(git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
+  case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
+  echo x
+done | wc -l)
+[ "$sections" -eq "$expected" ] || echo "FAIL: $sections sections for $expected changed files"
+```
+
+The `case` list is the same one the generator excludes by, so the two counts are
+built from the same rule; change one and change the other.
+
+**A mismatch means the bundle must not be sent, whichever way it went.** Fewer
+sections than files means a file the diff lists is missing from the bundle — the
+quoting above is one cause and this check is not specific to it, so treat any
+future cause the same way: find out which file and why before sending anything.
+More sections than files means a changed file's own contents carry a line shaped
+like `===== something =====` at column 0, which is worth knowing for a second
+reason: the runner derives the bundle's final-section marker with that same
+pattern, so it would name a line inside a file rather than the last section, and
+an honest reviewer would echo a value the runner never asked for.
+
+Confirm two more things about the nonce, so a bundle that breaks either is fixed
+here rather than refused at the next run:
 
 ```
 tail -1 docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt | grep -qE '^=== BUNDLE END === [0-9a-f]{32}$' || echo 'FAIL: nonce is not the last line'
 grep -c '^=== BUNDLE END === ' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt   # must print exactly 1
 ```
 
-**One nonce, on the last line.** The runner takes the *last* match in the file
-and looks for the final `===== <path> =====` header only above it, so both
-properties are load-bearing and neither is checkable from the bundle alone: the
-runner is handed a file and cannot know whether the generator meant it to end
-there. If anything follows the nonce, the echo proves delivery only as far as the
+**One nonce, on the last line.** Both properties are load-bearing, and both are
+now checked twice. The runner refuses a bundle that breaks either: `bundleMarkers`
+requires the nonce on the last non-empty line and refuses a bundle carrying more
+than one nonce-shaped line, before anything is sent. The two commands above are
+the generator-side check, which finds the same problem here, before the bundle is
+committed, rather than at the next run. Neither replaces the other: what used to
+be true is that these commands were the only check, and a check an operator has
+to remember to run is not a check.
+
+If anything follows the nonce, the echo proves delivery only as far as the
 nonce, and the prompt's instruction to read the very last line is false. If the
 marker appears twice, a reviewer that read the whole bundle can echo the earlier
 one and be recorded as having failed a check it passed — a refusal that throws

@@ -33,20 +33,47 @@ export function bundleMarkers(bundleText: string): BundleMarkers {
   const base = fieldValue(lines, 'BASE:');
   const head = fieldValue(lines, 'HEAD:');
 
-  let endNonce: string | null = null;
-  let nonceIndex = -1;
+  // Two properties the rest of the design leans on, checked here where every
+  // run passes: the nonce is the LAST non-empty line, and there is exactly one
+  // nonce-shaped line. Both were specified before — in `review-request`'s
+  // markdown, as commands an operator runs and reads. A guard someone has to
+  // remember to run is not a guard (codex-4). A bundle that fails either is
+  // refused before anything is sent, so the refusal costs no egress.
+  const nonces: Array<{ readonly nonce: string; readonly index: number }> = [];
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line !== undefined) {
       const match = END_NONCE.exec(line);
       if (match !== null) {
         const nonce = match[1];
-        if (nonce !== undefined) {
-          endNonce = nonce;
-          nonceIndex = i;
-        }
+        if (nonce !== undefined) nonces.push({ nonce, index: i });
       }
     }
+  }
+  if (nonces.length > 1) {
+    // A reviewer that read the whole bundle can echo the earlier value and be
+    // recorded as having failed a check it passed — a refusal that throws away
+    // a good review.
+    throw new Error(
+      `bundle has more than one "=== BUNDLE END === <nonce>" line (${String(nonces.length)}); exactly one is allowed, ` +
+        'on the last non-empty line. Regenerate it with `>` rather than `>>`.',
+    );
+  }
+  const only = nonces[0];
+  let endNonce: string | null = null;
+  let nonceIndex = -1;
+  if (only !== undefined) {
+    if (lines.slice(only.index + 1).some((line) => line.trim() !== '')) {
+      // The section scan stops at the nonce, so `finalSection` would name a
+      // header from above it while the bundle's real last section sat below —
+      // and the prompt's instruction to read the very last line would be false.
+      throw new Error(
+        'bundle has content after its "=== BUNDLE END === <nonce>" line: the nonce must be on the last ' +
+          'non-empty line, or the echo proves delivery only as far as the nonce',
+      );
+    }
+    endNonce = only.nonce;
+    nonceIndex = only.index;
   }
 
   let finalSection: string | undefined;

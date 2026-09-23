@@ -76,6 +76,32 @@ describe('findLeakedSecrets', () => {
     expect(findLeakedSecrets([`tail ${FAKE_KEY.slice(-19)} only`], { GEMINI_API_KEY: FAKE_KEY })).toEqual([]);
   });
 
+  it('matches a 20-character slice from the middle of a value of 40 characters or more', () => {
+    // gemini-3: a leak that reproduced a credential's start and stopped short
+    // matched neither the full value nor the tail. The middle of a long
+    // credential is unique to it and clear of both the shared prefix and the
+    // tail. ACCESS_TOKEN is 62 characters, so its middle slice ends at 41.
+    const secrets = authJsonSecrets(AUTH_JSON);
+
+    expect(findLeakedSecrets([`the token began ${ACCESS_TOKEN.slice(0, 41)}`], {}, secrets)).toEqual([AUTH_JSON_LABEL]);
+    // One character short of the middle slice is not a hit.
+    expect(findLeakedSecrets([`the token began ${ACCESS_TOKEN.slice(0, 40)}`], {}, secrets)).toEqual([]);
+  });
+
+  it('does not trip one project key against another of the same format, now that the middle is matched too', () => {
+    const ours = 'sk-proj-Qx7vN2mKp9Lw4Rt8Yz3Bc6Hd1Fj5Gs0Ae2Uo7Iy9Tr4We';
+    const theirs = 'sk-proj-Zb4kM8nHq2Pw6Ts1Xy7Cd3Gf9Jh5Ls0Be2Vo8Iu4Tr6Wq';
+
+    expect(findLeakedSecrets([`the reply quotes ${theirs}`], { OPENAI_API_KEY: ours })).toEqual([]);
+  });
+
+  it('leaves a value shorter than 40 characters to the full and tail comparisons alone', () => {
+    // Below 40 the middle slice overlaps the tail it would add nothing to, and
+    // on a key whose body repeats it collides across keys of the format.
+    expect(FAKE_KEY.length).toBeLessThan(40);
+    expect(findLeakedSecrets([`starts with ${FAKE_KEY.slice(0, 24)}`], { GEMINI_API_KEY: FAKE_KEY })).toEqual([]);
+  });
+
   it('does not trip on a different OpenAI project key, though every such key begins "sk-proj-"', () => {
     const key = 'sk-proj-Qx7vN2mKp9Lw4Rt8Yz3Bc6Hd1Fj5Gs0Ae2Uo7Iy9Tr4We';
     const reply = 'The fixture uses the placeholder sk-proj-dummydummydummydummydummydummy as its key.';
@@ -475,6 +501,11 @@ function codexFacts(overrides: Partial<Omit<Manifest, 'outcome'>> = {}): Omit<Ma
   return {
     unit: 'P5',
     family: 'codex',
+    artifacts: {
+      promptFile: '2026-09-19-P5-driver-claude-code-review-prompt.txt',
+      bundleFile: '2026-09-19-P5-driver-claude-code-review-bundle.txt',
+      matchingPairs: 1,
+    },
     invocation: {
       kind: 'cli',
       command: '/usr/bin/node',
@@ -889,6 +920,8 @@ describe('main: egress order', () => {
     /** The stand-in makes the -o path a directory, so reading the reply throws (EISDIR). */
     readonly replyReadThrows?: boolean;
     readonly removeThrows?: boolean;
+    /** What the stand-in Gemini call reports as the response's `usageMetadata`. */
+    readonly usageMetadata?: Readonly<Record<string, unknown>>;
     /** The stand-in Gemini call rejects with this. */
     readonly geminiRejects?: () => Error;
     /** The signal the maintainer sends while the vendor call is in flight. The
@@ -1002,7 +1035,7 @@ describe('main: egress order', () => {
           modelVersion: 'test-model',
           promptTokenCount: 1000,
           responseId: 'resp-test',
-          usageMetadata: { promptTokenCount: 1000 },
+          usageMetadata: options.usageMetadata ?? { promptTokenCount: 1000 },
           complete: true,
           incompleteReason: null,
         };
@@ -1336,5 +1369,62 @@ describe('main: egress order', () => {
     expect(printed).toMatch(/bundle WAS sent to Google/);
     expect(printed).toMatch(/no evidence was written because the run was interrupted/i);
     expect(h.calls.filter((call) => call.startsWith('write '))).toEqual([]);
+  });
+  it('gemini: writes a validated subset of usageMetadata to the session record, not the object the vendor returned', async () => {
+    // codex-2: the whole object went into a committed file verbatim, so an
+    // unexpected property on it was retained. Numbers and serviceTier are
+    // copied; nothing else is.
+    const h = harness({
+      usageMetadata: {
+        promptTokenCount: 1000,
+        candidatesTokenCount: 42,
+        serviceTier: 'paid',
+        split: ['A', 'I', 'z', 'a', 'S', 'y'],
+        nested: { promptTokenCount: 7 },
+        commentary: 'free-form text from the vendor',
+      },
+    });
+
+    expect(await main([UNIT, 'gemini'], h.deps)).toBe(0);
+    const session = readFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-gemini.session.jsonl`), 'utf8');
+
+    expect(session).toContain('"promptTokenCount":1000');
+    expect(session).toContain('"candidatesTokenCount":42');
+    expect(session).toContain('"serviceTier":"paid"');
+    expect(session).not.toContain('split');
+    expect(session).not.toContain('"A","I"');
+    expect(session).not.toContain('nested');
+    expect(session).not.toContain('commentary');
+  });
+
+  it('gemini: records in the manifest which pair it was built from and how many matched', async () => {
+    const h = harness();
+    // The same unit, re-bundled: two pairs match, and the newest is chosen.
+    writeFileSync(join(h.reviews, `2026-09-01-${UNIT}-probe-review-prompt.txt`), 'an earlier prompt\n');
+    writeFileSync(join(h.reviews, `2026-09-01-${UNIT}-probe-review-bundle.txt`), 'an earlier bundle\n');
+
+    expect(await main([UNIT, 'gemini'], h.deps)).toBe(0);
+    const manifest = JSON.parse(
+      readFileSync(join(h.reviews, `2026-09-21-${UNIT}-probe-review-gemini.run.json`), 'utf8'),
+    ) as Manifest; // JSON-parse boundary: the file this run just wrote.
+
+    expect(manifest.artifacts).toEqual({ promptFile: PROMPT, bundleFile: BUNDLE, matchingPairs: 2 });
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(/2 pairs? matched/i);
+  });
+
+  it('gemini: refuses a bundle with no end nonce before a payload can be composed from it', async () => {
+    // The delimiters carry the bundle's nonce, so there is no payload to build
+    // without one. The refusal is step 4, ahead of step 5, and it predates this
+    // change: what is new is that `composePayload` cannot be called without a
+    // nonce even by mistake.
+    const h = harness({ nonce: false });
+    const errors = vi.mocked(console.error);
+    errors.mockClear();
+
+    expect(await main([UNIT, 'gemini'], h.deps)).toBe(1);
+    expect(h.calls).not.toContain('callGemini');
+    const printed = errors.mock.calls.flat().join('\n');
+    expect(printed).toMatch(/step 4/);
+    expect(printed).toMatch(/BUNDLE END/);
   });
 });

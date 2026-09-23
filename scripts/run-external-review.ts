@@ -76,6 +76,13 @@ const SECRET_MIN_LENGTH = 8;
 const SECRET_TAIL_MIN_LENGTH = 24;
 const SECRET_TAIL_LENGTH = 20;
 
+/** A value this long or longer is ALSO searched for by a `SECRET_TAIL_LENGTH`
+ *  slice from its middle, starting at `floor(length / 2) - SECRET_TAIL_LENGTH /
+ *  2`. Below this length the middle slice overlaps the tail it would add
+ *  nothing to, and on a value whose body repeats it collides across values of
+ *  the same format. */
+const SECRET_MIDDLE_MIN_LENGTH = 40;
+
 /** Searched for whenever they are set. Neither reviewer can reach the
  *  environment, so any bug of ours that dumps `process.env` wholesale carries
  *  these with it: they are the canary for environment dumps generally. */
@@ -105,9 +112,15 @@ export const AUTH_JSON_LABEL = 'auth.json';
  * reply quoting any path under C:\Users tripped APPDATA, TEMP and seven more.
  *
  * Searches for the value of every canary variable, of every variable whose
- * name says it is a secret, and of every string in `authSecrets`: in full, or,
- * for a value of 24 characters or more, by its last 20 characters alone, so a
- * copy missing its start is still caught. Never by a prefix. `sk-proj-` begins
+ * name says it is a secret, and of every string in `authSecrets`: in full; for
+ * a value of 24 characters or more, by its last 20 characters alone, so a copy
+ * missing its start is still caught; and for a value of 40 characters or more,
+ * by a 20-character slice from its middle, so a copy missing its END is caught
+ * too — a leak that reproduces a credential's start and stops short matches
+ * neither of the other two (gemini-3). The middle of a long credential is
+ * unique to it and clear of both the shared prefix and the tail.
+ *
+ * Never by a prefix. `sk-proj-` begins
  * every OpenAI project key, `sk-ant-a` every Anthropic key, and `eyJhbGci`
  * every JWT in auth.json, so a reply quoting any placeholder in one of those
  * formats would withhold every file after the bundle was sent. A key's tail is
@@ -124,8 +137,14 @@ export function findLeakedSecrets(
 ): readonly string[] {
   const appears = (value: string): boolean => {
     if (value.length < SECRET_MIN_LENGTH) return false;
-    const needle = value.length >= SECRET_TAIL_MIN_LENGTH ? value.slice(-SECRET_TAIL_LENGTH) : value;
-    return contents.some((text) => text.includes(needle));
+    const needles: string[] = [
+      value.length >= SECRET_TAIL_MIN_LENGTH ? value.slice(-SECRET_TAIL_LENGTH) : value,
+    ];
+    if (value.length >= SECRET_MIDDLE_MIN_LENGTH) {
+      const start = Math.floor(value.length / 2) - SECRET_TAIL_LENGTH / 2;
+      needles.push(value.slice(start, start + SECRET_TAIL_LENGTH));
+    }
+    return contents.some((text) => needles.some((needle) => text.includes(needle)));
   };
 
   const leaked: string[] = [];
@@ -776,6 +795,17 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
       { cause: err },
     );
   }
+  // Several pairs for one unit is ordinary — units are re-bundled — and the
+  // newest wins. Saying so makes the choice visible at the top of every run,
+  // dry or real, rather than leaving it to be inferred from the filenames
+  // (gemini-1).
+  const pairs = artifacts.matchingPairs;
+  console.log(
+    `selected ${artifacts.promptFile} and ${artifacts.bundleFile} ` +
+      `(${String(pairs)} pair${pairs === 1 ? '' : 's'} matched ${args.unit}` +
+      `${pairs === 1 ? '' : '; the newest was chosen'})`,
+  );
+
   const promptPath = `${REVIEWS_DIR}/${artifacts.promptFile}`;
   const bundlePath = `${REVIEWS_DIR}/${artifacts.bundleFile}`;
 
@@ -815,7 +845,9 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
   }
 
   // Step 5.
-  const payload = composePayload(promptText, artifacts.bundleFile, bundleText);
+  // `markers.endNonce` is non-null here: step 4 above refuses a bundle without
+  // one, and the delimiters are built from it.
+  const payload = composePayload(promptText, artifacts.bundleFile, bundleText, markers.endNonce);
   return {
     artifacts,
     markers,
@@ -1106,6 +1138,7 @@ async function runCodex(
     const manifest = buildManifest({
       unit: args.unit,
       family: 'codex',
+      artifacts: manifestArtifacts(p.artifacts),
       invocation,
       cleanRoom,
       exitCode,
@@ -1213,6 +1246,7 @@ async function runGemini(
   const manifest = buildManifest({
     unit: args.unit,
     family: 'gemini',
+    artifacts: manifestArtifacts(p.artifacts),
     invocation,
     cleanRoom: null,
     exitCode,
@@ -1238,12 +1272,44 @@ async function runGemini(
   const sessionRecord: Record<string, unknown> = {
     modelVersion: result?.modelVersion ?? null,
     responseId: result?.responseId ?? null,
-    usageMetadata: result?.usageMetadata ?? null,
+    usageMetadata: sessionUsageMetadata(result?.usageMetadata ?? null),
   };
   if (httpStatus !== null) sessionRecord.httpStatus = httpStatus;
 
   // Steps 10 to 13.
   return finish(args, manifest, evidenceFiles(p.outputs, manifest, replyFile, JSON.stringify(sessionRecord)), env, [], deps);
+}
+
+/** The pair this run was built from, as the manifest records it. `UnitArtifacts`
+ *  also carries the date and slug the filenames are built from; the manifest
+ *  keeps the filenames themselves. */
+function manifestArtifacts(artifacts: UnitArtifacts): Manifest['artifacts'] {
+  return {
+    promptFile: artifacts.promptFile,
+    bundleFile: artifacts.bundleFile,
+    matchingPairs: artifacts.matchingPairs,
+  };
+}
+
+/**
+ * The `usageMetadata` fields a session record may keep: every value that is a
+ * number, plus `serviceTier` when it is a string. The whole object used to be
+ * written into a committed file verbatim, so an unexpected property on it was
+ * retained whatever it held, nested objects and arrays included (codex-2).
+ * Storing whatever a vendor returns, unexamined, in a tracked file is worth
+ * removing on its own merits; the token counts are what the record exists for,
+ * and `serviceTier` says which terms the call ran under.
+ */
+export function sessionUsageMetadata(
+  record: Readonly<Record<string, unknown>> | null,
+): Readonly<Record<string, number | string>> | null {
+  if (record === null) return null;
+  const out: Record<string, number | string> = {};
+  for (const [name, value] of Object.entries(record)) {
+    if (typeof value === 'number') out[name] = value;
+    else if (name === 'serviceTier' && typeof value === 'string') out[name] = value;
+  }
+  return out;
 }
 
 function numericFields(record: Readonly<Record<string, unknown>> | null): Readonly<Record<string, number>> | null {

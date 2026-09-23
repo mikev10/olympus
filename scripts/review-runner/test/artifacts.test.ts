@@ -18,6 +18,7 @@ describe('findUnitArtifacts', () => {
       slug: 'driver-claude-code',
       promptFile: '2026-09-19-P5-driver-claude-code-review-prompt.txt',
       bundleFile: '2026-09-19-P5-driver-claude-code-review-bundle.txt',
+      matchingPairs: 1,
     });
   });
 
@@ -46,5 +47,19 @@ describe('findUnitArtifacts', () => {
       '2026-09-15-P7-x-review-bundle.txt',
     ];
     expect(findUnitArtifacts(twice, 'P7').date).toBe('2026-09-15');
+  });
+
+  it('reports how many pairs matched, so a selection among several is not silent', () => {
+    expect(findUnitArtifacts(FILES, 'P5').matchingPairs).toBe(1);
+
+    const twice: readonly string[] = [
+      '2026-09-01-P7-x-review-prompt.txt',
+      '2026-09-01-P7-x-review-bundle.txt',
+      '2026-09-15-P7-x-review-prompt.txt',
+      '2026-09-15-P7-x-review-bundle.txt',
+    ];
+    const chosen = findUnitArtifacts(twice, 'P7');
+    expect(chosen.matchingPairs).toBe(2);
+    expect(chosen.date).toBe('2026-09-15');
   });
 });

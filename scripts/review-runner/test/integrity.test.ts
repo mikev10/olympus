@@ -51,18 +51,41 @@ describe('bundleMarkers', () => {
     });
   });
 
-  it('uses the LAST nonce line when multiple lines match the nonce pattern', () => {
-    const fakeNonceLine = '=== BUNDLE END === 0000000000000000000000000000000a';
+  it('refuses a bundle carrying more than one nonce-shaped line', () => {
+    // Not "takes the last one": a reviewer that read the whole bundle can echo
+    // the earlier value and be recorded as having failed a check it passed.
     const bundle = [
       'BASE: x',
       'HEAD: y',
-      fakeNonceLine,
+      '=== BUNDLE END === 0000000000000000000000000000000a',
       '===== a.ts =====',
       'content',
       '=== BUNDLE END === 0000000000000000000000000000000b',
     ].join('\n');
-    const markers = bundleMarkers(bundle);
-    expect(markers.endNonce).toBe('0000000000000000000000000000000b');
+    expect(() => bundleMarkers(bundle)).toThrow(/more than one|two/i);
+  });
+
+  it('refuses a bundle whose nonce is not on its last non-empty line', () => {
+    // codex-4's own construction, reproduced: the section scan stops at the
+    // nonce, so `finalSection` came back `early.ts` while `late.ts` was the
+    // bundle's real last section and the prompt's instruction to read the very
+    // last line was false.
+    const bundle = [
+      'BASE: x',
+      'HEAD: y',
+      '===== early.ts =====',
+      'export const early = 1;',
+      '=== BUNDLE END === a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      '',
+      '===== late.ts =====',
+      'export const late = 2;',
+      '',
+    ].join('\n');
+    expect(() => bundleMarkers(bundle)).toThrow(/last non-empty line|after its/i);
+  });
+
+  it('accepts trailing blank lines after the nonce, which every generated bundle has', () => {
+    expect(bundleMarkers(`${BUNDLE_WITH_NONCE}\n\n`).endNonce).toBe('a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6');
   });
 
   it('uses the LAST section header that occurs before a nonce line', () => {

@@ -16,6 +16,10 @@ import {
 // substring check would find it if it leaked anywhere it should not.
 const FAKE_KEY = 'AIzaSyDummyDummyDummyDummyDummyDummy12';
 
+// Supplied only to the transport, never to the builder: any appearance of it
+// in a built URL or body is a leak.
+const SENTINEL = 'AIzaSySentinelSentinelSentinelSentinel7';
+
 describe('GEMINI_MODEL', () => {
   it('is pinned to the measured model id, with no fallback list anywhere', () => {
     expect(GEMINI_MODEL).toBe('gemini-3.1-pro-preview');
@@ -31,10 +35,39 @@ describe('geminiRequest', () => {
     expect(request.url).not.toContain('key=');
   });
 
-  it('goes through keylessUrl, so a URL carrying a query string is impossible to construct here', () => {
-    // geminiRequest takes no key parameter at all — there is no argument by
-    // which a caller could even attempt to smuggle one into the URL.
-    expect(geminiRequest.length).toBe(1);
+  it('builds exactly the pinned endpoint, and no credential handed to the transport reaches the request', async () => {
+    // Replaces an arity assertion that passed regardless of the code under
+    // test (codex-6). The URL is asserted by its value, and the key by where
+    // it ends up: SENTINEL is distinct from every other value in this file, so
+    // if it reached the URL or the body these assertions would see it.
+    expect(request.url).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent',
+    );
+
+    let capturedUrl = '';
+    let capturedBody = '';
+    let capturedHeaders: Readonly<Record<string, string>> = {};
+    const fetchImpl: FetchLike = (url, init) => {
+      capturedUrl = url;
+      capturedBody = init.body;
+      capturedHeaders = init.headers;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: () =>
+          Promise.resolve({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] }),
+        text: () => Promise.resolve(''),
+      });
+    };
+
+    await callGemini('the whole review bundle', { env: { GEMINI_API_KEY: SENTINEL }, fetchImpl });
+
+    expect(capturedUrl).toBe(request.url);
+    expect(capturedUrl).not.toContain(SENTINEL);
+    expect(capturedBody).not.toContain(SENTINEL);
+    expect(capturedBody).toContain('the whole review bundle');
+    expect(capturedHeaders['x-goog-api-key']).toBe(SENTINEL);
   });
 
   it('carries exactly one user part with the payload text', () => {
