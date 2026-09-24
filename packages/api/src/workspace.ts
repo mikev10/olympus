@@ -122,7 +122,36 @@ async function present(absolute: string): Promise<boolean> {
   }
 }
 
-async function contentHashOrNull(absolute: string): Promise<string | null> {
+/**
+ * The first parent of `path` under `root` that is a link, or undefined. A
+ * diff path names an entry *in* the tree, and a path beneath a link names
+ * whatever the link points at, which may be anywhere on the host. The walk
+ * that collects a diff never follows a link, so no honest entry lies beneath
+ * one (codex-1).
+ */
+async function linkedParent(root: string, path: string): Promise<string | undefined> {
+  const parts = path.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    const facts = await lstat(join(root, ...parts.slice(0, i))).catch(() => null);
+    // An absent parent has nothing beneath it, through a link or otherwise.
+    if (facts === null) return undefined;
+    if (facts.isSymbolicLink()) return parts.slice(0, i).join('/');
+  }
+  return undefined;
+}
+
+/** Refuses an operation on `path` in `root` that would pass through a link to reach it (I5). */
+async function refuseLinkedParent(root: string, path: string, doing: string): Promise<void> {
+  const link = await linkedParent(root, path);
+  if (link !== undefined) {
+    throw new Error(`workspace: refusing to ${doing} ${path}, because its parent ${link} is a link and the path would resolve outside the tree`);
+  }
+}
+
+/** The content hash of `path` in `root`, or null when it is absent there. A path beneath a link is absent: what it reaches is not in the tree. */
+async function hashIn(root: string, path: string): Promise<string | null> {
+  if ((await linkedParent(root, path)) !== undefined) return null;
+  const absolute = join(root, ...path.split('/'));
   return (await present(absolute)) ? contentHash(absolute) : null;
 }
 
@@ -185,7 +214,7 @@ export async function ownDiff(start: string, work: string): Promise<DiffEntry[]>
 export async function composeDiff(base: string, accepted: readonly DiffEntry[], own: readonly DiffEntry[]): Promise<DiffEntry[]> {
   const byPath = new Map(accepted.map((entry) => [entry.path, entry]));
   for (const entry of own) {
-    const atBase = await contentHashOrNull(join(base, ...entry.path.split('/')));
+    const atBase = await hashIn(base, entry.path);
     if (entry.sha256 === null) {
       if (atBase === null) byPath.delete(entry.path);
       else byPath.set(entry.path, { path: entry.path, change: 'removed', sha256: null });
@@ -222,11 +251,17 @@ export async function materialize(
 }
 
 async function apply(target: string, diff: readonly DiffEntry[], sourceOf: (path: string) => string): Promise<void> {
+  // Each operation is checked where it lands, at the moment it runs: an earlier entry can put a
+  // link where a later entry's parent is.
   for (const entry of diff) {
-    if (entry.sha256 === null) await rm(join(target, ...entry.path.split('/')), { recursive: true, force: true });
+    if (entry.sha256 !== null) continue;
+    await refuseLinkedParent(target, entry.path, 'remove');
+    await rm(join(target, ...entry.path.split('/')), { recursive: true, force: true });
   }
   for (const entry of diff) {
     if (entry.sha256 === null) continue;
+    await refuseLinkedParent(target, entry.path, 'write');
+    await refuseLinkedParent(sourceOf(entry.path), entry.path, 'read');
     const destination = join(target, ...entry.path.split('/'));
     const source = join(sourceOf(entry.path), ...entry.path.split('/'));
     await rm(destination, { recursive: true, force: true });
@@ -251,7 +286,7 @@ export async function copyTree(source: string, target: string): Promise<void> {
 
 /** The content hash of one path in a tree, or null when it is absent. */
 export async function hashAt(tree: string, path: string): Promise<string | null> {
-  return contentHashOrNull(join(tree, ...path.split('/')));
+  return hashIn(tree, path);
 }
 
 /**
@@ -262,6 +297,8 @@ export async function copyOnly(source: string, target: string, paths: readonly s
   await rm(target, { recursive: true, force: true });
   await mkdir(target, { recursive: true, mode: 0o700 });
   for (const path of paths) {
+    await refuseLinkedParent(source, path, 'read');
+    await refuseLinkedParent(target, path, 'write');
     const from = join(source, ...path.split('/'));
     if (!(await present(from))) continue;
     const to = join(target, ...path.split('/'));

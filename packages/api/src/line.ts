@@ -418,6 +418,12 @@ function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egre
   };
 }
 
+/** One check's sandbox: the verified tree read-only, no network, and the check's own timeout as its wall clock. */
+function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec): SandboxSpec {
+  const spec = workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] });
+  return { ...spec, limits: { ...spec.limits, wallClockMs: check.timeoutMs } };
+}
+
 function scopeFor(ctx: LineContext, task: Task) {
   const resolved = engine.resolveCapabilities(task.role, task.station, ctx.policy);
   // Admission resolved every role the graph schedules, against the same admitted policy.
@@ -629,14 +635,18 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const specs = ctx.checks;
   const results: Array<CheckResult | undefined> = [];
   const unstarted: UnstartedCheck[] = [];
-  let handle: SandboxHandle;
-  try {
-    handle = await sandbox.provision(workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }));
-  } catch {
-    return spendRetry(ctx, task);
-  }
-  try {
-    for (const check of specs) {
+  // Each check gets a sandbox of its own, whose wall clock is the check's pinned timeout. A check
+  // shares no container with the one before it, so nothing an earlier check did to the container
+  // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
+  // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
+  for (const check of specs) {
+    let handle: SandboxHandle;
+    try {
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+    } catch {
+      return spendRetry(ctx, task);
+    }
+    try {
       const startedAt = new Date().toISOString();
       try {
         // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
@@ -656,9 +666,9 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
         results.push(undefined);
         unstarted.push({ checkId: check.id, reason: describe(error) });
       }
+    } finally {
+      await sandbox.destroy(handle);
     }
-  } finally {
-    await sandbox.destroy(handle);
   }
   const checks = results.filter((r): r is CheckResult => r !== undefined);
 
@@ -785,15 +795,24 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   if (started !== undefined) return started;
   // Everything the line has is offered, the author's narrative and the plan
   // included; grantedContext is what keeps a seat to its contract.
+  // The seat's tree holds the files the diff left, and a removal leaves none; the listing is how
+  // the seat sees one. It is the runtime's diff, never the claim's file list (codex-5).
+  const current = await accepted(ctx);
   const offered: Partial<Record<ContextGrant, string>> = {
     'locked-spec': spec.text,
     'acceptance-tests': tests.text,
+    diff: JSON.stringify(current.diff.map(({ path, change }) => ({ path, change }))),
     'evidence-bundle': await evidenceFacts(ctx, task.dependsOn),
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
     plan: JSON.stringify(ctx.graph.tasks),
   };
   const ran = await runTask(ctx, task, reviewer, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
   if (!ran.ok) return spendRetry(ctx, task);
+  // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
+  const problems = taskResultProblems(ran.result);
+  if (problems.length > 0) {
+    throw new Error(`line: the reviewer's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
+  }
   const seated = seatReviewer(task.id, authors, ran.result.model, level);
   if (!seated.ok) return seated;
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);

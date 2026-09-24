@@ -9,6 +9,7 @@ import { buildAdapterSet } from '@olympus-ai/adapters';
 import type { AgentClaim } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { DiffEntry } from '@olympus-ai/vault';
+import { SUITE_KINDS } from './gate.js';
 
 /**
  * Where the claim and the evidence differ. Only the claim's file list is
@@ -49,9 +50,6 @@ export function writesOutsideGrant(own: readonly DiffEntry[], roleGlobs: readonl
   return own.filter((entry) => !(role(entry.path) && station(entry.path))).map((entry) => entry.path);
 }
 
-/** The kinds whose result is a suite run, and so the ones a suite count is recorded for. */
-const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance']);
-
 /**
  * The number of suites in the verified tree, counted on the host by the
  * adapters from files alone, or null when the tree's stack has no test
@@ -69,9 +67,9 @@ export async function countSuites(tree: string): Promise<number | null> {
 }
 
 /**
- * The suite count a check's result records. A null here fails a check that
- * pins `expectedSuiteCount`, because the gate reads null as below any count:
- * a tree whose suites cannot be enumerated is not a tree whose suites passed.
+ * The suite count a check's result records. A null here fails a suite check,
+ * and any check that pins `expectedSuiteCount`: a tree whose suites cannot be
+ * enumerated is not a tree whose suites passed (`gate.ts`).
  */
 export function suiteCountFor(check: CheckSpec, counted: number | null): number | null {
   return SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined ? counted : null;

@@ -17,6 +17,7 @@ import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, Sandb
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
+import { canCreateIn } from './ownership.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { refuse } from './refusal.js';
 
@@ -170,13 +171,11 @@ const HOST_ENFORCES_OWNERSHIP = process.platform === 'linux';
 async function checkWorkspaceWritable(workspace: ResolvedMount, user: SandboxSpec['user']): Promise<void> {
   if (workspace.mode !== 'rw' || !HOST_ENFORCES_OWNERSHIP || user.uid === 0) return;
   const facts = await stat(workspace.source);
-  const writable =
-    facts.uid === user.uid ? (facts.mode & 0o200) !== 0 : facts.gid === user.gid ? (facts.mode & 0o020) !== 0 : (facts.mode & 0o002) !== 0;
-  if (!writable) {
+  if (!canCreateIn(facts, user)) {
     refuse(
       'user',
       `the workspace ${workspace.declared} is owned by ${String(facts.uid)}:${String(facts.gid)} with mode ${(facts.mode & 0o777).toString(8)}, ` +
-        `which uid ${String(user.uid)} gid ${String(user.gid)} cannot write; a task handed it could not change anything, so it is refused rather than mounted`,
+        `which uid ${String(user.uid)} gid ${String(user.gid)} cannot create entries in (that takes write and search); a task handed it could not change anything, so it is refused rather than mounted`,
     );
   }
 }

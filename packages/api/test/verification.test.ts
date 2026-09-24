@@ -3,7 +3,7 @@
  * over a real directory. The line's own behaviour is `line.test.ts`'s; the
  * registry assertions are in `packages/conformance`.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -20,7 +20,7 @@ import {
   treeDigest,
   writesOutsideGrant,
 } from '../src/index.js';
-import { basePath, localWorkspaceStore, materialize, snapshotBase, treePath } from '../src/workspace.js';
+import { basePath, copyOnly, hashAt, localWorkspaceStore, materialize, snapshotBase, treePath } from '../src/workspace.js';
 
 let base: string;
 
@@ -93,6 +93,53 @@ describe('a tree is built from base and a diff', () => {
     await materialize(store, runId, target, diff, () => changed);
     await materialize(store, runId, target, diff, () => target);
     expect(await readFile(join(target, 'b.ts'), 'utf8')).toBe('b');
+  });
+
+  test('a base link is not followed when a diff is composed, so a restored link cannot carry a removal outside the tree', async () => {
+    // codex-1: base holds `p`, a link to a directory outside every tree. Task A replaces it with a
+    // directory holding `p/x`; task B restores the link. Looked up through the link, A's `p/x` read
+    // as a modification of the outside file and B's removal of it survived composition.
+    const outside = await tree('outside', { x: 'outside' });
+    const root = await tree('linked-base', {});
+    await symlink(outside, join(root, 'p'), process.platform === 'win32' ? 'junction' : 'dir');
+    const link = await hashAt(root, 'p');
+    if (link === null) throw new Error('the link was not created');
+    const taskA = [
+      { path: 'p', change: 'removed' as const, sha256: null },
+      { path: 'p/x', change: 'added' as const, sha256: 'a-bytes' },
+    ];
+    const afterA = await composeDiff(root, [], taskA);
+    expect(afterA.map(({ path, change }) => [path, change])).toEqual([
+      ['p', 'removed'],
+      ['p/x', 'added'],
+    ]);
+    const taskB = [
+      { path: 'p', change: 'added' as const, sha256: link },
+      { path: 'p/x', change: 'removed' as const, sha256: null },
+    ];
+    expect(await composeDiff(root, afterA, taskB)).toEqual([]);
+    expect(await hashAt(root, 'p/x')).toBeNull();
+  });
+
+  test('a view refuses a path whose parent is a link, rather than reading through it', async () => {
+    const outside = await tree('outside-view', { x: 'outside' });
+    const source = await tree('view-source', {});
+    await symlink(outside, join(source, 'p'), process.platform === 'win32' ? 'junction' : 'dir');
+    await expect(copyOnly(source, join(base, 'view'), ['p/x'])).rejects.toThrow(/link/);
+  });
+
+  // Materializing copies base's links, and creating a link needs a privilege Windows accounts
+  // usually lack; the two tests above hold the same rule on every host.
+  test.skipIf(process.platform === 'win32')('a removal under a linked parent is refused where it would land, and the file outside is untouched', async () => {
+    const outside = await tree('outside-apply', { x: 'outside' });
+    const source = await tree('apply-source', {});
+    await symlink(outside, join(source, 'p'), 'dir');
+    const store = localWorkspaceStore({ root: join(base, 'store-link') });
+    const runId = 'linked' as RunId;
+    await snapshotBase(store, runId, source);
+    const diff = [{ path: 'p/x', change: 'removed' as const, sha256: null }];
+    await expect(materialize(store, runId, treePath(store, runId, diffDigest(diff)), diff, () => source)).rejects.toThrow(/link/);
+    expect(await readFile(join(outside, 'x'), 'utf8')).toBe('outside');
   });
 
   test('a source whose bytes changed after the diff was taken is refused', async () => {

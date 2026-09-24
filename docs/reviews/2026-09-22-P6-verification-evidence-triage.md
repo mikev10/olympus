@@ -40,12 +40,27 @@ number.
   Every verdict below agrees with its subagent. There is one reading where this
   triage departs from a subagent's: see codex-4.
 
-**Status: proposed.** The outcomes below are recommendations. None is applied
-yet, and they wait on the maintainer's confirmation, as P8's did.
+**Applied.** The maintainer confirmed the eight outcomes below as recommended,
+and the fixes landed on `unit/p6` in the commit that follows this triage. Every
+new or changed test was shown failing against the code before its fix and
+passing after. The three codex-1 tests were also run on Linux, as a non-root
+user in a `node:22-bookworm-slim` container: all three failed against the
+pre-fix `workspace.ts`, and all 23 tests in the file passed with the fix,
+including the one that is skipped on Windows. The container reproduction from
+the verification pass, rerun against the fixed file, leaves task B's cumulative
+diff empty and the outside file in place. Each fix is recorded in
+`docs/decisions.md` as D-P6-12 to D-P6-17, with additions to D-P6-07 and
+A-P6-04. The acceptance run is recorded at the end of this file.
+
+One departure from the proposals: for codex-4, the hello fixture was not given
+an enumerable suite. Its check, and the registry's `PASSING` and `FAILING`,
+run `node -e process.exit(0)` and were declared `unit` while running no suite.
+They are now declared `compile`, which is what they are, and two new line
+tests cover a `unit` check on each side.
 
 ## Findings
 
-| ID | Finding | Raised by | Verdict | Proposed outcome |
+| ID | Finding | Raised by | Verdict | Outcome |
 |---|---|---|---|---|
 | codex-1 | Composition through a base symlink deletes a host file outside the workspace | codex | holds (executed) | fix now |
 | codex-2 | Pinned argv does not pin the checker; checks share one container | codex | holds; the dispatch half is P7's | fix now (shared container); pending entry to P7 (dispatch) |
@@ -78,14 +93,15 @@ runs. Step A is also a host read outside the workspace, since the file is
 hashed. The only preconditions are a repository link with an absolute target
 and a two-task grant of `p` and `p/**`.
 
-**Proposed fix.** Give the workspace tree operations one rule: a path whose
-parent, anywhere under the tree root, is a link is absent for lookup, and every
-`rm`, `mkdir`, copy, and `symlink` refuses such a path. The rule goes in
-`contentHashOrNull`/`present` (which `hashAt` shares), in `apply`, and in
-`copyOnly`. With it, A's entry is `p/x added`, B's removal cancels it, and
-nothing outside the tree is read or touched. The regression test builds the
-two-task scenario over real links and runs on Linux CI. It is shown failing
-before the fix.
+**Fix.** The workspace tree operations follow one rule: a path whose parent,
+anywhere under the tree root, is a link is absent when it is looked up
+(`hashIn`, which `composeDiff` and `hashAt` share), and every removal, write,
+and source read in `apply` and `copyOnly` refuses it, checked at the moment
+the operation runs. With the rule, A's entry is `p/x added`, B's removal cancels
+it, and nothing outside the tree is read or touched. Three tests in
+`verification.test.ts` cover it: the two-task composition, a view through a
+link, and a materialized removal under a link. Each failed before the fix, and
+on Linux as well as here (D-P6-12).
 
 ## codex-2: the checker, and the container the checks share
 
@@ -103,14 +119,14 @@ workspace mount is `ro`, but the rest of the container filesystem is not.
   checked: an agent judged by an artifact it can write. Recognising a diff
   that touches test configuration or runner scripts is tamper analysis, which
   P6's out-of-scope list gives to P7 ("tamper-style reading of the diff").
-  **Proposed:** a pending registry entry,
+  **Done:** a pending registry entry,
   `I3.check-dispatch-not-writable-by-the-task`, owned by P7. It raises the I3
   baseline from 1 to 2 and appears in the diff. A repository that already held
   a substituted runner at admission is the admitting human's repository, and
   is outside what verification can judge.
 - *Cross-check contamination.* This is P6's own defect. The unit spec says the
   checks run "in a fresh sandbox", and one sandbox shared across checks lets an
-  earlier check change the container a later one runs in. **Proposed fix:** one
+  earlier check change the container a later one runs in. **Fix:** one
   freshly provisioned sandbox per check, over the same read-only tree with
   `deny-all` egress. The same change closes codex-7.
 
@@ -130,7 +146,7 @@ the stronger wording, that an ungranted write is *unavailable*. The consequence
 is confined to the task's own sandbox, which is already agent-writable by
 definition.
 
-**Proposed outcome.** A known limit in `docs/decisions.md`, with the I4 claim
+**Outcome.** A known limit in `docs/decisions.md`, with the I4 claim
 for workspace writes narrowed to what the code enforces: *an ungranted write
 never propagates beyond the task*. Enforcing write authority during execution
 takes per-path mounts, which is sandbox work. It has no owner in M1, and it is
@@ -153,13 +169,14 @@ unsupported stack" as a refusal. A `unit` or `acceptance` check is a suite run
 by kind, so a null count on one is a tree whose suites were not established.
 The line test asserts the defect, not the contract.
 
-**Proposed fix.** `requiredShortfall` fails a suite-kind check whose
+**Fix.** `requiredShortfall` fails a suite-kind check whose
 `suiteCount` is null, with cause `suite-count`. A non-suite check (`lint`,
 `typecheck`) is unaffected, because `suiteCountFor` records null for it by
-kind. The hello fixture gains an enumerable suite so that its test asserts a
-counted pass. A second test keeps the fixture's current shape and asserts that
-the check fails. That test is shown failing against the old gate first. This
-strengthens the test and weakens nothing.
+kind. The fixture checks that run no suite are now declared `compile`, as
+stated at the top of this file. `line.test.ts` asserts a `unit` check parked
+over a tree with no suites, which failed against the old gate, and passed with a
+count of one over a tree with one suite. This strengthens the tests and weakens
+nothing (D-P6-14).
 
 ## codex-5: the reviewer cannot see a deletion
 
@@ -172,7 +189,7 @@ mismatches, and no paths.
 nothing give the reviewer the same tree and the same facts. The review
 contract grants `diff`, and a removal is part of the diff.
 
-**Proposed outcome, in two parts.**
+**Outcome, in two parts.**
 - *Fix now:* the seat is offered the runtime's own diff listing under its
   `diff` grant: every path with `added`, `modified`, or `removed`, read from
   the Vault's diff and never from the claim. That makes a deletion visible, and
@@ -192,7 +209,7 @@ authors' families as read from their recorded `TaskResult.model`.
 **Found.** Both halves hold, and they have different status.
 - *The key check.* This is a defect of this unit. The accept list requires the
   check "where the line receives it", and the line receives a result at review
-  too. **Proposed fix:** the review station applies the same check, and stops
+  too. **Fix:** the review station applies the same check, and stops
   the same way, before `recordTaskResult` (D-P6-07). A test hands the seat a
   result carrying `status` and requires the refusal. It is shown failing first.
 - *The author's family.* A recorded limit that predates this unit.
@@ -212,7 +229,7 @@ takes no timeout "except by provisioning one sandbox per check", and left the
 choice to P6 and P2 (D-S1-11). P6 did not close it, and its known limits do not
 mention it.
 
-**Proposed fix.** This is the per-check sandbox from codex-2, provisioned with
+**Fix.** This is the per-check sandbox from codex-2, provisioned with
 `wallClockMs` set to the check's `timeoutMs`, which validation now requires to
 be a positive integer. A check that outruns it produces no result, and it is
 recorded in `unstarted` with the reason "timed out after N ms". A-P6-02 defines
@@ -231,9 +248,14 @@ through Olympus's own code produces a `0600` workspace today. The check is
 still incomplete for the property it asserts, and the assertion
 `I5.workspace-is-writable-by-the-task` tests only a uid mismatch.
 
-**Proposed fix.** Require both write and search (`w` and `x`) for the matching
-class. Add a conformance case for an owned directory at mode `0600`, shown
-failing first.
+**Fix.** The rule is now `canCreateIn` (`packages/sandbox/src/local/ownership.ts`),
+which requires both write and search (`w` and `x`) from the one class the user
+falls in. `ownership.test.ts` tests the rule on every host. It failed with the
+old write-only bits and passes with the new ones. `I5.workspace-is-writable-by-the-task`
+adds the `0600` case for the runtime's own non-root user. That case runs only
+on Linux against a real daemon, so its first execution is Linux CI: it was not
+run here, and it was not shown failing against the old check. The rule it
+exercises was (A-P6-04).
 
 ## Not changed by this triage
 
@@ -242,3 +264,26 @@ failing first.
   `434fb474e8ef1b712ee1b8780a4100c449e681adcdb0d7205eb490c074378aff`, is
   the value in the prompt file's first paragraph, and the tracked copy
   matches it.
+
+## Acceptance run after the fixes
+
+- `pnpm typecheck` and `pnpm lint`: clean.
+- Package tests, each run to completion: api 65 passed and 1 skipped (the
+  Linux-only link test, run separately on Linux, where all 23 in its file
+  pass); sandbox 97 passed and 2 skipped; core 133; vault 56; adapters 692
+  passed and 1 skipped.
+- `pnpm --filter @olympus-ai/driver-claude-code test`: **not completed.**
+  48 tests passed. The 8 that call a real model failed with HTTP 400, because
+  the API account's credit balance is too low ("Your credit balance is too low
+  to access the Anthropic API"). A direct one-token request confirmed the
+  cause. No fix here touches the driver package. The driver's reconciled
+  report therefore describes an older tree.
+- `pnpm conformance`: every assertion outside the driver holds, and every
+  pending count is at or below its baseline, with I3 at 2 of 2. The remaining
+  failures are the driver's external assertions and the registry-completeness
+  checks that count them, all reported as `test-failed` or stale by
+  `I8.external-assertion-execution-reconciled`: the credit failure above, and
+  nothing else.
+- **Owed before merge:** the driver run, then `pnpm conformance`, once the API
+  account has credit. The `0600` case in `I5.workspace-is-writable-by-the-task`
+  first runs on Linux CI.

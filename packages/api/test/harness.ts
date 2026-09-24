@@ -37,7 +37,7 @@ export const REVIEWER = 'reviewer' as RoleId;
 
 export const HELLO_CHECK: CheckSpec = {
   id: 'hello-exit-zero',
-  kind: 'unit',
+  kind: 'compile',
   command: ['node', '-e', 'process.exit(0)'],
   required: true,
   timeoutMs: 10_000,

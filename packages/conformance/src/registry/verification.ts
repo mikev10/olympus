@@ -9,7 +9,7 @@
  * on a line that refuses everything. The two that observe a container need a
  * Docker daemon and fail without one, for the reason `local-sandbox.ts` gives.
  */
-import { writeFile } from 'node:fs/promises';
+import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ComponentGraph, RunOutcome } from '@olympus-ai/api';
 import type { RoleId, RunState, TaskId, TaskRequest, TaskResult } from '@olympus-ai/core';
@@ -18,12 +18,12 @@ import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, EvidenceBundle, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { HELLO_TASK, linePolicy, lineScope, readArtifact, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
+import { HELLO_REVIEW, HELLO_TASK, linePolicy, lineScope, readArtifact, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 import { TEST_IMAGE, withProvider } from './local-sandbox.js';
 
 const api = async () => import('@olympus-ai/api');
 
-const PASSING = { id: 'passes', kind: 'unit', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+const PASSING = { id: 'passes', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
 const FAILING = { ...PASSING, id: 'fails', command: ['node', '-e', 'process.exit(1)'] };
 
 /** Runs a Node script in the task's own workspace, through the sandbox the line provisioned for it. */
@@ -152,7 +152,7 @@ export const UNSTARTED_CHECK_IS_IN_THE_EVIDENCE: LocalAssertion = runtime({
 export const TASK_RESULT_KEY_SET_ENFORCED: LocalAssertion = runtime({
   id: 'I2.task-result-key-set-enforced',
   title:
-    "a driver result carrying a key the TaskResult contract does not name — `status`, built after the fact the way a cast or JavaScript would — is refused where the line receives it, naming the key, and is never recorded; the same result without it is recorded",
+    "a driver result carrying a key the TaskResult contract does not name — `status`, built after the fact the way a cast or JavaScript would — is refused where the line receives it, at build and at review alike, naming the key, and is never recorded; the same result without it is recorded",
   run: async () => {
     await withLine('p6-i2-keys-', async (rig) => {
       const { startRun } = await api();
@@ -174,6 +174,27 @@ export const TASK_RESULT_KEY_SET_ENFORCED: LocalAssertion = runtime({
       if (!message.includes('result.status')) throw new Error(`I2: a result carrying status was not refused naming it (got: ${message || 'no refusal'})`);
       const state = await rig.state();
       if (Object.hasOwn(state.results, HELLO_TASK)) throw new Error('I2: a result carrying status was recorded');
+    });
+    // The line receives a result at review too (codex-6), and the same boundary holds there.
+    await withLine('p6-i2-keys-review-', async (rig) => {
+      const { startRun } = await api();
+      const inner = await stubDriver();
+      const lying = {
+        ...inner,
+        runTask: async (req: TaskRequest): Promise<TaskResult> => {
+          const result: TaskResult = await inner.runTask(req);
+          const widened: Record<string, unknown> = { ...result, status: 'passed' };
+          return widened as unknown as TaskResult;
+        },
+      };
+      let message = '';
+      try {
+        await startRun(await rig.request(await rig.components({ driver: inner, reviewer: lying })));
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      if (!message.includes('result.status')) throw new Error(`I2: a review result carrying status was not refused naming it (got: ${message || 'no refusal'})`);
+      if (Object.hasOwn((await rig.state()).results, HELLO_REVIEW)) throw new Error('I2: a review result carrying status was recorded');
     });
     await withLine('p6-i2-keys-control-', async (rig) => {
       const { startRun } = await api();
@@ -440,10 +461,30 @@ export const TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK: LocalAssertion = runtime
 export const WORKSPACE_IS_WRITABLE_BY_THE_TASK: LocalAssertion = runtime({
   id: 'I5.workspace-is-writable-by-the-task',
   title:
-    'a rw workspace owned by one user and handed to a container running as another is refused at provisioning, naming the user, on a host whose daemon carries ownership through the mount; on a host that maps every container user onto the host user the write lands instead; a sandbox whose task cannot write its workspace is never handed back',
+    'a rw workspace owned by one user and handed to a container running as another is refused at provisioning, naming the user, on a host whose daemon carries ownership through the mount; on a host that maps every container user onto the host user the write lands instead; on such a host a workspace its own user can write but not search is refused too; a sandbox whose task cannot write its workspace is never handed back',
   run: async () => {
     await withProvider('p6-i5-writable-', async (provider, dirs) => {
       const { specFor } = await import('./local-sandbox.js');
+      // Write without search creates nothing (codex-8). Root is exempt from both bits, so the case
+      // needs a runtime that is not root, which CI's runner is not.
+      if (process.platform === 'linux' && process.getuid !== undefined && process.getgid !== undefined && process.getuid() !== 0) {
+        const own = { uid: process.getuid(), gid: process.getgid() };
+        await chmod(dirs.workspace, 0o600);
+        try {
+          let mounted;
+          try {
+            mounted = await provider.provision(specFor(dirs, 'rw', { user: own }));
+          } catch (error) {
+            if ((error as { layer?: unknown }).layer !== 'user') throw error;
+          }
+          if (mounted !== undefined) {
+            await provider.destroy(mounted);
+            throw new Error('I5: a workspace at mode 600 was mounted for its own user, who can write it but not create anything in it');
+          }
+        } finally {
+          await chmod(dirs.workspace, 0o700);
+        }
+      }
       const stranger = { uid: 54321, gid: 54321 };
       let handle;
       try {

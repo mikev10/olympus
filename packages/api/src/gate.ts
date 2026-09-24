@@ -23,8 +23,15 @@ export function requiredShortfall(check: CheckSpec, result: CheckResult | undefi
   } else if (result.exitCode !== 0) {
     return { checkId: check.id, exitCode: result.exitCode, cause: 'exit-code' };
   }
-  if (check.expectedSuiteCount !== undefined && (result.suiteCount === null || result.suiteCount < check.expectedSuiteCount)) {
+  // A suite check whose suites could not be counted has not shown that any ran, pinned count or
+  // not: an unsupported stack or an enumeration that threw is a refusal, never a pass (I5, codex-4).
+  const counted = result.suiteCount;
+  const unknown = counted === null && (SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined);
+  if (unknown || (counted !== null && check.expectedSuiteCount !== undefined && counted < check.expectedSuiteCount)) {
     return { checkId: check.id, exitCode: result.exitCode, cause: 'suite-count' };
   }
   return undefined;
 }
+
+/** The kinds whose result is a suite run, and so the ones a suite count is recorded for and required of. */
+export const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance']);

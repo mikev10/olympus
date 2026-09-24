@@ -1,5 +1,5 @@
 {
   "checks": [
-    { "id": "hello-exit-zero", "kind": "unit", "command": ["node", "-e", "process.exit(0)"], "required": true, "timeoutMs": 10000 }
+    { "id": "hello-exit-zero", "kind": "compile", "command": ["node", "-e", "process.exit(0)"], "required": true, "timeoutMs": 10000 }
   ]
 }

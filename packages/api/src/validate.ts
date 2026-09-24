@@ -201,6 +201,11 @@ function checkProblems(checks: unknown, report: Report): void {
     if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
     }
+    // The timeout is the wall clock of the sandbox the check runs in, so it must be one (codex-7).
+    const timeout = c.timeoutMs;
+    if (!(typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0)) {
+      report(`${at}.timeoutMs`, 'not-integer', `${at}.timeoutMs must be a positive integer of milliseconds`);
+    }
   });
   if (required === 0) {
     report('manifest.checks', 'none-required', 'manifest.checks: at least one check must be required; a gate no check can fail is not a gate');
