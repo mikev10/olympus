@@ -81,6 +81,8 @@ function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
     mounts: { workspace: { source: workspace, target: '/workspace', mode: 'rw' }, others: [] },
     egress: { mode: 'deny-all', allow: [] },
     limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 120_000 },
+    // alpine's own default user; what these assertions ran as before SandboxSpec named one
+    user: { uid: 0, gid: 0 },
     ...overrides,
   };
 }

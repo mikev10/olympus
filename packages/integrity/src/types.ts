@@ -12,7 +12,14 @@ export type CheckKind =
 export interface CheckSpec {
   id: string;
   kind: CheckKind;
-  command: string;                    // pinned at test-design; lives in the Vault
+  /**
+   * Pinned at test-design; lives in the Vault. An argument vector, run exactly
+   * as given with no shell: a check that needs one names it, `['sh', '-c', …]`,
+   * so the shell is part of what was pinned rather than something the runtime
+   * added. A string with a grammar the runtime would have to invent is not
+   * representable (A-P6-01).
+   */
+  command: readonly [string, ...string[]];
   required: boolean;
   timeoutMs: number;
   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure

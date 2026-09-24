@@ -27,16 +27,17 @@ export interface DeclaresUnsafe {
 /**
  * The line's own declaration (S1 finding 3). If only the infrastructure stubs
  * declared themselves, replacing them would lift the L1 cap while the line
- * still faked its half. P4 paid the policy and station lines; what is left is
- * P6's and P7's, and the unit that pays the last of them deletes this, after
- * `I5.unsafe-declaration-survives-composition` is paid.
+ * still faked its half. P4 paid the policy and station lines and P6 the
+ * claim/evidence diff; what is left is P7's. An empty declaration is refused
+ * below, so whichever unit removes the last line puts the composition gap in
+ * its place, and I1 deletes this once `I5.unsafe-declaration-survives-composition`
+ * is paid (D-P6-01).
  */
 export const SKELETON_LINE: DeclaresUnsafe = {
   unsafe: {
     component: 'SkeletonLine',
     cannotEnforce: [
       'no tamper analysis: no assertion, skip marker, deletion, or protected-path touch is detected, so integrate never escalates for one',
-      'no claim/evidence diff: EvidenceBundle.claimEvidenceDiff is empty by construction',
     ],
   },
 };
@@ -71,7 +72,7 @@ function declarationOf(slot: 'vault' | 'sandbox' | 'driver' | 'reviewer', compon
  * Every declaration in the graph, plus the line's own. Order: vault, sandbox,
  * driver, reviewer, line. A reviewer that is the driver itself is listed once.
  */
-export function unsafeComponents(graph: ComponentGraph): UnsafeDeclaration[] {
+export function unsafeComponents(graph: Pick<ComponentGraph, 'vault' | 'sandbox' | 'driver' | 'reviewer'>): UnsafeDeclaration[] {
   const declarations: UnsafeDeclaration[] = [];
   const slots = [['vault', graph.vault], ['sandbox', graph.sandbox], ['driver', graph.driver], ['reviewer', graph.reviewer]] as const;
   for (const [slot, component] of slots) {

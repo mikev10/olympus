@@ -24,7 +24,9 @@ export type RefusalLayer =
   /** The handle is not one this provider issued, or the command is empty. */
   | 'handle'
   /** A variable named in `ExecOptions.env` is not a usable name, or has no value to pass. */
-  | 'environment';
+  | 'environment'
+  /** The user is not a uid and gid, or cannot write the rw workspace on a host that enforces ownership. */
+  | 'user';
 
 export class SandboxRefusal extends Error {
   override readonly name = 'SandboxRefusal';

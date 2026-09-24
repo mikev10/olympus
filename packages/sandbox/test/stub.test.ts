@@ -15,6 +15,7 @@ function specFor(source: string): SandboxSpec {
     mounts: { workspace: { source, target: '/workspace', mode: 'rw' }, others: [] },
     egress: { mode: 'deny-all', allow: [] },
     limits: { cpus: 0, memoryMb: 0, pids: 0, wallClockMs: 0 },
+    user: { uid: 0, gid: 0 },
   };
 }
 

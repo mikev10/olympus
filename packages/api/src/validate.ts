@@ -33,6 +33,8 @@ export type RequestProblemCode =
   | 'escapes'
   /** `CheckSpec.required` must be a boolean. */
   | 'not-boolean'
+  /** `CheckSpec.command` must be an argument vector: an array of strings whose first names a program (A-P6-01). */
+  | 'not-argv'
   /** `CheckSpec.expectedSuiteCount` must be a non-negative integer when present. */
   | 'not-integer'
   /** No check is required, so no check could fail the gate. */
@@ -54,7 +56,9 @@ export type RequestProblemCode =
   /** The policy does not validate. */
   | 'invalid-policy'
   /** The run already has state: it was admitted once, and is resumed, not started again. */
-  | 'already-admitted';
+  | 'already-admitted'
+  /** The workspace store and the workspace lie one inside the other. */
+  | 'overlaps';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */
@@ -140,7 +144,33 @@ export function parseManifest(value: unknown): { ok: true; checks: CheckSpec[] }
   const checks = typeof value === 'object' && value !== null && 'checks' in value ? value.checks : undefined;
   checkProblems(checks, report);
   if (problems.length > 0) return { ok: false, problems };
-  return { ok: true, checks: (checks as CheckSpec[]).map((check) => ({ ...check })) };
+  return {
+    ok: true,
+    checks: (checks as CheckSpec[]).map((check) => {
+      const [program, ...args] = check.command;
+      return { ...check, command: [program, ...args] };
+    }),
+  };
+}
+
+/**
+ * I5: a command is run exactly as pinned or not at all. A string would need a
+ * grammar the runtime invents, and a vector with a non-string in it has no
+ * exact form to run, so both are refused rather than approximated (A-P6-01).
+ */
+function commandProblems(command: unknown, at: string, report: Report): void {
+  if (!Array.isArray(command)) {
+    report(at, 'not-argv', `${at} must be an argument vector, an array of strings; a string would need a grammar the runtime would have to invent`);
+    return;
+  }
+  const argv: readonly unknown[] = command;
+  if (argv.length === 0) {
+    report(at, 'empty', `${at} is an empty argument vector; there is no program to run`);
+    return;
+  }
+  const bad = argv.findIndex((arg) => typeof arg !== 'string');
+  if (bad !== -1) report(`${at}[${String(bad)}]`, 'not-argv', `${at}[${String(bad)}] is not a string; an argument vector has no other element`);
+  else if (!isNonEmptyString(argv[0])) report(`${at}[0]`, 'empty', `${at}[0] must name the program to run`);
 }
 
 /** The fields the verdict reads: id (unique), command, required (a boolean), expectedSuiteCount (an integer when present). */
@@ -163,13 +193,18 @@ function checkProblems(checks: unknown, report: Report): void {
     else if (seen.has(c.id)) {
       report(`${at}.id`, 'duplicate', `${at}.id '${c.id}' is listed twice; a duplicate id lets one result stand in for another`);
     } else seen.add(c.id);
-    if (!isNonEmptyString(c.command)) report(`${at}.command`, 'empty', `${at}.command must be a non-empty string`);
+    commandProblems(c.command, `${at}.command`, report);
     if (typeof c.required !== 'boolean') {
       report(`${at}.required`, 'not-boolean', `${at}.required must be a boolean, not ${typeof c.required}`);
     } else if (c.required) required += 1;
     const count = c.expectedSuiteCount;
     if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
+    }
+    // The timeout is the wall clock of the sandbox the check runs in, so it must be one (codex-7).
+    const timeout = c.timeoutMs;
+    if (!(typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0)) {
+      report(`${at}.timeoutMs`, 'not-integer', `${at}.timeoutMs must be a positive integer of milliseconds`);
     }
   });
   if (required === 0) {

@@ -27,7 +27,7 @@ import {
 import type { CheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
-import type { ComponentGraph, RunRequest } from '../src/index.js';
+import { localWorkspaceStore, type ComponentGraph, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { DelegatingDriver } from './wrappers.js';
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
@@ -37,8 +37,8 @@ export const REVIEWER = 'reviewer' as RoleId;
 
 export const HELLO_CHECK: CheckSpec = {
   id: 'hello-exit-zero',
-  kind: 'unit',
-  command: 'node -e process.exit(0)',
+  kind: 'compile',
+  command: ['node', '-e', 'process.exit(0)'],
   required: true,
   timeoutMs: 10_000,
 };
@@ -56,7 +56,18 @@ export async function makeWorkspace(prefix: string): Promise<string> {
   return workspace;
 }
 
+/**
+ * The store beside a test workspace, never inside it. On a host with uids it
+ * runs as the test's own; on one without, the stub sandbox ignores the user,
+ * so root is as good a name as any.
+ */
+export function storeFor(workspace: string): WorkspaceStore {
+  const user = process.getuid === undefined ? { uid: 0, gid: 0 } : undefined;
+  return localWorkspaceStore(user === undefined ? { root: `${workspace}.store` } : { root: `${workspace}.store`, user });
+}
+
 export async function removeWorkspace(workspace: string): Promise<void> {
+  await rm(`${workspace}.store`, { recursive: true, force: true });
   await rm(workspace, { recursive: true, force: true });
 }
 
@@ -155,7 +166,7 @@ export class ChosenDriver extends DelegatingDriver {
 
 export function stubComponents(workspace: string, overrides: Partial<ComponentGraph> = {}): ComponentGraph {
   const driver = new StubDriver();
-  return { vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, ...overrides };
+  return { vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces: storeFor(workspace), ...overrides };
 }
 
 export function runRequest(runId: RunId, workspace: string, components: ComponentGraph, overrides: Partial<RunRequest> = {}): RunRequest {

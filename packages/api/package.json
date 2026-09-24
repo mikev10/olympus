@@ -16,9 +16,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@olympus-ai/adapters": "workspace:*",
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
-    "@olympus-ai/vault": "workspace:*"
+    "@olympus-ai/vault": "workspace:*",
+    "picomatch": "4.0.7"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.3"
   }
 }

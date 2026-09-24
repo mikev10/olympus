@@ -14,5 +14,14 @@ export {
 export { JestAdapter, VitestAdapter } from './framework.js';
 export { ConfigManifestAdapter } from './manifest.js';
 export { changedLines } from './line-diff.js';
+export {
+  diffTrees,
+  hashRegularFile,
+  walkTree,
+  type ChangeKind,
+  type TreeChange,
+  type TreeEntry,
+  type WalkOptions,
+} from './files.js';
 export { AdapterRefusal, type AdapterRefusalReason } from './refusal.js';
 export { JEST, VITEST, majorOf, type JestMajor, type VitestMajor } from './versions.js';

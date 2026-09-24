@@ -196,7 +196,7 @@ describe('hello at L1', () => {
 
 describe('the verdict follows the checks and nothing else (I2)', () => {
   test('a failing check fails the gate whatever the driver claimed; the task is rebuilt, then parks after maxIterations', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, command: 'node -e process.exit(3)' }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
     const driver = new ChosenDriver({ narrative: 'all tests pass' });
     const outcome = await startRun(runRequest(runId, workspace, { ...components, driver, reviewer: driver }));
     expect(outcome).toMatchObject({
@@ -224,7 +224,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
   });
 
   test('a required check that cannot be started has no result and fails the gate', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: 'no-such-program-p4 --version' }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: ['no-such-program-p4', '--version'] }]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('parked');
     const [ref] = state.evidenceRefs;
@@ -233,9 +233,83 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
   });
 
   test('a failing check that is not required does not fail the gate', async () => {
-    await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: 'node -e process.exit(1)', required: false }]);
+    await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: ['node', '-e', 'process.exit(1)'], required: false }]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('passed');
+  });
+
+  // codex-4: a unit or acceptance check is a suite run by its kind, so a tree whose suites
+  // cannot be enumerated has not shown one ran, whether or not the manifest pinned a count.
+  test('a unit check over a tree whose suites cannot be enumerated fails the gate, with no count pinned (I5)', async () => {
+    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
+    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+    expect(state.tasks[hello]).toBe('parked');
+  });
+
+  test('a unit check over a tree whose suites are enumerated passes, and records the count', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'p6', devDependencies: { vitest: '4.1.11' } }));
+    await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
+    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
+    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+    expect(state.tasks[hello]).toBe('passed');
+    const [ref] = state.evidenceRefs;
+    if (ref === undefined) return;
+    expect((await read<EvidenceBundle>(components.vault, ref)).checks[0]?.suiteCount).toBe(1);
+  });
+});
+
+describe('each check runs alone (codex-2, codex-7)', () => {
+  test('every check gets its own fresh sandbox, bounded by its own timeout, and each is destroyed', async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'second', timeoutMs: 2_500 }]);
+    await startRun(runRequest(runId, workspace, { ...components, sandbox }));
+    // build, then one per check, then review.
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['rw', 'ro', 'ro', 'ro']);
+    expect(sandbox.specs.slice(1, 3).map((s) => s.limits.wallClockMs)).toEqual([10_000, 2_500]);
+    expect(new Set(sandbox.provisioned.slice(1, 3)).size).toBe(2);
+    expect(sandbox.destroyed).toEqual(sandbox.provisioned);
+  });
+});
+
+/** A builder that deletes one file from its workspace, through the sandbox it was given. */
+class DeletingDriver extends DelegatingDriver {
+  constructor(private readonly sandbox: StubSandboxProvider, private readonly path: string) {
+    super(new ChosenDriver());
+  }
+
+  override async runTask(req: TaskRequest): Promise<TaskResult> {
+    const removed = await this.sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').rmSync(${JSON.stringify(this.path)})`]);
+    if (removed.exitCode !== 0) throw new Error(`the delete failed: ${removed.stderr}`);
+    const result = await this.inner.runTask(req);
+    return { ...result, claim: { narrative: '', filesChanged: [this.path] } };
+  }
+}
+
+describe('the review seat is shown what changed', () => {
+  // codex-5: the seat's tree holds surviving files, so a deletion left no trace in it.
+  test("a deleted file is in the seat's diff listing, read from the runtime's diff", async () => {
+    await writeFile(join(workspace, 'notes.txt'), 'to be removed\n');
+    const sandbox = new StubSandboxProvider();
+    const reviewer = new ChosenDriver({ family: 'other' });
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, driver: new DeletingDriver(sandbox, 'notes.txt'), reviewer }));
+    const [req] = reviewer.requests;
+    if (req === undefined) throw new Error('the reviewer never ran');
+    expect(req.stablePrefix).toContain('[diff]');
+    expect(req.stablePrefix).toContain('{"path":"notes.txt","change":"removed"}');
+  });
+
+  // codex-6: the key check ran where build's result arrives and not where review's does.
+  test("a review seat's result carrying a key the contract does not name is refused and not recorded", async () => {
+    const reviewer = new (class extends ChosenDriver {
+      override async runTask(req: TaskRequest): Promise<TaskResult> {
+        const result = await super.runTask(req);
+        const widened: Record<string, unknown> = { ...result, status: 'passed' };
+        return widened as unknown as TaskResult;
+      }
+    })({ family: 'other' });
+    await expect(startRun(runRequest(runId, workspace, { ...components, reviewer }))).rejects.toThrow(/result\.status/);
+    const state = await components.vault.readRunState(runId);
+    expect(Object.hasOwn(state.results, helloReview)).toBe(false);
   });
 });
 
@@ -274,7 +348,7 @@ describe('locks are re-verified at every transition (I3)', () => {
   });
 
   test('a check that rewrites a locked artifact is refused after the checks, and no evidence is written', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'rewrite', command: "node -e require('node:fs').writeFileSync('spec.md','changed')" }]);
+    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'rewrite', command: ['node', '-e', "require('node:fs').writeFileSync('spec.md','changed')"] }]);
     const outcome = await startRun(runRequest(runId, workspace, components));
     expect(outcome).toMatchObject({ at: 'verify', transition: { reason: 'lock-tamper' } });
     const state = refusedState(outcome);

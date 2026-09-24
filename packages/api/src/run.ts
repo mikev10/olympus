@@ -42,12 +42,14 @@ import type {
   StationRefusal,
   TaskGraph,
 } from '@olympus-ai/core';
+import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/adapters';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, Vault } from '@olympus-ai/vault';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
+import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
   readonly vault: Vault;
@@ -60,6 +62,12 @@ export interface ComponentGraph {
    * and run state records the seat's independence as reduced.
    */
   readonly reviewer: Driver;
+  /**
+   * Where the run's trees live: its base, each task's copies, and the trees
+   * the checks run over. Runtime-owned and never mounted except as one task's
+   * workspace or one verification's read-only tree (D-P6-02).
+   */
+  readonly workspaces: WorkspaceStore;
 }
 
 /** Workspace-relative paths. Each is hashed at admission and locked by its station: `spec`, then `test-design` (tests and manifest), then `plan` (graph). */
@@ -115,6 +123,13 @@ export type RunOutcome =
       readonly unsafe: readonly UnsafeDeclaration[];
     }
   | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly RequestProblem[] }
+  | {
+      readonly ok: false;
+      readonly reason: 'controls-unavailable';
+      readonly requestedLevel: AutonomyLevel;
+      /** Every control the run's adapter set lacks, as the admission record holds them. */
+      readonly unavailable: readonly string[];
+    }
   | {
       readonly ok: false;
       readonly reason: 'policy-refused';
@@ -232,6 +247,42 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
   };
 }
 
+/**
+ * I5: an L3 run is refused while any control is unavailable, naming each one,
+ * and a run below L3 is not refused here. Read from the admission record, so
+ * a resume holds the run to what admission found rather than to what its
+ * caller says now (D-P8-03).
+ */
+export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, { reason: 'controls-unavailable' }> | undefined {
+  const level = record.run.requestedLevel;
+  if (level < 3 || record.unavailableControls.length === 0) return undefined;
+  return { ok: false, reason: 'controls-unavailable', requestedLevel: level, unavailable: [...record.unavailableControls] };
+}
+
+/**
+ * The controls the base's adapter set lacks: what the set reports, and what
+ * its empty slots show whether it reports them or not. The same union the
+ * adapters' own refusal takes, so what is recorded is what that refusal
+ * would name (D-P8-03).
+ */
+async function unavailableControls(base: string, level: AutonomyLevel): Promise<string[]> {
+  const set = await buildAdapterSet(base, { provider: null, coverage: null });
+  const unavailable = [...new Set([...set.unavailableControls(), ...missingControls(set)])].sort();
+  const refusal = adapterAdmission(set, level);
+  // The two derive from the same set; if they ever disagree the record would misstate the refusal.
+  if (!refusal.ok && refusal.unavailable.join('\0') !== unavailable.join('\0')) {
+    throw new Error('admission: the recorded controls and the adapters\' own refusal disagree');
+  }
+  return unavailable;
+}
+
+/** The workspace store's root may not overlap the workspace it snapshots: a task would then be handed a tree that holds its own history. */
+function storeProblems(req: RunRequest): RequestProblem[] {
+  const { root } = req.components.workspaces;
+  if (!within(root, req.workspace) && !within(req.workspace, root)) return [];
+  return [{ path: 'components.workspaces', code: 'overlaps', message: `the workspace store ${root} and the workspace ${req.workspace} overlap; each must lie outside the other` }];
+}
+
 /** The driver that runs a task at an agent station. */
 function driverAt(station: 'build' | 'review', components: ComponentGraph): Driver {
   return station === 'build' ? components.driver : components.reviewer;
@@ -286,7 +337,7 @@ async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
  */
 export async function startRun(req: RunRequest): Promise<RunOutcome> {
   requireContractTable();
-  const problems = requestProblems(req);
+  const problems = [...requestProblems(req), ...storeProblems(req)];
   if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
 
   const unsafe = unsafeComponents(req.components);
@@ -312,6 +363,12 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
     };
   }
 
+  // The base is what every workspace is built from, so it is taken before anything is recorded,
+  // and discarded if admission refuses after it: a refusal leaves nothing behind.
+  const { workspaces } = req.components;
+  const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
+  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel);
+
   const now = new Date().toISOString();
   const run: Run = {
     id: req.runId,
@@ -323,7 +380,18 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
     graph: null,
     createdAt: now,
   };
-  const record: AdmissionRecord = { run, policy: policy.policy, artifacts: admitted.admitted.artifacts };
+  const record: AdmissionRecord = {
+    run,
+    policy: policy.policy,
+    artifacts: admitted.admitted.artifacts,
+    baseTreeSha256,
+    unavailableControls: controls,
+  };
+  const refusedControls = admissionRefusal(record);
+  if (refusedControls !== undefined) {
+    await discardRun(workspaces, req.runId);
+    return refusedControls;
+  }
   const admission = await vault.recordAdmission(record);
   const state = await vault.commitRunState(
     {
@@ -349,6 +417,7 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
     graph: admitted.admitted.graph,
     checks: admitted.admitted.checks,
     components: req.components,
+    baseTreeSha256,
     state,
   });
 }
@@ -366,7 +435,9 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
     typeof run === 'object' && run.id === state.runId && typeof run.repo === 'string' && typeof run.baseCommit === 'string' &&
     typeof run.requestedLevel === 'number' && typeof artifacts === 'object' &&
     Array.isArray(artifacts.spec) && Array.isArray(artifacts.acceptanceTests) &&
-    typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object';
+    typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object' &&
+    typeof r.baseTreeSha256 === 'string' && Array.isArray(r.unavailableControls) &&
+    r.unavailableControls.every((control) => typeof control === 'string');
   if (!shaped) throw new Error(`run ${state.runId}: the admission record does not hold a run and its artifacts; refusing to resume from it`);
   const policy = checkedPolicy(r.policy);
   if (!policy.ok) throw new Error(`run ${state.runId}: the admitted policy no longer validates; refusing to resume under it:\n${policy.message}`);
@@ -415,8 +486,16 @@ export async function resumeRun(req: ResumeRequest): Promise<RunOutcome> {
 
   const unsafe = unsafeComponents(req.components);
   if (unsafe.length > 0 && level > 1) return { ok: false, reason: 'unsafe-above-l1', requestedLevel: level, unsafe };
+  const controls = admissionRefusal(record);
+  if (controls !== undefined) return controls;
   const capability = capabilityRefusalFor(req.components);
   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state };
+  // The base every workspace is built from must be the one admission recorded. A store that lost
+  // it, or holds another run's, is refused rather than built on.
+  const base = await treeDigest(basePath(req.components.workspaces, req.runId)).catch(() => 'missing');
+  if (base !== record.baseTreeSha256) {
+    throw new Error(`run ${req.runId}: the workspace store's base is ${base}, not the ${record.baseTreeSha256} admission recorded; refusing to resume on it`);
+  }
 
   const reloaded = await reloadExecuted(record);
   const ctx: LineContext = {
@@ -426,6 +505,7 @@ export async function resumeRun(req: ResumeRequest): Promise<RunOutcome> {
     graph: reloaded.graph,
     checks: reloaded.checks,
     components: req.components,
+    baseTreeSha256: record.baseTreeSha256,
     state,
   };
   if (reloaded.changed.length > 0) return runLine(ctx, reloaded.changed);

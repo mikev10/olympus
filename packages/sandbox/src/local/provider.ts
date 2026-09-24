@@ -11,11 +11,13 @@
  * per command afterwards.
  */
 import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
+import { canCreateIn } from './ownership.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { refuse } from './refusal.js';
 
@@ -143,6 +145,41 @@ function checkLimits(limits: SandboxSpec['limits']): void {
   }
 }
 
+function checkUser(user: SandboxSpec['user']): void {
+  const ids: Array<[string, unknown]> = [['uid', user.uid], ['gid', user.gid]];
+  for (const [name, value] of ids) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      refuse('user', `user.${name} must be a whole number of zero or more, not ${String(value)}; a container needs a user it can be matched to its workspace by`);
+    }
+  }
+}
+
+/**
+ * Whether the host carries a bind mount's ownership into the container
+ * unchanged. A Linux host does, so a container user that is neither the
+ * owner nor in the group of a directory without a world-write bit cannot
+ * write it. Docker Desktop's file sharing on macOS and Windows maps every
+ * container user onto the host user, so there is no ownership to mismatch.
+ */
+const HOST_ENFORCES_OWNERSHIP = process.platform === 'linux';
+
+/**
+ * I5: a rw workspace the container's user cannot write is refused here. Mounted
+ * as it is, every write the task attempts fails, and the run reads as a model
+ * that chose not to act rather than a mount the runtime got wrong (A-P6-04).
+ */
+async function checkWorkspaceWritable(workspace: ResolvedMount, user: SandboxSpec['user']): Promise<void> {
+  if (workspace.mode !== 'rw' || !HOST_ENFORCES_OWNERSHIP || user.uid === 0) return;
+  const facts = await stat(workspace.source);
+  if (!canCreateIn(facts, user)) {
+    refuse(
+      'user',
+      `the workspace ${workspace.declared} is owned by ${String(facts.uid)}:${String(facts.gid)} with mode ${(facts.mode & 0o777).toString(8)}, ` +
+        `which uid ${String(user.uid)} gid ${String(user.gid)} cannot create entries in (that takes write and search); a task handed it could not change anything, so it is refused rather than mounted`,
+    );
+  }
+}
+
 /**
  * The proxy environment variables the sandbox is given under an allowlist.
  *
@@ -217,7 +254,7 @@ function environmentPassthrough(env: Readonly<Record<string, string>> | undefine
 }
 
 function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
-  const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network];
+  const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
   if (egress.mode === 'allowlist') args.push(...proxyEnvironment());
   for (const mount of mounts) args.push('--mount', mountArgument(mount));
   args.push(
@@ -280,11 +317,16 @@ export class LocalDockerProvider implements SandboxProvider {
     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
     const plan = checkEgress(spec.egress);
     checkLimits(spec.limits);
+    checkUser(spec.user);
 
     // Re-validated rather than trusted: the table may have been built by a cast, parsed from a
     // document, or handed over by JavaScript, in which case the type-level guarantee never ran.
     const table = mountTable({ workspace: spec.mounts.workspace, others: spec.mounts.others });
     const mounts = await resolveMounts(table, this.#vaultPaths);
+    const workspace = mounts.find((mount) => mount.target === table.workspace.target);
+    // resolveMounts returns one entry per table entry, the workspace among them.
+    if (workspace === undefined) refuse('mount', 'the resolved mount table has no workspace');
+    await checkWorkspaceWritable(workspace, spec.user);
 
     // I10: no Greek name in code, container names included. This one reaches `docker ps`.
     const id = randomUUID();

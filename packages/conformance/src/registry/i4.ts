@@ -5,6 +5,7 @@ import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
 } from './policy.js';
+import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF } from './verification.js';
 
 /** I4: Default deny. */
 export const I4: InvariantEntry = {
@@ -272,21 +273,10 @@ export const I4: InvariantEntry = {
       package: '@olympus-ai/driver-claude-code',
       file: 'test/invariants.test.ts',
     }),
+    TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK,
+    WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF,
   ],
   pending: [
-    pending({
-      id: 'I4.task-capabilities-do-not-outlive-the-task',
-      owner: 'P6',
-      reason:
-        'A sandbox is persistent by declaration (P2), and the driver serialises the foreground exec but not what a '
-        + 'task leaves behind. Demonstrated during P5\'s external review: a process detached by one exec was still '
-        + 'running when a later exec looked for it. A task granted Bash can therefore leave a process that keeps '
-        + 'reading and writing the workspace, and reaching whatever the sandbox permits, while a later task holding a '
-        + 'narrower grant runs beside it -- so the earlier task\'s capabilities are available during the later one, '
-        + 'which is what default deny forbids. Bounding it means a process boundary the sandbox enforces or a '
-        + 'container per task; a driver-side sweep would be a partial control that reads like a complete one. P6 '
-        + 'collects a diff in a fresh sandbox and is where per-task isolation has to become real. Surfaced by P5.',
-    }),
     pending({
       id: 'I4.model-credential-not-readable-by-the-task',
       owner: 'P12',
@@ -299,18 +289,6 @@ export const I4: InvariantEntry = {
         + 'allowlist proxy already interposes (P10), with the sandbox holding a short-lived token or nothing at all. '
         + 'That spans the sandbox, the proxy and the driver, so it is neither a driver change nor a verification one: '
         + 'owned by P12, split out for it (D-P6-04). Surfaced by P5.',
-    }),
-    pending({
-      id: 'I4.writable-globs-enforced-on-the-diff',
-      owner: 'P6',
-      reason:
-        'A role\'s CapabilityScope.writableGlobs and the station\'s WriteBoundary.workspaceGlobs are carried into '
-        + 'the run and enforced nowhere inside the workspace: the mount layer keeps an agent out of the Vault (I1) and '
-        + 'the lock re-verification catches a write to a locked artifact (I3), but a build task that writes outside '
-        + 'its globs, to a file nothing locked, is not refused. The only honest input is the diff the runtime '
-        + 'collects itself; a driver\'s file-write events miss any write the driver does not observe, so checking '
-        + 'them would read stronger than it is (D-P4-01). P6 collects base+diff in a fresh sandbox and must refuse a '
-        + 'change outside the granted globs, and assert the refusal. Surfaced by P4.',
     }),
   ],
 };

@@ -22,6 +22,7 @@ import {
 } from './local-sandbox.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
+import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 
 /** The declaration order the entry point promises: vault, sandbox, driver, then the line itself. */
 const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine'];
@@ -83,6 +84,7 @@ export const I5: InvariantEntry = {
             sandbox: new sandbox.StubSandboxProvider(),
             driver,
             reviewer: driver,
+            workspaces: rig.workspaces,
           };
 
           for (const level of [2, 3] as const) {
@@ -421,26 +423,12 @@ export const I5: InvariantEntry = {
     TASK_ATTEMPTS_ARE_BOUNDED,
     OVER_REQUEST_REFUSED_AT_ADMISSION,
     UNSUPPORTED_STACK_IS_LOUD,
+    ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+    CHECK_COMMAND_HAS_A_GRAMMAR,
+    MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+    WORKSPACE_IS_WRITABLE_BY_THE_TASK,
   ],
   pending: [
-    pending({
-      id: 'I5.workspace-is-writable-by-the-task',
-      owner: 'P6',
-      reason:
-        'A container runs as a fixed user and a bind mount carries the host\'s ownership through unchanged, so a '
-        + 'workspace created by any other uid is read-only to the task that was handed it. Nothing refuses: the agent '
-        + 'simply cannot write, its tool calls fail, and the run reads as a model that chose not to act rather than a '
-        + 'mount the runtime got wrong. That is the silent degrade this invariant exists to prevent, and it is worse '
-        + 'than an outright failure because the evidence looks like a model decision. Found on a GitHub runner during '
-        + 'P5, where the runner is uid 1001 and the driver image runs as 1000; it passed on a developer machine whose '
-        + 'daemon does not enforce host ownership the same way, so it is a defect that only appears on the hosts that '
-        + 'matter most. P5\'s harness widened its own temporary directory to keep its assertion honest, which fixes a '
-        + 'fixture and not the constraint. Closing it means SandboxSpec carrying the user a container runs as, so the '
-        + 'provider can match the container to the workspace it was given, and an assertion that provisions a '
-        + 'workspace owned by another uid and requires a refusal rather than an unwritable mount. P6 owns it because '
-        + 'it is the first unit to collect a diff in a sandbox it provisions, so it is the first whose correctness '
-        + 'depends on the workspace being writable by the task. Recorded by P5 as D-A-CI-03.',
-    }),
     pending({
       id: 'I5.unsafe-declaration-survives-composition',
       owner: 'I1',
@@ -469,25 +457,6 @@ export const I5: InvariantEntry = {
         'editing the owner.',
     }),
     pending({
-      id: 'I5.missing-check-or-shrunken-suite-refuses',
-      owner: 'P6',
-      reason:
-        'A required CheckSpec with no CheckResult, a driver lacking a required capability, or a suiteCount ' +
-        'below expectedSuiteCount must fail the gate. Needs the verification runtime P6 delivers.',
-    }),
-    pending({
-      id: 'I5.adapter-refusal-enforced-at-admission',
-      owner: 'P6',
-      reason:
-        'P8 ships the L3 refusal as a pure function over an AdapterSet (adapterAdmission), asserted by ' +
-        'I5.unsupported-stack-is-loud, and nothing calls it when a run is admitted. Wiring it there needs the ' +
-        "admission record to carry the set's unavailable controls, so a resume cannot restate them, and an assertion " +
-        'against the admission function that refuses L3 naming each missing control. The end-to-end half, an L3 run ' +
-        'refused through startRun, cannot fail for the right reason while SKELETON_LINE refuses every run above L1, ' +
-        'and is I5.adapter-refusal-refuses-l3-end-to-end, owned by I1 (D-P6-01). Surfaced by P8 (docs/decisions.md, ' +
-        'D-P8-03).',
-    }),
-    pending({
       id: 'I5.adapter-refusal-refuses-l3-end-to-end',
       owner: 'I1',
       reason:
@@ -495,16 +464,6 @@ export const I5: InvariantEntry = {
         'refused at admission naming each control its adapter set lacks. While SKELETON_LINE declares the line unsafe, ' +
         'every run above L1 is refused for that reason first, so this assertion would pass whether or not the adapter ' +
         'refusal is wired. I1 deletes SKELETON_LINE, so the assertion lands with it.',
-    }),
-    pending({
-      id: 'I5.check-command-has-a-grammar',
-      owner: 'P6',
-      reason:
-        'CheckSpec.command is one string with no declared grammar, so the skeleton invented one: split on whitespace, ' +
-        'no shell, which mangles any quoted argument. A pinned check the runtime cannot execute exactly as pinned must ' +
-        'be refused, never approximated. P6 owns the verification manifest and must declare the grammar (an argv array, ' +
-        'or a shell string with the shell declared) and assert that an unrepresentable command is refused. Surfaced by ' +
-        'S1 (docs/decisions.md, owed contract gaps).',
     }),
   ],
 };

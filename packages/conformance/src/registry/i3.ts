@@ -6,6 +6,7 @@ import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { STATION_LOCKS_THE_ADMITTED_ARTIFACT, TRANSITION_REVERIFIES_LOCKS } from './line-assertions.js';
 import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
+import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -197,6 +198,7 @@ export const I3: InvariantEntry = {
     }),
     TRANSITION_REVERIFIES_LOCKS,
     STATION_LOCKS_THE_ADMITTED_ARTIFACT,
+    LOCKED_PATH_IN_DIFF_IS_TAMPER,
   ],
   pending: [
     pending({
@@ -216,6 +218,18 @@ export const I3: InvariantEntry = {
         + 'figure is evidence about a suite that cooperated, not proof against one that did not. Recorded by P8 as '
         + 'D-P8-14. Owned by M3, beside mutation testing: the suite and the coverage writer share a process, so no '
         + 'location for the report decides whether its hit counts are true (D-P6-05).',
+    }),
+    pending({
+      id: 'I3.check-dispatch-not-writable-by-the-task',
+      owner: 'P7',
+      reason:
+        'A pinned check runs its argument vector exactly, but what `["npm", "test"]` runs is named in package.json, '
+        + 'which is not an admitted artifact and which a task may be granted. A diff that rewrites the test script, or '
+        + 'a runner config the command reads, changes the checker, and the pinned argv, the host suite count, and the '
+        + 'locked tests all still hold (external review of P6, codex-2). Recognising a diff that changes what a pinned '
+        + 'command dispatches to is a reading of the diff, which is P7\'s. The assertion owed: a task whose diff changes '
+        + 'the script a pinned command resolves through is refused or flagged naming the path, and the same task '
+        + 'without that change is not (D-P6-16).',
     }),
   ],
 };

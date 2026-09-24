@@ -6,7 +6,7 @@ import { StubDriver } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { describe, expect, test } from 'vitest';
-import { SKELETON_LINE, unsafeComponents, type ComponentGraph } from '../src/index.js';
+import { SKELETON_LINE, unsafeComponents } from '../src/index.js';
 import { DelegatingDriver, DelegatingSandbox, DelegatingVault } from './wrappers.js';
 
 function stubs() {
@@ -31,7 +31,7 @@ describe('unsafeComponents', () => {
   test('reads the declaration structurally: a component without one is not listed, and the line always is', () => {
     const graph = stubs();
     const driver = new DelegatingDriver(graph.driver);
-    const undeclared: ComponentGraph = {
+    const undeclared: Parameters<typeof unsafeComponents>[0] = {
       vault: new DelegatingVault(graph.vault),
       sandbox: new DelegatingSandbox(graph.sandbox),
       driver,
@@ -54,11 +54,11 @@ describe('unsafeComponents', () => {
 });
 
 describe('SKELETON_LINE', () => {
-  test('declares what the line still cannot enforce: tamper analysis and the claim/evidence diff, and no longer the policy or the stations P4 paid', () => {
+  test('declares what the line still cannot enforce: tamper analysis, and no longer the policy, the stations P4 paid, or the claim/evidence diff P6 paid', () => {
     expect(SKELETON_LINE.unsafe.component).toBe('SkeletonLine');
     const text = SKELETON_LINE.unsafe.cannotEnforce.join('\n');
     expect(text).toMatch(/tamper/i);
-    expect(text).toMatch(/claim/i);
+    expect(text).not.toMatch(/claim/i);
     expect(text).not.toMatch(/policy engine/i);
     expect(text).not.toMatch(/no station beyond/i);
   });

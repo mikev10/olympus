@@ -2207,6 +2207,7 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Ambiguous:** the conformance line says a mismatch "is recorded as a violation", and every entry of `RunState.violations` halts the run (`packages/core/src/station/machine.ts`, the violation refusal).
 - **Chosen:** the violation is written to the Vault with `recordViolation` and not entered in `RunState.violations`. Status is unchanged by it, and review sees it beside the evidence.
 - **Why:** the claim is the model's text. A halt the claim can trigger lets the model's story decide the outcome, the inverse of I2. Only the file list is compared; the narrative is never parsed.
+- **What review sees:** the number of differences, beside each check's result, and not the differences themselves. A claimed path is a string the author wrote, and the review seat is given no author material (I6), so the count is the runtime's fact and the paths stay in the bundle.
 - **Reverse:** commit the ref to `RunState.violations`.
 
 ### D-P6-04: The model credential moves to a new unit, P12
@@ -2220,3 +2221,102 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Ambiguous:** `I3.coverage-report-is-not-writable-by-the-suite` asks P6 for coverage the suite cannot forge.
 - **Chosen:** re-owned to M3, beside mutation testing. The suite and the coverage writer share a process, so no location for the report decides whether its hit counts are true; mutation testing is the control that does not trust a hit count. P6 claims nothing about coverage beyond what P8 recorded.
 - **Reverse:** re-own to P6 with a named mechanism that survives in-process forgery.
+
+### D-P6-06: With the task off `run.repo`, the locks are held to the task's diff and to the verified tree
+
+- **Surfaced by D-P6-02:** the Vault verifies locks against its artifact root, which is `run.repo`. Once a task writes a runtime-owned copy, an agent that rewrites a locked test changes its copy and never `run.repo`, so `verifyLocks` passes and I3 would have regressed with every existing assertion still green — they model the tamper by writing `run.repo` directly.
+- **Chosen:** a locked path in the task's own diff is a `lock-tamper` violation with `phase: 'diff'`, found before any check runs; and every admitted artifact is hashed in the verified tree before the checks and after them (`phase: 'tree'`, `'after-checks'`). The Vault's own check still runs at every point it ran before. Asserted by `I3.locked-path-in-diff-is-tamper`, whose rewrite lands in the copy and not in `run.repo`, and which says so.
+- **Reverse:** drop the two checks; `I3.locked-path-in-diff-is-tamper` then fails.
+
+### D-P6-07: A driver result outside the contract stops the run rather than spending a retry
+
+- **Ambiguous:** the spec says a result carrying another key is "refused before it is recorded" without saying what the refusal is. `StationRefusal` has no arm for it, and adding one is a contract change to a protected file for a case one call site produces.
+- **Chosen:** `taskResultProblems` checks the exact key set of the result, its claim, its model, and its usage, and the line throws naming every problem, before `recordTaskResult`. The run stops loudly, which is how `readResult` already treats a recorded result that does not hold what the line reads.
+- **Why not a retry:** `spendRetry` records no reason, so a driver that always adds `status` would park the task with the cause lost, which reads as flakiness rather than a contract breach.
+- **Reverse:** add a `StationRefusal` arm and return it here.
+- **At review too:** the check first ran only where build's result arrives. The line receives a result at review as well, and it now applies the same check there, before `recordTaskResult`, and stops the same way (external review, codex-6). `I2.task-result-key-set-enforced` runs both seats. The other half of codex-6, that an author's model family is the one its result reports, is the limit already recorded under P4: whether a driver's identity is true is P5's to prove, and I1 replaces the stub driver the line still runs.
+
+### D-P6-08: The review seat's view is its grants, which is narrower than the spec line said
+
+- **Ambiguous:** the P6 entry said the seat is provisioned over "base plus the diff under review, minus every admitted artifact its contract does not grant". The review contract (`packages/core/src/station/contracts.ts`) grants `locked-spec`, `acceptance-tests`, `diff`, and `evidence-bundle`, and not `base-repo-readonly`, so base files the diff did not touch are not a grant.
+- **Chosen:** the view holds the locked spec, the acceptance tests, and every path the accepted cumulative diff carries, copied from the verified tree, and nothing else. The task graph, the manifest, `.git`, and every unchanged base file are absent. The spec line is corrected to match in this pull request.
+- **Reverse:** grant `base-repo-readonly` to the review contract, and build the view from base as well.
+
+### D-P6-09: A tree is built beside its path and moved into place
+
+- **Found by `I4.task-capabilities-do-not-outlive-the-task`:** a task that changed nothing has the cumulative diff of the task before it, and so the same content-addressed tree, which is also where its bytes are read from. Building in place deleted the source first.
+- **Chosen:** `materialize` builds into `<tree>.building` and renames it over the target only when it is whole. A unit test rebuilds a tree from itself.
+- **Reverse:** none wanted; the in-place build is wrong whenever source and target coincide.
+
+### D-P6-10: The workspace store runs containers as the runtime's own user
+
+- **Ambiguous:** `SandboxSpec.user` needs a value from the line, and the line does not choose an image before I1.
+- **Chosen:** the `WorkspaceStore` names the user, because it makes the copies and knows who can write them. On a host with uids it is the runtime's own, and naming another is refused: making a tree writable by a different uid takes root or a world-write bit. On a host without uids it must be given.
+- **Consequence for I1:** the Claude Code image runs its CLI as `node` (1000) with its home owned by that user. A line on a host whose runtime is another uid provisions that image as the runtime's uid, and the CLI's home is then not its own. Wiring the real driver into the line is I1's, and this is the first thing it meets there.
+- **Reverse:** carry the user on the driver's capabilities, and have the store make its copies writable by it.
+
+### D-P6-11: Known limits, stated
+
+- **Independent tasks are not merged.** Diffs are cumulative and tasks run one at a time, so a task started before another passed does not see that task's change, and its own change is laid over it when it passes. Two tasks editing one file keep the later. A merge is `integrate`'s, which is I1's.
+- **Every task and every verification copies the whole tree**, dependencies included, as the entry's own known limit says. A tree digest at admission and on resume hashes it all.
+- **The stub sandbox enforces none of this.** It runs on the host in the copy's directory, mounts nothing, and so cannot keep a check from writing its read-only tree or a task from reaching the store; it says so in its declaration. The per-task process boundary is asserted on real containers only.
+- **The resume check compares the base's digest with the admission record**, which catches a store that lost or swapped the base. It does not protect a base the runtime's own user rewrites between runs; nothing mounts the base, so nothing a task runs can.
+
+The entries below come from the external review, triaged in `docs/reviews/2026-09-22-P6-verification-evidence-triage.md`. Codex raised eight findings, and all of them held. Gemini raised none.
+
+### D-P6-12: A path beneath a link is not in the tree
+
+- **Found:** `composeDiff` looked a diff path up in base by joining it to base's root, and `lstat` resolves every component of a path except its last. A repository link `p` pointing outside the repository made `p/x` read as a base entry. In two tasks, one replacing the link with a directory and one restoring it, the runtime's host process deleted the outside file while materializing the second task's tree, before any check ran (external review, codex-1; reproduced in a Linux container).
+- **Chosen:** every tree operation in `workspace.ts` treats a path with a linked parent as absent when it looks the path up, and refuses it when it acts on the path. That covers the base lookup `composeDiff` and `hashAt` share, each removal, write, and source read in `apply`, and both sides of `copyOnly`. Each check is made at the moment its operation runs, because an earlier entry in the same diff can put a link where a later entry's parent is. `walkTree` never follows a link, so no diff the runtime collects has an entry beneath one. The refusal is the backstop, not a path an honest diff takes.
+- **Asserted by:** `packages/api/test/verification.test.ts`. The composition and the view run on every host, using a junction on Windows. The materialization refusal runs where links can be created, which is Linux CI.
+
+### D-P6-13: Each check runs in a sandbox of its own, bounded by its own timeout
+
+- **Found:** every check ran in the one sandbox `verify` provisioned. The workspace mount was read-only, but the rest of the container was not, so an earlier check could change the container a later check ran in (codex-2). And `CheckSpec.timeoutMs` was never read: a check was bounded only by what was left of the sandbox's wall clock (codex-7). S1 recorded the second gap and left it to P6 and P2 (D-S1-11), and P6 had not closed it.
+- **Chosen:** one fresh sandbox per check, over the same read-only tree with `deny-all` egress, whose `wallClockMs` is the check's `timeoutMs`. Admission now refuses a `timeoutMs` that is not a positive integer. A check that outruns its timeout is ended by the provider and produces no result, so it is recorded in `unstarted` with the provider's reason, which is what A-P6-02 defines that field for. No contract changes.
+- **The cost:** a container start per check rather than per verification.
+- **Closes:** D-S1-11's open question.
+
+### D-P6-14: A suite check that cannot be counted fails, whether or not a count is pinned
+
+- **Found:** the gate failed a null `suiteCount` only when `expectedSuiteCount` was pinned, so a `unit` or `acceptance` check over a tree with no test adapter, or one whose enumeration threw, passed on its exit code alone (codex-4). The unit spec's accept list says: "A tree whose suites cannot be enumerated fails the check rather than reporting `null` as a pass."
+- **Chosen:** `requiredShortfall` fails a suite-kind check whose count is null, with cause `suite-count`. A check of any other kind records null by kind and is unaffected.
+- **Fixtures:** the hello fixture's `node -e process.exit(0)` check, and the registry's `PASSING` and `FAILING`, were declared `unit` while running no suite. They are now `compile`, which is what they are, and `line.test.ts` asserts both sides for a `unit` check: parked over a tree with no suites, passed with a count of one over a tree with one.
+
+### D-P6-15: The review seat is given the runtime's diff listing
+
+- **Found:** the seat's tree holds the files the diff left, and a removal leaves none. A run that deleted an unlocked file and a run that changed nothing gave the reviewer the same tree and the same facts (codex-5).
+- **Chosen:** under its `diff` grant, the seat is offered the cumulative diff as `{ path, change }` pairs read from the runtime's diff, never from the claim. The listing carries no author material.
+- **Known limit:** the seat still sees a modified file only as it now is, with no patch or before-state. D-P6-08 settled that the review contract grants no base tree, and showing base contents for changed paths is a question about that contract. It belongs to the review panel (M3).
+
+### D-P6-16: What a pinned command dispatches to is a file the task may be granted, and that is P7's to close
+
+- **Found:** `["npm", "test"]` runs exactly as pinned, but what it runs is named in `package.json`, which is not an admitted artifact and which a task may be granted. A diff that changes the test script changes the checker, and every check still reports that it held (codex-2).
+- **Why not here:** recognising a diff that changes test configuration or runner scripts is a reading of the diff, which P6's out-of-scope list gives to P7 ("tamper-style reading of the diff").
+- **Registered:** `I3.check-dispatch-not-writable-by-the-task`, pending, owned by P7. The I3 baseline rises from 1 to 2. A repository that held a substituted runner at admission is the admitting human's repository, and it is outside what verification judges.
+
+### D-P6-17: Writable globs bound what propagates, not what is written
+
+- **Found:** a build workspace is mounted read-write whole, and the globs are enforced on the task's own diff. A task can write an ungranted path, use it, and restore it before it ends. A write under `.git` is excluded from every diff (codex-3).
+- **Held:** neither kind of write propagates. None reaches verification, a later task, or the review seat, which is the property D-P6-02 and the accept list specify. What does not hold is the stronger reading, that an ungranted write is *unavailable* during the task. The I4 claim for workspace writes is therefore stated as: **an ungranted write never propagates beyond the task.**
+- **Known limit, unowned:** enforcing write authority during execution takes per-path mounts, which is sandbox work that no M1 unit owns. It is recorded here rather than assigned to a unit that has not taken it on.
+
+## P6 amendments to the contracts
+
+### A-P6-01: `CheckSpec.command` is an argument vector
+
+`command: readonly [string, ...string[]]`, run exactly as pinned with no shell; a check that needs one names it. A manifest whose command is a string, an empty vector, a blank program, or holds a non-string is refused at admission, naming the field, with `not-argv` or `empty`. The skeleton's whitespace split is gone. Asserted by `I5.check-command-has-a-grammar`, which also runs an argument containing a space and requires it to arrive whole, with the split form as its control.
+
+### A-P6-02: `EvidenceBundle.unstarted`
+
+`unstarted: readonly UnstartedCheck[]`, one `{ checkId, reason }` per check that produced no result. `CheckResult.exitCode` stays a real process's exit code. A required check here has failed the gate by `FailedCheck.cause: 'no-result'`, as before. Asserted by `I2.unstarted-check-is-in-the-evidence`.
+
+### A-P6-03: Evidence names the trees it is about
+
+`EvidenceBundle` gains `baseTreeSha256`, `diff: readonly DiffEntry[]` (the cumulative diff against base, each entry `{ path, change, sha256 }` with a null hash for a removal), and `diffSha256`. `AdmissionRecord` gains `baseTreeSha256` and `unavailableControls`. `baseCommit` alone did not say which tree the checks ran over, and a resume had no record of what admission found the adapter set lacked. The diff's entries are stored in the bundle; the bytes live in the runtime-owned tree the digest names.
+
+### A-P6-04: `SandboxSpec.user`
+
+A required `user: { uid, gid }`. `LocalDockerProvider` passes `--user uid:gid`; on a Linux host it refuses a rw workspace that user cannot write, with the new refusal layer `user`, and refuses a uid or gid that is not a whole number of zero or more. Docker Desktop maps every container user onto the host user, so there is nothing to refuse there, and the write lands. `StubSandboxProvider` ignores the user and declares it. Asserted by `I5.workspace-is-writable-by-the-task` and in `packages/sandbox`'s own suite, which require a refusal on Linux and a landed write elsewhere, and never a sandbox whose task cannot write.
+
+Creating an entry in a directory takes both write and search permission, and the check first tested write alone, so a workspace at mode `0600` passed for its own owner, who could then create nothing in it (external review, codex-8). The rule is now `canCreateIn` in `packages/sandbox/src/local/ownership.ts`, which requires both bits from the one class the user falls in. It is unit-tested on every host, and the I5 assertion adds the `0600` case on Linux.

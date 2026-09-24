@@ -81,6 +81,7 @@ describe('CliBehavioralAdapter against a container', () => {
       mounts: { workspace: { source: workspace, target: '/workspace', mode: 'ro' }, others: [] },
       egress: { mode: 'deny-all', allow: [] },
       limits: { cpus: 0.5, memoryMb: 128, pids: 32, wallClockMs: 60_000 },
+      user: { uid: 0, gid: 0 },
     });
   });
 

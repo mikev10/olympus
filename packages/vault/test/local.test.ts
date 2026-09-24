@@ -48,7 +48,11 @@ function bundle(): EvidenceBundle {
     runId,
     taskId,
     baseCommit: 'a'.repeat(40),
+    baseTreeSha256: 'b'.repeat(64),
+    diff: [],
+    diffSha256: 'c'.repeat(64),
     checks: [],
+    unstarted: [],
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
     collectedBy: 'runtime',
@@ -108,6 +112,8 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
       verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
       taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
     },
+    baseTreeSha256: '1'.repeat(64),
+    unavailableControls: ['mutation'],
   };
 }
 

@@ -74,6 +74,8 @@ function spec(image: string, workspaceDir: string): SandboxSpec {
     // all, which is why P5 waited for it.
     egress: { mode: 'allowlist', allow: [API_HOST] },
     limits: { cpus: 2, memoryMb: 2048, pids: 512, wallClockMs: 600_000 },
+    // The image's own `node` user (image/Dockerfile), which the CLI's home belongs to.
+    user: { uid: 1000, gid: 1000 },
   };
 }
 

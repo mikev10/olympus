@@ -272,7 +272,7 @@ export const TASK_ATTEMPTS_ARE_BOUNDED: LocalAssertion = runtime({
     const { maxIterations, retry } = STATION_CONTRACTS.build;
     await withLine('p4-i5-iter-', async (rig) => {
       const { startRun } = await api();
-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: 'node -e process.exit(1)', required: true, timeoutMs: 10_000 }]);
+      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
       const driver = await stubDriver({ narrative: 'all tests pass' });
       const refusal = refusalOf(await startRun(await rig.request(await rig.components({ driver, reviewer: driver }))), 'I5 iterations');
       const t = refusal.transition;
