@@ -41,7 +41,7 @@ number.
   triage departs from a subagent's: see codex-4.
 
 **Applied.** The maintainer confirmed the eight outcomes below as recommended,
-and the fixes landed on `unit/p6` in the commit that follows this triage. Every
+and the fixes landed on `unit/p6` in the same commit as this update. Every
 new or changed test was shown failing against the code before its fix and
 passing after. The three codex-1 tests were also run on Linux, as a non-root
 user in a `node:22-bookworm-slim` container: all three failed against the
@@ -100,8 +100,8 @@ and source read in `apply` and `copyOnly` refuses it, checked at the moment
 the operation runs. With the rule, A's entry is `p/x added`, B's removal cancels
 it, and nothing outside the tree is read or touched. Three tests in
 `verification.test.ts` cover it: the two-task composition, a view through a
-link, and a materialized removal under a link. Each failed before the fix, and
-on Linux as well as here (D-P6-12).
+link, and a materialized removal under a link. Each failed before the fix: the
+first two here and on Linux, the third on Linux, where it runs (D-P6-12).
 
 ## codex-2: the checker, and the container the checks share
 
