@@ -287,3 +287,7 @@ exercises was (A-P6-04).
 - **Owed before merge:** the driver run, then `pnpm conformance`, once the API
   account has credit. The `0600` case in `I5.workspace-is-writable-by-the-task`
   first runs on Linux CI.
+
+**Completed after the account was funded:** the driver run passed 56 of 56.
+`pnpm conformance` then passed 100 of 100, with 97 assertions, all 9 external
+ones reconciled, none missing, and 11 pending entries against a baseline of 11.
