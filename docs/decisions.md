@@ -2359,3 +2359,34 @@ Proposed with the unit spec and approved by the maintainer before any code, each
 - **Options:** (A) `packages/drivers/claude-code` exports the relay request as a constant, and a contract method waits for a consumer that holds a driver by its contract; (B) `Driver` gains a method returning it now.
 - **Chosen: A**, with the maintainer. No code in this unit would call B through the contract, so it would be an amendment with no first use — the thing WORKFLOW.md says amendments come from. It also puts a sandbox type into `core`'s driver contract, a dependency direction nothing has needed yet. I1 decides the method's shape when it wires the driver, with a second driver (M2) in view.
 - **Reverse:** add the method to `packages/core/src/driver/contract.ts`, implement it on `StubDriver` and the Claude Code driver, and have the harness call it.
+
+### D-P12-06: The relay's registry assertion is a runtime entry, not an external one
+
+- **Ambiguous:** the spec named `I4.model-relay-forwards-only-its-grant` as "external in `@olympus-ai/sandbox`". The sandbox's Docker-backed invariants have never been external: `I5.sandbox-egress-allowlist-enforced` and the mount assertions are `runtime` entries the registry runs itself through `local-sandbox.ts`, and `@olympus-ai/sandbox` has no conformance reporter.
+- **Chosen:** a `runtime` entry in `packages/conformance/src/registry/local-relay.ts`, beside the P10 assertion it follows. Making it external would add the reporter to the sandbox's vitest config and a dependency on conformance — two gate-path changes to reach the same evidence by a longer route. `packages/sandbox/test/relay.test.ts` carries the fuller suite, as `egress.test.ts` does for P10.
+- **Reverse:** add `@olympus-ai/conformance/reporter` to `packages/sandbox/vitest.config.ts`, register the entry as `external`, and wrap the sandbox test in `invariantTest`.
+
+### D-P12-07: The CLI's startup probe is refused, and the grant stays one path
+
+- **Found:** against a fake upstream, the pinned CLI (2.1.277) sends `HEAD /api/hello` at startup, then `POST /v1/messages?beta=true`, even with non-essential traffic off. With the probe answered 403 the CLI carries on and the model call is made.
+- **Chosen:** `MODEL_RELAY.paths` is `['/v1/messages']` alone. Forwarding the probe would attach the credential to a request no task needs, which is what D-P12-04 exists to stop. The relay logs each refusal by method and path, so a CLI upgrade that starts to depend on another path fails the claim suite loudly and names it.
+- **Reverse:** add `/api/hello` to `MODEL_RELAY.paths`.
+
+### D-P12-08: An absolute-form target is refused, not rewritten
+
+- **Ambiguous:** the spec said the relay "ignores" absolute-form targets.
+- **Chosen:** refused with 400. Rewriting one onto the upstream would forward a request whose author named a different origin, and the author is the task; refusing states the rule instead of guessing past it. The `Host` header, which a client sends on every request, is discarded and replaced with the upstream's, as the spec says.
+- **Reverse:** strip the origin from an absolute-form target and forward its path.
+
+### D-P12-09: The relay suites need `openssl` on the host
+
+- **Why:** the relay verifies its upstream's certificate, so a hermetic test needs an upstream with a certificate the relay can be told to trust. Node cannot make an X.509 certificate, and committing a private key as a fixture would put one in the repository for a secret scanner to flag. `openssl` ships on every CI runner and with Git for Windows. The suites fail rather than skip without it, as they do without Docker.
+- **Reverse:** commit a long-lived fixture certificate and key, or generate one inside a container.
+
+## P12 amendments to the contracts
+
+### A-P12-01: `SandboxSpec.relay`
+
+An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, `urlVariable` — declared in `packages/sandbox/src/types.ts` with the obligations an implementation carries: keep the credential out of the sandbox, and refuse an unheld credential, a non-`https` upstream, or an empty grant rather than provision a sandbox whose model calls fail later. The spec names a credential and never carries one, because a `SandboxSpec` is a record the runtime may keep. Reasoned in D-P12-01 to D-P12-04.
+
+`LocalDockerProvider` implements it and refuses at the new `relay` refusal layer; `StubSandboxProvider` refuses every relay, since it runs commands on the host beside whatever the host holds. `ExecOptions.env`'s documentation now says what D-P5-20 found: a value passed that way is not confidential from the task, so a model credential is not passed that way. Asserted by `I4.model-relay-forwards-only-its-grant` and `I4.model-credential-not-readable-by-the-task`, and in `packages/sandbox/test/relay.test.ts`.

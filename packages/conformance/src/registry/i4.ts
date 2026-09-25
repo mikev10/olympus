@@ -1,6 +1,7 @@
-import { compileError, external, pending, runtime } from '../kit/assert.js';
+import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
+import { MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
 import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
@@ -275,20 +276,20 @@ export const I4: InvariantEntry = {
     }),
     TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK,
     WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF,
-  ],
-  pending: [
-    pending({
+    // Paid by P12. Surfaced by P5's external review, which read the credential out of a child of
+    // the CLI and, through /proc, out of a later exec given none (D-P5-20). The credential now
+    // lives in a relay the provider owns, and the assertion replays that exploit and finds nothing.
+    external({
       id: 'I4.model-credential-not-readable-by-the-task',
-      owner: 'P12',
-      reason:
-        'The model credential reaches the CLI as an environment value on the exec, which keeps it out of every '
-        + 'argument vector and off the mount table. It does not keep it from the model: the CLI and any tool the task '
-        + 'runs share a user, so the value is readable from the process environment. Demonstrated during P5\'s '
-        + 'external review -- a child printed it, and a later exec given no credential at all read it out of /proc. '
-        + 'Closing it means the credential never enters the container: authentication at the egress layer the '
-        + 'allowlist proxy already interposes (P10), with the sandbox holding a short-lived token or nothing at all. '
-        + 'That spans the sandbox, the proxy and the driver, so it is neither a driver change nor a verification one: '
-        + 'owned by P12, split out for it (D-P6-04). Surfaced by P5.',
+      title:
+        'the model credential never enters the sandbox: a child of the CLI, a later exec, a process left running, every file of the container, '
+        + 'its docker inspect, and the workspace hold no trace of it, while the task reaches the model through the relay that holds it; '
+        + 'the same search finds a value an exec was given, so it is not blind',
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
     }),
+    MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
   ],
+  pending: [],
 };

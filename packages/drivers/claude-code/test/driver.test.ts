@@ -12,7 +12,9 @@ import { describe, expect, test } from 'vitest';
 import type { SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
-  CREDENTIAL_VARIABLE,
+  KEY_PLACEHOLDER,
+  KEY_VARIABLE,
+  MODEL_RELAY,
   ClaudeCodeDriver,
   DriverRefusal,
   artifactFiles,
@@ -27,7 +29,6 @@ import {
 } from '../src/index.js';
 
 const HANDLE = 'sandbox-1' as SandboxHandle;
-const CREDENTIAL = 'sk-ant-test-not-a-real-key';
 
 /** Records every exec instead of running one. Nothing in this file starts a process. */
 class RecordingProvider implements SandboxProvider {
@@ -94,7 +95,7 @@ function stream(parts: { tools?: string[]; servers?: Array<{ name: string; statu
     mcp_servers: parts.servers ?? [],
     agents: ['claude'],
     model: 'claude-sonnet-5',
-    apiKeySource: CREDENTIAL_VARIABLE,
+    apiKeySource: KEY_VARIABLE,
     claude_code_version: '2.1.277',
   };
   const result = {
@@ -111,7 +112,7 @@ function stream(parts: { tools?: string[]; servers?: Array<{ name: string; statu
 }
 
 function driverWith(provider: RecordingProvider, options: Record<string, unknown> = {}): ClaudeCodeDriver {
-  return new ClaudeCodeDriver({ provider, credential: CREDENTIAL, ...options });
+  return new ClaudeCodeDriver({ provider, ...options });
 }
 
 /**
@@ -138,7 +139,7 @@ function configWrite(provider: RecordingProvider): string {
 describe('construction', () => {
   test('a driver without a provider cannot be constructed (I1)', () => {
     // The type forbids this; the cast is the untyped caller the refusal exists for.
-    const construct = (): ClaudeCodeDriver => new ClaudeCodeDriver({ credential: CREDENTIAL } as unknown as { provider: SandboxProvider });
+    const construct = (): ClaudeCodeDriver => new ClaudeCodeDriver({} as unknown as { provider: SandboxProvider });
     expect(construct).toThrow(DriverRefusal);
     try {
       construct();
@@ -147,16 +148,21 @@ describe('construction', () => {
     }
   });
 
-  test('a driver without a credential refuses at construction, not at the first task (I5)', () => {
-    const saved = process.env[CREDENTIAL_VARIABLE];
-    // The variable is emptied rather than removed: `delete` on a computed key
-    // is the one form the lint rules refuse, and an empty value is the same
-    // refusal path.
-    process.env[CREDENTIAL_VARIABLE] = '';
+  test('a driver holds no credential: it constructs without one and reads none from the host environment (P12)', async () => {
+    // A value planted where P5's driver read its credential from. Nothing the
+    // driver builds or passes may carry it: the credential lives in the relay.
+    const planted = 'sk-ant-planted-in-the-host-environment';
+    const saved = process.env[KEY_VARIABLE];
+    process.env[KEY_VARIABLE] = planted;
     try {
-      expect(() => new ClaudeCodeDriver({ provider: new RecordingProvider() })).toThrow(/no credential/);
+      const provider = new RecordingProvider();
+      provider.stdout = stream();
+      const driver = new ClaudeCodeDriver({ provider });
+      await driver.runTask(request());
+      expect(JSON.stringify(provider.calls)).not.toContain(planted);
+      expect(provider.calls[0]?.env?.[KEY_VARIABLE]).toBe(KEY_PLACEHOLDER);
     } finally {
-      process.env[CREDENTIAL_VARIABLE] = saved ?? '';
+      process.env[KEY_VARIABLE] = saved ?? '';
     }
   });
 });
@@ -170,13 +176,20 @@ describe('the invocation', () => {
     expect(provider.calls[0]?.cmd).toContain('claude');
   });
 
-  test('the credential travels as an environment value and appears in no argument', async () => {
+  test('the CLI is given the placeholder where a key would go, and the relay request names the API and one path', async () => {
     const provider = new RecordingProvider();
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
-    const call = provider.calls[0];
-    expect(call?.env?.[CREDENTIAL_VARIABLE]).toBe(CREDENTIAL);
-    expect(call?.cmd.join(' ')).not.toContain(CREDENTIAL);
+    expect(provider.calls[0]?.env?.[KEY_VARIABLE]).toBe(KEY_PLACEHOLDER);
+    // The base URL is the provider's to set, from the relay request, so the driver never hard-codes an address.
+    expect(provider.calls[0]?.env?.[MODEL_RELAY.urlVariable]).toBeUndefined();
+    expect(MODEL_RELAY).toStrictEqual({
+      upstream: 'https://api.anthropic.com',
+      paths: ['/v1/messages'],
+      header: 'x-api-key',
+      credential: 'anthropic',
+      urlVariable: 'ANTHROPIC_BASE_URL',
+    });
   });
 
   test('the prefix and the suffix reach different flags, which is what makes the cache reading possible', async () => {
@@ -374,9 +387,9 @@ describe('refusals when the CLI did not run the task (I5)', () => {
     await expect(driverWith(provider).runTask(request())).rejects.toThrow(/produced no session/);
   });
 
-  test('a credential from a source this driver did not arrange refuses', async () => {
+  test('a key from a source this driver did not arrange refuses', async () => {
     const provider = new RecordingProvider();
-    provider.stdout = stream().replace(CREDENTIAL_VARIABLE, 'keychain');
+    provider.stdout = stream().replace(KEY_VARIABLE, 'keychain');
     await expect(driverWith(provider).runTask(request())).rejects.toThrow(/rather than ANTHROPIC_API_KEY/);
   });
 
@@ -465,7 +478,7 @@ describe('capabilities as declarations', () => {
         };
       },
     });
-    const serial = new ClaudeCodeDriver({ provider: wrapped, credential: CREDENTIAL });
+    const serial = new ClaudeCodeDriver({ provider: wrapped });
     await Promise.all([serial.runTask(request()), serial.runTask(request({ taskId: 'task-2' as TaskId }))]);
     expect(order).toEqual(['start', 'end', 'start', 'end']);
   });

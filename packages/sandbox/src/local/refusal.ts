@@ -26,7 +26,9 @@ export type RefusalLayer =
   /** A variable named in `ExecOptions.env` is not a usable name, or has no value to pass. */
   | 'environment'
   /** The user is not a uid and gid, or cannot write the rw workspace on a host that enforces ownership. */
-  | 'user';
+  | 'user'
+  /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, or a relay that did not come up. */
+  | 'relay';
 
 export class SandboxRefusal extends Error {
   override readonly name = 'SandboxRefusal';
