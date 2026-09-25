@@ -15,7 +15,7 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -330,6 +330,30 @@ export function exportContains(container: string, secret: string): Promise<boole
       else resolve(found);
     });
   });
+}
+
+/**
+ * Whether `secret` appears anywhere under a host directory: every file at every
+ * depth, and the text of every link, which is read and never followed. It
+ * searches the workspace mount, which `exportContains` does not reach.
+ *
+ * Anything it cannot read refuses rather than counting as clean: a directory
+ * read as a file, an unreadable entry, or a special file would otherwise be
+ * searched as the empty string, and a scan that reports "found nothing"
+ * because it looked nowhere is not evidence (external review, codex-1).
+ */
+export async function workspaceContains(dir: string, secret: string): Promise<boolean> {
+  for (const entry of await readdir(dir)) {
+    const path = join(dir, entry);
+    const stat = await lstat(path);
+    let found: boolean;
+    if (stat.isDirectory()) found = await workspaceContains(path, secret);
+    else if (stat.isSymbolicLink()) found = (await readlink(path)).includes(secret);
+    else if (stat.isFile()) found = (await readFile(path, 'utf8')).includes(secret);
+    else throw new Error(`${path} is neither a file, a directory, nor a link, so it cannot be searched`);
+    if (found) return true;
+  }
+  return false;
 }
 
 /** Runs `docker` on the host and returns its stdout. For reading evidence about a container, never for running a task. */

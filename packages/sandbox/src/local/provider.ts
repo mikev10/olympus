@@ -19,7 +19,7 @@ import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
-import { refuse } from './refusal.js';
+import { refuse, withLeftovers } from './refusal.js';
 import { CREDENTIAL_NAME, RELAY_ALIAS, RELAY_URL, checkRelay, startRelay, stopRelay, type AppliedRelay, type RelayOptions, type RelayPlan } from './relay.js';
 
 /**
@@ -397,6 +397,15 @@ export class LocalDockerProvider implements SandboxProvider {
     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
     const plan = checkEgress(spec.egress);
     const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()));
+    if (plan.mode === 'allowlist' && relayPlan !== undefined && plan.hosts.includes(relayPlan.upstreamHost)) {
+      // The proxy would be a second route to the host the relay exists to be the only route to.
+      // Both are the runtime's to choose, and a spec that chose both contradicts itself (external review, codex-2).
+      refuse(
+        'relay',
+        `egress.allow names ${relayPlan.upstreamHost}, the relay's upstream host. The relay is the sandbox's only route to its upstream, ` +
+          'and an allowlist that also reaches it is a route around the grant; the spec is refused rather than half-applied.',
+      );
+    }
     checkLimits(spec.limits);
     checkUser(spec.user);
 
@@ -417,9 +426,9 @@ export class LocalDockerProvider implements SandboxProvider {
       return await this.#start(spec, mounts, name, egress);
     } catch (error) {
       // Whatever refused, the proxy, the relay, and their networks were created for a sandbox that
-      // does not exist. They go with it: a leaked route out is worse than the failure that caused it.
-      await this.#stopSidecars(egress);
-      throw error;
+      // does not exist. They go with it: a leaked route out is worse than the failure that caused it,
+      // and one that would not go is reported beside that failure, never instead of it or not at all.
+      throw withLeftovers(error, await this.#stopSidecars(egress));
     }
   }
 
@@ -458,8 +467,7 @@ export class LocalDockerProvider implements SandboxProvider {
     try {
       relay = await this.#startRelay(id, relayPlan, { internal: proxy.internalNetwork, outbound: proxy.outboundNetwork });
     } catch (error) {
-      await stopProxy(proxy, this.#proxyOptions);
-      throw error;
+      throw withLeftovers(error, await stopProxy(proxy, this.#proxyOptions));
     }
     return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy, relay };
   }

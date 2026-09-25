@@ -1,3 +1,54 @@
+# External review of P12, gemini, 2026-09-25
+
+An adversarial pre-merge review of P12 (Credential at the egress layer), the
+same scope as its companion `2026-09-25-P12-credential-relay-review-codex.md`,
+from the same prompt and bundle. Both are triaged in
+`2026-09-25-P12-credential-relay-triage.md`. This reply reported no findings,
+so the triage cites none from it by number.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call (`POST` to the v1beta
+  `models/gemini-3.1-pro-preview:generateContent` endpoint) to
+  `modelRequested` `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is
+  `null` because an API call loads no local configuration. Exit 0, not timed
+  out, 197.3 s. Ingestion `complete`: 70,753 prompt tokens against a floor of
+  51,552. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `9eadf6937c31e38fa5bbad1b68bb2b101f09c72e8576fe85a1a0a689b6816b29`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** none. This reply raised no findings. Its
+  item-6 assessment named mechanisms as sound, and codex disputes none of them.
+  Its item 2 and item 3 answers, however, claimed two things that codex-1 and
+  codex-3 dispute: that the control proves the credential search is not blind,
+  and that a failed start tears down what it created. The triage records which
+  account the code bore out.
+- **Date:** 2026-09-25 (run started 2026-09-25T16:21:17Z UTC).
+- **Bundle:** `2026-09-25-P12-credential-relay-review-bundle.txt`, SHA-256
+  `922953cb079f962ec66d85ddb95fc94d4e2ebcc9f452c0d8994415ba25e47f8e` (the
+  manifest's `bundleSha256`), base `22079d2` (`reviewed/P6`), head `1522900`
+  (P12: tool search stays on behind the relay, and the owed driver run
+  passes). It held the full contents of 19 of the 21 files changed in that
+  range. It excluded `docs/decisions.md` and `docs/plan/DECOMPOSITION.md`, the
+  design documents, as the prompt states ("no design documents"). The payload
+  (257,762 bytes, SHA-256 `0a1638b5…`) is byte-identical to codex's. Prompt:
+  `2026-09-25-P12-credential-relay-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated that it had no prior
+  context about the project and performed no lookups. This is a self-report
+  and cannot be independently verified. An API call offering no tools had no
+  means of lookup in any case.
+- **Coverage, and any gap:** all seven items are answered under headings with
+  the prompt's numbers. Items 1 to 5 each read "None found". Items 3 and 5
+  give reasons. Items 1, 2, and 4 give reasons but no attempted construction.
+  Item 6 names five mechanisms as sound, with reasons. Item 7: the framing is
+  right. No item came back empty. Every item that asked for a construction
+  came back with none.
+- **Citations:** the reply cites functions and files by name, not line. Its
+  section numbers are the prompt's item numbers, not finding numbers.
+
+---
+
 BASE: 22079d2
 HEAD: 1522900
 packages/sandbox/test/upstream.ts

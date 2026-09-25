@@ -2387,7 +2387,7 @@ Proposed with the unit spec and approved by the maintainer before any code, each
 
 ### A-P12-01: `SandboxSpec.relay`
 
-An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, `urlVariable` — declared in `packages/sandbox/src/types.ts` with the obligations an implementation carries: keep the credential out of the sandbox, and refuse an unheld credential, a non-`https` upstream, or an empty grant rather than provision a sandbox whose model calls fail later. The spec names a credential and never carries one, because a `SandboxSpec` is a record the runtime may keep. Reasoned in D-P12-01 to D-P12-04.
+An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, `urlVariable` — declared in `packages/sandbox/src/types.ts` with the obligations an implementation carries: keep the credential out of the sandbox, and refuse an unheld credential, a non-`https` upstream, or an empty grant rather than provision a sandbox whose model calls fail later, and refuse an allowlist naming the upstream's host (D-P12-11). The spec names a credential and never carries one, because a `SandboxSpec` is a record the runtime may keep. Reasoned in D-P12-01 to D-P12-04.
 
 `LocalDockerProvider` implements it and refuses at the new `relay` refusal layer; `StubSandboxProvider` refuses every relay, since it runs commands on the host beside whatever the host holds. `ExecOptions.env`'s documentation now says what D-P5-20 found: a value passed that way is not confidential from the task, so a model credential is not passed that way. Asserted by `I4.model-relay-forwards-only-its-grant` and `I4.model-credential-not-readable-by-the-task`, and in `packages/sandbox/test/relay.test.ts`.
 
@@ -2396,3 +2396,31 @@ An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, 
 - **Found:** the first funded run of the driver suite failed `I4.driver-tool-inventory-validated`: a session granted every declared tool came up without `ToolSearch`. Shown without a model call: the pinned CLI (2.1.277) offers `ToolSearch` with no base URL set and drops it when `ANTHROPIC_BASE_URL` names any other host, and `ENABLE_TOOL_SEARCH=true` restores it. The driver refused the narrowed session, as it should.
 - **Chosen:** the driver sets `ENABLE_TOOL_SEARCH=true` on every exec. The CLI's default guards against third-party gateways that may not carry the beta; the relay forwards to the API itself with headers and query intact, so the guard does not apply.
 - **Reverse:** drop `ToolSearch` from `DECLARED_TOOLS` instead, so no grant can name a tool a relayed session does not offer.
+
+The entries below come from the external review, triaged in `docs/reviews/2026-09-25-P12-credential-relay-triage.md`. Codex raised four findings, and all of them held, two only in part. Gemini raised none.
+
+### D-P12-11: An allowlist naming the relay's upstream host is refused
+
+- **Found:** the provider handed the allowlist to the proxy without comparing it with the relay's upstream. A spec whose `egress.allow` named that host gave the sandbox a second route to it, a proxy `CONNECT`, beside the relay. The credential stays in the relay either way, so nothing is exposed, but the relay stops being the only route to its upstream, which is what D-P12-02 and the P12 entry say it is. The test covered only a disjoint allowlist (external review, codex-2).
+- **Chosen:** `LocalDockerProvider.provision` refuses such a spec at the `relay` layer, before any container starts, and `RelaySpec`'s documentation makes the refusal an obligation on every implementation (A-P12-01). Hosts are compared after the same normalization on both sides, so case does not get around it. A refusal is used rather than a proxy that excludes the host: both halves of the spec are the runtime's, a spec asking for both contradicts itself, and I5 refuses a contradiction instead of choosing half of it.
+- **Asserted by:** `packages/sandbox/test/relay.test.ts`, which failed before the fix.
+- **Limit:** the comparison is by name. An allowlist entry that reaches the same service under another name, or by address, is not detected. The allowlist is written by the runtime from policy, and the task cannot add to it.
+
+### D-P12-12: A relay's teardown attempts every step and reports every failure
+
+- **Found:** the relay's teardown stopped at the first `docker` call that threw (a timeout, or a `docker` that could not be run), so its networks were never attempted. Two failed-start paths, `startRelay` and `provision`, discarded whatever the cleanup reported and rethrew only the original error, so a relay container still holding its credential could stay on the host with nothing reporting it (external review, codex-3). A relay left behind sits alone on its own sandbox's network, which no sandbox reaches, so the credential stays on the host, inside the trust boundary. The failure was that the leftover went unreported, not that the sandbox could read the credential.
+- **Chosen:** each teardown step catches its own failure, and every step runs. The returned error names each object left behind. `startRelay`, `provision`, and the relay-start path in `#applyEgress` report a cleanup failure together with the error that caused it (`withLeftovers`), and a refusal keeps its layer.
+- **Asserted by:** `packages/sandbox/test/relay.test.ts`, both of which failed before the fix.
+- **Not changed here:** the egress proxy's teardown (`proxy.ts`, P10) has the same shape, and a proxy teardown that throws still ends `#stopSidecars` early. It is P10's code and outside this unit's scope; it is recorded in the triage for an issue.
+
+### D-P12-13: The workspace is searched at every depth, and an entry it cannot read refuses
+
+- **Found:** `I4.model-credential-not-readable-by-the-task` searched the workspace mount one level deep. It turned every read failure into the empty string, so a directory counted as a clean file. A credential written to `/workspace/subdir/key` would have been reported absent, and `docker export` does not reach the mount. The control wrote to `/tmp`, which exercised the export and not the workspace scan (external review, codex-1).
+- **Chosen:** `workspaceContains` in the driver's test harness walks the mount at every depth with `lstat`, reads link text without following the link, and throws on an entry that is not a file, a directory, or a link, or that it cannot read. The control now writes its canary two directories deep in the workspace as well, and requires the scan to find it.
+- **Asserted by:** the registry assertion itself. It runs with the driver suite in CI, not locally. Without a model call, the old loop was shown to miss a nested file that the new helper finds.
+
+### D-P12-14: Absence in the relay suite is Docker's "not found", and the relay's refusals are its own
+
+- **Found:** the relay suite's `containerExists` and `networkExists` read any inspection error as absence, and one teardown test made no positive check first. Its startup-refusal test accepted any non-zero exit, including a missing image or daemon, with no control (external review, codex-4).
+- **Chosen:** absence is only Docker's own "No such container" or "not found". Any other failure is thrown. The allowlist teardown test now checks that each object existed before destroying it. The startup test requires exit status 1 and the relay's own `model-relay:` diagnostic for each missing piece, beside a control in which the same image, program, and flags with nothing missing leave a relay running.
+- **Not changed here:** `egress.test.ts` (P10) and `local.test.ts` (P2) carry the same permissive helpers. Recorded in the triage for an issue.

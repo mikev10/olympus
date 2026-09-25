@@ -14,13 +14,12 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { expect } from 'vitest';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { TaskId } from '@olympus-ai/core';
 import { relayOf } from '@olympus-ai/sandbox';
 import { DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver, KEY_PLACEHOLDER, KEY_VARIABLE, MODEL_RELAY } from '../src/index.js';
-import { PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, withDriver } from './harness.js';
+import { PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, withDriver, workspaceContains } from './harness.js';
 
 /**
  * A marker only a process inside the container can write, and only into the
@@ -173,9 +172,7 @@ invariantTest(
         const containerId = h.provider.appliedControls(h.handle).containerId;
         expect(await exportContains(containerId, secret)).toBe(false);
         expect(await dockerOut(['inspect', containerId])).not.toContain(secret);
-        for (const entry of await readdir(h.workspaceDir)) {
-          expect(await readFile(join(h.workspaceDir, entry), 'utf8').catch(() => '')).not.toContain(secret);
-        }
+        expect(await workspaceContains(h.workspaceDir, secret)).toBe(false);
 
         // The API host itself is not reachable from the sandbox: the relay is the only route, not the preferred one.
         const direct = await h.provider.exec(h.handle, [
@@ -187,12 +184,19 @@ invariantTest(
         expect(direct.stdout).toContain('REFUSED');
 
         // The control. A value handed to an exec, the way P5 handed the credential, is found by the
-        // same dump and the same export. A canary rather than the credential: the control proves the
+        // same dump, the same export, and the same workspace scan, written two directories deep so the
+        // scan is shown to descend. A canary rather than the credential: the control proves the
         // search can see, and the real key has no reason to enter the container even to prove it.
         const canary = `canary-${randomUUID()}`;
-        await h.provider.exec(h.handle, ['sh', '-c', `(sleep 600 >/dev/null 2>&1 &) ; env > ${EXPLOIT_DIR}/leaked`], { env: { LEAKED: canary } });
+        const nested = `${WORKDIR}/exploit-control/nested`;
+        await h.provider.exec(
+          h.handle,
+          ['sh', '-c', `(sleep 600 >/dev/null 2>&1 &) ; env > ${EXPLOIT_DIR}/leaked && mkdir -p ${nested} && env > ${nested}/leaked`],
+          { env: { LEAKED: canary } },
+        );
         expect((await h.provider.exec(h.handle, ['sh', '-c', PROCESS_DUMP])).stdout).toContain(canary);
         expect(await exportContains(containerId, canary)).toBe(true);
+        expect(await workspaceContains(h.workspaceDir, canary)).toBe(true);
       },
       { settingsPath },
     );

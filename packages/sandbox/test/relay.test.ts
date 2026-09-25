@@ -33,6 +33,7 @@ import {
   type SandboxHandle,
   type SandboxSpec,
 } from '../src/index.js';
+import { startRelay, stopRelay } from '../src/local/relay.js';
 import { TEST_IMAGE } from './image.js';
 import {
   PROCESS_DUMP,
@@ -134,23 +135,31 @@ async function refusal(body: () => unknown): Promise<SandboxRefusal> {
   throw new Error('expected a SandboxRefusal, but the call returned');
 }
 
-async function containerExists(name: string): Promise<boolean> {
+/**
+ * Whether Docker has an object by that name. Only Docker's own "not found"
+ * answer is absence: any other failure, such as no daemon or no executable,
+ * is thrown, never read as the object being gone (external review, codex-4).
+ */
+function stderrOf(error: unknown): string {
+  const stderr = (error as { stderr?: unknown }).stderr;
+  return typeof stderr === 'string' ? stderr : '';
+}
+
+async function exists(args: string[], notFound: string): Promise<boolean> {
   try {
-    await run('docker', ['inspect', '--type', 'container', name]);
+    await run('docker', args);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (stderrOf(error).includes(notFound)) return false;
+    throw error;
   }
 }
 
-async function networkExists(name: string): Promise<boolean> {
-  try {
-    await run('docker', ['network', 'inspect', name]);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const containerExists = (name: string): Promise<boolean> => exists(['inspect', '--type', 'container', name], 'No such container');
+const networkExists = (name: string): Promise<boolean> => exists(['network', 'inspect', name], 'not found');
+
+/** A `docker` that cannot be run, for a teardown that has to go on without one. */
+const NO_DOCKER = { executable: join(tmpdir(), `no-docker-${randomUUID()}`), image: EGRESS_PROXY_IMAGE, timeoutMs: 10_000 };
 
 /** Removes the upstreams first: a network with one still attached cannot be removed with its sandbox. */
 async function removeUpstreams(): Promise<void> {
@@ -400,6 +409,10 @@ describe('the relay lives and dies with its sandbox', () => {
     const controls = provider.appliedControls(handle);
     if (controls.egress.mode !== 'allowlist') throw new Error('expected an allowlist sandbox');
     const relay = relayFor(handle);
+    expect(await containerExists(relay.name)).toBe(true);
+    expect(await containerExists(controls.egress.proxy.name)).toBe(true);
+    expect(await networkExists(controls.egress.proxy.internalNetwork)).toBe(true);
+    expect(await networkExists(controls.egress.proxy.outboundNetwork)).toBe(true);
 
     await provider.destroy(handle);
     expect(await containerExists(relay.name)).toBe(false);
@@ -419,6 +432,32 @@ describe('the relay lives and dies with its sandbox', () => {
     const after = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
     expect(after.stdout.split(/\r?\n/).filter((n) => n.startsWith('model-relay-'))).toStrictEqual(relaysBefore);
   });
+
+  test('a teardown whose docker fails attempts every step and reports each thing it left behind', async () => {
+    const relay = relayFor(await provisioned());
+
+    // Each step fails without a docker to run. The teardown goes on past the first and names all three.
+    const failure = await stopRelay(relay, NO_DOCKER);
+    expect(failure?.message).toContain(relay.containerId);
+    expect(failure?.message).toContain(relay.internalNetwork);
+    expect(failure?.message).toContain(relay.outboundNetwork);
+    // The real relay is still there, which is what the report says; afterEach removes it.
+    expect(await containerExists(relay.name)).toBe(true);
+  });
+
+  test('a start that fails and cannot clean up after itself reports both, not only the first', async () => {
+    const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]));
+    const id = randomUUID();
+    const failed = await startRelay(id, plan, secret, undefined, undefined, NO_DOCKER).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failed).toBeInstanceOf(Error);
+    const message = (failed as Error).message;
+    expect(message).toContain('cleaning up after it failed');
+    expect(message).toContain(`model-relay-${id}`);
+    expect(message).not.toContain(secret);
+  });
 });
 
 describe('a relay that cannot be applied exactly is refused (I5)', () => {
@@ -430,6 +469,15 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
 
     const bare = await LocalDockerProvider.create({ vaultPaths: [] });
     expect((await refusal(() => bare.provision(specFor()))).layer).toBe('relay');
+  });
+
+  test("an allowlist naming the relay's upstream host is refused, since the proxy would be a second route to it", async () => {
+    for (const allow of [[UPSTREAM_HOST], ['example.com', UPSTREAM_HOST.toUpperCase()]]) {
+      // Through `provisioned`, so a sandbox the provider wrongly hands back is still destroyed.
+      const refused = await refusal(() => provisioned(specFor({ egress: { mode: 'allowlist', allow } })));
+      expect(refused.layer, JSON.stringify(allow)).toBe('relay');
+      expect(refused.message).toContain(UPSTREAM_HOST);
+    }
   });
 
   test('an upstream that is not an https origin naming a host is refused', () => {
@@ -478,18 +526,34 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
   });
 
   test('the relay itself refuses to start without a credential or a grant', async () => {
-    const attempts: Array<Record<string, string>> = [
-      { RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080' },
-      { RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '[]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080' },
-      { RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: 'http://api.example.com', RELAY_PATHS: '["/v1"]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080' },
+    const valid: Record<string, string> = {
+      RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080',
+    };
+    const flagsFor = (env: Record<string, string>): string[] => Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
+
+    // The control: the same image, program, and flags with nothing missing start a relay that stays up.
+    // Without it, the refusals below could be an image or a daemon that runs nothing (external review, codex-4).
+    const control = `relay-start-control-${randomUUID()}`;
+    upstreams.push(control);
+    await run('docker', ['run', '--detach', '--name', control, ...flagsFor(valid), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]);
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect((await run('docker', ['inspect', '--format', '{{.State.Running}}', control])).stdout.trim()).toBe('true');
+
+    const uncredentialed = Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_CREDENTIAL'));
+    const attempts: Array<[Record<string, string>, string]> = [
+      [uncredentialed, 'no credential'],
+      [{ ...valid, RELAY_PATHS: '[]' }, 'no path grant'],
+      [{ ...valid, RELAY_UPSTREAM: 'http://api.example.com', RELAY_PATHS: '["/v1"]' }, 'not an https origin'],
     ];
-    for (const env of attempts) {
-      const flags = Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
-      const outcome = await run('docker', ['run', '--rm', ...flags, EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
-        () => 0,
-        (error: unknown) => (error as { code?: number }).code ?? -1,
+    for (const [env, named] of attempts) {
+      const outcome = await run('docker', ['run', '--rm', ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
+        () => ({ code: 0, stderr: '' }),
+        (error: unknown) => ({ code: (error as { code?: unknown }).code, stderr: stderrOf(error) }),
       );
-      expect(outcome, JSON.stringify(env)).not.toBe(0);
+      // The relay's own refusal, naming what it lacks: not merely some non-zero exit.
+      expect(outcome.code, JSON.stringify(env)).toBe(1);
+      expect(outcome.stderr, JSON.stringify(env)).toContain('model-relay: ');
+      expect(outcome.stderr, JSON.stringify(env)).toContain(named);
     }
   });
 });

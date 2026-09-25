@@ -27,7 +27,7 @@ export type RefusalLayer =
   | 'environment'
   /** The user is not a uid and gid, or cannot write the rw workspace on a host that enforces ownership. */
   | 'user'
-  /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, or a relay that did not come up. */
+  /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, an upstream host the allowlist also names, or a relay that did not come up. */
   | 'relay';
 
 export class SandboxRefusal extends Error {
@@ -42,4 +42,17 @@ export class SandboxRefusal extends Error {
 
 export function refuse(layer: RefusalLayer, message: string): never {
   throw new SandboxRefusal(layer, message);
+}
+
+/**
+ * The error a failed start reports once its cleanup has run: the failure that
+ * stopped it, and, when the cleanup failed too, what the cleanup left behind.
+ * A refusal keeps its layer, so a caller still sees the right refusal. A relay
+ * container holds its credential, so one left on the host is reported rather
+ * than dropped in favour of the better reason (external review, codex-3).
+ */
+export function withLeftovers(error: unknown, leftovers: Error | undefined): unknown {
+  if (leftovers === undefined) return error;
+  const why = `${error instanceof Error ? error.message : String(error)} — and cleaning up after it failed: ${leftovers.message}`;
+  return error instanceof SandboxRefusal ? new SandboxRefusal(error.layer, why) : new Error(why);
 }

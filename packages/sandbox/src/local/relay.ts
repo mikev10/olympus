@@ -28,7 +28,7 @@
  */
 import { dockerCli } from './docker.js';
 import { normalizeHost } from './egress.js';
-import { refuse } from './refusal.js';
+import { refuse, withLeftovers } from './refusal.js';
 import type { RelaySpec } from '../types.js';
 
 /** The port the relay listens on, inside its own container. Nothing is published to the host. */
@@ -443,8 +443,7 @@ export async function startRelay(
       runArgs: Object.freeze([...runArgs]),
     };
   } catch (error) {
-    await teardown(options, containerId === '' ? names.container : containerId, created);
-    throw error;
+    throw withLeftovers(error, await teardown(options, containerId === '' ? names.container : containerId, created));
   }
 }
 
@@ -464,22 +463,29 @@ async function requireListening(containerId: string, options: RelayOptions): Pro
   );
 }
 
-/** Removes the relay container and then any networks it created. Best effort: every step is attempted. */
+/**
+ * Removes the relay container and then any networks it created. Every step is
+ * attempted, whichever failed before it — a `docker` that times out or cannot
+ * be spawned is a failed step, not the end of the teardown — and every failure
+ * is reported, each naming what it left behind (external review, codex-3).
+ */
 async function teardown(options: RelayOptions, container: string, networks: readonly string[]): Promise<Error | undefined> {
-  let failure: Error | undefined;
-  if (container !== '') {
-    const removed = await dockerCli(options.executable, ['rm', '--force', '--volumes', container], { timeoutMs: options.timeoutMs });
-    if (removed.exitCode !== 0 && !removed.stderr.includes('No such container')) {
-      failure = new Error(`docker rm exited ${String(removed.exitCode)} for the model relay ${container}: ${removed.stderr.trim()}`);
+  const failures: string[] = [];
+  const attempt = async (args: string[], gone: string, what: string): Promise<void> => {
+    try {
+      const removed = await dockerCli(options.executable, args, { timeoutMs: options.timeoutMs });
+      if (removed.exitCode !== 0 && !removed.stderr.includes(gone)) {
+        failures.push(`docker ${args.slice(0, 2).join(' ')} exited ${String(removed.exitCode)} for ${what}: ${removed.stderr.trim()}`);
+      }
+    } catch (error) {
+      failures.push(`docker ${args.slice(0, 2).join(' ')} failed for ${what}: ${error instanceof Error ? error.message : String(error)}`);
     }
-  }
-  for (const network of networks) {
-    const removed = await dockerCli(options.executable, ['network', 'rm', network], { timeoutMs: options.timeoutMs });
-    if (removed.exitCode !== 0 && !removed.stderr.includes('not found')) {
-      failure ??= new Error(`docker network rm exited ${String(removed.exitCode)} for ${network}: ${removed.stderr.trim()}`);
-    }
-  }
-  return failure;
+  };
+
+  // A container that was never created is not a leak; `docker rm` says so and this is not it.
+  if (container !== '') await attempt(['rm', '--force', '--volumes', container], 'No such container', `the model relay ${container}`);
+  for (const network of networks) await attempt(['network', 'rm', network], 'not found', `the network ${network}`);
+  return failures.length === 0 ? undefined : new Error(`the model relay was not fully removed: ${failures.join('; ')}`);
 }
 
 /**

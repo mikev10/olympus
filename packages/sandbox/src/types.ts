@@ -44,7 +44,9 @@ export interface EgressPolicy { mode: 'deny-all' | 'allowlist'; allow: string[];
  * spec that carries a relay.
  *
  * A relay is independent of `egress` (D-P12-02): under `deny-all` the sandbox
- * reaches the relay and nothing else.
+ * reaches the relay and nothing else. Under `allowlist` the relay is still the
+ * only route to its upstream, so implementations MUST refuse an `egress.allow`
+ * naming the upstream's host (D-P12-11).
  */
 export interface RelaySpec {
   /** An `https` origin with no path: `'https://api.example.com'`. The only origin the relay reaches. */
