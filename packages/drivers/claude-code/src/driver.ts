@@ -123,6 +123,12 @@ const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
   DISABLE_AUTOUPDATER: '1',
   DISABLE_TELEMETRY: '1',
   DISABLE_ERROR_REPORTING: '1',
+  // The CLI turns tool search off when its base URL is not Anthropic's, on the
+  // theory that a third-party gateway may not carry the beta. The relay is not
+  // a gateway: it forwards to the API itself, headers and query intact. Without
+  // this, a session granted `ToolSearch` silently comes up without it, which the
+  // driver refuses (I4.driver-tool-inventory-validated; D-P12-10).
+  ENABLE_TOOL_SEARCH: 'true',
 };
 
 /** Every exec's environment: the settings above and the placeholder. No value in it is secret. */

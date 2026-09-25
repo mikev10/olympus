@@ -181,6 +181,8 @@ describe('the invocation', () => {
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
     expect(provider.calls[0]?.env?.[KEY_VARIABLE]).toBe(KEY_PLACEHOLDER);
+    // Behind a base URL that is not Anthropic's the CLI drops ToolSearch unless told not to (D-P12-10).
+    expect(provider.calls[0]?.env?.ENABLE_TOOL_SEARCH).toBe('true');
     // The base URL is the provider's to set, from the relay request, so the driver never hard-codes an address.
     expect(provider.calls[0]?.env?.[MODEL_RELAY.urlVariable]).toBeUndefined();
     expect(MODEL_RELAY).toStrictEqual({

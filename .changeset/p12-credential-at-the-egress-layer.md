@@ -31,7 +31,9 @@ header or variable is reserved is refused at the new `relay` refusal layer;
 (D-P5-20's reverse); every exec carries `KEY_PLACEHOLDER` in `KEY_VARIABLE`,
 and the session check still refuses a key from any other source. The driver
 exports `MODEL_RELAY`, the relay request its sandbox must be provisioned
-with, and `MODEL_CREDENTIAL`, the name the provider holds the key under.
+with, and `MODEL_CREDENTIAL`, the name the provider holds the key under. It
+sets `ENABLE_TOOL_SEARCH=true`, because the CLI drops `ToolSearch` behind any
+base URL that is not Anthropic's (D-P12-10).
 
 `@olympus-ai/conformance`: `I4.model-credential-not-readable-by-the-task` is
 paid — a live external assertion in the driver's suite that replays P5's

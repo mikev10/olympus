@@ -2390,3 +2390,9 @@ Proposed with the unit spec and approved by the maintainer before any code, each
 An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, `urlVariable` — declared in `packages/sandbox/src/types.ts` with the obligations an implementation carries: keep the credential out of the sandbox, and refuse an unheld credential, a non-`https` upstream, or an empty grant rather than provision a sandbox whose model calls fail later. The spec names a credential and never carries one, because a `SandboxSpec` is a record the runtime may keep. Reasoned in D-P12-01 to D-P12-04.
 
 `LocalDockerProvider` implements it and refuses at the new `relay` refusal layer; `StubSandboxProvider` refuses every relay, since it runs commands on the host beside whatever the host holds. `ExecOptions.env`'s documentation now says what D-P5-20 found: a value passed that way is not confidential from the task, so a model credential is not passed that way. Asserted by `I4.model-relay-forwards-only-its-grant` and `I4.model-credential-not-readable-by-the-task`, and in `packages/sandbox/test/relay.test.ts`.
+
+### D-P12-10: The driver keeps tool search on behind the relay
+
+- **Found:** the first funded run of the driver suite failed `I4.driver-tool-inventory-validated`: a session granted every declared tool came up without `ToolSearch`. Shown without a model call: the pinned CLI (2.1.277) offers `ToolSearch` with no base URL set and drops it when `ANTHROPIC_BASE_URL` names any other host, and `ENABLE_TOOL_SEARCH=true` restores it. The driver refused the narrowed session, as it should.
+- **Chosen:** the driver sets `ENABLE_TOOL_SEARCH=true` on every exec. The CLI's default guards against third-party gateways that may not carry the beta; the relay forwards to the API itself with headers and query intact, so the guard does not apply.
+- **Reverse:** drop `ToolSearch` from `DECLARED_TOOLS` instead, so no grant can name a tool a relayed session does not offer.
