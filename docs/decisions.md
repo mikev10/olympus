@@ -2320,3 +2320,42 @@ The entries below come from the external review, triaged in `docs/reviews/2026-0
 A required `user: { uid, gid }`. `LocalDockerProvider` passes `--user uid:gid`; on a Linux host it refuses a rw workspace that user cannot write, with the new refusal layer `user`, and refuses a uid or gid that is not a whole number of zero or more. Docker Desktop maps every container user onto the host user, so there is nothing to refuse there, and the write lands. `StubSandboxProvider` ignores the user and declares it. Asserted by `I5.workspace-is-writable-by-the-task` and in `packages/sandbox`'s own suite, which require a refusal on Linux and a landed write elsewhere, and never a sandbox whose task cannot write.
 
 Creating an entry in a directory takes both write and search permission, and the check first tested write alone, so a workspace at mode `0600` passed for its own owner, who could then create nothing in it (external review, codex-8). The rule is now `canCreateIn` in `packages/sandbox/src/local/ownership.ts`, which requires both bits from the one class the user falls in. It is unit-tested on every host, and the I5 assertion adds the `0600` case on Linux.
+
+## P12: Credential at the egress layer
+
+Proposed with the unit spec and approved by the maintainer before any code, each as recommended. Each entry names the option not taken, so a reversal is a choice between two stated shapes rather than a redesign.
+
+### D-P12-01: The relay is its own container, not a second listener in the egress proxy
+
+- **Ambiguous:** the entry says the credential moves "into" the P10 proxy, and the proxy is already the provider-owned process on the sandbox's only route out.
+- **Options:** (A) a second provider-owned container, the relay, on the same internal network; (B) a second listener inside the existing proxy container.
+- **Chosen: A**, with the maintainer. The proxy is `--read-only` with the comment "the proxy holds no secret", and P10's assertions rest on it being a blind tunnel that reads nothing. Putting the credential in the process that also tunnels every allowlisted connection joins the one component that must stay ignorant of traffic to the one component that must read it. A separate container keeps P10's proxy and its assertions exactly as reviewed, lets a `deny-all` sandbox have a relay with no proxy at all (D-P12-02), and costs one more container per credentialed sandbox.
+- **Reverse:** move the relay's request handler into `PROXY_SOURCE` behind a second port, and give the proxy the credential environment.
+
+### D-P12-02: A relay is independent of the egress mode
+
+- **Ambiguous:** a build task that needs the model and no other host has no shape today: `deny-all` is `--network none`, and an `allowlist` with an empty list is refused.
+- **Options:** (A) `SandboxSpec.relay` is orthogonal to `egress`; under `deny-all` a relay puts the sandbox on an internal network holding the relay alone, and `deny-all` without one is unchanged; (B) a relay is accepted only beside an `allowlist`, so a task that needs the model alone must be granted some host it does not need.
+- **Chosen: A**, with the maintainer. B forces a grant nobody asked for to get a route nobody else can use, which is I4 read backwards. A keeps P10's `deny-all` assertion byte-for-byte for every sandbox without a relay, and the relay is not egress in P10's sense: the sandbox reaches one provider-owned endpoint, which reaches one fixed origin.
+- **Reverse:** refuse `relay` unless `egress.mode === 'allowlist'`.
+
+### D-P12-03: The sandbox holds a fixed placeholder, not a per-sandbox token
+
+- **Ambiguous:** the entry allows "a placeholder, a short-lived token, or nothing". The CLI needs some value in its key variable, and the driver refuses a session whose key came from anywhere else.
+- **Options:** (A) a fixed placeholder the relay ignores, the relay authenticating its client by network position — only its own sandbox's internal network reaches it; (B) a random token per sandbox, set in the container and checked by the relay.
+- **Chosen: A**, with the maintainer. A token the CLI can send is a token every process in the sandbox can read, so it authenticates nothing the network position does not already: the relay is reachable only from a network one sandbox is on, verification sandboxes get no relay, and the P11 probe that will share the sandbox's network is the runtime's own. B adds a secret-shaped value, a comparison, and a way for the relay to fail, for no threat that A leaves open.
+- **Reverse:** generate a token at provisioning, set it through the spec as a second variable, and refuse any request that does not carry it.
+
+### D-P12-04: The relay forwards a granted set of path prefixes on one origin
+
+- **Ambiguous:** the entry says the provider "authenticates the upstream request" and does not say which requests.
+- **Options:** (A) the spec names one `https` origin and a non-empty list of path prefixes, and the relay refuses everything else; (B) one origin, any path.
+- **Chosen: A**, with the maintainer. An API key reaches more than the messages endpoint — batches and files store data on the account and outlive the sandbox. Default deny applies to what the credential can do, not only to where it can go. The Claude Code driver's grant is set by what its CLI is observed to call with non-essential traffic off, and the relay's refusals name the path, so an under-grant is a loud, specific failure in the claim suite rather than a silent one.
+- **Reverse:** drop `paths` from `RelaySpec` and forward every path to the upstream.
+
+### D-P12-05: The driver exports its relay request; the `Driver` contract is not amended
+
+- **Ambiguous:** something has to tell whoever provisions a sandbox which relay the driver's CLI needs. In this unit that is the driver's own test harness; in the line it will be `packages/api`, which is I1's to wire.
+- **Options:** (A) `packages/drivers/claude-code` exports the relay request as a constant, and a contract method waits for a consumer that holds a driver by its contract; (B) `Driver` gains a method returning it now.
+- **Chosen: A**, with the maintainer. No code in this unit would call B through the contract, so it would be an amendment with no first use — the thing WORKFLOW.md says amendments come from. It also puts a sandbox type into `core`'s driver contract, a dependency direction nothing has needed yet. I1 decides the method's shape when it wires the driver, with a second driver (M2) in view.
+- **Reverse:** add the method to `packages/core/src/driver/contract.ts`, implement it on `StubDriver` and the Claude Code driver, and have the harness call it.
