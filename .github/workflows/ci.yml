@@ -91,10 +91,44 @@ jobs:
       # a credential (I5). A fork pull request has no secret and fails here,
       # which is the correct outcome: a capability claim proven by a test that
       # did not run is worse than one reported pending.
+      #
+      # They run only when the tree they execute has changed (D-A-CI-04). The
+      # report is cached under the hash the registry recomputes over the
+      # driver and every workspace package it depends on, so a restored report
+      # is evidence about these exact bytes, and one that is not is refused by
+      # the registry as tree-changed. A wrong key costs a model run or a red
+      # build, never a green one.
+      - name: Driver tree hash
+        id: driver-tree
+        run: echo "hash=$(node scripts/driver-report-key.ts packages/drivers/claude-code)" >> "$GITHUB_OUTPUT"
+
+      - name: Driver report from an earlier run of the same tree
+        id: driver-report
+        uses: actions/cache/restore@v6
+        with:
+          path: packages/drivers/claude-code/.conformance/run.json
+          key: driver-report-${{ steps.driver-tree.outputs.hash }}
+
+      - name: Reused driver report
+        if: steps.driver-report.outputs.cache-hit == 'true'
+        run: |
+          echo "::notice::driver assertions not re-run; reusing the report for tree ${{ steps.driver-tree.outputs.hash }}"
+          grep -E '"(treeHash|generatedAt)"' packages/drivers/claude-code/.conformance/run.json
+
       - name: Driver assertions, which write the conformance run report
+        if: steps.driver-report.outputs.cache-hit != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm --filter @olympus-ai/driver-claude-code test
+
+      # Only after the step above passed: a failing run's report stays out of
+      # the cache, so the next run of the same tree calls the model again.
+      - name: Keep the driver report for the next run of the same tree
+        if: steps.driver-report.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: packages/drivers/claude-code/.conformance/run.json
+          key: driver-report-${{ steps.driver-tree.outputs.hash }}
 
       # Every package but the driver, which the step above already ran: its
       # assertions call a real model, and a second pass bills every one of

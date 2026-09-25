@@ -1984,6 +1984,16 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **Reverse:** drop the `chmod` and the assertion fails on any host whose uid is not 1000.
 - **Promoted to the ledger before P6 starts.** This entry began as prose, which is findable and not counted. `I5.workspace-is-writable-by-the-task` is now a pending registry entry owned by P6, and the I5 baseline rises from 5 to 6 to say so in the diff. The reason is D-P5-01's: a ledger only constrains the work if it is fixed before the work that would edit it, so an obligation written after P6 starts is a description of what P6 did rather than a claim on it.
 
+### D-A-CI-04: the driver's model calls run once, and only for a tree they have not already proven
+
+- **Problem:** CI spent API credit faster than the evidence it bought was worth. D-A-CI-02 accepted a second run of the driver suite inside `pnpm test`, eighteen model calls per CI run rather than nine, and every push to every pull request paid them again for bytes an earlier run had already proven. The credit ran out on 2026-09-24 and every run went red at the driver step.
+- **Chosen, part one (087ebfb):** the `Test` step runs every package but the driver, and no longer receives the credential. The step before it already wrote the report; a second pass proved nothing the first did not.
+- **Chosen, part two:** the report is cached under the hash the registry recomputes when it reconciles (`packageTreeHash`, over the driver and every workspace package it depends on). A run whose tree hashes the same restores the report and makes no model call; any other run calls the model and caches the report only if the step passed. `scripts/driver-report-key.ts` prints the hash by calling the kit's own function, so the key cannot drift from what the registry checks.
+- **Why this is not a skip:** the registry's reconciliation is unchanged. A restored report is refused as `tree-changed` unless it describes the exact bytes being evaluated, and each assertion must still be recorded as passed in it. A wrong cache key costs a model run or a red build, never a green one. The log states when a report was reused and when it was generated.
+- **What it gives up, stated:** a green run can now rest on model evidence produced by an earlier run of the same tree rather than by itself. The claim is unchanged — these bytes passed against a real model — but it is no longer "passed in this run". A model-side regression with no change to the tree is not caught until the tree next changes; nothing in CI caught it deliberately before either, since the tests pin behaviour, not the model.
+- **Why not run on pushes to `v2` only:** the registry needs the report on every run, so a pull request that skipped the driver would fail from cold. And "only the last push of a pull request" is not an event GitHub can detect.
+- **Reverse:** delete the three cache steps and the condition on the driver step.
+
 ## P8: Adapters (TypeScript)
 
 ### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code
