@@ -83,10 +83,9 @@ jobs:
 
       # Before the recursive test command, and the order is not incidental
       # (D-P5-23). The registry reconciles this package's external assertions
-      # against a run report only this suite writes, and pnpm runs conformance
-      # first because the kit is the driver's dependency. From a cold checkout
-      # there is no report, all nine refuse, and the recursive run aborts
-      # before the driver package is ever reached.
+      # against a run report only this suite writes, and the recursive run
+      # below tests conformance but not the driver. From a cold checkout there
+      # would be no report, all nine would refuse, and nothing would write one.
       #
       # These assertions call a real model and refuse rather than skip without
       # a credential (I5). A fork pull request has no secret and fails here,
@@ -97,10 +96,14 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm --filter @olympus-ai/driver-claude-code test
 
+      # Every package but the driver, which the step above already ran: its
+      # assertions call a real model, and a second pass bills every one of
+      # them again to prove nothing the first did not. The report it wrote is
+      # bound to the package's tree hash, which nothing between the two steps
+      # changes. No credential here: no other package calls a model, and one
+      # that starts to should refuse loudly rather than find a key waiting.
       - name: Test
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pnpm test
+        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' test
 
       # scripts/ is not a workspace package, so `pnpm -r typecheck` and
       # `pnpm -r test` cannot see it. Without these two steps the review
