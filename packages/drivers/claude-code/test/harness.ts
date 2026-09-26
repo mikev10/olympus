@@ -19,9 +19,10 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { afterAll, expect } from 'vitest';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { ExecOptions, LocalDockerProvider, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, type ClaudeCodeDriverOptions } from '../src/index.js';
+import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
 
 /**
  * Where the host's credential is read from, to be handed to the provider. The
@@ -29,6 +30,39 @@ import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, type Clau
  * inside the sandbox that variable carries a placeholder.
  */
 export const HOST_CREDENTIAL_VARIABLE = 'ANTHROPIC_API_KEY';
+
+/**
+ * What this file's model calls cost, as the CLI reported each one. Every exec
+ * passes through the harness's provider, so this sees every call: a task's, a
+ * subagent's, and a tool-inventory inspection's, whether or not an assertion
+ * then passed. Printed per call and per file, so a CI log says where the money
+ * went instead of leaving it to be guessed from the account's bill.
+ */
+const spent = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+
+function recordCost(stdout: string): void {
+  const usage = parseStream(stdout).result?.usage;
+  if (usage === undefined) return;
+  spent.calls += 1;
+  spent.inputTokens += usage.inputTokens;
+  spent.outputTokens += usage.outputTokens;
+  spent.cacheReadTokens += usage.cacheReadTokens;
+  spent.cacheWriteTokens += usage.cacheWriteTokens;
+  spent.costUsd += usage.costUsd;
+  console.log(
+    `[model-cost] ${expect.getState().currentTestName ?? '(outside a test)'}: ` +
+      `in ${String(usage.inputTokens)}, out ${String(usage.outputTokens)}, ` +
+      `cache read ${String(usage.cacheReadTokens)}, cache write ${String(usage.cacheWriteTokens)}, $${usage.costUsd.toFixed(4)}`,
+  );
+}
+
+afterAll(() => {
+  if (spent.calls === 0) return;
+  console.log(
+    `[model-cost] file total: ${String(spent.calls)} calls, in ${String(spent.inputTokens)}, out ${String(spent.outputTokens)}, ` +
+      `cache read ${String(spent.cacheReadTokens)}, cache write ${String(spent.cacheWriteTokens)}, $${spent.costUsd.toFixed(4)}`,
+  );
+});
 
 /** Where the workspace mount lands inside the container, and where the driver runs. */
 export const WORKDIR = '/workspace';
@@ -134,7 +168,9 @@ export async function withDriver<T>(
     exec: async (h: SandboxHandle, cmd: string[], o?: ExecOptions) => {
       const leave = watcher?.();
       try {
-        return await provider.exec(h, cmd, o);
+        const result = await provider.exec(h, cmd, o);
+        recordCost(result.stdout);
+        return result;
       } finally {
         leave?.();
       }
