@@ -19,7 +19,8 @@ import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
-import { refuse } from './refusal.js';
+import { refuse, withLeftovers } from './refusal.js';
+import { CREDENTIAL_NAME, RELAY_ALIAS, RELAY_URL, checkRelay, startRelay, stopRelay, type AppliedRelay, type RelayOptions, type RelayPlan } from './relay.js';
 
 /**
  * A POSIX keep-alive. `sleep infinity` is a GNU and BusyBox extension, and a
@@ -48,6 +49,23 @@ export interface LocalDockerOptions {
    * is `PROXY_SOURCE`, which this image is handed and runs.
    */
   readonly proxyImage?: string;
+  /**
+   * The credentials this provider may hand to a model relay, by name. A
+   * `SandboxSpec` names one in `relay.credential` and never carries a value;
+   * a name that is not here is refused at provisioning. Absent means no
+   * credentials, and every spec that asks for a relay is refused (I4: a
+   * credential not given is not available).
+   *
+   * The values go to relay containers and nowhere else: never to a sandbox,
+   * never into an argument vector, and never into `appliedControls()`.
+   */
+  readonly credentials?: Readonly<Record<string, string>>;
+  /**
+   * Extra root certificates, PEM, a relay trusts beside the public ones, for
+   * an upstream a private authority signed. Not a way to turn verification
+   * off: the upstream's certificate is always checked against its name.
+   */
+  readonly relayTrust?: string;
 }
 
 /**
@@ -66,6 +84,17 @@ export type AppliedEgress =
        * records `network: 'none'` is a sandbox that was given it.
        */
       readonly network: 'none';
+    }
+  | {
+      readonly mode: 'deny-all';
+      /**
+       * The per-sandbox internal network the relay created. It carries the
+       * sandbox and the relay and nothing else, and no default route, so the
+       * one endpoint the sandbox reaches is the relay (D-P12-02). A `deny-all`
+       * with no relay is the branch above, unchanged.
+       */
+      readonly network: string;
+      readonly relay: AppliedRelay;
     }
   | {
       readonly mode: 'allowlist';
@@ -88,7 +117,14 @@ export type AppliedEgress =
        * and will remove. Either record read alone is complete.
        */
       readonly proxy: AppliedProxy;
+      /** The relay on the same internal network, when the spec asked for one. */
+      readonly relay?: AppliedRelay;
     };
+
+/** The relay one sandbox was given, or `undefined`. */
+export function relayOf(egress: AppliedEgress): AppliedRelay | undefined {
+  return 'relay' in egress ? egress.relay : undefined;
+}
 
 /**
  * What the provider actually applied to one container. Recorded rather than
@@ -189,9 +225,11 @@ async function checkWorkspaceWritable(workspace: ResolvedMount, user: SandboxSpe
  * exempted so a container talking to itself does not take a detour through a
  * proxy that would refuse it.
  */
-function proxyEnvironment(): string[] {
+function proxyEnvironment(relay: boolean): string[] {
   const url = `http://${PROXY_ALIAS}:${String(PROXY_PORT)}`;
-  const loopback = 'localhost,127.0.0.1,::1';
+  // The relay is reached directly on the internal network. Sent to the proxy, a
+  // model call would be refused as a host nobody allowlisted.
+  const loopback = relay ? `localhost,127.0.0.1,::1,${RELAY_ALIAS}` : 'localhost,127.0.0.1,::1';
   return [
     '--env', `HTTP_PROXY=${url}`,
     '--env', `http_proxy=${url}`,
@@ -255,7 +293,10 @@ function environmentPassthrough(env: Readonly<Record<string, string>> | undefine
 
 function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
   const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
-  if (egress.mode === 'allowlist') args.push(...proxyEnvironment());
+  const relay = relayOf(egress);
+  if (egress.mode === 'allowlist') args.push(...proxyEnvironment(relay !== undefined));
+  // The relay's address, not a secret: the credential is in the relay, and this is where to find it.
+  if (relay !== undefined) args.push('--env', `${relay.urlVariable}=${RELAY_URL}`);
   for (const mount of mounts) args.push('--mount', mountArgument(mount));
   args.push(
     '--cpus', String(spec.limits.cpus),
@@ -268,6 +309,27 @@ function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: s
   return args;
 }
 
+/**
+ * The credentials a provider holds, checked once at construction. A name a
+ * relay spec could not match exactly, or a value with nothing in it, is
+ * refused here rather than at the first provision that names it.
+ */
+function heldCredentials(credentials: Readonly<Record<string, string>> | undefined): ReadonlyMap<string, string> {
+  const held = new Map<string, string>();
+  if (credentials === undefined) return held;
+  for (const [name, value] of Object.entries(credentials)) {
+    if (!CREDENTIAL_NAME.test(name)) {
+      refuse('relay', `the credential name ${JSON.stringify(name)} is not lower-case letters, digits, and interior hyphens`);
+    }
+    // The type says string, but a value read from an unset environment variable arrives as undefined.
+    if (typeof value !== 'string' || value.trim() === '') {
+      refuse('relay', `the credential ${JSON.stringify(name)} has no value; a relay started with it would forward unauthenticated`);
+    }
+    held.set(name, value);
+  }
+  return held;
+}
+
 export class LocalDockerProvider implements SandboxProvider {
   readonly id = 'local-docker';
 
@@ -275,13 +337,29 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #vaultPaths: readonly string[];
   readonly #daemon: DaemonFacts;
   readonly #proxyImage: string;
+  readonly #credentials: ReadonlyMap<string, string>;
+  readonly #relayTrust: string | undefined;
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
 
-  private constructor(executable: string, vaultPaths: readonly string[], daemon: DaemonFacts, proxyImage: string) {
+  private constructor(
+    executable: string,
+    vaultPaths: readonly string[],
+    daemon: DaemonFacts,
+    proxyImage: string,
+    credentials: ReadonlyMap<string, string>,
+    relayTrust: string | undefined,
+  ) {
     this.#executable = executable;
     this.#vaultPaths = vaultPaths;
     this.#daemon = daemon;
     this.#proxyImage = proxyImage;
+    this.#credentials = credentials;
+    this.#relayTrust = relayTrust;
+  }
+
+  /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
+  get #relayOptions(): RelayOptions {
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
   }
 
   /** The options the proxy's own lifecycle commands run under. */
@@ -299,8 +377,10 @@ export class LocalDockerProvider implements SandboxProvider {
   static async create(options: LocalDockerOptions): Promise<LocalDockerProvider> {
     const executable = options.executable ?? 'docker';
     const daemon = await probeDaemon(executable);
+    const credentials = heldCredentials(options.credentials);
     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
-    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE);
+    const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust);
   }
 
   /** What the probe established about the daemon behind this provider. */
@@ -316,6 +396,16 @@ export class LocalDockerProvider implements SandboxProvider {
   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
     const plan = checkEgress(spec.egress);
+    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()));
+    if (plan.mode === 'allowlist' && relayPlan !== undefined && plan.hosts.includes(relayPlan.upstreamHost)) {
+      // The proxy would be a second route to the host the relay exists to be the only route to.
+      // Both are the runtime's to choose, and a spec that chose both contradicts itself (external review, codex-2).
+      refuse(
+        'relay',
+        `egress.allow names ${relayPlan.upstreamHost}, the relay's upstream host. The relay is the sandbox's only route to its upstream, ` +
+          'and an allowlist that also reaches it is a route around the grant; the spec is refused rather than half-applied.',
+      );
+    }
     checkLimits(spec.limits);
     checkUser(spec.user);
 
@@ -331,27 +421,34 @@ export class LocalDockerProvider implements SandboxProvider {
     // I10: no Greek name in code, container names included. This one reaches `docker ps`.
     const id = randomUUID();
     const name = `sandbox-${id}`;
-    const egress = await this.#applyEgress(id, plan);
+    const egress = await this.#applyEgress(id, plan, relayPlan);
     try {
       return await this.#start(spec, mounts, name, egress);
     } catch (error) {
-      // Whatever refused, the proxy and its networks were created for a sandbox that does not
-      // exist. They go with it: a leaked route out is worse than the failure that caused it.
-      if (egress.mode === 'allowlist') await stopProxy(egress.proxy, this.#proxyOptions);
-      throw error;
+      // Whatever refused, the proxy, the relay, and their networks were created for a sandbox that
+      // does not exist. They go with it: a leaked route out is worse than the failure that caused it,
+      // and one that would not go is reported beside that failure, never instead of it or not at all.
+      throw withLeftovers(error, await this.#stopSidecars(egress));
     }
   }
 
   /**
-   * Starts the proxy an allowlist needs, or nothing at all.
+   * Starts the proxy an allowlist needs and the relay a spec asked for, or
+   * nothing at all.
    *
-   * `deny-all` is untouched by this unit: no network is created, no proxy is
+   * `deny-all` without a relay is untouched: no network is created, nothing is
    * started, and the container is given `--network none` exactly as before.
-   * Starting a proxy beside a sandbox entitled to no egress would put a route
-   * out next to the one policy that asked for none.
+   * `deny-all` with a relay puts the sandbox on an internal network that
+   * carries the relay alone (D-P12-02). Starting a proxy beside a sandbox
+   * entitled to no egress would put a route out next to the one policy that
+   * asked for none, and nothing here does.
    */
-  async #applyEgress(id: string, plan: EgressPlan): Promise<AppliedEgress> {
-    if (plan.mode === 'deny-all') return { mode: 'deny-all', network: 'none' };
+  async #applyEgress(id: string, plan: EgressPlan, relayPlan: RelayPlan | undefined): Promise<AppliedEgress> {
+    if (plan.mode === 'deny-all') {
+      if (relayPlan === undefined) return { mode: 'deny-all', network: 'none' };
+      const relay = await this.#startRelay(id, relayPlan, undefined);
+      return { mode: 'deny-all', network: relay.internalNetwork, relay };
+    }
     let proxy: AppliedProxy;
     try {
       proxy = await startProxy(id, plan.hosts, this.#proxyOptions);
@@ -365,7 +462,40 @@ export class LocalDockerProvider implements SandboxProvider {
           (error instanceof Error ? error.message : String(error)),
       );
     }
-    return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy };
+    if (relayPlan === undefined) return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy };
+    let relay: AppliedRelay;
+    try {
+      relay = await this.#startRelay(id, relayPlan, { internal: proxy.internalNetwork, outbound: proxy.outboundNetwork });
+    } catch (error) {
+      throw withLeftovers(error, await stopProxy(proxy, this.#proxyOptions));
+    }
+    return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy, relay };
+  }
+
+  /**
+   * Starts a relay, or refuses. The credential is read from this provider's
+   * own map here and handed to the relay container alone; `checkRelay` has
+   * already refused a name the map does not hold.
+   */
+  async #startRelay(id: string, plan: RelayPlan, shared: { internal: string; outbound: string } | undefined): Promise<AppliedRelay> {
+    const credential = this.#credentials.get(plan.credential);
+    if (credential === undefined) refuse('relay', `the credential ${JSON.stringify(plan.credential)} is not held by this provider`);
+    try {
+      return await startRelay(id, plan, credential, this.#relayTrust, shared, this.#relayOptions);
+    } catch (error) {
+      refuse(
+        'relay',
+        'the model relay could not be started, so no sandbox was provisioned: ' + (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  /** Removes the relay and then the proxy, in that order: the proxy's networks cannot go while the relay is on them. */
+  async #stopSidecars(egress: AppliedEgress): Promise<Error | undefined> {
+    const relay = relayOf(egress);
+    const relayFailure = relay === undefined ? undefined : await stopRelay(relay, this.#relayOptions);
+    const proxyFailure = egress.mode === 'allowlist' ? await stopProxy(egress.proxy, this.#proxyOptions) : undefined;
+    return relayFailure ?? proxyFailure;
   }
 
   async #start(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): Promise<SandboxHandle> {
@@ -504,8 +634,8 @@ export class LocalDockerProvider implements SandboxProvider {
   }
 
   /**
-   * Removes everything one sandbox was given: the container, and under an
-   * allowlist the proxy container and both its networks.
+   * Removes everything one sandbox was given: the container, its relay, and
+   * under an allowlist the proxy container, and the networks either created.
    *
    * The proxy goes with the sandbox it serves and with nothing else. A proxy
    * that outlived its sandbox would be a route out with no workload behind it
@@ -516,9 +646,8 @@ export class LocalDockerProvider implements SandboxProvider {
   async #dismantle(controls: AppliedControls): Promise<Error | undefined> {
     // The container first: a network still holding an endpoint cannot be removed.
     const container = await this.#remove(controls.containerId);
-    if (controls.egress.mode === 'deny-all') return container;
-    const proxy = await stopProxy(controls.egress.proxy, this.#proxyOptions);
-    return container ?? proxy;
+    const sidecars = await this.#stopSidecars(controls.egress);
+    return container ?? sidecars;
   }
 
   /**

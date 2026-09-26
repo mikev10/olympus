@@ -1,6 +1,6 @@
 /**
- * What the model-calling assertions share: a real container, a real egress
- * allowlist, and a real credential.
+ * What the model-calling assertions share: a real container, a real model
+ * relay, and a real credential — held by the relay, never by the container.
  *
  * **These assertions require a Docker daemon and an `ANTHROPIC_API_KEY`, and
  * they fail without either.** They are never skipped. An assertion that
@@ -13,20 +13,56 @@
  * They also cost money. Every task in this file is the smallest one that can
  * prove its point, and the prompts ask for one word wherever a word will do.
  */
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { afterAll, expect } from 'vitest';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { ExecOptions, LocalDockerProvider, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import { CREDENTIAL_VARIABLE, ClaudeCodeDriver, ensureImage, type ClaudeCodeDriverOptions } from '../src/index.js';
+import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
 
 /**
- * The one host the sandbox may reach. The allowlist grants the API and nothing
- * else, so a task that wanted anything more — a package registry, an analytics
- * endpoint — is refused by the proxy rather than quietly served.
+ * Where the host's credential is read from, to be handed to the provider. The
+ * same name the CLI reads its key from, which is a coincidence of convention:
+ * inside the sandbox that variable carries a placeholder.
  */
-export const API_HOST = 'api.anthropic.com';
+export const HOST_CREDENTIAL_VARIABLE = 'ANTHROPIC_API_KEY';
+
+/**
+ * What this file's model calls cost, as the CLI reported each one. Every exec
+ * passes through the harness's provider, so this sees every call: a task's, a
+ * subagent's, and a tool-inventory inspection's, whether or not an assertion
+ * then passed. Printed per call and per file, so a CI log says where the money
+ * went instead of leaving it to be guessed from the account's bill.
+ */
+const spent = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+
+function recordCost(stdout: string): void {
+  const usage = parseStream(stdout).result?.usage;
+  if (usage === undefined) return;
+  spent.calls += 1;
+  spent.inputTokens += usage.inputTokens;
+  spent.outputTokens += usage.outputTokens;
+  spent.cacheReadTokens += usage.cacheReadTokens;
+  spent.cacheWriteTokens += usage.cacheWriteTokens;
+  spent.costUsd += usage.costUsd;
+  console.log(
+    `[model-cost] ${expect.getState().currentTestName ?? '(outside a test)'}: ` +
+      `in ${String(usage.inputTokens)}, out ${String(usage.outputTokens)}, ` +
+      `cache read ${String(usage.cacheReadTokens)}, cache write ${String(usage.cacheWriteTokens)}, $${usage.costUsd.toFixed(4)}`,
+  );
+}
+
+afterAll(() => {
+  if (spent.calls === 0) return;
+  console.log(
+    `[model-cost] file total: ${String(spent.calls)} calls, in ${String(spent.inputTokens)}, out ${String(spent.outputTokens)}, ` +
+      `cache read ${String(spent.cacheReadTokens)}, cache write ${String(spent.cacheWriteTokens)}, $${spent.costUsd.toFixed(4)}`,
+  );
+});
 
 /** Where the workspace mount lands inside the container, and where the driver runs. */
 export const WORKDIR = '/workspace';
@@ -38,10 +74,10 @@ export const BUDGET: Budget = { maxTokens: 20_000, maxCostUsd: 1, maxWallClockMs
  * rather than captured, so a test that unsets it sees it gone.
  */
 export function credential(): string {
-  const value = process.env[CREDENTIAL_VARIABLE];
+  const value = process.env[HOST_CREDENTIAL_VARIABLE];
   if (value === undefined || value.trim() === '') {
     throw new Error(
-      `${CREDENTIAL_VARIABLE} is not set. The driver's capability claims are proven against a real model call, ` +
+      `${HOST_CREDENTIAL_VARIABLE} is not set. The driver's capability claims are proven against a real model call, ` +
         'so they refuse rather than skip when there is no credential: a claim asserted by a test that did not run ' +
         'is worse than a claim reported pending.',
     );
@@ -70,9 +106,12 @@ function spec(image: string, workspaceDir: string): SandboxSpec {
   return {
     image,
     mounts: { workspace: { source: workspaceDir, target: WORKDIR, mode: 'rw' }, others: [] },
-    // The allowlist P10 delivers. `deny-all` cannot reach the model API at
-    // all, which is why P5 waited for it.
-    egress: { mode: 'allowlist', allow: [API_HOST] },
+    // No egress at all: the relay is the sandbox's one route, and it reaches
+    // the API's messages endpoint and nothing else (P12). A task that wanted
+    // anything more — a package registry, an analytics endpoint, the API host
+    // directly — has no route to it.
+    egress: { mode: 'deny-all', allow: [] },
+    relay: { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] },
     limits: { cpus: 2, memoryMb: 2048, pids: 512, wallClockMs: 600_000 },
     // The image's own `node` user (image/Dockerfile), which the CLI's home belongs to.
     user: { uid: 1000, gid: 1000 },
@@ -113,7 +152,8 @@ export async function withDriver<T>(
   const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
   // A Vault root that exists and holds nothing: the provider requires one, and
   // no mount here may be it, sit inside it, or contain it (I1).
-  const provider = await Provider.create({ vaultPaths: [vaultDir] });
+  // The credential goes to the provider, which gives it to the relay and to nothing else.
+  const provider = await Provider.create({ vaultPaths: [vaultDir], credentials: { [MODEL_CREDENTIAL]: secret } });
   const handle = await provider.provision(spec(image, workspaceDir));
 
   // The driver is given a provider that reports each exec as it starts and
@@ -128,13 +168,15 @@ export async function withDriver<T>(
     exec: async (h: SandboxHandle, cmd: string[], o?: ExecOptions) => {
       const leave = watcher?.();
       try {
-        return await provider.exec(h, cmd, o);
+        const result = await provider.exec(h, cmd, o);
+        recordCost(result.stdout);
+        return result;
       } finally {
         leave?.();
       }
     },
   };
-  const driver = new ClaudeCodeDriver({ provider: watched, credential: secret, workdir: WORKDIR, ...options });
+  const driver = new ClaudeCodeDriver({ provider: watched, workdir: WORKDIR, ...options });
   // The run tells the driver which sandbox its artifacts belong in. `emitArtifacts`
   // takes a target directory and no handle, so a driver that has not been told
   // refuses rather than writing to the host (I1) — which is what it did the first
@@ -229,7 +271,7 @@ const PREFIX_RULES: readonly string[] = [
  * The same trick the egress proxy uses (`PROXY_SOURCE`): no image to build, no
  * mount, and nothing between this source and what runs. It exists so the `mcp`
  * claim can be proven without reaching a package registry — the sandbox's
- * allowlist grants the model API and nothing else, so an assertion that had to
+ * one route is the model relay, so an assertion that had to
  * `npx` a server would fail for a reason that has nothing to do with MCP.
  *
  * It speaks the newline-delimited JSON-RPC the CLI expects and offers two
@@ -284,3 +326,74 @@ export const MCP_SERVER_SOURCE = [
   "  send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'no such method' } });",
   '}',
 ].join(String.fromCharCode(10));
+
+/**
+ * The environment and argument vector of every process the container user can
+ * read, read from inside the sandbox the way P5's review read the credential
+ * out of it (D-P5-20). The text comes back to the host, which does the
+ * searching, so the value being looked for is never sent into the container.
+ */
+export const PROCESS_DUMP = 'for p in /proc/[0-9]*; do cat "$p/environ" "$p/cmdline" 2>/dev/null; printf "\n"; done';
+
+/**
+ * Whether `secret` appears anywhere in a container's own filesystem, searched
+ * from the host through `docker export`. Nothing runs inside the container and
+ * the secret is never sent into it; the export covers every file whoever may
+ * read it, and none of the mounts, which a caller searches on the host.
+ */
+export function exportContains(container: string, secret: string): Promise<boolean> {
+  const needle = Buffer.from(secret, 'utf8');
+  return new Promise((resolve, reject) => {
+    const child = spawn('docker', ['export', container], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let tail = Buffer.alloc(0);
+    let found = false;
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (found) return;
+      const window = Buffer.concat([tail, chunk]);
+      if (window.includes(needle)) {
+        found = true;
+        return;
+      }
+      tail = window.subarray(Math.max(0, window.length - needle.length + 1));
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0 && !found) reject(new Error(`docker export exited ${String(code)}: ${stderr.trim()}`));
+      else resolve(found);
+    });
+  });
+}
+
+/**
+ * Whether `secret` appears anywhere under a host directory: every file at every
+ * depth, and the text of every link, which is read and never followed. It
+ * searches the workspace mount, which `exportContains` does not reach.
+ *
+ * Anything it cannot read refuses rather than counting as clean: a directory
+ * read as a file, an unreadable entry, or a special file would otherwise be
+ * searched as the empty string, and a scan that reports "found nothing"
+ * because it looked nowhere is not evidence (external review, codex-1).
+ */
+export async function workspaceContains(dir: string, secret: string): Promise<boolean> {
+  for (const entry of await readdir(dir)) {
+    const path = join(dir, entry);
+    const stat = await lstat(path);
+    let found: boolean;
+    if (stat.isDirectory()) found = await workspaceContains(path, secret);
+    else if (stat.isSymbolicLink()) found = (await readlink(path)).includes(secret);
+    else if (stat.isFile()) found = (await readFile(path, 'utf8')).includes(secret);
+    else throw new Error(`${path} is neither a file, a directory, nor a link, so it cannot be searched`);
+    if (found) return true;
+  }
+  return false;
+}
+
+/** Runs `docker` on the host and returns its stdout. For reading evidence about a container, never for running a task. */
+export async function dockerOut(args: string[]): Promise<string> {
+  const { stdout } = await promisify(execFile)('docker', args, { maxBuffer: 16 * 1024 * 1024 });
+  return stdout;
+}

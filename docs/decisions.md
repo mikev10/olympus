@@ -2330,3 +2330,113 @@ The entries below come from the external review, triaged in `docs/reviews/2026-0
 A required `user: { uid, gid }`. `LocalDockerProvider` passes `--user uid:gid`; on a Linux host it refuses a rw workspace that user cannot write, with the new refusal layer `user`, and refuses a uid or gid that is not a whole number of zero or more. Docker Desktop maps every container user onto the host user, so there is nothing to refuse there, and the write lands. `StubSandboxProvider` ignores the user and declares it. Asserted by `I5.workspace-is-writable-by-the-task` and in `packages/sandbox`'s own suite, which require a refusal on Linux and a landed write elsewhere, and never a sandbox whose task cannot write.
 
 Creating an entry in a directory takes both write and search permission, and the check first tested write alone, so a workspace at mode `0600` passed for its own owner, who could then create nothing in it (external review, codex-8). The rule is now `canCreateIn` in `packages/sandbox/src/local/ownership.ts`, which requires both bits from the one class the user falls in. It is unit-tested on every host, and the I5 assertion adds the `0600` case on Linux.
+
+## P12: Credential at the egress layer
+
+Proposed with the unit spec and approved by the maintainer before any code, each as recommended. Each entry names the option not taken, so a reversal is a choice between two stated shapes rather than a redesign.
+
+### D-P12-01: The relay is its own container, not a second listener in the egress proxy
+
+- **Ambiguous:** the entry says the credential moves "into" the P10 proxy, and the proxy is already the provider-owned process on the sandbox's only route out.
+- **Options:** (A) a second provider-owned container, the relay, on the same internal network; (B) a second listener inside the existing proxy container.
+- **Chosen: A**, with the maintainer. The proxy is `--read-only` with the comment "the proxy holds no secret", and P10's assertions rest on it being a blind tunnel that reads nothing. Putting the credential in the process that also tunnels every allowlisted connection joins the one component that must stay ignorant of traffic to the one component that must read it. A separate container keeps P10's proxy and its assertions exactly as reviewed, lets a `deny-all` sandbox have a relay with no proxy at all (D-P12-02), and costs one more container per credentialed sandbox.
+- **Reverse:** move the relay's request handler into `PROXY_SOURCE` behind a second port, and give the proxy the credential environment.
+
+### D-P12-02: A relay is independent of the egress mode
+
+- **Ambiguous:** a build task that needs the model and no other host has no shape today: `deny-all` is `--network none`, and an `allowlist` with an empty list is refused.
+- **Options:** (A) `SandboxSpec.relay` is orthogonal to `egress`; under `deny-all` a relay puts the sandbox on an internal network holding the relay alone, and `deny-all` without one is unchanged; (B) a relay is accepted only beside an `allowlist`, so a task that needs the model alone must be granted some host it does not need.
+- **Chosen: A**, with the maintainer. B forces a grant nobody asked for to get a route nobody else can use, which is I4 read backwards. A keeps P10's `deny-all` assertion byte-for-byte for every sandbox without a relay, and the relay is not egress in P10's sense: the sandbox reaches one provider-owned endpoint, which reaches one fixed origin.
+- **Reverse:** refuse `relay` unless `egress.mode === 'allowlist'`.
+
+### D-P12-03: The sandbox holds a fixed placeholder, not a per-sandbox token
+
+- **Ambiguous:** the entry allows "a placeholder, a short-lived token, or nothing". The CLI needs some value in its key variable, and the driver refuses a session whose key came from anywhere else.
+- **Options:** (A) a fixed placeholder the relay ignores, the relay authenticating its client by network position — only its own sandbox's internal network reaches it; (B) a random token per sandbox, set in the container and checked by the relay.
+- **Chosen: A**, with the maintainer. A token the CLI can send is a token every process in the sandbox can read, so it authenticates nothing the network position does not already: the relay is reachable only from a network one sandbox is on, verification sandboxes get no relay, and the P11 probe that will share the sandbox's network is the runtime's own. B adds a secret-shaped value, a comparison, and a way for the relay to fail, for no threat that A leaves open.
+- **Reverse:** generate a token at provisioning, set it through the spec as a second variable, and refuse any request that does not carry it.
+
+### D-P12-04: The relay forwards a granted set of path prefixes on one origin
+
+- **Ambiguous:** the entry says the provider "authenticates the upstream request" and does not say which requests.
+- **Options:** (A) the spec names one `https` origin and a non-empty list of path prefixes, and the relay refuses everything else; (B) one origin, any path.
+- **Chosen: A**, with the maintainer. An API key reaches more than the messages endpoint — batches and files store data on the account and outlive the sandbox. Default deny applies to what the credential can do, not only to where it can go. The Claude Code driver's grant is set by what its CLI is observed to call with non-essential traffic off, and the relay's refusals name the path, so an under-grant is a loud, specific failure in the claim suite rather than a silent one.
+- **Reverse:** drop `paths` from `RelaySpec` and forward every path to the upstream.
+
+### D-P12-05: The driver exports its relay request; the `Driver` contract is not amended
+
+- **Ambiguous:** something has to tell whoever provisions a sandbox which relay the driver's CLI needs. In this unit that is the driver's own test harness; in the line it will be `packages/api`, which is I1's to wire.
+- **Options:** (A) `packages/drivers/claude-code` exports the relay request as a constant, and a contract method waits for a consumer that holds a driver by its contract; (B) `Driver` gains a method returning it now.
+- **Chosen: A**, with the maintainer. No code in this unit would call B through the contract, so it would be an amendment with no first use — the thing WORKFLOW.md says amendments come from. It also puts a sandbox type into `core`'s driver contract, a dependency direction nothing has needed yet. I1 decides the method's shape when it wires the driver, with a second driver (M2) in view.
+- **Reverse:** add the method to `packages/core/src/driver/contract.ts`, implement it on `StubDriver` and the Claude Code driver, and have the harness call it.
+
+### D-P12-06: The relay's registry assertion is a runtime entry, not an external one
+
+- **Ambiguous:** the spec named `I4.model-relay-forwards-only-its-grant` as "external in `@olympus-ai/sandbox`". The sandbox's Docker-backed invariants have never been external: `I5.sandbox-egress-allowlist-enforced` and the mount assertions are `runtime` entries the registry runs itself through `local-sandbox.ts`, and `@olympus-ai/sandbox` has no conformance reporter.
+- **Chosen:** a `runtime` entry in `packages/conformance/src/registry/local-relay.ts`, beside the P10 assertion it follows. Making it external would add the reporter to the sandbox's vitest config and a dependency on conformance — two gate-path changes to reach the same evidence by a longer route. `packages/sandbox/test/relay.test.ts` carries the fuller suite, as `egress.test.ts` does for P10.
+- **Reverse:** add `@olympus-ai/conformance/reporter` to `packages/sandbox/vitest.config.ts`, register the entry as `external`, and wrap the sandbox test in `invariantTest`.
+
+### D-P12-07: The CLI's startup probe is refused, and the grant stays one path
+
+- **Found:** against a fake upstream, the pinned CLI (2.1.277) sends `HEAD /api/hello` at startup, then `POST /v1/messages?beta=true`, even with non-essential traffic off. With the probe answered 403 the CLI carries on and the model call is made.
+- **Chosen:** `MODEL_RELAY.paths` is `['/v1/messages']` alone. Forwarding the probe would attach the credential to a request no task needs, which is what D-P12-04 exists to stop. The relay logs each refusal by method and path, so a CLI upgrade that starts to depend on another path fails the claim suite loudly and names it.
+- **Reverse:** add `/api/hello` to `MODEL_RELAY.paths`.
+
+### D-P12-08: An absolute-form target is refused, not rewritten
+
+- **Ambiguous:** the spec said the relay "ignores" absolute-form targets.
+- **Chosen:** refused with 400. Rewriting one onto the upstream would forward a request whose author named a different origin, and the author is the task; refusing states the rule instead of guessing past it. The `Host` header, which a client sends on every request, is discarded and replaced with the upstream's, as the spec says.
+- **Reverse:** strip the origin from an absolute-form target and forward its path.
+
+### D-P12-09: The relay suites need `openssl` on the host
+
+- **Why:** the relay verifies its upstream's certificate, so a hermetic test needs an upstream with a certificate the relay can be told to trust. Node cannot make an X.509 certificate, and committing a private key as a fixture would put one in the repository for a secret scanner to flag. `openssl` ships on every CI runner and with Git for Windows. The suites fail rather than skip without it, as they do without Docker.
+- **Reverse:** commit a long-lived fixture certificate and key, or generate one inside a container.
+
+## P12 amendments to the contracts
+
+### A-P12-01: `SandboxSpec.relay`
+
+An optional `relay: RelaySpec` — `upstream`, `paths`, `header`, `credential`, `urlVariable` — declared in `packages/sandbox/src/types.ts` with the obligations an implementation carries: keep the credential out of the sandbox, and refuse an unheld credential, a non-`https` upstream, or an empty grant rather than provision a sandbox whose model calls fail later, and refuse an allowlist naming the upstream's host (D-P12-11). The spec names a credential and never carries one, because a `SandboxSpec` is a record the runtime may keep. Reasoned in D-P12-01 to D-P12-04.
+
+`LocalDockerProvider` implements it and refuses at the new `relay` refusal layer; `StubSandboxProvider` refuses every relay, since it runs commands on the host beside whatever the host holds. `ExecOptions.env`'s documentation now says what D-P5-20 found: a value passed that way is not confidential from the task, so a model credential is not passed that way. Asserted by `I4.model-relay-forwards-only-its-grant` and `I4.model-credential-not-readable-by-the-task`, and in `packages/sandbox/test/relay.test.ts`.
+
+### D-P12-10: The driver keeps tool search on behind the relay
+
+- **Found:** the first funded run of the driver suite failed `I4.driver-tool-inventory-validated`: a session granted every declared tool came up without `ToolSearch`. Shown without a model call: the pinned CLI (2.1.277) offers `ToolSearch` with no base URL set and drops it when `ANTHROPIC_BASE_URL` names any other host, and `ENABLE_TOOL_SEARCH=true` restores it. The driver refused the narrowed session, as it should.
+- **Chosen:** the driver sets `ENABLE_TOOL_SEARCH=true` on every exec. The CLI's default guards against third-party gateways that may not carry the beta; the relay forwards to the API itself with headers and query intact, so the guard does not apply.
+- **Reverse:** drop `ToolSearch` from `DECLARED_TOOLS` instead, so no grant can name a tool a relayed session does not offer.
+
+The entries below come from the external review, triaged in `docs/reviews/2026-09-25-P12-credential-relay-triage.md`. Codex raised four findings, and all of them held, two only in part. Gemini raised none.
+
+### D-P12-11: An allowlist naming the relay's upstream host is refused
+
+- **Found:** the provider handed the allowlist to the proxy without comparing it with the relay's upstream. A spec whose `egress.allow` named that host gave the sandbox a second route to it, a proxy `CONNECT`, beside the relay. The credential stays in the relay either way, so nothing is exposed, but the relay stops being the only route to its upstream, which is what D-P12-02 and the P12 entry say it is. The test covered only a disjoint allowlist (external review, codex-2).
+- **Chosen:** `LocalDockerProvider.provision` refuses such a spec at the `relay` layer, before any container starts, and `RelaySpec`'s documentation makes the refusal an obligation on every implementation (A-P12-01). Hosts are compared after the same normalization on both sides, so case does not get around it. A refusal is used rather than a proxy that excludes the host: both halves of the spec are the runtime's, a spec asking for both contradicts itself, and I5 refuses a contradiction instead of choosing half of it.
+- **Asserted by:** `packages/sandbox/test/relay.test.ts`, which failed before the fix.
+- **Limit:** the comparison is by name. An allowlist entry that reaches the same service under another name, or by address, is not detected. The allowlist is written by the runtime from policy, and the task cannot add to it.
+
+### D-P12-12: A relay's teardown attempts every step and reports every failure
+
+- **Found:** the relay's teardown stopped at the first `docker` call that threw (a timeout, or a `docker` that could not be run), so its networks were never attempted. Two failed-start paths, `startRelay` and `provision`, discarded whatever the cleanup reported and rethrew only the original error, so a relay container still holding its credential could stay on the host with nothing reporting it (external review, codex-3). A relay left behind sits alone on its own sandbox's network, which no sandbox reaches, so the credential stays on the host, inside the trust boundary. The failure was that the leftover went unreported, not that the sandbox could read the credential.
+- **Chosen:** each teardown step catches its own failure, and every step runs. The returned error names each object left behind. `startRelay`, `provision`, and the relay-start path in `#applyEgress` report a cleanup failure together with the error that caused it (`withLeftovers`), and a refusal keeps its layer.
+- **Asserted by:** `packages/sandbox/test/relay.test.ts`, both of which failed before the fix.
+- **Not changed here:** the egress proxy's teardown (`proxy.ts`, P10) has the same shape, and a proxy teardown that throws still ends `#stopSidecars` early. It is P10's code and outside this unit's scope; it is recorded in the triage for an issue.
+
+### D-P12-13: The workspace is searched at every depth, and an entry it cannot read refuses
+
+- **Found:** `I4.model-credential-not-readable-by-the-task` searched the workspace mount one level deep. It turned every read failure into the empty string, so a directory counted as a clean file. A credential written to `/workspace/subdir/key` would have been reported absent, and `docker export` does not reach the mount. The control wrote to `/tmp`, which exercised the export and not the workspace scan (external review, codex-1).
+- **Chosen:** `workspaceContains` in the driver's test harness walks the mount at every depth with `lstat`, reads link text without following the link, and throws on an entry that is not a file, a directory, or a link, or that it cannot read. The control now writes its canary two directories deep in the workspace as well, and requires the scan to find it.
+- **Asserted by:** the registry assertion itself. It runs with the driver suite in CI, not locally. Without a model call, the old loop was shown to miss a nested file that the new helper finds.
+
+### D-P12-14: Absence in the relay suite is Docker's "not found", and the relay's refusals are its own
+
+- **Found:** the relay suite's `containerExists` and `networkExists` read any inspection error as absence, and one teardown test made no positive check first. Its startup-refusal test accepted any non-zero exit, including a missing image or daemon, with no control (external review, codex-4).
+- **Chosen:** absence is only Docker's own "No such container" or "not found". Any other failure is thrown. The allowlist teardown test now checks that each object existed before destroying it. The startup test requires exit status 1 and the relay's own `model-relay:` diagnostic for each missing piece, beside a control in which the same image, program, and flags with nothing missing leave a relay running.
+- **Not changed here:** `egress.test.ts` (P10) and `local.test.ts` (P2) carry the same permissive helpers. Recorded in the triage for an issue.
+
+### D-P12-15: The driver suite stops at its first failure, and prints what each model call cost
+
+- **Found:** with the account out of credit, a CI run answered all nine driver tests with the same API 400, one paid attempt after another. Nothing recorded what a passing run costs: the driver reads each call's usage and cost from the CLI (P5), but per-run reporting is I1's and R2's, and the suite's own spend was never tracked, although P5 said it costs money.
+- **Chosen:** the driver package's vitest config sets `bail: 1`, so the first failure stops the rest. A stopped test is reported skipped, which the registry refuses as it refuses a failure, so nothing is weakened. The harness's provider wrapper parses every exec's stream and prints `[model-cost]` lines, for each call and a total for each file: tokens, cache reads and writes, and dollars. It sees every call, including subagents and tool-inventory inspections.
+- **Next:** the budget unit after P12 moves per-run cost reporting forward from I1 and R2 and enforces `Budget` at the relay. These log lines measure what that unit is meant to reduce.
