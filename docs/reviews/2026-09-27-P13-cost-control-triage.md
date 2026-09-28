@@ -33,21 +33,24 @@ marker. Findings are cited by family and number.
   of who wrote the code. Every verdict below agrees with its subagent.
   codex-4 and codex-5 were checked by reading the cited code directly and, for
   codex-5, by running the changed test.
-- **Executed evidence:** the relay meter suite (`meter.test.ts`, 26 tests)
-  passed against the unmodified tree. The mutation that codex-4 proposes
-  (remove `acquire`/`release`) was **not run**: this session's permission
-  classifier refused both the mutation and a later read of the test upstream.
-  codex-4's verdict therefore rests on reading, and the fixes for codex-2 and
-  codex-4 are owed (see Outcomes).
+- **Executed evidence:** at first, this session's permission classifier
+  refused the codex-4 mutation and a read of the test upstream. The
+  maintainer then asked for the codex-2 and codex-4 fixes, and both were
+  shown failing before they were trusted. The codex-2 test ran against the
+  unfixed relay and failed, because the call after the hang-up was admitted
+  (`[502, 200]`, where `[502, 402]` was expected). The codex-4 test ran with
+  `acquire` reduced to `turn()` and `release` to a no-op, and failed, because
+  all four concurrent calls were admitted (`[200, 200, 200, 200]`). The queue
+  was then restored.
 
 ## Findings
 
 | ID | Finding | Raised by | Verdict | Outcome |
 |---|---|---|---|---|
 | codex-1 | An unreadable call is charged `max_tokens` as output only, and the totals present that figure as exact | codex | Holds in part | Known limit, owned by I1 (D-P13-19) |
-| codex-2 | A transport failure after the request is sent, but before headers arrive, is charged zero and leaves the budget usable | codex | Holds | Fix now: **owed, not applied** |
+| codex-2 | A transport failure after the request is sent, but before headers arrive, is charged zero and leaves the budget usable | codex | Holds | Fixed |
 | codex-3 | A lost reading, or a record stored without its ref, drops a spent call from the totals across resume | codex | Holds | Known limit, owned by I1 (D-P13-20) |
-| codex-4 | No test fails if the one-call-at-a-time queue is removed | codex | Holds | Fix now: **owed, not applied** |
+| codex-4 | No test fails if the one-call-at-a-time queue is removed | codex | Holds | Fixed (test added) |
 | codex-5 | The model-price test passes with an empty table and claims a property it cannot check | codex | Holds | Fixed |
 
 ## codex-1: the unreadable charge is not a ceiling
@@ -96,14 +99,27 @@ count, and the rule this unit sets is that such a call is charged or refused,
 never forwarded free. The task probably cannot force a vendor-side connection
 failure. The zero charge is still certain, and a retry is admitted after it.
 
-**Outcome:** fix now, and **owed**. The fix: track whether the outbound
-request finished sending (the `finish` event). A failure before that point is
-provably unsent and is charged nothing, as today. A failure after it is
-charged as unreadable, like a call cut off at close. That is D-P13-04's
-chosen option applied to a case it did not name. The test needs the test
-upstream to accept a body and then hang up without answering, and it must be
-shown failing on the current relay. That work was not done in this session
-(see Executed evidence).
+**Fixed.** The relay now tracks whether a metered request was sent whole,
+marked by the outbound request's `finish` event. A call that fails with no
+answer after that point is charged as unreadable, the same as a call cut off
+at close, so the budget is marked `unreadable` and every later call is
+refused. A failure before that point is provably unsent and is still charged
+nothing. That is D-P13-04's chosen option applied to a case it did not name.
+It is recorded as an "Also" on D-P13-04 and in the changeset.
+
+Two tests were added to `meter.test.ts`, with a `hangup` switch in the test
+upstream that reads the whole request and closes without answering:
+
+- **Sent, never answered:** statuses `[502, 402]`, one POST upstream, and a
+  reading of `calls: 1`, `outputTokens: 64`, `exhausted: 'unreadable'`,
+  `refused: 1`. This test failed on the unfixed relay.
+- **Never sent** (no upstream exists, so its name does not resolve): statuses
+  `[502, 502]`, `costUsd: 0`, `exhausted: 'none'`. This test pins the
+  boundary, so the fix does not refuse calls that provably cost nothing.
+
+The cost is availability. After a vendor connection drops mid-call, the
+task's later calls are refused. A retry cannot be allowed after a call whose
+cost is unknown.
 
 ## codex-3: unaccounted invocations can disappear across resume
 
@@ -136,16 +152,17 @@ The in-flight test's loop sends its next request only after the previous
 answer ends. With at most one metered call outstanding, a no-op queue behaves
 the same, so every current test would still pass.
 
-**Holds**, by reading. The mutation was not executed. D-P13-13 chose the
-queue specifically to make the stated one-call overshoot true, and each
-capability claim needs an assertion that fails when the capability is
-deleted. This one has none.
+**Holds.** D-P13-13 chose the queue specifically to make the stated one-call
+overshoot true, and each capability claim needs an assertion that fails when
+the capability is deleted. This one had none.
 
-**Outcome:** fix now, and **owed**. The test: hold the first upstream answer
-open, send several metered requests at once, and assert that the upstream saw
-exactly one. Then let that answer cross the budget, and assert that every
-queued request is refused. It must be shown failing with `acquire` reduced to
-`turn()`.
+**Fixed.** A test was added to `meter.test.ts`: "calls sent at once reach
+the upstream one at a time". The test client gained a `concurrent` mode, and
+the test upstream a `hold` delay before answering. Four metered requests are
+sent at once, each answer held for a second, under a dollar bound that the
+first call crosses. The test requires statuses `[200, 402, 402, 402]`, one
+POST upstream, and `calls: 1`, `exhausted: 'cost'`, `refused: 3`. With the
+queue removed, it failed with all four admitted (see Executed evidence).
 
 ## codex-5: the price-coverage test is vacuous
 
@@ -168,9 +185,15 @@ passes (49 tests), and so do typecheck and lint.
 
 ## Gates
 
-- `packages/drivers/claude-code`: `driver.test.ts` 49/49, `tsc --noEmit` and
-  `eslint` clean.
-- `packages/sandbox`: `meter.test.ts` 26/26 on the unmodified relay.
-- The unit's full acceptance run has **not** been repeated after this
-  triage. Two fix-now items are still owed, and the full run belongs after
-  them.
+- `pnpm typecheck`, `pnpm lint`, `typecheck:tooling`: clean. `test:tooling`:
+  239/239.
+- `packages/sandbox`: 148 passed, 2 skipped, including the 29 meter tests.
+- `packages/drivers/claude-code`: `driver.test.ts` 49/49.
+- `packages/conformance`: 202 passed and 13 failed. Every failure is an
+  external entry backed by the funded driver suite, plus the two
+  registry-completeness checks that count those entries. The stored driver
+  report was produced against a driver-package tree that codex-5's test edit
+  has since changed, so conformance correctly refuses it as evidence about
+  other bytes (`tree-changed`). Nothing is wrong with the entries. The funded
+  driver suite has to run again against this tree, which costs API credit,
+  and that run is the maintainer's to authorise.

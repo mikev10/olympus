@@ -2479,6 +2479,7 @@ Proposed with the unit spec and approved by the maintainer before any code, each
 - **Ambiguous:** a stream can end without its final usage (dropped, or an error event mid-stream), and a response can arrive in a form the relay cannot parse.
 - **Options:** (A) a successful response with input usage and no final output usage is charged the request's `max_tokens` as output; one with no readable usage marks the budget `unreadable` and refuses every later call; a model absent from the price table is refused before forwarding; (B) charge what was read and flag the rest.
 - **Chosen: A**, with the maintainer. B makes an unreadable response free, so a task that could provoke one would spend around its budget. A charges the ceiling where one is known and stops where none is. An error response that is not a success is not billed upstream and is charged nothing.
+- **Also** (review fix, codex-2 in `2026-09-27-P13-cost-control-triage.md`): some requests get no response at all. Whether the upstream billed one that was sent whole is unknown, so it is charged as unreadable, and every later call is refused. Only a request that failed before it left the relay is charged nothing. "Sent" is the outbound request's `finish` event.
 - **Reverse:** charge only the usage read, and record the call as `unreadable` without refusing.
 
 ### D-P13-05: `maxTokens` counts all four token classes

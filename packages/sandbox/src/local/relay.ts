@@ -424,7 +424,7 @@ function metered(req, res, target, path) {
       const u = usageReader();
       let reader = null;
       let settled = false;
-      const call = { outbound: null, cut: false };
+      const call = { outbound: null, cut: false, sent: false };
       inFlight.add(call);
       const headers = forwarded(req.headers, DROPPED);
       if (req.headers['content-length'] === undefined) headers['content-length'] = String(body.length);
@@ -432,14 +432,19 @@ function metered(req, res, target, path) {
         if (settled) return;
         settled = true;
         if (reader !== null && reader.end !== undefined && complete) reader.end();
-        // A call the relay cut off at close before any answer may still be billed, so it is charged as unreadable.
+        // A call with no answer may still be billed if the relay cut it off at close, or if
+        // its whole request was sent before it failed, so either is charged as unreadable.
+        // Only a failure before the request left the relay is provably free.
         const status = answer === null ? 0 : answer.statusCode || 0;
-        charge(model, maxTokens, u, answer === null ? call.cut : status >= 200 && status < 300);
+        charge(model, maxTokens, u, answer === null ? call.cut || call.sent : status >= 200 && status < 300);
         inFlight.delete(call);
         release();
         if (closing && inFlight.size === 0) finish();
       }
-      done.outbound = function (outbound) { call.outbound = outbound; };
+      done.outbound = function (outbound) {
+        call.outbound = outbound;
+        outbound.on('finish', function () { call.sent = true; });
+      };
       done.watch = function (answer) {
         const encoding = String(answer.headers['content-encoding'] || 'identity').toLowerCase();
         const type = String(answer.headers['content-type'] || '').toLowerCase();

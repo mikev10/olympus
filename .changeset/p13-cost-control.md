@@ -18,7 +18,9 @@ dollars reach their bound, it refuses every later request with 402 and
 Every other request is refused, because its cost cannot be counted
 (D-P13-12). One metered call is in flight at a time (D-P13-13). A response
 with no final usage is charged its `max_tokens`. One with no readable usage,
-or in an unrequested encoding, marks the budget `unreadable`.
+or in an unrequested encoding, marks the budget `unreadable`. So does a
+request that was sent whole and never answered. A request that failed before
+it left the relay is charged nothing.
 `SandboxProvider.destroy` returns a `MeterReading` (A-P13-02).
 `LocalDockerProvider` reads it after the sandbox container is removed, by
 stopping the relay and summing its per-call log lines against a closing line.

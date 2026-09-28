@@ -126,7 +126,7 @@ interface Answer {
   readonly sent: string | null;
 }
 
-/** A client that sends each request in turn to the relay and reports what came back. Plain Node, no SDK. */
+/** A client that sends each request in turn, or all at once when given `concurrent`, and reports what came back. Plain Node, no SDK. */
 const CLIENT = `
 const http = require('node:http');
 const crypto = require('node:crypto');
@@ -152,14 +152,16 @@ function send(r) {
 let input = '';
 process.stdin.on('data', function (c) { input += c; });
 process.stdin.on('end', async function () {
+  const requests = JSON.parse(input);
   const out = [];
-  for (const r of JSON.parse(input)) out.push(await send(r));
+  if (process.argv[1] === 'concurrent') out.push(...await Promise.all(requests.map(send)));
+  else for (const r of requests) out.push(await send(r));
   process.stdout.write(JSON.stringify(out));
 });
 `;
 
-async function send(handle: SandboxHandle, requests: readonly Sent[]): Promise<Answer[]> {
-  const result = await provider.exec(handle, ['node', '--eval', CLIENT], { stdin: JSON.stringify(requests) });
+async function send(handle: SandboxHandle, requests: readonly Sent[], concurrent = false): Promise<Answer[]> {
+  const result = await provider.exec(handle, ['node', '--eval', CLIENT, ...(concurrent ? ['concurrent'] : [])], { stdin: JSON.stringify(requests) });
   if (result.exitCode !== 0) throw new Error(`the client exited ${String(result.exitCode)}: ${result.stderr}`);
   return JSON.parse(result.stdout) as Answer[];
 }
@@ -249,6 +251,17 @@ describe('the budget binds whatever calls the relay', () => {
     expect(reading).toMatchObject({ calls: 2, inputTokens: 1000, outputTokens: 200, cacheReadTokens: 800, cacheWriteTokens: 600, exhausted: 'tokens', refused: 1 });
   });
 
+  test('calls sent at once reach the upstream one at a time, so a crossing call leaves every call queued behind it refused', async () => {
+    // Each answer is held a second, so without the queue all four would be in flight before the first is charged.
+    const { handle, upstream } = await metered({ maxTokens: 1_000_000_000, maxCostUsd: 0.001 });
+    const usage = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 };
+    const answers = await send(handle, [1, 2, 3, 4].map(() => ({ body: message(usage, {}, { hold: 1000 }) })), true);
+
+    expect(answers.map((a) => a.status).sort()).toStrictEqual([200, 402, 402, 402]);
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, exhausted: 'cost', refused: 3 });
+  });
+
   test('a streamed response and a whole one are metered identically, and both bodies cross the relay byte for byte', async () => {
     const usage = { input: 1000, output: 100, cacheRead: 200, cacheWrite: 300 };
     const readings: MeterReading[] = [];
@@ -315,6 +328,24 @@ describe('what the meter cannot read, it charges or refuses', () => {
     const [answer] = await send(handle, [{ body: message({ input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 }, {}, { status: 529 }) }]);
     expect(answer?.status).toBe(529);
     expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, inputTokens: 0, outputTokens: 0, costUsd: 0, exhausted: 'none' });
+  });
+
+  test('a request the upstream received and never answered is charged as unreadable, and every later call is refused', async () => {
+    const { handle, upstream } = await metered();
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const answers = await send(handle, [{ body: message(usage, {}, { hangup: true }) }, { body: message(usage) }]);
+    expect(answers.map((a) => a.status)).toStrictEqual([502, 402]);
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, outputTokens: 64, exhausted: 'unreadable', refused: 1 });
+  });
+
+  test('a request that never reached the upstream is charged nothing, and the budget stays open', async () => {
+    // No upstream is started, so its name does not resolve and nothing is sent.
+    const handle = await provisioned(specFor({}));
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const answers = await send(handle, [{ body: message(usage) }, { body: message(usage) }]);
+    expect(answers.map((a) => a.status)).toStrictEqual([502, 502]);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 2, outputTokens: 0, costUsd: 0, exhausted: 'none', refused: 0 });
   });
 
   test('a write whose cost the meter cannot count is refused, and token counting is forwarded free', async () => {

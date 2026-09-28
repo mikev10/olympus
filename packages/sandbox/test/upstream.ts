@@ -82,8 +82,10 @@ export async function makeCertificate(): Promise<Certificate> {
  * `POST /v1/messages` answers as the Messages API does, with the usage a meter
  * reads (P13). What it answers is steered by `relay_test` in the request body,
  * which the relay forwards unchanged like the rest: `usage` (the four counts),
- * `omit` (`'final'` drops the output count, `'all'` every count), `status`, and
- * `encoding` (`'gzip'`). `stream: true` answers in server-sent events. It logs
+ * `omit` (`'final'` drops the output count, `'all'` every count), `status`,
+ * `encoding` (`'gzip'`), `hold` (milliseconds before answering), and `hangup`
+ * (`true` reads the whole request and closes without answering). `stream:
+ * true` answers in server-sent events. It logs
  * the SHA-256 of every body it received and sent, so a suite can prove both
  * crossed the relay byte for byte.
  */
@@ -97,6 +99,12 @@ function messages(q, s, body, echo) {
   let request = {};
   try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = {}; }
   const t = request.relay_test || {};
+  // The whole request arrived and no answer ever will: a call the upstream may have billed.
+  if (t.hangup === true) { s.socket.destroy(); return; }
+  // Held back, so other calls can arrive while this one is in flight.
+  setTimeout(function () { answer(s, request, t, body, echo); }, typeof t.hold === 'number' ? t.hold : 0);
+}
+function answer(s, request, t, body, echo) {
   const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
   const status = t.status || 200;
   const usage = t.omit === 'all' ? undefined : {
