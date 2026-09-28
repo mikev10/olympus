@@ -1,3 +1,60 @@
+# External review of P13, codex, 2026-09-27
+
+An adversarial pre-merge review of P13 (Cost control: budget at the relay, cost
+in evidence): the relay's request classification, request and response parsing
+for model and usage, the budget check and charge, the one-call-at-a-time queue,
+the SIGTERM close and closing line, the teardown read of the meter, and the
+recording path from `runTask` through the Vault to `costTotals`. One of two
+reviews run from the same prompt and bundle; the other is
+`2026-09-27-P13-cost-control-review-gemini.md`. Both are triaged in
+`2026-09-27-P13-cost-control-triage.md`, which cites this review's findings as
+`codex-1` to `codex-5`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: `configHome` `["auth.json"]`, `workDir` `[]`. Exit 0, not timed
+  out, 516.5 s. Ingestion `complete`: 203,172 input tokens against a floor of
+  140,793. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `148b45a9f83d0fa7c62e13fa5ebdb0146f584603d8e3f8d8109c3e65a30e7bc0`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** none. Gemini raised no findings. All five
+  findings here were raised by codex alone. Gemini's item-6 answer assessed as
+  sound the charge for an unreadable answer, calling `max_tokens` its
+  "ceiling"; codex-1 disputes that it is a ceiling. The triage records which
+  account the code bore out.
+- **Date:** 2026-09-27 (run started 2026-09-28T02:06Z).
+- **Bundle:** `2026-09-27-P13-cost-control-review-bundle.txt`, SHA-256
+  `4e05a9d6dd31c88d01db9c90c34b8cd10bf9e0e19a4d2e0bf9a85167258ca8dc`, base
+  `5536bdc` (`reviewed/P12`), head `a1764bb` (the P13 implementation commit).
+  It held the full contents of every changed source, test, registry, and
+  package file, the changeset, and `pnpm-lock.yaml`; the three changed docs
+  (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, `docs/plan/F1-spine.md`)
+  were listed in the diffstat and excluded. Prompt:
+  `2026-09-27-P13-cost-control-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated "Prior context: none.
+  External lookups: none", and that execution was blocked by its environment,
+  so its findings are from source, not reproduced. A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Items 1
+  and 3 are answered by codex-1 to codex-3, item 2 by codex-4 and codex-5,
+  item 4 in the closing list (casts, augmentation, and the `collectedBy`
+  literal: no concrete escape found), item 6 in the closing list, and item 7
+  in the closing paragraph, which proposes a complementary question about
+  ambiguous responses, teardown failures, and interrupted recording. Item 5
+  (configuration satisfied without doing what it appears to) was not
+  addressed.
+- **Citations:** line numbers refer to positions in the reviewed source files
+  as the bundle carried them, not to the repository at any later commit. They
+  are hints; the triage located each construct by name.
+
+---
+
 Prior context: none. External lookups: none. I reviewed the inline bundle; execution was blocked by the environment, so these are source findings, not reproduced exploits.
 
 ```text

@@ -2577,6 +2577,18 @@ The entries below were decided while the unit was built, where the spec left a c
 - **Chosen:** the dependency is added, type-only. `core` already depends on `sandbox`, so the graph gains an edge and no cycle.
 - **Reverse:** re-export `MeterReading` from `core` and import it from there.
 
+### D-P13-19: An unreadable call's cost is a lower bound, and the totals do not say so
+
+- **Found in review** (codex-1, `2026-09-27-P13-cost-control-triage.md`). A call with no readable usage is charged `max_tokens` as output and nothing for input or cache (D-P13-12). A call cut off mid-answer at the wall clock, after the vendor has read a large input, is recorded well below what it cost. The budget is not bypassed: the mark `unreadable` refuses every later call, so the overshoot stays at one call (D-P13-03). What is wrong is the record. `costTotals` adds that figure to `metered` like any complete one, and counts it only in `exhausted`, together with calls that simply crossed their bound. A total built from such a record reads as exact when it is a lower bound.
+- **Known limit, owned by I1.** Until I1 wires the relay into the line, every line record is `unmetered` (D-P13-11), so no total can contain one of these calls yet. I1 must resolve this before its first metered record.
+- **Options owed:** (A) count unreadable calls separately in the totals, so a total that holds one says it is a lower bound; (B) also charge the request's input from its body size, an upper bound that overstates the cost of a call that could not be read. Recommended: A, and B only if a lower bound must never be published.
+
+### D-P13-20: A spent call whose reading was lost is not blocked on resume
+
+- **Found in review** (codex-3, `2026-09-27-P13-cost-control-triage.md`). D-P13-15 stops the run when `destroy` cannot return a reading, but it commits nothing first. The task stays `running`, and `resumeRun` replays it, and nothing records that the first call's cost is missing. Separately, `recordUsage` in `line.ts` stores the `UsageRecord` and then commits its ref. A crash between the two leaves a stored record that `readUsage` never reads.
+- **Known limit, owned by I1.** The line runs `StubDriver` with no relay today (D-P13-11), so no model money is spent on the line and none can be lost from its totals. Once I1 wires the relay, a lost reading is real spend missing from the record.
+- **What I1 must do:** durably record a failed reading before the run stops, and have `resumeRun` refuse a run that holds one until a human resolves it. Make a stored record findable without its ref. Add a test for resume after each of the two failures.
+
 ## P13 amendments to the contracts
 
 ### A-P13-01: `RelaySpec.budget` and `RelaySpec.meter`

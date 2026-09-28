@@ -204,10 +204,15 @@ describe('the invocation', () => {
     expect(argv).not.toContain('--max-budget-usd');
   });
 
-  test("the meter prices every model a tier resolves to, each price a non-negative finite number", () => {
+  // Which model a tier's alias resolves to is the CLI's answer at run time, so no offline test can
+  // name that set; a model missing from the table is refused by the relay before it is sent (D-P13-06).
+  test('the meter names at least one model, and every model it names carries all five prices, each a non-negative finite number', () => {
     expect(MODEL_METER.dialect).toBe('anthropic-messages');
-    for (const [model, prices] of Object.entries(MODEL_METER.prices)) {
-      for (const value of Object.values(prices)) expect(Number.isFinite(value) && value >= 0, model).toBe(true);
+    const fields = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'] as const;
+    const models = Object.entries(MODEL_METER.prices);
+    expect(models.length).toBeGreaterThan(0);
+    for (const [model, prices] of models) {
+      for (const field of fields) expect(Number.isFinite(prices[field]) && prices[field] >= 0, `${model}.${field}`).toBe(true);
     }
   });
 
