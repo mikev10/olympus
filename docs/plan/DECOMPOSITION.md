@@ -309,8 +309,9 @@ Beside it, a `BehavioralAdapter` of kind `http` in `packages/adapters`. A scenar
 - `detach` with `stdin` is refused; `probe()` on an ended sandbox is refused; `probe()` past the wall-clock budget ends the sandbox as `exec` does
 - issue #14: the cleanup test asserts on the networks named from its own sandbox id, not on every `egress-*` network on the daemon
 - **the ledger.** Paid: none — P11 owns no pending entry. Added live: `I2.http-verdict-judged-outside-the-product`, `I2.http-probe-shares-network-not-filesystem`, `I5.http-probe-absent-is-named`. `pending-baseline.json` is unchanged
-- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
+- `pnpm typecheck` and `pnpm lint` pass; `pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test` passes locally. `sandbox` is a dependency of the driver, so this unit makes the driver's run report stale; the driver suite, the conformance package's tests, and `pnpm conformance` pass once in CI, on the pull request, after the maintainer applies `run-driver` (D-A-CI-05), as P13's did
 - `git ls-files -- .plan/` prints nothing
+**Gate paths:** `packages/sandbox/src/types.ts` and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
 **Invariants:** I2 is the subject — an HTTP verdict is the runtime's comparison of what a client the product cannot replace observed, never the product's report of itself. I5 is that a provider without a probe is named, a server that never listens is a failure rather than a skip, and a malformed scenario is refused. I4 is that the probe grants nothing: it adds no network to a deny-all sandbox and reaches no host but the sandbox's loopback. I3 is that `expected` comes from locked acceptance criteria; the adapter takes it as given.
 
 ### P12 — Credential at the egress layer
