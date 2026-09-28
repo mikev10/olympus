@@ -16,9 +16,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { LocalDockerProvider, SandboxHandle } from '@olympus-ai/sandbox';
+import type { LocalDockerProvider, MeterReading, RelayBudget, RelayMeter, RelaySpec, SandboxHandle } from '@olympus-ai/sandbox';
 import { runtime } from '../kit/assert.js';
-import { dockerHas, refusalFrom, specFor, withSandboxDirs } from './local-sandbox.js';
+import { dockerHas, refusalFrom, specFor, withSandboxDirs, type SandboxDirs } from './local-sandbox.js';
 
 const docker = promisify(execFile);
 
@@ -48,13 +48,32 @@ async function makeCertificate(): Promise<{ cert: string; key: string }> {
   }
 }
 
-/** An upstream that reports whether the key it was sent is the one expected, and never echoes it. */
+/**
+ * An upstream that reports whether the key it was sent is the one expected,
+ * and never echoes it. `POST /v1/messages` answers as the Messages API does,
+ * with the usage the request's `relay_test` names, for the meter to read (P13).
+ */
 const UPSTREAM_SOURCE = `'use strict';
 const expected = String(process.env.UPSTREAM_EXPECTED || '');
 require('node:https').createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_CERT }, function (q, s) {
-  q.resume();
+  const parts = [];
+  q.on('data', function (c) { parts.push(c); });
   q.on('end', function () {
     console.log('UPSTREAM ' + q.method + ' ' + q.url);
+    if (q.method === 'POST' && q.url.split('?')[0] === '/v1/messages') {
+      let request = {};
+      try { request = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { request = {}; }
+      const t = request.relay_test || {};
+      const message = { id: 'msg', type: 'message', role: 'assistant', model: request.model, content: [] };
+      if (t.omit !== 'all') {
+        message.usage = { input_tokens: t.input, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+        if (t.omit !== 'final') message.usage.output_tokens = t.output;
+      }
+      const answer = JSON.stringify(message);
+      s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
+      s.end(answer);
+      return;
+    }
     let keys = 0;
     for (let i = 0; i < q.rawHeaders.length; i += 2) if (q.rawHeaders[i].toLowerCase() === 'x-api-key') keys += 1;
     const body = JSON.stringify({ marker: '${UPSTREAM_MARKER}', host: q.headers.host, keyMatches: q.headers['x-api-key'] === expected, keyCount: keys });
@@ -121,7 +140,7 @@ export const MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT = runtime({
     await withSandboxDirs('i4-model-relay-', async (dirs) => {
       const { LocalDockerProvider: Provider, relayOf } = await import('@olympus-ai/sandbox');
       const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: secret }, relayTrust: certificate.cert });
-      const relay = { upstream: UPSTREAM_ORIGIN, paths: ['/v1/messages'], header: 'x-api-key', credential: CREDENTIAL, urlVariable: 'MODEL_BASE_URL' };
+      const relay = meteredRelay();
 
       // I4: a credential not given is not available. The refusal names it and carries no value.
       const unheld = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { relay: { ...relay, credential: 'never-given' } })));
@@ -191,6 +210,187 @@ export const MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT = runtime({
       ] as const) {
         if (await dockerHas(kind, name)) throw new Error(`I4: the ${kind} ${name} outlived the sandbox its relay served`);
       }
+    });
+  },
+});
+
+/** The model the metered entries name, priced so a charge can be checked by hand: a dollar per million input tokens, ten per million output. */
+const METERED_MODEL = 'conformance-model';
+const METER: RelayMeter = {
+  dialect: 'anthropic-messages',
+  prices: { [METERED_MODEL]: { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 } },
+};
+const AMPLE: RelayBudget = { maxTokens: 1_000_000_000, maxCostUsd: 100 };
+
+function meteredRelay(budget: RelayBudget = AMPLE): RelaySpec {
+  return { upstream: UPSTREAM_ORIGIN, paths: ['/v1/messages'], header: 'x-api-key', credential: CREDENTIAL, urlVariable: 'MODEL_BASE_URL', budget, meter: METER };
+}
+
+/** A Messages API request the upstream answers with the usage it names; `omit` drops the final output count, or every count. */
+function message(input: number, output: number, omit?: 'final' | 'all', model = METERED_MODEL): Record<string, unknown> {
+  return { model, max_tokens: 64, messages: [], relay_test: { input, output, ...(omit === undefined ? {} : { omit }) } };
+}
+
+/**
+ * Sends each request in turn from inside the sandbox, with `node` rather than
+ * a model's CLI: the budget binds whatever calls the relay, and a task that
+ * bypasses its CLI is the case it exists for.
+ */
+const CLIENT = `
+const http = require('node:http');
+const base = new URL(process.env.MODEL_BASE_URL);
+function send(body) {
+  return new Promise(function (resolve) {
+    const bytes = Buffer.from(JSON.stringify(body));
+    const q = http.request({ host: base.hostname, port: base.port, method: 'POST', path: '/v1/messages', agent: false,
+      headers: { 'content-type': 'application/json', 'content-length': String(bytes.length) } }, function (s) {
+      let text = '';
+      s.on('data', function (c) { text += c; });
+      s.on('end', function () { resolve({ status: s.statusCode, body: text }); });
+    });
+    q.on('error', function (e) { resolve({ status: 0, body: String(e.message) }); });
+    q.end(bytes);
+  });
+}
+let input = '';
+process.stdin.on('data', function (c) { input += c; });
+process.stdin.on('end', async function () {
+  const out = [];
+  for (const body of JSON.parse(input)) out.push(await send(body));
+  process.stdout.write(JSON.stringify(out));
+});
+`;
+
+async function sendAll(provider: LocalDockerProvider, handle: SandboxHandle, bodies: readonly unknown[]): Promise<Array<{ status: number; body: string }>> {
+  const result = await provider.exec(handle, ['node', '--eval', CLIENT], { stdin: JSON.stringify(bodies) });
+  if (result.exitCode !== 0) throw new Error(`the in-sandbox client exited ${String(result.exitCode)}: ${result.stderr}`);
+  return JSON.parse(result.stdout) as Array<{ status: number; body: string }>;
+}
+
+/**
+ * Provisions a metered sandbox on the proxy's Node image, starts the upstream
+ * beside its relay, runs `body`, then removes the upstream and destroys the
+ * sandbox, returning what the relay counted.
+ */
+async function withMeteredSandbox(
+  provider: LocalDockerProvider,
+  dirs: SandboxDirs,
+  certificate: { cert: string; key: string },
+  budget: RelayBudget,
+  body: (handle: SandboxHandle, upstreamLog: () => Promise<string[]>) => Promise<void>,
+): Promise<MeterReading> {
+  const { EGRESS_PROXY_IMAGE, relayOf } = await import('@olympus-ai/sandbox');
+  const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay(budget) }));
+  const upstreamName = `relay-upstream-${randomUUID()}`;
+  let destroyed = false;
+  try {
+    const applied = relayOf(provider.appliedControls(handle).egress);
+    if (applied === undefined) throw new Error('a spec with a relay was provisioned without one');
+    await startUpstream(upstreamName, applied.outboundNetwork, certificate, 'unused');
+    await body(handle, async () => {
+      const { stdout } = await docker('docker', ['logs', upstreamName]);
+      return stdout.split(/\r?\n/u).filter((line) => line.startsWith('UPSTREAM POST '));
+    });
+    await docker('docker', ['rm', '--force', '--volumes', upstreamName]);
+    destroyed = true;
+    return await provider.destroy(handle);
+  } finally {
+    if (!destroyed) {
+      await docker('docker', ['rm', '--force', '--volumes', upstreamName]).catch(() => undefined);
+      await provider.destroy(handle).catch(() => undefined);
+    }
+  }
+}
+
+function metered(reading: MeterReading, context: string): Extract<MeterReading, { kind: 'metered' }> {
+  if (reading.kind !== 'metered') throw new Error(`${context}: a sandbox with a relay returned an unmetered reading`);
+  return reading;
+}
+
+export const MODEL_RELAY_ENFORCES_BUDGET = runtime({
+  id: 'I4.model-relay-enforces-budget',
+  title:
+    "a sandbox's relay counts what each call used and, once its budget's dollars or tokens are spent, refuses every later call with a status the client does not retry, naming the bound — " +
+    'for calls made from inside the sandbox by node rather than a model CLI; destroy returns what it counted, and a relay with no budget is refused at provisioning',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i4-relay-budget-', async (dirs) => {
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+
+      // I5 beside I4: a relay nothing bounds is not started.
+      const { budget: _dropped, ...unbounded } = meteredRelay();
+      const refused = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { relay: unbounded as RelaySpec })));
+      if (refused.layer !== 'relay' || !refused.message.includes('relay.budget')) {
+        throw new Error(`I4: a relay with no budget was refused at the ${refused.layer} layer with: ${refused.message}`);
+      }
+
+      // Each call costs 1000 * $1 + 100 * $10 per million: $0.002. The second crosses $0.003.
+      for (const [bound, budget] of [
+        ['maxCostUsd', { maxTokens: 1_000_000_000, maxCostUsd: 0.003 }],
+        ['maxTokens', { maxTokens: 2000, maxCostUsd: 100 }],
+      ] as const) {
+        const reading = metered(
+          await withMeteredSandbox(provider, dirs, certificate, budget, async (handle, upstreamLog) => {
+            const answers = await sendAll(provider, handle, [message(1000, 100), message(1000, 100), message(1000, 100)]);
+            const statuses = answers.map((a) => a.status).join(',');
+            if (statuses !== '200,200,402') throw new Error(`I4: under ${bound} the calls were answered ${statuses}, expected 200,200,402`);
+            if (!(answers[2]?.body ?? '').includes(bound)) throw new Error(`I4: the refusal does not name ${bound}: ${answers[2]?.body ?? ''}`);
+            const reached = await upstreamLog();
+            if (reached.length !== 2) throw new Error(`I4: the upstream received ${String(reached.length)} calls under ${bound}; the refused one must not reach it`);
+          }),
+          'I4',
+        );
+        const exhausted = bound === 'maxCostUsd' ? 'cost' : 'tokens';
+        if (reading.calls !== 2 || reading.inputTokens !== 2000 || reading.outputTokens !== 200 || reading.refused !== 1 || reading.exhausted !== exhausted) {
+          throw new Error(`I4: under ${bound} destroy read ${JSON.stringify(reading)}`);
+        }
+      }
+    });
+  },
+});
+
+export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE = runtime({
+  id: 'I5.model-relay-fails-closed-on-unmetered-usage',
+  title:
+    'what the relay cannot count it does not forgive: a model with no price is refused before the upstream sees it, an answer with its input and no final usage is charged max_tokens as output, ' +
+    'an answer with no readable usage stops the relay forwarding, and a relay log that does not account for itself makes destroy throw while the relay is still torn down',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i5-relay-unmetered-', async (dirs) => {
+      const { LocalDockerProvider: Provider, relayOf } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+
+      const reading = metered(
+        await withMeteredSandbox(provider, dirs, certificate, AMPLE, async (handle, upstreamLog) => {
+          const unpriced = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model')]);
+          if (unpriced[0]?.status !== 400 || !unpriced[0].body.includes('unpriced-model') || (await upstreamLog()).length !== 0) {
+            throw new Error(`I5: an unpriced model was answered ${JSON.stringify(unpriced)} or reached the upstream`);
+          }
+          // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported.
+          const partial = await sendAll(provider, handle, [message(1000, 7, 'final')]);
+          if (partial[0]?.status !== 200) throw new Error(`I5: a call with partial usage was answered ${JSON.stringify(partial)}`);
+          const blind = await sendAll(provider, handle, [message(1000, 7, 'all'), message(10, 1)]);
+          if (blind.map((a) => a.status).join(',') !== '200,402') throw new Error(`I5: after an unreadable answer the relay answered ${JSON.stringify(blind)}`);
+        }),
+        'I5',
+      );
+      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 2) {
+        throw new Error(`I5: destroy read ${JSON.stringify(reading)}`);
+      }
+
+      // A relay killed before it could write its closing line leaves a log that may not hold every call.
+      const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
+      const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay() }));
+      const applied = relayOf(provider.appliedControls(handle).egress);
+      if (applied === undefined) throw new Error('I5: a spec with a relay was provisioned without one');
+      await docker('docker', ['kill', applied.containerId]);
+      const outcome = await provider.destroy(handle).then(
+        (r) => `returned ${JSON.stringify(r)}`,
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      if (!outcome.includes('closing meter line')) throw new Error(`I5: destroy over an unaccounted relay log ${outcome}`);
+      if (await dockerHas('container', applied.name)) throw new Error('I5: the relay outlived a destroy whose meter could not be read');
     });
   },
 });

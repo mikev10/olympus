@@ -19,7 +19,7 @@ import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { TaskId } from '@olympus-ai/core';
 import { relayOf } from '@olympus-ai/sandbox';
 import { DECLARED_TOOLS, DriverRefusal, ClaudeCodeDriver, KEY_PLACEHOLDER, KEY_VARIABLE, MODEL_RELAY } from '../src/index.js';
-import { PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, withDriver, workspaceContains } from './harness.js';
+import { PROCESS_DUMP, WORKDIR, credential, dockerOut, exportContains, meteredSessions, withDriver, workspaceContains } from './harness.js';
 
 /**
  * A marker only a process inside the container can write, and only into the
@@ -201,5 +201,29 @@ invariantTest(
       },
       { settingsPath },
     );
+  },
+);
+
+// Last in the file, and it must stay last: it reads the sessions the assertions above ran, and adds no model call.
+invariantTest(
+  'I2.relay-meter-agrees-with-session',
+  "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+  () => {
+    // A control with nothing to compare would pass having proved nothing.
+    expect(meteredSessions.length).toBeGreaterThan(0);
+    for (const { test, reading, cli } of meteredSessions) {
+      if (reading instanceof Error) throw new Error(`${test}: the relay's meter could not be read: ${reading.message}`);
+      if (reading.kind !== 'metered') throw new Error(`${test}: the session's sandbox had no relay, so nothing counted it`);
+      const relay = {
+        inputTokens: reading.inputTokens,
+        outputTokens: reading.outputTokens,
+        cacheReadTokens: reading.cacheReadTokens,
+        cacheWriteTokens: reading.cacheWriteTokens,
+      };
+      // Both figures in the message, so a difference says which class and by how much.
+      expect(relay, `${test}: relay ${JSON.stringify(relay)} against the CLI's ${JSON.stringify(cli)}`).toStrictEqual(cli);
+      expect(reading.calls).toBeGreaterThan(0);
+      expect(reading.exhausted).toBe('none');
+    }
   },
 );

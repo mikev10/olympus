@@ -32,7 +32,7 @@ import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
+import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -74,7 +74,7 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
-  'admission', 'task-result',
+  'admission', 'task-result', 'usage',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
@@ -201,9 +201,27 @@ function requireRunState(value: unknown, file: string): RunState {
     (value.phase === 'working' || value.phase === 'exiting') && isRef(value.admission) &&
     isMap(value.tasks) && isMap(value.attempts) && isMap(value.results) &&
     Array.isArray(value.evidenceRefs) && Array.isArray(value.violations) &&
-    Array.isArray(value.approvals) && Array.isArray(value.reviews);
+    Array.isArray(value.approvals) && Array.isArray(value.reviews) && Array.isArray(value.usage);
   if (!ok) throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
   return value as unknown as RunState;
+}
+
+const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd', 'refused'] as const;
+const EXHAUSTED = new Set(['none', 'tokens', 'cost', 'unreadable']);
+
+/** Why a usage record is not one the runtime collected, or `undefined` when it is. */
+function usageProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId') || !hasString(r, 'station')) return 'it names no run, task, and station';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (typeof r.attempt !== 'number' || !Number.isInteger(r.attempt) || r.attempt < 1) return 'attempt is not a positive whole number';
+  const reading = r.reading;
+  if (!isRecord(reading)) return 'it carries no reading';
+  if (reading.kind === 'unmetered') return undefined;
+  if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is neither metered nor unmetered`;
+  const bad = READING_COUNTS.filter((k) => typeof reading[k] !== 'number' || !Number.isFinite(reading[k]) || reading[k] < 0);
+  if (bad.length > 0) return `the reading's ${bad.join(', ')} are not non-negative finite numbers`;
+  if (typeof reading.exhausted !== 'string' || !EXHAUSTED.has(reading.exhausted)) return "the reading's exhausted is not a known reason";
+  return undefined;
 }
 
 function isLockEntry(value: unknown): boolean {
@@ -446,6 +464,17 @@ export class LocalVault implements Vault {
       return Promise.reject(new Error(`LocalVault: refusing to record a task result for run ${runId} that names no task`));
     }
     return storeObject(this.#store, runId, 'task-result', r);
+  }
+
+  /**
+   * I2: only a record the runtime collected. A reading is checked for its
+   * shape too, because a total derived from a record with a missing count
+   * would be a figure nobody measured.
+   */
+  recordUsage(r: UsageRecord): Promise<VaultRef> {
+    const problem = usageProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a usage record: ${problem}`));
+    return storeObject(this.#store, r.runId, 'usage', r);
   }
 
   async readRunState(runId: RunId): Promise<RunState> {

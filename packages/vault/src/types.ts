@@ -9,6 +9,7 @@
  */
 import type { AgentClaim, Policy, Run, RunId, RunState, StationId, TaskId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation } from '@olympus-ai/integrity';
+import type { MeterReading } from '@olympus-ai/sandbox';
 
 /**
  * I3: an agent may not be judged by an artifact it can write. Specs and
@@ -65,6 +66,27 @@ export interface EvidenceBundle {
   contractVersion: string;
 }
 
+/**
+ * What one driver call cost, as the runtime collected it: the reading the
+ * sandbox's relay took after the sandbox stopped (A-P13-03). One per call —
+ * every build attempt, a failed one included, and every review seat — so a
+ * call that spent money and produced nothing still appears.
+ *
+ * I2: never taken from the driver's `TaskResult.usage`, which is the CLI's own
+ * account from inside the sandbox. `collectedBy` is a literal for the reason
+ * `EvidenceBundle`'s is. A call whose sandbox had no relay is `unmetered`, and
+ * a total over it says so rather than counting it as free.
+ */
+export interface UsageRecord {
+  runId: RunId;
+  taskId: TaskId;
+  station: StationId;
+  /** The task's `starts` count for this call: which invocation of the task it was. */
+  attempt: number;
+  reading: MeterReading;
+  collectedBy: 'runtime';
+}
+
 /** An artifact as admitted: where it sits in the workspace, and the SHA-256 of its bytes at admission. */
 export interface AdmittedArtifact {
   readonly path: string;
@@ -114,6 +136,8 @@ export interface Vault {
   recordAdmission(a: AdmissionRecord): Promise<VaultRef>;
   /** The result exactly as the driver returned it. A claim a later station reads comes from here, never from memory. */
   recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef>;
+  /** What one driver call cost, as the runtime read it from the relay. Refused unless `collectedBy` is `'runtime'`. */
+  recordUsage(r: UsageRecord): Promise<VaultRef>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

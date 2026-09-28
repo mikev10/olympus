@@ -406,6 +406,7 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
       violations: [],
       approvals: [],
       reviews: [],
+      usage: [],
       version: '0',
     },
     '0',

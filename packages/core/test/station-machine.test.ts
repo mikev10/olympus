@@ -77,6 +77,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     violations: [],
     approvals: [],
     reviews: [],
+    usage: [],
     version: '1',
     ...overrides,
   };

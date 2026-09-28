@@ -9,11 +9,12 @@
  * output from the pinned CLI version, trimmed.
  */
 import { describe, expect, test } from 'vitest';
-import type { SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
   KEY_PLACEHOLDER,
   KEY_VARIABLE,
+  MODEL_METER,
   MODEL_RELAY,
   ClaudeCodeDriver,
   DriverRefusal,
@@ -59,8 +60,8 @@ class RecordingProvider implements SandboxProvider {
     return Promise.resolve({ exitCode: this.exitCode, stdout, stderr: '', durationMs: 5 });
   }
 
-  destroy(_h: SandboxHandle): Promise<void> {
-    return Promise.resolve();
+  destroy(_h: SandboxHandle): Promise<MeterReading> {
+    return Promise.resolve({ kind: 'unmetered' });
   }
 
   capabilities(): { computerUse: boolean; gpu: boolean; os: 'linux'; persistent: boolean; remote: boolean } {
@@ -191,7 +192,23 @@ describe('the invocation', () => {
       header: 'x-api-key',
       credential: 'anthropic',
       urlVariable: 'ANTHROPIC_BASE_URL',
+      meter: MODEL_METER,
     });
+  });
+
+  test('the CLI is not given a budget of its own: the relay is the only bound, and every stop is in its log (D-P13-10)', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request());
+    const argv = provider.calls.flatMap((call) => call.cmd);
+    expect(argv).not.toContain('--max-budget-usd');
+  });
+
+  test("the meter prices every model a tier resolves to, each price a non-negative finite number", () => {
+    expect(MODEL_METER.dialect).toBe('anthropic-messages');
+    for (const [model, prices] of Object.entries(MODEL_METER.prices)) {
+      for (const value of Object.values(prices)) expect(Number.isFinite(value) && value >= 0, model).toBe(true);
+    }
   });
 
   test('the prefix and the suffix reach different flags, which is what makes the cache reading possible', async () => {

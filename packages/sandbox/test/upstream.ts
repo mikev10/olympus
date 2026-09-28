@@ -17,7 +17,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { EGRESS_PROXY_IMAGE } from '../src/index.js';
+import { EGRESS_PROXY_IMAGE, type RelayBudget, type RelayMeter } from '../src/index.js';
 
 const run = promisify(execFile);
 
@@ -25,6 +25,20 @@ const run = promisify(execFile);
 export const UPSTREAM_HOST = 'upstream.test';
 export const UPSTREAM_PORT = 8443;
 export const UPSTREAM_ORIGIN = `https://${UPSTREAM_HOST}:${String(UPSTREAM_PORT)}`;
+
+/** The model the suites' requests name, and its price: round numbers, so a charge can be checked by hand. */
+export const TEST_MODEL = 'test-model-1';
+
+/** A dollar per million tokens of every class but output, which is ten; a cache write held an hour costs two. */
+export const TEST_METER: RelayMeter = {
+  dialect: 'anthropic-messages',
+  prices: {
+    [TEST_MODEL]: { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.5, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 },
+  },
+};
+
+/** A budget no suite that is not about budgets comes near. */
+export const TEST_BUDGET: RelayBudget = { maxTokens: 10_000_000, maxCostUsd: 100 };
 
 /** What every upstream answer carries, so a body that arrives is known to have come from the upstream. */
 export const UPSTREAM_MARKER = 'upstream-reached';
@@ -64,14 +78,81 @@ export async function makeCertificate(): Promise<Certificate> {
  *
  * `/v1/messages/redirect` answers 302 to another origin, so a relay that
  * followed redirects would be caught sending the credential onward.
+ *
+ * `POST /v1/messages` answers as the Messages API does, with the usage a meter
+ * reads (P13). What it answers is steered by `relay_test` in the request body,
+ * which the relay forwards unchanged like the rest: `usage` (the four counts),
+ * `omit` (`'final'` drops the output count, `'all'` every count), `status`, and
+ * `encoding` (`'gzip'`). `stream: true` answers in server-sent events. It logs
+ * the SHA-256 of every body it received and sent, so a suite can prove both
+ * crossed the relay byte for byte.
  */
 const UPSTREAM_SOURCE = `'use strict';
 const https = require('node:https');
+const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const expected = String(process.env.UPSTREAM_EXPECTED || '');
+function sha(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+function messages(q, s, body, echo) {
+  let request = {};
+  try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = {}; }
+  const t = request.relay_test || {};
+  const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
+  const status = t.status || 200;
+  const usage = t.omit === 'all' ? undefined : {
+    input_tokens: counts.input,
+    cache_read_input_tokens: counts.cacheRead,
+    cache_creation_input_tokens: counts.cacheWrite,
+    cache_creation: { ephemeral_5m_input_tokens: counts.cacheWrite, ephemeral_1h_input_tokens: 0 },
+  };
+  if (usage !== undefined && t.omit !== 'final') usage.output_tokens = counts.output;
+  let payload;
+  let type;
+  if (status !== 200) {
+    type = 'application/json';
+    payload = JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'test upstream' } });
+  } else if (request.stream === true) {
+    type = 'text/event-stream';
+    const start = { id: 'msg_test', type: 'message', role: 'assistant', model: request.model, content: [] };
+    if (usage !== undefined) start.usage = { input_tokens: usage.input_tokens, cache_read_input_tokens: usage.cache_read_input_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens, cache_creation: usage.cache_creation, output_tokens: 1 };
+    const events = [
+      ['message_start', { type: 'message_start', message: start }],
+      ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+      ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: JSON.stringify(echo) } }],
+      ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+    ];
+    if (t.omit !== 'final' && t.omit !== 'all') {
+      events.push(['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: counts.output } }]);
+      events.push(['message_stop', { type: 'message_stop' }]);
+    }
+    payload = events.map(function (e) { return 'event: ' + e[0] + '\\ndata: ' + JSON.stringify(e[1]) + '\\n\\n'; }).join('');
+  } else {
+    type = 'application/json';
+    const message = Object.assign({ id: 'msg_test', type: 'message', role: 'assistant', model: request.model }, echo);
+    if (usage !== undefined) message.usage = usage;
+    payload = JSON.stringify(message);
+  }
+  let bytes = Buffer.from(payload, 'utf8');
+  const headers = { 'content-type': type };
+  if (t.encoding === 'gzip') { bytes = zlib.gzipSync(bytes); headers['content-encoding'] = 'gzip'; }
+  console.log('UPSTREAM_BODY ' + sha(body) + ' UPSTREAM_SENT ' + sha(bytes));
+  s.writeHead(status, headers);
+  // Written in pieces, as a stream arrives, so a meter reading one whole chunk is not what passes.
+  const step = Math.max(1, Math.ceil(bytes.length / 4));
+  let at = 0;
+  (function next() {
+    if (at >= bytes.length) { s.end(); return; }
+    s.write(bytes.subarray(at, at + step));
+    at += step;
+    setTimeout(next, 5);
+  })();
+}
 https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_CERT }, function (q, s) {
-  let size = 0;
-  q.on('data', function (c) { size += c.length; });
+  const parts = [];
+  q.on('data', function (c) { parts.push(c); });
   q.on('end', function () {
+    const body = Buffer.concat(parts);
     console.log('UPSTREAM ' + q.method + ' ' + q.url);
     if (q.url.indexOf('/v1/messages/redirect') === 0) {
       s.writeHead(302, { location: 'https://elsewhere.invalid/v1/messages' });
@@ -80,8 +161,7 @@ https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_C
     }
     let keys = 0;
     for (let i = 0; i < q.rawHeaders.length; i += 2) if (q.rawHeaders[i].toLowerCase() === 'x-api-key') keys += 1;
-    s.writeHead(200, { 'content-type': 'application/json' });
-    s.end(JSON.stringify({
+    const echo = {
       marker: '${UPSTREAM_MARKER}',
       method: q.method,
       url: q.url,
@@ -89,8 +169,13 @@ https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_C
       keyMatches: q.headers['x-api-key'] === expected,
       keyCount: keys,
       authorization: q.headers.authorization === undefined ? null : 'present',
-      bodyBytes: size,
-    }));
+      acceptEncoding: q.headers['accept-encoding'] === undefined ? null : q.headers['accept-encoding'],
+      bodyBytes: body.length,
+    };
+    const path = q.url.split('?')[0];
+    if (q.method === 'POST' && path === '/v1/messages') { messages(q, s, body, echo); return; }
+    s.writeHead(200, { 'content-type': 'application/json' });
+    s.end(JSON.stringify(echo));
   });
 }).listen(${String(UPSTREAM_PORT)}, '0.0.0.0');
 `;
@@ -119,6 +204,16 @@ export async function startUpstream(name: string, network: string, certificate: 
     }
   }
   throw new Error(`the upstream container ${name} never listened`);
+}
+
+/** The SHA-256 of each `POST /v1/messages` body the upstream received, and of the bytes it answered with, in order. */
+export async function upstreamDigests(name: string): Promise<Array<{ received: string; sent: string }>> {
+  const { stdout } = await run('docker', ['logs', name]);
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => /^UPSTREAM_BODY ([0-9a-f]{64}) UPSTREAM_SENT ([0-9a-f]{64})$/u.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({ received: m[1] ?? '', sent: m[2] ?? '' }));
 }
 
 /** The requests the upstream received, one `METHOD url` per line. */

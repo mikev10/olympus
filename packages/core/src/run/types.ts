@@ -29,7 +29,7 @@ export type VaultRefKind =
   | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
   | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
   | 'run-state' | 'rubric' | 'learning'
-  | 'admission' | 'task-result';
+  | 'admission' | 'task-result' | 'usage';
 
 export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 
@@ -164,5 +164,11 @@ export interface RunState {
   readonly approvals: readonly ApprovalGrant[];
   /** Every review seat assembled, with its independence (I6). */
   readonly reviews: readonly ReviewSeat[];
+  /**
+   * One `UsageRecord` per driver call, failed attempts and review seats
+   * included, in the order the calls ended (A-P13-04). No total is stored:
+   * a total is derived from these records, so it cannot disagree with them.
+   */
+  readonly usage: readonly VaultRef[];
   readonly version: string;             // optimistic concurrency
 }

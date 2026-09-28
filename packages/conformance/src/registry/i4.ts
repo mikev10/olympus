@@ -1,7 +1,7 @@
 import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
-import { MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
+import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
 import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
@@ -290,6 +290,8 @@ export const I4: InvariantEntry = {
       file: 'test/invariants.test.ts',
     }),
     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
+    // P13: spending is a capability, bounded where the task cannot reach it.
+    MODEL_RELAY_ENFORCES_BUDGET,
   ],
   pending: [],
 };

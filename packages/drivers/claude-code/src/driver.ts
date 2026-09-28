@@ -16,6 +16,11 @@
  * CLI is given the relay's address by the provider and a placeholder where a
  * key would go, so no process the task runs can read the credential: not the
  * CLI, not a tool it starts, not a later exec (D-P5-20, paid).
+ *
+ * Nor does it bound spend (P13). The relay meters every call with
+ * `MODEL_METER` and enforces the task's budget where the task cannot reach it;
+ * the CLI's own `--max-budget-usd` is not passed, so every stop is the
+ * relay's and is in its log (D-P13-10).
  */
 import type {
   AgentClaim,
@@ -33,7 +38,7 @@ import type {
   Usage,
 } from '@olympus-ai/core';
 import { DRIVER_CONTRACT_VERSION } from '@olympus-ai/core';
-import type { RelaySpec, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
+import type { ModelPrice, RelayMeter, RelaySpec, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
 import { CLI_VERSION } from './image.js';
 import { refuse } from './refusal.js';
 import { parseStream, type ParsedStream, type SessionInit } from './stream.js';
@@ -64,10 +69,47 @@ export const KEY_PLACEHOLDER = 'relay-held-credential-placeholder';
 export const MODEL_CREDENTIAL = 'anthropic';
 
 /**
+ * The date the prices in `MODEL_METER` were taken from Anthropic's published
+ * list prices. A price that changed since makes the dollar figure wrong in a
+ * stated direction, and updating it is an ordinary change (P13).
+ */
+export const PRICES_AS_OF = '2026-09-27';
+
+/** List prices in US dollars per million tokens: input, output, and the cache classes at their published multiples of input. */
+function price(input: number, output: number, cacheRead: number): ModelPrice {
+  return { inputPerMTok: input, outputPerMTok: output, cacheReadPerMTok: cacheRead, cacheWritePerMTok: input * 1.25, cacheWrite1hPerMTok: input * 2 };
+}
+
+/**
+ * How the relay reads what a call of this driver used, and what each model
+ * costs (D-P13-06). Keyed by the exact model name the CLI sends, which it
+ * resolves from the tier's alias, so both the bare and the dated Haiku name
+ * are listed. A model not here is refused by the relay before its request is
+ * sent, naming it: a CLI that resolves an alias to a newer model fails loudly
+ * rather than spending uncounted.
+ */
+export const MODEL_METER: Readonly<RelayMeter> = Object.freeze({
+  dialect: 'anthropic-messages',
+  prices: Object.freeze({
+    'claude-haiku-4-5': price(1, 5, 0.1),
+    'claude-haiku-4-5-20251001': price(1, 5, 0.1),
+    'claude-sonnet-5': price(2, 10, 0.2),
+    'claude-sonnet-4-6': price(3, 15, 0.3),
+    'claude-opus-5-5': price(4, 20, 0.2),
+    'claude-opus-5': price(5, 25, 0.5),
+    'claude-opus-4-8': price(5, 25, 0.5),
+    'claude-fable-5-1': price(10, 50, 0.25),
+    'claude-fable-5': price(10, 50, 1),
+  }),
+});
+
+/**
  * The relay a sandbox this driver runs in must be provisioned with (D-P12-05):
  * the API origin, the one path the CLI calls with non-essential traffic off,
- * the header the API reads a key from, and the variable the CLI reads its
- * base URL from.
+ * the header the API reads a key from, the variable the CLI reads its base
+ * URL from, and the meter. The budget is not here: it is the task's, and
+ * whoever provisions the sandbox adds `TaskRequest.budget`'s tokens and
+ * dollars to it (D-P13-01).
  *
  * `/v1/messages` covers the CLI's `POST /v1/messages?beta=true` and its
  * token-counting sub-path. The CLI also sends `HEAD /api/hello` at startup; the
@@ -75,12 +117,13 @@ export const MODEL_CREDENTIAL = 'anthropic';
  * path a task needs. Observed against the pinned CLI, and re-proven by every
  * claim assertion, each of which runs through the relay.
  */
-export const MODEL_RELAY: Readonly<RelaySpec> = Object.freeze({
+export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
   upstream: 'https://api.anthropic.com',
   paths: ['/v1/messages'],
   header: 'x-api-key',
   credential: MODEL_CREDENTIAL,
   urlVariable: 'ANTHROPIC_BASE_URL',
+  meter: MODEL_METER,
 });
 
 /**
@@ -629,7 +672,6 @@ export class ClaudeCodeDriver implements Driver {
       '--no-session-persistence',
       '--session-id', sessionIdFor(req.taskId),
       '--include-hook-events',
-      '--max-budget-usd', String(req.budget.maxCostUsd),
     ];
     if (configPath !== undefined) cli.push('--mcp-config', configPath);
     // Named one by one, because a server-wide pattern removes the granted tools

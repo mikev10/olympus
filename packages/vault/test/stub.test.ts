@@ -65,6 +65,7 @@ function state(): RunState {
     violations: [],
     approvals: [],
     reviews: [],
+    usage: [],
     version: '0',
   };
 }

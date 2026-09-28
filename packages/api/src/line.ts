@@ -23,6 +23,11 @@
  *   (I6) and runs it on context its contract grants, over a view holding only
  *   the files those grants cover.
  *
+ * Every driver call — each build attempt, a failed one included, and each
+ * review seat — writes one `UsageRecord` from what the sandbox's relay counted,
+ * read by `destroy` after the sandbox stopped (D-P13-08). What the driver says
+ * it used is recorded in its result and is never the source of a cost.
+ *
  * Locks are re-verified before every task step, after the checks, and on every
  * exit once anything is locked. A mismatch records a violation, and a run with
  * a recorded violation does not continue (I3).
@@ -69,8 +74,8 @@ import type {
 } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, IntegrityViolation } from '@olympus-ai/integrity';
 import { requiredShortfall } from './gate.js';
-import type { EgressPolicy, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck } from '@olympus-ai/vault';
+import type { EgressPolicy, MeterReading, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
+import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageRecord } from '@olympus-ai/vault';
 import type { ComponentGraph, RunOutcome } from './run.js';
 import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
@@ -437,6 +442,12 @@ function scopeFor(ctx: LineContext, task: Task) {
  * allows: a station whose `writeBoundary` grants no glob — `review` — gets a
  * tree it cannot write (A-P4-05). The sandbox is destroyed when the task
  * ends, and with it anything the task left running (I4).
+ *
+ * Once the driver was called, what the call cost is recorded whatever the
+ * call returned, before the caller decides anything from it (D-P13-08). A
+ * sandbox that cannot be destroyed and read stops the run: the call it served
+ * spent an amount nothing recorded, and a retry would spend again on top of
+ * it (I5, D-P13-15).
  */
 async function runTask(
   ctx: LineContext, task: Task, driver: Driver, context: string, workspace: string,
@@ -444,29 +455,56 @@ async function runTask(
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
   const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
+  let handle: SandboxHandle;
   try {
-    const handle = await sandbox.provision(workspaceOnly(ctx, workspace, mode, egressFor(scope.network)));
-    try {
-      const request: TaskRequest = {
-        taskId: task.id,
-        role: task.role,
-        stablePrefix: context,
-        variableSuffix: task.id,
-        tier: scope.tier,
-        tools: [...scope.tools],
-        sandbox: handle,
-        timeoutMs: scope.budget.maxWallClockMs,
-        budget: { ...scope.budget },
-      };
-      const result = await driver.runTask(request);
-      if (result.taskId !== task.id) throw new Error(`the driver returned a result for task ${String(result.taskId)} when asked to run ${task.id}`);
-      return { ok: true, result };
-    } finally {
-      await sandbox.destroy(handle);
-    }
+    handle = await sandbox.provision(workspaceOnly(ctx, workspace, mode, egressFor(scope.network)));
   } catch (error) {
     return { ok: false, error };
   }
+  let outcome: { ok: true; result: TaskResult } | { ok: false; error: unknown };
+  try {
+    const request: TaskRequest = {
+      taskId: task.id,
+      role: task.role,
+      stablePrefix: context,
+      variableSuffix: task.id,
+      tier: scope.tier,
+      tools: [...scope.tools],
+      sandbox: handle,
+      timeoutMs: scope.budget.maxWallClockMs,
+      budget: { ...scope.budget },
+    };
+    const result = await driver.runTask(request);
+    if (result.taskId !== task.id) throw new Error(`the driver returned a result for task ${String(result.taskId)} when asked to run ${task.id}`);
+    outcome = { ok: true, result };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  let reading: MeterReading;
+  try {
+    reading = await sandbox.destroy(handle);
+  } catch (error) {
+    throw new Error(
+      `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
+      { cause: error },
+    );
+  }
+  await recordUsage(ctx, task, reading);
+  return outcome;
+}
+
+/** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
+async function recordUsage(ctx: LineContext, task: Task, reading: MeterReading): Promise<void> {
+  const record: UsageRecord = {
+    runId: ctx.run.id,
+    taskId: task.id,
+    station: ctx.state.station,
+    attempt: attemptsOf(ctx.state, task).starts,
+    reading,
+    collectedBy: 'runtime',
+  };
+  const ref = await ctx.components.vault.recordUsage(record);
+  await commit(ctx, { usage: ref });
 }
 
 function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
@@ -834,6 +872,7 @@ interface StateChange {
   readonly evidence?: VaultRef;
   readonly violation?: VaultRef;
   readonly review?: RunState['reviews'][number];
+  readonly usage?: VaultRef;
 }
 
 /** Commits the next state through the Vault's version check and keeps what it stored. */
@@ -851,6 +890,7 @@ async function commit(ctx: LineContext, change: StateChange): Promise<void> {
       evidenceRefs: change.evidence === undefined ? state.evidenceRefs : [...state.evidenceRefs, change.evidence],
       violations: change.violation === undefined ? state.violations : [...state.violations, change.violation],
       reviews: change.review === undefined ? state.reviews : [...state.reviews, change.review],
+      usage: change.usage === undefined ? state.usage : [...state.usage, change.usage],
     },
     state.version,
   );
