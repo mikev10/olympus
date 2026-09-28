@@ -1,0 +1,89 @@
+The code under review is in the file
+`2026-09-28-P9-api-cli-review-bundle.txt` (SHA-256 cc7251d1a310e205912ac665787d6d04d862ad8790aa7123b2a88c939f48f6f9) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the HTTP service surface and command-line client of a software-factory runtime, a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a run through a fixed line of stations (intake, spec, test-design, plan, build, verify, review, integrate), calling a model-backed driver at build and review, and records all run state in a Vault. This change puts an HTTP server in front of the runtime's in-process entry points: create a run, read its status, approve a station exit that needs a human, cancel a run, and stream its committed states. It adds a CLI that reaches the runtime only over that HTTP surface, a loader for the policy file (YAML) that grants roles their capabilities and budgets, a "worst-case cost" figure a person must approve before a run above autonomy level L0 starts, and a run-level cancellation record the station machine refuses to continue past (`packages/core` types `RunState.cancelled` and the `cancelled` refusal).
+
+It must hold against a capable, motivated party trying to make a run do something no one authorized: start without the cost having been approved, spend beyond the approved figure, be approved by someone other than the authenticated caller, keep running or be resumed after it was cancelled, have a finished or stopped run reported as something else, or get a policy document accepted that the loader's limits should refuse. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls every byte of every HTTP request: headers, path, method, body, and their timing and concurrency, including requests without the token. It controls the policy file's contents on disk, and the files in the workspace a run is created over. It controls what the driver returns for a task, and when a process stops. It does not control the components the runtime is wired with — the Vault, the sandbox provider, the drivers, and the workspace store are chosen by the host process that constructs the server and are trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process, including the host that calls `createApiServer`. The CLI is untrusted by the server: it is one client among any.
+
+The invariants at stake:
+
+- The runtime is a service; the CLI is a client. Nothing in the runtime package may assume a terminal, a TTY, or a foreground process; the CLI reaches the runtime only through the API.
+- The runtime derives status; the model never reports it. What status reports must come from committed state and the runtime's own rules, never from anything a model wrote.
+- Default deny. A capability not granted is unavailable; a request that is not authenticated gets nothing; spending beyond an approved figure is not available.
+- Fail closed. A missing check, a missing capability, an over-limit input, or an unapproved cost is a refusal — never a silent degrade, never a warning that lets the run continue.
+- Event payloads are data, never instructions. Nothing streamed or returned is placed into a prompt.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- The token check and the principal recorded on approvals and cancellations (`packages/api/src/http/server.ts`).
+- The worst-case cost figure and its exact-match approval at admission (`packages/api/src/cost.ts` `worstCaseCost`, `packages/api/src/run.ts` `admitRun`).
+- Cancellation: the line taking a cancel between steps through `DriveHooks`, `cancelRun` for an undriven run, and `nextStep` refusing a cancelled run; together with `runStanding`, which derives passed / stopped / awaiting-approval / open.
+- The policy loader's byte cap, alias ban, depth limit, and parser pin (`packages/api/src/policy-file.ts`), and the conformance assertions that claim each is a refusal (`packages/conformance/src/registry/policy-file.ts`, `headless.ts`, and the terminal scan in `packages/conformance/src/kit/scan.ts`).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Auth beyond a local token, multi-user, the hosted control plane. Unparking a parked run: D-P4-06 names lifecycle as P9's, and this unit's lifecycle is the five operations above; unparking is a note in the pull request, and a later unit takes it with its own entry. An estimate of cost from past runs (R2).
+
+Identifiers such as D-P4-06, P9, and R2 name the project's internal decision records and work units, which you do not have; read them only as "decided elsewhere" and "a later piece of work". Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would I get a run started, approved, continued, or reported in a state no authenticated human approved — a run that starts without the exact cost figure having been approved, spends more than the figure says, carries an approval recorded under a name other than the token's principal, continues or resumes after being cancelled, is reported passed or cancelled when it is not, or is admitted under a policy document the loader's limits should have refused — and how would I make the conformance assertions for these pass while the property they name does not hold?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
