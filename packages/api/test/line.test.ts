@@ -6,12 +6,12 @@
  */
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult } from '@olympus-ai/core';
+import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
-import type { EvidenceBundle, LockVerdict, Vault } from '@olympus-ai/vault';
+import { StubSandboxProvider, type ExecResult, type MeterReading, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
+import type { EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { approveStation, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
+import { approveStation, costTotals, readUsage, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
 import {
   approvals,
   ChosenDriver,
@@ -63,7 +63,7 @@ class RecordingSandbox extends DelegatingSandbox {
     return handle;
   }
 
-  override destroy(h: SandboxHandle): Promise<void> {
+  override destroy(h: SandboxHandle): Promise<MeterReading> {
     this.destroyed.push(h);
     return this.inner.destroy(h);
   }
@@ -513,5 +513,116 @@ describe('what a station is handed, beyond its prompt', () => {
     // The reviewer never ran, so the builder is the last role that acted; the reviewer's driver is what found it.
     expect(violation.role).toBe('builder');
     expect(violation.driverProvenanceId).toBe(reviewer.provenanceId());
+  });
+});
+
+/**
+ * Stands in for a provider whose sandboxes have relays: each destroy returns a
+ * metered reading, the n-th with n calls, so every record can be told apart
+ * and every total checked by hand (D-P13-11). The line itself provisions no
+ * relay until I1; what is proven here is that it records what `destroy`
+ * returns, and nothing a driver says.
+ */
+class MeteredSandbox extends DelegatingSandbox {
+  private destroyed = 0;
+
+  override async destroy(h: SandboxHandle): Promise<MeterReading> {
+    await this.inner.destroy(h);
+    this.destroyed += 1;
+    const n = this.destroyed;
+    return { kind: 'metered', calls: n, inputTokens: 100 * n, outputTokens: 10 * n, cacheReadTokens: n, cacheWriteTokens: 2 * n, costUsd: n / 1000, exhausted: 'none', refused: 0 };
+  }
+}
+
+/** Counts what went through `recordUsage`, the only way a usage record reaches the Vault. */
+class CountingVault extends DelegatingVault {
+  readonly usage: UsageRecord[] = [];
+
+  override recordUsage(r: UsageRecord): Promise<VaultRef> {
+    this.usage.push(r);
+    return this.inner.recordUsage(r);
+  }
+}
+
+/** A driver that fails its first call, as a crashed CLI would, and delegates after. */
+class FailsFirstCall extends ChosenDriver {
+  private calls = 0;
+
+  override async runTask(req: TaskRequest): Promise<TaskResult> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      this.requests.push(req);
+      throw new Error('the driver failed');
+    }
+    return super.runTask(req);
+  }
+}
+
+describe('cost is what the relay counted, recorded per driver call (I2)', () => {
+  test('every driver call writes one usage record through recordUsage, with the meter figures, and a driver reporting zero cannot lower them', async () => {
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const reviewer = new ChosenDriver({ family: 'other' });
+    const vault = new CountingVault(components.vault);
+    // Build twice (the first check fails), then one review seat: three driver calls, each in its own sandbox.
+    const sandbox = new MeteredSandbox(new FailsFirstCheck(new StubSandboxProvider()));
+    const outcome = await startRun(runRequest(runId, workspace, { ...components, vault, driver, reviewer, sandbox }));
+    const state = outcome.ok ? outcome.state : refusedState(outcome);
+
+    const records = await readUsage(vault, state);
+    expect(records).toStrictEqual(vault.usage);
+    expect(records.map((r) => [r.taskId, r.station, r.attempt])).toStrictEqual([
+      [hello, 'build', 1],
+      [hello, 'build', 2],
+      [helloReview, 'review', 1],
+    ]);
+    for (const record of records) expect(record.collectedBy).toBe('runtime');
+    // The driver reported zero for every call; each record carries what its sandbox's destroy returned.
+    const results = await Promise.all(Object.values(state.results).map((ref) => read<TaskResult>(vault, ref)));
+    for (const result of results) expect(result.usage.costUsd).toBe(0);
+    expect(records.every((r) => r.reading.kind === 'metered' && r.reading.costUsd > 0)).toBe(true);
+
+    // Totals are the sums of their records, and nothing else.
+    const sums = (rs: readonly UsageRecord[]): number => rs.reduce((s, r) => s + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
+    const totals = costTotals(records);
+    expect(totals.run).toMatchObject({ calls: 3, unmetered: 0, metered: { calls: 3 } });
+    expect(totals.run.metered.costUsd).toBeCloseTo(sums(records), 12);
+    expect(totals.byStation.build?.metered.costUsd).toBeCloseTo(sums(records.filter((r) => r.station === 'build')), 12);
+    expect(totals.byStation.review?.calls).toBe(1);
+    expect(totals.byTask[hello]?.calls).toBe(2);
+    expect(totals.byTask[helloReview]?.metered.inputTokens).toBe(records[2]?.reading.kind === 'metered' ? records[2].reading.inputTokens : -1);
+  });
+
+  test('a driver call that failed is recorded before its retry', async () => {
+    const driver = new FailsFirstCall({ narrative: 'built' });
+    const vault = new CountingVault(components.vault);
+    await startRun(runRequest(runId, workspace, { ...components, vault, driver, reviewer: new ChosenDriver({ family: 'other' }), sandbox: new MeteredSandbox(new StubSandboxProvider()) }));
+    const builds = vault.usage.filter((r) => r.station === 'build');
+    expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(2);
+    expect(builds).toHaveLength(2);
+    expect(builds[0]?.reading).toMatchObject({ kind: 'metered', calls: 1 });
+  });
+
+  test('calls whose sandbox had no relay are counted as unmetered, never as zero cost', async () => {
+    const vault = new CountingVault(components.vault);
+    const outcome = await startRun(runRequest(runId, workspace, { ...components, vault, reviewer: new ChosenDriver({ family: 'other' }) }));
+    const state = outcome.ok ? outcome.state : refusedState(outcome);
+    const totals = costTotals(await readUsage(vault, state));
+    expect(totals.run).toMatchObject({ calls: 2, unmetered: 2, metered: { calls: 0 } });
+  });
+
+  test('a sandbox whose cost cannot be read after the driver ran stops the run, rather than retrying blind', async () => {
+    class UnreadableMeter extends DelegatingSandbox {
+      override async destroy(h: SandboxHandle): Promise<MeterReading> {
+        await this.inner.destroy(h);
+        throw new Error("the model relay's meter could not be read");
+      }
+    }
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const vault = new CountingVault(components.vault);
+    await expect(startRun(runRequest(runId, workspace, { ...components, vault, driver, sandbox: new UnreadableMeter(new StubSandboxProvider()) }))).rejects.toThrow(
+      /could not be destroyed and its cost read/u,
+    );
+    expect(driver.requests).toHaveLength(1);
+    expect(vault.usage).toHaveLength(0);
   });
 });

@@ -59,7 +59,67 @@ export interface RelaySpec {
   credential: string;
   /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
   urlVariable: string;
+  /**
+   * What one driver call may spend through this relay (A-P13-01). The relay
+   * counts what each response used and refuses every request once either
+   * bound is reached, so a call begun under budget may end over it by at most
+   * one call (D-P13-03). Each bound MUST be a positive finite number.
+   */
+  budget: RelayBudget;
+  /** How the relay reads what a call used and prices it. A dialect the implementation does not know is refused (D-P13-06). */
+  meter: RelayMeter;
 }
+
+/** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
+export interface RelayBudget {
+  maxTokens: number;
+  maxCostUsd: number;
+}
+
+/** US dollars per million tokens of each class. Each MUST be a non-negative finite number. */
+export interface ModelPrice {
+  inputPerMTok: number;
+  outputPerMTok: number;
+  cacheReadPerMTok: number;
+  /** A cache write held five minutes. */
+  cacheWritePerMTok: number;
+  /** A cache write held an hour. A write whose duration the response does not report is charged at this price. */
+  cacheWrite1hPerMTok: number;
+}
+
+/**
+ * Where the usage sits in a response, and what each model costs. The dialect
+ * is a closed union so a relay never guesses at a response it was not built to
+ * read; a model absent from `prices` is refused before its request is sent.
+ */
+export interface RelayMeter {
+  dialect: 'anthropic-messages';
+  /** Keyed by the exact model name a request carries. Never empty. */
+  prices: Readonly<Record<string, ModelPrice>>;
+}
+
+/**
+ * What a sandbox's relay counted, read by `destroy` after the sandbox stopped
+ * (A-P13-02). `unmetered` is a sandbox with no relay, stated rather than
+ * reported as zero, so a caller never presents an uncounted call as free.
+ *
+ * `exhausted` is the first reason the relay stopped forwarding, or `'none'`;
+ * `refused` counts the requests the meter refused, the budget's refusals and
+ * an unpriced model's among them.
+ */
+export type MeterReading =
+  | { readonly kind: 'unmetered' }
+  | {
+      readonly kind: 'metered';
+      readonly calls: number;
+      readonly inputTokens: number;
+      readonly outputTokens: number;
+      readonly cacheReadTokens: number;
+      readonly cacheWriteTokens: number;
+      readonly costUsd: number;
+      readonly exhausted: 'none' | 'tokens' | 'cost' | 'unreadable';
+      readonly refused: number;
+    };
 
 export interface SandboxSpec {
   image: string;
@@ -130,6 +190,13 @@ export interface SandboxProvider {
   readonly id: string;
   provision(spec: SandboxSpec): Promise<SandboxHandle>;
   exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
-  destroy(h: SandboxHandle): Promise<void>;
+  /**
+   * Ends the sandbox and returns what its relay counted, read after the
+   * sandbox stopped so nothing spends after the read (D-P13-07). A sandbox
+   * with no relay returns `{ kind: 'unmetered' }`. A provider that had a relay
+   * and cannot read its count MUST throw rather than return a reading, and
+   * MUST still tear the relay down.
+   */
+  destroy(h: SandboxHandle): Promise<MeterReading>;
   capabilities(): SandboxCapabilities;
 }

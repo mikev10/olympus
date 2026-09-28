@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@olympus-ai/core": "workspace:*",
-    "@olympus-ai/integrity": "workspace:*"
+    "@olympus-ai/integrity": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*"
   }
 }

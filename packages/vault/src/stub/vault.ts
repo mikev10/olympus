@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, Vault } from '../types.js';
+import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -119,6 +119,11 @@ export class StubVault implements Vault {
     return Promise.resolve(this.store(runId, 'task-result', r));
   }
 
+  recordUsage(r: UsageRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: a usage record is collected by the runtime, or it is not recorded"));
+    return Promise.resolve(this.store(r.runId, 'usage', r));
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
     if (state === undefined) return Promise.reject(new Error(`StubVault: no run state for ${runId}`));
@@ -141,8 +146,8 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result',
-    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

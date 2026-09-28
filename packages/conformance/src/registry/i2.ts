@@ -1,7 +1,7 @@
-import { compileError } from '../kit/assert.js';
+import { compileError, external } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
-import { RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+import { COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 
 /** I2: The runtime derives status; the model never reports it. */
@@ -45,6 +45,16 @@ export const I2: InvariantEntry = {
     STATUS_DERIVED_FROM_CHECK_RESULTS,
     TASK_RESULT_KEY_SET_ENFORCED,
     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
+    // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
+    COST_IS_RUNTIME_METERED,
+    // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
+    external({
+      id: 'I2.relay-meter-agrees-with-session',
+      title: "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
+    }),
   ],
   pending: [],
 };

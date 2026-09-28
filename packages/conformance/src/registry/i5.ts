@@ -20,6 +20,7 @@ import {
   withProvider,
   withSandbox,
 } from './local-sandbox.js';
+import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
@@ -427,6 +428,8 @@ export const I5: InvariantEntry = {
     CHECK_COMMAND_HAS_A_GRAMMAR,
     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+    // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+    MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
   ],
   pending: [
     pending({

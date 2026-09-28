@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, expect } from 'vitest';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
-import type { ExecOptions, LocalDockerProvider, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { ExecOptions, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
 
 /**
@@ -64,10 +64,62 @@ afterAll(() => {
   );
 });
 
+/** Token counts by class, as one side of the meter control counted them. */
+export interface TokenCounts {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/**
+ * The CLI's own account of every call a session made, summed over the models
+ * in its result's `modelUsage`: the main thread's, a subagent's, and any side
+ * call the CLI makes on another model. `result.usage` covers the main thread
+ * alone, so it is not the figure the relay's count can be held to.
+ */
+function sessionUsage(stdout: string, into: TokenCounts): void {
+  for (const line of stdout.split(/\r?\n/u)) {
+    if (!line.startsWith('{')) continue;
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const record = message as { type?: unknown; modelUsage?: unknown };
+    if (record.type !== 'result' || typeof record.modelUsage !== 'object' || record.modelUsage === null) continue;
+    for (const model of Object.values(record.modelUsage as Record<string, Record<string, unknown>>)) {
+      const count = (key: string): number => {
+        const value = model[key];
+        return typeof value === 'number' ? value : 0;
+      };
+      into.inputTokens += count('inputTokens');
+      into.outputTokens += count('outputTokens');
+      into.cacheReadTokens += count('cacheReadInputTokens');
+      into.cacheWriteTokens += count('cacheCreationInputTokens');
+    }
+  }
+}
+
+/**
+ * Every session this file ran, as the relay counted it and as the CLI
+ * reported it, recorded when the harness tore the sandbox down. The meter
+ * control (`I2.relay-meter-agrees-with-session`) reads these and makes no
+ * model call of its own.
+ */
+export const meteredSessions: Array<{ readonly test: string; readonly reading: MeterReading | Error; readonly cli: TokenCounts }> = [];
+
 /** Where the workspace mount lands inside the container, and where the driver runs. */
 export const WORKDIR = '/workspace';
 
-export const BUDGET: Budget = { maxTokens: 20_000, maxCostUsd: 1, maxWallClockMs: 300_000 };
+/**
+ * The relay enforces this per sandbox, and one sandbox serves every task of a
+ * test. `maxTokens` counts cache reads and writes, which one CLI session of
+ * the pinned version runs to tens of thousands, so it is sized for the test's
+ * sessions together; the dollar bound is what keeps a runaway test cheap.
+ */
+export const BUDGET: Budget = { maxTokens: 2_000_000, maxCostUsd: 1, maxWallClockMs: 300_000 };
 
 /**
  * The credential, or a failure that names what is missing. Read once per call
@@ -111,7 +163,8 @@ function spec(image: string, workspaceDir: string): SandboxSpec {
     // anything more — a package registry, an analytics endpoint, the API host
     // directly — has no route to it.
     egress: { mode: 'deny-all', allow: [] },
-    relay: { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] },
+    // The relay enforces the task's budget: the same bounds the request carries (D-P13-01).
+    relay: { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths], budget: { maxTokens: BUDGET.maxTokens, maxCostUsd: BUDGET.maxCostUsd } },
     limits: { cpus: 2, memoryMb: 2048, pids: 512, wallClockMs: 600_000 },
     // The image's own `node` user (image/Dockerfile), which the CLI's home belongs to.
     user: { uid: 1000, gid: 1000 },
@@ -160,6 +213,8 @@ export async function withDriver<T>(
   // ends. It is the real provider underneath — nothing is stubbed — so an
   // assertion about concurrency reads the same containers everything else does.
   let watcher: (() => () => void) | undefined;
+  const cli: TokenCounts = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const test = expect.getState().currentTestName ?? '(outside a test)';
   const watched: SandboxProvider = {
     id: provider.id,
     provision: (s: SandboxSpec) => provider.provision(s),
@@ -170,6 +225,7 @@ export async function withDriver<T>(
       try {
         const result = await provider.exec(h, cmd, o);
         recordCost(result.stdout);
+        sessionUsage(result.stdout, cli);
         return result;
       } finally {
         leave?.();
@@ -209,7 +265,9 @@ export async function withDriver<T>(
   try {
     return await body(harness);
   } finally {
-    await provider.destroy(handle).catch(() => undefined);
+    // The reading is kept, or why it could not be taken: the meter control fails on either.
+    const reading = await provider.destroy(handle).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+    meteredSessions.push({ test, reading, cli });
     await rm(base, { recursive: true, force: true });
   }
 }

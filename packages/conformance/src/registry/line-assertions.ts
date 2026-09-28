@@ -14,8 +14,8 @@ import { join } from 'node:path';
 import type { RunOutcome } from '@olympus-ai/api';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { AutonomyLevel, ModelFamily, ModelIdentity, RunState, StationContractTable, TaskId } from '@olympus-ai/core';
-import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { LockManifest, Vault } from '@olympus-ai/vault';
+import type { MeterReading, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
+import type { LockManifest, UsageRecord, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import {
@@ -53,6 +53,7 @@ function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void
     recordViolation: (v) => inner.recordViolation(v),
     recordAdmission: (a) => inner.recordAdmission(a),
     recordTaskResult: (runId, r) => inner.recordTaskResult(runId, r),
+    recordUsage: (r) => inner.recordUsage(r),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
       hooks.beforeCommit?.(s);
@@ -509,5 +510,99 @@ export const REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL: LocalAssertion = runtime({
       assembled = false;
     }
     if (assembled) throw new Error('I6: context was assembled for a review contract that grants the author narrative');
+  },
+});
+
+/**
+ * A provider whose every destroy returns a metered reading, the n-th with n
+ * calls and n thousandths of a dollar, so each record can be told apart. It
+ * stands in for sandboxes with relays: the line provisions none until I1
+ * (D-P13-11), and what is asserted here is that the line records what
+ * `destroy` returns and nothing a driver says.
+ */
+async function meteredProvider(readings: Map<SandboxHandle, MeterReading>): Promise<SandboxProvider> {
+  const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+  const inner = new StubSandboxProvider();
+  let destroyed = 0;
+  return {
+    id: inner.id,
+    capabilities: () => inner.capabilities(),
+    provision: (spec) => inner.provision(spec),
+    exec: (handle, cmd, options) => inner.exec(handle, cmd, options),
+    destroy: async (handle) => {
+      await inner.destroy(handle);
+      destroyed += 1;
+      const n = destroyed;
+      const reading: MeterReading = { kind: 'metered', calls: n, inputTokens: 100 * n, outputTokens: 10 * n, cacheReadTokens: n, cacheWriteTokens: n, costUsd: n / 1000, exhausted: 'none', refused: 0 };
+      readings.set(handle, reading);
+      return reading;
+    },
+  };
+}
+
+export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
+  id: 'I2.cost-is-runtime-metered',
+  title:
+    "every driver call the line makes — a build attempt that failed, the one retried after it, and the review seat — writes one usage record through recordUsage, carrying what the sandbox's meter read and never what the driver reported; totals per task, station, and run are the sums of those records, and calls with no meter are counted as unmetered rather than as free",
+  run: async () => {
+    const { startRun, costTotals, readUsage } = await api();
+    await withLine('p13-i2-cost-', async (rig) => {
+      // The driver reports zero usage for every call, and fails its first.
+      const inner = await stubDriver();
+      const handles: SandboxHandle[] = [];
+      const driver = {
+        ...inner,
+        runTask: async (req: Parameters<typeof inner.runTask>[0]) => {
+          handles.push(req.sandbox);
+          if (handles.length === 1) throw new Error('the driver failed');
+          return inner.runTask(req);
+        },
+      };
+      const reviewer = await stubDriver({ family: 'other-family' });
+      const recorded: UsageRecord[] = [];
+      const readings = new Map<SandboxHandle, MeterReading>();
+      const base = await rig.components({ driver, reviewer, sandbox: await meteredProvider(readings) });
+      const vault: Vault = {
+        ...around(base.vault, {}),
+        recordUsage: (r) => {
+          recorded.push(r);
+          return base.vault.recordUsage(r);
+        },
+      };
+      const state = stateOf(await startRun(await rig.request({ ...base, vault })), 'I2 metered');
+      const records = await readUsage(vault, state);
+      const shape = records.map((r) => `${r.taskId}@${r.station}#${String(r.attempt)}`);
+      const expected = [`${HELLO_TASK}@build#1`, `${HELLO_TASK}@build#2`, `${HELLO_REVIEW}@review#1`];
+      if (JSON.stringify(shape) !== JSON.stringify(expected)) throw new Error(`I2: the usage records were ${JSON.stringify(shape)}, expected ${JSON.stringify(expected)}`);
+      if (JSON.stringify(records) !== JSON.stringify(recorded)) throw new Error('I2: a usage record in run state did not come through recordUsage');
+      // Each record carries what destroy returned for the sandbox that driver call ran in, and the check sandboxes between them record nothing.
+      const sandboxes = [...handles, ...reviewer.requests.map((req) => req.sandbox)];
+      records.forEach((r, i) => {
+        const handle = sandboxes[i];
+        const expectedReading = handle === undefined ? undefined : readings.get(handle);
+        if (expectedReading === undefined || JSON.stringify(r.reading) !== JSON.stringify(expectedReading)) {
+          throw new Error(`I2: usage record ${String(i)} does not carry its sandbox's meter reading: ${JSON.stringify(r)}`);
+        }
+      });
+      const totals = costTotals(records);
+      const cost = (rs: readonly UsageRecord[]): number => rs.reduce((s, r) => s + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
+      const builds = records.filter((r) => r.station === 'build');
+      if (
+        totals.run.calls !== 3 || totals.run.unmetered !== 0 || totals.run.metered.costUsd !== cost(records) ||
+        totals.byStation.build?.metered.costUsd !== cost(builds) || totals.byTask[HELLO_TASK]?.calls !== 2 || totals.byTask[HELLO_REVIEW]?.calls !== 1
+      ) {
+        throw new Error(`I2: the totals are not the sums of their records: ${JSON.stringify(totals)}`);
+      }
+    });
+
+    // The control: the same line with no meter records every call as unmetered, and a total says how many.
+    await withLine('p13-i2-unmetered-', async (rig) => {
+      const base = await rig.components({ reviewer: await stubDriver({ family: 'other-family' }) });
+      const state = stateOf(await startRun(await rig.request(base)), 'I2 unmetered');
+      const totals = costTotals(await readUsage(base.vault, state));
+      if (totals.run.calls !== 2 || totals.run.unmetered !== 2 || totals.run.metered.calls !== 0) {
+        throw new Error(`I2: an unmetered line reported ${JSON.stringify(totals.run)}`);
+      }
+    });
   },
 });

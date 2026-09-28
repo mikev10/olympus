@@ -37,6 +37,9 @@ import { startRelay, stopRelay } from '../src/local/relay.js';
 import { TEST_IMAGE } from './image.js';
 import {
   PROCESS_DUMP,
+  TEST_BUDGET,
+  TEST_METER,
+  TEST_MODEL,
   UPSTREAM_HOST,
   UPSTREAM_MARKER,
   UPSTREAM_ORIGIN,
@@ -57,6 +60,9 @@ const run = promisify(execFile);
 /** The name the specs use for the credential; what the provider holds under it is made fresh per test. */
 const CREDENTIAL = 'model';
 
+/** A metered request the meter can price. */
+const MESSAGE = JSON.stringify({ model: TEST_MODEL, max_tokens: 16, messages: [] });
+
 /** The variable the sandbox is told the relay's address in. Deliberately not a vendor's name: the relay is not one vendor's. */
 const URL_VARIABLE = 'MODEL_BASE_URL';
 
@@ -67,6 +73,8 @@ function relaySpec(overrides: Partial<RelaySpec> = {}): RelaySpec {
     header: 'x-api-key',
     credential: CREDENTIAL,
     urlVariable: URL_VARIABLE,
+    budget: TEST_BUDGET,
+    meter: TEST_METER,
     ...overrides,
   };
 }
@@ -203,8 +211,8 @@ describe('the relay forwards its grant, with its own credential, to its own upst
         'x-api-key': 'a-key-of-the-tasks-own',
         authorization: 'Bearer another-one',
         'content-type': 'application/json',
-        'content-length': '2',
-      }) + '{}',
+        'content-length': String(Buffer.byteLength(MESSAGE)),
+      }) + MESSAGE,
     );
     expect(statusOf(response)).toBe(200);
     const seen = JSON.parse(bodyOf(response)) as Record<string, unknown>;
@@ -218,7 +226,7 @@ describe('the relay forwards its grant, with its own credential, to its own upst
       // Exactly one key: the provider's replaced the client's rather than joining it.
       keyCount: 1,
       authorization: null,
-      bodyBytes: 2,
+      bodyBytes: Buffer.byteLength(MESSAGE),
     });
   });
 
@@ -528,6 +536,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
   test('the relay itself refuses to start without a credential or a grant', async () => {
     const valid: Record<string, string> = {
       RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080',
+      RELAY_BUDGET: JSON.stringify(TEST_BUDGET), RELAY_METER: JSON.stringify(TEST_METER),
     };
     const flagsFor = (env: Record<string, string>): string[] => Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
 
@@ -544,6 +553,11 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       [uncredentialed, 'no credential'],
       [{ ...valid, RELAY_PATHS: '[]' }, 'no path grant'],
       [{ ...valid, RELAY_UPSTREAM: 'http://api.example.com', RELAY_PATHS: '["/v1"]' }, 'not an https origin'],
+      // P13: a relay nothing bounds, or that cannot price what it forwards, does not start either.
+      [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_BUDGET')), 'no budget'],
+      [{ ...valid, RELAY_BUDGET: JSON.stringify({ maxTokens: 0, maxCostUsd: 1 }) }, 'no budget'],
+      [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, dialect: 'openai-chat' }) }, 'no meter'],
+      [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { m: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } }) }, 'no price table'],
     ];
     for (const [env, named] of attempts) {
       const outcome = await run('docker', ['run', '--rm', ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(

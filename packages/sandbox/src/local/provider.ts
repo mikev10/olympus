@@ -13,14 +13,25 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
-import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type { ExecOptions, ExecResult, MeterReading, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { refuse, withLeftovers } from './refusal.js';
-import { CREDENTIAL_NAME, RELAY_ALIAS, RELAY_URL, checkRelay, startRelay, stopRelay, type AppliedRelay, type RelayOptions, type RelayPlan } from './relay.js';
+import {
+  CREDENTIAL_NAME,
+  RELAY_ALIAS,
+  RELAY_URL,
+  checkRelay,
+  readMeter,
+  startRelay,
+  stopRelay,
+  type AppliedRelay,
+  type RelayOptions,
+  type RelayPlan,
+} from './relay.js';
 
 /**
  * A POSIX keep-alive. `sleep infinity` is a GNU and BusyBox extension, and a
@@ -143,6 +154,13 @@ export interface AppliedControls {
   readonly runArgs: readonly string[];
 }
 
+/** How a sandbox ended: whether everything it was given was removed, and what its relay counted. */
+interface Ended {
+  readonly removal: Error | undefined;
+  /** The relay's reading, `unmetered` without one, or why it could not be read. */
+  readonly reading: MeterReading | Error;
+}
+
 interface Sandbox {
   readonly controls: AppliedControls;
   /** Set once the budget is spent or the container is destroyed, so a later exec says why rather than failing obscurely. */
@@ -161,7 +179,13 @@ interface Sandbox {
    * immediately afterwards still finds it. One promise, awaited by whoever
    * arrives second.
    */
-  ending?: Promise<Error | undefined> | undefined;
+  ending?: Promise<Ended> | undefined;
+  /**
+   * Set by the first `destroy`. A sandbox its wall clock ended is still
+   * destroyed once, and that call returns the reading taken when it ended; a
+   * second `destroy` is refused (D-P13-14).
+   */
+  destroyed?: boolean;
 }
 
 function checkLimits(limits: SandboxSpec['limits']): void {
@@ -577,7 +601,7 @@ export class LocalDockerProvider implements SandboxProvider {
       if (!(error instanceof CliTimeout)) throw error;
       // The budget is the sandbox's, not the command's: the container goes with it, so nothing
       // left running inside outlives the limit that was supposed to bound it.
-      const removal = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
+      const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
       if (removal !== undefined) {
         // The breach is still the headline, but a container that outlived its budget *and*
         // could not be removed is worse than one that was, and must not be reported as less.
@@ -587,11 +611,20 @@ export class LocalDockerProvider implements SandboxProvider {
     }
   }
 
-  async destroy(h: SandboxHandle): Promise<void> {
+  /**
+   * Ends the sandbox and returns what its relay counted (D-P13-07). A sandbox
+   * its wall clock already ended returns the reading taken then: the call it
+   * served spent money whether or not it finished in time, and the runtime
+   * records it either way (D-P13-14).
+   */
+  async destroy(h: SandboxHandle): Promise<MeterReading> {
     const sandbox = this.#require(h);
-    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has already ended: ${sandbox.ended}`);
-    const removal = await this.#end(sandbox, 'it was destroyed');
+    if (sandbox.destroyed === true) refuse('lifetime', `sandbox ${h} has already ended: ${sandbox.ended ?? 'it was destroyed'}`);
+    sandbox.destroyed = true;
+    const { removal, reading } = await this.#end(sandbox, 'it was destroyed');
     if (removal !== undefined) throw removal;
+    if (reading instanceof Error) throw reading;
+    return reading;
   }
 
   /**
@@ -620,7 +653,7 @@ export class LocalDockerProvider implements SandboxProvider {
    * audited. Returns the removal failure rather than throwing it, so a caller
    * that is already refusing for a better reason can decide which to report.
    */
-  async #end(sandbox: Sandbox, why: string): Promise<Error | undefined> {
+  async #end(sandbox: Sandbox, why: string): Promise<Ended> {
     // Whoever gets here second awaits the first removal rather than starting another, and so
     // does not return until the container is actually gone.
     if (sandbox.ending !== undefined) return sandbox.ending;
@@ -643,11 +676,22 @@ export class LocalDockerProvider implements SandboxProvider {
    * there to make that a failing test rather than a thing somebody notices in
    * `docker ps` a week later.
    */
-  async #dismantle(controls: AppliedControls): Promise<Error | undefined> {
-    // The container first: a network still holding an endpoint cannot be removed.
+  async #dismantle(controls: AppliedControls): Promise<Ended> {
+    // The container first: a network still holding an endpoint cannot be removed, and a meter read
+    // while the sandbox runs can be overtaken by a process still calling the relay (D-P13-07).
     const container = await this.#remove(controls.containerId);
+    const relay = relayOf(controls.egress);
+    let reading: MeterReading | Error = { kind: 'unmetered' };
+    if (relay !== undefined) {
+      try {
+        reading = await readMeter(relay, this.#relayOptions);
+      } catch (error) {
+        // Kept, not thrown: the relay is still torn down below, and `destroy` reports this.
+        reading = new Error(`the model relay's meter could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const sidecars = await this.#stopSidecars(controls.egress);
-    return container ?? sidecars;
+    return { removal: container ?? sidecars, reading };
   }
 
   /**
@@ -658,7 +702,7 @@ export class LocalDockerProvider implements SandboxProvider {
    */
   async #expire(sandbox: Sandbox, budgetMs: number): Promise<void> {
     if (sandbox.ending !== undefined) return;
-    const removal = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
+    const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
     if (removal !== undefined) {
       sandbox.ended = `it exceeded its wall-clock limit of ${String(budgetMs)}ms and could not be destroyed: ${removal.message}`;
     }

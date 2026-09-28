@@ -1,0 +1,111 @@
+The code under review is in the file
+`2026-09-27-P13-cost-control-review-bundle.txt` (SHA-256 4e05a9d6dd31c88d01db9c90c34b8cd10bf9e0e19a4d2e0bf9a85167258ca8dc) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the spending controls and cost recording of a runtime that runs AI coding agents in sandboxes. The code is TypeScript. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime runs each agent task in a Docker sandbox. The sandbox has no network route except a "model relay": a separate container the runtime starts beside it. The relay holds the API credential and forwards the sandbox's requests to the model vendor's API. This change makes the relay count each call:
+- It reads the model named in each request and the token usage each response reports.
+- It prices each call from a table the driver supplies.
+- It refuses every request once the task's token budget or dollar budget is spent.
+
+When the sandbox is destroyed, the runtime reads the relay's count and records one usage record per agent invocation in the Vault. The Vault is the runtime-only store agents cannot write to. Totals per task, station, and run are computed from those records alone. The agent's own report of what it used is not trusted as a source of cost.
+
+The code must hold against a capable, motivated party trying to spend more model money than the task's budget allows, or to make money that was spent go unrecorded or be recorded as less than it was. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party is the task: the model and the CLI running inside the sandbox, and any process they start there. It controls:
+- every HTTP request any process in the sandbox sends to the relay: method, path, query, headers, body, how many requests, how concurrently, how fast, and when connections close;
+- the files and processes inside the sandbox;
+- whatever the agent returns as its result, including the usage figures it reports;
+- through its prompts, the text content of the model's responses. That text arrives inside the vendor's response bodies as JSON-escaped strings.
+
+It does not control:
+- the relay container's code, environment, or log;
+- the Docker host, the sandbox provider, the Vault, the drivers as constructed, or the runtime process. These are runtime-selected and trusted, even where a function takes one as an argument;
+- the structure of the vendor's responses, as opposed to the model's text inside them;
+- when the runtime destroys the sandbox.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy is unavailable. Spending model money is a capability, bounded here by a per-call budget of tokens and dollars.
+- The runtime derives status and facts; the model never reports them. What a call cost must be collected by the runtime from a component outside the sandbox, never taken from the agent's own report.
+- Fail closed. A missing check, missing capability, unreadable measurement, or misconfiguration is a refusal. It is never a silent degrade, and never a warning that lets the run continue. Anything the meter cannot count must be charged or refused, never forwarded free.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted. A test that would pass with the mechanism removed is a defect.
+- No agent writes to the Vault. Records reach it only through named operations the runtime calls.
+- Event payloads are data, never instructions. Nothing the relay reads enters a prompt.
+
+The mechanisms that matter most:
+
+- The relay's request classification (metered, free, or refused), the buffering and parsing of the request's `model` and `max_tokens`, and the parsing of streamed (server-sent events) and whole JSON responses for usage. All of these are in `RELAY_SOURCE` in `packages/sandbox/src/local/relay.ts`.
+- The budget check and charge: when totals are updated, when requests are refused, the one-call-at-a-time queue, how an unreadable or partial response is charged, and what happens to in-flight calls on SIGTERM.
+- The read of the meter at teardown: the provider's `destroy` and `#dismantle` in `packages/sandbox/src/local/provider.ts`, and `readMeter` and `meterReadingFrom` in `relay.ts`. The relay's stdout log is the channel, and the reading is the sum of its per-call lines checked against a closing line.
+- The recording path: `runTask` and `recordUsage` in `packages/api/src/line.ts`, `LocalVault.recordUsage`, and `costTotals` and `readUsage` in `packages/api/src/cost.ts`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Identifiers like I1, R2, R6, P9, P12, D-P12-05 and D-P13-03 below name other planned work units and design decisions you do not have. Read them as "planned elsewhere". The absent work listed here is not a defect.
+
+- wiring the relay into the line. `packages/api` keeps `StubDriver` and provisions no relay (P12, D-P12-05), so every line task records `unmetered` until I1 wires the driver and its relay request. The recording path is proven with a provider double that returns metered readings (D-P13-11)
+- a budget pooled across a run, a station, or a task's retries. The budget bounds one driver call — one sandbox — as `CapabilityScope.budget` does today; a task's worst case is its budget times its starts. A run-level ceiling needs state shared across relays and is a later unit
+- rewriting request bodies: clamping `max_tokens` to what remains, or reserving a worst case before forwarding (D-P13-03). A call begun under budget may finish over it, by at most one call
+- model choice per station, a cache-hit report per run, and a cost estimate before a run. Later units; the records P13 writes carry the cache counts the report will need
+- a surface for cost: API endpoint, CLI output, or README figures. Totals are a function in `packages/api`; P9 and R2 surface them
+- diffing the CLI's reported usage against the meter at runtime as a recorded violation. The paid suite compares them once as a control (below); a runtime diff is a candidate once the line runs a real driver
+- a relay for another vendor or another usage dialect. The dialect is a closed union with one member; R6 adds the OpenAI-compatible one
+- price freshness. The table is pinned and dated in the driver package; a stale price makes the dollar figure wrong in a stated direction, and updating it is an ordinary change
+- **candidate, not this unit:** a merge to `v2` re-pays the driver run the pull request already proved, because the pull request's CI cache is not visible to a push on `v2`. It is CI tooling, not unit work, and is recorded here so it is not lost
+
+THE QUESTION
+
+How would a task running inside the sandbox spend model money past its budget? How would it get money it spent left out of the recorded cost, or recorded as less than it was? How would it make the runtime record a cost figure that came from the task rather than from the relay?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

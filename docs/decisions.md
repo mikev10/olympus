@@ -2456,3 +2456,162 @@ The entries below come from the external review, triaged in `docs/reviews/2026-0
 - **Found:** with the account out of credit, a CI run answered all nine driver tests with the same API 400, one paid attempt after another. Nothing recorded what a passing run costs: the driver reads each call's usage and cost from the CLI (P5), but per-run reporting is I1's and R2's, and the suite's own spend was never tracked, although P5 said it costs money.
 - **Chosen:** the driver package's vitest config sets `bail: 1`, so the first failure stops the rest. A stopped test is reported skipped, which the registry refuses as it refuses a failure, so nothing is weakened. The harness's provider wrapper parses every exec's stream and prints `[model-cost]` lines, for each call and a total for each file: tokens, cache reads and writes, and dollars. It sees every call, including subagents and tool-inventory inspections.
 - **Next:** the budget unit after P12 moves per-run cost reporting forward from I1 and R2 and enforces `Budget` at the relay. These log lines measure what that unit is meant to reduce.
+
+## P13: Cost control
+
+Proposed with the unit spec and approved by the maintainer before any code, each as recommended. Each entry names the option not taken, so a reversal is a choice between two stated shapes rather than a redesign.
+
+### D-P13-01: The budget bounds one driver call, and travels with the relay's spec
+
+- **Ambiguous:** `Budget` sits on `CapabilityScope` and is copied onto each `TaskRequest`, so it is per driver call today. Nothing says whether enforcement at the relay keeps that scope or pools spend across a task's retries or a run.
+- **Options:** (A) `RelaySpec.budget` is required and set by whoever provisions the sandbox, so one relay enforces one call's budget; (B) a pool shared across relays, per task or per run.
+- **Chosen: A**, with the maintainer. A relay lives and dies with one sandbox, so it can enforce A with state it already holds. B needs a counter outside every relay that each relay consults before forwarding, a new component on the model's only route. A task's worst case under A is its budget times its starts, which is bounded and stated.
+- **Reverse:** add a run-scoped counter the provider holds, and have each relay reserve against it.
+
+### D-P13-02: The relay reads the request's model and the response's usage, and forwards both bodies unchanged
+
+- **Ambiguous:** P12 put reading bodies out of scope. Metering cannot be done without reading the usage the response reports.
+- **Options:** (A) the relay buffers a metered request to read `model`, forwards it unchanged, and reads a copy of the response as it streams it through; (B) meter on the host from the CLI's own stream, as the driver already parses it.
+- **Chosen: A**, with the maintainer. B is the CLI's report, produced inside the sandbox, which is what this unit replaces. The relay reads two things, a model name and usage fields, records neither body, and changes neither. It sets `accept-encoding: identity` upstream so what it reads is what was sent.
+- **Reverse:** drop the body reads and take cost from `TaskResult.usage`.
+
+### D-P13-03: Spend is counted after each response, and every request after the crossing one is refused
+
+- **Ambiguous:** a response's cost is known only once it ends, so a bound can be enforced before a call only by guessing.
+- **Options:** (A) count after each response; refuse every later request once either total reaches its bound, with a status the CLI does not retry and a body naming the bound; (B) also rewrite `max_tokens` down to what remains; (C) reserve a worst case from the request's size and `max_tokens` before forwarding, never exceeding the bound.
+- **Chosen: A**, with the maintainer. B edits what the CLI sent, and a clamp below a thinking budget is an upstream error mid-task. C never overshoots but, sized from body bytes, refuses long agentic sessions far below their real cost. A overshoots by at most one call, which is stated as a known limit.
+- **Reverse:** B — parse and rewrite `max_tokens`; or C — reserve before forwarding and settle after.
+
+### D-P13-04: What the relay cannot read, it charges rather than forgives
+
+- **Ambiguous:** a stream can end without its final usage (dropped, or an error event mid-stream), and a response can arrive in a form the relay cannot parse.
+- **Options:** (A) a successful response with input usage and no final output usage is charged the request's `max_tokens` as output; one with no readable usage marks the budget `unreadable` and refuses every later call; a model absent from the price table is refused before forwarding; (B) charge what was read and flag the rest.
+- **Chosen: A**, with the maintainer. B makes an unreadable response free, so a task that could provoke one would spend around its budget. A charges the ceiling where one is known and stops where none is. An error response that is not a success is not billed upstream and is charged nothing.
+- **Also** (review fix, codex-2 in `2026-09-27-P13-cost-control-triage.md`): some requests get no response at all. Whether the upstream billed one that was sent whole is unknown, so it is charged as unreadable, and every later call is refused. Only a request that failed before it left the relay is charged nothing. "Sent" is the outbound request's `finish` event.
+- **Reverse:** charge only the usage read, and record the call as `unreadable` without refusing.
+
+### D-P13-05: `maxTokens` counts all four token classes
+
+- **Ambiguous:** `Usage` has four counts; the budget has one.
+- **Options:** (A) input, output, cache write, and cache read, summed; (B) exclude cache reads, which dominate an agentic session's count and cost a tenth as much.
+- **Chosen: A**, with the maintainer. A token bound exists to hold independently of the price table; a bound with an excluded class is one a task can spend around, and the class excluded is the largest. A policy author sizes `maxTokens` knowing that, and `maxCostUsd` already weighs the classes by price.
+- **Reverse:** drop `cacheReadTokens` from the sum.
+
+### D-P13-06: The driver pins the prices, and the relay knows one closed set of dialects
+
+- **Ambiguous:** the relay must turn tokens into dollars and must know where in a response the usage sits; both are vendor knowledge, and `RelaySpec` names nothing vendor-specific.
+- **Options:** (A) `RelaySpec.meter` carries a `dialect` from a closed union (`'anthropic-messages'` only) and a price table per model and token class, and the driver exports both, dated, beside `MODEL_RELAY`; (B) prices in `policy.yaml`, in the Vault.
+- **Chosen: A**, with the maintainer. The driver resolves tiers to models, so it is the package that knows which models a task can name. Prices are facts about a vendor, not grants, so they do not belong with capabilities in policy. A dialect the relay does not implement is refused at provisioning.
+- **Reverse:** move the table into `Policy` and have the line pass it into the spec.
+
+### D-P13-07: The meter is read by `destroy`, after the sandbox has stopped
+
+- **Ambiguous:** the runtime must read the relay's totals, and a read taken while the sandbox runs can be overtaken by a background process still calling the relay.
+- **Options:** (A) `destroy` stops the sandbox container, reads the relay's log, removes the relay, and returns the reading; (B) a separate `meter(handle)` the caller invokes before `destroy`.
+- **Chosen: A**, with the maintainer. Under A nothing can spend after the read, and a caller cannot forget to take it. The relay's log is in the relay's container, which nothing in the sandbox reaches, so the channel is out of the task's reach; nothing is published to the host.
+- **Reverse:** add `meter(handle)` to `SandboxProvider` and restore `destroy`'s `void`.
+
+### D-P13-08: Cost is a record per driver call, and totals are derived, never stored
+
+- **Ambiguous:** "cost in the evidence" could mean a field on `EvidenceBundle`, which exists only for a verified build attempt.
+- **Options:** (A) a `UsageRecord` per driver call, written through `Vault.recordUsage`, referenced from `RunState.usage`, with totals per task, station, and run computed by one function from the records; (B) a cost field on `EvidenceBundle` and running totals in `RunState`.
+- **Chosen: A**, with the maintainer. B misses every attempt that failed and every review seat, each of which spent money, and a stored total is a second figure that can disagree with its parts. A records every call and has one source for every total.
+- **Reverse:** add `cost` to `EvidenceBundle` and fold totals into `commitRunState`.
+
+### D-P13-09: An exhausted budget is recorded and does not decide status
+
+- **Ambiguous:** a call cut off by its budget may still leave a diff that passes its checks.
+- **Options:** (A) the reading's `exhausted` is recorded in the `UsageRecord`, and status is derived from check results as before; (B) an exhausted budget fails the attempt before verification.
+- **Chosen: A**, with the maintainer. Status has one source, the checks the runtime ran. A cut-off task that left failing work fails them; one whose work passes has done what the checks ask. Retries stay bounded by `retry.max`.
+- **Reverse:** have the line fail an attempt whose reading is exhausted, before `verify`.
+
+### D-P13-10: The driver stops passing `--max-budget-usd`
+
+- **Options:** (A) remove the flag, leaving the relay the only bound; (B) keep it beside the relay.
+- **Chosen: A**, with the maintainer. Two bounds with two price tables leave "which one stopped the task" unanswerable in the evidence, and the one inside the sandbox is the one this unit exists to stop relying on. Under A every stop is the relay's and is in its log.
+- **Reverse:** restore the flag in the driver's argument vector.
+
+### D-P13-11: The line records every call now, and stays unmetered until I1 wires the relay
+
+- **Ambiguous:** the line runs `StubDriver` with no relay (D-P12-05), so its records would all be `unmetered`.
+- **Options:** (A) wire recording now, prove it with a provider double that returns metered readings, and leave the relay's wiring to I1; (B) wire the relay into the line in this unit.
+- **Chosen: A**, with the maintainer. B needs the line to obtain a driver's relay request, which D-P12-05 left for the `Driver` contract method I1 designs with a second driver in view. A proves the recording path and the relay's enforcement separately, each against its real code, and the join is one call site I1 changes.
+- **Reverse:** land D-P12-05's reverse and provision the relay in `runTask`.
+
+The entries below were decided while the unit was built, where the spec left a choice open.
+
+### D-P13-12: The dialect names what it meters, what is free, and refuses the rest
+
+- **Ambiguous:** the spec meters "each request to a metered path" and does not say which paths those are. `MODEL_RELAY` grants the `/v1/messages` prefix, which also covers `/v1/messages/count_tokens` (free upstream) and `/v1/messages/batches` (billed, in a shape the relay does not read).
+- **Options:** (A) meter `POST /v1/messages`; forward `POST /v1/messages/count_tokens`, `GET`, and `HEAD` unmetered, since none of them generates; refuse every other request with 403, naming it; (B) meter `POST /v1/messages` and forward the rest of the grant unmetered.
+- **Chosen: A.** Under B a task could spend through the batches endpoint and the budget would never see it, which is the gap this unit closes. A refuses the write it cannot count (I5). The pinned CLI calls only the metered endpoint and token counting, so it loses nothing; the paid driver suite is where that is re-proven.
+- **Also:** an answer with no readable usage at all is charged `max_tokens` as output, the one part of its ceiling the relay knows, as well as marking the budget `unreadable`. D-P13-04 only required the mark; charging the known part too keeps the reading from presenting that call as free.
+- **Reverse:** make `kindOf` in `RELAY_SOURCE` return `free` for every request that is not metered.
+
+### D-P13-13: One metered call is in flight at a time
+
+- **Ambiguous:** D-P13-03 and the known limit say a call begun under budget ends over it "by at most one call". With concurrent calls, every call in flight at the crossing could end over budget.
+- **Options:** (A) the relay admits one metered call at a time and queues the rest; each call is checked against the budget when its turn comes; (B) allow concurrency, and restate the limit as "by at most the calls in flight".
+- **Chosen: A**, because it makes the stated bound true rather than rewriting it. The cost is latency for a CLI that runs subagents in parallel. The relay's request timeout is off, so a queued request waits behind a long generation instead of timing out; the sandbox's wall clock still bounds it. Free requests are not queued.
+- **Reverse:** remove `acquire`/`release` from the metered path, and restate the known limit in `DECOMPOSITION.md`.
+
+### D-P13-14: A sandbox its wall clock ended is still destroyed once, and returns its reading
+
+- **Ambiguous:** a sandbox that outruns its wall clock is dismantled by the provider's timer, relay included. `destroy` then refused as "already ended", so the reading of a call that timed out would be lost, and that call spent money too.
+- **Chosen:** teardown (`#dismantle`) reads the meter whenever it runs and keeps the reading on the sandbox. The first `destroy` returns it, whether it ends the sandbox or finds it already ended; a second `destroy` is refused, as before. A side effect: a verify check that outruns its timeout is now destroyed cleanly instead of throwing from the line's `finally`.
+- **Reverse:** restore the `ended` check at the top of `destroy`, and accept that timed-out calls go unrecorded.
+
+### D-P13-15: A driver call whose cost cannot be read stops the run
+
+- **Ambiguous:** before P13, a failed `destroy` after a driver call became a retry. After P13 it also means the call's cost could not be read, so no `UsageRecord` can be written for it.
+- **Options:** (A) the line throws and the run stops, naming the failure; (B) keep retrying with the call left unrecorded.
+- **Chosen: A.** B is an uncounted call followed by another call, a silent degrade (I5). A failed `provision` is still a retry: no driver call happened, so nothing was spent.
+- **Reverse:** in `runTask`, catch the `destroy` failure and return `{ ok: false }` without recording.
+
+### D-P13-16: The paid control reads the CLI's `modelUsage`, over every session the file ran
+
+- **Ambiguous:** "the CLI's reported token counts". The CLI's `result.usage` covers the main thread only; `modelUsage` sums every model the session used.
+- **Chosen:** the harness sums `modelUsage` from every result in a sandbox. At teardown it takes the relay's reading from `destroy`, which it no longer discards. `I2.relay-meter-agrees-with-session` is the last test in `invariants.test.ts`. It requires at least one session, and requires class-by-class equality for each, printing both figures. It makes no model call. The harness `BUDGET` is sized for this: `maxTokens` now counts cache tokens, so it rises from 20,000 to 2,000,000, and `maxCostUsd` stays at 1.
+- **Reverse:** compare against `result.usage`, and restrict the control to sessions that ran no subagent.
+
+### D-P13-17: The relay is stopped before its log is read, and a log with no closing line is refused
+
+- **Ambiguous:** D-P13-07 reads the log after the sandbox stops. A call can still be in flight inside the relay at that point, and a relay killed mid-write leaves a log that looks whole.
+- **Chosen:** `readMeter` runs `docker stop` on the relay. On SIGTERM the relay stops accepting requests and cuts off any call in flight, charging it by the usual rules (a call cut off before any answer is charged as unreadable). It then writes a `closed` line carrying its running totals. The host sums the per-call lines and refuses a log with no closing line, or one whose sum differs from the stated totals.
+- **Reverse:** read `docker logs` without stopping the relay, and accept a reading that can miss the last call.
+
+### D-P13-18: `@olympus-ai/vault` depends on `@olympus-ai/sandbox` for `MeterReading`
+
+- **Ambiguous:** `UsageRecord` lives beside `EvidenceBundle` (A-P13-03) and carries a `MeterReading`, which `@olympus-ai/sandbox` declares. The Vault package depended only on `core` and `integrity`.
+- **Chosen:** the dependency is added, type-only. `core` already depends on `sandbox`, so the graph gains an edge and no cycle.
+- **Reverse:** re-export `MeterReading` from `core` and import it from there.
+
+### D-P13-19: An unreadable call's cost is a lower bound, and the totals do not say so
+
+- **Found in review** (codex-1, `2026-09-27-P13-cost-control-triage.md`). A call with no readable usage is charged `max_tokens` as output and nothing for input or cache (D-P13-12). A call cut off mid-answer at the wall clock, after the vendor has read a large input, is recorded well below what it cost. The budget is not bypassed: the mark `unreadable` refuses every later call, so the overshoot stays at one call (D-P13-03). What is wrong is the record. `costTotals` adds that figure to `metered` like any complete one, and counts it only in `exhausted`, together with calls that simply crossed their bound. A total built from such a record reads as exact when it is a lower bound.
+- **Known limit, owned by I1.** Until I1 wires the relay into the line, every line record is `unmetered` (D-P13-11), so no total can contain one of these calls yet. I1 must resolve this before its first metered record.
+- **Options owed:** (A) count unreadable calls separately in the totals, so a total that holds one says it is a lower bound; (B) also charge the request's input from its body size, an upper bound that overstates the cost of a call that could not be read. Recommended: A, and B only if a lower bound must never be published.
+
+### D-P13-20: A spent call whose reading was lost is not blocked on resume
+
+- **Found in review** (codex-3, `2026-09-27-P13-cost-control-triage.md`). D-P13-15 stops the run when `destroy` cannot return a reading, but it commits nothing first. The task stays `running`, and `resumeRun` replays it, and nothing records that the first call's cost is missing. Separately, `recordUsage` in `line.ts` stores the `UsageRecord` and then commits its ref. A crash between the two leaves a stored record that `readUsage` never reads.
+- **Known limit, owned by I1.** The line runs `StubDriver` with no relay today (D-P13-11), so no model money is spent on the line and none can be lost from its totals. Once I1 wires the relay, a lost reading is real spend missing from the record.
+- **What I1 must do:** durably record a failed reading before the run stops, and have `resumeRun` refuse a run that holds one until a human resolves it. Make a stored record findable without its ref. Add a test for resume after each of the two failures.
+
+## P13 amendments to the contracts
+
+### A-P13-01: `RelaySpec.budget` and `RelaySpec.meter`
+
+`budget: RelayBudget` (`maxTokens`, `maxCostUsd`) and `meter: RelayMeter` (`dialect: 'anthropic-messages'` and `prices`, a `ModelPrice` per model name) are required. An implementation must refuse a relay missing either, a bound that is not a positive finite number, a price that is not a non-negative finite number, an empty price table, or a dialect it does not implement. `LocalDockerProvider` refuses these at the `relay` layer, naming the field. The relay source refuses the same things again at start. Reasoned in D-P13-01, D-P13-05, and D-P13-06.
+
+### A-P13-02: `SandboxProvider.destroy` returns a `MeterReading`
+
+The return is `{ kind: 'unmetered' }` or `{ kind: 'metered'; calls; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd; exhausted; refused }`. A provider that had a relay and cannot read its count must throw, and must still tear the relay down. `StubSandboxProvider` returns `unmetered`. Reasoned in D-P13-07, D-P13-14, and D-P13-17.
+
+### A-P13-03: `Vault.recordUsage` and `UsageRecord`
+
+`UsageRecord` (`runId`, `taskId`, `station`, `attempt`, `reading`, `collectedBy: 'runtime'`) is declared beside `EvidenceBundle`. `recordUsage` is its one named write. `LocalVault` refuses a record that is not the runtime's or whose reading is malformed, and stores accepted ones under the new `VaultRefKind` `'usage'`. Reasoned in D-P13-08.
+
+### A-P13-04: `RunState.usage`
+
+`usage: readonly VaultRef[]` holds one ref per driver call, in order. `LocalVault` refuses a stored run state without it. Totals are derived by `costTotals` in `packages/api/src/cost.ts` and never stored.

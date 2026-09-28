@@ -89,6 +89,7 @@ function state(version: string): RunState {
     violations: [],
     approvals: [],
     reviews: [],
+    usage: [],
     version,
   };
 }
@@ -210,6 +211,31 @@ describe('admission and task results', () => {
 
   test('refuses a task result that names no task', async () => {
     await expect(vault.recordTaskResult(runId, {} as never)).rejects.toThrow(/names no task/);
+  });
+});
+
+describe('usage records (A-P13-03)', () => {
+  const record = {
+    runId,
+    taskId: 'hello' as TaskId,
+    station: 'build' as const,
+    attempt: 1,
+    reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
+    collectedBy: 'runtime' as const,
+  };
+
+  test('stores a record the runtime collected, metered or unmetered, and reads it back as written', async () => {
+    const ref = await vault.recordUsage(record);
+    expect(ref).toMatchObject({ runId, kind: 'usage' });
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(record);
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'unmetered' } })).resolves.toMatchObject({ kind: 'usage' });
+  });
+
+  test('refuses a record the runtime did not collect, or whose reading is not whole', async () => {
+    await expect(vault.recordUsage({ ...record, collectedBy: 'driver' } as never)).rejects.toThrow(/collectedBy/);
+    await expect(vault.recordUsage({ ...record, attempt: 0 })).rejects.toThrow(/attempt/);
+    await expect(vault.recordUsage({ ...record, reading: { ...record.reading, costUsd: Number.NaN } })).rejects.toThrow(/costUsd/);
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'guessed' } } as never)).rejects.toThrow(/kind/);
   });
 });
 

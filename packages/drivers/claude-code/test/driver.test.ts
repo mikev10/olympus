@@ -9,11 +9,12 @@
  * output from the pinned CLI version, trimmed.
  */
 import { describe, expect, test } from 'vitest';
-import type { SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
   KEY_PLACEHOLDER,
   KEY_VARIABLE,
+  MODEL_METER,
   MODEL_RELAY,
   ClaudeCodeDriver,
   DriverRefusal,
@@ -59,8 +60,8 @@ class RecordingProvider implements SandboxProvider {
     return Promise.resolve({ exitCode: this.exitCode, stdout, stderr: '', durationMs: 5 });
   }
 
-  destroy(_h: SandboxHandle): Promise<void> {
-    return Promise.resolve();
+  destroy(_h: SandboxHandle): Promise<MeterReading> {
+    return Promise.resolve({ kind: 'unmetered' });
   }
 
   capabilities(): { computerUse: boolean; gpu: boolean; os: 'linux'; persistent: boolean; remote: boolean } {
@@ -191,7 +192,28 @@ describe('the invocation', () => {
       header: 'x-api-key',
       credential: 'anthropic',
       urlVariable: 'ANTHROPIC_BASE_URL',
+      meter: MODEL_METER,
     });
+  });
+
+  test('the CLI is not given a budget of its own: the relay is the only bound, and every stop is in its log (D-P13-10)', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request());
+    const argv = provider.calls.flatMap((call) => call.cmd);
+    expect(argv).not.toContain('--max-budget-usd');
+  });
+
+  // Which model a tier's alias resolves to is the CLI's answer at run time, so no offline test can
+  // name that set; a model missing from the table is refused by the relay before it is sent (D-P13-06).
+  test('the meter names at least one model, and every model it names carries all five prices, each a non-negative finite number', () => {
+    expect(MODEL_METER.dialect).toBe('anthropic-messages');
+    const fields = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'] as const;
+    const models = Object.entries(MODEL_METER.prices);
+    expect(models.length).toBeGreaterThan(0);
+    for (const [model, prices] of models) {
+      for (const field of fields) expect(Number.isFinite(prices[field]) && prices[field] >= 0, `${model}.${field}`).toBe(true);
+    }
   });
 
   test('the prefix and the suffix reach different flags, which is what makes the cache reading possible', async () => {
@@ -399,6 +421,14 @@ describe('refusals when the CLI did not run the task (I5)', () => {
     const provider = new RecordingProvider();
     provider.stdout = stream().replace('"is_error":false', '"is_error":true,"api_error_status":401');
     await expect(driverWith(provider).runTask(request())).rejects.toThrow(/the API answered 401/);
+  });
+
+  test('the refusal quotes what the CLI said the API answered, so the reason is not lost', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream()
+      .replace('"is_error":false', '"is_error":true,"api_error_status":400')
+      .replace('"result":"done"', '"result":"API Error: 400 the model \\"claude-x\\" has no price"');
+    await expect(driverWith(provider).runTask(request())).rejects.toThrow(/the API answered 400.*has no price/);
   });
 
   test('a stream with no result refuses', async () => {
