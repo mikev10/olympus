@@ -2002,6 +2002,14 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **What it gives up, stated:** a pull request's real-model evidence arrives only at the end, so a change that breaks the driver against the real model is found when the label is added rather than on the push that made it. Until then, the driver's tests that call no model (`driver.test.ts`) still run on every push, with no credential, and the full suite still gates the merge.
 - **Reverse:** remove the label condition from the three steps and delete the final step.
 
+### D-A-CI-06: a merge to v2 reuses its pull request's driver report
+
+- **Problem:** GitHub scopes a cache to the ref that saved it, and a push to `v2` cannot see a pull request's cache. So the push that merges a pull request re-ran the whole driver suite for a tree its pull request had just proved, which is one paid run per unit that bought nothing. It was recorded as a candidate in P13's out-of-scope list.
+- **Chosen:** a pull request run that executes the driver suite also uploads its report as an artifact named `driver-report-<tree hash>`, kept for 30 days. On a push with no cache hit, CI looks up an unexpired artifact of that name. The run that made it must belong to this repository, not a fork, because a fork's run executes the fork's own workflow file. If one is found, CI restores the report and skips the paid step. The existing cache step then saves the report under `v2`, where later pushes and pull requests can see it. The workflow gains `actions: read`.
+- **Why the gate is not weakened:** the registry reconciles the report against the tree it evaluates, exactly as for a cached one, so a report for other bytes is refused as `tree-changed`. A missing or unmatched artifact runs the paid suite as before. A wrong lookup costs a model run or a red build, never a green one. The artifact's trust is the same as the cache's: it is written only by a run of this repository, after the suite passed.
+- **Unverified until the first merge:** the lookup filters on the artifact API's `workflow_run.repository_id` and `head_repository_id`. No artifact existed to check them against. If either field is absent, the filter matches nothing and the merge pays, as before this change.
+- **Reverse:** delete the `pr-report` and `Keep the driver report for the merge` steps, remove `steps.pr-report.outputs.found` from the paid step's condition, and drop `actions: read`.
+
 ## P8: Adapters (TypeScript)
 
 ### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code

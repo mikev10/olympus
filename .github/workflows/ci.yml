@@ -16,6 +16,8 @@ concurrency:
 
 permissions:
   contents: read
+  # To find and download the driver report a merged pull request's run kept (D-A-CI-06).
+  actions: read
 
 jobs:
   verify:
@@ -102,8 +104,9 @@ jobs:
       # build, never a green one.
       #
       # On a pull request they run only once it carries the `run-driver` label,
-      # which the maintainer adds when it is ready to merge (D-A-CI-05). Pushes
-      # to v2 are unchanged. Without the label and without a report for this
+      # which the maintainer adds when it is ready to merge (D-A-CI-05). A push
+      # to v2 reuses a merged pull request's report for the same tree
+      # (D-A-CI-06). Without the label and without a report for this
       # tree, every free step still runs, the registry does not, and the job
       # ends red saying why: an unproven tree never goes green.
       - name: Driver tree hash
@@ -123,8 +126,35 @@ jobs:
           echo "::notice::driver assertions not re-run; reusing the report for tree ${{ steps.driver-tree.outputs.hash }}"
           grep -E '"(treeHash|generatedAt)"' packages/drivers/claude-code/.conformance/run.json
 
+      # A push to v2 cannot see a pull request's cache, so a merge would pay
+      # again for the tree its pull request already proved (D-A-CI-06). The
+      # pull request's run keeps its report as an artifact too, and a push
+      # reuses it when the hash matches. Only an artifact from a run of this
+      # repository counts: a fork's run executes the fork's own workflow file.
+      # The registry still refuses a report for other bytes as tree-changed.
+      - name: Driver report from the merged pull request's run
+        id: pr-report
+        if: github.event_name == 'push' && steps.driver-report.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HASH: ${{ steps.driver-tree.outputs.hash }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/${{ github.repository }}/actions/artifacts?name=driver-report-${HASH}&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == .workflow_run.repository_id)] | first | .id // empty')"
+          if [ -z "$id" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/actions/artifacts/${id}/zip" > "$RUNNER_TEMP/report.zip"
+          mkdir -p packages/drivers/claude-code/.conformance
+          unzip -o "$RUNNER_TEMP/report.zip" -d packages/drivers/claude-code/.conformance
+          echo "::notice::driver assertions not re-run; reusing the merged pull request's report for tree ${HASH}"
+          grep -E '"(treeHash|generatedAt)"' packages/drivers/claude-code/.conformance/run.json
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
       - name: Driver assertions, which write the conformance run report
-        if: steps.driver-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: steps.driver-report.outputs.cache-hit != 'true' && steps.pr-report.outputs.found != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm --filter @olympus-ai/driver-claude-code test
@@ -136,13 +166,26 @@ jobs:
         run: pnpm --filter @olympus-ai/driver-claude-code exec vitest run test/driver.test.ts
 
       # Only after the step above passed: a failing run's report stays out of
-      # the cache, so the next run of the same tree calls the model again.
+      # the cache, so the next run of the same tree calls the model again. On
+      # a push this also caches a report reused from the pull request, so
+      # later pushes and pull requests on the same tree find it.
       - name: Keep the driver report for the next run of the same tree
         if: steps.driver-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         uses: actions/cache/save@v6
         with:
           path: packages/drivers/claude-code/.conformance/run.json
           key: driver-report-${{ steps.driver-tree.outputs.hash }}
+
+      # The same report, where the push that merges this pull request can find it.
+      - name: Keep the driver report for the merge
+        if: github.event_name == 'pull_request' && steps.driver-report.outputs.cache-hit != 'true' && contains(github.event.pull_request.labels.*.name, 'run-driver')
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-report-${{ steps.driver-tree.outputs.hash }}
+          path: packages/drivers/claude-code/.conformance/run.json
+          # The report lives under a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          retention-days: 30
 
       # Every package but the driver, which the step above already ran: its
       # assertions call a real model, and a second pass bills every one of
