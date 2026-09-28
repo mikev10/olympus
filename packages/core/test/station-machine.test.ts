@@ -78,6 +78,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     approvals: [],
     reviews: [],
     usage: [],
+    cancelled: null,
     version: '1',
     ...overrides,
   };
@@ -233,6 +234,17 @@ describe('station caps where no role acts (I5)', () => {
 });
 
 describe('nextStep', () => {
+  test('refuses every step of a cancelled run, before anything else it holds, naming who and when (A-P9-01)', () => {
+    const cancelled = { by: 'local', at: '2026-09-28T00:00:00.000Z' };
+    for (const s of [state({ cancelled }), state({ cancelled, station: 'build', tasks: { a: 'running' } as RunState['tasks'] }), state({ cancelled, station: 'integrate', phase: 'exiting' })]) {
+      expect(nextStep(s, GRAPH)).toEqual({
+        kind: 'refuse',
+        refusal: { ok: false, reason: 'cancelled', cancelledBy: 'local', cancelledAt: cancelled.at, message: expect.stringContaining('cancelled by local') as unknown },
+      });
+    }
+  });
+
+
   test('the runtime stations work, then exit into their successor', () => {
     expect(nextStep(state(), GRAPH)).toEqual({ kind: 'work', station: 'intake' });
     expect(nextStep(state({ station: 'plan', phase: 'exiting' }), GRAPH)).toEqual({ kind: 'exit', from: 'plan', to: 'build' });

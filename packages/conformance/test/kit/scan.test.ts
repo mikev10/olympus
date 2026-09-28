@@ -8,6 +8,7 @@ import {
   parseCastExpectations,
   propertyChains,
   splitWords,
+  terminalBindings,
   words,
 } from '../../src/kit/scan.js';
 
@@ -147,5 +148,54 @@ describe('matchCastExpectations', () => {
     const result = matchCastExpectations([{ line: 1, from: 'UntrustedPayload' }], [cast(1, 'UntrustedText')]);
     expect(result.unmet).toHaveLength(1);
     expect(result.unexpected).toHaveLength(1);
+  });
+});
+
+describe('terminalBindings', () => {
+  test('finds terminal use by what the checker resolves, not by how it is spelled (the D-S1 note owed to P9)', () => {
+    const files: Record<string, string> = {
+      '/virtual/sample.ts': [
+        `import { term } from './reexport.js';`,
+        `const { stdout } = process;`,
+        `const { argv: args } = process;`,
+        `const p = process;`,
+        `p.exit(1);`,
+        `p['stderr'].write('x');`,
+        `const c = console;`,
+        `c.log(stdout, args, term);`,
+        `const fine = process.env.HOME ?? process.cwd();`,
+        `export { fine };`,
+      ].join('\n'),
+      '/virtual/reexport.ts': `export { isatty as term } from 'node:tty';`,
+    };
+    const host = ts.createCompilerHost({});
+    const program = ts.createProgram({
+      rootNames: Object.keys(files),
+      options: { strict: true, noEmit: true, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, target: ts.ScriptTarget.ES2022, types: ['node'] },
+      host: {
+        ...host,
+        getSourceFile: (name, version) => {
+          const text = files[name];
+          return text === undefined ? host.getSourceFile(name, version) : ts.createSourceFile(name, text, version, true);
+        },
+        fileExists: (name) => name in files || ts.sys.fileExists(name),
+        readFile: (name) => files[name] ?? ts.sys.readFile(name),
+        directoryExists: (dir) => dir.replaceAll('\\', '/').endsWith('/virtual') || ts.sys.directoryExists(dir),
+        getCurrentDirectory: () => process.cwd(),
+      },
+    });
+    const sf = program.getSourceFile('/virtual/sample.ts');
+    if (sf === undefined) throw new Error('sample not loaded');
+    const found = terminalBindings(sf, program.getTypeChecker()).map((b) => [b.line, b.text]);
+    expect(found).toEqual(expect.arrayContaining([
+      [1, 'terminal module binding term'],
+      [2, 'Process.stdout'],
+      [3, 'Process.argv'],
+      [5, 'Process.exit'],
+      [6, 'Process.stderr'],
+      [7, 'Console c'],
+    ]));
+    // process.env and process.cwd() are not a terminal; nothing on line 9 is reported.
+    expect(found.filter(([line]) => line === 9)).toEqual([]);
   });
 });

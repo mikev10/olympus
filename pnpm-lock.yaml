@@ -179,10 +179,28 @@ importers:
       picomatch:
         specifier: 4.0.7
         version: 4.0.7
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       '@types/picomatch':
         specifier: ^4.0.3
         version: 4.0.3
+
+  packages/cli:
+    devDependencies:
+      '@olympus-ai/api':
+        specifier: workspace:*
+        version: link:../api
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@olympus-ai/vault':
+        specifier: workspace:*
+        version: link:../vault
 
   packages/conformance:
     dependencies:
@@ -1179,6 +1197,11 @@ packages:
     engines: {node: '>= 14.6'}
     hasBin: true
 
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -2049,5 +2072,7 @@ snapshots:
   word-wrap@1.2.5: {}
 
   yaml@2.9.0: {}
+
+  yaml@2.9.1: {}
 
   yocto-queue@0.1.0: {}

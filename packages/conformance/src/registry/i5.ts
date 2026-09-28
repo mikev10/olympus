@@ -22,6 +22,7 @@ import {
 } from './local-sandbox.js';
 import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
+import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 
@@ -35,6 +36,11 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    runtime({
+      id: 'I5.policy-document-load-is-hardened',
+      title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+      run: assertPolicyLoadIsHardened,
+    }),
     compileError({
       id: 'I5.transition-has-no-warn-and-continue',
       title:
@@ -445,19 +451,6 @@ export const I5: InvariantEntry = {
         'or an equivalent; and the assertion must wrap a stub without forwarding and require the refusal. Recorded by ' +
         'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01). Owned by I1, the unit that replaces every S1 stub ' +
         'and deletes SKELETON_LINE, rather than by whichever of P6 and P7 lands second (D-P6-01).',
-    }),
-    pending({
-      id: 'I5.policy-document-load-is-hardened',
-      owner: 'P9',
-      reason:
-        'P3 validates an already-parsed policy document; nothing yet reads policy.yaml off a disk, and no package ' +
-        'carries a YAML parser (D-P3-01). The loader is the first code to touch untrusted-shaped bytes on their way ' +
-        'into the Vault, so the unit that adds it owes four refusals, not four configured options: an exact version ' +
-        'pin with no caret on the parser; maxAliasCount 0, so an alias bomb cannot expand; a byte cap on the ' +
-        'document; and a nesting-depth limit. Each must be asserted as a refusal that fails when the setting is ' +
-        'relaxed. Owner is P9 because P4 is handed a resolved Policy and reads no file, and packages/api is the ' +
-        'run-creation path; a unit before P9 that needs a Vault-resident policy at run time inherits this entry by ' +
-        'editing the owner.',
     }),
     pending({
       id: 'I5.adapter-refusal-refuses-l3-end-to-end',

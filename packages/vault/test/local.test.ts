@@ -90,6 +90,7 @@ function state(version: string): RunState {
     approvals: [],
     reviews: [],
     usage: [],
+    cancelled: null,
     version,
   };
 }

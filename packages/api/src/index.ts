@@ -14,6 +14,7 @@ export * from './safety.js';
 export * from './run.js';
 export * from './validate.js';
 export * from './verification.js';
+export * from './policy-file.js';
 export {
   composeDiff,
   diffDigest,
@@ -23,3 +24,6 @@ export {
   type ContainerUser,
   type WorkspaceStore,
 } from './workspace.js';
+export { egressFor } from './line.js';
+export * from './http/server.js';
+export type * from './http/wire.js';

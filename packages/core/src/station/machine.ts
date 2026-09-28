@@ -296,6 +296,14 @@ export function parkRefusal(state: RunState, task: Task, contracts: StationContr
  * `running` was in flight when the run stopped, and is run again.
  */
 export function nextStep(state: RunState, graph: TaskGraph, contracts: StationContractTable = STATION_CONTRACTS): Step {
+  // A cancelled run does nothing more, whatever else its state holds (A-P9-01).
+  if (state.cancelled !== null) {
+    const { by, at } = state.cancelled;
+    return {
+      kind: 'refuse',
+      refusal: { ok: false, reason: 'cancelled', cancelledBy: by, cancelledAt: at, message: `the run was cancelled by ${by} at ${at} and does not continue` },
+    };
+  }
   if (state.violations.length > 0) {
     return {
       kind: 'refuse',

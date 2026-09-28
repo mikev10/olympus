@@ -83,6 +83,9 @@ export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-e
  * approval cell, a `human-required` cell with no recorded grant, and, at L3
  * only, a reviewer whose model family is an author's. None of them is a
  * warning the run may continue past.
+ *
+ * `cancelled` is a human's stop, recorded in run state: the run does not
+ * continue, and a resume reads the record and refuses (A-P9-01).
  */
 export type StationRefusal =
   | { ok: false; reason: 'gate-failed'; failed: FailedCheck[]; message: string }
@@ -93,7 +96,8 @@ export type StationRefusal =
   | { ok: false; reason: 'approval-blocked'; key: ApprovalKey; message: string }
   | { ok: false; reason: 'approval-required'; key: ApprovalKey; message: string }
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
-  | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string };
+  | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string }
+  | { ok: false; reason: 'cancelled'; cancelledBy: string; cancelledAt: string; message: string };
 
 /**
  * `spends` names the approval grant the advance consumes, or null when the

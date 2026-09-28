@@ -12,7 +12,8 @@
  * the metered calls alone. A consumer that shows a total with a non-zero
  * `unmetered` beside it is showing a floor, and the type says so.
  */
-import type { RunState, StationId, TaskId } from '@olympus-ai/core';
+import { isAgentStation, maxStarts, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
+import type { Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { UsageRecord, Vault } from '@olympus-ai/vault';
 
 /** Sums over the calls a relay counted. */
@@ -95,4 +96,49 @@ export async function readUsage(vault: Vault, state: RunState): Promise<UsageRec
     records.push(record as UsageRecord);
   }
   return records;
+}
+
+/** One task's share of the worst case: every driver call it can make, each at its role's ceiling. */
+export interface WorstCaseTask {
+  readonly task: TaskId;
+  readonly station: StationId;
+  readonly role: RoleId;
+  /** `maxStarts` for the task's station: the most times the line will invoke a driver for it, replays included. */
+  readonly calls: number;
+  readonly maxCostUsdPerCall: number;
+  readonly usd: number;
+}
+
+/**
+ * The most a run can be charged, known before it starts: for every task at a
+ * station that calls a driver, the most calls the line will make for it times
+ * its role's `Budget.maxCostUsd`, summed. It is a bound the line enforces, not
+ * an estimate, and it needs no history (D-P9-03).
+ *
+ * Exact for the run as admitted. It inherits P13's stated limit: a call that
+ * starts under its budget may end over it by at most one response.
+ */
+export interface WorstCaseCost {
+  /** Rounded to a millionth of a dollar, so the figure a person approves is the figure compared. */
+  readonly usd: number;
+  readonly calls: number;
+  readonly tasks: readonly WorstCaseTask[];
+}
+
+const MICRO = 1_000_000;
+
+export function worstCaseCost(graph: TaskGraph, policy: Policy): WorstCaseCost {
+  const engine = new StrictPolicyEngine();
+  const tasks: WorstCaseTask[] = [];
+  for (const task of graph.tasks) {
+    if (!isAgentStation(task.station)) continue;
+    const resolved = engine.resolveCapabilities(task.role, task.station, policy);
+    // Admission resolves every role the graph schedules before it asks for this figure.
+    if (!resolved.ok) throw new Error(`worst-case cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
+    const calls = maxStarts(STATION_CONTRACTS[task.station]);
+    const perCall = resolved.scope.budget.maxCostUsd;
+    tasks.push({ task: task.id, station: task.station, role: task.role, calls, maxCostUsdPerCall: perCall, usd: Math.round(calls * perCall * MICRO) / MICRO });
+  }
+  const micro = tasks.reduce((sum, t) => sum + Math.round(t.usd * MICRO), 0);
+  return { usd: micro / MICRO, calls: tasks.reduce((sum, t) => sum + t.calls, 0), tasks };
 }

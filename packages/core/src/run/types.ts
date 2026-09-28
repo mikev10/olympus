@@ -140,6 +140,15 @@ export interface ApprovalGrant {
 }
 
 /**
+ * A human's stop of the whole run, recorded by the runtime. `by` is what the
+ * caller authenticated, as `ApprovalGrant.approvedBy` is (A-P9-01).
+ */
+export interface RunCancellation {
+  readonly by: string;
+  readonly at: string;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
@@ -170,5 +179,11 @@ export interface RunState {
    * a total is derived from these records, so it cannot disagree with them.
    */
   readonly usage: readonly VaultRef[];
+  /**
+   * Null while the run may continue. Once set it is never cleared: the
+   * station machine refuses every step of a cancelled run, so a resume
+   * cannot carry it on (A-P9-01).
+   */
+  readonly cancelled: RunCancellation | null;
   readonly version: string;             // optimistic concurrency
 }

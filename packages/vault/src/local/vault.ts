@@ -201,7 +201,8 @@ function requireRunState(value: unknown, file: string): RunState {
     (value.phase === 'working' || value.phase === 'exiting') && isRef(value.admission) &&
     isMap(value.tasks) && isMap(value.attempts) && isMap(value.results) &&
     Array.isArray(value.evidenceRefs) && Array.isArray(value.violations) &&
-    Array.isArray(value.approvals) && Array.isArray(value.reviews) && Array.isArray(value.usage);
+    Array.isArray(value.approvals) && Array.isArray(value.reviews) && Array.isArray(value.usage) &&
+    (value.cancelled === null || (isRecord(value.cancelled) && hasString(value.cancelled, 'by') && hasString(value.cancelled, 'at')));
   if (!ok) throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
   return value as unknown as RunState;
 }

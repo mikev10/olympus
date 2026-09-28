@@ -230,3 +230,54 @@ export const GREEK_NAMES: readonly string[] = [
   'rhea', 'phoebe', 'coeus', 'crius', 'agamemnon', 'menelaus', 'medea', 'circe', 'calypso', 'scylla',
   'charybdis', 'centaur', 'satyr', 'dryad', 'naiad', 'nereus', 'proteus', 'boreas', 'zephyrus', 'aeolus',
 ];
+
+/** Members of the Node `process` object that assume a foreground process with a terminal attached. */
+export const TERMINAL_PROCESS_MEMBERS: ReadonlySet<string> = new Set(['stdin', 'stdout', 'stderr', 'exit', 'exitCode', 'argv']);
+
+/** Node's own declaration files for modules that exist to drive a terminal. */
+const TERMINAL_DECLARATIONS = /\/@types\/node\/(tty|readline|readline\/promises)\.d\.ts$/;
+
+function typeIs(checker: ts.TypeChecker, node: ts.Node, name: string): boolean {
+  return typeNames(checker.getTypeAtLocation(node)).includes(name);
+}
+
+function memberName(node: ts.PropertyName | ts.BindingName | ts.Expression): string | undefined {
+  if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  return undefined;
+}
+
+/**
+ * Terminal use found by binding rather than by spelling: what the checker
+ * resolves, not what the source happens to say. A value typed as Node's
+ * `Process` has a terminal member read — by property access, by element
+ * access with a literal key, or by destructuring — however the value was
+ * named; any value typed as `Console` is referenced at all; and any
+ * identifier resolves, through imports and re-exports, to a declaration in
+ * Node's `tty` or `readline` modules. So `const { stdout } = process`,
+ * `const p = process; p.exit()`, `const c = console`, and a re-export of
+ * `tty` from a local module are each caught (the D-S1 note owed to P9).
+ */
+export function terminalBindings(sf: ts.SourceFile, checker: ts.TypeChecker): Located[] {
+  const out: Located[] = [];
+  walk(sf, (node) => {
+    if (ts.isPropertyAccessExpression(node) && TERMINAL_PROCESS_MEMBERS.has(node.name.text) && typeIs(checker, node.expression, 'Process')) {
+      out.push(locate(sf, node, `Process.${node.name.text}`));
+    } else if (ts.isElementAccessExpression(node)) {
+      const key = memberName(node.argumentExpression);
+      if (key !== undefined && TERMINAL_PROCESS_MEMBERS.has(key) && typeIs(checker, node.expression, 'Process')) out.push(locate(sf, node, `Process.${key}`));
+    } else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+      const key = memberName(node.propertyName ?? node.name);
+      if (key !== undefined && TERMINAL_PROCESS_MEMBERS.has(key) && typeIs(checker, node.parent, 'Process')) out.push(locate(sf, node, `Process.${key}`));
+    } else if (ts.isIdentifier(node)) {
+      if (typeIs(checker, node, 'Console')) {
+        out.push(locate(sf, node, `Console ${node.text}`));
+        return;
+      }
+      let symbol = checker.getSymbolAtLocation(node);
+      if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+      const terminal = symbol?.declarations?.some((d) => TERMINAL_DECLARATIONS.test(toPosix(d.getSourceFile().fileName))) ?? false;
+      if (terminal) out.push(locate(sf, node, `terminal module binding ${node.text}`));
+    }
+  });
+  return out;
+}
