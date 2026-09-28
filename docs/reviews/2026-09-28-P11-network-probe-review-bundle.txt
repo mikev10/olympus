@@ -1,0 +1,3580 @@
+BASE: reviewed/P13
+HEAD: 19a1002
+
+=== COMMITS ===
+19a1002 P11: done-when names the CI driver run, as P13's does
+775bcca P11: sandbox network probe + HTTP behavioral
+e890c82 P11: spec before code
+c010db0 amend: P7 and P9 to the maintainer, P7/P9/P11 in parallel, cost decisions placed
+
+=== CHANGED ===
+ .changeset/p11-network-probe.md           |  23 +++
+ docs/decisions.md                         |  54 +++++++
+ docs/plan/DECOMPOSITION.md                |  45 +++++-
+ packages/adapters/src/detect.ts           |   8 +-
+ packages/adapters/src/http.ts             | 253 ++++++++++++++++++++++++++++++
+ packages/adapters/src/index.ts            |  10 ++
+ packages/adapters/test/http.test.ts       | 148 +++++++++++++++++
+ packages/adapters/test/set.test.ts        |  11 +-
+ packages/conformance/src/registry/http.ts | 144 +++++++++++++++++
+ packages/conformance/src/registry/i2.ts   |   4 +
+ packages/conformance/src/registry/i5.ts   |   3 +
+ packages/sandbox/src/index.ts             |   1 +
+ packages/sandbox/src/local/probe.ts       | 231 +++++++++++++++++++++++++++
+ packages/sandbox/src/local/provider.ts    | 102 +++++++++---
+ packages/sandbox/src/local/refusal.ts     |  11 +-
+ packages/sandbox/src/stub/provider.ts     |   3 +
+ packages/sandbox/src/types.ts             |  63 ++++++++
+ packages/sandbox/test/egress.test.ts      |  14 +-
+ packages/sandbox/test/probe.test.ts       | 196 +++++++++++++++++++++++
+ 19 files changed, 1288 insertions(+), 36 deletions(-)
+
+
+===== .changeset/p11-network-probe.md =====
+---
+"@olympus-ai/sandbox": minor
+"@olympus-ai/adapters": minor
+"@olympus-ai/conformance": minor
+---
+
+P11: the sandbox network probe and the HTTP behavioral adapter.
+
+`LocalDockerProvider.probe` starts one container per call in the sandbox's
+network namespace (`--network container:<sandbox>`) and not its filesystem or
+process tree: pinned image, read-only, every capability dropped, nothing
+mounted. It connects to the sandbox's loopback only, reports raw status,
+headers, and body as JSON, and decides nothing. A deny-all sandbox stays
+`--network none`. `destroy()` removes a probe still in flight.
+
+`HttpBehavioralAdapter` starts a scenario's `serve` detached, probes it, and
+compares on the host. One HTTP scenario per handle. Stack detection carries it
+when the provider has a probe and names `behavioral:http` otherwise.
+
+Contract amendments: `SandboxProvider.probe` (optional; A-P11-01) and
+`ExecOptions.detach` (A-P11-02). `StubSandboxProvider` has no probe and refuses
+`detach`. A failed provision's `SandboxRefusal` now names its sandbox, so the
+egress cleanup test checks only what it created (issue #14).
+
+===== packages/adapters/src/detect.ts =====
+/**
+ * The `AdapterSet` for one repository. Every slot is either an adapter that
+ * works for this stack or `null` with the reason recorded, and
+ * `unavailableControls()` names every control the set lacks — the null slots
+ * and every behavioral kind it does not carry — so a stack this package
+ * cannot serve is loud about it and cannot run at L3 (I5).
+ */
+import type { SandboxProvider } from '@olympus-ai/sandbox';
+import { CliBehavioralAdapter } from './behavioral.js';
+import { canProbe, HttpBehavioralAdapter } from './http.js';
+import { IstanbulCoverageAdapter } from './coverage.js';
+import { jestDiscovery, vitestDiscovery } from './discovery.js';
+import { JestAdapter, VitestAdapter } from './framework.js';
+import { ConfigManifestAdapter } from './manifest.js';
+import { declaredRange, readPackageManifest, type PackageManifest } from './manifest-file.js';
+import { AdapterRefusal } from './refusal.js';
+import type { AdapterSet, BehavioralAdapter, CoverageAdapter, ManifestAdapter, MutationAdapter, TestFrameworkAdapter } from './types.js';
+
+/** Every kind `BehavioralAdapter.kind` admits. A set missing one names it. */
+export const BEHAVIORAL_KINDS: ReadonlyArray<BehavioralAdapter['kind']> = ['cli', 'http', 'browser'];
+
+export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | `behavioral:${BehavioralAdapter['kind']}`;
+
+export interface AdapterSetOptions {
+  /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe. */
+  readonly provider: SandboxProvider | null;
+  /** Where the coverage check's report is, or null when no coverage check has run. */
+  readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
+}
+
+/**
+ * The controls a set lacks, derived from its slots rather than taken from
+ * its own `unavailableControls()`: a set that under-reports is still caught.
+ */
+export function missingControls(set: AdapterSet): Control[] {
+  const missing: Control[] = [];
+  if (set.test === null) missing.push('test');
+  if (set.coverage === null) missing.push('coverage');
+  if (set.mutation === null) missing.push('mutation');
+  if (set.manifest === null) missing.push('manifest');
+  const kinds = new Set(set.behavioral.map((b) => b.kind));
+  for (const kind of BEHAVIORAL_KINDS) if (!kinds.has(kind)) missing.push(`behavioral:${kind}`);
+  return missing;
+}
+
+export class TypeScriptAdapterSet implements AdapterSet {
+  readonly stack: string;
+  readonly test: TestFrameworkAdapter | null;
+  readonly coverage: CoverageAdapter | null;
+  /** Mutation testing is M3. */
+  readonly mutation: MutationAdapter | null = null;
+  readonly behavioral: BehavioralAdapter[];
+  readonly manifest: ManifestAdapter | null;
+  /** Why each unavailable control is unavailable, in words a maintainer can act on. */
+  readonly reasons: ReadonlyMap<Control, string>;
+
+  constructor(parts: {
+    test: TestFrameworkAdapter | null;
+    coverage: CoverageAdapter | null;
+    behavioral: BehavioralAdapter[];
+    manifest: ManifestAdapter | null;
+    reasons: ReadonlyMap<Control, string>;
+  }) {
+    this.stack = parts.test?.stack ?? 'unsupported';
+    this.test = parts.test;
+    this.coverage = parts.coverage;
+    this.behavioral = parts.behavioral;
+    this.manifest = parts.manifest;
+    this.reasons = parts.reasons;
+  }
+
+  unavailableControls(): string[] {
+    return missingControls(this);
+  }
+}
+
+/**
+ * The test adapter, or null with the reason recorded. Every refusal on the
+ * way — an unreadable package.json, a framework declared twice, a config that
+ * cannot be read statically — becomes a named gap in the set rather than a
+ * throw, so the set always says what it lacks; discovery runs now for the
+ * same reason, rather than surprising the first caller to enumerate.
+ */
+async function testAdapter(root: string, manifest: PackageManifest, reasons: Map<Control, string>): Promise<TestFrameworkAdapter | null> {
+  try {
+    const vitest = declaredRange(manifest, 'vitest');
+    const jest = declaredRange(manifest, 'jest');
+    if (vitest !== undefined && jest !== undefined) {
+      reasons.set('test', 'both vitest and jest are declared, and which suite is authoritative is not something to guess');
+      return null;
+    }
+    if (vitest !== undefined) return new VitestAdapter((await vitestDiscovery(root)).rules.major);
+    if (jest !== undefined) return new JestAdapter((await jestDiscovery(root)).rules.major);
+  } catch (error) {
+    if (!(error instanceof AdapterRefusal)) throw error;
+    reasons.set('test', error.message);
+    return null;
+  }
+  reasons.set('test', 'neither vitest nor jest is declared in package.json');
+  return null;
+}
+
+/** The manifest, or null with every manifest-dependent control's reason recorded. */
+async function manifestOf(root: string, reasons: Map<Control, string>): Promise<PackageManifest | null> {
+  let manifest: PackageManifest | null;
+  let why = 'the repository has no package.json';
+  try {
+    manifest = await readPackageManifest(root);
+  } catch (error) {
+    if (!(error instanceof AdapterRefusal)) throw error;
+    manifest = null;
+    why = error.message;
+  }
+  if (manifest === null) {
+    reasons.set('test', `${why}, so no test framework is declared`);
+    reasons.set('manifest', `${why}, and the config files this package knows are Node.js files`);
+  }
+  return manifest;
+}
+
+export async function buildAdapterSet(root: string, options: AdapterSetOptions): Promise<TypeScriptAdapterSet> {
+  const reasons = new Map<Control, string>();
+  const manifest = await manifestOf(root, reasons);
+  const test = manifest === null ? null : await testAdapter(root, manifest, reasons);
+  const hasManifest = manifest !== null;
+
+  let coverage: CoverageAdapter | null = null;
+  if (test === null) reasons.set('coverage', 'coverage is read against the test framework, and there is none for this stack');
+  else if (options.coverage === null) reasons.set('coverage', 'no coverage report location was given');
+  else coverage = new IstanbulCoverageAdapter({ ...options.coverage, tests: test });
+
+  reasons.set('mutation', 'mutation testing is M3');
+  const behavioral: BehavioralAdapter[] = [];
+  if (options.provider === null) reasons.set('behavioral:cli', 'no sandbox provider was given to run CLI scenarios through');
+  else behavioral.push(new CliBehavioralAdapter(options.provider));
+  if (options.provider === null) reasons.set('behavioral:http', 'no sandbox provider was given to run HTTP scenarios through');
+  else if (!canProbe(options.provider)) {
+    reasons.set('behavioral:http', `sandbox provider ${options.provider.id} has no probe, so an HTTP client would run where the product can replace it`);
+  } else behavioral.push(new HttpBehavioralAdapter(options.provider));
+  reasons.set('behavioral:browser', 'browser scenarios are R3');
+
+  return new TypeScriptAdapterSet({
+    test,
+    coverage,
+    behavioral,
+    manifest: hasManifest ? new ConfigManifestAdapter() : null,
+    reasons,
+  });
+}
+
+===== packages/adapters/src/http.ts =====
+/**
+ * An HTTP scenario, served inside the sandbox, observed by a probe the
+ * product cannot reach, and judged on the host (P11).
+ *
+ * The scenario owns its server (D-P11-03): `serve` is started detached in the
+ * sandbox, and the provider's probe — a container in the sandbox's network
+ * namespace and out of its filesystem — sends the requests and reports what
+ * came back. The comparison against `expected` happens here, in the runtime's
+ * own process, as the CLI adapter's does. A client inside the product's
+ * container would be one the product could replace, and what it observed
+ * would be the product's report of itself.
+ *
+ * One scenario per handle. The first scenario's server holds the sandbox until
+ * the sandbox ends, and nothing inside the product's container is trusted to
+ * stop it, so a second scenario on the same handle is refused rather than
+ * answered by whatever is still listening. The fresh sandbox per check is P6's.
+ *
+ * `expected` comes from locked acceptance criteria and never from the
+ * implementation (I3). This adapter cannot check that; it takes the value it
+ * is handed and refuses one it cannot read.
+ */
+import type { CheckResult, ExpectationMismatch, ExpectationOutcome } from '@olympus-ai/integrity';
+import type { ProbeExchange, ProbeObservation, ProbeRequest, ProbeResult, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
+import { refuse } from './refusal.js';
+import type { BehavioralAdapter, BehavioralScenario } from './types.js';
+
+export interface HttpInput {
+  readonly serve: readonly [string, ...string[]];
+  readonly port: number;
+  readonly readyWithinMs: number;
+  readonly exchanges: readonly [ProbeExchange, ...ProbeExchange[]];
+}
+
+/** What one response must show. `headers` are compared by name, case-insensitively, and only those named. */
+export interface HttpExpectedResponse {
+  readonly status: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+  readonly bodyIncludes?: readonly string[];
+  /** The body parsed as JSON and compared structurally, so key order and whitespace do not matter. */
+  readonly json?: unknown;
+}
+
+export interface HttpExpected {
+  readonly exchanges: readonly HttpExpectedResponse[];
+}
+
+/** How long a server has to start listening when the scenario does not say. */
+export const DEFAULT_READY_WITHIN_MS = 10_000;
+
+const INPUT_KEYS: ReadonlySet<string> = new Set(['serve', 'port', 'readyWithinMs', 'exchanges']);
+const EXCHANGE_KEYS: ReadonlySet<string> = new Set(['method', 'path', 'headers', 'body']);
+const EXPECTED_KEYS: ReadonlySet<string> = new Set(['exchanges']);
+const RESPONSE_KEYS: ReadonlySet<string> = new Set(['status', 'headers', 'body', 'bodyIncludes', 'json']);
+/** How much of an observed body a mismatch quotes; the whole observation is in the result beside it. */
+const QUOTE_LIMIT = 1024;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function unknownKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void {
+  const extra = Object.keys(value).filter((key) => !allowed.has(key));
+  if (extra.length > 0) {
+    refuse('unrecognised-scenario', `${label} has ${extra.map((k) => `${label}.${k}`).join(', ')}, which this adapter does not know; it is refused rather than ignored`);
+  }
+}
+
+function strings(value: unknown, label: string): readonly [string, ...string[]] {
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string' && item !== '')) {
+    refuse('unrecognised-scenario', `${label} must be a non-empty array of non-empty strings`);
+  }
+  const [first, ...rest] = value;
+  if (first === undefined) refuse('unrecognised-scenario', `${label} must be a non-empty array of non-empty strings`);
+  return [first, ...rest];
+}
+
+function stringRecord(value: unknown, label: string): Readonly<Record<string, string>> {
+  if (!isRecord(value) || !Object.values(value).every((v) => typeof v === 'string')) {
+    refuse('unrecognised-scenario', `${label} must be an object of names to strings`);
+  }
+  return value as Readonly<Record<string, string>>;
+}
+
+function integer(value: unknown, label: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    refuse('unrecognised-scenario', `${label} must be an integer from ${String(min)} to ${String(max)}`);
+  }
+  return value;
+}
+
+function readExchange(value: unknown, i: number): ProbeExchange {
+  const at = `input.exchanges[${String(i)}]`;
+  if (!isRecord(value)) refuse('unrecognised-scenario', `${at} must be an object`);
+  unknownKeys(value, EXCHANGE_KEYS, at);
+  if (typeof value.method !== 'string' || value.method === '') refuse('unrecognised-scenario', `${at}.method must be a non-empty string`);
+  if (typeof value.path !== 'string' || !value.path.startsWith('/')) refuse('unrecognised-scenario', `${at}.path must be a string beginning with /`);
+  if (value.body !== undefined && typeof value.body !== 'string') refuse('unrecognised-scenario', `${at}.body must be a string`);
+  return {
+    method: value.method,
+    path: value.path,
+    ...(value.headers === undefined ? {} : { headers: stringRecord(value.headers, `${at}.headers`) }),
+    ...(typeof value.body === 'string' ? { body: value.body } : {}),
+  };
+}
+
+function readResponse(value: unknown, i: number): HttpExpectedResponse {
+  const at = `expected.exchanges[${String(i)}]`;
+  if (!isRecord(value)) refuse('unrecognised-scenario', `${at} must be an object`);
+  unknownKeys(value, RESPONSE_KEYS, at);
+  if (value.body !== undefined && typeof value.body !== 'string') refuse('unrecognised-scenario', `${at}.body must be a string`);
+  return {
+    status: integer(value.status, `${at}.status`, 100, 599),
+    ...(value.headers === undefined ? {} : { headers: stringRecord(value.headers, `${at}.headers`) }),
+    ...(typeof value.body === 'string' ? { body: value.body } : {}),
+    ...(value.bodyIncludes === undefined ? {} : { bodyIncludes: strings(value.bodyIncludes, `${at}.bodyIncludes`) }),
+    ...('json' in value ? { json: value.json } : {}),
+  };
+}
+
+export function readHttpScenario(scenario: BehavioralScenario): { input: HttpInput; expected: HttpExpected } {
+  if (typeof scenario.id !== 'string' || scenario.id === '') refuse('unrecognised-scenario', 'scenario.id must be a non-empty string');
+  const { input, expected } = scenario;
+  if (!isRecord(input)) refuse('unrecognised-scenario', `scenario ${scenario.id}: input must be an object`);
+  unknownKeys(input, INPUT_KEYS, 'input');
+  const serve = strings(input.serve, 'input.serve');
+  const port = integer(input.port, 'input.port', 1, 65535);
+  const readyWithinMs = input.readyWithinMs === undefined ? DEFAULT_READY_WITHIN_MS : integer(input.readyWithinMs, 'input.readyWithinMs', 1, 600_000);
+  if (!Array.isArray(input.exchanges)) refuse('unrecognised-scenario', 'input.exchanges must be a non-empty array');
+  const [first, ...rest] = input.exchanges.map(readExchange);
+  if (first === undefined) refuse('unrecognised-scenario', 'input.exchanges must be a non-empty array');
+
+  if (!isRecord(expected)) refuse('unrecognised-scenario', `scenario ${scenario.id}: expected must be an object`);
+  unknownKeys(expected, EXPECTED_KEYS, 'expected');
+  if (!Array.isArray(expected.exchanges)) refuse('unrecognised-scenario', 'expected.exchanges must be an array');
+  const responses = expected.exchanges.map(readResponse);
+  if (responses.length !== rest.length + 1) {
+    refuse('unrecognised-scenario', `expected.exchanges has ${String(responses.length)} entries for ${String(rest.length + 1)} in input.exchanges; each request needs one expected response`);
+  }
+  return { input: { serve, port, readyWithinMs, exchanges: [first, ...rest] }, expected: { exchanges: responses } };
+}
+
+function quote(observed: string): string {
+  if (observed.length <= QUOTE_LIMIT) return observed;
+  return `${observed.slice(0, QUOTE_LIMIT)}… (${String(observed.length - QUOTE_LIMIT)} more characters in the result)`;
+}
+
+/** Key order is not part of a JSON value, so both sides are written with their keys sorted before they are compared. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  }
+  return value === undefined ? 'undefined' : JSON.stringify(value);
+}
+
+function compareResponse(expected: HttpExpectedResponse, observed: ProbeObservation, at: string, out: ExpectationMismatch[]): void {
+  if (observed.kind === 'no-response') {
+    out.push({ field: at, expected: `a response with status ${String(expected.status)}`, observed: observed.reason });
+    return;
+  }
+  if (observed.status !== expected.status) out.push({ field: `${at}.status`, expected: String(expected.status), observed: String(observed.status) });
+  for (const [name, value] of Object.entries(expected.headers ?? {})) {
+    const seen = observed.headers[name.toLowerCase()];
+    if (seen !== value) out.push({ field: `${at}.headers.${name.toLowerCase()}`, expected: value, observed: seen ?? '(absent)' });
+  }
+  const wantsBody = expected.body !== undefined || expected.bodyIncludes !== undefined || 'json' in expected;
+  if (observed.kind === 'oversized') {
+    if (wantsBody) out.push({ field: `${at}.body`, expected: 'a body within the probe\'s limit', observed: `more than ${String(observed.limitBytes)} bytes` });
+    return;
+  }
+  if (expected.body !== undefined && observed.body !== expected.body) out.push({ field: `${at}.body`, expected: expected.body, observed: quote(observed.body) });
+  (expected.bodyIncludes ?? []).forEach((fragment, i) => {
+    if (!observed.body.includes(fragment)) out.push({ field: `${at}.bodyIncludes[${String(i)}]`, expected: fragment, observed: quote(observed.body) });
+  });
+  if ('json' in expected) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(observed.body);
+    } catch {
+      out.push({ field: `${at}.json`, expected: canonical(expected.json), observed: `not JSON: ${quote(observed.body)}` });
+      return;
+    }
+    if (canonical(parsed) !== canonical(expected.json)) out.push({ field: `${at}.json`, expected: canonical(expected.json), observed: quote(canonical(parsed)) });
+  }
+}
+
+/** The runtime's comparison. Pure, so what decides a verdict is testable without a container. */
+export function compareHttp(expected: HttpExpected, observed: ProbeResult): ExpectationOutcome {
+  const mismatches: ExpectationMismatch[] = [];
+  if (!observed.ready) {
+    mismatches.push({ field: 'ready', expected: 'the server listening on its port', observed: 'nothing accepted a connection before readyWithinMs passed' });
+  } else {
+    expected.exchanges.forEach((response, i) => {
+      const at = `exchanges[${String(i)}]`;
+      const seen = observed.observations[i];
+      if (seen === undefined) mismatches.push({ field: at, expected: `a response with status ${String(response.status)}`, observed: 'no observation' });
+      else compareResponse(response, seen, at, mismatches);
+    });
+  }
+  const [first, ...rest] = mismatches;
+  return first === undefined ? { held: true } : { held: false, mismatches: [first, ...rest] };
+}
+
+/** A provider with a probe. Narrowed once, at construction, so `run` never finds it missing. */
+type ProbingProvider = SandboxProvider & { probe(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult> };
+
+export function canProbe(provider: SandboxProvider): provider is ProbingProvider {
+  return typeof provider.probe === 'function';
+}
+
+export class HttpBehavioralAdapter implements BehavioralAdapter {
+  readonly kind = 'http' as const;
+  readonly #provider: ProbingProvider;
+  readonly #served = new Set<SandboxHandle>();
+
+  /** The provider that provisioned the handles this adapter will be given. One without a probe is refused: it cannot observe the product from outside it. */
+  constructor(provider: SandboxProvider) {
+    if (!canProbe(provider)) {
+      refuse('unsupported-feature', `sandbox provider ${provider.id} has no probe, so an HTTP client would run where the product can replace it`);
+    }
+    this.#provider = provider;
+  }
+
+  async run(scenario: BehavioralScenario, h: SandboxHandle): Promise<CheckResult> {
+    const { input, expected } = readHttpScenario(scenario);
+    if (this.#served.has(h)) {
+      refuse('unrecognised-scenario', `scenario ${scenario.id}: sandbox ${h} already ran an HTTP scenario, whose server still holds it; each HTTP scenario needs a fresh sandbox`);
+    }
+    this.#served.add(h);
+    const startedAt = new Date().toISOString();
+    // A provider that cannot run the command throws, and there is no result to report: the
+    // caller's gate treats a required check with no result as a failure.
+    const started = await this.#provider.exec(h, [...input.serve], { detach: true });
+    const base = { checkId: scenario.id, exitCode: started.exitCode, stderr: started.stderr, suiteCount: null, startedAt };
+    if (started.exitCode !== 0) {
+      return {
+        ...base,
+        stdout: '',
+        expectation: { held: false, mismatches: [{ field: 'serve', expected: 'the server started', observed: `the start exited ${String(started.exitCode)}: ${quote(started.stderr)}` }] },
+        durationMs: started.durationMs,
+      };
+    }
+    const observed = await this.#provider.probe(h, { port: input.port, readyWithinMs: input.readyWithinMs, exchanges: input.exchanges });
+    return {
+      ...base,
+      // The probe's whole report is the evidence; the expectation is the verdict drawn from it.
+      stdout: JSON.stringify(observed),
+      expectation: compareHttp(expected, observed),
+      durationMs: started.durationMs + observed.durationMs,
+    };
+  }
+}
+
+===== packages/adapters/src/index.ts =====
+export * from './types.js';
+export { adapterAdmission, type AdapterAdmission } from './autonomy.js';
+export { CliBehavioralAdapter, compareCli, readCliScenario, type CliExpected, type CliInput } from './behavioral.js';
+export {
+  canProbe,
+  compareHttp,
+  DEFAULT_READY_WITHIN_MS,
+  HttpBehavioralAdapter,
+  readHttpScenario,
+  type HttpExpected,
+  type HttpExpectedResponse,
+  type HttpInput,
+} from './http.js';
+export { CONFIG_FILE_GLOBS, isConfigFile } from './config-files.js';
+export { IstanbulCoverageAdapter, REPORT_CAP, type IstanbulCoverageOptions } from './coverage.js';
+export {
+  BEHAVIORAL_KINDS,
+  buildAdapterSet,
+  missingControls,
+  TypeScriptAdapterSet,
+  type AdapterSetOptions,
+  type Control,
+} from './detect.js';
+export { JestAdapter, VitestAdapter } from './framework.js';
+export { ConfigManifestAdapter } from './manifest.js';
+export { changedLines } from './line-diff.js';
+export {
+  diffTrees,
+  hashRegularFile,
+  walkTree,
+  type ChangeKind,
+  type TreeChange,
+  type TreeEntry,
+  type WalkOptions,
+} from './files.js';
+export { AdapterRefusal, type AdapterRefusalReason } from './refusal.js';
+export { JEST, VITEST, majorOf, type JestMajor, type VitestMajor } from './versions.js';
+
+===== packages/adapters/test/http.test.ts =====
+/**
+ * An HTTP scenario is served inside the sandbox, observed by the provider's
+ * probe, and judged on the host. The reading and the comparison are asserted
+ * on their own, and then end to end against a real server in a real
+ * container: this suite requires a Docker daemon and fails without one,
+ * because a behavioral check that skips itself proves nothing (I5).
+ */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { EGRESS_PROXY_IMAGE, LocalDockerProvider, StubSandboxProvider, type SandboxHandle } from '@olympus-ai/sandbox';
+import { AdapterRefusal, buildAdapterSet, compareHttp, HttpBehavioralAdapter, readHttpScenario, type HttpExpected } from '../src/index.js';
+import { cleanup, pkg, repo } from './repo.js';
+
+const get = { method: 'GET', path: '/' };
+const ok = { exchanges: [{ status: 200 }] };
+
+describe('readHttpScenario', () => {
+  test('reads serve, port, and each exchange, and defaults readyWithinMs', () => {
+    expect(readHttpScenario({ id: 's', input: { serve: ['node', 'server.js'], port: 8080, exchanges: [get] }, expected: { exchanges: [{ status: 200, json: { a: 1 } }] } })).toEqual({
+      input: { serve: ['node', 'server.js'], port: 8080, readyWithinMs: 10_000, exchanges: [get] },
+      expected: { exchanges: [{ status: 200, json: { a: 1 } }] },
+    });
+  });
+
+  test.each([
+    ['an unknown input key', { serve: ['s'], port: 80, exchanges: [get], url: 'http://x' }, ok, /input\.url/],
+    ['an empty serve', { serve: [], port: 80, exchanges: [get] }, ok, /input\.serve/],
+    ['port 0', { serve: ['s'], port: 0, exchanges: [get] }, ok, /input\.port/],
+    ['a port past 65535', { serve: ['s'], port: 65_536, exchanges: [get] }, ok, /input\.port/],
+    ['no exchanges', { serve: ['s'], port: 80, exchanges: [] }, { exchanges: [] }, /input\.exchanges/],
+    ['a path that is a URL', { serve: ['s'], port: 80, exchanges: [{ method: 'GET', path: 'http://x/' }] }, ok, /input\.exchanges\[0\]\.path/],
+    ['an unknown exchange key', { serve: ['s'], port: 80, exchanges: [{ ...get, host: 'x' }] }, ok, /input\.exchanges\[0\]\.host/],
+    ['fewer expected responses than requests', { serve: ['s'], port: 80, exchanges: [get, get] }, ok, /expected\.exchanges has 1 entries for 2/],
+    ['a status out of range', { serve: ['s'], port: 80, exchanges: [get] }, { exchanges: [{ status: 42 }] }, /expected\.exchanges\[0\]\.status/],
+    ['an unknown expected key', { serve: ['s'], port: 80, exchanges: [get] }, { exchanges: [{ status: 200, bodyMatches: 'x' }] }, /bodyMatches/],
+  ])('%s is refused, naming the field', (_, input, expected, field) => {
+    const read = (): unknown => readHttpScenario({ id: 's', input, expected });
+    expect(read).toThrow(AdapterRefusal);
+    expect(read).toThrow(field);
+  });
+});
+
+describe('compareHttp', () => {
+  const response = (status: number, body: string, headers: Record<string, string> = {}) => ({ kind: 'response' as const, status, headers, body });
+  const expected: HttpExpected = { exchanges: [{ status: 200, headers: { 'Content-Type': 'application/json' }, json: { a: 1, b: [2] } }] };
+
+  test('a matching response holds, whatever the JSON key order and header case', () => {
+    const observed = { ready: true, observations: [response(200, '{ "b": [2], "a": 1 }', { 'content-type': 'application/json' })], durationMs: 1 };
+    expect(compareHttp(expected, observed)).toEqual({ held: true });
+  });
+
+  test('a 200 with the wrong body does not hold, naming the exchange and field', () => {
+    const observed = { ready: true, observations: [response(200, '{"a":2,"b":[2]}', { 'content-type': 'application/json' })], durationMs: 1 };
+    expect(compareHttp(expected, observed)).toEqual({ held: false, mismatches: [{ field: 'exchanges[0].json', expected: '{"a":1,"b":[2]}', observed: '{"a":2,"b":[2]}' }] });
+  });
+
+  test('a server that never listened does not hold', () => {
+    expect(compareHttp(ok, { ready: false, observations: [], durationMs: 1 })).toMatchObject({ held: false, mismatches: [{ field: 'ready' }] });
+  });
+
+  test('no response, and a body over the cap, do not hold', () => {
+    expect(compareHttp(ok, { ready: true, observations: [{ kind: 'no-response', reason: 'socket hang up' }], durationMs: 1 })).toEqual({
+      held: false, mismatches: [{ field: 'exchanges[0]', expected: 'a response with status 200', observed: 'socket hang up' }],
+    });
+    const oversized = { ready: true, observations: [{ kind: 'oversized' as const, status: 200, headers: {}, limitBytes: 10 }], durationMs: 1 };
+    expect(compareHttp({ exchanges: [{ status: 200, bodyIncludes: ['x'] }] }, oversized)).toMatchObject({ held: false, mismatches: [{ field: 'exchanges[0].body' }] });
+  });
+});
+
+describe('HttpBehavioralAdapter', () => {
+  test('a provider with no probe is refused at construction', () => {
+    expect(() => new HttpBehavioralAdapter(new StubSandboxProvider())).toThrow(/has no probe/);
+  });
+});
+
+describe('HttpBehavioralAdapter against a real sandbox', () => {
+  /** A server that answers `/` with JSON and `/wrong` with a 200 whose body is not what a scenario expects. */
+  const SERVER = `
+    require('node:http').createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(req.url === '/wrong' ? '{"greeting":"goodbye"}' : '{"greeting":"hello"}');
+    }).listen(8080);
+  `;
+  const scenario = (id: string, path: string) => ({
+    id,
+    input: { serve: ['node', '--eval', SERVER], port: 8080, exchanges: [{ method: 'GET', path }] },
+    expected: { exchanges: [{ status: 200, headers: { 'content-type': 'application/json' }, json: { greeting: 'hello' } }] },
+  });
+
+  let provider: LocalDockerProvider;
+  let workspace: string;
+  const handles: SandboxHandle[] = [];
+
+  async function sandbox(): Promise<SandboxHandle> {
+    const h = await provider.provision({
+      image: EGRESS_PROXY_IMAGE,
+      mounts: { workspace: { source: workspace, target: '/workspace', mode: 'ro' }, others: [] },
+      egress: { mode: 'deny-all', allow: [] },
+      limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 60_000 },
+      user: { uid: 0, gid: 0 },
+    });
+    handles.push(h);
+    return h;
+  }
+
+  beforeAll(async () => {
+    // Not wrapped: no daemon is a failing suite, never a skipped one.
+    provider = await LocalDockerProvider.create({ vaultPaths: [] });
+    workspace = await mkdtemp(join(tmpdir(), 'adapters-http-'));
+  });
+
+  afterAll(async () => {
+    for (const h of handles) await provider.destroy(h).catch(() => undefined);
+    await rm(workspace, { recursive: true, force: true });
+    await cleanup();
+  });
+
+  test('a set built on this provider carries the HTTP adapter', async () => {
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), { provider, coverage: null });
+    expect(set.behavioral.map((adapter) => adapter.kind)).toContain('http');
+    expect(set.unavailableControls()).not.toContain('behavioral:http');
+  });
+
+  test('a server that answers as expected holds', async () => {
+    const result = await new HttpBehavioralAdapter(provider).run(scenario('greets', '/'), await sandbox());
+    expect(result).toMatchObject({ checkId: 'greets', exitCode: 0, suiteCount: null, expectation: { held: true } });
+    expect(JSON.parse(result.stdout)).toMatchObject({ ready: true, observations: [{ kind: 'response', status: 200 }] });
+  }, 60_000);
+
+  test('a server that answers 200 with the wrong body does not hold, and a second scenario on the handle is refused', async () => {
+    const adapter = new HttpBehavioralAdapter(provider);
+    const h = await sandbox();
+    const result = await adapter.run(scenario('greets-wrong', '/wrong'), h);
+    expect(result.expectation).toEqual({
+      held: false,
+      mismatches: [{ field: 'exchanges[0].json', expected: '{"greeting":"hello"}', observed: '{"greeting":"goodbye"}' }],
+    });
+    await expect(adapter.run(scenario('again', '/'), h)).rejects.toThrow(/already ran an HTTP scenario/);
+  }, 60_000);
+
+  test('a server that never starts does not hold', async () => {
+    const never = { ...scenario('never', '/'), input: { serve: ['sleep', '60'], port: 8080, readyWithinMs: 500, exchanges: [get] } };
+    const result = await new HttpBehavioralAdapter(provider).run(never, await sandbox());
+    expect(result.expectation).toMatchObject({ held: false, mismatches: [{ field: 'ready' }] });
+  }, 60_000);
+});
+
+===== packages/adapters/test/set.test.ts =====
+/**
+ * The adapter set a repository gets, what it says it lacks, and the L3
+ * refusal that follows from it (I5).
+ */
+import { afterEach, describe, expect, test } from 'vitest';
+import { StubSandboxProvider } from '@olympus-ai/sandbox';
+import { adapterAdmission, buildAdapterSet, type AdapterSet } from '../src/index.js';
+import { cleanup, pkg, repo } from './repo.js';
+
+afterEach(cleanup);
+
+const withEverything = { provider: new StubSandboxProvider(), coverage: { report: '/r/coverage-final.json', sourceRoot: '/workspace' } };
+
+describe('buildAdapterSet', () => {
+  test('a vitest repository gets the vitest set; a jest repository gets the jest set', async () => {
+    const vitest = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '^4.1.0' }) }), withEverything);
+    const jest = await buildAdapterSet(await repo({ 'package.json': pkg({ jest: '^29.7.0' }) }), withEverything);
+    expect([vitest.stack, vitest.test?.stack]).toEqual(['vitest@4', 'vitest@4']);
+    expect([jest.stack, jest.test?.stack]).toEqual(['jest@29', 'jest@29']);
+  });
+
+  test('a set on a provider with no probe names mutation, behavioral:http, and behavioral:browser, so it does not clear L3', async () => {
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), withEverything);
+    expect(set.unavailableControls()).toEqual(['mutation', 'behavioral:http', 'behavioral:browser']);
+    expect(set.reasons.get('behavioral:http')).toMatch(/has no probe/);
+  });
+
+  test('a set on a provider with a probe carries the HTTP adapter; mutation and browser still keep it from L3', async () => {
+    const probing = Object.assign(new StubSandboxProvider(), { probe: (): Promise<never> => Promise.reject(new Error('not called')) });
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), { ...withEverything, provider: probing });
+    expect(set.behavioral.map((adapter) => adapter.kind)).toEqual(['cli', 'http']);
+    expect(set.unavailableControls()).toEqual(['mutation', 'behavioral:browser']);
+    expect(adapterAdmission(set, 3).ok).toBe(false);
+  });
+
+  test.each([
+    ['neither framework', { 'package.json': pkg({ mocha: '10' }) }, /neither vitest nor jest/],
+    ['both frameworks', { 'package.json': pkg({ vitest: '4', jest: '30' }) }, /both vitest and jest/],
+    ['no package.json', {}, /no package\.json/],
+    ['an unsupported major', { 'package.json': pkg({ vitest: '^2.1.0' }) }, /majors whose discovery rules/],
+    ['a config that cannot be read', { 'package.json': pkg({ vitest: '4' }), 'vitest.config.ts': 'export default load();' }, /not an object literal/],
+    ['a package.json that is not JSON', { 'package.json': '{ "devDependencies": ' }, /not valid JSON/],
+    ['a framework declared at two ranges', { 'package.json': JSON.stringify({ dependencies: { vitest: '3' }, devDependencies: { vitest: '4' } }) }, /declares vitest twice/],
+  ])('%s gets test: null and a set that names it, never a guess', async (_, files, why) => {
+    const set = await buildAdapterSet(await repo(files), withEverything);
+    expect(set.test).toBeNull();
+    expect(set.stack).toBe('unsupported');
+    expect(set.unavailableControls()).toContain('test');
+    expect(set.unavailableControls()).toContain('coverage');
+    expect(set.reasons.get('test')).toMatch(why);
+  });
+
+  test('a set built with no provider and no coverage report names those two as well', async () => {
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ jest: '30' }) }), { provider: null, coverage: null });
+    expect(set.unavailableControls()).toEqual(['coverage', 'mutation', 'behavioral:cli', 'behavioral:http', 'behavioral:browser']);
+  });
+});
+
+describe('adapterAdmission', () => {
+  test('L3 is refused for a set that lacks any control, naming each', async () => {
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), withEverything);
+    const admission = adapterAdmission(set, 3);
+    expect(admission).toMatchObject({ ok: false, reason: 'controls-unavailable', requested: 3 });
+    expect(admission.ok ? [] : admission.unavailable).toEqual(['behavioral:browser', 'behavioral:http', 'mutation']);
+  });
+
+  test.each([0, 1, 2] as const)('L%i is not refused, and comes back as asked for', async (level) => {
+    const set = await buildAdapterSet(await repo({}), { provider: null, coverage: null });
+    expect(adapterAdmission(set, level)).toEqual({ ok: true, level });
+  });
+
+  test('a set whose own unavailableControls() under-reports is still refused: the gaps are derived from its slots', () => {
+    const lying: AdapterSet = {
+      stack: 'custom',
+      test: null,
+      coverage: null,
+      mutation: null,
+      behavioral: [],
+      manifest: null,
+      unavailableControls: () => [],
+    };
+    const admission = adapterAdmission(lying, 3);
+    expect(admission.ok).toBe(false);
+    expect(admission.ok ? [] : admission.unavailable).toContain('test');
+  });
+
+  test('a value that is not a level is refused rather than compared', async () => {
+    const set = await buildAdapterSet(await repo({}), { provider: null, coverage: null });
+    expect(() => adapterAdmission(set, 4 as unknown as 3)).toThrow(/not an autonomy level/);
+  });
+});
+
+===== packages/conformance/src/registry/http.ts =====
+/**
+ * The runtime assertions P11 owns: that an HTTP verdict is the runtime's
+ * comparison of what a client out of the product's reach observed (I2), and
+ * that a provider without such a client is named rather than trusted (I5).
+ *
+ * The Docker-backed entries require a daemon and fail without one, for the
+ * reason `local-sandbox.ts` gives: an assertion about where a client ran
+ * proves nothing if it skipped the container it was about.
+ */
+import { execFile } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+import { specFor, withProvider, withSandbox, withSandboxDirs } from './local-sandbox.js';
+
+const run = promisify(execFile);
+
+/** A product that answers `/` correctly, `/wrong` with a 200 and the wrong body, and `/slow` after two seconds. */
+const SERVER = `
+  require('node:http').createServer((req, res) => {
+    const reply = () => res.end(req.url === '/wrong' ? 'goodbye' : 'hello');
+    if (req.url === '/slow') setTimeout(reply, 2000); else reply();
+  }).listen(8080);
+`;
+
+function scenario(id: string, path: string): { id: string; input: unknown; expected: unknown } {
+  return {
+    id,
+    input: { serve: ['node', '--eval', SERVER], port: 8080, exchanges: [{ method: 'GET', path }] },
+    expected: { exchanges: [{ status: 200, body: 'hello' }] },
+  };
+}
+
+async function probeContainers(): Promise<string[]> {
+  const { stdout } = await run('docker', ['ps', '--all', '--filter', 'name=probe-', '--format', '{{.Names}}']);
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
+}
+
+export const HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT: LocalAssertion = runtime({
+  id: 'I2.http-verdict-judged-outside-the-product',
+  title:
+    'an HTTP scenario runs against a real server in a real sandbox; a server that answers as expected holds, one that answers 200 ' +
+    "with the wrong body does not, naming the exchange and field, and the gate fails it on its expectation",
+  run: async () => {
+    const [{ HttpBehavioralAdapter }, { requiredShortfall }, { EGRESS_PROXY_IMAGE }] = await Promise.all([
+      import('@olympus-ai/adapters'),
+      import('@olympus-ai/api'),
+      import('@olympus-ai/sandbox'),
+    ]);
+    const spec = { id: 'greets', kind: 'behavioral' as const, command: ['serve'] as const, required: true, timeoutMs: 30_000 };
+    await withProvider('conformance-http-', async (provider, dirs) => {
+      const image = { image: EGRESS_PROXY_IMAGE };
+      const right = await withSandbox(provider, specFor(dirs, 'ro', image), (h) => new HttpBehavioralAdapter(provider).run(scenario('greets', '/'), h));
+      if (right.expectation?.held !== true) throw new Error(`I2: a server that answered as expected did not hold: ${JSON.stringify(right.expectation)}`);
+      if (requiredShortfall(spec, right) !== undefined) throw new Error('I2: a held HTTP expectation failed the gate');
+
+      const wrong = await withSandbox(provider, specFor(dirs, 'ro', image), (h) => new HttpBehavioralAdapter(provider).run(scenario('greets', '/wrong'), h));
+      if (wrong.expectation?.held !== false) throw new Error('I2: a 200 with the wrong body was accepted by the runtime\'s comparison');
+      const field = wrong.expectation.mismatches[0].field;
+      if (field !== 'exchanges[0].body') throw new Error(`I2: the mismatch named ${field}, not the exchange and field that differed`);
+      const failed = requiredShortfall(spec, wrong);
+      if (failed?.cause !== 'expectation') throw new Error(`I2: a 200 with the wrong body did not fail the gate on its expectation (${failed?.cause ?? 'passed'})`);
+    });
+  },
+});
+
+export const HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM: LocalAssertion = runtime({
+  id: 'I2.http-probe-shares-network-not-filesystem',
+  title:
+    "the probe is inspected while it runs: in the sandbox's network namespace, nothing mounted, a read-only root, every capability " +
+    'dropped, and without a file the product wrote; a deny-all sandbox it probed is still --network none, and no probe outlives its call',
+  run: async () => {
+    const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
+    await withProvider('conformance-probe-', async (provider, dirs) => {
+      await withSandbox(provider, specFor(dirs, 'ro', { image: EGRESS_PROXY_IMAGE }), async (h) => {
+        const started = await provider.exec(h, ['node', '--eval', SERVER], { detach: true });
+        if (started.exitCode !== 0) throw new Error(`I2: the product's server did not start: ${started.stderr}`);
+        const planted = await provider.exec(h, ['sh', '-c', 'echo forged > /tmp/probe-marker']);
+        if (planted.exitCode !== 0) throw new Error('I2: could not plant the marker in the product\'s container');
+
+        const call = provider.probe(h, { port: 8080, readyWithinMs: 10_000, exchanges: [{ method: 'GET', path: '/slow' }] });
+        let probe: string | undefined;
+        for (let i = 0; i < 50 && probe === undefined; i += 1) {
+          [probe] = await probeContainers();
+          if (probe === undefined) await new Promise((r) => setTimeout(r, 100));
+        }
+        if (probe === undefined) throw new Error('I2: no probe container was seen while the call ran');
+        const format = '{{.HostConfig.NetworkMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}';
+        const inspected = (await run('docker', ['inspect', '--format', format, probe])).stdout.trim();
+        const wanted = `container:${h}|[]|true|["ALL"]`;
+        if (inspected !== wanted) throw new Error(`I2: the probe ran as ${inspected}, not ${wanted}`);
+        const marker = await run('docker', ['exec', probe, 'cat', '/tmp/probe-marker']).then(() => 'present', () => 'absent');
+        if (marker !== 'absent') throw new Error("I2: a file the product wrote is in the probe's filesystem");
+
+        const result = await call;
+        const [seen] = result.observations;
+        if (seen?.kind !== 'response' || seen.body !== 'hello') throw new Error(`I2: the probe did not observe the product's answer: ${JSON.stringify(result)}`);
+        const network = (await run('docker', ['inspect', '--format', '{{.HostConfig.NetworkMode}}', h])).stdout.trim();
+        if (network !== 'none') throw new Error(`I2: probing a deny-all sandbox changed its network to ${network}`);
+        const left = await probeContainers();
+        if (left.length > 0) throw new Error(`I2: probe containers outlived their call: ${left.join(', ')}`);
+      });
+    });
+  },
+});
+
+export const HTTP_PROBE_ABSENT_IS_NAMED: LocalAssertion = runtime({
+  id: 'I5.http-probe-absent-is-named',
+  title:
+    'a provider with no probe builds a set that names behavioral:http unavailable and cannot construct the HTTP adapter; ' +
+    'a provider with one builds a set that carries it, and mutation and browser still keep that set from L3',
+  run: async () => {
+    const [{ adapterAdmission, buildAdapterSet, HttpBehavioralAdapter }, { LocalDockerProvider, StubSandboxProvider }] = await Promise.all([
+      import('@olympus-ai/adapters'),
+      import('@olympus-ai/sandbox'),
+    ]);
+    await withSandboxDirs('conformance-http-set-', async (dirs) => {
+      await writeFile(join(dirs.workspace, 'package.json'), JSON.stringify({ name: 'fixture', devDependencies: { vitest: '^4.1.0' } }));
+
+      const stub = new StubSandboxProvider();
+      if ('probe' in stub) throw new Error('I5: StubSandboxProvider has a probe, though every process it runs is on the host');
+      const without = await buildAdapterSet(dirs.workspace, { provider: stub, coverage: null });
+      if (!without.unavailableControls().includes('behavioral:http')) throw new Error('I5: a set on a provider with no probe did not name behavioral:http');
+      if (without.behavioral.some((adapter) => adapter.kind === 'http')) throw new Error('I5: a set on a provider with no probe carries an HTTP adapter');
+      let refused = false;
+      try {
+        new HttpBehavioralAdapter(stub);
+      } catch {
+        refused = true;
+      }
+      if (!refused) throw new Error('I5: the HTTP adapter was constructed on a provider with no probe');
+
+      const local = await LocalDockerProvider.create({ vaultPaths: [dirs.vault] });
+      const withProbe = await buildAdapterSet(dirs.workspace, { provider: local, coverage: null });
+      if (withProbe.unavailableControls().includes('behavioral:http')) throw new Error('I5: a set on a provider with a probe still names behavioral:http');
+      const l3 = adapterAdmission(withProbe, 3);
+      if (l3.ok || !l3.unavailable.includes('mutation') || !l3.unavailable.includes('behavioral:browser')) {
+        throw new Error(`I5: the L3 refusal did not still name mutation and behavioral:browser: ${l3.ok ? 'admitted' : l3.message}`);
+      }
+    });
+  },
+});
+
+===== packages/conformance/src/registry/i2.ts =====
+import { compileError, external } from '../kit/assert.js';
+import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
+import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
+import { COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
+
+/** I2: The runtime derives status; the model never reports it. */
+export const I2: InvariantEntry = {
+  title: INVARIANTS.I2,
+  assertions: [
+    compileError({
+      id: 'I2.task-result-has-no-status',
+      title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',
+      fixture: 'i2/task-result-has-no-status.ts',
+    }),
+    compileError({
+      id: 'I2.task-status-lives-in-run-state',
+      title: 'Task carries no status; RunState.tasks is the only place it can be read from',
+      fixture: 'i2/task-status-lives-in-run-state.ts',
+    }),
+    compileError({
+      id: 'I2.evidence-collected-by-runtime',
+      title: 'EvidenceBundle.collectedBy admits only "runtime" and the bundle has no pass/fail field',
+      fixture: 'i2/evidence-collected-by-runtime.ts',
+    }),
+    compileError({
+      id: 'I2.gate-verdict-single-source',
+      title: 'GateResult has one verdict and no second boolean to disagree with it',
+      fixture: 'i2/gate-verdict-single-source.ts',
+    }),
+    compileError({
+      id: 'I2.records-are-readonly',
+      title:
+        'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
+      fixture: 'i2/records-are-readonly.ts',
+    }),
+    compileError({
+      id: 'I2.check-result-declares-expectation',
+      title:
+        'CheckResult.expectation is required, null for a check with none; a held expectation carries no mismatch and a failed one at least one',
+      fixture: 'i2/check-result-declares-expectation.ts',
+    }),
+    RESUME_DERIVES_STATE_FROM_THE_VAULT,
+    UNMET_EXPECTATION_FAILS_THE_GATE,
+    // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
+    HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
+    HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
+    STATUS_DERIVED_FROM_CHECK_RESULTS,
+    TASK_RESULT_KEY_SET_ENFORCED,
+    UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
+    // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
+    COST_IS_RUNTIME_METERED,
+    // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
+    external({
+      id: 'I2.relay-meter-agrees-with-session',
+      title: "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+      level: 'runtime',
+      package: '@olympus-ai/driver-claude-code',
+      file: 'test/invariants.test.ts',
+    }),
+  ],
+  pending: [],
+};
+
+===== packages/conformance/src/registry/i5.ts =====
+import type { ComponentGraph } from '@olympus-ai/api';
+import type { AutonomyLevel, RunId, StationId } from '@olympus-ai/core';
+import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
+import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
+import { withLine } from './line.js';
+import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
+import { HTTP_PROBE_ABSENT_IS_NAMED } from './http.js';
+import {
+  BLOCKED_ADDRESS,
+  BLOCKED_NAME,
+  ORIGIN_BODY,
+  ORIGIN_PORT,
+  allowlistControls,
+  dockerHas,
+  originName,
+  refusalFrom,
+  specFor,
+  throughProxy,
+  withOrigin,
+  withProvider,
+  withSandbox,
+} from './local-sandbox.js';
+import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
+import { contendOnCommit, withVaultDirs } from './local-vault.js';
+import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
+import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
+
+/** The declaration order the entry point promises: vault, sandbox, driver, then the line itself. */
+const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine'];
+
+/** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
+const CONTENDERS = 8;
+
+/** I5: Fail closed. */
+export const I5: InvariantEntry = {
+  title: INVARIANTS.I5,
+  assertions: [
+    compileError({
+      id: 'I5.transition-has-no-warn-and-continue',
+      title:
+        'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+      fixture: 'i5/transition-has-no-warn-and-continue.ts',
+    }),
+    compileError({
+      id: 'I5.policy-refusal-is-explicit',
+      title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+      fixture: 'i5/policy-refusal-is-explicit.ts',
+    }),
+    compileError({
+      id: 'I5.station-requires-declared-capabilities',
+      title: 'StationContract.requires accepts only keys of DriverCapabilities',
+      fixture: 'i5/station-requires-declared-capabilities.ts',
+    }),
+    compileError({
+      id: 'I5.adapter-set-declares-absent-controls',
+      title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+      fixture: 'i5/adapter-set-declares-absent-controls.ts',
+    }),
+    compileError({
+      id: 'I5.check-result-declares-suite-count',
+      title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+      fixture: 'i5/check-result-declares-suite-count.ts',
+    }),
+    compileOk({
+      id: 'I5.stubs-declare-unsafe',
+      title:
+        'StubVault, StubSandboxProvider, StubDriver, and SKELETON_LINE are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+      fixture: 'i5/stubs-declare-unsafe.ts',
+    }),
+    runtime({
+      id: 'I5.unsafe-component-refused-above-l1',
+      title:
+        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and SkeletonLine in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+      run: async () => {
+        await withLine('s1-hello-', async (rig) => {
+          const [api, core, sandbox, vault] = await Promise.all([
+            import('@olympus-ai/api'),
+            import('@olympus-ai/core'),
+            import('@olympus-ai/sandbox'),
+            import('@olympus-ai/vault'),
+          ]);
+          const driver = new core.StubDriver();
+          const components: ComponentGraph = {
+            vault: new vault.StubVault(rig.dirs.artifacts),
+            sandbox: new sandbox.StubSandboxProvider(),
+            driver,
+            reviewer: driver,
+            workspaces: rig.workspaces,
+          };
+
+          for (const level of [2, 3] as const) {
+            const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+            if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+              const got = outcome.ok ? 'ok' : outcome.reason;
+              throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+            }
+            const names = outcome.unsafe.map((u) => u.component);
+            if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+              throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+            }
+            for (const u of outcome.unsafe) {
+              if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+            }
+            let recorded = true;
+            try {
+              await components.vault.readRunState(rig.runId);
+            } catch {
+              recorded = false;
+            }
+            if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+          }
+
+          const l1 = await api.startRun(await rig.request(components));
+          if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+            const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+            throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+          }
+        });
+      },
+    }),
+    runtime({
+      id: 'I5.stale-commit-is-refused-under-contention',
+      title:
+        'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+      run: async () => {
+        await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+          const runId = 'i5-contend';
+          const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+
+          const winners = outcomes.filter((o) => o.ok);
+          if (winners.length !== 1) {
+            const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+            throw new Error(
+              `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                `\n  ${detail.join('\n  ')}`,
+            );
+          }
+          const [winner] = winners;
+          if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+          if (winner.version !== '1') {
+            throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+          }
+          for (const loser of outcomes.filter((o) => !o.ok)) {
+            if (loser.message === '') {
+              throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+            }
+          }
+
+          // The record that landed must be one writer's whole state, not a
+          // blend: each child tags its own `tasks`, so the stored state names
+          // exactly one of them.
+          const { LocalVault } = await import('@olympus-ai/vault');
+          const vault = new LocalVault(dirs);
+          const stored = await vault.readRunState(runId as RunId);
+          if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+          const tags = Object.keys(stored.tasks);
+          if (tags.length !== 1 || tags[0] !== winner.tag) {
+            throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+          }
+
+          // The same refusal, uncontended: a commit from a version that has
+          // already been superseded stores nothing at all.
+          let stale = true;
+          try {
+            await vault.commitRunState({ ...stored, version: '0' }, '0');
+          } catch {
+            stale = false;
+          }
+          if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+          const after = await vault.readRunState(runId as RunId);
+          if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+            throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+          }
+        });
+      },
+    }),
+    runtime({
+      id: 'I5.over-request-refused',
+      title:
+        'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+      run: async () => {
+        const { StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const policy = engine.resolvePolicy(grantingDocument());
+
+        // Three bounds, three different values, so each refusal names the one
+        // that actually bit. `build` is capped below the role ceiling, which is
+        // itself below the global cap.
+        const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+          { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+          { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+        ];
+        for (const { level, station, bound } of overRequests) {
+          const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+          if (outcome.ok) {
+            throw new Error(
+              `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                'agree to, while reporting success.',
+            );
+          }
+          if (outcome.reason !== 'exceeds-cap') {
+            throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+          }
+          if (Object.hasOwn(outcome, 'level')) {
+            throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+          }
+          if (outcome.detail === '') {
+            throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+          }
+        }
+
+        // The global cap, which the fixture document sets to the maximum and
+        // so can never bite on its own. Lowered here, it must refuse a request
+        // the station cap and role ceiling would both have allowed.
+        const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+        const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+        if (global.ok) {
+          throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+        }
+        if (global.reason !== 'exceeds-cap') {
+          throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+        }
+        if (!global.detail.includes('global L0')) {
+          throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+        }
+        if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+          throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+        }
+
+        // The control: a request within every bound is granted, and granted at
+        // the level requested rather than raised or lowered to a cap. An engine
+        // that refused everything would satisfy the loop above.
+        for (const level of [0, 1] as const) {
+          const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+          if (!outcome.ok) {
+            throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+          }
+          if (outcome.level !== level) {
+            throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+          }
+        }
+      },
+    }),
+    runtime({
+      id: 'I5.malformed-document-refused-at-resolve',
+      title:
+        'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+      run: async () => {
+        const { StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const document = grantingDocument();
+        const scope = document.roles[GRANTED_ROLE];
+        if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+
+        // Each of these is what a caller produces by writing `value as
+        // PolicyDocument`. Without the guard, the first resolves a global cap
+        // of 99 and grants every level; the rest widen a scope the document
+        // never authorised.
+        const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+          { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+          { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+          { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+          { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+        ];
+        for (const { what, value } of rogues) {
+          let refused = false;
+          try {
+            engine.resolvePolicy(value as never);
+          } catch {
+            refused = true;
+          }
+          if (!refused) {
+            throw new Error(
+              `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                'only while every caller remembers to validate first is not closed.',
+            );
+          }
+        }
+
+        // The control: a genuine document resolves. A guard that threw on
+        // everything would satisfy the loop above and break the engine.
+        const policy = engine.resolvePolicy(document);
+        if (policy.globalCap !== document.globalCap) {
+          throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+        }
+      },
+    }),
+    runtime({
+      id: 'I5.malformed-autonomy-level-refused',
+      title:
+        'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+      run: async () => {
+        const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+        const engine = new StrictPolicyEngine();
+        const policy = engine.resolvePolicy(grantingDocument());
+
+        for (const [label, level] of [
+          ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+        ] as const) {
+          let refused = false;
+          try {
+            const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+            if (outcome.ok) {
+              throw new Error(
+                `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                  'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                  'level nobody can honour.',
+              );
+            }
+          } catch (error) {
+            if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+            refused = true;
+          }
+          if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+        }
+
+        // The control: every real level is still answered normally.
+        for (const level of AUTONOMY_LEVELS) {
+          const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+          const allowed = level <= ROLE_CEILING;
+          if (outcome.ok !== allowed) {
+            throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+          }
+        }
+      },
+    }),
+    runtime({
+      id: 'I5.sandbox-egress-allowlist-enforced',
+      title:
+        'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+        'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+        'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+      run: async () => {
+        await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+          // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+          // name, and it is not permission to reach everything; either reading would be the
+          // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+          const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+          if (empty.layer !== 'egress') {
+            throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+          }
+
+          // deny-all is untouched by the allowlist existing: no proxy is started beside a
+          // sandbox entitled to no egress, and no network is created for it.
+          await withSandbox(provider, specFor(dirs), async (handle) => {
+            const controls = provider.appliedControls(handle);
+            if (controls.egress.mode !== 'deny-all') {
+              throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+            }
+            // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+            // read here is what Docker was actually told and what the container actually got.
+            if (!controls.runArgs.join(' ').includes('--network none')) {
+              throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+            }
+            const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+            if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+              throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+            }
+          });
+
+          const name = originName();
+          const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+          const { egress } = allowlistControls(provider, handle);
+          try {
+            await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+              // The grant. The body proves the origin answered, not the proxy on its behalf.
+              const reached = await provider.exec(handle, [
+                'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+              ]);
+              if (!reached.stdout.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+              }
+
+              // Refused by name, and by address. The second is the one that matters: a refusal
+              // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+              for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                if (!answer.includes('403') || !answer.includes(host)) {
+                  throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                }
+              }
+
+              // The strongest form: the origin's own address, which the proxy demonstrably
+              // reaches, refused for the one reason under test — the address is not on the list.
+              const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+              if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+              }
+
+              // There is nothing to bypass. The internal network carries no default route, so a
+              // process that unsets every proxy variable is left with no second path to take.
+              const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+              if (routes.stdout.includes('default')) {
+                throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+              }
+              const bypass = await provider.exec(handle, [
+                'sh', '-c',
+                'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                  `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+              ]);
+              if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+              }
+            });
+          } finally {
+            await provider.destroy(handle);
+          }
+
+          // The proxy is the sandbox's, and goes with it. One left running is a route off the
+          // host with no workload behind it and nobody watching it.
+          for (const [kind, leaked] of [
+            ['container', egress.proxy.name],
+            ['network', egress.proxy.internalNetwork],
+            ['network', egress.proxy.outboundNetwork],
+          ] as const) {
+            if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+          }
+        });
+      },
+    }),
+    STATION_MISSING_CAPABILITY_REFUSED,
+    TASK_ATTEMPTS_ARE_BOUNDED,
+    OVER_REQUEST_REFUSED_AT_ADMISSION,
+    UNSUPPORTED_STACK_IS_LOUD,
+    // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+    HTTP_PROBE_ABSENT_IS_NAMED,
+    ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+    CHECK_COMMAND_HAS_A_GRAMMAR,
+    MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+    WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+    // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+    MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+  ],
+  pending: [
+    pending({
+      id: 'I5.unsafe-declaration-survives-composition',
+      owner: 'I1',
+      reason:
+        "unsafeComponents reads each component's `unsafe` property structurally, so a wrapper around a stub that does " +
+        'not forward the property carries no declaration and passes as safe. Today that is no route above L1: ' +
+        'SKELETON_LINE is appended unconditionally, and any declaration refuses. P4 narrowed SKELETON_LINE to the ' +
+        'two controls P6 and P7 still owe, and the unit that pays the last of them deletes it, at which point a ' +
+        'wrapped stub would carry a run to L2 or L3. Before SKELETON_LINE is deleted, component provenance must be ' +
+        'compositional: trusted metadata a wrapper must propagate, a graph-construction layer that owns provenance, ' +
+        'or an equivalent; and the assertion must wrap a stub without forwarding and require the refusal. Recorded by ' +
+        'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01). Owned by I1, the unit that replaces every S1 stub ' +
+        'and deletes SKELETON_LINE, rather than by whichever of P6 and P7 lands second (D-P6-01).',
+    }),
+    pending({
+      id: 'I5.policy-document-load-is-hardened',
+      owner: 'P9',
+      reason:
+        'P3 validates an already-parsed policy document; nothing yet reads policy.yaml off a disk, and no package ' +
+        'carries a YAML parser (D-P3-01). The loader is the first code to touch untrusted-shaped bytes on their way ' +
+        'into the Vault, so the unit that adds it owes four refusals, not four configured options: an exact version ' +
+        'pin with no caret on the parser; maxAliasCount 0, so an alias bomb cannot expand; a byte cap on the ' +
+        'document; and a nesting-depth limit. Each must be asserted as a refusal that fails when the setting is ' +
+        'relaxed. Owner is P9 because P4 is handed a resolved Policy and reads no file, and packages/api is the ' +
+        'run-creation path; a unit before P9 that needs a Vault-resident policy at run time inherits this entry by ' +
+        'editing the owner.',
+    }),
+    pending({
+      id: 'I5.adapter-refusal-refuses-l3-end-to-end',
+      owner: 'I1',
+      reason:
+        'Split from I5.adapter-refusal-enforced-at-admission (D-P6-01). An L3 run started through startRun must be ' +
+        'refused at admission naming each control its adapter set lacks. While SKELETON_LINE declares the line unsafe, ' +
+        'every run above L1 is refused for that reason first, so this assertion would pass whether or not the adapter ' +
+        'refusal is wired. I1 deletes SKELETON_LINE, so the assertion lands with it.',
+    }),
+  ],
+};
+
+===== packages/sandbox/src/index.ts =====
+export * from './types.js';
+export * from './stub/provider.js';
+export * from './local/provider.js';
+export * from './local/mounts.js';
+export * from './local/egress.js';
+export * from './local/proxy.js';
+export * from './local/relay.js';
+export * from './local/probe.js';
+export * from './local/refusal.js';
+export { DockerUnavailable, type DaemonFacts } from './local/docker.js';
+
+===== packages/sandbox/src/local/probe.ts =====
+/**
+ * The HTTP probe: the client an HTTP scenario observes the product through
+ * (A-P11-01).
+ *
+ * The shape, and why it is this shape:
+ *
+ * - One container per `probe()` call, started with
+ *   `--network container:<sandbox>`. It shares the sandbox's network
+ *   namespace — its loopback, and under an allowlist its route to the proxy —
+ *   and not its filesystem or its process tree. The product can answer the
+ *   probe's requests, which is what is being tested, and cannot replace the
+ *   probe, which is what makes the answer evidence (D-P11-01).
+ * - It joins a namespace that already exists and adds nothing to it that
+ *   outlives the call: a deny-all sandbox is still `--network none`, and no
+ *   network, route, or container is created for it (D-P11-02).
+ * - It connects to the loopback and no other host. The request names a port,
+ *   never a URL, so the probe is not a way out of the sandbox.
+ * - It observes and decides nothing. Status, headers, and body go to its
+ *   stdout as JSON, and the comparison against what the scenario expected runs
+ *   in the runtime's own process.
+ *
+ * Built the way the proxy and relay are: source passed to `node --eval` in the
+ * same pinned image, read-only, every capability dropped, nothing mounted.
+ */
+import type { ProbeExchange, ProbeObservation, ProbeRequest, ProbeResult } from '../types.js';
+import { refuse } from './refusal.js';
+
+/** A body larger than this is reported `oversized`, with no body, rather than truncated. */
+export const PROBE_BODY_LIMIT_BYTES = 1024 * 1024;
+
+/** How long one request waits for its response, from the moment it is sent. */
+export const PROBE_RESPONSE_MS = 10_000;
+
+/** A method is an HTTP token: RFC 9110's `tchar`, which excludes every separator and whitespace. */
+const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** True when `text` holds a character below space, or DEL, which no request target or header value may carry. */
+function hasControl(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * The probe. Passed to `node --eval` as one argv element; its request arrives
+ * on stdin, so nothing a scenario supplies is on any command line.
+ *
+ * Both loopback addresses are tried, because a server told to listen on
+ * `localhost` binds whichever one its resolver prefers. Whichever accepted a
+ * connection first is the one every request goes to.
+ */
+export const PROBE_SOURCE = `'use strict';
+const http = require('node:http');
+const net = require('node:net');
+
+const LIMIT = Number(process.env.PROBE_BODY_LIMIT);
+const RESPONSE_MS = Number(process.env.PROBE_RESPONSE_MS);
+
+function fail(message) {
+  process.stderr.write('probe: ' + message + '\\n');
+  process.exit(2);
+}
+
+function accepts(host, port) {
+  return new Promise(function (resolve) {
+    const socket = net.connect({ host: host, port: port });
+    socket.once('connect', function () { socket.destroy(); resolve(true); });
+    socket.once('error', function () { socket.destroy(); resolve(false); });
+  });
+}
+
+async function ready(port, withinMs) {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    for (const host of ['127.0.0.1', '::1']) {
+      if (await accepts(host, port)) return host;
+    }
+    if (Date.now() >= deadline) return null;
+    await new Promise(function (r) { setTimeout(r, 100); });
+  }
+}
+
+function headersOf(res) {
+  const out = {};
+  for (const [name, value] of Object.entries(res.headers)) {
+    out[name] = Array.isArray(value) ? value.join(', ') : String(value);
+  }
+  return out;
+}
+
+function send(host, port, exchange) {
+  return new Promise(function (resolve) {
+    let settled = false;
+    function settle(observation) { if (!settled) { settled = true; resolve(observation); } }
+    const req = http.request({
+      host: host, port: port, method: exchange.method, path: exchange.path,
+      headers: exchange.headers || {}, agent: false,
+    }, function (res) {
+      const chunks = [];
+      let size = 0;
+      res.on('data', function (chunk) {
+        size += chunk.length;
+        if (size > LIMIT) {
+          settle({ kind: 'oversized', status: res.statusCode, headers: headersOf(res), limitBytes: LIMIT });
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('end', function () {
+        settle({ kind: 'response', status: res.statusCode, headers: headersOf(res), body: Buffer.concat(chunks).toString('utf8') });
+      });
+      res.on('error', function (error) { settle({ kind: 'no-response', reason: 'the response broke off: ' + error.message }); });
+    });
+    req.setTimeout(RESPONSE_MS, function () {
+      settle({ kind: 'no-response', reason: 'no complete response within ' + RESPONSE_MS + 'ms' });
+      req.destroy();
+    });
+    req.on('error', function (error) { settle({ kind: 'no-response', reason: error.message }); });
+    if (exchange.body !== undefined) req.write(exchange.body);
+    req.end();
+  });
+}
+
+async function main(text) {
+  if (!Number.isInteger(LIMIT) || LIMIT <= 0 || !Number.isInteger(RESPONSE_MS) || RESPONSE_MS <= 0) fail('no body limit or response timeout');
+  let request;
+  try { request = JSON.parse(text); } catch (error) { fail('the request is not JSON'); }
+  const started = Date.now();
+  const host = await ready(request.port, request.readyWithinMs);
+  const observations = [];
+  if (host !== null) {
+    for (const exchange of request.exchanges) observations.push(await send(host, request.port, exchange));
+  }
+  process.stdout.write(JSON.stringify({ ready: host !== null, observations: observations, durationMs: Date.now() - started }));
+}
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', function (chunk) { input += chunk; });
+process.stdin.on('end', function () { main(input).catch(function (error) { fail(String(error && error.stack || error)); }); });
+`;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function checkExchange(exchange: ProbeExchange, i: number): void {
+  const at = `exchanges[${String(i)}]`;
+  if (typeof exchange.method !== 'string' || !TOKEN.test(exchange.method)) refuse('probe', `${at}.method must be an HTTP method token`);
+  if (typeof exchange.path !== 'string' || !exchange.path.startsWith('/') || /\s/.test(exchange.path) || hasControl(exchange.path)) {
+    refuse('probe', `${at}.path must begin with / and contain no whitespace or control characters; the host is always the sandbox's loopback`);
+  }
+  if (exchange.headers !== undefined) {
+    if (!isRecord(exchange.headers)) refuse('probe', `${at}.headers must be an object of names to strings`);
+    for (const [name, value] of Object.entries(exchange.headers)) {
+      if (!TOKEN.test(name)) refuse('probe', `${at}.headers has a name that is not an HTTP token: ${JSON.stringify(name)}`);
+      if (typeof value !== 'string' || hasControl(value)) refuse('probe', `${at}.headers.${name} must be a string with no line breaks or control characters`);
+    }
+  }
+  if (exchange.body !== undefined && typeof exchange.body !== 'string') refuse('probe', `${at}.body must be a string`);
+}
+
+/** Refuses a request the probe could not send as written, naming the field, rather than sending something else. */
+export function checkProbeRequest(request: ProbeRequest): void {
+  if (!Number.isInteger(request.port) || request.port < 1 || request.port > 65535) refuse('probe', 'port must be an integer from 1 to 65535');
+  if (!Number.isInteger(request.readyWithinMs) || request.readyWithinMs <= 0) refuse('probe', 'readyWithinMs must be a positive integer');
+  if (!Array.isArray(request.exchanges) || request.exchanges.length === 0) refuse('probe', 'exchanges must be a non-empty list');
+  request.exchanges.forEach(checkExchange);
+}
+
+function stringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((v) => typeof v === 'string');
+}
+
+function readObservation(value: unknown): ProbeObservation {
+  if (!isRecord(value)) throw new Error('an observation is not an object');
+  if (value.kind === 'no-response' && typeof value.reason === 'string') return { kind: 'no-response', reason: value.reason };
+  if (typeof value.status !== 'number' || !stringRecord(value.headers)) throw new Error('an observation has no status or headers');
+  if (value.kind === 'response' && typeof value.body === 'string') return { kind: 'response', status: value.status, headers: value.headers, body: value.body };
+  if (value.kind === 'oversized' && typeof value.limitBytes === 'number') {
+    return { kind: 'oversized', status: value.status, headers: value.headers, limitBytes: value.limitBytes };
+  }
+  throw new Error(`an observation has an unknown shape: ${JSON.stringify(value).slice(0, 200)}`);
+}
+
+/**
+ * Reads what the probe printed. The probe is the runtime's own code, so a
+ * shape this does not know is the probe breaking, and it throws rather than
+ * reports an observation it did not make.
+ */
+export function readProbeOutput(stdout: string, sent: number): ProbeResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error(`the probe printed something that is not JSON: ${stdout.slice(0, 200)}`);
+  }
+  if (!isRecord(parsed) || typeof parsed.ready !== 'boolean' || !Array.isArray(parsed.observations) || typeof parsed.durationMs !== 'number') {
+    throw new Error('the probe printed a result with an unknown shape');
+  }
+  const observations = parsed.observations.map(readObservation);
+  const expected = parsed.ready ? sent : 0;
+  if (observations.length !== expected) {
+    throw new Error(`the probe reported ${String(observations.length)} observations for ${String(expected)} requests`);
+  }
+  return { ready: parsed.ready, observations, durationMs: parsed.durationMs };
+}
+
+/**
+ * The `docker run` for one probe. `--rm` so a probe that finished is gone; the
+ * provider also removes it by name if its call is still running when the
+ * sandbox ends, so none outlives its sandbox.
+ */
+export function probeRunArgs(name: string, sandboxContainer: string, image: string): string[] {
+  return [
+    'run', '--rm', '--interactive',
+    '--name', name,
+    '--network', `container:${sandboxContainer}`,
+    '--env', `PROBE_BODY_LIMIT=${String(PROBE_BODY_LIMIT_BYTES)}`,
+    '--env', `PROBE_RESPONSE_MS=${String(PROBE_RESPONSE_MS)}`,
+    '--read-only',
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    '--user', '65534:65534',
+    image,
+    'node', '--eval', PROBE_SOURCE,
+  ];
+}
+
+===== packages/sandbox/src/local/provider.ts =====
+/**
+ * LocalDockerProvider: the SandboxProvider contract over a local Docker
+ * daemon. This is the substrate every other package's safety rests on, so
+ * every control the SandboxSpec names is either applied to the container or
+ * the provision is refused. There is no path through this file that returns a
+ * handle to a sandbox with fewer controls than were asked for.
+ *
+ * The container is started detached with a keep-alive command and each
+ * `exec()` is a `docker exec` into it, so the mount table, the network mode,
+ * and the cgroup limits are set once, by `docker run`, and cannot be varied
+ * per command afterwards.
+ */
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { resolve as resolvePath } from 'node:path';
+import type {
+  ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec,
+} from '../types.js';
+import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
+import { checkEgress, type EgressPlan } from './egress.js';
+import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
+import { canCreateIn } from './ownership.js';
+import { checkProbeRequest, probeRunArgs, readProbeOutput } from './probe.js';
+import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
+import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
+import {
+  CREDENTIAL_NAME,
+  RELAY_ALIAS,
+  RELAY_URL,
+  checkRelay,
+  readMeter,
+  startRelay,
+  stopRelay,
+  type AppliedRelay,
+  type RelayOptions,
+  type RelayPlan,
+} from './relay.js';
+
+/**
+ * A POSIX keep-alive. `sleep infinity` is a GNU and BusyBox extension, and a
+ * loop that sleeps in bounded steps runs on any shell; the wall-clock budget,
+ * not this number, is what ends the container.
+ */
+const KEEP_ALIVE = 'while :; do sleep 3600; done';
+
+/** How long the lifecycle commands themselves may take. Distinct from the sandbox's own budget. */
+const LIFECYCLE_TIMEOUT_MS = 120_000;
+
+export interface LocalDockerOptions {
+  /**
+   * Host directories the Vault owns. No mount may be one, sit inside one, or
+   * contain one, at any mode. Required and not defaulted: a provider that
+   * defaulted this to an empty list would enforce I1 against nothing, and the
+   * caller that forgot would never find out.
+   */
+  readonly vaultPaths: readonly string[];
+  /** The Docker executable. Defaults to `docker` on PATH. */
+  readonly executable?: string;
+  /**
+   * The image the egress proxy runs on. Defaults to the digest this package
+   * pins. Overridable so an air-gapped host can name a mirror of the same
+   * image, not so a different filter can be substituted: the proxy's behaviour
+   * is `PROXY_SOURCE`, which this image is handed and runs.
+   */
+  readonly proxyImage?: string;
+  /**
+   * The credentials this provider may hand to a model relay, by name. A
+   * `SandboxSpec` names one in `relay.credential` and never carries a value;
+   * a name that is not here is refused at provisioning. Absent means no
+   * credentials, and every spec that asks for a relay is refused (I4: a
+   * credential not given is not available).
+   *
+   * The values go to relay containers and nowhere else: never to a sandbox,
+   * never into an argument vector, and never into `appliedControls()`.
+   */
+  readonly credentials?: Readonly<Record<string, string>>;
+  /**
+   * Extra root certificates, PEM, a relay trusts beside the public ones, for
+   * an upstream a private authority signed. Not a way to turn verification
+   * off: the upstream's certificate is always checked against its name.
+   */
+  readonly relayTrust?: string;
+}
+
+/**
+ * What the provider applied for egress. A discriminated union, so the mode
+ * that was asked for and the evidence that it was applied cannot drift apart:
+ * `deny-all` can only carry `network: 'none'`, and `allowlist` cannot exist
+ * without the proxy that enforces it.
+ */
+export type AppliedEgress =
+  | {
+      readonly mode: 'deny-all';
+      /**
+       * The Docker network mode. `none` is `deny-all` applied: a loopback
+       * interface and nothing else, enforced by the kernel. The literal is
+       * load-bearing — only this branch can carry it, so a sandbox that
+       * records `network: 'none'` is a sandbox that was given it.
+       */
+      readonly network: 'none';
+    }
+  | {
+      readonly mode: 'deny-all';
+      /**
+       * The per-sandbox internal network the relay created. It carries the
+       * sandbox and the relay and nothing else, and no default route, so the
+       * one endpoint the sandbox reaches is the relay (D-P12-02). A `deny-all`
+       * with no relay is the branch above, unchanged.
+       */
+      readonly network: string;
+      readonly relay: AppliedRelay;
+    }
+  | {
+      readonly mode: 'allowlist';
+      /**
+       * The per-sandbox internal network. Created `--internal`, so a container
+       * on it has no default route at all and every address off the subnet is
+       * unreachable at the kernel, whatever the process believes.
+       */
+      readonly network: string;
+      /** The hosts the proxy will open a connection to, normalised as it matches them. Every other host is refused. */
+      readonly allow: readonly string[];
+      /**
+       * The filtering proxy this sandbox's only route out passes through.
+       *
+       * `proxy.internalNetwork` is the same string as `network` above, and the
+       * suite asserts it. They are kept apart because they are two facts that
+       * coincide rather than one written twice: `network` is the mode the
+       * *sandbox* container was given, which is what `'none'` is in the other
+       * branch, and `proxy.internalNetwork` is a network the *proxy* created
+       * and will remove. Either record read alone is complete.
+       */
+      readonly proxy: AppliedProxy;
+      /** The relay on the same internal network, when the spec asked for one. */
+      readonly relay?: AppliedRelay;
+    };
+
+/** The relay one sandbox was given, or `undefined`. */
+export function relayOf(egress: AppliedEgress): AppliedRelay | undefined {
+  return 'relay' in egress ? egress.relay : undefined;
+}
+
+/**
+ * What the provider actually applied to one container. Recorded rather than
+ * assumed: "egress is denied" is a claim, and this is the evidence for it,
+ * readable by an auditor and by the conformance suite.
+ */
+export interface AppliedControls {
+  readonly containerId: string;
+  readonly mounts: readonly ResolvedMount[];
+  /** What was applied for egress, and the evidence for it: the network mode, and for an allowlist the hosts and the proxy that enforces them. */
+  readonly egress: AppliedEgress;
+  readonly limits: SandboxSpec['limits'];
+  /** `performance.now()` reading past which the sandbox is over its wall-clock budget. */
+  readonly deadline: number;
+  /** The exact argv `docker run` was given, so a reviewer can reproduce the container. */
+  readonly runArgs: readonly string[];
+}
+
+/** How a sandbox ended: whether everything it was given was removed, and what its relay counted. */
+interface Ended {
+  readonly removal: Error | undefined;
+  /** The relay's reading, `unmetered` without one, or why it could not be read. */
+  readonly reading: MeterReading | Error;
+}
+
+interface Sandbox {
+  readonly controls: AppliedControls;
+  /** Set once the budget is spent or the container is destroyed, so a later exec says why rather than failing obscurely. */
+  ended?: string;
+  /**
+   * Destroys the container when the wall-clock budget expires, whether or not
+   * anyone calls `exec` again. Cleared when the sandbox ends by another route.
+   */
+  timer?: NodeJS.Timeout | undefined;
+  /**
+   * The one in-flight removal. The wall-clock timer and an `exec` that
+   * outlives its budget both expire at the same instant and both want the
+   * container gone, so without this they issue two concurrent `docker rm`
+   * calls for the same container: the second returns as soon as the first has
+   * marked it, while removal is still in progress, and a caller that checks
+   * immediately afterwards still finds it. One promise, awaited by whoever
+   * arrives second.
+   */
+  ending?: Promise<Ended> | undefined;
+  /**
+   * Set by the first `destroy`. A sandbox its wall clock ended is still
+   * destroyed once, and that call returns the reading taken when it ended; a
+   * second `destroy` is refused (D-P13-14).
+   */
+  destroyed?: boolean;
+  /**
+   * The names of probe containers whose call is still running. Removed before
+   * the sandbox's own container when it ends, so no probe outlives the
+   * namespace it joined (D-P11-02).
+   */
+  readonly probes: Set<string>;
+}
+
+function checkLimits(limits: SandboxSpec['limits']): void {
+  const named: Array<[string, number]> = [
+    ['cpus', limits.cpus],
+    ['memoryMb', limits.memoryMb],
+    ['pids', limits.pids],
+    ['wallClockMs', limits.wallClockMs],
+  ];
+  for (const [name, value] of named) {
+    if (!Number.isFinite(value) || value <= 0) {
+      refuse('limits', `limits.${name} must be a finite positive number, not ${String(value)}; an unbounded sandbox is refused, not granted`);
+    }
+  }
+  if (!Number.isInteger(limits.memoryMb) || !Number.isInteger(limits.pids)) {
+    refuse('limits', 'limits.memoryMb and limits.pids must be whole numbers; Docker takes no fraction of a megabyte or of a process');
+  }
+}
+
+function checkUser(user: SandboxSpec['user']): void {
+  const ids: Array<[string, unknown]> = [['uid', user.uid], ['gid', user.gid]];
+  for (const [name, value] of ids) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      refuse('user', `user.${name} must be a whole number of zero or more, not ${String(value)}; a container needs a user it can be matched to its workspace by`);
+    }
+  }
+}
+
+/**
+ * Whether the host carries a bind mount's ownership into the container
+ * unchanged. A Linux host does, so a container user that is neither the
+ * owner nor in the group of a directory without a world-write bit cannot
+ * write it. Docker Desktop's file sharing on macOS and Windows maps every
+ * container user onto the host user, so there is no ownership to mismatch.
+ */
+const HOST_ENFORCES_OWNERSHIP = process.platform === 'linux';
+
+/**
+ * I5: a rw workspace the container's user cannot write is refused here. Mounted
+ * as it is, every write the task attempts fails, and the run reads as a model
+ * that chose not to act rather than a mount the runtime got wrong (A-P6-04).
+ */
+async function checkWorkspaceWritable(workspace: ResolvedMount, user: SandboxSpec['user']): Promise<void> {
+  if (workspace.mode !== 'rw' || !HOST_ENFORCES_OWNERSHIP || user.uid === 0) return;
+  const facts = await stat(workspace.source);
+  if (!canCreateIn(facts, user)) {
+    refuse(
+      'user',
+      `the workspace ${workspace.declared} is owned by ${String(facts.uid)}:${String(facts.gid)} with mode ${(facts.mode & 0o777).toString(8)}, ` +
+        `which uid ${String(user.uid)} gid ${String(user.gid)} cannot create entries in (that takes write and search); a task handed it could not change anything, so it is refused rather than mounted`,
+    );
+  }
+}
+
+/**
+ * The proxy environment variables the sandbox is given under an allowlist.
+ *
+ * They are a convenience for the process inside, not the control: the control
+ * is that the internal network carries no default route, so a process that
+ * ignores or unsets every one of these reaches nothing at all. Loopback is
+ * exempted so a container talking to itself does not take a detour through a
+ * proxy that would refuse it.
+ */
+function proxyEnvironment(relay: boolean): string[] {
+  const url = `http://${PROXY_ALIAS}:${String(PROXY_PORT)}`;
+  // The relay is reached directly on the internal network. Sent to the proxy, a
+  // model call would be refused as a host nobody allowlisted.
+  const loopback = relay ? `localhost,127.0.0.1,::1,${RELAY_ALIAS}` : 'localhost,127.0.0.1,::1';
+  return [
+    '--env', `HTTP_PROXY=${url}`,
+    '--env', `http_proxy=${url}`,
+    '--env', `HTTPS_PROXY=${url}`,
+    '--env', `https_proxy=${url}`,
+    '--env', `NO_PROXY=${loopback}`,
+    '--env', `no_proxy=${loopback}`,
+  ];
+}
+
+/**
+ * A plain environment-variable name: a letter or underscore, then letters,
+ * digits, and underscores. Narrower than POSIX allows, deliberately — a name
+ * outside this set is far more likely to be a caller building `NAME=value`
+ * into the key than a variable anyone meant to set.
+ */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Turns the names and values a caller asked for into `docker exec` flags and
+ * an environment for the `docker` process itself.
+ *
+ * `-e NAME` with no `=value` makes the CLI read that name from its own
+ * environment, so the value travels through the daemon API and appears in no
+ * argument vector — not the one this process spawns, and not the one the
+ * command runs under inside the container. A secret in an argv is readable by
+ * anything that can list processes, and a credential is exactly what this
+ * exists to carry.
+ *
+ * Every refusal here is the fail-closed one (I5): a command that lost its
+ * credential does not fail where the credential was lost. It fails later,
+ * inside the model runner, with a message about authentication that says
+ * nothing about the provider having dropped it.
+ */
+function environmentPassthrough(env: Readonly<Record<string, string>> | undefined): {
+  flags: string[];
+  values: Record<string, string> | undefined;
+} {
+  if (env === undefined) return { flags: [], values: undefined };
+  const names = Object.keys(env);
+  if (names.length === 0) return { flags: [], values: undefined };
+
+  const flags: string[] = [];
+  const values: Record<string, string> = {};
+  for (const name of names) {
+    if (!ENV_NAME.test(name)) {
+      refuse('environment', `${JSON.stringify(name)} is not an environment variable name; a name is a letter or underscore followed by letters, digits, and underscores`);
+    }
+    // `noUncheckedIndexedAccess` makes this `string | undefined`, which is the
+    // honest type: a caller can pass an explicit `undefined` as easily as omit
+    // a key, and both must refuse rather than send an empty value through.
+    const value = env[name];
+    if (value === undefined) {
+      refuse('environment', `${name} was named in ExecOptions.env with no value; the command was not started rather than run without it`);
+    }
+    flags.push('--env', name);
+    values[name] = value;
+  }
+  return { flags, values };
+}
+
+function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
+  const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
+  const relay = relayOf(egress);
+  if (egress.mode === 'allowlist') args.push(...proxyEnvironment(relay !== undefined));
+  // The relay's address, not a secret: the credential is in the relay, and this is where to find it.
+  if (relay !== undefined) args.push('--env', `${relay.urlVariable}=${RELAY_URL}`);
+  for (const mount of mounts) args.push('--mount', mountArgument(mount));
+  args.push(
+    '--cpus', String(spec.limits.cpus),
+    '--memory', `${String(spec.limits.memoryMb)}m`,
+    '--pids-limit', String(spec.limits.pids),
+    '--entrypoint', 'sh',
+    spec.image,
+    '-c', KEEP_ALIVE,
+  );
+  return args;
+}
+
+/**
+ * The credentials a provider holds, checked once at construction. A name a
+ * relay spec could not match exactly, or a value with nothing in it, is
+ * refused here rather than at the first provision that names it.
+ */
+function heldCredentials(credentials: Readonly<Record<string, string>> | undefined): ReadonlyMap<string, string> {
+  const held = new Map<string, string>();
+  if (credentials === undefined) return held;
+  for (const [name, value] of Object.entries(credentials)) {
+    if (!CREDENTIAL_NAME.test(name)) {
+      refuse('relay', `the credential name ${JSON.stringify(name)} is not lower-case letters, digits, and interior hyphens`);
+    }
+    // The type says string, but a value read from an unset environment variable arrives as undefined.
+    if (typeof value !== 'string' || value.trim() === '') {
+      refuse('relay', `the credential ${JSON.stringify(name)} has no value; a relay started with it would forward unauthenticated`);
+    }
+    held.set(name, value);
+  }
+  return held;
+}
+
+export class LocalDockerProvider implements SandboxProvider {
+  readonly id = 'local-docker';
+
+  readonly #executable: string;
+  readonly #vaultPaths: readonly string[];
+  readonly #daemon: DaemonFacts;
+  readonly #proxyImage: string;
+  readonly #credentials: ReadonlyMap<string, string>;
+  readonly #relayTrust: string | undefined;
+  readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
+
+  private constructor(
+    executable: string,
+    vaultPaths: readonly string[],
+    daemon: DaemonFacts,
+    proxyImage: string,
+    credentials: ReadonlyMap<string, string>,
+    relayTrust: string | undefined,
+  ) {
+    this.#executable = executable;
+    this.#vaultPaths = vaultPaths;
+    this.#daemon = daemon;
+    this.#proxyImage = proxyImage;
+    this.#credentials = credentials;
+    this.#relayTrust = relayTrust;
+  }
+
+  /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
+  get #relayOptions(): RelayOptions {
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+  }
+
+  /** The options the proxy's own lifecycle commands run under. */
+  get #proxyOptions(): ProxyOptions {
+    return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+  }
+
+  /**
+   * The only way to build one. The daemon is probed first and the provider is
+   * not constructed unless it is there, runs Linux containers, and is local —
+   * the three things `capabilities()` goes on to claim. A provider that
+   * existed without a daemon would have to answer `capabilities()` with a
+   * guess, and every assertion built on it would be asserting the guess.
+   */
+  static async create(options: LocalDockerOptions): Promise<LocalDockerProvider> {
+    const executable = options.executable ?? 'docker';
+    const daemon = await probeDaemon(executable);
+    const credentials = heldCredentials(options.credentials);
+    const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
+    const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust);
+  }
+
+  /** What the probe established about the daemon behind this provider. */
+  daemon(): DaemonFacts {
+    return this.#daemon;
+  }
+
+  /** What was applied to one sandbox. Throws for a handle this provider did not issue. */
+  appliedControls(h: SandboxHandle): AppliedControls {
+    return this.#require(h).controls;
+  }
+
+  async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+    if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
+    const plan = checkEgress(spec.egress);
+    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()));
+    if (plan.mode === 'allowlist' && relayPlan !== undefined && plan.hosts.includes(relayPlan.upstreamHost)) {
+      // The proxy would be a second route to the host the relay exists to be the only route to.
+      // Both are the runtime's to choose, and a spec that chose both contradicts itself (external review, codex-2).
+      refuse(
+        'relay',
+        `egress.allow names ${relayPlan.upstreamHost}, the relay's upstream host. The relay is the sandbox's only route to its upstream, ` +
+          'and an allowlist that also reaches it is a route around the grant; the spec is refused rather than half-applied.',
+      );
+    }
+    checkLimits(spec.limits);
+    checkUser(spec.user);
+
+    // Re-validated rather than trusted: the table may have been built by a cast, parsed from a
+    // document, or handed over by JavaScript, in which case the type-level guarantee never ran.
+    const table = mountTable({ workspace: spec.mounts.workspace, others: spec.mounts.others });
+    const mounts = await resolveMounts(table, this.#vaultPaths);
+    const workspace = mounts.find((mount) => mount.target === table.workspace.target);
+    // resolveMounts returns one entry per table entry, the workspace among them.
+    if (workspace === undefined) refuse('mount', 'the resolved mount table has no workspace');
+    await checkWorkspaceWritable(workspace, spec.user);
+
+    // I10: no Greek name in code, container names included. This one reaches `docker ps`.
+    const id = randomUUID();
+    const name = `sandbox-${id}`;
+    const egress = await this.#applyEgress(id, plan, relayPlan);
+    try {
+      return await this.#start(spec, mounts, name, egress);
+    } catch (error) {
+      // Whatever refused, the proxy, the relay, and their networks were created for a sandbox that
+      // does not exist. They go with it: a leaked route out is worse than the failure that caused it,
+      // and one that would not go is reported beside that failure, never instead of it or not at all.
+      const failed = withLeftovers(error, await this.#stopSidecars(egress));
+      throw failed instanceof SandboxRefusal ? new SandboxRefusal(failed.layer, failed.message, name) : failed;
+    }
+  }
+
+  /**
+   * Starts the proxy an allowlist needs and the relay a spec asked for, or
+   * nothing at all.
+   *
+   * `deny-all` without a relay is untouched: no network is created, nothing is
+   * started, and the container is given `--network none` exactly as before.
+   * `deny-all` with a relay puts the sandbox on an internal network that
+   * carries the relay alone (D-P12-02). Starting a proxy beside a sandbox
+   * entitled to no egress would put a route out next to the one policy that
+   * asked for none, and nothing here does.
+   */
+  async #applyEgress(id: string, plan: EgressPlan, relayPlan: RelayPlan | undefined): Promise<AppliedEgress> {
+    if (plan.mode === 'deny-all') {
+      if (relayPlan === undefined) return { mode: 'deny-all', network: 'none' };
+      const relay = await this.#startRelay(id, relayPlan, undefined);
+      return { mode: 'deny-all', network: relay.internalNetwork, relay };
+    }
+    let proxy: AppliedProxy;
+    try {
+      proxy = await startProxy(id, plan.hosts, this.#proxyOptions);
+    } catch (error) {
+      // I5: an allowlist this provider could not stand up is a refusal. There is no fallback to
+      // deny-all, which breaks the run silently, and none to a routed network, which hands the
+      // whole of it to a policy that asked for a subset.
+      refuse(
+        'egress',
+        'the egress allowlist could not be enforced, so no sandbox was provisioned: ' +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+    if (relayPlan === undefined) return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy };
+    let relay: AppliedRelay;
+    try {
+      relay = await this.#startRelay(id, relayPlan, { internal: proxy.internalNetwork, outbound: proxy.outboundNetwork });
+    } catch (error) {
+      throw withLeftovers(error, await stopProxy(proxy, this.#proxyOptions));
+    }
+    return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy, relay };
+  }
+
+  /**
+   * Starts a relay, or refuses. The credential is read from this provider's
+   * own map here and handed to the relay container alone; `checkRelay` has
+   * already refused a name the map does not hold.
+   */
+  async #startRelay(id: string, plan: RelayPlan, shared: { internal: string; outbound: string } | undefined): Promise<AppliedRelay> {
+    const credential = this.#credentials.get(plan.credential);
+    if (credential === undefined) refuse('relay', `the credential ${JSON.stringify(plan.credential)} is not held by this provider`);
+    try {
+      return await startRelay(id, plan, credential, this.#relayTrust, shared, this.#relayOptions);
+    } catch (error) {
+      refuse(
+        'relay',
+        'the model relay could not be started, so no sandbox was provisioned: ' + (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  /** Removes the relay and then the proxy, in that order: the proxy's networks cannot go while the relay is on them. */
+  async #stopSidecars(egress: AppliedEgress): Promise<Error | undefined> {
+    const relay = relayOf(egress);
+    const relayFailure = relay === undefined ? undefined : await stopRelay(relay, this.#relayOptions);
+    const proxyFailure = egress.mode === 'allowlist' ? await stopProxy(egress.proxy, this.#proxyOptions) : undefined;
+    return relayFailure ?? proxyFailure;
+  }
+
+  async #start(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): Promise<SandboxHandle> {
+    const args = runArgsFor(spec, mounts, name, egress);
+    const started = await dockerCli(this.#executable, args, { timeoutMs: LIFECYCLE_TIMEOUT_MS });
+    if (started.exitCode !== 0) {
+      refuse('image', `docker run exited ${String(started.exitCode)} for image ${spec.image}: ${started.stderr.trim() || started.stdout.trim()}`);
+    }
+    const containerId = started.stdout.trim();
+    if (containerId === '') refuse('image', 'docker run reported no container id, so there is no sandbox to hand back');
+
+    // A container that exits immediately — a shell-less image, a bad entrypoint — would otherwise
+    // hand back a handle whose every exec fails obscurely.
+    const running = await dockerCli(this.#executable, ['inspect', '--format', '{{.State.Running}}', containerId], {
+      timeoutMs: LIFECYCLE_TIMEOUT_MS,
+    });
+    if (running.stdout.trim() !== 'true') {
+      // Best effort: the refusal below is the reason the caller needs, and a container that
+      // never started is not one this provider is handing out a handle to.
+      await this.#remove(containerId);
+      refuse('image', `the container from image ${spec.image} was not running after start; it needs a POSIX shell at \`sh\` to hold itself open`);
+    }
+
+    const handle = containerId as SandboxHandle;
+    const sandbox: Sandbox = {
+      controls: {
+        containerId,
+        mounts,
+        egress,
+        limits: { ...spec.limits },
+        deadline: performance.now() + spec.limits.wallClockMs,
+        runArgs: Object.freeze([...args]),
+      },
+      probes: new Set(),
+    };
+    this.#sandboxes.set(handle, sandbox);
+
+    // The budget has to be enforced by something that runs on its own. Checking it inside `exec`
+    // bounds only sandboxes somebody keeps calling: a task that starts a background process and
+    // is never exec'd again would outlive its limit entirely, which is the whole thing the limit
+    // exists to prevent. Review finding 2.
+    const timer = setTimeout(() => {
+      void this.#expire(sandbox, spec.limits.wallClockMs);
+    }, spec.limits.wallClockMs);
+    // The runtime is a service (I9), and a pending timer must never be the reason its process
+    // stays alive. An unref'd timer still fires for as long as the process is running.
+    timer.unref();
+    sandbox.timer = timer;
+    return handle;
+  }
+
+  async exec(h: SandboxHandle, cmd: string[], options: ExecOptions = {}): Promise<ExecResult>  {
+    const sandbox = this.#require(h);
+    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+    if (cmd.length === 0) refuse('handle', 'the command is empty; there is nothing to run');
+    const detach = options.detach === true;
+    if (detach && options.stdin !== undefined) refuse('probe', 'a detached command cannot be handed stdin; it would run without it');
+    const passthrough = environmentPassthrough(options.env);
+
+    const remaining = await this.#remaining(sandbox, h);
+    try {
+      const result = await dockerCli(
+        this.#executable,
+        // `--interactive` keeps the container process's stdin attached to the one `docker` is given
+        // (A-P8-02). Without it the bytes would reach the CLI and stop there, and the command would
+        // run as if it had been handed nothing.
+        ['exec', ...(detach ? ['--detach'] : []), ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
+        {
+          timeoutMs: remaining,
+          ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
+          ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+        },
+      );
+      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: result.durationMs };
+    } catch (error) {
+      return await this.#overBudget(sandbox, h, error);
+    }
+  }
+
+  /**
+   * Sends a scenario's requests from a probe container in the sandbox's
+   * network namespace (A-P11-01, D-P11-01). The probe is started for this
+   * call and removed when it returns; the time it takes is the sandbox's, so a
+   * probe that outlives the budget ends the sandbox as a command would.
+   */
+  async probe(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult> {
+    const sandbox = this.#require(h);
+    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+    checkProbeRequest(request);
+    const remaining = await this.#remaining(sandbox, h);
+    const name = `probe-${randomUUID()}`;
+    sandbox.probes.add(name);
+    try {
+      const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
+        timeoutMs: remaining,
+        stdin: JSON.stringify(request),
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(`the probe exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+      }
+      return readProbeOutput(result.stdout, request.exchanges.length);
+    } catch (error) {
+      return await this.#overBudget(sandbox, h, error);
+    } finally {
+      sandbox.probes.delete(name);
+    }
+  }
+
+  /** What is left of the sandbox's wall clock, or a refusal that ends it when nothing is. */
+  async #remaining(sandbox: Sandbox, h: SandboxHandle): Promise<number> {
+    const remaining = sandbox.controls.deadline - performance.now();
+    if (remaining <= 0) {
+      const budget = String(sandbox.controls.limits.wallClockMs);
+      await this.#end(sandbox, `its wall-clock budget of ${budget}ms was already spent`);
+      refuse('lifetime', `sandbox ${h} is past its wall-clock limit of ${budget}ms; the command was not started`);
+    }
+    return remaining;
+  }
+
+  /** Rethrows anything but a timeout; a timeout ends the sandbox and refuses. */
+  async #overBudget(sandbox: Sandbox, h: SandboxHandle, error: unknown): Promise<never> {
+    if (!(error instanceof CliTimeout)) throw error;
+    const budget = String(sandbox.controls.limits.wallClockMs);
+    // The budget is the sandbox's, not the command's: the container goes with it, so nothing
+    // left running inside outlives the limit that was supposed to bound it.
+    const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
+    if (removal !== undefined) {
+      // The breach is still the headline, but a container that outlived its budget *and*
+      // could not be removed is worse than one that was, and must not be reported as less.
+      refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and could not be destroyed: ${removal.message}`);
+    }
+    refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and was destroyed`);
+  }
+
+  /**
+   * Ends the sandbox and returns what its relay counted (D-P13-07). A sandbox
+   * its wall clock already ended returns the reading taken then: the call it
+   * served spent money whether or not it finished in time, and the runtime
+   * records it either way (D-P13-14).
+   */
+  async destroy(h: SandboxHandle): Promise<MeterReading> {
+    const sandbox = this.#require(h);
+    if (sandbox.destroyed === true) refuse('lifetime', `sandbox ${h} has already ended: ${sandbox.ended ?? 'it was destroyed'}`);
+    sandbox.destroyed = true;
+    const { removal, reading } = await this.#end(sandbox, 'it was destroyed');
+    if (removal !== undefined) throw removal;
+    if (reading instanceof Error) throw reading;
+    return reading;
+  }
+
+  /**
+   * Each value is asserted against a provisioned container by the conformance
+   * registry (I8), so flipping one here without changing what the provider
+   * does fails the suite. `persistent` is true because one container serves
+   * every exec; the others are false or `linux` because `create()` refused to
+   * build a provider for which they were not.
+   */
+  capabilities(): SandboxCapabilities {
+    return { computerUse: false, gpu: false, os: this.#daemon.osType, persistent: true, remote: false };
+  }
+
+  #require(h: SandboxHandle): Sandbox {
+    const sandbox = this.#sandboxes.get(h);
+    if (sandbox === undefined) refuse('handle', `${h} is not a handle this provider issued`);
+    return sandbox;
+  }
+
+  /**
+   * Ends a sandbox and keeps its record. The record is not deleted, for two
+   * reasons: a later call then says the sandbox ended and why, instead of
+   * "unknown handle" for a container the runtime itself destroyed; and
+   * `appliedControls()` keeps answering afterwards, so what was enforced on a
+   * sandbox outlives the sandbox and can still be read when the run is
+   * audited. Returns the removal failure rather than throwing it, so a caller
+   * that is already refusing for a better reason can decide which to report.
+   */
+  async #end(sandbox: Sandbox, why: string): Promise<Ended> {
+    // Whoever gets here second awaits the first removal rather than starting another, and so
+    // does not return until the container is actually gone.
+    if (sandbox.ending !== undefined) return sandbox.ending;
+    sandbox.ended = why;
+    if (sandbox.timer !== undefined) {
+      clearTimeout(sandbox.timer);
+      sandbox.timer = undefined;
+    }
+    sandbox.ending = this.#dismantle(sandbox.controls, sandbox.probes);
+    return sandbox.ending;
+  }
+
+  /**
+   * Removes everything one sandbox was given: the container, its relay, and
+   * under an allowlist the proxy container, and the networks either created.
+   *
+   * The proxy goes with the sandbox it serves and with nothing else. A proxy
+   * that outlived its sandbox would be a route out with no workload behind it
+   * and nobody watching it, and the assertion that counts leaked containers is
+   * there to make that a failing test rather than a thing somebody notices in
+   * `docker ps` a week later.
+   */
+  async #dismantle(controls: AppliedControls, probes: ReadonlySet<string>): Promise<Ended> {
+    // Probes first: each is in the container's namespace, and none may outlive it (D-P11-02).
+    // A probe that already finished removed itself, so a failure here is not reported.
+    await Promise.all([...probes].map((name) => this.#remove(name)));
+    // Then the container: a network still holding an endpoint cannot be removed, and a meter read
+    // while the sandbox runs can be overtaken by a process still calling the relay (D-P13-07).
+    const container = await this.#remove(controls.containerId);
+    const relay = relayOf(controls.egress);
+    let reading: MeterReading | Error = { kind: 'unmetered' };
+    if (relay !== undefined) {
+      try {
+        reading = await readMeter(relay, this.#relayOptions);
+      } catch (error) {
+        // Kept, not thrown: the relay is still torn down below, and `destroy` reports this.
+        reading = new Error(`the model relay's meter could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const sidecars = await this.#stopSidecars(controls.egress);
+    return { removal: container ?? sidecars, reading };
+  }
+
+  /**
+   * The wall-clock timer firing. Nothing is waiting on this call, so a removal
+   * failure has no caller to refuse: it is recorded on the sandbox, where the
+   * next `exec` or `destroy` reports it, rather than raised as an unhandled
+   * rejection.
+   */
+  async #expire(sandbox: Sandbox, budgetMs: number): Promise<void> {
+    if (sandbox.ending !== undefined) return;
+    const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
+    if (removal !== undefined) {
+      sandbox.ended = `it exceeded its wall-clock limit of ${String(budgetMs)}ms and could not be destroyed: ${removal.message}`;
+    }
+  }
+
+  async #remove(containerId: string): Promise<Error | undefined> {
+    const removed = await dockerCli(this.#executable, ['rm', '--force', '--volumes', containerId], {
+      timeoutMs: LIFECYCLE_TIMEOUT_MS,
+    });
+    if (removed.exitCode === 0) return undefined;
+    return new Error(`docker rm exited ${String(removed.exitCode)} for container ${containerId}: ${removed.stderr.trim()}`);
+  }
+}
+
+===== packages/sandbox/src/local/refusal.ts =====
+/**
+ * One refusal type for the whole provider. A refusal is the provider
+ * declining to give a caller something it cannot enforce; it is never a
+ * warning, never a downgrade, and never a container that came up with fewer
+ * controls than the spec asked for (I5).
+ *
+ * `layer` names which control refused, so a caller — and a conformance
+ * assertion — can require the *right* refusal rather than merely some error.
+ * A test that accepts any throw passes when the daemon is missing, the image
+ * is wrong, or the code has a typo, and proves nothing about the control it
+ * claims to cover.
+ */
+export type RefusalLayer =
+  /** The mount table: a second rw mount, a malformed path, an overlap, or a source that lands on the Vault. */
+  | 'mount'
+  /** The egress policy asked for something this provider cannot enforce. */
+  | 'egress'
+  /** A limit was missing, non-finite, or not positive. */
+  | 'limits'
+  /** The image reference was unusable, or the container did not come up. */
+  | 'image'
+  /** The sandbox's wall-clock budget is spent. */
+  | 'lifetime'
+  /** The handle is not one this provider issued, or the command is empty. */
+  | 'handle'
+  /** A variable named in `ExecOptions.env` is not a usable name, or has no value to pass. */
+  | 'environment'
+  /** The user is not a uid and gid, or cannot write the rw workspace on a host that enforces ownership. */
+  | 'user'
+  /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, an upstream host the allowlist also names, or a relay that did not come up. */
+  | 'relay'
+  /** A probe request this provider cannot send: a port, a wait, or an exchange it cannot read, or `detach` with `stdin`. */
+  | 'probe';
+
+export class SandboxRefusal extends Error {
+  override readonly name = 'SandboxRefusal';
+  constructor(
+    readonly layer: RefusalLayer,
+    message: string,
+    /**
+     * The sandbox a failed start was for, by container name, when the refusal
+     * came after the provider had chosen one. What was created for it is named
+     * from it, so a caller can check exactly those rather than the whole
+     * daemon (issue #14).
+     */
+    readonly sandbox?: string,
+  ) {
+    super(message);
+  }
+}
+
+export function refuse(layer: RefusalLayer, message: string): never {
+  throw new SandboxRefusal(layer, message);
+}
+
+/**
+ * The error a failed start reports once its cleanup has run: the failure that
+ * stopped it, and, when the cleanup failed too, what the cleanup left behind.
+ * A refusal keeps its layer, so a caller still sees the right refusal. A relay
+ * container holds its credential, so one left on the host is reported rather
+ * than dropped in favour of the better reason (external review, codex-3).
+ */
+export function withLeftovers(error: unknown, leftovers: Error | undefined): unknown {
+  if (leftovers === undefined) return error;
+  const why = `${error instanceof Error ? error.message : String(error)} — and cleaning up after it failed: ${leftovers.message}`;
+  return error instanceof SandboxRefusal ? new SandboxRefusal(error.layer, why) : new Error(why);
+}
+
+===== packages/sandbox/src/stub/provider.ts =====
+/**
+ * StubSandboxProvider: the SandboxProvider contract with no container. It
+ * spawns commands on the host in the Workspace mount's source directory, so
+ * the line runs on every host, and it enforces none of what a SandboxSpec
+ * implies: the mount table, egress, limits, and isolation are each declared
+ * unenforced through `unsafe` rather than accepted as if they held. P2
+ * replaces this file with Docker.
+ */
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { refuse } from '../local/refusal.js';
+import { writeStdin } from '../stdin.js';
+import type { ExecOptions, ExecResult, MeterReading, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The host's os as the capabilities union names it; a host it cannot name throws (S1 finding 4a). */
+function hostOs(): SandboxCapabilities['os'] {
+  const platform = process.platform;
+  if (platform === 'linux') return 'linux';
+  if (platform === 'darwin') return 'macos';
+  throw new Error(`StubSandboxProvider: SandboxCapabilities.os has no value for host platform ${platform}`);
+}
+
+export class StubSandboxProvider implements SandboxProvider {
+  readonly id = 'stub-local';
+
+  /**
+   * Read structurally by the entry point in @olympus-ai/api; the conformance
+   * fixture I5.stubs-declare-unsafe pins the shape.
+   */
+  readonly unsafe: { readonly component: 'StubSandboxProvider'; readonly cannotEnforce: readonly string[] } = {
+    component: 'StubSandboxProvider',
+    cannotEnforce: [
+      "the mount table: nothing is mounted, every path on the host is reachable, the Vault's memory included, `others` is ignored, and a workspace the table marks ro is as writable as one it marks rw",
+      'egress: the host network is reachable whatever the policy says',
+      'limits: no CPU, memory, PID, or wall-clock bound is applied',
+      'isolation: commands run on the host as the invoking user, and `image` and `user` are ignored',
+    ],
+  };
+
+  /** Each provisioned handle and the host directory it executes in. */
+  private readonly workspaces = new Map<SandboxHandle, string>();
+
+  async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+    // A relay exists to keep a credential out of every process the task runs. This provider runs
+    // them on the host, beside whatever the host holds, so it cannot keep that promise and refuses
+    // rather than making it (A-P12-01).
+    if (spec.relay !== undefined) {
+      refuse('relay', 'StubSandboxProvider cannot keep a credential out of a process it runs on the host, so it provisions no relay');
+    }
+    const source = spec.mounts.workspace.source;
+    if (!(await isDirectory(source))) {
+      throw new Error(`StubSandboxProvider: workspace source ${source} is not an existing directory`);
+    }
+    const handle = randomUUID() as SandboxHandle;
+    this.workspaces.set(handle, source);
+    return handle;
+  }
+
+  exec(h: SandboxHandle, cmd: string[], options: ExecOptions = {}): Promise<ExecResult> {
+    const cwd = this.workspaces.get(h);
+    if (cwd === undefined) return Promise.reject(new Error(`StubSandboxProvider: unknown handle ${h}`));
+    const [file, ...args] = cmd;
+    if (file === undefined) return Promise.reject(new Error('StubSandboxProvider: empty command'));
+    // Its only consumer is an HTTP scenario, which this provider cannot serve: it has no `probe`,
+    // because every process it runs is on the host beside the product (D-P11-04, D-P11-05).
+    if (options.detach === true) return Promise.reject(new Error('StubSandboxProvider: detach is not supported; it serves HTTP scenarios, and this provider has no probe'));
+    // The value is set on the child alone, never appended to `args`. The stub enforces nothing
+    // else a SandboxSpec implies, but leaking a credential into an argv is a habit worth not
+    // having in the one implementation that runs on a developer's own machine.
+    const env = options.env === undefined ? undefined : { ...process.env, ...options.env };
+    return new Promise((resolve, reject) => {
+      const started = performance.now();
+      const child = spawn(file, args, {
+        cwd,
+        shell: false,
+        stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        ...(env === undefined ? {} : { env }),
+      });
+      if (options.stdin !== undefined) {
+        writeStdin(child.stdin, options.stdin, (error) => {
+          child.kill();
+          reject(new Error(`StubSandboxProvider: the standard input of ${file} could not be delivered: ${error.message}`));
+        });
+      }
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      // Both are 'pipe' above, so Node always creates them; the conditional stdin entry is what
+      // hides that from spawn's overloads.
+      if (child.stdout === null || child.stderr === null) throw new Error(`StubSandboxProvider: ${file} was spawned without output pipes`);
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout.push(chunk);
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr.push(chunk);
+      });
+      child.on('error', reject);
+      child.on('close', (code, signal) => {
+        const durationMs = performance.now() - started;
+        if (signal !== null) {
+          // ExecResult.exitCode cannot represent a signal; inventing a code would be a lie (S1 finding 4c).
+          reject(new Error(`StubSandboxProvider: ${file} ended by signal ${signal}`));
+          return;
+        }
+        if (code === null) {
+          reject(new Error(`StubSandboxProvider: ${file} ended with neither an exit code nor a signal`));
+          return;
+        }
+        resolve({
+          exitCode: code,
+          stdout: Buffer.concat(stdout).toString('utf8'),
+          stderr: Buffer.concat(stderr).toString('utf8'),
+          durationMs,
+        });
+      });
+    });
+  }
+
+  /** Always `unmetered`: this provider refuses every relay, so nothing it ran was counted (A-P13-02). */
+  destroy(h: SandboxHandle): Promise<MeterReading> {
+    if (!this.workspaces.delete(h)) return Promise.reject(new Error(`StubSandboxProvider: unknown handle ${h}`));
+    return Promise.resolve({ kind: 'unmetered' });
+  }
+
+  /** `persistent: true` is true: nothing is ever torn down, so one exec's files are there for the next. */
+  capabilities(): SandboxCapabilities {
+    return { computerUse: false, gpu: false, os: hostOs(), persistent: true, remote: false };
+  }
+}
+
+===== packages/sandbox/src/types.ts =====
+/**
+ * Sandbox: the ephemeral, agent-writable execution substrate. The mount table
+ * is where I1 is physically enforced.
+ */
+export type SandboxHandle = string & { readonly __brand: 'SandboxHandle' };
+
+export interface MountEntry {
+  source: string;
+  target: string;
+  mode: 'ro' | 'rw';
+}
+
+/**
+ * I1 enforced at the substrate: at most one rw mount, and if there is one, it
+ * is the Workspace. `others` admits ro only, so a second rw mount has no slot;
+ * the Workspace itself is rw for build and ro for verification, so the checks
+ * run against a tree they cannot modify (I3). Implementations MUST reject
+ * every table that violates this, MUST mount the Workspace with the mode the
+ * table gives it, and MUST resolve symlinks and path escapes before mounting.
+ */
+export interface MountTable {
+  workspace: MountEntry & { mode: 'rw' | 'ro' };
+  readonly others: Array<MountEntry & { mode: 'ro' }>;
+}
+
+export interface EgressPolicy { mode: 'deny-all' | 'allowlist'; allow: string[]; }
+
+/**
+ * A model relay: a provider-owned endpoint that holds a credential the sandbox
+ * never does, and forwards the sandbox's requests to one upstream with it
+ * (A-P12-01).
+ *
+ * The spec names the credential and never carries it, because a `SandboxSpec`
+ * is a record the runtime may keep and a secret in it is a secret in the
+ * record. An implementation resolves `credential` against the credentials it
+ * was constructed with.
+ *
+ * Implementations MUST keep the credential out of the sandbox — out of its
+ * environment, its mounts, and every process it runs — and MUST refuse a relay
+ * whose credential they were not given, whose `upstream` is not an `https`
+ * origin, or whose `paths` is empty, rather than provision a sandbox whose
+ * model calls fail later for a reason nothing recorded (I5). An implementation
+ * that cannot keep a credential out of a process it runs MUST refuse every
+ * spec that carries a relay.
+ *
+ * A relay is independent of `egress` (D-P12-02): under `deny-all` the sandbox
+ * reaches the relay and nothing else. Under `allowlist` the relay is still the
+ * only route to its upstream, so implementations MUST refuse an `egress.allow`
+ * naming the upstream's host (D-P12-11).
+ */
+export interface RelaySpec {
+  /** An `https` origin with no path: `'https://api.example.com'`. The only origin the relay reaches. */
+  upstream: string;
+  /** The path prefixes forwarded, each a segment boundary. Every other path is refused. Never empty (D-P12-04). */
+  paths: string[];
+  /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
+  header: string;
+  /** The name of a credential the provider holds. Never a value. */
+  credential: string;
+  /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
+  urlVariable: string;
+  /**
+   * What one driver call may spend through this relay (A-P13-01). The relay
+   * counts what each response used and refuses every request once either
+   * bound is reached, so a call begun under budget may end over it by at most
+   * one call (D-P13-03). Each bound MUST be a positive finite number.
+   */
+  budget: RelayBudget;
+  /** How the relay reads what a call used and prices it. A dialect the implementation does not know is refused (D-P13-06). */
+  meter: RelayMeter;
+}
+
+/** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
+export interface RelayBudget {
+  maxTokens: number;
+  maxCostUsd: number;
+}
+
+/** US dollars per million tokens of each class. Each MUST be a non-negative finite number. */
+export interface ModelPrice {
+  inputPerMTok: number;
+  outputPerMTok: number;
+  cacheReadPerMTok: number;
+  /** A cache write held five minutes. */
+  cacheWritePerMTok: number;
+  /** A cache write held an hour. A write whose duration the response does not report is charged at this price. */
+  cacheWrite1hPerMTok: number;
+}
+
+/**
+ * Where the usage sits in a response, and what each model costs. The dialect
+ * is a closed union so a relay never guesses at a response it was not built to
+ * read; a model absent from `prices` is refused before its request is sent.
+ */
+export interface RelayMeter {
+  dialect: 'anthropic-messages';
+  /** Keyed by the exact model name a request carries. Never empty. */
+  prices: Readonly<Record<string, ModelPrice>>;
+}
+
+/**
+ * What a sandbox's relay counted, read by `destroy` after the sandbox stopped
+ * (A-P13-02). `unmetered` is a sandbox with no relay, stated rather than
+ * reported as zero, so a caller never presents an uncounted call as free.
+ *
+ * `exhausted` is the first reason the relay stopped forwarding, or `'none'`;
+ * `refused` counts the requests the meter refused, the budget's refusals and
+ * an unpriced model's among them.
+ */
+export type MeterReading =
+  | { readonly kind: 'unmetered' }
+  | {
+      readonly kind: 'metered';
+      readonly calls: number;
+      readonly inputTokens: number;
+      readonly outputTokens: number;
+      readonly cacheReadTokens: number;
+      readonly cacheWriteTokens: number;
+      readonly costUsd: number;
+      readonly exhausted: 'none' | 'tokens' | 'cost' | 'unreadable';
+      readonly refused: number;
+    };
+
+export interface SandboxSpec {
+  image: string;
+  mounts: MountTable;
+  egress: EgressPolicy;
+  limits: { cpus: number; memoryMb: number; pids: number; wallClockMs: number };
+  /**
+   * Who the container's commands run as. Required, so a provider can match the
+   * container to the workspace it was handed: a bind mount carries the host's
+   * ownership through unchanged, and a workspace another uid owns is read-only
+   * to the task. Where the host enforces that ownership an implementation MUST
+   * refuse a rw workspace this user cannot write, never mount it and let the
+   * task fail quietly (I5, A-P6-04).
+   */
+  user: { uid: number; gid: number };
+  /** A model relay beside the sandbox, or none. Absent means the sandbox holds no route to one. */
+  relay?: RelaySpec;
+}
+
+export interface ExecResult { exitCode: number; stdout: string; stderr: string; durationMs: number; }
+
+/**
+ * Per-command options. `env` exists so a value can reach a process inside the
+ * sandbox without becoming a mount: a secret on the mount table is a file the
+ * agent can read, copy, and exfiltrate for the sandbox's whole life, and a
+ * secret in a prompt is a secret the model has seen. It does not make a value
+ * confidential from the task — every process the command starts can read it,
+ * and later ones through `/proc` (D-P5-20) — so a model credential is not
+ * passed this way; it stays in a relay (`RelaySpec`).
+ *
+ * Implementations MUST keep the value out of every argument vector, on the
+ * host and in the guest alike, because an argv is world-readable in a process
+ * table. They MUST refuse a name that is not a plain environment-variable name
+ * and a value that is absent, rather than running the command without it: a
+ * command that silently loses its credential fails somewhere later, for a
+ * reason nothing in the evidence explains (I5).
+ *
+ * `stdin` is written to the command's standard input, UTF-8, and the stream is
+ * then closed. It exists so a behavioral scenario can feed its process input
+ * without a shell wrapper inside the container, which would put part of the
+ * scenario where the code under test can reach it (A-P8-02). Omitted, the
+ * command has no standard input attached. An implementation that cannot
+ * deliver the bytes MUST refuse rather than run the command without them.
+ */
+export interface ExecOptions {
+  readonly env?: Readonly<Record<string, string>>;
+  readonly stdin?: string;
+  /**
+   * Start the command and return once it has started, with no output; it runs
+   * until it exits or the sandbox ends. It exists so an HTTP scenario can start
+   * the server it probes (A-P11-02). The result's exit code is the start's,
+   * not the command's. An implementation MUST refuse it together with `stdin`,
+   * which a detached command cannot be handed, and one that cannot detach MUST
+   * refuse rather than run the command to completion.
+   */
+  readonly detach?: boolean;
+}
+
+/** One request a probe sends. `path` begins with `/`; the host is always the sandbox's own loopback. */
+export interface ProbeExchange {
+  readonly method: string;
+  readonly path: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+/**
+ * What a probe is asked to do (A-P11-01). A port and never a URL: the probe
+ * reaches the sandbox's loopback and no other host, so it cannot be pointed
+ * anywhere the sandbox could not already reach.
+ */
+export interface ProbeRequest {
+  readonly port: number;
+  /** How long the port has to accept a connection before the probe gives up and sends nothing. */
+  readonly readyWithinMs: number;
+  /** Sent in order, one at a time, each on its own connection. */
+  readonly exchanges: readonly [ProbeExchange, ...ProbeExchange[]];
+}
+
+/**
+ * What the probe saw for one request, and nothing it decided. `oversized` is a
+ * response whose body passed the cap, reported without a body rather than
+ * with a truncated one a comparison could mistake for the whole.
+ */
+export type ProbeObservation =
+  | { readonly kind: 'response'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string }
+  | { readonly kind: 'oversized'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly limitBytes: number }
+  | { readonly kind: 'no-response'; readonly reason: string };
+
+/**
+ * `ready: false` means the port never accepted a connection within
+ * `readyWithinMs`, and `observations` is empty because nothing was sent.
+ * Otherwise there is one observation per exchange, in order.
+ */
+export interface ProbeResult {
+  readonly ready: boolean;
+  readonly observations: readonly ProbeObservation[];
+  readonly durationMs: number;
+}
+
+/**
+ * I8: every capability claimed here needs an executable conformance assertion
+ * (packages/conformance) that fails when the capability is removed.
+ *
+ * A type alias rather than an interface, for the reason `DriverCapabilities`
+ * gives: an interface can be reopened from another compilation unit, and a
+ * capability added that way is invisible to the program that holds the
+ * registry equal to this type's keys.
+ */
+export type SandboxCapabilities = {
+  computerUse: boolean; gpu: boolean; os: 'linux' | 'macos'; persistent: boolean; remote: boolean;
+};
+
+/**
+ * M1 implements a local Docker provider only. Remote workers and pools arrive
+ * later behind this same interface.
+ */
+export interface SandboxProvider {
+  readonly id: string;
+  provision(spec: SandboxSpec): Promise<SandboxHandle>;
+  exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
+  /**
+   * Sends HTTP requests to the sandbox's own loopback from a client the
+   * sandbox's processes cannot reach: one that shares the sandbox's network
+   * and not its filesystem or process tree, so what it observed is not the
+   * product's report of itself (A-P11-01). Optional: a provider that cannot
+   * put the client out of the product's reach omits it, and a set built on
+   * that provider names `behavioral:http` unavailable. An implementation MUST
+   * connect to the sandbox's loopback and nothing else, MUST charge the call
+   * to the sandbox's wall-clock budget as `exec` does, and MUST refuse a call
+   * on an ended sandbox.
+   */
+  probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
+  /**
+   * Ends the sandbox and returns what its relay counted, read after the
+   * sandbox stopped so nothing spends after the read (D-P13-07). A sandbox
+   * with no relay returns `{ kind: 'unmetered' }`. A provider that had a relay
+   * and cannot read its count MUST throw rather than return a reading, and
+   * MUST still tear the relay down.
+   */
+  destroy(h: SandboxHandle): Promise<MeterReading>;
+  capabilities(): SandboxCapabilities;
+}
+
+===== packages/sandbox/test/egress.test.ts =====
+/**
+ * The egress allowlist, against a real daemon.
+ *
+ * Hermetic: nothing here reaches the internet. The allowlisted host is an
+ * origin container this suite starts on the proxy's own outbound network, so
+ * "reaches an allowlisted host" is observed rather than assumed, and a host
+ * that is refused is refused while being demonstrably reachable *from the
+ * proxy*. That is the difference that matters — a test whose denied host was
+ * simply unreachable would pass against a provider with no allowlist at all.
+ *
+ * These tests require Docker and fail without it, for the reason `local.test.ts`
+ * gives: the network layer is where an allowlist is enforced, and there is no
+ * way to observe an enforcement that has no container to enforce it in (I5,
+ * D-P2-02).
+ */
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import {
+  EGRESS_PROXY_IMAGE,
+  LocalDockerProvider,
+  PROXY_ALIAS,
+  PROXY_PORT,
+  proxyNames,
+  SandboxRefusal,
+  type AppliedControls,
+  type SandboxHandle,
+  type SandboxSpec,
+} from '../src/index.js';
+import { TEST_IMAGE } from './image.js';
+
+const run = promisify(execFile);
+
+/** What the origin container answers with, so a body that arrives is known to have come from it. */
+const ORIGIN_BODY = 'origin-reached';
+const ORIGIN_PORT = 8080;
+
+/** A host that is not on the allowlist and does not resolve anywhere: the refusal must be the list, and must come before any lookup. */
+const BLOCKED_NAME = 'blocked.invalid';
+
+/** A documentation-range address (RFC 5737), so a refusal by address cannot be an accident of the local network. */
+const BLOCKED_ADDRESS = '198.51.100.9';
+
+const ORIGIN_SOURCE =
+  "require('node:http').createServer(function (q, s) { s.end('" + ORIGIN_BODY + "'); })" +
+  '.listen(' + String(ORIGIN_PORT) + ", '0.0.0.0');";
+
+/** An origin that reports back the Host header it received, so what the upstream was asked for is observed and not inferred. */
+const ECHO_SOURCE =
+  "require('node:http').createServer(function (q, s) { s.end('HOST-SEEN=' + String(q.headers.host)); })" +
+  '.listen(' + String(ORIGIN_PORT) + ", '0.0.0.0');";
+
+/**
+ * A proxied GET whose Host header the caller chooses, run inside the sandbox.
+ * `path` is absolute-form, which is how a proxy is addressed; the Host header
+ * is separate and is what a fronting attempt controls.
+ */
+function frontingClient(origin: string, hostHeader: string): string {
+  return (
+    "const r = require('node:http').request(" +
+    `{ host: '${PROXY_ALIAS}', port: ${String(PROXY_PORT)}, method: 'GET', ` +
+    `path: 'http://${origin}:${String(ORIGIN_PORT)}/', headers: { host: '${hostHeader}' } }, ` +
+    "function (a) { let b = ''; a.on('data', function (d) { b += d; }); " +
+    "a.on('end', function () { console.log('STATUS=' + String(a.statusCode) + ' BODY=' + b); }); });" +
+    "r.on('error', function (e) { console.log('ERROR=' + e.message); }); r.end();"
+  );
+}
+
+let provider: LocalDockerProvider;
+let base: string;
+let workspace: string;
+const live: SandboxHandle[] = [];
+const origins: string[] = [];
+
+function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
+  return {
+    image: TEST_IMAGE,
+    mounts: { workspace: { source: workspace, target: '/workspace', mode: 'rw' }, others: [] },
+    egress: { mode: 'deny-all', allow: [] },
+    limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 120_000 },
+    // alpine's own default user; what these assertions ran as before SandboxSpec named one
+    user: { uid: 0, gid: 0 },
+    ...overrides,
+  };
+}
+
+async function provisionWith(allow: readonly string[]): Promise<SandboxHandle> {
+  const handle = await provider.provision(specFor({ egress: { mode: 'allowlist', allow: [...allow] } }));
+  live.push(handle);
+  return handle;
+}
+
+/**
+ * The allowlist branch of the applied controls, or a failure. Narrowing here
+ * rather than in each test keeps a `deny-all` sandbox from silently satisfying
+ * an assertion written about an allowlist.
+ */
+function allowlistControls(handle: SandboxHandle): AppliedControls & { egress: { mode: 'allowlist' } } {
+  const controls = provider.appliedControls(handle);
+  if (controls.egress.mode !== 'allowlist') throw new Error(`expected an allowlist sandbox, got ${controls.egress.mode}`);
+  return controls as AppliedControls & { egress: { mode: 'allowlist' } };
+}
+
+/** Starts the origin on the proxy's outbound network and waits for it to answer. The sandbox is never on that network. */
+async function startOrigin(name: string, network: string, source: string = ORIGIN_SOURCE): Promise<string> {
+  origins.push(name);
+  await run('docker', [
+    'run', '--detach', '--init', '--name', name,
+    '--network', network, '--network-alias', name,
+    EGRESS_PROXY_IMAGE, 'node', '--eval', source,
+  ]);
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    try {
+      await run('docker', ['exec', name, 'node', '--eval',
+        `require('node:net').connect(${String(ORIGIN_PORT)}, '127.0.0.1').on('connect', function () { process.exit(0); }).on('error', function () { process.exit(1); });`,
+      ]);
+      const { stdout } = await run('docker', ['inspect', '--format', `{{(index .NetworkSettings.Networks "${network}").IPAddress}}`, name]);
+      return stdout.trim();
+    } catch {
+      await new Promise((done) => setTimeout(done, 250));
+    }
+  }
+  throw new Error(`the origin container ${name} never listened`);
+}
+
+/** One raw request to the proxy, spoken from inside the sandbox. Raw, so the proxy's own answer is read rather than a client's summary of it. */
+async function throughProxy(handle: SandboxHandle, request: string): Promise<string> {
+  const result = await provider.exec(handle, [
+    'sh', '-c', `printf '${request}\\r\\n\\r\\n' | nc -w 4 ${PROXY_ALIAS} ${String(PROXY_PORT)}`,
+  ]);
+  return result.stdout + result.stderr;
+}
+
+/**
+ * Removes one origin container. A test that destroys its sandbox while the
+ * origin is still attached to the proxy's outbound network is asking the
+ * provider to remove a network that still has an endpoint on it, which Docker
+ * refuses and the provider reports rather than swallows. The order is the
+ * test's to get right.
+ */
+async function removeOrigin(name: string): Promise<void> {
+  await run('docker', ['rm', '--force', '--volumes', name]);
+  const at = origins.indexOf(name);
+  if (at !== -1) origins.splice(at, 1);
+}
+
+/** The egress networks Docker currently holds, so a leak is counted against what was there before rather than against the whole host. */
+async function egressNetworks(): Promise<string[]> {
+  const { stdout } = await run('docker', ['network', 'ls', '--format', '{{.Name}}']);
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('egress-'));
+}
+
+async function containerExists(name: string): Promise<boolean> {
+  try {
+    await run('docker', ['inspect', '--type', 'container', name]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function networkExists(name: string): Promise<boolean> {
+  try {
+    await run('docker', ['network', 'inspect', name]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refusal(body: () => unknown): Promise<SandboxRefusal> {
+  try {
+    await body();
+  } catch (error) {
+    if (error instanceof SandboxRefusal) return error;
+    throw error;
+  }
+  throw new Error('expected a SandboxRefusal, but the call returned');
+}
+
+beforeEach(async () => {
+  base = await mkdtemp(join(tmpdir(), 'egress-allowlist-'));
+  workspace = join(base, 'workspace');
+  await mkdir(workspace, { recursive: true });
+  provider = await LocalDockerProvider.create({ vaultPaths: [] });
+});
+
+afterEach(async () => {
+  while (origins.length > 0) {
+    const name = origins.pop();
+    if (name === undefined) continue;
+    try {
+      await run('docker', ['rm', '--force', '--volumes', name]);
+    } catch {
+      // Already gone, or never started.
+    }
+  }
+  while (live.length > 0) {
+    const handle = live.pop();
+    if (handle === undefined) continue;
+    try {
+      await provider.destroy(handle);
+    } catch {
+      // Already destroyed by the test, or by the wall clock.
+    }
+  }
+  await rm(base, { recursive: true, force: true });
+});
+
+describe('an allowlist is applied, and is the only route out', () => {
+  test('the allowlisted host is reached and every other host is refused, by name and by address', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    const originAddress = await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    // The grant: the named host is reached, and the body proves it was the origin that answered
+    // and not the proxy answering on its behalf.
+    const allowed = await provider.exec(handle, [
+      'sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`,
+    ]);
+    expect(allowed.stdout).toContain(ORIGIN_BODY);
+    expect(allowed.exitCode).toBe(0);
+
+    // Refused by name, before any lookup: the proxy never resolves a host it will not open.
+    const byName = await throughProxy(handle, `GET http://${BLOCKED_NAME}/ HTTP/1.0`);
+    expect(byName).toContain('403');
+    expect(byName).toContain(BLOCKED_NAME);
+
+    // Refused by address, so the refusal is not DNS alone.
+    const byAddress = await throughProxy(handle, `GET http://${BLOCKED_ADDRESS}/ HTTP/1.0`);
+    expect(byAddress).toContain('403');
+    expect(byAddress).toContain(BLOCKED_ADDRESS);
+
+    // The strongest form: the origin's own address, which the proxy can certainly reach, because
+    // it just did — under a different name. It is refused for the one reason under test, that the
+    // address is not on the list. A denied host that was merely unreachable would prove nothing.
+    const sameHostByAddress = await throughProxy(handle, `GET http://${originAddress}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+    expect(sameHostByAddress).toContain('403');
+    expect(sameHostByAddress).not.toContain(ORIGIN_BODY);
+  });
+
+  test('CONNECT is tunnelled for an allowlisted host and refused for every other, with nothing inside the connection read', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    const opened = await throughProxy(handle, `CONNECT ${originName}:${String(ORIGIN_PORT)} HTTP/1.1`);
+    expect(opened).toContain('200 Connection Established');
+
+    const refused = await throughProxy(handle, `CONNECT ${BLOCKED_NAME}:443 HTTP/1.1`);
+    expect(refused).toContain('403');
+    expect(refused).toContain(BLOCKED_NAME);
+  });
+
+  test('the direct route does not exist: unsetting every proxy variable reaches nothing at all', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    const originAddress = await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    // There is no default route, so there is nothing to ask politely not to use. Asserted on the
+    // routing table as well as on a failed request: a request also fails when a tool is missing.
+    const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+    expect(routes.stdout).not.toContain('default');
+
+    const bypass =
+      'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+      `wget -T 4 -O - http://${originAddress}:${String(ORIGIN_PORT)}/ 2>&1`;
+    const direct = await provider.exec(handle, ['sh', '-c', bypass]);
+    expect(direct.exitCode).not.toBe(0);
+    expect(direct.stdout + direct.stderr).not.toContain(ORIGIN_BODY);
+    expect(direct.stdout + direct.stderr).toContain('unreachable');
+
+    // And nothing off the subnet at all, by an address the proxy was never asked about.
+    const elsewhere = await provider.exec(handle, ['sh', '-c', `wget -T 4 -O /dev/null http://${BLOCKED_ADDRESS}/ 2>&1`]);
+    expect(elsewhere.exitCode).not.toBe(0);
+  });
+
+  test('removing the proxy from the path makes the allowlisted host unreachable, rather than reachable', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    const originAddress = await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    const before = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    expect(before.stdout).toContain(ORIGIN_BODY);
+
+    // The counterfactual this whole suite rests on. If the reach above had come from anywhere
+    // but the proxy, it would survive the proxy being stopped, and this assertion would fail.
+    await run('docker', ['stop', '--timeout', '1', controls.egress.proxy.containerId]);
+    const after = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    expect(after.exitCode).not.toBe(0);
+    expect(after.stdout + after.stderr).not.toContain(ORIGIN_BODY);
+
+    // And with the proxy variables unset, so the failure above is not merely wget being pointed
+    // at a stopped proxy. With no proxy and no route there is no way out at all; without this
+    // second half the assertion would pass even against a network that had a default route.
+    // External review of P10, finding 3.
+    const direct = await provider.exec(handle, [
+      'sh', '-c',
+      'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+        `wget -T 4 -O - http://${originAddress}:${String(ORIGIN_PORT)}/ 2>&1`,
+    ]);
+    expect(direct.exitCode).not.toBe(0);
+    expect(direct.stdout + direct.stderr).not.toContain(ORIGIN_BODY);
+    expect(direct.stdout + direct.stderr).toContain('unreachable');
+  });
+});
+
+describe('the grant is the host the upstream is asked for', () => {
+  test("a client's own Host header is discarded: an allowlisted host is asked for the host that was granted", async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provider.provision(
+      // The node image as the sandbox, so the probe can set a Host header exactly. Busybox wget
+      // cannot, and the header is the whole of what this assertion is about.
+      specFor({ image: EGRESS_PROXY_IMAGE, egress: { mode: 'allowlist', allow: [originName] } }),
+    );
+    live.push(handle);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork, ECHO_SOURCE);
+
+    // The control: an honest client, whose Host names the host it asked for.
+    const honest = await provider.exec(handle, ['node', '--eval', frontingClient(originName, `${originName}:${String(ORIGIN_PORT)}`)]);
+    expect(honest.stdout).toContain(`HOST-SEEN=${originName}:${String(ORIGIN_PORT)}`);
+
+    // The attack: absolute-form to the granted host, carrying someone else's Host. The
+    // connection goes to a granted host either way; what is under test is which site the
+    // infrastructure in front of it would be asked to serve. RFC 7230 5.3.2 requires the
+    // received Host to be replaced by the one in the request target.
+    const fronted = await provider.exec(handle, ['node', '--eval', frontingClient(originName, 'evil.example')]);
+    expect(fronted.stdout).not.toContain('HOST-SEEN=evil.example');
+    expect(fronted.stdout).toContain(`HOST-SEEN=${originName}:${String(ORIGIN_PORT)}`);
+  });
+
+  test('an authority whose port is not a port is refused, and the proxy survives to refuse the next one', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    // The host half is on the allowlist and the port half is not a number. Passing that on
+    // reaches the socket layer as NaN, which throws where nothing catches it.
+    const malformed = await throughProxy(handle, `CONNECT ${originName}:${String(ORIGIN_PORT)}@evil.example HTTP/1.1`);
+    expect(malformed).toContain('403');
+
+    const running = await run('docker', ['inspect', '--format', '{{.State.Running}}', controls.egress.proxy.containerId]);
+    expect(running.stdout.trim()).toBe('true');
+
+    // The sandbox still has the egress it was granted. A proxy that died here would take the
+    // only route out with it, and the run would fail for a reason nothing recorded.
+    const after = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    expect(after.stdout).toContain(ORIGIN_BODY);
+  });
+});
+
+describe('what the proxy records, and what that is not', () => {
+  test('each connection is one line on the proxy container stdout, and it goes when the sandbox goes', async () => {
+    const originName = `egress-origin-${randomUUID()}`;
+    const handle = await provisionWith([originName]);
+    const controls = allowlistControls(handle);
+    await startOrigin(originName, controls.egress.proxy.outboundNetwork);
+
+    await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    await throughProxy(handle, `GET http://${BLOCKED_NAME}/ HTTP/1.0`);
+
+    const logs = await run('docker', ['logs', controls.egress.proxy.containerId]);
+    const lines = logs.stdout + logs.stderr;
+    expect(lines).toContain(`egress-proxy: opened ${originName}`);
+    expect(lines).toContain(`egress-proxy: refused ${BLOCKED_NAME}`);
+
+    // What this is not. The line lives in the proxy container and is destroyed with it, so it is
+    // readable during a run and is not evidence afterwards. Nothing collects it into an evidence
+    // bundle, and this unit claims nothing more than the line; collection is P6's.
+    await removeOrigin(originName);
+    await provider.destroy(handle);
+    live.length = 0;
+    expect(await containerExists(controls.egress.proxy.name)).toBe(false);
+  });
+});
+
+describe('the applied controls are the evidence', () => {
+  test('appliedControls records the allowlist, the proxy, and the argv both containers were started with', async () => {
+    const handle = await provisionWith(['Example.COM', 'example.com', '192.0.2.10']);
+    const controls = allowlistControls(handle);
+
+    // Normalised as the proxy matches: lower-cased, and the duplicate collapsed.
+    expect(controls.egress.allow).toStrictEqual(['example.com', '192.0.2.10']);
+    expect(controls.egress.network).toBe(controls.egress.proxy.internalNetwork);
+    expect(controls.egress.proxy.endpoint).toBe(`${PROXY_ALIAS}:${String(PROXY_PORT)}`);
+
+    // The sandbox is on the internal network and on nothing else.
+    expect(controls.runArgs).toStrictEqual(expect.arrayContaining(['--network', controls.egress.proxy.internalNetwork]));
+    expect(controls.runArgs).not.toContain(controls.egress.proxy.outboundNetwork);
+
+    // The proxy's argv carries the allowlist it was started with, so what it was told is readable
+    // beside what it did.
+    expect(controls.egress.proxy.runArgs).toStrictEqual(
+      expect.arrayContaining(['--env', 'EGRESS_ALLOW=example.com,192.0.2.10']),
+    );
+    expect(controls.egress.proxy.runArgs).toStrictEqual(expect.arrayContaining(['--network-alias', PROXY_ALIAS]));
+
+    const { stdout } = await run('docker', [
+      'inspect', '--format', '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}', controls.containerId,
+    ]);
+    expect(stdout.trim().split(/\s+/)).toStrictEqual([controls.egress.proxy.internalNetwork]);
+  });
+
+  test('the proxy and both its networks are destroyed with the sandbox they serve', async () => {
+    const handle = await provisionWith(['example.com']);
+    const { egress } = allowlistControls(handle);
+    expect(await containerExists(egress.proxy.name)).toBe(true);
+    expect(await networkExists(egress.proxy.internalNetwork)).toBe(true);
+    expect(await networkExists(egress.proxy.outboundNetwork)).toBe(true);
+
+    await provider.destroy(handle);
+    live.length = 0;
+
+    expect(await containerExists(egress.proxy.name)).toBe(false);
+    expect(await networkExists(egress.proxy.internalNetwork)).toBe(false);
+    expect(await networkExists(egress.proxy.outboundNetwork)).toBe(false);
+  });
+
+  test('a sandbox that could not start leaves no proxy and no network behind', async () => {
+    // A spec that gets past every check and then fails at `docker run`: the image does not exist,
+    // which is only discovered after the proxy has been stood up for it.
+    const error = await refusal(() =>
+      provider.provision(
+        specFor({ image: 'no-such-image-for-p10:latest', egress: { mode: 'allowlist', allow: ['example.com'] } }),
+      ),
+    );
+    expect(error.layer).toBe('image');
+
+    // Checked by the names this provision chose, not by comparing every egress network on the
+    // daemon: a concurrent suite creating or removing its own is not this provision leaking (#14).
+    const id = /^sandbox-(.+)$/.exec(error.sandbox ?? '')?.[1];
+    expect(id).toBeDefined();
+    const names = proxyNames(id ?? '');
+    expect(await egressNetworks()).not.toContain(names.internal);
+    expect(await egressNetworks()).not.toContain(names.outbound);
+    expect(await containerExists(names.container)).toBe(false);
+  });
+});
+
+===== packages/sandbox/test/probe.test.ts =====
+/**
+ * The HTTP probe (A-P11-01): a client in the sandbox's network namespace and
+ * out of its filesystem and process tree, started for one call and gone after
+ * it. Requires a Docker daemon and fails without one, as the rest of this
+ * package's Docker-backed suites do: a probe that skipped itself would prove
+ * nothing about where it ran.
+ *
+ * The sandbox runs the proxy's pinned Node image, because the product under
+ * test here is an HTTP server and alpine has none.
+ */
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import {
+  EGRESS_PROXY_IMAGE,
+  LocalDockerProvider,
+  PROBE_BODY_LIMIT_BYTES,
+  SandboxRefusal,
+  type ProbeRequest,
+  type SandboxHandle,
+  type SandboxSpec,
+} from '../src/index.js';
+
+const run = promisify(execFile);
+
+/** A server on 8080 answering `/`, `/slow` after two seconds, and `/big` with a body over the probe's cap. */
+const SERVER = `
+const http = require('node:http');
+http.createServer((req, res) => {
+  if (req.url === '/slow') { setTimeout(() => res.end('late'), 2000); return; }
+  if (req.url === '/big') { res.end('x'.repeat(${String(PROBE_BODY_LIMIT_BYTES + 1)})); return; }
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    res.setHeader('content-type', 'text/plain');
+    res.end(req.method + ' ' + req.url + ' ' + body);
+  });
+}).listen(8080, '127.0.0.1');
+`;
+
+let provider: LocalDockerProvider;
+let base: string;
+const live: SandboxHandle[] = [];
+
+function specFor(overrides: Partial<SandboxSpec> = {}): SandboxSpec {
+  return {
+    image: EGRESS_PROXY_IMAGE,
+    mounts: { workspace: { source: join(base, 'workspace'), target: '/workspace', mode: 'rw' }, others: [] },
+    egress: { mode: 'deny-all', allow: [] },
+    limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 60_000 },
+    user: { uid: 0, gid: 0 },
+    ...overrides,
+  };
+}
+
+async function serving(overrides: Partial<SandboxSpec> = {}): Promise<SandboxHandle> {
+  const h = await provider.provision(specFor(overrides));
+  live.push(h);
+  const started = await provider.exec(h, ['node', '--eval', SERVER], { detach: true });
+  expect(started.exitCode).toBe(0);
+  return h;
+}
+
+function get(path: string, readyWithinMs = 10_000): ProbeRequest {
+  return { port: 8080, readyWithinMs, exchanges: [{ method: 'GET', path }] };
+}
+
+async function probeContainers(): Promise<string[]> {
+  const { stdout } = await run('docker', ['ps', '--all', '--filter', 'name=probe-', '--format', '{{.Names}}']);
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
+}
+
+async function refusal(body: () => unknown): Promise<SandboxRefusal> {
+  try {
+    await body();
+  } catch (error) {
+    if (error instanceof SandboxRefusal) return error;
+    throw error;
+  }
+  throw new Error('expected a SandboxRefusal, but the call returned');
+}
+
+beforeAll(async () => {
+  provider = await LocalDockerProvider.create({ vaultPaths: [] });
+});
+
+beforeEach(async () => {
+  base = await mkdtemp(join(tmpdir(), 'sandbox-probe-'));
+  await mkdir(join(base, 'workspace'));
+});
+
+afterEach(async () => {
+  for (const h of live.splice(0)) await provider.destroy(h).catch(() => undefined);
+  await rm(base, { recursive: true, force: true });
+});
+
+describe('probe', () => {
+  test('a deny-all sandbox is answered on its loopback, and is still --network none afterwards', async () => {
+    const h = await serving();
+    const result = await provider.probe(h, {
+      port: 8080,
+      readyWithinMs: 10_000,
+      exchanges: [
+        { method: 'GET', path: '/a' },
+        { method: 'POST', path: '/b', headers: { 'x-test': '1' }, body: 'hello' },
+      ],
+    });
+    expect(result.ready).toBe(true);
+    expect(result.observations.map((o) => (o.kind === 'response' ? [o.status, o.headers['content-type'], o.body] : o.kind))).toEqual([
+      [200, 'text/plain', 'GET /a '],
+      [200, 'text/plain', 'POST /b hello'],
+    ]);
+    expect(provider.appliedControls(h).egress).toEqual({ mode: 'deny-all', network: 'none' });
+    const { stdout } = await run('docker', ['inspect', '--format', '{{.HostConfig.NetworkMode}}', h]);
+    expect(stdout.trim()).toBe('none');
+    expect(await probeContainers()).toEqual([]);
+  }, 60_000);
+
+  test('the probe shares the network and not the filesystem, runs read-only with nothing, and is gone after the call', async () => {
+    const h = await serving();
+    // Something the product wrote where a forged probe would sit in its own container.
+    expect((await provider.exec(h, ['sh', '-c', 'echo forged > /tmp/probe-marker'])).exitCode).toBe(0);
+
+    const call = provider.probe(h, get('/slow'));
+    let name: string | undefined;
+    for (let i = 0; i < 50 && name === undefined; i += 1) {
+      [name] = await probeContainers();
+      if (name === undefined) await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(name).toBeDefined();
+    const probe = name ?? '';
+    const format = '{{.HostConfig.NetworkMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}';
+    const { stdout } = await run('docker', ['inspect', '--format', format, probe]);
+    const [networkMode, mounts, readOnly, capDrop] = stdout.trim().split('|');
+    expect(networkMode).toBe(`container:${h}`);
+    expect(mounts).toBe('[]');
+    expect(readOnly).toBe('true');
+    expect(capDrop).toBe('["ALL"]');
+    const marker = await run('docker', ['exec', probe, 'cat', '/tmp/probe-marker']).then(() => 'present', () => 'absent');
+    expect(marker).toBe('absent');
+
+    const result = await call;
+    expect(result.observations.map((o) => (o.kind === 'response' ? o.body : o.kind))).toEqual(['late']);
+    expect(await probeContainers()).toEqual([]);
+  }, 60_000);
+
+  test('a port nothing listens on is reported not ready, with nothing sent', async () => {
+    const h = await provider.provision(specFor());
+    live.push(h);
+    const result = await provider.probe(h, get('/', 500));
+    expect([result.ready, result.observations]).toEqual([false, []]);
+  }, 60_000);
+
+  test('a body over the cap is reported oversized, never truncated', async () => {
+    const h = await serving();
+    const result = await provider.probe(h, get('/big'));
+    expect(result.observations.map((o) => (o.kind === 'oversized' ? [o.status, o.limitBytes] : o.kind))).toEqual([[200, PROBE_BODY_LIMIT_BYTES]]);
+  }, 60_000);
+
+  test('a probe still running when the sandbox is destroyed goes with it', async () => {
+    const h = await serving();
+    const call = provider.probe(h, get('/slow')).then(() => 'answered', () => 'failed');
+    for (let i = 0; i < 50 && (await probeContainers()).length === 0; i += 1) await new Promise((r) => setTimeout(r, 100));
+    await provider.destroy(h);
+    live.splice(live.indexOf(h), 1);
+    expect(await probeContainers()).toEqual([]);
+    expect(await call).toBe('failed');
+  }, 60_000);
+
+  test.each([
+    ['port 0', { port: 0, readyWithinMs: 1000, exchanges: [{ method: 'GET', path: '/' }] }, /port/],
+    ['a port past 65535', { port: 70_000, readyWithinMs: 1000, exchanges: [{ method: 'GET', path: '/' }] }, /port/],
+    ['no exchanges', { port: 80, readyWithinMs: 1000, exchanges: [] }, /exchanges/],
+    ['a path that is a URL', { port: 80, readyWithinMs: 1000, exchanges: [{ method: 'GET', path: 'http://example.com/' }] }, /path/],
+    ['a method with a space', { port: 80, readyWithinMs: 1000, exchanges: [{ method: 'GET /x', path: '/' }] }, /method/],
+    ['a header value with a line break', { port: 80, readyWithinMs: 1000, exchanges: [{ method: 'GET', path: '/', headers: { a: 'b\r\nc: d' } }] }, /headers\.a/],
+  ])('%s is refused, naming the field', async (_, request, field) => {
+    const h = await provider.provision(specFor());
+    live.push(h);
+    const error = await refusal(() => provider.probe(h, request as unknown as ProbeRequest));
+    expect(error.layer).toBe('probe');
+    expect(error.message).toMatch(field);
+  }, 60_000);
+
+  test('an ended sandbox is refused, and detach with stdin is refused', async () => {
+    const h = await provider.provision(specFor());
+    live.push(h);
+    expect((await refusal(() => provider.exec(h, ['cat'], { detach: true, stdin: 'x' }))).layer).toBe('probe');
+    await provider.destroy(h);
+    live.splice(live.indexOf(h), 1);
+    expect((await refusal(() => provider.probe(h, get('/')))).layer).toBe('lifetime');
+  }, 60_000);
+});
+
+=== BUNDLE END === f59857eaf5b377eedc6be711bdadd69a

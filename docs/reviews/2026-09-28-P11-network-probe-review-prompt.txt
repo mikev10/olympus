@@ -1,0 +1,142 @@
+The code under review is in the file
+`2026-09-28-P11-network-probe-review-bundle.txt` (SHA-256 b28abf127b554285e88f670e53e3a3c41cc53cc0348d9c58cf185bf3f20f1d84) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the HTTP behavioral check of a TypeScript project — the
+component that decides whether a product under test answered HTTP requests
+correctly, and the sandbox capability it runs on. You have the source and
+nothing else — no design documents, no author reasoning, no prior version, no
+conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs code an AI agent wrote inside a Docker container (the
+"sandbox") and then decides, in its own host process, whether that code meets
+acceptance criteria. For an HTTP product, a scenario names a command that
+starts the product's server (run detached inside the sandbox), a port, and a
+list of requests with the responses expected. The sandbox provider sends the
+requests from a separate, short-lived "probe" container that joins the
+sandbox's network namespace (`docker run --network container:<sandbox>`) but
+not its filesystem or process tree; the probe reports raw status, headers, and
+bodies as JSON, and the comparison against the expected responses runs on the
+host. Stack detection offers this HTTP check only for a provider that has a
+probe.
+
+It must hold against a capable, motivated party trying to make an HTTP
+behavioral check pass when the product does not actually answer as expected —
+or trying to use the check to reach something the sandbox could not reach
+itself. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls everything that runs inside the sandbox container: the
+product's source and binaries, any process it starts, every file the container
+can write, and every byte the product sends over the network, including on the
+loopback interface the probe shares. It does not control the scenario (its
+expected responses come from locked acceptance criteria), and it does not
+control the components the runtime is wired with — the sandbox provider, the
+Docker daemon, the probe's pinned image and source, and the adapter are
+runtime-selected and trusted, even where a function takes one as an argument —
+and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A verdict is the
+  runtime's own comparison of evidence the runtime collected, never a report
+  produced by the code being judged. For an HTTP check, what the client
+  observed must be observed by a client the product cannot replace or tamper
+  with, and the comparison must run where the product cannot reach.
+- Fail closed. A missing control, an unsupported provider, a malformed
+  scenario, a server that never listens, or an error must be a refusal or a
+  failed check — never a silent pass, a skip, or a degraded check that still
+  reports success.
+- Default deny. A capability not granted is not available. The probe must not
+  give the sandbox any network reach it did not already have: a sandbox with
+  networking disabled stays with networking disabled, and the probe connects
+  to the sandbox's own loopback and nowhere else.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. The conformance entries added here must fail if the
+  property they name stops holding.
+
+The mechanisms that matter most:
+
+- The probe's isolation: `probeRunArgs` and `LocalDockerProvider.probe` —
+  namespace join, read-only root, dropped capabilities, no mounts, removal on
+  sandbox teardown, and the wall-clock budget.
+- The probe source (`PROBE_SOURCE`) and `readProbeOutput`: what it can be made
+  to report, and how the host parses it.
+- `readHttpScenario` and `compareHttp`: whether any response that does not
+  match the expectation can be judged as holding, and whether any malformed
+  scenario is accepted.
+- Stack detection and the one-scenario-per-sandbox rule in
+  `HttpBehavioralAdapter`, and the three conformance entries in
+  `packages/conformance/src/registry/http.ts`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Identifiers such as R3, M3, P6, and I1 below name later pieces of work in the
+project's plan, and D-P11-02 names a recorded design decision; none of them
+refers to anything you are missing from the bundle.
+
+- a `BehavioralAdapter` of kind `browser` (R3), and `MutationAdapter` (M3). Both stay named in `unavailableControls()`
+- executing HTTP scenarios from a `VerificationManifest`, and provisioning the fresh sandbox a scenario runs in (P6's line, wired by I1)
+- TLS to the product, HTTP/2, and WebSockets. The probe speaks HTTP/1.1 over plain TCP on loopback
+- stopping a scenario's server inside the sandbox. It ends with the sandbox
+- a long-lived probe per sandbox, and any `SandboxSpec` field for one (D-P11-02)
+
+Absent work listed here is not a defect.
+
+THE QUESTION
+
+From inside the sandbox, how would you make an HTTP scenario come back with
+its expectation held when the product does not answer as the scenario
+expects — by replacing, influencing, or impersonating the observer, by shaping
+what the probe reports, by exploiting how the host parses or compares it, or
+by leaving something behind that answers a later check — and how would you
+use the probe to reach anything beyond the sandbox's own loopback?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
