@@ -24,6 +24,7 @@
 | P10 | Sandbox egress allowlist | 2 | maintainer | P2 | 2 |
 | P11 | Sandbox network probe + HTTP behavioral | 2 | maintainer | P8, P10 | 2 |
 | P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
+| P13 | Cost control: budget at the relay, cost in evidence | 2 | maintainer | P6, P12 | 2 |
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
@@ -318,6 +319,50 @@
 **Invariants:** I4 is the subject — a credential the task can read is a capability no policy granted, and after this unit the task holds the ability to ask one upstream for a granted set of paths and nothing more. I5 is every refusal above: an unheld credential, an unreadable upstream, an empty grant, a provider that cannot keep a secret off the host. I1 must not regress: the relay adds a container and a network route and no mount, and the single-rw-mount rule is untouched. I8 is the control run beside the exploit, without which "found nothing" could mean the scan looked nowhere. I7 is unaffected: the relay streams bodies and never builds a prompt.
 **Known limit, stated now:** the task can use the credential without reading it — any process in the sandbox can call the relay for the granted paths until the sandbox is destroyed, and the CLI's budget does not bind a call that bypasses the CLI. That is a narrower exposure than the one paid, and it is recorded with R2 as owner and no registry entry, since nothing asserts spend today. The seven claim assertions still cost money and refuse, never skip, without a credential or a daemon.
 
+### P13 — Cost control: budget at the relay, cost in evidence
+**Scope:** the task's `Budget` (`maxTokens`, `maxCostUsd`) is enforced by the model relay, which counts what each upstream response used and refuses every request once either bound is spent; and what each driver call cost is recorded in the Vault by the runtime, so tokens and dollars can be totalled per task, per station, and per run.
+**Why it is its own unit, and why now:** it is pulled forward from R2 (cost per merged change) and I1 (cost reported per run). P12 left a stated gap: the only thing bounding spend is the CLI's `--max-budget-usd`, which binds the CLI and nothing that calls the relay directly, and it is enforced by a process inside the sandbox. D-P12-15 then measured the driver suite's spend with log lines, which is a measurement nothing enforces and nothing records. A budget enforced inside the task's reach is a bound the task can remove; the relay is the one component on the model's only route that the task cannot reach.
+**Depends on:** P12 (the relay, the only route to the model), P6 (the evidence the runtime writes, and the line that writes it).
+**Re-owns:** P12's known limit ("metering at the relay is R2's") and the cost half of R2's cost-per-merged-change input. R2 keeps the derivations; it reads P13's records rather than the driver-reported `TaskResult.usage`.
+**Specified before any code, as P12 was.** The decisions this entry rests on are D-P13-01 to D-P13-11 in `docs/decisions.md`, each with the option not taken.
+**Deliver:**
+- **The relay meters and enforces.** A relay is given a budget and a meter with its spec (D-P13-01, D-P13-06). It reads the `model` of each request to a metered path and refuses one whose model has no price before forwarding it; it forwards the request unchanged; it reads the usage the response reports while streaming the response through unchanged; and it keeps a running total of all four token classes and of dollars (D-P13-02, D-P13-05). Once either total reaches its bound, every later request is refused with a status the CLI does not retry, naming the budget (D-P13-03). A successful response whose usage it cannot read is charged its ceiling rather than nothing (D-P13-04). It records one line per metered call — model, the four token counts, dollars, running totals — in its own log, which only the provider can read.
+- **The meter is read at teardown.** `destroy` stops the sandbox container first, then reads the relay's log, then removes the relay, and returns the final reading, so nothing can spend after it was read (D-P13-07). A sandbox with no relay returns an explicit `unmetered` reading, never zeros.
+- **The runtime records cost.** Every driver call the line makes — each build attempt, including one that fails and is retried, and each review seat — writes one `UsageRecord` to the Vault through a new named operation: run, task, station, attempt, the meter reading, and `collectedBy: 'runtime'` (D-P13-08). `RunState` holds their refs. One function derives totals per task, per station, and per run from those records and nothing else; a total is never stored, so it cannot disagree with its parts. `TaskResult.usage` — what the CLI reported — stays in the recorded result as it is, and is not the source of any cost figure.
+- **The driver stops passing `--max-budget-usd`** (D-P13-10), and exports its meter — dialect and a dated price table — beside `MODEL_RELAY` (D-P13-06).
+**Where it lives:** `packages/sandbox/src/local/relay.ts` (the meter and enforcement, still `node --eval` source in the pinned image, `--read-only`, nothing mounted); `packages/sandbox/src/local/` for the teardown read; `packages/vault` for the record and its operation; `packages/api/src/line.ts` and a new cost module beside it for recording and totals; `packages/drivers/claude-code` for the price table and the flag's removal.
+**Contract amendments, landed in this unit's pull request**, each an `A-P13-nn` entry in `docs/decisions.md`:
+- `RelaySpec` gains a required `budget: { maxTokens; maxCostUsd }` and a required `meter: { dialect: 'anthropic-messages'; prices }`. An implementation MUST refuse a relay without either, a budget bound that is not a positive finite number, a price that is not a non-negative finite number, and a dialect it does not implement, rather than provision a relay nothing bounds (I5). `maxWallClockMs` stays the sandbox's `limits.wallClockMs`
+- `SandboxProvider.destroy` returns a `MeterReading`: `{ kind: 'unmetered' }` or `{ kind: 'metered'; calls; inputTokens; outputTokens; cacheReadTokens; cacheWriteTokens; costUsd; exhausted: 'none' | 'tokens' | 'cost' | 'unreadable'; refused }`. `StubSandboxProvider` returns `unmetered`, as it refuses every relay. A provider that had a relay and cannot read its log MUST throw rather than return a reading
+- `Vault` gains `recordUsage(r: UsageRecord): Promise<VaultRef>`, and `UsageRecord` is declared beside `EvidenceBundle` with `collectedBy: 'runtime'` as a literal
+- `RunState` gains `usage: readonly VaultRef[]`
+**Out of scope:**
+- wiring the relay into the line. `packages/api` keeps `StubDriver` and provisions no relay (P12, D-P12-05), so every line task records `unmetered` until I1 wires the driver and its relay request. The recording path is proven with a provider double that returns metered readings (D-P13-11)
+- a budget pooled across a run, a station, or a task's retries. The budget bounds one driver call — one sandbox — as `CapabilityScope.budget` does today; a task's worst case is its budget times its starts. A run-level ceiling needs state shared across relays and is a later unit
+- rewriting request bodies: clamping `max_tokens` to what remains, or reserving a worst case before forwarding (D-P13-03). A call begun under budget may finish over it, by at most one call
+- model choice per station, a cache-hit report per run, and a cost estimate before a run. Later units; the records P13 writes carry the cache counts the report will need
+- a surface for cost: API endpoint, CLI output, or README figures. Totals are a function in `packages/api`; P9 and R2 surface them
+- diffing the CLI's reported usage against the meter at runtime as a recorded violation. The paid suite compares them once as a control (below); a runtime diff is a candidate once the line runs a real driver
+- a relay for another vendor or another usage dialect. The dialect is a closed union with one member; R6 adds the OpenAI-compatible one
+- price freshness. The table is pinned and dated in the driver package; a stale price makes the dollar figure wrong in a stated direction, and updating it is an ordinary change
+- **candidate, not this unit:** a merge to `v2` re-pays the driver run the pull request already proved, because the pull request's CI cache is not visible to a push on `v2`. It is CI tooling, not unit work, and is recorded here so it is not lost
+**Conformance:** a task that calls the relay directly, bypassing the CLI, is refused once its budget is spent; an unpriced model is refused before any call is forwarded; an unreadable response is charged, never free; the line's cost figures come from the meter, and a driver that reports zero usage cannot lower them; the meter agrees with the CLI's own account of the same session.
+**Accept:**
+- against a local upstream the test owns, with no model call: a sequence of calls whose reported usage crosses `maxCostUsd` is forwarded up to the crossing call and every later call is refused with the budget-exhausted status and a body naming the bound; the same for `maxTokens`; the refusal holds for a request sent from inside the sandbox by `node` rather than the CLI; a streamed response and a non-streamed one are metered identically; the total counts all four token classes
+- a request naming a model absent from the price table is refused before the upstream sees it (the fake upstream records no request); a successful response with no readable final usage is charged the request's `max_tokens` at the output price on top of the input it did report, and one with no readable usage at all marks the budget `unreadable` and refuses every later call; a response carrying a content encoding the relay did not ask for is treated as unreadable
+- request and response bodies reach the client and the upstream byte-for-byte as sent, apart from the headers P12 already rewrites and `accept-encoding`
+- a relay spec without a budget or a meter, with a non-positive or non-finite bound, with a negative or non-finite price, or with an unknown dialect is refused at provisioning at the `relay` layer, naming the field
+- `destroy` returns the relay's final reading, taken after the sandbox container stopped; a reading equals the sum of the relay's per-call log lines; a sandbox without a relay returns `unmetered`; a relay log that cannot be read throws, and the relay is still torn down
+- the line writes one `UsageRecord` per driver call, failed attempts and review seats included, each through `recordUsage`; with a provider double reporting a metered reading and a driver reporting zero usage, the record carries the meter's figures; totals per task, per station, and per run equal the sums of their records; a run with any `unmetered` record reports how many, and never presents the unmetered calls as zero cost
+- the driver's argument vector carries no `--max-budget-usd`
+- **the paid control,** in the driver suite, adding no model call: for a session already run, the relay's reading equals the CLI's reported token counts class by class, and a difference fails with both figures printed. This is the I8 control that the meter is not blind
+- **the ledger.** Added live, none pending: `I4.model-relay-enforces-budget` and `I5.model-relay-fails-closed-on-unmetered-usage`, runtime entries in `packages/conformance/src/registry/local-relay.ts` beside P12's; `I2.cost-is-runtime-metered`, a runtime entry over the line; `I2.relay-meter-agrees-with-session`, external in `@olympus-ai/driver-claude-code`. `pending-baseline.json` is unchanged
+- `pnpm typecheck` and `pnpm lint` pass; `pnpm -r --filter '!@olympus-ai/driver-claude-code' test` passes locally, since the driver suite calls a real model (about $0.14 a run, D-P12-15). The driver suite and `pnpm conformance` pass once in CI, on the pull request, after the maintainer applies `run-driver` (D-A-CI-05)
+- `git ls-files -- .plan/` prints nothing
+**Gate paths:** `packages/sandbox/src/types.ts`, `packages/vault/src/types.ts`, `packages/core/src/run/types.ts`, and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
+**Invariants:** I4 is the subject — spending is a capability, and after this unit a task holds the ability to spend up to its budget and no further, enforced where the task cannot reach. I2 is the record — what a call cost is collected by the runtime from a component outside the sandbox, never taken from the CLI's report, as status is never taken from the model's. I5 is every refusal: an unpriced model, an unreadable response charged its ceiling, a relay with no budget, a meter log that cannot be read. I8 is the paid control that the meter counts what the session used. I1 must not regress: the relay still mounts nothing, and the new record reaches the Vault only through a named operation. I7 is unaffected: the relay reads usage fields and a model name, and nothing it reads enters a prompt.
+**Known limits, stated now:** a call that begins under budget may end over it, by at most one call's cost — for the pinned CLI, one response's input and its `max_tokens` of output. Dollars are computed from a pinned table, not the vendor's invoice, so they are an estimate whose error is the table's staleness; tokens are the upstream's own counts. Budget is per driver call, so retries multiply it.
+
 ### P9 — API + CLI
 **Scope:** the runtime as a service (I9).
 **Deliver:** HTTP surface for run lifecycle — create, status, approve, cancel, stream events — and a CLI that is purely a client of it.
@@ -356,7 +401,7 @@
 - one real feature reaches a merged PR
 - modifying a locked test fails the run
 - writing to the Vault fails at the mount layer
-- cost and cache-hit rate reported per run
+- cost and cache-hit rate reported per run (cost from P13's usage records, which are `unmetered` until this unit wires the relay into the line)
 - `unavailableControls()` correctly refuses L3: an L3 run is refused at admission end to end, naming each missing control (`I5.adapter-refusal-refuses-l3-end-to-end`, split from P6's admission entry)
 - component provenance survives composition, and `SKELETON_LINE` is deleted only after it does: a stub wrapped without forwarding its declaration is still refused above L1 (`I5.unsafe-declaration-survives-composition`, re-owned from P6)
 
@@ -390,8 +435,8 @@ effective-level formula. Still blocked on P8, whose `AdapterSet` it consumes.
 
 Autonomy ratio (the share of tasks completed at their requested level with no
 approval consumed), cycle time from `intake` to `integrate`, and cost per
-merged change. Every input already exists in run state and the usage figures
-P5 captures, so this is derivation and a reporting surface, not collection.
+merged change. Every input already exists in run state and the usage records
+P13 writes from the relay's meter, so this is derivation and a reporting surface, not collection.
 Bounded by the same rule as R1: derived by the runtime, never reported by a
 model. Blocked on P4 and P9 because it reads finished runs through the API.
 
