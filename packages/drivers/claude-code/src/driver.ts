@@ -10,10 +10,12 @@
  * model can reach. A driver constructed without a provider cannot be
  * constructed.
  *
- * The credential reaches the CLI as an environment variable on that exec
- * (`ExecOptions.env`), which keeps it out of every argument vector. It is
- * never a mount — a secret on the mount table is a file the model can read and
- * copy for the sandbox's whole life — and never part of a prompt.
+ * This driver holds no credential (P12). The sandbox it runs in is provisioned
+ * with a model relay — `MODEL_RELAY`, below — that holds the credential in a
+ * container of its own and forwards the CLI's requests to the API with it. The
+ * CLI is given the relay's address by the provider and a placeholder where a
+ * key would go, so no process the task runs can read the credential: not the
+ * CLI, not a tool it starts, not a later exec (D-P5-20, paid).
  */
 import type {
   AgentClaim,
@@ -31,20 +33,55 @@ import type {
   Usage,
 } from '@olympus-ai/core';
 import { DRIVER_CONTRACT_VERSION } from '@olympus-ai/core';
-import type { SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
+import type { RelaySpec, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
 import { CLI_VERSION } from './image.js';
 import { refuse } from './refusal.js';
 import { parseStream, type ParsedStream, type SessionInit } from './stream.js';
 import { DECLARED_TOOLS, isCommandTool, isNetworkTool, isSubagentTool, writtenPath } from './tools.js';
 
 /**
- * The environment variable the CLI reads its credential from. The session's
- * own `init` message reports which source it used, and this driver refuses a
- * session that names any other: a CLI that found a credential in a keychain or
- * a mounted file would be authenticating by a path this driver did not arrange
- * and cannot account for.
+ * The environment variable the CLI reads its key from. It carries
+ * `KEY_PLACEHOLDER`, never a credential. The session's own `init` message
+ * reports which source the CLI used, and this driver refuses a session that
+ * names any other: a CLI that found a key in a keychain or a mounted file would
+ * be authenticating by a path this driver did not arrange, and would be
+ * holding a real credential inside the sandbox.
  */
-export const CREDENTIAL_VARIABLE = 'ANTHROPIC_API_KEY';
+export const KEY_VARIABLE = 'ANTHROPIC_API_KEY';
+
+/**
+ * What the CLI sends where a key would go. The relay discards it with every
+ * other authentication header the client sent and writes the credential it
+ * holds (D-P12-03). It is not a secret and authenticates nothing: the relay is
+ * reachable only from the sandbox it serves.
+ */
+export const KEY_PLACEHOLDER = 'relay-held-credential-placeholder';
+
+/**
+ * The name of the credential the relay is given, as a provider holds it.
+ * `LocalDockerProvider.create({ credentials: { [MODEL_CREDENTIAL]: key } })`.
+ */
+export const MODEL_CREDENTIAL = 'anthropic';
+
+/**
+ * The relay a sandbox this driver runs in must be provisioned with (D-P12-05):
+ * the API origin, the one path the CLI calls with non-essential traffic off,
+ * the header the API reads a key from, and the variable the CLI reads its
+ * base URL from.
+ *
+ * `/v1/messages` covers the CLI's `POST /v1/messages?beta=true` and its
+ * token-counting sub-path. The CLI also sends `HEAD /api/hello` at startup; the
+ * relay refuses it, the CLI carries on without it, and the grant stays the one
+ * path a task needs. Observed against the pinned CLI, and re-proven by every
+ * claim assertion, each of which runs through the relay.
+ */
+export const MODEL_RELAY: Readonly<RelaySpec> = Object.freeze({
+  upstream: 'https://api.anthropic.com',
+  paths: ['/v1/messages'],
+  header: 'x-api-key',
+  credential: MODEL_CREDENTIAL,
+  urlVariable: 'ANTHROPIC_BASE_URL',
+});
 
 /**
  * I6: the family is a value this driver assigns, here, once. It is not derived
@@ -66,12 +103,12 @@ const TIER_MODELS: Readonly<Record<ModelTier, string>> = {
 };
 
 /**
- * Environment the CLI gets on every exec besides the credential.
+ * Environment the CLI gets on every exec, beside the key placeholder.
  *
- * Non-essential traffic is off because the sandbox's egress allowlist grants
- * the API host alone; a CLI that also wanted an analytics host would be
- * refused by the proxy and the run would fail for a reason that has nothing to
- * do with the task. The auto-updater is off for the same reason and one more:
+ * Non-essential traffic is off because the relay is the CLI's only route out
+ * and grants the messages endpoint alone; a CLI that also wanted an analytics
+ * host would be refused and the run would fail for a reason that has nothing
+ * to do with the task. The auto-updater is off for the same reason and one more:
  * an image pinned to a CLI version that updates itself at run time is not
  * pinned.
  */
@@ -86,7 +123,16 @@ const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
   DISABLE_AUTOUPDATER: '1',
   DISABLE_TELEMETRY: '1',
   DISABLE_ERROR_REPORTING: '1',
+  // The CLI turns tool search off when its base URL is not Anthropic's, on the
+  // theory that a third-party gateway may not carry the beta. The relay is not
+  // a gateway: it forwards to the API itself, headers and query intact. Without
+  // this, a session granted `ToolSearch` silently comes up without it, which the
+  // driver refuses (I4.driver-tool-inventory-validated; D-P12-10).
+  ENABLE_TOOL_SEARCH: 'true',
 };
+
+/** Every exec's environment: the settings above and the placeholder. No value in it is secret. */
+const CLI_KEY_ENVIRONMENT: Readonly<Record<string, string>> = Object.freeze({ ...CLI_ENVIRONMENT, [KEY_VARIABLE]: KEY_PLACEHOLDER });
 
 /**
  * An MCP server this driver can put in front of a task, as the CLI's
@@ -115,12 +161,6 @@ export interface ClaudeCodeDriverOptions {
    * the host is the failure I1 exists to prevent.
    */
   readonly provider: SandboxProvider;
-  /**
-   * The API credential. Defaults to `process.env.ANTHROPIC_API_KEY`. A driver
-   * with neither refuses at construction rather than at the first task, so a
-   * run does not provision a sandbox to discover it cannot use it.
-   */
-  readonly credential?: string;
   /** The working directory inside the sandbox. Defaults to the workspace mount's usual target. */
   readonly workdir?: string;
   /** Overrides the tier-to-model map. Every tier must be present. */
@@ -175,24 +215,11 @@ function requireSettingsOutsideWorkspace(path: string | undefined, workdir: stri
   return path;
 }
 
-function requireCredential(explicit: string | undefined): string {
-  const credential = explicit ?? process.env[CREDENTIAL_VARIABLE];
-  if (credential === undefined || credential.trim() === '') {
-    refuse(
-      'credential',
-      `no credential: pass ClaudeCodeDriverOptions.credential or set ${CREDENTIAL_VARIABLE}. ` +
-        'The driver refuses rather than starting a task that would spend a sandbox to fail at the first API call.',
-    );
-  }
-  return credential;
-}
-
 export class ClaudeCodeDriver implements Driver {
   readonly id = 'claude-code';
   readonly contractVersion = DRIVER_CONTRACT_VERSION;
 
   readonly #provider: SandboxProvider;
-  readonly #credential: string;
   readonly #workdir: string;
   readonly #models: Readonly<Record<ModelTier, string>>;
   readonly #mcpServers: Readonly<Record<string, McpServerConfig>>;
@@ -235,7 +262,6 @@ export class ClaudeCodeDriver implements Driver {
       refuse('provider', 'ClaudeCodeDriver needs the SandboxProvider that provisioned the handle; there is no host fallback (I1)');
     }
     this.#provider = options.provider;
-    this.#credential = requireCredential(options.credential);
     this.#workdir = options.workdir ?? '/workspace';
     this.#models = options.models ?? TIER_MODELS;
     this.#mcpServers = options.mcpServers ?? {};
@@ -490,7 +516,7 @@ export class ClaudeCodeDriver implements Driver {
         '--permission-prompts', 'none',
         '--no-session-persistence',
       ],
-      { env: { ...CLI_ENVIRONMENT, [CREDENTIAL_VARIABLE]: this.#credential } },
+      { env: CLI_KEY_ENVIRONMENT },
     );
     const init = parseStream(inspected.stdout).init;
     if (init === undefined) {
@@ -618,7 +644,7 @@ export class ClaudeCodeDriver implements Driver {
     // interpolated, and it is quoted.
     return {
       argv: ['sh', '-c', `cd ${shellQuote(this.#workdir)} && exec "$@"`, 'driver', ...cli],
-      env: { ...CLI_ENVIRONMENT, [CREDENTIAL_VARIABLE]: this.#credential },
+      env: CLI_KEY_ENVIRONMENT,
     };
   }
 
@@ -643,11 +669,11 @@ export class ClaudeCodeDriver implements Driver {
           (stderr.trim() === '' ? '' : `; stderr: ${stderr.trim().slice(0, 400)}`),
       );
     }
-    if (init.apiKeySource !== CREDENTIAL_VARIABLE) {
+    if (init.apiKeySource !== KEY_VARIABLE) {
       refuse(
         'credential',
-        `the session authenticated from '${init.apiKeySource}' rather than ${CREDENTIAL_VARIABLE}; ` +
-          'a credential this driver did not supply is one it cannot account for',
+        `the session authenticated from '${init.apiKeySource}' rather than ${KEY_VARIABLE}; ` +
+          'a key this driver did not supply is one it cannot account for, and one the CLI found is a credential inside the sandbox',
       );
     }
     const result = stream.result;

@@ -9,6 +9,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
+import { refuse } from '../local/refusal.js';
 import { writeStdin } from '../stdin.js';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
 
@@ -49,6 +50,12 @@ export class StubSandboxProvider implements SandboxProvider {
   private readonly workspaces = new Map<SandboxHandle, string>();
 
   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+    // A relay exists to keep a credential out of every process the task runs. This provider runs
+    // them on the host, beside whatever the host holds, so it cannot keep that promise and refuses
+    // rather than making it (A-P12-01).
+    if (spec.relay !== undefined) {
+      refuse('relay', 'StubSandboxProvider cannot keep a credential out of a process it runs on the host, so it provisions no relay');
+    }
     const source = spec.mounts.workspace.source;
     if (!(await isDirectory(source))) {
       throw new Error(`StubSandboxProvider: workspace source ${source} is not an existing directory`);

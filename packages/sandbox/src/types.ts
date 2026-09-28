@@ -25,6 +25,42 @@ export interface MountTable {
 
 export interface EgressPolicy { mode: 'deny-all' | 'allowlist'; allow: string[]; }
 
+/**
+ * A model relay: a provider-owned endpoint that holds a credential the sandbox
+ * never does, and forwards the sandbox's requests to one upstream with it
+ * (A-P12-01).
+ *
+ * The spec names the credential and never carries it, because a `SandboxSpec`
+ * is a record the runtime may keep and a secret in it is a secret in the
+ * record. An implementation resolves `credential` against the credentials it
+ * was constructed with.
+ *
+ * Implementations MUST keep the credential out of the sandbox — out of its
+ * environment, its mounts, and every process it runs — and MUST refuse a relay
+ * whose credential they were not given, whose `upstream` is not an `https`
+ * origin, or whose `paths` is empty, rather than provision a sandbox whose
+ * model calls fail later for a reason nothing recorded (I5). An implementation
+ * that cannot keep a credential out of a process it runs MUST refuse every
+ * spec that carries a relay.
+ *
+ * A relay is independent of `egress` (D-P12-02): under `deny-all` the sandbox
+ * reaches the relay and nothing else. Under `allowlist` the relay is still the
+ * only route to its upstream, so implementations MUST refuse an `egress.allow`
+ * naming the upstream's host (D-P12-11).
+ */
+export interface RelaySpec {
+  /** An `https` origin with no path: `'https://api.example.com'`. The only origin the relay reaches. */
+  upstream: string;
+  /** The path prefixes forwarded, each a segment boundary. Every other path is refused. Never empty (D-P12-04). */
+  paths: string[];
+  /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
+  header: string;
+  /** The name of a credential the provider holds. Never a value. */
+  credential: string;
+  /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
+  urlVariable: string;
+}
+
 export interface SandboxSpec {
   image: string;
   mounts: MountTable;
@@ -39,15 +75,20 @@ export interface SandboxSpec {
    * task fail quietly (I5, A-P6-04).
    */
   user: { uid: number; gid: number };
+  /** A model relay beside the sandbox, or none. Absent means the sandbox holds no route to one. */
+  relay?: RelaySpec;
 }
 
 export interface ExecResult { exitCode: number; stdout: string; stderr: string; durationMs: number; }
 
 /**
- * Per-command options. `env` exists so a credential can reach a process inside
- * the sandbox without becoming a mount: a secret on the mount table is a file
- * the agent can read, copy, and exfiltrate for the sandbox's whole life, and a
- * secret in a prompt is a secret the model has seen.
+ * Per-command options. `env` exists so a value can reach a process inside the
+ * sandbox without becoming a mount: a secret on the mount table is a file the
+ * agent can read, copy, and exfiltrate for the sandbox's whole life, and a
+ * secret in a prompt is a secret the model has seen. It does not make a value
+ * confidential from the task — every process the command starts can read it,
+ * and later ones through `/proc` (D-P5-20) — so a model credential is not
+ * passed this way; it stays in a relay (`RelaySpec`).
  *
  * Implementations MUST keep the value out of every argument vector, on the
  * host and in the guest alike, because an argv is world-readable in a process

@@ -24,7 +24,7 @@ export interface SessionInit {
   readonly agents: readonly string[];
   readonly model: string;
   readonly sessionId: string;
-  /** Where the CLI found its credential. `ANTHROPIC_API_KEY` is the only one this driver arranges. */
+  /** Where the CLI found its key. `ANTHROPIC_API_KEY`, carrying the placeholder, is the only one this driver arranges. */
   readonly apiKeySource: string;
   readonly cliVersion: string;
 }

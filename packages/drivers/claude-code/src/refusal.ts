@@ -8,7 +8,7 @@
 export type DriverRefusalLayer =
   /** No sandbox provider, or one that did not provision the handle in the request. */
   | 'provider'
-  /** No credential to give the CLI, or one that is not usable as an environment value. */
+  /** The session authenticated from a source other than the placeholder this driver set. */
   | 'credential'
   /** The image could not be built or is not present. */
   | 'image'

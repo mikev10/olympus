@@ -17,5 +17,11 @@ export default defineConfig({
     // keep a concurrency assertion from being timed against another file's
     // model call.
     fileParallelism: false,
+    // Every test here is a paid model call. Once one fails, the rest are
+    // stopped rather than each paying to fail the same way: an account out of
+    // credit answered nine calls with the same 400 in one run. A stopped test
+    // is reported skipped, which the registry refuses exactly as it refuses a
+    // failure, so this saves money and weakens nothing.
+    bail: 1,
   },
 });
