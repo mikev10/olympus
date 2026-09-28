@@ -1994,6 +1994,14 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **Why not run on pushes to `v2` only:** the registry needs the report on every run, so a pull request that skipped the driver would fail from cold. And "only the last push of a pull request" is not an event GitHub can detect.
 - **Reverse:** delete the three cache steps and the condition on the driver step.
 
+### D-A-CI-05: a pull request calls the model only once it is labelled ready
+
+- **Problem:** D-A-CI-04 runs the driver suite once per tree, but every push to a pull request is a new tree. A unit pushed ten times paid for ten runs, and only the last one's evidence is merged. D-P12-15's cost log measured a full run at about $0.17 and 139k tokens (2026-09-27), and 2026-09-25's 2.8M tokens on the key was about twenty of them.
+- **Chosen:** on a pull request, the driver step runs only when the pull request carries the `run-driver` label, which the maintainer adds when it is ready to merge. Adding the label starts a run (`labeled` is a trigger). A report already cached for the tree is still reused, with or without the label. Pushes to `v2` are unchanged.
+- **Why this is not a skip:** without the label and without a cached report, the registry step does not run, and a final step fails the job, naming the tree and the label. Every free step still runs, so an unready pull request gets its typecheck, lint, and test results, and never a green check. The registry's reconciliation is untouched.
+- **What it gives up, stated:** a pull request's real-model evidence arrives only at the end, so a change that breaks the driver against the real model is found when the label is added rather than on the push that made it. Until then, the driver's tests that call no model (`driver.test.ts`) still run on every push, with no credential, and the full suite still gates the merge.
+- **Reverse:** remove the label condition from the three steps and delete the final step.
+
 ## P8: Adapters (TypeScript)
 
 ### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code

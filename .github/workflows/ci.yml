@@ -7,6 +7,8 @@ on:
     branches: [v2]
   pull_request:
     branches: [v2]
+    # `labeled` so that adding `run-driver` starts the paid run (D-A-CI-05).
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -98,6 +100,12 @@ jobs:
       # is evidence about these exact bytes, and one that is not is refused by
       # the registry as tree-changed. A wrong key costs a model run or a red
       # build, never a green one.
+      #
+      # On a pull request they run only once it carries the `run-driver` label,
+      # which the maintainer adds when it is ready to merge (D-A-CI-05). Pushes
+      # to v2 are unchanged. Without the label and without a report for this
+      # tree, every free step still runs, the registry does not, and the job
+      # ends red saying why: an unproven tree never goes green.
       - name: Driver tree hash
         id: driver-tree
         run: echo "hash=$(node scripts/driver-report-key.ts packages/drivers/claude-code)" >> "$GITHUB_OUTPUT"
@@ -116,15 +124,21 @@ jobs:
           grep -E '"(treeHash|generatedAt)"' packages/drivers/claude-code/.conformance/run.json
 
       - name: Driver assertions, which write the conformance run report
-        if: steps.driver-report.outputs.cache-hit != 'true'
+        if: steps.driver-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: pnpm --filter @olympus-ai/driver-claude-code test
 
+      # Until the label is added, the driver's tests that call no model still
+      # run, and with no credential, so one that starts to call a model fails.
+      - name: Driver tests that call no model
+        if: steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        run: pnpm --filter @olympus-ai/driver-claude-code exec vitest run test/driver.test.ts
+
       # Only after the step above passed: a failing run's report stays out of
       # the cache, so the next run of the same tree calls the model again.
       - name: Keep the driver report for the next run of the same tree
-        if: steps.driver-report.outputs.cache-hit != 'true'
+        if: steps.driver-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         uses: actions/cache/save@v6
         with:
           path: packages/drivers/claude-code/.conformance/run.json
@@ -152,4 +166,11 @@ jobs:
       # thing in the log: every invariant's state, every pending entry, and
       # the unit that owes it. A `missing` invariant fails this step.
       - name: Conformance registry
+        if: steps.driver-report.outputs.cache-hit == 'true' || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: pnpm conformance
+
+      - name: Driver suite not yet run for this tree
+        if: steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        run: |
+          echo "::error::the driver's real-model assertions have not run for tree ${{ steps.driver-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model once."
+          exit 1
