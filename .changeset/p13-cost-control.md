@@ -9,6 +9,9 @@
 
 P13: budget at the relay, cost in the Vault.
 
+`@olympus-ai/driver-claude-code`: a refusal on an API status now quotes what
+the CLI reported the API said, so a 400 from the relay names its reason.
+
 `@olympus-ai/sandbox`: `RelaySpec` requires `budget` and `meter` (A-P13-01).
 The model relay meters `POST /v1/messages`. It reads the request's model and
 the response's usage, and forwards both bodies unchanged. It refuses a model

@@ -423,6 +423,14 @@ describe('refusals when the CLI did not run the task (I5)', () => {
     await expect(driverWith(provider).runTask(request())).rejects.toThrow(/the API answered 401/);
   });
 
+  test('the refusal quotes what the CLI said the API answered, so the reason is not lost', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream()
+      .replace('"is_error":false', '"is_error":true,"api_error_status":400')
+      .replace('"result":"done"', '"result":"API Error: 400 the model \\"claude-x\\" has no price"');
+    await expect(driverWith(provider).runTask(request())).rejects.toThrow(/the API answered 400.*has no price/);
+  });
+
   test('a stream with no result refuses', async () => {
     const provider = new RecordingProvider();
     provider.stdout = stream().split('\n')[0] ?? '';

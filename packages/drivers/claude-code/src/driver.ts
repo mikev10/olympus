@@ -725,7 +725,8 @@ export class ClaudeCodeDriver implements Driver {
     if (result.apiErrorStatus !== undefined) {
       refuse(
         'invocation',
-        `the model was not reached for task ${req.taskId}: the API answered ${String(result.apiErrorStatus)} and the CLI stopped retrying`,
+        `the model was not reached for task ${req.taskId}: the API answered ${String(result.apiErrorStatus)} and the CLI stopped retrying` +
+          (result.narrative.trim() === '' ? '' : `; the CLI reported ${JSON.stringify(result.narrative.trim().slice(0, 400))}`),
       );
     }
     if (result.isError && result.numTurns === 0) {

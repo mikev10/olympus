@@ -197,3 +197,18 @@ passes (49 tests), and so do typecheck and lint.
   other bytes (`tree-changed`). Nothing is wrong with the entries. The funded
   driver suite has to run again against this tree, which costs API credit,
   and that run is the maintainer's to authorise.
+
+## After triage: the funded driver run
+
+With the maintainer's approval, the funded run went ahead on PR #16 (CI run
+36435629938). It failed at its first model call, `driver.subagents`, with
+"the API answered 400 and the CLI stopped retrying". The relay answers 400
+itself when a model is unpriced or `max_tokens` is missing, so a P13 defect
+was the first suspect. The refusal did not say which.
+
+The driver's refusal on an API status now quotes the CLI's own account of
+the error. The quote is truncated, and a unit test covers it that failed
+before the change. With that in place, one local run of `driver.subagents`
+gave the reason: "Credit balance is too low". The account behind the key is
+out of API credit. It is not a code defect, and the rest of the funded suite
+has not yet run against this tree.
