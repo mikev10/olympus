@@ -191,7 +191,8 @@ invariantTest(
         const nested = `${WORKDIR}/exploit-control/nested`;
         await h.provider.exec(
           h.handle,
-          ['sh', '-c', `(sleep 600 >/dev/null 2>&1 &) ; env > ${EXPLOIT_DIR}/leaked && mkdir -p ${nested} && env > ${nested}/leaked`],
+          // Made writable by anyone, as the workspace itself is, so the host can remove what the container user created.
+          ['sh', '-c', `(sleep 600 >/dev/null 2>&1 &) ; env > ${EXPLOIT_DIR}/leaked && mkdir -p ${nested} && env > ${nested}/leaked && chmod -R a+rwX ${WORKDIR}/exploit-control`],
           { env: { LEAKED: canary } },
         );
         expect((await h.provider.exec(h.handle, ['sh', '-c', PROCESS_DUMP])).stdout).toContain(canary);
