@@ -1,3 +1,65 @@
+# External review of P9, codex, 2026-09-28
+
+An adversarial pre-merge review of P9 (API + CLI): the HTTP server's token
+check and the principal it records on approvals and cancellations, the
+worst-case cost figure and its exact-match approval at admission, run
+cancellation through the line, `cancelRun`, and `nextStep`, the derived
+standing from `runStanding`, the policy loader's byte cap, alias ban, depth
+limit, and parser pin, and the conformance assertions that claim each of these
+(`policy-file.ts`, `headless.ts`, and the terminal scan). The only counted review
+of this unit: the Gemini run from the same prompt and bundle failed, so there is
+no second review. Triaged in `2026-09-28-P9-api-cli-triage.md`, which cites this
+review's findings as `codex-1` to `codex-6`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: `configHome` `["auth.json"]`, `workDir` `[]`. Exit 0, not timed
+  out, 111.7 s. Ingestion `complete`: 134,820 input tokens against a floor of
+  84,297. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `52fb366729b9030c3b664bfc062dc19aef1fc75c42b93c7dbcf835b1b09031d6`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** not available — only codex counted; gemini was
+  `FAILED`. The Gemini call to `gemini-3.1-pro-preview` returned HTTP 402 after
+  371 ms: exit 1, no model reported, ingestion `unreported`, integrity `failed`
+  with every marker absent, and no reply written. The maintainer chose to proceed
+  on this review alone rather than re-run Gemini. Every finding here was raised
+  by codex alone, and none had a chance of corroboration.
+- **Date:** 2026-09-28 (run started 2026-09-28T19:32Z).
+- **Bundle:** `2026-09-28-P9-api-cli-review-bundle.txt`, SHA-256
+  `cc7251d1a310e205912ac665787d6d04d862ad8790aa7123b2a88c939f48f6f9`, base
+  `9930590` (`reviewed/P13`), head `b23beab` (the P9 implementation commit).
+  It held the full contents of every changed source, test, registry, fixture,
+  and package file, the three changesets, and `pnpm-lock.yaml`; the two changed
+  docs (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`) were listed in the
+  diffstat and excluded. Prompt: `2026-09-28-P9-api-cli-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated "I had no prior project
+  context and performed no external lookups", and that local command execution
+  was blocked, so it ran no tests and did not verify the bundle's hash. Its
+  findings are from source, not reproduced. A self-report, not independently
+  verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Item 1
+  is answered by codex-1 to codex-3, item 3 by codex-2 (a driver fault held
+  only in memory), item 4 by codex-5 (structural assignment and
+  `as unknown as`; declaration merging, module augmentation, and predicates
+  considered and set aside), and items 2 and 5 together by codex-4 and codex-6,
+  with the closing statement that no check is wholly tautological. Item 6 is
+  the closing list of sound mechanisms, and item 7 the closing paragraph, which
+  accepts the framing and names two distinctions: token possession is the
+  principal, so an echoed cost figure cannot be told from a human approval, and
+  scan escapes measure regression resistance rather than remote authorization.
+  No item came back empty.
+- **Citations:** line numbers refer to positions in the reviewed source files
+  as the bundle carried them, not to the repository at any later commit. They
+  are hints; the triage located each construct by name.
+
+---
+
 BASE: reviewed/P13
 HEAD: b23beab
 pnpm-lock.yaml
