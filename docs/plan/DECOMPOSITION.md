@@ -18,9 +18,9 @@
 | P4 | Station machine | 2 | maintainer | P1, P3 | 3–4 |
 | P5 | Driver: Claude Code | 2 | maintainer | P2, P10 | 2–3 |
 | P6 | Verification + evidence | 2 | maintainer | P1, P2, P8 | 3 |
-| P7 | Tamper detection | 2 | **contributor — best first issue** | P8 | 2 |
+| P7 | Tamper detection | 2 | maintainer | P8 | 2 |
 | P8 | Adapters (TypeScript) | 2 | contributor | F2, F3 | 2–3 |
-| P9 | API + CLI | 2 | contributor | P4 | 2 |
+| P9 | API + CLI | 2 | maintainer | P4 | 2 |
 | P10 | Sandbox egress allowlist | 2 | maintainer | P2 | 2 |
 | P11 | Sandbox network probe + HTTP behavioral | 2 | maintainer | P8, P10 | 2 |
 | P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
@@ -28,6 +28,10 @@
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
+
+**Parallel after P13:** P7, P9, and P11 have no sibling dependencies, and each works in its own packages (`integrity`, `api` and `cli`, `sandbox` and `adapters`), so they can be worked at the same time, one session and one branch each. Two rules keep this cheap. A unit is rebased onto the latest `v2` before its `run-driver` label is added, because a sibling's merge changes the tree the paid run proves. And each unit's review bundle is cut after that rebase. I1 starts when all three are merged.
+
+**Owner change, 2026-09-28:** P7 and P9 were reserved for outside contributors. No contributor has appeared, and I1 cannot start without them, so the maintainer takes both.
 
 ---
 
@@ -235,7 +239,7 @@
 **Invariants:** I2 is the subject — status from runtime-run checks alone, a claim stored beside the evidence and diffed against it, and a result that cannot smuggle a field in. I3 is that the checks run in a tree the agent never ran in, so nothing it can write judges it. I4 is the writable globs enforced on the only honest input, and a task's reach ending with the task. I5 is every refusal above: an unstarted check, a shrunken suite, an unrepresentable command, an unwritable workspace. I6 is the review seat that can read only what it was granted. I1 must not regress: the snapshots are runtime-owned and never mounted writable anywhere a later task or check can see, and nothing P6 adds writes to the Vault except through named operations.
 **Known limit, stated now:** each task and each verification copies the whole tree, dependencies included, because a `deny-all` verification cannot install them. That costs time and disk on a large repository and nothing in correctness; a copy-on-write or overlay mount is the optimisation, and it is not taken here. A build task that installs dependencies changes paths outside most globs and is refused, which is fail-closed and will read as friction until a role grants them.
 
-### P7 — Tamper detection — **best first contributor issue**
+### P7 — Tamper detection
 **Scope:** `TamperReport` from F2 §6. Pure functions over diffs; no system knowledge required.
 **Deliver:** AST assertion comparison (operators and arguments, not counts), skip/xfail/only detection, deletions including renames, moves, and case-set reduction, snapshot regeneration, coverage delta, protected-path touches.
 **Conformance:** a fixture suite of taxonomy items — `assertEqual(x,5)` → `assertTrue(x)` is caught, and a rename that drops three cases counts as a deletion.
@@ -280,6 +284,7 @@
 **Scope:** a `BehavioralAdapter` of kind `http`, and the sandbox capability it needs: a probe the provider starts and owns, joined to a sandbox's network namespace and never to its filesystem, so the client that observes the product is out of the product's reach.
 **Why it is its own unit:** P8 found it. An HTTP request has to originate on the sandbox's network, and a `deny-all` sandbox has only loopback, so the client runs beside the product — and a client in the product's container is one the product can replace. Folding the probe into P8 would make one pull request that both changes the sandbox's network posture and adds adapters, the shape P10 was split out to stop.
 **Depends on:** P8 (the `BehavioralAdapter` shape and `CheckResult.expectation`), P10 (the provider-owned sidecar pattern the probe follows).
+**Also owns:** issue #14. The sandbox's egress cleanup test compares global Docker state and races conformance's egress test. P11 works in the same network code, and a flaky run there can waste a paid driver run.
 **Specified when it starts.** Scope, out of scope, conformance, and acceptance are written before any code, as P5's and P8's were.
 
 ### P12 — Credential at the egress layer
@@ -366,6 +371,7 @@
 ### P9 — API + CLI
 **Scope:** the runtime as a service (I9).
 **Deliver:** HTTP surface for run lifecycle — create, status, approve, cancel, stream events — and a CLI that is purely a client of it.
+**Also delivers:** the worst-case cost of a run, shown before it starts. That is each driver call's `Budget.maxCostUsd` times the number of driver calls the run can make. An L1 or L2 run needs approval of that figure. It is exact, not an estimate, and needs no history. An estimate from past runs is R2's.
 **Out of scope:** auth beyond a local token, multi-user, the hosted control plane.
 **Conformance:** every CLI command works against a remote API URL; no import from `core` assumes a TTY.
 
@@ -402,6 +408,8 @@
 - modifying a locked test fails the run
 - writing to the Vault fails at the mount layer
 - cost and cache-hit rate reported per run (cost from P13's usage records, which are `unmetered` until this unit wires the relay into the line)
+- each station's real driver calls use the model tier its role's policy scope names (`CapabilityScope.tier`), and the usage records show which model each call used. This proves the model is chosen per station, which the policy already expresses.
+- the known limits P13's review left to this unit are closed before the first metered record: an unreadable call's cost reads as a lower bound (D-P13-19), and a lost meter reading blocks resume (D-P13-20)
 - `unavailableControls()` correctly refuses L3: an L3 run is refused at admission end to end, naming each missing control (`I5.adapter-refusal-refuses-l3-end-to-end`, split from P6's admission entry)
 - component provenance survives composition, and `SKELETON_LINE` is deleted only after it does: a stub wrapped without forwarding its declaration is still refused above L1 (`I5.unsafe-declaration-survives-composition`, re-owned from P6)
 
@@ -439,6 +447,8 @@ merged change. Every input already exists in run state and the usage records
 P13 writes from the relay's meter, so this is derivation and a reporting surface, not collection.
 Bounded by the same rule as R1: derived by the runtime, never reported by a
 model. Blocked on P4 and P9 because it reads finished runs through the API.
+
+It also owns the cost estimate before a run, taken from past runs' usage records per station and model. P9 shows the exact worst case. R2 adds the likely figure beside it, once I1's real runs have produced records to estimate from.
 
 It also owes the number the spine's claim is waiting on:
 
