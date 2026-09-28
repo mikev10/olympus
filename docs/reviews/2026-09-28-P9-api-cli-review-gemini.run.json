@@ -1,0 +1,48 @@
+{
+  "unit": "P9",
+  "family": "gemini",
+  "artifacts": {
+    "promptFile": "2026-09-28-P9-api-cli-review-prompt.txt",
+    "bundleFile": "2026-09-28-P9-api-cli-review-bundle.txt",
+    "matchingPairs": 1
+  },
+  "invocation": {
+    "kind": "api",
+    "method": "POST",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent",
+    "modelRequested": "gemini-3.1-pro-preview",
+    "headerNames": [
+      "x-goog-api-key",
+      "content-type"
+    ]
+  },
+  "cleanRoom": null,
+  "exitCode": 1,
+  "timedOut": false,
+  "startedAt": "2026-09-28T19:05:43.944Z",
+  "endedAt": "2026-09-28T19:05:44.315Z",
+  "durationMs": 371,
+  "cliVersion": "api:generativelanguage/v1beta",
+  "modelReported": null,
+  "tokenUsage": null,
+  "payloadSha256": "03fc2a49f0eb45f746d864f8806ca7a6db7e0366c1071baa69ace357fb3e5f79",
+  "payloadBytes": 421489,
+  "ingestion": {
+    "kind": "unreported",
+    "floor": 84297
+  },
+  "postRunFileCount": null,
+  "recordedApprovalPolicy": null,
+  "bundleSha256": "cc7251d1a310e205912ac665787d6d04d862ad8790aa7123b2a88c939f48f6f9",
+  "integrity": {
+    "kind": "failed",
+    "absent": [
+      "base",
+      "head",
+      "finalSection",
+      "endNonce"
+    ]
+  },
+  "replySha256": null,
+  "outcome": "FAILED"
+}
