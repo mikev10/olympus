@@ -15,6 +15,8 @@ import { cleanup, pkg, repo } from './repo.js';
 
 const get = { method: 'GET', path: '/' };
 const ok = { exchanges: [{ status: 200 }] };
+/** An array of `length` with only the given indexes set, and a hole at every other. */
+const holed = (length: number, at: Record<number, unknown>): unknown[] => Object.assign(new Array<unknown>(length), at);
 
 describe('readHttpScenario', () => {
   test('reads serve, port, and each exchange, and defaults readyWithinMs', () => {
@@ -39,6 +41,30 @@ describe('readHttpScenario', () => {
     const read = (): unknown => readHttpScenario({ id: 's', input, expected });
     expect(read).toThrow(AdapterRefusal);
     expect(read).toThrow(field);
+  });
+
+  // A hole in an array is skipped by map and forEach, so an unchecked one removes a comparison (codex-3).
+  test.each([
+    ['a hole in expected.exchanges', { serve: ['s'], port: 80, exchanges: [get] }, { exchanges: new Array(1) }, /expected\.exchanges\[0\]/],
+    ['a hole in input.exchanges', { serve: ['s'], port: 80, exchanges: holed(3, { 0: get, 2: get }) }, { exchanges: [{ status: 200 }, { status: 200 }, { status: 200 }] }, /input\.exchanges\[1\]/],
+    ['a hole in input.serve', { serve: holed(3, { 0: 'node', 2: 'x' }), port: 80, exchanges: [get] }, ok, /input\.serve/],
+    ['a hole in bodyIncludes', { serve: ['s'], port: 80, exchanges: [get] }, { exchanges: [{ status: 200, bodyIncludes: holed(3, { 0: 'a', 2: 'b' }) }] }, /bodyIncludes/],
+  ])('%s is refused, naming the field', (_, input, expected, field) => {
+    const read = (): unknown => readHttpScenario({ id: 's', input, expected });
+    expect(read).toThrow(AdapterRefusal);
+    expect(read).toThrow(field);
+  });
+
+  // An expected json value JSON cannot carry would be compared as whatever JSON.stringify makes of it (codex-1).
+  test.each([
+    ['Infinity', Infinity],
+    ['NaN', NaN],
+    ['a nested undefined', { a: [undefined] }],
+    ['a function', { a: () => 1 }],
+  ])('an expected json holding %s is refused', (_, json) => {
+    const read = (): unknown => readHttpScenario({ id: 's', input: { serve: ['s'], port: 80, exchanges: [get] }, expected: { exchanges: [{ status: 200, json }] } });
+    expect(read).toThrow(AdapterRefusal);
+    expect(read).toThrow(/expected\.exchanges\[0\]\.json/);
   });
 });
 
@@ -66,6 +92,22 @@ describe('compareHttp', () => {
     });
     const oversized = { ready: true, observations: [{ kind: 'oversized' as const, status: 200, headers: {}, limitBytes: 10 }], durationMs: 1 };
     expect(compareHttp({ exchanges: [{ status: 200, bodyIncludes: ['x'] }] }, oversized)).toMatchObject({ held: false, mismatches: [{ field: 'exchanges[0].body' }] });
+  });
+
+  test('a body over the cap does not hold even when only the status is expected', () => {
+    // The probe stops reading at the cap, so whether the response ever completed is unknown (codex-2).
+    const oversized = { ready: true, observations: [{ kind: 'oversized' as const, status: 200, headers: {}, limitBytes: 10 }], durationMs: 1 };
+    expect(compareHttp(ok, oversized)).toEqual({
+      held: false, mismatches: [{ field: 'exchanges[0].body', expected: "a body within the probe's limit", observed: 'more than 10 bytes' }],
+    });
+  });
+
+  test('a number past JSON\'s range is not equal to null, at the top or nested', () => {
+    // JSON.parse turns 1e400 into Infinity, which JSON.stringify writes as null (codex-1).
+    const at = (json: unknown, body: string) => compareHttp({ exchanges: [{ status: 200, json }] }, { ready: true, observations: [response(200, body)], durationMs: 1 });
+    expect(at(null, '1e400')).toMatchObject({ held: false, mismatches: [{ field: 'exchanges[0].json' }] });
+    expect(at({ a: [null] }, '{"a":[-1e400]}')).toMatchObject({ held: false, mismatches: [{ field: 'exchanges[0].json' }] });
+    expect(at({ a: [null] }, '{"a":[null]}')).toEqual({ held: true });
   });
 });
 

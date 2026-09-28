@@ -1,3 +1,60 @@
+# External review of P11, codex, 2026-09-28
+
+An adversarial pre-merge review of P11 (the sandbox network probe and the HTTP
+behavioral adapter): the probe container `LocalDockerProvider.probe` starts in
+the sandbox's network namespace, the probe script and its observation format,
+the HTTP scenario reader and response comparison in the adapter, detection of
+HTTP-capable stacks, and the conformance entries asserting the probe's
+isolation. The only review of this unit; see Cross-family agreement below.
+Triaged in `2026-09-28-P11-network-probe-triage.md`, which cites this review's
+findings as `codex-1` to `codex-6`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: `configHome` `["auth.json"]`, `workDir` `[]`. Exit 0, not timed
+  out, 126.1 s. Ingestion `complete`: 59,821 input tokens against a floor of
+  37,394. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `052ae88fab312b52a0777ea8e5890c64ee3f9e8d8e320689b90ac4b2829d78b5`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** not available — only codex counted; gemini was
+  not run. The Gemini call was blocked by the authoring session's permission
+  classifier, and the maintainer then chose to proceed on one review for cost.
+  One review, no cross-family pass: every finding here was raised by codex
+  alone and had no chance of corroboration.
+- **Date:** 2026-09-28 (run started 2026-09-28T19:31Z).
+- **Bundle:** `2026-09-28-P11-network-probe-review-bundle.txt`, SHA-256
+  `b28abf127b554285e88f670e53e3a3c41cc53cc0348d9c58cf185bf3f20f1d84`, base
+  `9930590` (`reviewed/P13`), head `19a1002` (the P11 done-when amendment, on
+  top of the implementation commit `775bcca`). It held the full contents of
+  every changed source, test, and registry file and the changeset; the two
+  changed docs (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`) were listed
+  in the diffstat and excluded. Prompt:
+  `2026-09-28-P11-network-probe-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated "Prior context: none.
+  External lookups: none", and that local shell access was blocked, so it
+  neither executed tests nor verified the file hash. A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Item 1
+  is answered by codex-1, codex-2, codex-3 and codex-6; item 2 by codex-5;
+  item 3 by codex-2 and the marker check in codex-5; item 4 in the paragraph
+  on casts, declaration merging and `canProbe` (no escape found beyond
+  runtime sparse arrays and numbers); item 6 in the paragraphs on the observer
+  design and loopback reach; item 7 in the closing paragraph, which accepts the
+  framing and names its limit. Item 5 (configuration satisfied without doing
+  what it appears to) is not addressed under that name; codex-4 and codex-5
+  come closest.
+- **Citations:** line numbers refer to positions in the reviewed source files
+  as the bundle carried them, not to the repository at any later commit. They
+  are hints; the triage located each construct by name.
+
+---
+
 BASE: reviewed/P13  
 HEAD: 19a1002  
 packages/sandbox/test/probe.test.ts  

@@ -10,10 +10,12 @@
  * container would be one the product could replace, and what it observed
  * would be the product's report of itself.
  *
- * One scenario per handle. The first scenario's server holds the sandbox until
- * the sandbox ends, and nothing inside the product's container is trusted to
- * stop it, so a second scenario on the same handle is refused rather than
- * answered by whatever is still listening. The fresh sandbox per check is P6's.
+ * One scenario per handle, per adapter. The first scenario's server holds the
+ * sandbox until the sandbox ends, and nothing inside the product's container
+ * is trusted to stop it, so a second scenario on a handle this adapter already
+ * served is refused rather than answered by whatever is still listening. A
+ * second adapter does not know what the first served; that every check gets a
+ * fresh sandbox is P6's, and is what closes the gap (D-P11-07).
  *
  * `expected` comes from locked acceptance criteria and never from the
  * implementation (I3). This adapter cannot check that; it takes the value it
@@ -66,11 +68,29 @@ function unknownKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
   }
 }
 
+/**
+ * An array's entries by index, holes included as undefined. map, every, and forEach skip a hole, so
+ * an array read with them can hold an entry nothing checked and nothing compares.
+ */
+function dense(value: readonly unknown[]): unknown[] {
+  return Array.from(value);
+}
+
+/** True for a value JSON can carry: no undefined, function, or number outside JSON's range. */
+function isJson(value: unknown): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return dense(value).every(isJson);
+  if (isRecord(value)) return Object.values(value).every(isJson);
+  return false;
+}
+
 function strings(value: unknown, label: string): readonly [string, ...string[]] {
-  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string' && item !== '')) {
+  const items = Array.isArray(value) ? dense(value) : [];
+  if (!Array.isArray(value) || !items.every((item): item is string => typeof item === 'string' && item !== '')) {
     refuse('unrecognised-scenario', `${label} must be a non-empty array of non-empty strings`);
   }
-  const [first, ...rest] = value;
+  const [first, ...rest] = items;
   if (first === undefined) refuse('unrecognised-scenario', `${label} must be a non-empty array of non-empty strings`);
   return [first, ...rest];
 }
@@ -109,6 +129,9 @@ function readResponse(value: unknown, i: number): HttpExpectedResponse {
   if (!isRecord(value)) refuse('unrecognised-scenario', `${at} must be an object`);
   unknownKeys(value, RESPONSE_KEYS, at);
   if (value.body !== undefined && typeof value.body !== 'string') refuse('unrecognised-scenario', `${at}.body must be a string`);
+  if ('json' in value && !isJson(value.json)) {
+    refuse('unrecognised-scenario', `${at}.json must be a JSON value: no undefined, function, or number outside JSON's range`);
+  }
   return {
     status: integer(value.status, `${at}.status`, 100, 599),
     ...(value.headers === undefined ? {} : { headers: stringRecord(value.headers, `${at}.headers`) }),
@@ -127,13 +150,13 @@ export function readHttpScenario(scenario: BehavioralScenario): { input: HttpInp
   const port = integer(input.port, 'input.port', 1, 65535);
   const readyWithinMs = input.readyWithinMs === undefined ? DEFAULT_READY_WITHIN_MS : integer(input.readyWithinMs, 'input.readyWithinMs', 1, 600_000);
   if (!Array.isArray(input.exchanges)) refuse('unrecognised-scenario', 'input.exchanges must be a non-empty array');
-  const [first, ...rest] = input.exchanges.map(readExchange);
+  const [first, ...rest] = dense(input.exchanges).map(readExchange);
   if (first === undefined) refuse('unrecognised-scenario', 'input.exchanges must be a non-empty array');
 
   if (!isRecord(expected)) refuse('unrecognised-scenario', `scenario ${scenario.id}: expected must be an object`);
   unknownKeys(expected, EXPECTED_KEYS, 'expected');
   if (!Array.isArray(expected.exchanges)) refuse('unrecognised-scenario', 'expected.exchanges must be an array');
-  const responses = expected.exchanges.map(readResponse);
+  const responses = dense(expected.exchanges).map(readResponse);
   if (responses.length !== rest.length + 1) {
     refuse('unrecognised-scenario', `expected.exchanges has ${String(responses.length)} entries for ${String(rest.length + 1)} in input.exchanges; each request needs one expected response`);
   }
@@ -164,9 +187,10 @@ function compareResponse(expected: HttpExpectedResponse, observed: ProbeObservat
     const seen = observed.headers[name.toLowerCase()];
     if (seen !== value) out.push({ field: `${at}.headers.${name.toLowerCase()}`, expected: value, observed: seen ?? '(absent)' });
   }
-  const wantsBody = expected.body !== undefined || expected.bodyIncludes !== undefined || 'json' in expected;
+  // The probe stops reading at its cap, so an oversized response may never have completed: it
+  // fails whatever the scenario expected of the body, as a body over the cap is the product's failure.
   if (observed.kind === 'oversized') {
-    if (wantsBody) out.push({ field: `${at}.body`, expected: 'a body within the probe\'s limit', observed: `more than ${String(observed.limitBytes)} bytes` });
+    out.push({ field: `${at}.body`, expected: 'a body within the probe\'s limit', observed: `more than ${String(observed.limitBytes)} bytes` });
     return;
   }
   if (expected.body !== undefined && observed.body !== expected.body) out.push({ field: `${at}.body`, expected: expected.body, observed: quote(observed.body) });
@@ -179,6 +203,11 @@ function compareResponse(expected: HttpExpectedResponse, observed: ProbeObservat
       parsed = JSON.parse(observed.body);
     } catch {
       out.push({ field: `${at}.json`, expected: canonical(expected.json), observed: `not JSON: ${quote(observed.body)}` });
+      return;
+    }
+    // JSON.parse reads a number past JSON's range as Infinity, which canonical would write as null.
+    if (!isJson(parsed)) {
+      out.push({ field: `${at}.json`, expected: canonical(expected.json), observed: `a number outside JSON's range: ${quote(observed.body)}` });
       return;
     }
     if (canonical(parsed) !== canonical(expected.json)) out.push({ field: `${at}.json`, expected: canonical(expected.json), observed: quote(canonical(parsed)) });

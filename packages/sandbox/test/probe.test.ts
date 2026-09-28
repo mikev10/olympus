@@ -8,8 +8,9 @@
  * The sandbox runs the proxy's pinned Node image, because the product under
  * test here is an HTTP server and alpine has none.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -23,8 +24,16 @@ import {
   type SandboxHandle,
   type SandboxSpec,
 } from '../src/index.js';
+import { PROBE_SOURCE } from '../src/local/probe.js';
 
 const run = promisify(execFile);
+
+/** Every field of the probe's container that its isolation rests on, in one inspect. */
+const PROBE_INSPECT_FORMAT =
+  '{{.HostConfig.NetworkMode}}|{{.HostConfig.PidMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}|{{json .HostConfig.SecurityOpt}}|{{.Config.User}}';
+
+/** Run inside the probe: whether the product's marker is visible, and whether its own node binary is, as the control. */
+const MARKER_CHECK = "const fs = require('node:fs'); process.stdout.write(JSON.stringify({ marker: fs.existsSync('/tmp/probe-marker'), control: fs.existsSync(process.execPath) }))";
 
 /** A server on 8080 answering `/`, `/slow` after two seconds, and `/big` with a body over the probe's cap. */
 const SERVER = `
@@ -132,15 +141,19 @@ describe('probe', () => {
     }
     expect(name).toBeDefined();
     const probe = name ?? '';
-    const format = '{{.HostConfig.NetworkMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}';
-    const { stdout } = await run('docker', ['inspect', '--format', format, probe]);
-    const [networkMode, mounts, readOnly, capDrop] = stdout.trim().split('|');
+    const { stdout } = await run('docker', ['inspect', '--format', PROBE_INSPECT_FORMAT, probe]);
+    const [networkMode, pidMode, mounts, readOnly, capDrop, securityOpt, user] = stdout.trim().split('|');
     expect(networkMode).toBe(`container:${h}`);
+    // Empty is Docker's own private PID namespace: the product's processes are not the probe's.
+    expect(pidMode).toBe('');
     expect(mounts).toBe('[]');
     expect(readOnly).toBe('true');
     expect(capDrop).toBe('["ALL"]');
-    const marker = await run('docker', ['exec', probe, 'cat', '/tmp/probe-marker']).then(() => 'present', () => 'absent');
-    expect(marker).toBe('absent');
+    expect(securityOpt).toBe('["no-new-privileges"]');
+    expect(user).toBe('65534:65534');
+    // Asked inside the probe, with a path it must have as a control, so a failed exec cannot read as absence.
+    const { stdout: seen } = await run('docker', ['exec', probe, 'node', '--eval', MARKER_CHECK]);
+    expect(JSON.parse(seen)).toEqual({ marker: false, control: true });
 
     const result = await call;
     expect(result.observations.map((o) => (o.kind === 'response' ? o.body : o.kind))).toEqual(['late']);
@@ -183,6 +196,37 @@ describe('probe', () => {
     const error = await refusal(() => provider.probe(h, request as unknown as ProbeRequest));
     expect(error.layer).toBe('probe');
     expect(error.message).toMatch(field);
+  }, 60_000);
+
+  test('the response limit runs from the moment a request is sent, so a trickled body cannot outlast it', async () => {
+    // The probe's own source against a host server, with a 400ms limit so the case is quick. A body
+    // sent a chunk every 100ms keeps the socket busy past the limit; an idle timer never fires (codex-6).
+    const server = createServer((_req, res) => {
+      let sent = 0;
+      const tick = setInterval(() => {
+        res.write('x');
+        sent += 1;
+        if (sent === 12) { clearInterval(tick); res.end(); }
+      }, 100);
+      res.on('close', () => { clearInterval(tick); });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('the test server has no port');
+      const child = spawn(process.execPath, ['--eval', PROBE_SOURCE], {
+        env: { ...process.env, PROBE_BODY_LIMIT: String(PROBE_BODY_LIMIT_BYTES), PROBE_RESPONSE_MS: '400' },
+      });
+      let out = '';
+      child.stdout.on('data', (c: Buffer) => { out += c.toString('utf8'); });
+      child.stdin.end(JSON.stringify({ port: address.port, readyWithinMs: 2000, exchanges: [{ method: 'GET', path: '/' }] }));
+      await new Promise((resolve) => { child.on('close', resolve); });
+      const result = JSON.parse(out) as { observations: Array<{ kind: string; reason?: string }> };
+      expect(result.observations).toEqual([{ kind: 'no-response', reason: 'no complete response within 400ms' }]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   }, 60_000);
 
   test('an ended sandbox is refused, and detach with stdin is refused', async () => {

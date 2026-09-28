@@ -2660,6 +2660,14 @@ The return is `{ kind: 'unmetered' }` or `{ kind: 'metered'; calls; inputTokens;
 - **Chosen: A.** B still fails when a neighbour creates a network mid-test, and C hides the race rather than removing it. A checks exactly what this provision would have left, and an operator reading a refusal can now find its leftovers by name.
 - **Reverse:** drop the field and return to the global comparison, with the suites serialised.
 
+### D-P11-07: One HTTP scenario per handle is enforced per adapter (known limit, owner I1)
+
+- **Ambiguous:** the unit spec refuses a second scenario "on a handle the adapter already served", and the adapter keeps the handles it served in a field of its own. A second `HttpBehavioralAdapter` built over the same provider does not know what the first served, so it runs a second scenario on that handle, and the first scenario's server, still listening, can answer it (external review of P11, codex-4, reproduced).
+- **Options:** (A) keep the refusal per adapter, and close reuse where handles are issued: every check gets a fresh sandbox; (B) move the record of served handles to the provider, shared by every adapter over it.
+- **Chosen: A.** Nothing in the codebase builds two adapters over one handle today, and nothing yet assigns sandboxes to checks at all. B would make the provider track a consumer's policy about its handles. The rule that closes the gap is P6's fresh sandbox for every check, which I1 wires. The adapter's doc comment now says the refusal is per adapter, not per handle.
+- **Owner:** I1, which wires P6's fresh sandbox per check, the rule that makes a second scenario on a served handle impossible, not merely refused. The assertion owed there: two scenarios given to two adapters never share a handle.
+- **Reverse:** implement B, keeping the served set on `LocalDockerProvider` and refusing a second detached `serve` on a handle whose probe has already run.
+
 ## P11 amendments to the contracts
 
 ### A-P11-01: `SandboxProvider.probe`

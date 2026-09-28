@@ -93,7 +93,8 @@ function headersOf(res) {
 function send(host, port, exchange) {
   return new Promise(function (resolve) {
     let settled = false;
-    function settle(observation) { if (!settled) { settled = true; resolve(observation); } }
+    let deadline;
+    function settle(observation) { if (!settled) { settled = true; clearTimeout(deadline); resolve(observation); } }
     const req = http.request({
       host: host, port: port, method: exchange.method, path: exchange.path,
       headers: exchange.headers || {}, agent: false,
@@ -114,10 +115,12 @@ function send(host, port, exchange) {
       });
       res.on('error', function (error) { settle({ kind: 'no-response', reason: 'the response broke off: ' + error.message }); });
     });
-    req.setTimeout(RESPONSE_MS, function () {
+    // A timer of its own, not req.setTimeout: that one measures socket idleness, and a body
+    // trickled a byte at a time would keep resetting it.
+    deadline = setTimeout(function () {
       settle({ kind: 'no-response', reason: 'no complete response within ' + RESPONSE_MS + 'ms' });
       req.destroy();
-    });
+    }, RESPONSE_MS);
     req.on('error', function (error) { settle({ kind: 'no-response', reason: error.message }); });
     if (exchange.body !== undefined) req.write(exchange.body);
     req.end();

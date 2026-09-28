@@ -69,8 +69,8 @@ export const HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT: LocalAssertion = runtime({
 export const HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM: LocalAssertion = runtime({
   id: 'I2.http-probe-shares-network-not-filesystem',
   title:
-    "the probe is inspected while it runs: in the sandbox's network namespace, nothing mounted, a read-only root, every capability " +
-    'dropped, and without a file the product wrote; a deny-all sandbox it probed is still --network none, and no probe outlives its call',
+    "the probe is inspected while it runs: in the sandbox's network namespace and its own process namespace, nothing mounted, a " +
+    'read-only root, every capability dropped, no new privileges, an unprivileged user, and without a file the product wrote; a deny-all sandbox it probed is still --network none, and no probe outlives its call',
   run: async () => {
     const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
     await withProvider('conformance-probe-', async (provider, dirs) => {
@@ -87,12 +87,19 @@ export const HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM: LocalAssertion = runtime(
           if (probe === undefined) await new Promise((r) => setTimeout(r, 100));
         }
         if (probe === undefined) throw new Error('I2: no probe container was seen while the call ran');
-        const format = '{{.HostConfig.NetworkMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}';
+        // PidMode empty is Docker's private PID namespace: the product's processes are not the probe's.
+        const format =
+          '{{.HostConfig.NetworkMode}}|{{.HostConfig.PidMode}}|{{json .Mounts}}|{{.HostConfig.ReadonlyRootfs}}|{{json .HostConfig.CapDrop}}|' +
+          '{{json .HostConfig.SecurityOpt}}|{{.Config.User}}';
         const inspected = (await run('docker', ['inspect', '--format', format, probe])).stdout.trim();
-        const wanted = `container:${h}|[]|true|["ALL"]`;
+        const wanted = `container:${h}||[]|true|["ALL"]|["no-new-privileges"]|65534:65534`;
         if (inspected !== wanted) throw new Error(`I2: the probe ran as ${inspected}, not ${wanted}`);
-        const marker = await run('docker', ['exec', probe, 'cat', '/tmp/probe-marker']).then(() => 'present', () => 'absent');
-        if (marker !== 'absent') throw new Error("I2: a file the product wrote is in the probe's filesystem");
+        // Asked inside the probe, with its own node binary as a control, so an exec that failed
+        // cannot pass for a file that is absent.
+        const check =
+          "const fs = require('node:fs'); process.stdout.write(JSON.stringify({ marker: fs.existsSync('/tmp/probe-marker'), control: fs.existsSync(process.execPath) }))";
+        const inside = (await run('docker', ['exec', probe, 'node', '--eval', check])).stdout.trim();
+        if (inside !== '{"marker":false,"control":true}') throw new Error(`I2: inside the probe, the product's marker and the control read ${inside}`);
 
         const result = await call;
         const [seen] = result.observations;
