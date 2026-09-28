@@ -28,13 +28,22 @@ export type RefusalLayer =
   /** The user is not a uid and gid, or cannot write the rw workspace on a host that enforces ownership. */
   | 'user'
   /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, an upstream host the allowlist also names, or a relay that did not come up. */
-  | 'relay';
+  | 'relay'
+  /** A probe request this provider cannot send: a port, a wait, or an exchange it cannot read, or `detach` with `stdin`. */
+  | 'probe';
 
 export class SandboxRefusal extends Error {
   override readonly name = 'SandboxRefusal';
   constructor(
     readonly layer: RefusalLayer,
     message: string,
+    /**
+     * The sandbox a failed start was for, by container name, when the refusal
+     * came after the provider had chosen one. What was created for it is named
+     * from it, so a caller can check exactly those rather than the whole
+     * daemon (issue #14).
+     */
+    readonly sandbox?: string,
   ) {
     super(message);
   }

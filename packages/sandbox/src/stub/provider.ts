@@ -70,6 +70,9 @@ export class StubSandboxProvider implements SandboxProvider {
     if (cwd === undefined) return Promise.reject(new Error(`StubSandboxProvider: unknown handle ${h}`));
     const [file, ...args] = cmd;
     if (file === undefined) return Promise.reject(new Error('StubSandboxProvider: empty command'));
+    // Its only consumer is an HTTP scenario, which this provider cannot serve: it has no `probe`,
+    // because every process it runs is on the host beside the product (D-P11-04, D-P11-05).
+    if (options.detach === true) return Promise.reject(new Error('StubSandboxProvider: detach is not supported; it serves HTTP scenarios, and this provider has no probe'));
     // The value is set on the child alone, never appended to `args`. The stub enforces nothing
     // else a SandboxSpec implies, but leaking a credential into an argv is a habit worth not
     // having in the one implementation that runs on a developer's own machine.

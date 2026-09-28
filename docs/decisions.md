@@ -2653,6 +2653,13 @@ The return is `{ kind: 'unmetered' }` or `{ kind: 'metered'; calls; inputTokens;
 - **Chosen: A.** The only consumer of `detach` is the HTTP adapter, which the stub cannot serve (D-P11-04), so B would be code with no caller. Refusal is loud.
 - **Reverse:** implement B in `packages/sandbox/src/stub`.
 
+### D-P11-06: Issue #14 is fixed by naming the sandbox on a failed start
+
+- **Ambiguous:** the cleanup test cannot check "the networks this provision created" without knowing the id the provider chose, and the provider chooses it internally.
+- **Options:** (A) `SandboxRefusal` carries an optional `sandbox`, the container name a failed start was for, and the test derives the sidecar names from it; (B) keep diffing every `egress-*` network but tolerate ones that vanished; (C) serialise the two suites.
+- **Chosen: A.** B still fails when a neighbour creates a network mid-test, and C hides the race rather than removing it. A checks exactly what this provision would have left, and an operator reading a refusal can now find its leftovers by name.
+- **Reverse:** drop the field and return to the global comparison, with the suites serialised.
+
 ## P11 amendments to the contracts
 
 ### A-P11-01: `SandboxProvider.probe`
