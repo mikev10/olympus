@@ -4,9 +4,14 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspacePackages } from '../kit/workspace.js';
 import { assertApiRunsHeadless } from './headless.js';
 
-/** Modules that exist to drive a terminal. None may be imported by the runtime. */
+/**
+ * Modules that exist to drive a terminal, and `process` as a module, which
+ * hands out the same streams under names the binding scan does not follow.
+ * None may be imported by the runtime; it reads `process.env` by member name.
+ */
 const TERMINAL_MODULES: ReadonlySet<string> = new Set([
   'tty', 'node:tty',
+  'process', 'node:process',
   'readline', 'node:readline', 'readline/promises', 'node:readline/promises',
   'inquirer', 'prompts', 'enquirer', 'ink', 'chalk', 'ora', 'commander', 'yargs', 'blessed', 'cli-progress',
 ]);

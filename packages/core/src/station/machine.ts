@@ -304,6 +304,11 @@ export function nextStep(state: RunState, graph: TaskGraph, contracts: StationCo
       refusal: { ok: false, reason: 'cancelled', cancelledBy: by, cancelledAt: at, message: `the run was cancelled by ${by} at ${at} and does not continue` },
     };
   }
+  // A drive that ended in an error stopped the run without saying why in its state; the halt is that record (A-P9-02).
+  if (state.halted !== null) {
+    const { at, message } = state.halted;
+    return { kind: 'refuse', refusal: { ok: false, reason: 'halted', haltedAt: at, message: `a drive of the run ended in an error at ${at} and the run does not continue: ${message}` } };
+  }
   if (state.violations.length > 0) {
     return {
       kind: 'refuse',

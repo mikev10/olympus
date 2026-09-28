@@ -79,6 +79,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     reviews: [],
     usage: [],
     cancelled: null,
+    halted: null,
     version: '1',
     ...overrides,
   };
@@ -244,6 +245,18 @@ describe('nextStep', () => {
     }
   });
 
+
+  test('refuses every step of a halted run, after a cancellation and before anything else (A-P9-02)', () => {
+    const halted = { at: '2026-09-28T00:00:00.000Z', message: 'the result did not match the contract' };
+    for (const s of [state({ halted }), state({ halted, station: 'build', tasks: { a: 'running' } as RunState['tasks'] })]) {
+      expect(nextStep(s, GRAPH)).toEqual({
+        kind: 'refuse',
+        refusal: { ok: false, reason: 'halted', haltedAt: halted.at, message: expect.stringContaining('the result did not match the contract') as unknown },
+      });
+    }
+    const cancelled = { by: 'local', at: '2026-09-28T00:00:01.000Z' };
+    expect(nextStep(state({ halted, cancelled }), GRAPH)).toMatchObject({ kind: 'refuse', refusal: { reason: 'cancelled' } });
+  });
 
   test('the runtime stations work, then exit into their successor', () => {
     expect(nextStep(state(), GRAPH)).toEqual({ kind: 'work', station: 'intake' });

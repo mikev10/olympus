@@ -67,6 +67,7 @@ function state(): RunState {
     reviews: [],
     usage: [],
     cancelled: null,
+    halted: null,
     version: '0',
   };
 }

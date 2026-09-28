@@ -149,6 +149,17 @@ export interface RunCancellation {
 }
 
 /**
+ * A drive of the run that ended in an error rather than a refusal, recorded
+ * by the runtime that drove it. The line stopped without committing why, so
+ * this is that record: `message` is the runtime's own account of the error,
+ * never a field a driver returned (A-P9-02).
+ */
+export interface RunHalt {
+  readonly at: string;
+  readonly message: string;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
@@ -185,5 +196,11 @@ export interface RunState {
    * cannot carry it on (A-P9-01).
    */
   readonly cancelled: RunCancellation | null;
+  /**
+   * Null while the run may continue. Set when a drive ended in an error, and
+   * never cleared: the station machine refuses every step of a halted run, so
+   * its status reads stopped and a cancel cannot relabel it (A-P9-02).
+   */
+  readonly halted: RunHalt | null;
   readonly version: string;             // optimistic concurrency
 }

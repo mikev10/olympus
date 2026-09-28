@@ -91,6 +91,7 @@ function state(version: string): RunState {
     reviews: [],
     usage: [],
     cancelled: null,
+    halted: null,
     version,
   };
 }
@@ -362,6 +363,16 @@ describe('records read back from the store', () => {
       await mkdir(dir, { recursive: true });
       const { [field]: _dropped, ...partial } = state('1');
       await writeFile(join(dir, '1.json'), JSON.stringify(partial));
+      await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
+    },
+  );
+
+  test.each([['cancelled', undefined], ['cancelled', { by: 'x' }], ['halted', undefined], ['halted', { at: 'x' }]] as const)(
+    'a run state whose %s is missing or malformed is refused (A-P9-01, A-P9-02)',
+    async (field, value) => {
+      const dir = join(store, 'runs', runId, 'state');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, '1.json'), JSON.stringify({ ...state('1'), [field]: value }));
       await expect(vault.readRunState(runId)).rejects.toThrow(/does not hold a run state/);
     },
   );

@@ -4,6 +4,7 @@
  * of a run nothing is driving and of one being driven, and the event stream.
  */
 import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
@@ -154,6 +155,18 @@ describe('the worst-case cost, approved before a run starts (D-P9-03)', () => {
 });
 
 /** A driver that holds its first call until the test lets it go. */
+/** Returns the stub's result with a `status` the contract does not define, as a driver reporting its own outcome would. */
+class StatusReportingDriver extends DelegatingDriver {
+  constructor() {
+    super(new StubDriver());
+  }
+
+  override async runTask(req: TaskRequest): Promise<TaskResult> {
+    const result = await this.inner.runTask(req);
+    return { ...result, status: 'passed' } as TaskResult;
+  }
+}
+
 class HeldDriver extends DelegatingDriver {
   release: () => void = () => undefined;
   readonly entered: Promise<void>;
@@ -206,6 +219,42 @@ describe('cancel (A-P9-01)', () => {
     await settled(second.runId);
     expect((await call('POST', `/runs/${second.runId}/cancel`)).status).toBe(200);
     expect((await call('POST', `/runs/${second.runId}/cancel`)).status).toBe(409);
+  });
+
+  test('a passed or cancelled run stays so when an admitted artifact is edited afterwards; the committed record is read first (P9 review, codex-3)', async () => {
+    await serve();
+    const passed = await created();
+    await settled(passed.runId);
+    expect((await call('POST', `/runs/${passed.runId}/approve`, { key: 'integrate:1' })).status).toBe(200);
+    expect((await settled(passed.runId)).standing).toEqual({ standing: 'passed' });
+    const cancelled = await created();
+    await settled(cancelled.runId);
+    expect((await call('POST', `/runs/${cancelled.runId}/cancel`)).status).toBe(200);
+
+    await writeFile(join(workspace, ARTIFACTS.taskGraph), '{}');
+    expect(((await call('GET', `/runs/${passed.runId}`)).body as RunView).standing).toEqual({ standing: 'passed' });
+    expect(((await call('GET', `/runs/${cancelled.runId}`)).body as RunView).standing).toMatchObject({ standing: 'stopped', refusal: { reason: 'cancelled', cancelledBy: PRINCIPAL } });
+    expect((await call('POST', `/runs/${passed.runId}/cancel`)).status).toBe(409);
+  });
+
+  test('a drive that ends in an error halts the run in the Vault: status reads stopped, a cancel is refused, and a restarted server reads the same (A-P9-02, P9 review codex-2)', async () => {
+    await serve({ driver: new StatusReportingDriver() });
+    const run = await created();
+    const ended = await settled(run.runId);
+    expect(ended.lastOutcome).toMatchObject({ kind: 'error', message: expect.stringContaining('does not match the TaskResult contract') as unknown });
+    expect(ended.state.halted).toEqual({ at: expect.any(String) as unknown, message: expect.stringContaining('does not match the TaskResult contract') as unknown });
+    expect(ended.standing).toMatchObject({ standing: 'stopped', refusal: { reason: 'halted' } });
+    const res = await call('POST', `/runs/${run.runId}/cancel`);
+    expect(res).toMatchObject({ status: 409, body: { error: 'refused', refusal: { reason: 'finished' } } });
+
+    // A second server over the same Vault holds nothing in memory; the halt is read from the record.
+    const vault = components.vault;
+    await server?.close();
+    await serve({ vault });
+    const restarted = (await call('GET', `/runs/${run.runId}`)).body as RunView;
+    expect(restarted.lastOutcome).toBeNull();
+    expect(restarted.standing).toMatchObject({ standing: 'stopped', refusal: { reason: 'halted' } });
+    expect(restarted.state.cancelled).toBeNull();
   });
 
   test('a run being driven is cancelled by the line between steps, and the call in flight keeps its usage record (D-P9-04)', async () => {

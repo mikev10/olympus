@@ -457,6 +457,7 @@ export async function admitRun(req: RunRequest): Promise<AdmissionOutcome> {
       reviews: [],
       usage: [],
       cancelled: null,
+      halted: null,
       version: '0',
     },
     '0',
@@ -634,9 +635,25 @@ export type RunStanding =
   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey }
   | { readonly standing: 'open' };
 
+/** The station whose exit ends an M1 run. */
+const LAST_STATION: StationId = M1_STATIONS[M1_STATIONS.length - 1] ?? 'integrate';
+
 export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding }> {
   const state = await vault.readRunState(runId);
   const { record, policy } = await readAdmission(vault, state);
+  // What was committed is read before what the workspace holds now. A cancellation, a halt, and the grant
+  // spent in the commit that ended a passed run, are records an artifact edited afterwards does not
+  // undo; re-hashed first, a later edit would report either run as tampered (P9 review, codex-3).
+  if (state.cancelled !== null || state.halted !== null) {
+    // `nextStep` refuses a cancelled or halted run before any other check, so no graph is needed to read why (A-P9-01, A-P9-02).
+    const ended = nextStep(state, { tasks: [], edges: [] });
+    if (ended.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: ended.refusal } };
+  }
+  // The last exit is crossed only by a run that passed, and when it needs an approval the line
+  // spends the grant in the commit that ends the run. A spent grant for it is that record; the
+  // gate re-evaluated would ask for a second approval of an exit already crossed (D-P9-08).
+  const last = approvalKey(LAST_STATION, record.run.requestedLevel);
+  if (state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) return { state, standing: { standing: 'passed' } };
   const { graph, changed } = await reloadExecuted(record);
   if (changed.length > 0) {
     const paths = changed.map((c) => c.path).join(', ');
@@ -645,13 +662,6 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   const step = nextStep(state, graph);
   if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal } };
   if (step.kind !== 'exit') return { state, standing: { standing: 'open' } };
-  // The last exit is crossed only by a run that passed, and when it needs an approval the line
-  // spends the grant in the commit that ends the run. A spent grant for it is that record; the
-  // gate re-evaluated would ask for a second approval of an exit already crossed.
-  const last = approvalKey(step.from, record.run.requestedLevel);
-  if (!M1_STATIONS.includes(step.to) && state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) {
-    return { state, standing: { standing: 'passed' } };
-  }
   const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };
   const next = transition({
     from: step.from,

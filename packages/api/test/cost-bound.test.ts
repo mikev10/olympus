@@ -97,3 +97,25 @@ test('the figure sums each task\'s calls at its own role\'s ceiling, rounded to 
   expect(figure.usd).toBe(2.91);
   expect(figure.tasks.map((t) => t.usd)).toEqual([0.9, 0.9, 1.11]);
 });
+
+test('each task\'s share is rounded up, never to nearest, so the figure is not below the ceiling it stands for', () => {
+  const doc = policy();
+  const priced = {
+    ...doc,
+    roles: {
+      [BUILDER]: { ...doc.roles[BUILDER], budget: { maxTokens: 1, maxCostUsd: 1.00000004, maxWallClockMs: 1 } },
+      [REVIEWER]: { ...doc.roles[REVIEWER], budget: { maxTokens: 1, maxCostUsd: 0.07, maxWallClockMs: 1 } },
+    },
+  } as typeof doc;
+  const figure = worstCaseCost(
+    { tasks: [
+      { id: 'a', station: 'build', role: BUILDER } as never,
+      { id: 'b', station: 'build', role: BUILDER } as never,
+      { id: 'r', station: 'review', role: REVIEWER } as never,
+    ], edges: [] },
+    priced,
+  );
+  // 9 × 1.00000004 is 9.00000036: nearest rounding gives 9, which a build task can exceed.
+  expect(figure.tasks.map((t) => t.usd)).toEqual([9.000001, 9.000001, 0.21]);
+  expect(figure.usd).toBe(18.210002);
+});

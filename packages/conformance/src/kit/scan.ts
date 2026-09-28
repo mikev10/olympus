@@ -246,6 +246,36 @@ function memberName(node: ts.PropertyName | ts.BindingName | ts.Expression): str
   return undefined;
 }
 
+/** Whether `node` names Node's global `process` object, directly or as `globalThis.process`. */
+function isGlobalProcess(checker: ts.TypeChecker, node: ts.Identifier): boolean {
+  if (node.text !== 'process') return false;
+  const symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+    ? checker.getShorthandAssignmentValueSymbol(node.parent)
+    : checker.getSymbolAtLocation(node);
+  return symbol?.declarations?.some((d) => ts.isVariableDeclaration(d) && toPosix(d.getSourceFile().fileName).includes('/@types/node/')) ?? false;
+}
+
+/**
+ * Whether a reference to `process` lets the object go anywhere the scan cannot
+ * follow it. Reading a member by name, destructuring named members, and
+ * `typeof process` in a type keep it in view; the terminal members among those
+ * are reported by the rules above. Anything else — an assignment, an
+ * argument, a cast, a spread, a computed key — hands the object on under a
+ * type the scan may not recognise, as `const p: Pick<NodeJS.Process, 'stdout'>
+ * = process` does, so it is reported itself.
+ */
+function processEscapes(node: ts.Identifier): boolean {
+  const expr: ts.Node = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node ? node.parent : node;
+  const parent = expr.parent;
+  if (ts.isTypeQueryNode(parent)) return false;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === expr) return false;
+  if (ts.isElementAccessExpression(parent) && parent.expression === expr) return memberName(parent.argumentExpression) === undefined;
+  if (ts.isVariableDeclaration(parent) && parent.initializer === expr && ts.isObjectBindingPattern(parent.name)) {
+    return parent.name.elements.some((e) => e.dotDotDotToken !== undefined || memberName(e.propertyName ?? e.name) === undefined);
+  }
+  return true;
+}
+
 /**
  * Terminal use found by binding rather than by spelling: what the checker
  * resolves, not what the source happens to say. A value typed as Node's
@@ -256,6 +286,9 @@ function memberName(node: ts.PropertyName | ts.BindingName | ts.Expression): str
  * Node's `tty` or `readline` modules. So `const { stdout } = process`,
  * `const p = process; p.exit()`, `const c = console`, and a re-export of
  * `tty` from a local module are each caught (the D-S1 note owed to P9).
+ * `process` itself may only be read by member name: handed on as a value, it
+ * is reported, since a structural type or a cast would hide it from the
+ * rules that follow types (P9 review, codex-5).
  */
 export function terminalBindings(sf: ts.SourceFile, checker: ts.TypeChecker): Located[] {
   const out: Located[] = [];
@@ -271,6 +304,10 @@ export function terminalBindings(sf: ts.SourceFile, checker: ts.TypeChecker): Lo
     } else if (ts.isIdentifier(node)) {
       if (typeIs(checker, node, 'Console')) {
         out.push(locate(sf, node, `Console ${node.text}`));
+        return;
+      }
+      if (isGlobalProcess(checker, node) && processEscapes(node)) {
+        out.push(locate(sf, node, `process as a value`));
         return;
       }
       let symbol = checker.getSymbolAtLocation(node);

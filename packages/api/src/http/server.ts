@@ -181,6 +181,7 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     };
     entry.drive = start(hooks)
       .then((outcome): DriveEnd => ({ kind: 'outcome', outcome }), (error: unknown): DriveEnd => ({ kind: 'error', message: describe(error) }))
+      .then((end) => (end.kind === 'error' ? halt(runId, end) : end))
       .then(async (end) => {
         entry.lastOutcome = end;
         entry.drive = null;
@@ -189,6 +190,25 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         if (standing !== undefined) publish(entry, { event: 'standing', data: standing });
         publish(entry, { event: 'end', data: end });
       });
+  };
+
+  /**
+   * A drive that ended in an error, rather than a refusal the line committed,
+   * left the run's state as it was mid-step, which status would read as open
+   * and a cancel would relabel. The halt is committed so the stop is the
+   * Vault's record, and survives this process (A-P9-02). A run already
+   * cancelled keeps that record instead; if the halt cannot be committed, the
+   * drive's end says so.
+   */
+  const halt = async (runId: RunId, end: DriveEnd & { kind: 'error' }): Promise<DriveEnd> => {
+    try {
+      const state = await components.vault.readRunState(runId);
+      if (state.cancelled !== null || state.halted !== null) return end;
+      await components.vault.commitRunState({ ...state, halted: { at: new Date().toISOString(), message: end.message } }, state.version);
+      return end;
+    } catch (error) {
+      return { kind: 'error', message: `${end.message}; the halt could not be recorded: ${describe(error)}` };
+    }
   };
 
   const view = async (runId: RunId): Promise<RunView> => {

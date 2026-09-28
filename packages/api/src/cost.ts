@@ -119,7 +119,7 @@ export interface WorstCaseTask {
  * starts under its budget may end over it by at most one response.
  */
 export interface WorstCaseCost {
-  /** Rounded to a millionth of a dollar, so the figure a person approves is the figure compared. */
+  /** Rounded up to a millionth of a dollar per task, so the figure a person approves is the figure compared and never below the ceiling. */
   readonly usd: number;
   readonly calls: number;
   readonly tasks: readonly WorstCaseTask[];
@@ -137,8 +137,30 @@ export function worstCaseCost(graph: TaskGraph, policy: Policy): WorstCaseCost {
     if (!resolved.ok) throw new Error(`worst-case cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
     const calls = maxStarts(STATION_CONTRACTS[task.station]);
     const perCall = resolved.scope.budget.maxCostUsd;
-    tasks.push({ task: task.id, station: task.station, role: task.role, calls, maxCostUsdPerCall: perCall, usd: Math.round(calls * perCall * MICRO) / MICRO });
+    tasks.push({ task: task.id, station: task.station, role: task.role, calls, maxCostUsdPerCall: perCall, usd: Number(microsCeiling(perCall, calls)) / MICRO });
   }
-  const micro = tasks.reduce((sum, t) => sum + Math.round(t.usd * MICRO), 0);
-  return { usd: micro / MICRO, calls: tasks.reduce((sum, t) => sum + t.calls, 0), tasks };
+  const micro = tasks.reduce((sum, t) => sum + microsCeiling(t.maxCostUsdPerCall, t.calls), 0n);
+  return { usd: Number(micro) / MICRO, calls: tasks.reduce((sum, t) => sum + t.calls, 0), tasks };
+}
+
+/**
+ * `calls` times `usd`, in whole millionths of a dollar, rounded up, so a
+ * task's share is never less than the ceiling it stands for. Computed exactly
+ * from the number's shortest decimal spelling, the one the policy author
+ * wrote, so `0.07` is 70000 and not the 70001 that `Math.ceil(0.07 * 1e6)`
+ * gives from the binary value.
+ */
+export function microsCeiling(usd: number, calls = 1): bigint {
+  if (!Number.isFinite(usd) || usd < 0) throw new Error(`worst-case cost: ${String(usd)} is not a non-negative amount`);
+  if (!Number.isSafeInteger(calls) || calls < 0) throw new Error(`worst-case cost: ${String(calls)} is not a count of calls`);
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(usd));
+  // String() of a finite non-negative number always has this shape.
+  if (match === null) throw new Error(`worst-case cost: cannot read ${String(usd)} as a decimal`);
+  const fraction = match[2] ?? '';
+  // usd = units / 10^scale exactly, where the exponent moves the point.
+  const units = BigInt((match[1] ?? '0') + fraction) * BigInt(calls);
+  const scale = fraction.length - Number(match[3] ?? '0') - 6;
+  if (scale <= 0) return units * 10n ** BigInt(-scale);
+  const divisor = 10n ** BigInt(scale);
+  return (units + divisor - 1n) / divisor;
 }

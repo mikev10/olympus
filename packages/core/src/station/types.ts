@@ -97,7 +97,8 @@ export type StationRefusal =
   | { ok: false; reason: 'approval-required'; key: ApprovalKey; message: string }
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
   | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string }
-  | { ok: false; reason: 'cancelled'; cancelledBy: string; cancelledAt: string; message: string };
+  | { ok: false; reason: 'cancelled'; cancelledBy: string; cancelledAt: string; message: string }
+  | { ok: false; reason: 'halted'; haltedAt: string; message: string };
 
 /**
  * `spends` names the approval grant the advance consumes, or null when the
