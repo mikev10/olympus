@@ -1,3 +1,49 @@
+# External review of P7, gemini, 2026-09-29
+
+An adversarial pre-merge review of P7 (tamper detection): `analyzeTamper` over a
+task's base and verified trees, the adapters' case enumeration, skip-marker and
+assertion extraction, the protected-path and dispatch checks, the report's path
+into the Vault, the evidence bundle, the review seat, and the `integrate`
+escalation, and the conformance entries that claim each of these. Triaged in
+`2026-09-29-P7-tamper-detection-triage.md`, which cites this review's findings
+as `gemini-1` to `gemini-6`, numbered in the order the reply gives them.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools. `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 241.4 s. Ingestion `complete`: 95,749
+  prompt tokens against a floor of 67,777. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `0964f9567bc5d641fbae788497e9495b2254de399854a6a680fedb72d2e81d94`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex also raised gemini-3 (codex-2: context-skip
+  aliasing), gemini-4 (codex-1 for test utilities, codex-5 for dispatched
+  scripts), and gemini-6 (codex-6: a missing test adapter returns empty
+  findings). Gemini alone raised gemini-1 (shadowed test declarers), gemini-2
+  (tagged-template `each`), and gemini-5 (assertions in unreachable code).
+- **Date:** 2026-09-29
+- **Bundle:** `2026-09-29-P7-tamper-detection-review-bundle.txt`, SHA-256
+  `60bf727f9a108bc7733d7fbd2969528bf1367adc39183390678be8724bc236f5`, base
+  `3528016` (`reviewed/P9`), head `6b1c8c3` (the P7 commit, "P7: Tamper
+  detection"). The full contents of 26 of the 28 files changed in that range;
+  `docs/decisions.md` and `docs/plan/DECOMPOSITION.md` were excluded, as the
+  prompt withholds design documents. Unchanged files were not in it. Prompt:
+  `2026-09-29-P7-tamper-detection-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  about the project and made no external lookups. A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** the reply is a list of six findings with no
+  per-item structure. Items 1, 3, and 5 are answered by them (1, 3, 4, 5 for
+  item 1; 2 and 6 for item 3; the dispatched-script half of 4 for item 5).
+  Items 2 (tautological checks), 4 (language escape hatches), 6 (mechanisms
+  assessed as sound), and 7 (whether the framing is right) came back empty.
+  That silence is recorded, not read as endorsement.
+- **Citations:** line numbers refer to positions within the bundle's copy of
+  each file, not the repository, and are treated as hints to the construct.
+
 BASE: reviewed/P9
 HEAD: 6b1c8c3
 packages/vault/test/stub.test.ts

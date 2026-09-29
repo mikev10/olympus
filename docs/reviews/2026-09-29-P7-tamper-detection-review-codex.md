@@ -1,3 +1,53 @@
+# External review of P7, codex, 2026-09-29
+
+An adversarial pre-merge review of P7 (tamper detection): `analyzeTamper` over a
+task's base and verified trees, the adapters' case enumeration, skip-marker and
+assertion extraction, the protected-path and dispatch checks, the report's path
+into the Vault, the evidence bundle, the review seat, and the `integrate`
+escalation, and the conformance entries that claim each of these. Triaged in
+`2026-09-29-P7-tamper-detection-triage.md`, which cites this review's findings
+as `codex-1` to `codex-7`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: `configHome` `["auth.json"]`, `workDir` `[]`. Exit 0, not timed
+  out, 102.0 s. Ingestion `complete`: 99,517 input tokens against a floor of
+  67,777. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `e84e100bd0b8da8f2c2babedd5862e3d1d23798bcdee7fa84e8982973aec8194`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini also raised codex-1 (as part of gemini-4:
+  test utilities outside the analysed set), codex-2 (gemini-3: context-skip
+  aliasing), codex-5 (the dispatched-script half of gemini-4), and codex-6
+  (gemini-6: a missing test adapter returns empty findings). Codex alone raised
+  codex-3 (a shrinking `test.each` table), codex-4 (global pairing of `.only`
+  markers), and codex-7 (the conformance fixtures' pinned check).
+- **Date:** 2026-09-29
+- **Bundle:** `2026-09-29-P7-tamper-detection-review-bundle.txt`, SHA-256
+  `60bf727f9a108bc7733d7fbd2969528bf1367adc39183390678be8724bc236f5`, base
+  `3528016` (`reviewed/P9`), head `6b1c8c3` (the P7 commit, "P7: Tamper
+  detection"). The full contents of 26 of the 28 files changed in that range;
+  `docs/decisions.md` and `docs/plan/DECOMPOSITION.md` were excluded, as the
+  prompt withholds design documents. Unchanged files, such as the adapters'
+  `assertions.ts`, were not in it. Prompt:
+  `2026-09-29-P7-tamper-detection-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups, that a local file-listing attempt was
+  blocked, and that it executed no tests and did not verify the bundle's hash.
+  A self-report, not independently verifiable.
+- **Coverage, and any gap:** all seven prompt items were answered. Items 1 and
+  5 by findings 1–5, item 2 by finding 7, item 3 by finding 6, item 4 by a
+  paragraph reporting no direct language escape, item 6 by a list of mechanisms
+  it assessed as sound, and item 7 by a closing paragraph proposing a different
+  acceptance question.
+- **Citations:** line numbers refer to positions within the bundle's copy of
+  each file, not the repository, and are treated as hints to the construct.
+
 BASE: reviewed/P9  
 HEAD: 6b1c8c3  
 packages/vault/test/stub.test.ts  
