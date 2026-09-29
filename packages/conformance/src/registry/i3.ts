@@ -230,5 +230,21 @@ export const I3: InvariantEntry = {
         + 'D-P8-14. Owned by M3, beside mutation testing: the suite and the coverage writer share a process, so no '
         + 'location for the report decides whether its hit counts are true (D-P6-05).',
     }),
+    pending({
+      id: 'I3.unchanged-assertion-still-judges',
+      owner: 'M3',
+      reason:
+        'Tamper analysis reads the test files that changed and compares what they say. An assertion it reads as '
+        + 'unchanged can stop judging without its file changing, or while the change reads as nothing: a helper, fixture, '
+        + 'custom matcher, setup file, or type the test imports is rewritten to pass everything; the assertion is moved '
+        + 'into a branch that never runs or a function never called; a script the pinned command runs imports a module '
+        + 'that now does nothing. None of those is a test file, and reachability is not decidable by parsing. The '
+        + "policy's protected paths can name the files a repository knows to be load-bearing, and a pinned command's "
+        + 'own script is protected (D-P7-10), but no reading of the diff decides what an unchanged assertion now '
+        + 'executes. Closing it means running the suite against mutants of the code under test and requiring the '
+        + 'suite that passed at the base to kill the ones it killed there, with an assertion that a helper rewritten to '
+        + 'return early, and an assertion made unreachable, each lower the kill rate and escalate. Raised by the P7 '
+        + 'external review (codex-1, gemini-4, gemini-5) and recorded as D-P7-11. Owned by M3, beside mutation testing.',
+    }),
   ],
 };

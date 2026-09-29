@@ -464,5 +464,18 @@ export const I5: InvariantEntry = {
         'every run above L1 is refused for that reason first, so this assertion would pass whether or not the adapter ' +
         'refusal is wired. I1 deletes SKELETON_LINE, so the assertion lands with it.',
     }),
+    pending({
+      id: 'I5.unanalysed-tests-are-not-reported-clean',
+      owner: 'I1',
+      reason:
+        'A stack with no test adapter gives a tamper report whose test fields are empty, the same report a clean change '
+        + 'gives (D-P7-06): the unavailable `test` control is recorded at admission, not in the report `integrate` and the '
+        + 'review seat read. At L1 that is no route past a human, and while SKELETON_LINE stands no run is admitted above '
+        + 'L1. Once I1 deletes it, an L2 run over such a stack would carry an evidence bundle that reads as analysed and '
+        + 'clean. Before then the report, or the escalation derived from it, must say the test analysis did not run, and '
+        + 'the assertion must run a task over a repository with no vitest or jest at L2 and require that `integrate` '
+        + 'escalates or refuses. Raised by the P7 external review (codex-6, gemini-6) and recorded as D-P7-09. Owned by I1, '
+        + 'which lifts the L1 cap.',
+    }),
   ],
 };

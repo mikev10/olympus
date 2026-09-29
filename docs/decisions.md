@@ -2819,6 +2819,35 @@ Surfaced by the external review (codex-2): a driver result carrying a `status` f
 - **Chosen:** `driving` and `lastOutcome` are taken before the read. A drive running when the read starts is reported as running, so a client polls once more; a view reporting `driving: false` holds a state read after the drive ended. Fixed here rather than recorded, because it made this unit's own gate flaky. Fifteen consecutive runs of the server, line, and tamper suites passed after it, where it had failed within a few before.
 - **Reverse:** read `runs.get(runId)` after `runStanding` again.
 
+### D-P7-09: A report over a stack with no test adapter reads as clean (known limit, owned by I1)
+
+- **Found:** by the external review (codex-6, gemini-6). D-P7-06 stands, and so does its reason. What it left unsaid is that the report such a stack gets is the same report a clean change gets: the unavailable `test` control is in the admission record, not in the report `integrate` and the review seat read.
+- **Chosen:** not changed in P7. No run is admitted above L1 while `SKELETON_LINE` stands, and at L1 a human approves `integrate` anyway. Registered as the pending `I5.unanalysed-tests-are-not-reported-clean`, owned by I1, which lifts the L1 cap and must close this gap before any L2 run can carry such a bundle. The I5 baseline rises from 2 to 3.
+- **Reverse:** throw from `analyzeTamper` when `set.test` is null (D-P7-06's reverse), or add a contract field saying the test analysis did not run.
+
+### D-P7-10: A file the pinned command names is part of what it dispatches through
+
+- **Found:** by the external review (codex-5, and the dispatched-script half of gemini-4). A pinned `node scripts/check.mjs` runs whatever that file says. The file is not a config file, so rewriting it to `process.exit(0)` left the report empty unless the policy happened to protect it.
+- **Chosen:** `TamperOptions` gains `commands`, the pinned checks' argument vectors, and a changed file that any token of them names is added to `protectedPathsTouched`. Each element is split on whitespace, quotes, and `=`, so `sh -c "node scripts/run.mjs"` and `--config=ci.config.ts` name their files as well. A token that names nothing costs nothing, while a token missed would leave a dispatch unprotected. The line passes `ctx.checks`. `I3.check-dispatch-not-writable-by-the-task` now asserts this, with a control that makes the same change with no command naming the file.
+- **Known limit:** what that script imports is not followed; it falls under D-P7-11.
+- **Reverse:** drop `commands` and rely on the policy's protected paths.
+
+### D-P7-11: What an unchanged assertion executes is not read (known limit, owned by M3)
+
+- **Found:** by the external review (codex-1, gemini-4, gemini-5), and each case was reproduced. An assertion the analysis reads as unchanged can stop judging. A helper, fixture, custom matcher, setup file, or type it depends on can be rewritten to pass everything. The assertion can be moved into a branch that never runs. None of those is a test file, and reachability cannot be decided by parsing.
+- **Chosen:** not changed in P7. The spec scopes P7 to reading the diff ("pure functions over diffs"), and the mechanism that decides what an assertion still judges is mutation testing, which the spec leaves to M3. The policy's protected paths remain the way for a repository to name the files it knows to be load-bearing. Registered as the pending `I3.unchanged-assertion-still-judges`, owned by M3. The I3 baseline rises from 1 to 2.
+- **Reverse:** follow each changed test file's import graph and report a change anywhere in it.
+
+### D-P7-12: Review fixes to what the parser reads as a test
+
+Found by the external review. Each case was reproduced before its fix, and each fix's test fails against the unfixed code.
+
+- **A shadowed declarer is refused** (gemini-1). `{ const test = () => {}; test('judging', ...) }` was read as a test that runs, with its assertions intact, although only the no-op ever ran. Any binding of a declarer's name other than an import or a top-level alias `declarersIn` resolved is now refused as `unsupported-feature`: a local `const`, a parameter, a function, a class.
+- **The test context's `skip` is followed or refused** (codex-2, gemini-3). `const omit = ctx.skip; omit()`, `const c = ctx; c.skip()`, and `ctx['sk' + 'ip']()` each skipped a test with no marker recorded. Under vitest, the context may now only be read by a literal property, and `skip` only called. An alias, a computed key, `skip` taken as a value, and the context handed to a helper are all refused. A `...rest` of the context is followed as the context. Under jest the first parameter is `done`, which cannot skip and is routinely handed on, so only the `skip` rules apply there. A `.each` callback receives a row, not the context, and `.for` passes the context as the second parameter, so the context is looked for only where the framework puts it.
+- **A table's rows are cases** (codex-3). A `.each` or `.for` case was one title template, and `extractCases` claimed that the assertion comparison would see a table shrink. It could not: an `Assertion` does not carry the table. Each row is now a case of its own, `handles %i [2]`, and under a suite declared from a table every case is repeated per row. A table must be an array literal, either inline or in a top-level `const` that the file uses only as a table. An imported table, a computed one, a spread, or a mutated one is refused, following A-P7-01's rule for titles.
+- **A marker pairs within its file** (codex-4). D-P7-03 paired markers as one multiset across files, so a `.only` moved from one surviving file to another cancelled out while a different set of tests stopped running. A marker now pairs with the same marker in the same file. Across files it pairs only from a file that left the tests to one that joined them, which is a rename or a move. Cases and assertions still pair across files, as D-P7-03 says.
+- **Reverse:** revert each fix separately; each stands alone.
+
 ## P7 amendments to the contracts
 
 ### A-P7-01: `TestFrameworkAdapter` gains `enumerateCases`

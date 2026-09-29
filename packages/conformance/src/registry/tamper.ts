@@ -89,18 +89,18 @@ export const CASE_SET_REDUCTION_IS_A_DELETION: LocalAssertion = runtime({
     const four = ["import { test, expect } from 'vitest';", ...['a', 'b', 'c', 'd'].map((n) => `test('${n}', () => { expect(${n}).toBe(1); });`)].join('\n');
     const one = ["import { test, expect } from 'vitest';", "test('a', () => { expect(a).toBe(1); });"].join('\n');
     await withTrees({ 'package.json': PACKAGE, 'src/old.test.ts': four }, { 'package.json': PACKAGE, 'src/new.test.ts': one }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
       const deleted = [...report.testsDeleted].sort();
       if (JSON.stringify(deleted) !== JSON.stringify(['src/old.test.ts: b', 'src/old.test.ts: c', 'src/old.test.ts: d'])) {
         throw new Error(`I3: a rename that dropped three cases reported ${JSON.stringify(deleted)} as deleted, not the three cases by name`);
       }
     });
     await withTrees({ 'package.json': PACKAGE, 'src/old.test.ts': four }, { 'package.json': PACKAGE, 'src/moved/new.test.ts': four }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
       if (!isEmpty(report)) throw new Error(`I3 control: a rename that kept every case reported ${JSON.stringify(report)}`);
     });
     await withTrees({ 'package.json': PACKAGE, 'src/x.test.ts': SUM_TEST.replace('1 + 4', 'x') }, { 'package.json': PACKAGE, 'src/x.test.ts': SUM_TEST.replace('1 + 4', 'x').replace('toBe(5)', 'toBeTruthy()') }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
       const [weakened] = report.assertionsWeakened;
       if (weakened?.file !== 'src/x.test.ts' || !weakened.before.includes('.toBe(5)') || !weakened.after.includes('.toBeTruthy()')) {
         throw new Error(`I3: toBe(5) changed to toBeTruthy() was reported as ${JSON.stringify(report.assertionsWeakened)}`);
@@ -161,7 +161,7 @@ export const SKIP_MARKER_IS_A_FINDING: LocalAssertion = runtime({
 export const CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK: LocalAssertion = runtime({
   id: 'I3.check-dispatch-not-writable-by-the-task',
   title:
-    "a task that rewrites the package.json test script a pinned command dispatches through has package.json in its report's protectedPathsTouched, though the policy's protected paths do not name it, and records a protected-path violation; the same run writing an unrelated file names nothing",
+    "a task that rewrites the package.json test script a pinned command dispatches through has package.json in its report's protectedPathsTouched, though the policy's protected paths do not name it, and records a protected-path violation; the same run writing an unrelated file names nothing. A script the pinned argument vector names by path is protected the same way: rewriting it is a touch when a command names it, and not when none does",
   run: async () => {
     await withLine('p7-i3-dispatch-', async (rig) => {
       const rewritten = JSON.stringify({ ...(JSON.parse(PACKAGE) as object), scripts: { test: 'node -e "process.exit(0)"' } });
@@ -174,6 +174,15 @@ export const CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK: LocalAssertion = runtime({
     await withLine('p7-i3-dispatch-control-', async (rig) => {
       const { report } = await runVitest(rig, { 'src/ok.ts': 'export const ok = 1;\n' });
       if (report.protectedPathsTouched.length > 0) throw new Error(`I3 control: an unrelated write touched ${report.protectedPathsTouched.join(', ')}`);
+    });
+    const { analyzeTamper } = await api();
+    await withTrees({ 'scripts/check.mjs': 'run()\n' }, { 'scripts/check.mjs': 'process.exit(0)\n' }, async (base, head) => {
+      const named = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [['node', 'scripts/check.mjs']] });
+      if (!named.protectedPathsTouched.includes('scripts/check.mjs')) {
+        throw new Error(`I3: a rewritten script the pinned command runs is not a protected-path touch: ${JSON.stringify(named.protectedPathsTouched)}`);
+      }
+      const unnamed = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
+      if (unnamed.protectedPathsTouched.length > 0) throw new Error(`I3 control: a script no command names touched ${unnamed.protectedPathsTouched.join(', ')}`);
     });
   },
 });

@@ -733,7 +733,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const built = await tamperedIn(ctx, tree);
   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
   const counted = await countSuites(tree);
-  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx) });
+  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => c.command) });
 
   // Results stay aligned with the specs by position, never matched up by id afterwards.
   const specs = ctx.checks;

@@ -24,6 +24,8 @@ export interface TamperOptions {
   readonly protectedPaths: readonly string[];
   /** Where a pinned coverage check's report is, or null when the manifest pins none (A-P7-02). */
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
+  /** The pinned checks' argument vectors: a file one names is what that check runs, and a change to it a touch. */
+  readonly commands: ReadonlyArray<readonly string[]>;
 }
 
 const SNAPSHOT = /(?:^|\/)__snapshots__\/|\.snap$/;
@@ -41,6 +43,24 @@ function spell(a: Assertion): string {
 
 function key(a: Assertion): string {
   return [a.operator, ...a.args, a.tolerance === undefined ? '' : String(a.tolerance)].join('\u0000');
+}
+
+/**
+ * Every token of the pinned argument vectors that could name a file in the
+ * tree, spelled as a tree-relative path. An element is split on whitespace,
+ * quotes, and `=`, so `sh -c "node scripts/run.mjs"` and
+ * `--config=ci.config.ts` name their files too; a token that names nothing
+ * in the diff costs nothing, and one missed is a dispatch left unprotected.
+ */
+function commandPaths(commands: ReadonlyArray<readonly string[]>): Set<string> {
+  const paths = new Set<string>();
+  for (const argv of commands) {
+    for (const token of argv.flatMap((arg) => arg.split(/[\s="'`]+/))) {
+      const path = token.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
+      if (path !== '' && !path.startsWith('/') && !path.startsWith('-')) paths.add(path);
+    }
+  }
+  return paths;
 }
 
 /** Removes and returns one entry equal to `value`, or undefined when the multiset holds none. */
@@ -101,11 +121,15 @@ async function testFindings(test: TestFrameworkAdapter, base: string, head: stri
     ...delta.removed.map((b) => ({ file: b.file, before: spell(b), after: '(removed)' })),
   ];
 
-  const markersBefore = (await read(before, (abs) => test.detectSkipMarkers(abs))).map((m) => m.item);
-  const skipMarkersAdded: TamperReport['skipMarkersAdded'] = [];
-  for (const { file, item } of await read(after, (abs) => test.detectSkipMarkers(abs))) {
-    if (take(markersBefore, (m) => m === item) === undefined) skipMarkersAdded.push({ file, marker: item });
-  }
+  // A marker pairs within its file, and across files only from a file that left the tests to one
+  // that joined them — a rename or a move. Between two files that both survive, a marker is not the
+  // same marker: `.only` moved from one to the other focuses a different set of tests.
+  const markersBefore = await read(before, (abs) => test.detectSkipMarkers(abs));
+  const markersAfter = await read(after, (abs) => test.detectSkipMarkers(abs));
+  const unmatched = markersAfter.filter((m) => take(markersBefore, (b) => b.file === m.file && b.item === m.item) === undefined);
+  const skipMarkersAdded: TamperReport['skipMarkersAdded'] = unmatched
+    .filter((m) => baseSet.has(m.file) || take(markersBefore, (b) => !headSet.has(b.file) && b.item === m.item) === undefined)
+    .map(({ file, item }) => ({ file, marker: item }));
 
   // Cases pair by title wherever they went, so a move or a rename that keeps a case loses nothing.
   const casesAfter = (await read(after, (abs) => test.enumerateCases(abs))).map((c) => c.item);
@@ -140,6 +164,9 @@ export async function analyzeTamper(base: string, head: string, options: TamperO
   // A config file changes what a pinned command dispatches to — a package.json script, a runner
   // config — without touching the command, the suite count, or a locked test.
   if (set.manifest !== null) for (const path of await set.manifest.detectConfigChanges(base, head)) touched.add(path);
+  // So does a file the pinned command names: `node scripts/check.mjs` runs whatever that file says.
+  const named = commandPaths(options.commands);
+  for (const path of changed) if (named.has(path)) touched.add(path);
 
   const tests = set.test === null
     ? { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [] }
