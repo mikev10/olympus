@@ -167,6 +167,57 @@ export interface ExecResult { exitCode: number; stdout: string; stderr: string; 
 export interface ExecOptions {
   readonly env?: Readonly<Record<string, string>>;
   readonly stdin?: string;
+  /**
+   * Start the command and return once it has started, with no output; it runs
+   * until it exits or the sandbox ends. It exists so an HTTP scenario can start
+   * the server it probes (A-P11-02). The result's exit code is the start's,
+   * not the command's. An implementation MUST refuse it together with `stdin`,
+   * which a detached command cannot be handed, and one that cannot detach MUST
+   * refuse rather than run the command to completion.
+   */
+  readonly detach?: boolean;
+}
+
+/** One request a probe sends. `path` begins with `/`; the host is always the sandbox's own loopback. */
+export interface ProbeExchange {
+  readonly method: string;
+  readonly path: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+}
+
+/**
+ * What a probe is asked to do (A-P11-01). A port and never a URL: the probe
+ * reaches the sandbox's loopback and no other host, so it cannot be pointed
+ * anywhere the sandbox could not already reach.
+ */
+export interface ProbeRequest {
+  readonly port: number;
+  /** How long the port has to accept a connection before the probe gives up and sends nothing. */
+  readonly readyWithinMs: number;
+  /** Sent in order, one at a time, each on its own connection. */
+  readonly exchanges: readonly [ProbeExchange, ...ProbeExchange[]];
+}
+
+/**
+ * What the probe saw for one request, and nothing it decided. `oversized` is a
+ * response whose body passed the cap, reported without a body rather than
+ * with a truncated one a comparison could mistake for the whole.
+ */
+export type ProbeObservation =
+  | { readonly kind: 'response'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string }
+  | { readonly kind: 'oversized'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly limitBytes: number }
+  | { readonly kind: 'no-response'; readonly reason: string };
+
+/**
+ * `ready: false` means the port never accepted a connection within
+ * `readyWithinMs`, and `observations` is empty because nothing was sent.
+ * Otherwise there is one observation per exchange, in order.
+ */
+export interface ProbeResult {
+  readonly ready: boolean;
+  readonly observations: readonly ProbeObservation[];
+  readonly durationMs: number;
 }
 
 /**
@@ -190,6 +241,18 @@ export interface SandboxProvider {
   readonly id: string;
   provision(spec: SandboxSpec): Promise<SandboxHandle>;
   exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
+  /**
+   * Sends HTTP requests to the sandbox's own loopback from a client the
+   * sandbox's processes cannot reach: one that shares the sandbox's network
+   * and not its filesystem or process tree, so what it observed is not the
+   * product's report of itself (A-P11-01). Optional: a provider that cannot
+   * put the client out of the product's reach omits it, and a set built on
+   * that provider names `behavioral:http` unavailable. An implementation MUST
+   * connect to the sandbox's loopback and nothing else, MUST charge the call
+   * to the sandbox's wall-clock budget as `exec` does, and MUST refuse a call
+   * on an ended sandbox.
+   */
+  probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
   /**
    * Ends the sandbox and returns what its relay counted, read after the
    * sandbox stopped so nothing spends after the read (D-P13-07). A sandbox

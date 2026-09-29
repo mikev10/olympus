@@ -25,6 +25,7 @@ import {
   LocalDockerProvider,
   PROXY_ALIAS,
   PROXY_PORT,
+  proxyNames,
   SandboxRefusal,
   type AppliedControls,
   type SandboxHandle,
@@ -426,8 +427,6 @@ describe('the applied controls are the evidence', () => {
   });
 
   test('a sandbox that could not start leaves no proxy and no network behind', async () => {
-    const before = await egressNetworks();
-
     // A spec that gets past every check and then fails at `docker run`: the image does not exist,
     // which is only discovered after the proxy has been stood up for it.
     const error = await refusal(() =>
@@ -437,8 +436,13 @@ describe('the applied controls are the evidence', () => {
     );
     expect(error.layer).toBe('image');
 
-    expect(await egressNetworks()).toStrictEqual(before);
-    const containers = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
-    expect(containers.stdout).not.toContain('egress-proxy-');
+    // Checked by the names this provision chose, not by comparing every egress network on the
+    // daemon: a concurrent suite creating or removing its own is not this provision leaking (#14).
+    const id = /^sandbox-(.+)$/.exec(error.sandbox ?? '')?.[1];
+    expect(id).toBeDefined();
+    const names = proxyNames(id ?? '');
+    expect(await egressNetworks()).not.toContain(names.internal);
+    expect(await egressNetworks()).not.toContain(names.outbound);
+    expect(await containerExists(names.container)).toBe(false);
   });
 });

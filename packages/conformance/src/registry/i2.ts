@@ -1,6 +1,7 @@
 import { compileError, external } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
+import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
 import { COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 
@@ -42,6 +43,9 @@ export const I2: InvariantEntry = {
     }),
     RESUME_DERIVES_STATE_FROM_THE_VAULT,
     UNMET_EXPECTATION_FAILS_THE_GATE,
+    // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
+    HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
+    HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
     STATUS_DERIVED_FROM_CHECK_RESULTS,
     TASK_RESULT_KEY_SET_ENFORCED,
     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
