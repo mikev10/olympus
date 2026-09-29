@@ -21,11 +21,13 @@ import {
   isAgentStation,
   isApprovalKey,
   isBackward,
+  locksHeldLeaving,
   M1_STATIONS,
   nextStep,
   STATION_CONTRACTS,
   stationCapRefusal,
   StrictPolicyEngine,
+  transition,
   validatePolicyDocument,
 } from '@olympus-ai/core';
 import type {
@@ -36,6 +38,7 @@ import type {
   PolicyRefusal,
   RoleId,
   Run,
+  RunCancellation,
   RunId,
   RunState,
   StationId,
@@ -46,6 +49,7 @@ import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, Vault } from '@olympus-ai/vault';
+import { worstCaseCost, type WorstCaseCost } from './cost.js';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
@@ -88,9 +92,23 @@ export interface RunRequest {
   /** Absolute path: the Workspace mount source, and the tree the Vault resolves locked paths against. */
   readonly workspace: string;
   readonly artifacts: RequestedArtifacts;
-  /** A resolved Policy. This unit reads no policy file (P9 loads one); the value is validated again here all the same. */
+  /** A resolved Policy, validated again here all the same. `loadPolicyFile` is how a service reads one from disk. */
   readonly policy: Policy;
   readonly components: ComponentGraph;
+  /**
+   * The worst-case cost a person approved, in dollars, or null. Above L0 it
+   * must equal the figure admission computes, or the run is refused before
+   * anything is written; the refusal carries the figure to approve (D-P9-03).
+   */
+  readonly approvedCostUsd: number | null;
+}
+
+/** What a caller of the line may observe and ask of it while it drives. Neither can change what is committed. */
+export interface DriveHooks {
+  /** Asked between steps; a cancellation returned is committed by the line and the run stops (A-P9-01). */
+  readonly cancelRequested?: () => RunCancellation | null;
+  /** Told of every committed state, in order. */
+  readonly onCommit?: (state: RunState) => void;
 }
 
 /** Deliberately no level, policy, or artifacts: a resume reads them from the run's admission record (A-P4-03). */
@@ -125,6 +143,14 @@ export type RunOutcome =
   | { readonly ok: false; readonly reason: 'invalid-request'; readonly problems: readonly RequestProblem[] }
   | {
       readonly ok: false;
+      readonly reason: 'cost-unapproved';
+      readonly requestedLevel: AutonomyLevel;
+      /** The figure to approve, and what makes it up. */
+      readonly worstCase: WorstCaseCost;
+      readonly approvedCostUsd: number | null;
+    }
+  | {
+      readonly ok: false;
       readonly reason: 'controls-unavailable';
       readonly requestedLevel: AutonomyLevel;
       /** Every control the run's adapter set lacks, as the admission record holds them. */
@@ -145,6 +171,15 @@ export type RunOutcome =
       readonly transition: StationRefusal;
       readonly state: RunState | null;
     };
+
+/** A run admitted and recorded, not yet driven. */
+export interface AdmittedRun {
+  readonly state: RunState;
+  readonly worstCase: WorstCaseCost;
+  drive(hooks?: DriveHooks): Promise<RunOutcome>;
+}
+
+export type AdmissionOutcome = { readonly ok: true; readonly admitted: AdmittedRun } | Exclude<RunOutcome, { ok: true }>;
 
 export type ApprovalOutcome =
   | { readonly ok: true; readonly state: RunState }
@@ -336,6 +371,16 @@ async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
  * written leaves nothing behind: no record, no state, no lock, no sandbox.
  */
 export async function startRun(req: RunRequest): Promise<RunOutcome> {
+  const admission = await admitRun(req);
+  return admission.ok ? admission.admitted.drive() : admission;
+}
+
+/**
+ * Admission alone: every check `startRun` makes, the record and the first
+ * state written, and the line not yet started. A service answers its caller
+ * here and drives the run after (D-P9-02).
+ */
+export async function admitRun(req: RunRequest): Promise<AdmissionOutcome> {
   requireContractTable();
   const problems = [...requestProblems(req), ...storeProblems(req)];
   if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
@@ -353,6 +398,10 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy);
   if (refused !== undefined) return refused;
+  const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
+  if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
+    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, approvedCostUsd: req.approvedCostUsd };
+  }
 
   const { vault } = req.components;
   if (await hasState(vault, req.runId)) {
@@ -407,20 +456,30 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
       approvals: [],
       reviews: [],
       usage: [],
+      cancelled: null,
+      halted: null,
       version: '0',
     },
     '0',
   );
-  return runLine({
-    run,
-    policy: policy.policy,
-    artifacts: record.artifacts,
-    graph: admitted.admitted.graph,
-    checks: admitted.admitted.checks,
-    components: req.components,
-    baseTreeSha256,
-    state,
-  });
+  return {
+    ok: true,
+    admitted: {
+      state,
+      worstCase,
+      drive: (hooks: DriveHooks = {}) => runLine({
+        run,
+        policy: policy.policy,
+        artifacts: record.artifacts,
+        graph: admitted.admitted.graph,
+        checks: admitted.admitted.checks,
+        components: req.components,
+        baseTreeSha256,
+        state,
+        ...hooks,
+      }),
+    },
+  };
 }
 
 /**
@@ -478,7 +537,7 @@ async function reloadExecuted(record: AdmissionRecord): Promise<Reloaded> {
  * components are the caller's, and they are held to the same safety and
  * capability checks as at admission.
  */
-export async function resumeRun(req: ResumeRequest): Promise<RunOutcome> {
+export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Promise<RunOutcome> {
   requireContractTable();
   const { vault } = req.components;
   const state = await vault.readRunState(req.runId);
@@ -508,6 +567,7 @@ export async function resumeRun(req: ResumeRequest): Promise<RunOutcome> {
     components: req.components,
     baseTreeSha256: record.baseTreeSha256,
     state,
+    ...hooks,
   };
   if (reloaded.changed.length > 0) return runLine(ctx, reloaded.changed);
   return runLine(ctx);
@@ -536,8 +596,10 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
 
   const step = nextStep(state, graph);
   const expected = approvalKey(state.station, level);
+  // A spent grant for the last exit is a run that passed; there is nothing left to approve.
+  const passed = step.kind === 'exit' && !M1_STATIONS.includes(step.to) && state.approvals.some((grant) => grant.key === expected && grant.usedAt !== null);
   const awaiting =
-    step.kind === 'exit' && !isBackward(step.from, step.to) && req.key === expected &&
+    step.kind === 'exit' && !passed && !isBackward(step.from, step.to) && req.key === expected &&
     effectiveApproval(STATION_CONTRACTS[state.station], policy, level, []) === 'human-required' &&
     !state.approvals.some((grant) => grant.key === expected && grant.usedAt === null);
   if (!awaiting) {
@@ -555,5 +617,96 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
     return { ok: true, state: next };
   } catch (error) {
     return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} moved while the approval was recorded: ${describe(error)}` };
+  }
+}
+
+/**
+ * Where a run stands, derived from its committed state by the rules the line
+ * itself follows (I2). Nothing a model wrote is an input.
+ *
+ * - `passed`: every M1 exit gate is crossed; a resume would return at once.
+ * - `stopped`: the line refuses to continue, and says why.
+ * - `awaiting-approval`: the next exit needs a human's approval of `key`.
+ * - `open`: there is work left, and a drive would do it.
+ */
+export type RunStanding =
+  | { readonly standing: 'passed' }
+  | { readonly standing: 'stopped'; readonly refusal: StationRefusal }
+  | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey }
+  | { readonly standing: 'open' };
+
+/** The station whose exit ends an M1 run. */
+const LAST_STATION: StationId = M1_STATIONS[M1_STATIONS.length - 1] ?? 'integrate';
+
+export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding }> {
+  const state = await vault.readRunState(runId);
+  const { record, policy } = await readAdmission(vault, state);
+  // What was committed is read before what the workspace holds now. A cancellation, a halt, and the grant
+  // spent in the commit that ended a passed run, are records an artifact edited afterwards does not
+  // undo; re-hashed first, a later edit would report either run as tampered (P9 review, codex-3).
+  if (state.cancelled !== null || state.halted !== null) {
+    // `nextStep` refuses a cancelled or halted run before any other check, so no graph is needed to read why (A-P9-01, A-P9-02).
+    const ended = nextStep(state, { tasks: [], edges: [] });
+    if (ended.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: ended.refusal } };
+  }
+  // The last exit is crossed only by a run that passed, and when it needs an approval the line
+  // spends the grant in the commit that ends the run. A spent grant for it is that record; the
+  // gate re-evaluated would ask for a second approval of an exit already crossed (D-P9-08).
+  const last = approvalKey(LAST_STATION, record.run.requestedLevel);
+  if (state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) return { state, standing: { standing: 'passed' } };
+  const { graph, changed } = await reloadExecuted(record);
+  if (changed.length > 0) {
+    const paths = changed.map((c) => c.path).join(', ');
+    return { state, standing: { standing: 'stopped', refusal: { ok: false, reason: 'lock-tamper', tampered: changed, message: `an admitted artifact changed: ${paths}` } } };
+  }
+  const step = nextStep(state, graph);
+  if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal } };
+  if (step.kind !== 'exit') return { state, standing: { standing: 'open' } };
+  const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };
+  const next = transition({
+    from: step.from,
+    to: step.to,
+    level: record.run.requestedLevel,
+    policy,
+    tampered: verdict.ok ? [] : verdict.tampered.map((t) => ({ ...t })),
+    grants: state.approvals,
+    protectedPathsTouched: [],
+  });
+  if (!next.ok) {
+    return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key } : { standing: 'stopped', refusal: next } };
+  }
+  return { state, standing: M1_STATIONS.includes(next.next) ? { standing: 'open' } : { standing: 'passed' } };
+}
+
+export interface CancelRequest {
+  readonly runId: RunId;
+  /** Recorded as given; the service that calls this authenticated it (D-P9-06). */
+  readonly by: string;
+  readonly vault: Vault;
+}
+
+export type CancelOutcome =
+  | { readonly ok: true; readonly state: RunState }
+  | { readonly ok: false; readonly reason: 'invalid-request'; readonly message: string }
+  | { readonly ok: false; readonly reason: 'finished'; readonly standing: RunStanding; readonly message: string };
+
+/**
+ * Cancels a run nothing is driving, by committing the record the station
+ * machine refuses on (A-P9-01). A run that has passed or stopped is refused,
+ * not reported cancelled: there is nothing left to stop, and a success would
+ * say otherwise. A run being driven is cancelled through `DriveHooks`, by the
+ * line, never by a second writer racing it.
+ */
+export async function cancelRun(req: CancelRequest): Promise<CancelOutcome> {
+  if (typeof req.by !== 'string' || req.by.trim() === '') return { ok: false, reason: 'invalid-request', message: 'by must name who cancelled' };
+  const { state, standing } = await runStanding(req.vault, req.runId);
+  if (standing.standing === 'passed' || standing.standing === 'stopped') {
+    return { ok: false, reason: 'finished', standing, message: `run ${req.runId} is ${standing.standing}; there is nothing to cancel` };
+  }
+  try {
+    const next = await req.vault.commitRunState({ ...state, cancelled: { by: req.by, at: new Date().toISOString() } }, state.version);
+    return { ok: true, state: next };
+  } catch (error) {
+    return { ok: false, reason: 'invalid-request', message: `run ${req.runId} moved while the cancellation was recorded: ${describe(error)}` };
   }
 }

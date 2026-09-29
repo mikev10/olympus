@@ -2677,3 +2677,89 @@ Optional. `probe(h, { port, readyWithinMs, exchanges })` returns `{ ready, obser
 ### A-P11-02: `ExecOptions.detach`
 
 The command is started and the call returns once it has, with no output; it runs until it exits or the sandbox ends. Refused together with `stdin`. `StubSandboxProvider` refuses it. Reasoned in D-P11-03 and D-P11-05.
+
+## P9: API + CLI
+
+### D-P9-01: The host composes the components; a request carries data only
+
+- **Ambiguous:** `startRun` takes a `ComponentGraph` of live objects — driver, sandbox provider, Vault, workspace store — and none can cross a wire. The spec did not say where they come from for a run created over HTTP.
+- **Options:** (A) `createApiServer` is handed one graph by its host process, and a create request names only artifacts, level, base commit, and the approved cost; (B) the server holds several named graphs and a request picks one.
+- **Chosen: A**, with the maintainer. `packages/api` imports no driver, and I1 writes the real host. The policy is the server's too: the host names a `policy.yaml`, read through the hardened loader on every create, so a request cannot choose the rules it runs under.
+- **Reverse:** add a `profile` field to `CreateRunBody` and a map of graphs to `ApiServerOptions`.
+
+### D-P9-02: Admission is split from driving
+
+- **Ambiguous:** `startRun` admits and then drives to the end, so an HTTP create that awaited it would hold the connection for the whole run, and one that did not await it could not report an admission refusal.
+- **Chosen:** `admitRun` runs every check `startRun` makes and writes the admission record and first state, then returns a `drive(hooks)` it has not called. `startRun` is `admitRun` then `drive`. The server answers 201 or the refusal after admission and drives in the background.
+- **Reverse:** inline `admitRun` back into `startRun`; the server would then need its own admission.
+
+### D-P9-03: The worst-case cost, and what approving it means
+
+- **Chosen:** for each task at a station that calls a driver (`build`, `review`), `maxStarts` of that station — `maxIterations × (retry.max + 1)`, the bound the line already enforces with replays counted — times the task's role's `Budget.maxCostUsd`, summed. Each task's share is rounded up to a millionth of a dollar, computed exactly from the decimal the policy states, so the figure shown is the figure compared and is never below the ceiling it stands for. Rounding to nearest, as first written, put nine calls at $1.00000004 at $9 when the line can spend $9.00000036 (external review, codex-1). Every level above L0 must send exactly that figure in `approvedCostUsd`, or admission refuses with `cost-unapproved` carrying the figure and its parts, before anything is written. Exact rather than "at least": a ceiling of 1e9 would be a standing approval of any run, which is what A-P4-04 refused for station grants.
+- **Levels:** the spec named L1 and L2. L3 is required too, since the rule is fail-closed and M1 refuses L3 anyway; L0 is exempt as the spec says.
+- **Tight:** a run in which every task spends every start and passes on its last makes exactly the figure's calls (`packages/api/test/cost-bound.test.ts`). A driver that fails every attempt parks after `retry.max + 1` calls and never reaches it; the spec's first wording said otherwise and was corrected in this unit.
+- **Known limit:** the approved figure is checked, not recorded. Putting it in the Vault needs a field on `AdmissionRecord`, a contract change nothing in P9's scope required; until one lands, that a human approved $X is visible only in the request log. P13's per-call overrun of at most one response still applies inside the figure.
+- **Reverse:** drop the check in `admitRun`, or relax `!==` to `>`.
+
+### D-P9-04: A driven run is cancelled by the line, between steps
+
+- **Ambiguous:** a cancel that commits `cancelled` while the line is mid-step races the line's next commit on the Vault's version check, and the line's next commit may be the usage record of a call already paid for.
+- **Chosen:** the server sets a flag the line reads through `DriveHooks.cancelRequested` at the top of each step, and the line commits the cancellation itself. The step in flight finishes — its driver call is bounded by its budget — and its usage record is kept. A run nothing is driving is cancelled by `cancelRun` with a direct commit. A passed or stopped run is refused with `finished`, not reported cancelled.
+- **Reverse:** thread an `AbortSignal` into `Driver.runTask` so a call can be stopped mid-flight; that is a driver contract change.
+
+### D-P9-05: A grant of no hosts is `deny-all`
+
+- **Chosen:** `egressFor` maps `egress: []` to `{ mode: 'deny-all' }` instead of an empty allowlist, which P10 made the provider refuse. The run was refused before and runs now, with no network — what the grant says. Closes the note P10 left in `packages/api`.
+- **Reverse:** restore the one-line mapping.
+
+### D-P9-06: The token, and who a request is
+
+- **Chosen:** one local token, at least 32 characters, compared as SHA-256 digests with `timingSafeEqual` so length does not leak. Its holder is one `principal` named by the host, and that name — never a body field — is what `approveStation` and `cancelRun` record. The wire refuses any body key it does not define, so a client sending `approvedBy` is refused rather than ignored. Closes P4 review finding 2.
+- **Known limit:** one secret, one principal, no per-user identity; multi-user is out of scope.
+
+### D-P9-07: The CLI is `olympus-ai`, types-only, with no default server
+
+- **Chosen:** package `olympus-ai` in `packages/cli`, per D-F2-04, with bin `olympus-ai`. Its `package.json` carries v1's last version, 4.5.16, and its changeset is `major`, so the first publish is exactly 5.0.0. It imports only types from `@olympus-ai/api` (a devDependency; `import type` is erased), so no runtime code runs in its process. There is no default URL: `--url` or `FACTORY_API_URL`, and `--token` or `FACTORY_API_TOKEN`. The variable names carry no Greek name (I10); the I10 scan exempts the string `olympus-ai` exactly, so the usage line names the command through one constant.
+- **Known limit:** the bin is a `.ts` file, like every package's entry in this workspace; running it installed from npm needs the build step no package has yet.
+
+### D-P9-08: Where a run stands is derived, and a passed run is read from its spent last grant
+
+- **Surfaced:** a passed run's committed state is `integrate`, `exiting`, with its `integrate:L` grant spent in the commit that ended the run — the same state as one awaiting that approval, re-evaluated. Status read it as `awaiting-approval`, cancel accepted it, and approve would record a second grant.
+- **Chosen:** `runStanding` derives `passed`, `stopped` (with the refusal), `awaiting-approval` (with the key), or `open`, by the rules the line follows, and reads a spent grant for the last exit as passed: that exit is crossed only by a passing run, and nothing goes back from `integrate`. `approveStation` refuses on the same rule.
+- **Committed records first:** a cancellation, a halt (A-P9-02), and the spent last grant are read before the admitted artifacts are re-hashed. Re-hashed first, an artifact edited after a run passed or was cancelled reported it `stopped` for `lock-tamper`, and restoring the bytes reported it passed again (external review, codex-3). `integrate`'s own floor is `human-required` (D-P4-03), so every passed M1 run holds that spent grant, and none is left to re-derive.
+- **Reverse:** record a terminal marker in `RunState` when the last exit is crossed, a contract change.
+
+### D-P9-09: The policy loader's limits, and where it measures
+
+- **Chosen:** `packages/api/src/policy-file.ts`, since `api` is the run-creation path (D-P3-01). `yaml` pinned at exactly 2.9.1. Limits 64 KiB, nesting depth 32, aliases 0. The byte cap is checked before decoding, and the file is read to at most one byte past it. Depth and aliases are measured on the parser's CST with an explicit stack, before the recursive composer runs, so thirty thousand `[` is refused rather than overflowing the stack. More than one document, a duplicate key, or any parser warning is refused. The conformance assertion fixes the limits rather than reading the defaults, and tests each at the limit and one step past it, through `parsePolicyYaml` and through `loadPolicyFile`, the path the service reads the file by. As first written it tested only a document well past each limit and never called `loadPolicyFile`, so a byte cap of 65537, a depth of 33, or a loader handed relaxed limits of its own all passed; and its relaxed-depth half accepted any refusal but `too-deep`. The depth cases are documents no policy field can hold, so past the depth check they must be refused as `invalid-policy` and only as that (external review, codex-4).
+- **Reverse:** change `POLICY_FILE_LIMITS` and the two constants in the assertion together.
+
+### D-P9-10: How the headless assertion runs TypeScript in a child process
+
+- **Chosen:** the host is `packages/api/test/fixtures/headless-host.ts`, run with Node's `--experimental-transform-types` and an inline resolve hook mapping `.js` specifiers to `.ts`, as `scripts/driver-report-key.ts` does. It is spawned with stdin `ignore` (EOF at once), stdout discarded, stderr piped for diagnostics, and an IPC channel, which is the only way it reports its URL. It sits in `api`'s program, so the I9 terminal scan reads it too. Each CLI command is spawned as its own process with an environment of PATH and temp variables only.
+- **What the processes do not prove, checked beside them:** a refused create is judged by its side effects, not its output: the host counts every Vault write and driver call and reports the count over IPC, and the refused create must leave both at zero, with the passed run afterwards as the positive control. Separate processes show the CLI works over HTTP, not that it has no other route, so the CLI's own program is read first: every import of a workspace package must be type-only, nothing outside `packages/cli/src` may be imported by path, nothing may be loaded at run time, and its manifest may take no workspace package as a runtime dependency (external review, codex-6).
+- **Reverse:** add a build step and spawn the built output.
+
+### D-P9-11: What the server holds in memory
+
+- **Chosen:** per run, only the drive in flight, a pending cancel, the last drive's outcome, and open streams. Status and standing are read from the Vault on every request.
+- **Known limit:** a restarted server serves every run's state but drives none of them; an `open` run left mid-drive needs a resume the spec does not list, so it waits for one. `lastOutcome` is lost on restart; `standing` is the authority. A drive that ended in an error is not such a run: its halt is committed (A-P9-02). What remains `open` is a run whose server process stopped while driving it, which left no error to record.
+
+### D-P9-12: The terminal scan follows `process` as a value
+
+- **Surfaced:** the binding scan matched a terminal member only on a value whose type the checker named `Process`, so `const p: Pick<NodeJS.Process, 'stdout'> = process` or `process as unknown as { stdout: ... }` wrote to stdout with neither scan reporting it (external review, codex-5).
+- **Chosen:** `process` may be read only by member name: `process.env`, `process['cwd']`, a destructuring of named members, and `typeof process` stay in view, and the terminal members among them are reported as before. Any other reference, an assignment, an argument, a cast, a spread, a computed key, or `globalThis.process`, is reported itself, since past that point a structural type or a cast hides the object. `process` and `node:process` join the modules the runtime may not import, since they hand out the same streams.
+- **Known limit:** the scan is static. A lookup built at run time, `globalThis[name]`, `eval`, or `Function`, reaches `process` without naming it, and no scan of source can follow one. The claim is that no file spells or binds a terminal, not that no code can reach one.
+- **Reverse:** drop `processEscapes` from `terminalBindings` and the two module names from `TERMINAL_MODULES`.
+
+## P9 amendments to the contracts
+
+### A-P9-01: `RunState.cancelled` and the `cancelled` refusal
+
+`RunState` gains `cancelled: RunCancellation | null`, where `RunCancellation` is `{ by, at }` — `by` the principal the service authenticated, as `ApprovalGrant.approvedBy` is. Once set it is never cleared. `StationRefusal` gains `{ reason: 'cancelled', cancelledBy, cancelledAt, message }`, and `nextStep` returns it before any other check, so a resume of a cancelled run is refused. `LocalVault` refuses a stored run state without the field or with a malformed one. Taken with the maintainer rather than marking tasks `cancelled`, which could not cancel a run before `plan` and which the machine never read. Reasoned in D-P9-04.
+
+### A-P9-02: `RunState.halted` and the `halted` refusal
+
+`RunState` gains `halted: RunHalt | null`, where `RunHalt` is `{ at, message }`: `message` is the runtime's own account of the error, never a field a driver returned. The service commits it when a drive ends in an error rather than a refusal the line committed, unless the run is already cancelled. Once set it is never cleared. `StationRefusal` gains `{ reason: 'halted', haltedAt, message }`, and `nextStep` returns it right after the `cancelled` check, so status reads the run `stopped`, a cancel is refused as `finished`, and a resume is refused. `LocalVault` refuses a stored run state without the field or with a malformed one.
+
+Surfaced by the external review (codex-2): a driver result carrying a `status` field was refused by `taskResultProblems` and the line threw before committing anything, leaving the build task `running`. Status read the run `open`, the only record of why was the server's in-memory `lastOutcome`, and a cancel then recorded a human cancellation over a run the runtime had already stopped. Taken with the maintainer rather than recorded as a known limit. Clearing a halt, like unparking, is lifecycle this unit does not take.

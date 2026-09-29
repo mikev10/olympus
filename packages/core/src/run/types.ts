@@ -140,6 +140,26 @@ export interface ApprovalGrant {
 }
 
 /**
+ * A human's stop of the whole run, recorded by the runtime. `by` is what the
+ * caller authenticated, as `ApprovalGrant.approvedBy` is (A-P9-01).
+ */
+export interface RunCancellation {
+  readonly by: string;
+  readonly at: string;
+}
+
+/**
+ * A drive of the run that ended in an error rather than a refusal, recorded
+ * by the runtime that drove it. The line stopped without committing why, so
+ * this is that record: `message` is the runtime's own account of the error,
+ * never a field a driver returned (A-P9-02).
+ */
+export interface RunHalt {
+  readonly at: string;
+  readonly message: string;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
@@ -170,5 +190,17 @@ export interface RunState {
    * a total is derived from these records, so it cannot disagree with them.
    */
   readonly usage: readonly VaultRef[];
+  /**
+   * Null while the run may continue. Once set it is never cleared: the
+   * station machine refuses every step of a cancelled run, so a resume
+   * cannot carry it on (A-P9-01).
+   */
+  readonly cancelled: RunCancellation | null;
+  /**
+   * Null while the run may continue. Set when a drive ended in an error, and
+   * never cleared: the station machine refuses every step of a halted run, so
+   * its status reads stopped and a cancel cannot relabel it (A-P9-02).
+   */
+  readonly halted: RunHalt | null;
   readonly version: string;             // optimistic concurrency
 }

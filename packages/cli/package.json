@@ -1,0 +1,27 @@
+{
+  "name": "olympus-ai",
+  "version": "4.5.16",
+  "description": "The command line: a client of the runtime's HTTP API, and nothing more",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/cli.ts",
+  "types": "./src/cli.ts",
+  "bin": {
+    "olympus-ai": "./src/main.ts"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@olympus-ai/api": "workspace:*",
+    "@olympus-ai/core": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*",
+    "@olympus-ai/vault": "workspace:*"
+  }
+}

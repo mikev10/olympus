@@ -28,6 +28,7 @@ import type {
   RoleId,
   RunId,
   RunState,
+  TaskGraph,
   TaskId,
   TaskRequest,
   TaskResult,
@@ -153,6 +154,17 @@ export interface LineRig {
   state(): Promise<RunState>;
 }
 
+/** The worst-case figure for the graph file as it stands, or null when the graph does not resolve under the policy. */
+async function approvedFigure(req: RunRequest): Promise<number | null> {
+  try {
+    const { worstCaseCost } = await import('@olympus-ai/api');
+    const parsed = JSON.parse(await readFile(join(req.workspace, req.artifacts.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
+    return worstCaseCost({ tasks: parsed.tasks, edges: [] }, req.policy).usd;
+  } catch {
+    return null;
+  }
+}
+
 /** The hello fixture in a fresh artifact root, a fresh store beside it, and a way to open both again. */
 export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promise<T>): Promise<T> {
   return withVaultDirs(prefix, async (dirs, base) => {
@@ -172,16 +184,21 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
         const driver = await stubDriver();
         return { vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces, ...overrides };
       },
-      request: async (components, overrides = {}) => ({
-        runId,
-        baseCommit: '0'.repeat(40),
-        requestedLevel: 1,
-        workspace: dirs.artifacts,
-        artifacts: ARTIFACTS,
-        policy: await linePolicy(),
-        components,
-        ...overrides,
-      }),
+      request: async (components, overrides = {}) => {
+        const req: RunRequest = {
+          runId,
+          baseCommit: '0'.repeat(40),
+          requestedLevel: 1,
+          workspace: dirs.artifacts,
+          artifacts: ARTIFACTS,
+          policy: await linePolicy(),
+          components,
+          approvedCostUsd: null,
+          ...overrides,
+        };
+        // A person who read the worst-case figure approved it, unless the assertion says otherwise (D-P9-03).
+        return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: await approvedFigure(req) };
+      },
       state: async () => (await open()).readRunState(runId),
     };
     return body(rig);

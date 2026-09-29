@@ -12,7 +12,8 @@
  * the metered calls alone. A consumer that shows a total with a non-zero
  * `unmetered` beside it is showing a floor, and the type says so.
  */
-import type { RunState, StationId, TaskId } from '@olympus-ai/core';
+import { isAgentStation, maxStarts, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
+import type { Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { UsageRecord, Vault } from '@olympus-ai/vault';
 
 /** Sums over the calls a relay counted. */
@@ -95,4 +96,71 @@ export async function readUsage(vault: Vault, state: RunState): Promise<UsageRec
     records.push(record as UsageRecord);
   }
   return records;
+}
+
+/** One task's share of the worst case: every driver call it can make, each at its role's ceiling. */
+export interface WorstCaseTask {
+  readonly task: TaskId;
+  readonly station: StationId;
+  readonly role: RoleId;
+  /** `maxStarts` for the task's station: the most times the line will invoke a driver for it, replays included. */
+  readonly calls: number;
+  readonly maxCostUsdPerCall: number;
+  readonly usd: number;
+}
+
+/**
+ * The most a run can be charged, known before it starts: for every task at a
+ * station that calls a driver, the most calls the line will make for it times
+ * its role's `Budget.maxCostUsd`, summed. It is a bound the line enforces, not
+ * an estimate, and it needs no history (D-P9-03).
+ *
+ * Exact for the run as admitted. It inherits P13's stated limit: a call that
+ * starts under its budget may end over it by at most one response.
+ */
+export interface WorstCaseCost {
+  /** Rounded up to a millionth of a dollar per task, so the figure a person approves is the figure compared and never below the ceiling. */
+  readonly usd: number;
+  readonly calls: number;
+  readonly tasks: readonly WorstCaseTask[];
+}
+
+const MICRO = 1_000_000;
+
+export function worstCaseCost(graph: TaskGraph, policy: Policy): WorstCaseCost {
+  const engine = new StrictPolicyEngine();
+  const tasks: WorstCaseTask[] = [];
+  for (const task of graph.tasks) {
+    if (!isAgentStation(task.station)) continue;
+    const resolved = engine.resolveCapabilities(task.role, task.station, policy);
+    // Admission resolves every role the graph schedules before it asks for this figure.
+    if (!resolved.ok) throw new Error(`worst-case cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
+    const calls = maxStarts(STATION_CONTRACTS[task.station]);
+    const perCall = resolved.scope.budget.maxCostUsd;
+    tasks.push({ task: task.id, station: task.station, role: task.role, calls, maxCostUsdPerCall: perCall, usd: Number(microsCeiling(perCall, calls)) / MICRO });
+  }
+  const micro = tasks.reduce((sum, t) => sum + microsCeiling(t.maxCostUsdPerCall, t.calls), 0n);
+  return { usd: Number(micro) / MICRO, calls: tasks.reduce((sum, t) => sum + t.calls, 0), tasks };
+}
+
+/**
+ * `calls` times `usd`, in whole millionths of a dollar, rounded up, so a
+ * task's share is never less than the ceiling it stands for. Computed exactly
+ * from the number's shortest decimal spelling, the one the policy author
+ * wrote, so `0.07` is 70000 and not the 70001 that `Math.ceil(0.07 * 1e6)`
+ * gives from the binary value.
+ */
+export function microsCeiling(usd: number, calls = 1): bigint {
+  if (!Number.isFinite(usd) || usd < 0) throw new Error(`worst-case cost: ${String(usd)} is not a non-negative amount`);
+  if (!Number.isSafeInteger(calls) || calls < 0) throw new Error(`worst-case cost: ${String(calls)} is not a count of calls`);
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(usd));
+  // String() of a finite non-negative number always has this shape.
+  if (match === null) throw new Error(`worst-case cost: cannot read ${String(usd)} as a decimal`);
+  const fraction = match[2] ?? '';
+  // usd = units / 10^scale exactly, where the exponent moves the point.
+  const units = BigInt((match[1] ?? '0') + fraction) * BigInt(calls);
+  const scale = fraction.length - Number(match[3] ?? '0') - 6;
+  if (scale <= 0) return units * 10n ** BigInt(-scale);
+  const divisor = 10n ** BigInt(scale);
+  return (units + divisor - 1n) / divisor;
 }

@@ -8,6 +8,7 @@ import {
   parseCastExpectations,
   propertyChains,
   splitWords,
+  terminalBindings,
   words,
 } from '../../src/kit/scan.js';
 
@@ -147,5 +148,82 @@ describe('matchCastExpectations', () => {
     const result = matchCastExpectations([{ line: 1, from: 'UntrustedPayload' }], [cast(1, 'UntrustedText')]);
     expect(result.unmet).toHaveLength(1);
     expect(result.unexpected).toHaveLength(1);
+  });
+});
+
+/** A checked program over in-memory files, with Node's types, for the binding scans. */
+function program(files: Record<string, string>): { file: ts.SourceFile; checker: ts.TypeChecker } {
+  const host = ts.createCompilerHost({});
+  const built = ts.createProgram({
+    rootNames: Object.keys(files),
+    options: { strict: true, noEmit: true, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, target: ts.ScriptTarget.ES2022, types: ['node'] },
+    host: {
+      ...host,
+      getSourceFile: (name, version) => {
+        const text = files[name];
+        return text === undefined ? host.getSourceFile(name, version) : ts.createSourceFile(name, text, version, true);
+      },
+      fileExists: (name) => name in files || ts.sys.fileExists(name),
+      readFile: (name) => files[name] ?? ts.sys.readFile(name),
+      directoryExists: (dir) => dir.replaceAll('\\', '/').endsWith('/virtual') || ts.sys.directoryExists(dir),
+      getCurrentDirectory: () => process.cwd(),
+    },
+  });
+  const file = built.getSourceFile('/virtual/sample.ts');
+  if (file === undefined) throw new Error('sample not loaded');
+  return { file, checker: built.getTypeChecker() };
+}
+
+describe('terminalBindings', () => {
+  test('finds terminal use by what the checker resolves, not by how it is spelled (the D-S1 note owed to P9)', () => {
+    const files: Record<string, string> = {
+      '/virtual/sample.ts': [
+        `import { term } from './reexport.js';`,
+        `const { stdout } = process;`,
+        `const { argv: args } = process;`,
+        `const p = process;`,
+        `p.exit(1);`,
+        `p['stderr'].write('x');`,
+        `const c = console;`,
+        `c.log(stdout, args, term);`,
+        `const fine = process.env.HOME ?? process.cwd();`,
+        `export { fine };`,
+      ].join('\n'),
+      '/virtual/reexport.ts': `export { isatty as term } from 'node:tty';`,
+    };
+    const { file: sf, checker } = program(files);
+    const found = terminalBindings(sf, checker).map((b) => [b.line, b.text]);
+    expect(found).toEqual(expect.arrayContaining([
+      [1, 'terminal module binding term'],
+      [2, 'Process.stdout'],
+      [3, 'Process.argv'],
+      [5, 'Process.exit'],
+      [6, 'Process.stderr'],
+      [7, 'Console c'],
+    ]));
+    // process.env and process.cwd() are not a terminal; nothing on line 9 is reported.
+    expect(found.filter(([line]) => line === 9)).toEqual([]);
+  });
+
+  test('reports process handed on as a value, so a structural type or a cast cannot hide it (P9 review, codex-5)', () => {
+    const sf = program({
+      '/virtual/sample.ts': [
+        `const a: Pick<NodeJS.Process, 'stdout'> = process;`,
+        `a.stdout.write('x');`,
+        `const b = process as unknown as { stdout: { write(t: string): unknown } };`,
+        `b.stdout.write('x');`,
+        `const key = 'stdout' as string;`,
+        `const c = process[key as 'stdout'];`,
+        `const { ...d } = process;`,
+        `const e = globalThis.process;`,
+        `const f = { process };`,
+        `const fine = process.env.HOME ?? process.cwd();`,
+        `const { env } = process;`,
+        `type P = typeof process;`,
+        `export { a, b, c, d, e, f, fine, env, type P };`,
+      ].join('\n'),
+    });
+    const found = terminalBindings(sf.file, sf.checker).filter((b) => b.text === 'process as a value').map((b) => b.line);
+    expect(found).toEqual([1, 3, 6, 7, 8, 9]);
   });
 });

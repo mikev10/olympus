@@ -1,11 +1,17 @@
 import { compileError, pending, runtime } from '../kit/assert.js';
-import { moduleSpecifiers, packageProgram, propertyChains, sourceFilesOutsideProgram } from '../kit/scan.js';
+import { moduleSpecifiers, packageProgram, propertyChains, sourceFilesOutsideProgram, terminalBindings } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspacePackages } from '../kit/workspace.js';
+import { assertApiRunsHeadless } from './headless.js';
 
-/** Modules that exist to drive a terminal. None may be imported by the runtime. */
+/**
+ * Modules that exist to drive a terminal, and `process` as a module, which
+ * hands out the same streams under names the binding scan does not follow.
+ * None may be imported by the runtime; it reads `process.env` by member name.
+ */
 const TERMINAL_MODULES: ReadonlySet<string> = new Set([
   'tty', 'node:tty',
+  'process', 'node:process',
   'readline', 'node:readline', 'readline/promises', 'node:readline/promises',
   'inquirer', 'prompts', 'enquirer', 'ink', 'chalk', 'ora', 'commander', 'yargs', 'blessed', 'cli-progress',
 ]);
@@ -24,7 +30,7 @@ const TERMINAL_CHAINS = /^process\.(stdin|stdout|stderr|exit|exitCode|argv)(\.|$
 function assertNeverTouchesATerminal(packageName: string): void {
   const pkg = workspacePackages().find((p) => p.name === packageName);
   if (pkg === undefined) throw new Error(`I9: ${packageName} is not in the workspace`);
-  const { files } = packageProgram(pkg);
+  const { files, checker } = packageProgram(pkg);
   if (files.length === 0) throw new Error(`I9: ${packageName} has no source files`);
   const omitted = sourceFilesOutsideProgram(pkg);
   if (omitted.length > 0) {
@@ -38,6 +44,8 @@ function assertNeverTouchesATerminal(packageName: string): void {
     for (const chain of propertyChains(sf)) {
       if (TERMINAL_CHAINS.test(chain.text)) hits.push(`${chain.file}:${String(chain.line)} uses ${chain.text}`);
     }
+    // By binding as well as by spelling: a destructured, aliased, or re-exported terminal is the same terminal.
+    for (const binding of terminalBindings(sf, checker)) hits.push(`${binding.file}:${String(binding.line)} binds ${binding.text}`);
   }
   if (hits.length > 0) throw new Error(`I9: ${packageName} assumes a terminal\n  ${hits.join('\n  ')}`);
 }
@@ -55,10 +63,15 @@ export const I9: InvariantEntry = {
     }),
     runtime({
       id: 'I9.api-never-touches-a-terminal',
-      title: 'no file in api, the entry point, imports a terminal module or touches process streams, argv, exit, isTTY, or console, and every .ts under its src is in the scanned program',
+      title: 'no file in api, the entry point, imports a terminal module or touches process streams, argv, exit, isTTY, or console, by spelling or by binding, and every .ts under its src is in the scanned program',
       run: () => {
         assertNeverTouchesATerminal('@olympus-ai/api');
       },
+    }),
+    runtime({
+      id: 'I9.api-runs-headless',
+      title: 'the API process, spawned with stdin closed and no TTY, serves a run from create to passed, and the CLI, a separate process given only a URL and a token, drives every step over HTTP',
+      run: assertApiRunsHeadless,
     }),
     compileError({
       id: 'I9.no-dom-in-lib',
@@ -81,13 +94,6 @@ export const I9: InvariantEntry = {
         + 'verdict about something other than what ran. Owner is P10 because it is the next unit to change the '
         + 'provider, and this is its file. Raised by P8\'s external review (codex-9) against code P2 wrote; P8 added '
         + 'only stdin to that function. Recorded as D-P8-15.',
-    }),
-    pending({
-      id: 'I9.api-runs-headless',
-      owner: 'P9',
-      reason:
-        'The API process must start and serve a run with no TTY and stdin closed, and the CLI must drive it ' +
-        'only through the API. Neither exists until P9.',
     }),
   ],
 };

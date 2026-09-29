@@ -3,6 +3,7 @@
  * workspace, a policy that grants the two roles the fixture graph schedules,
  * and drivers whose model family a test can choose. Test code only.
  */
+import { readFileSync } from 'node:fs';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -21,13 +22,14 @@ import {
   type PolicyDocument,
   type RoleId,
   type RunId,
+  type TaskGraph,
   type TaskRequest,
   type TaskResult,
 } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
-import { localWorkspaceStore, type ComponentGraph, type RunRequest, type WorkspaceStore } from '../src/index.js';
+import { localWorkspaceStore, worstCaseCost, type ComponentGraph, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { DelegatingDriver } from './wrappers.js';
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
@@ -169,8 +171,14 @@ export function stubComponents(workspace: string, overrides: Partial<ComponentGr
   return { vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces: storeFor(workspace), ...overrides };
 }
 
+/**
+ * A request as a person who read the worst-case figure and approved it would
+ * send, unless the test says otherwise. The figure comes from the graph file
+ * as it stands when the request is made; a graph a test cannot resolve gets
+ * null, and admission refuses for the reason that makes it unresolvable.
+ */
 export function runRequest(runId: RunId, workspace: string, components: ComponentGraph, overrides: Partial<RunRequest> = {}): RunRequest {
-  return {
+  const req: RunRequest = {
     runId,
     baseCommit: BASE_COMMIT,
     requestedLevel: 1,
@@ -178,6 +186,17 @@ export function runRequest(runId: RunId, workspace: string, components: Componen
     artifacts: ARTIFACTS,
     policy: policy(),
     components,
+    approvedCostUsd: null,
     ...overrides,
   };
+  return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: approvedFigure(req) };
+}
+
+function approvedFigure(req: RunRequest): number | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(req.workspace, req.artifacts.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
+    return worstCaseCost({ tasks: parsed.tasks, edges: [] }, req.policy).usd;
+  } catch {
+    return null;
+  }
 }

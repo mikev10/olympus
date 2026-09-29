@@ -50,6 +50,7 @@ import {
 } from '@olympus-ai/core';
 import type {
   AgentClaim,
+  RunCancellation,
   ApprovalGrant,
   ApprovalKey,
   ContextGrant,
@@ -103,6 +104,14 @@ export interface LineContext {
   readonly baseTreeSha256: string;
   /** Replaced by every commit. */
   state: RunState;
+  /**
+   * Asked between steps, never during one: a cancellation it returns is
+   * committed by the line itself, so no step in flight loses a commit to a
+   * version race, and the usage record of a call already made is kept (D-P9-04).
+   */
+  readonly cancelRequested?: () => RunCancellation | null;
+  /** Told of every state the line commits, after the Vault stored it. Serves the event stream; it cannot change what is committed. */
+  readonly onCommit?: (state: RunState) => void;
 }
 
 const engine = new StrictPolicyEngine();
@@ -124,6 +133,8 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
     return refused(ctx, ctx.state.station, await recordTamper(ctx, ctx.state.station, null, [...changed], { phase: 'resume' }));
   }
   for (;;) {
+    const cancel = ctx.state.cancelled === null ? (ctx.cancelRequested?.() ?? null) : null;
+    if (cancel !== null) await commit(ctx, { cancelled: cancel });
     const step = nextStep(ctx.state, ctx.graph);
     let refusal: StationRefusal | undefined;
     switch (step.kind) {
@@ -404,8 +415,10 @@ async function readResult(ctx: LineContext, task: Task): Promise<TaskResult> {
   return r as TaskResult;
 }
 
-function egressFor(network: { egress: 'none' | string[] }): EgressPolicy {
-  return network.egress === 'none' ? { mode: 'deny-all', allow: [] } : { mode: 'allowlist', allow: [...network.egress] };
+/** A grant of no hosts is no egress: `[]` is `deny-all`, never an empty allowlist the provider would refuse (D-P9-05). */
+export function egressFor(network: { egress: 'none' | string[] }): EgressPolicy {
+  if (network.egress === 'none' || network.egress.length === 0) return { mode: 'deny-all', allow: [] };
+  return { mode: 'allowlist', allow: [...network.egress] };
 }
 
 /**
@@ -873,6 +886,7 @@ interface StateChange {
   readonly violation?: VaultRef;
   readonly review?: RunState['reviews'][number];
   readonly usage?: VaultRef;
+  readonly cancelled?: RunCancellation;
 }
 
 /** Commits the next state through the Vault's version check and keeps what it stored. */
@@ -891,9 +905,11 @@ async function commit(ctx: LineContext, change: StateChange): Promise<void> {
       violations: change.violation === undefined ? state.violations : [...state.violations, change.violation],
       reviews: change.review === undefined ? state.reviews : [...state.reviews, change.review],
       usage: change.usage === undefined ? state.usage : [...state.usage, change.usage],
+      cancelled: change.cancelled ?? state.cancelled,
     },
     state.version,
   );
+  ctx.onCommit?.(ctx.state);
 }
 
 function describe(error: unknown): string {
