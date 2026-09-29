@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { withLine } from './line.js';
 import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
+import { HTTP_PROBE_ABSENT_IS_NAMED } from './http.js';
 import {
   BLOCKED_ADDRESS,
   BLOCKED_NAME,
@@ -430,6 +431,8 @@ export const I5: InvariantEntry = {
     TASK_ATTEMPTS_ARE_BOUNDED,
     OVER_REQUEST_REFUSED_AT_ADMISSION,
     UNSUPPORTED_STACK_IS_LOUD,
+    // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+    HTTP_PROBE_ABSENT_IS_NAMED,
     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
     CHECK_COMMAND_HAS_A_GRAMMAR,
     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,

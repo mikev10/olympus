@@ -19,9 +19,18 @@ describe('buildAdapterSet', () => {
     expect([jest.stack, jest.test?.stack]).toEqual(['jest@29', 'jest@29']);
   });
 
-  test('every set P8 builds names mutation, behavioral:http, and behavioral:browser, so none clears L3 at M1', async () => {
+  test('a set on a provider with no probe names mutation, behavioral:http, and behavioral:browser, so it does not clear L3', async () => {
     const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), withEverything);
     expect(set.unavailableControls()).toEqual(['mutation', 'behavioral:http', 'behavioral:browser']);
+    expect(set.reasons.get('behavioral:http')).toMatch(/has no probe/);
+  });
+
+  test('a set on a provider with a probe carries the HTTP adapter; mutation and browser still keep it from L3', async () => {
+    const probing = Object.assign(new StubSandboxProvider(), { probe: (): Promise<never> => Promise.reject(new Error('not called')) });
+    const set = await buildAdapterSet(await repo({ 'package.json': pkg({ vitest: '4' }) }), { ...withEverything, provider: probing });
+    expect(set.behavioral.map((adapter) => adapter.kind)).toEqual(['cli', 'http']);
+    expect(set.unavailableControls()).toEqual(['mutation', 'behavioral:browser']);
+    expect(adapterAdmission(set, 3).ok).toBe(false);
   });
 
   test.each([

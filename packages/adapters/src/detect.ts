@@ -7,6 +7,7 @@
  */
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import { CliBehavioralAdapter } from './behavioral.js';
+import { canProbe, HttpBehavioralAdapter } from './http.js';
 import { IstanbulCoverageAdapter } from './coverage.js';
 import { jestDiscovery, vitestDiscovery } from './discovery.js';
 import { JestAdapter, VitestAdapter } from './framework.js';
@@ -21,7 +22,7 @@ export const BEHAVIORAL_KINDS: ReadonlyArray<BehavioralAdapter['kind']> = ['cli'
 export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | `behavioral:${BehavioralAdapter['kind']}`;
 
 export interface AdapterSetOptions {
-  /** The provider CLI scenarios run through, or null to build a set with no behavioral adapter. */
+  /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe. */
   readonly provider: SandboxProvider | null;
   /** Where the coverage check's report is, or null when no coverage check has run. */
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
@@ -132,7 +133,10 @@ export async function buildAdapterSet(root: string, options: AdapterSetOptions):
   const behavioral: BehavioralAdapter[] = [];
   if (options.provider === null) reasons.set('behavioral:cli', 'no sandbox provider was given to run CLI scenarios through');
   else behavioral.push(new CliBehavioralAdapter(options.provider));
-  reasons.set('behavioral:http', 'HTTP scenarios need a probe the product cannot reach, which P11 delivers');
+  if (options.provider === null) reasons.set('behavioral:http', 'no sandbox provider was given to run HTTP scenarios through');
+  else if (!canProbe(options.provider)) {
+    reasons.set('behavioral:http', `sandbox provider ${options.provider.id} has no probe, so an HTTP client would run where the product can replace it`);
+  } else behavioral.push(new HttpBehavioralAdapter(options.provider));
   reasons.set('behavioral:browser', 'browser scenarios are R3');
 
   return new TypeScriptAdapterSet({

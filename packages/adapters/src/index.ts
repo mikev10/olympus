@@ -1,6 +1,16 @@
 export * from './types.js';
 export { adapterAdmission, type AdapterAdmission } from './autonomy.js';
 export { CliBehavioralAdapter, compareCli, readCliScenario, type CliExpected, type CliInput } from './behavioral.js';
+export {
+  canProbe,
+  compareHttp,
+  DEFAULT_READY_WITHIN_MS,
+  HttpBehavioralAdapter,
+  readHttpScenario,
+  type HttpExpected,
+  type HttpExpectedResponse,
+  type HttpInput,
+} from './http.js';
 export { CONFIG_FILE_GLOBS, isConfigFile } from './config-files.js';
 export { IstanbulCoverageAdapter, REPORT_CAP, type IstanbulCoverageOptions } from './coverage.js';
 export {

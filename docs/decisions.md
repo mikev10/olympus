@@ -2616,6 +2616,68 @@ The return is `{ kind: 'unmetered' }` or `{ kind: 'metered'; calls; inputTokens;
 
 `usage: readonly VaultRef[]` holds one ref per driver call, in order. `LocalVault` refuses a stored run state without it. Totals are derived by `costTotals` in `packages/api/src/cost.ts` and never stored.
 
+## P11: Sandbox network probe + HTTP behavioral
+
+### D-P11-01: The probe joins the sandbox's network namespace, not a network beside it
+
+- **Ambiguous:** "shares the sandbox's network" can mean its namespace or a Docker network it is on. A deny-all sandbox is on no network at all.
+- **Options:** (A) `--network container:<sandbox>`: the probe shares the product's loopback and reaches it on `127.0.0.1`; (B) put the probe on the per-sandbox internal network P10 creates, and create one for deny-all.
+- **Chosen: A**, with the maintainer. It changes no sandbox's posture: a deny-all sandbox stays `--network none`, and the probe adds a process to a namespace that already exists rather than a network the sandbox did not have. B would give every deny-all sandbox a network endpoint whenever it was probed, which is the change P10 was split out to stop happening quietly. A namespace is not a filesystem or a process tree, so the product still cannot replace the client.
+- **Reverse:** create an internal network for the probe in `#applyEgress`, attach the sandbox with an alias, and point the probe at the alias.
+
+### D-P11-02: One probe container per call, not one per sandbox
+
+- **Ambiguous:** "a probe the provider starts and owns" does not say for how long.
+- **Options:** (A) `docker run --rm` per `probe()` call, charged to the sandbox's wall clock; (B) a sidecar started at provisioning when the spec asks for one, and removed by `destroy()`.
+- **Chosen: A**, with the maintainer. No `SandboxSpec` field, nothing more in provisioning or teardown, and nothing running between calls. The cost is one container start per scenario. `destroy()` still removes a probe whose call is in flight, so none outlives its sandbox.
+- **Reverse:** add `SandboxSpec.probe`, start it beside the relay, and have `probe()` exec into it.
+
+### D-P11-03: A scenario owns its server
+
+- **Ambiguous:** something has to start the product's server before a request, and free its port before the next scenario.
+- **Options:** (A) the scenario carries `serve`, the adapter starts it detached, and one HTTP scenario runs per handle; (B) the caller starts the server, and the scenario is only requests; (C) `probe()` starts and stops the server itself.
+- **Chosen: A**, with the maintainer. B leaves the adapter unprovable in isolation, and a missing server reads as the product's failure. C must stop the server by running `kill` inside the product's container, which the product can replace. A trusts nothing in the container to stop anything: the server ends with the sandbox, and P6 already provisions a fresh one per check.
+- **Reverse:** drop `serve` from the input, and refuse nothing on a second scenario per handle.
+
+### D-P11-04: `probe` is optional on `SandboxProvider`
+
+- **Ambiguous:** a required method the stub refuses, or an optional one it omits.
+- **Options:** (A) optional; stack detection names `behavioral:http` unavailable for a provider without it; (B) required, and `StubSandboxProvider` throws.
+- **Chosen: A.** Under B a stub-built set would claim an HTTP control and refuse every scenario when it ran, so the set would report a control it does not have. Under A absence is a state the type makes explicit, and it is named where L3 is decided.
+- **Reverse:** make it required and have the stub refuse.
+
+### D-P11-05: The stub refuses `detach`
+
+- **Ambiguous:** the stub implements every other `ExecOptions` field.
+- **Options:** (A) refuse; (B) spawn a detached child and kill it at `destroy()`.
+- **Chosen: A.** The only consumer of `detach` is the HTTP adapter, which the stub cannot serve (D-P11-04), so B would be code with no caller. Refusal is loud.
+- **Reverse:** implement B in `packages/sandbox/src/stub`.
+
+### D-P11-06: Issue #14 is fixed by naming the sandbox on a failed start
+
+- **Ambiguous:** the cleanup test cannot check "the networks this provision created" without knowing the id the provider chose, and the provider chooses it internally.
+- **Options:** (A) `SandboxRefusal` carries an optional `sandbox`, the container name a failed start was for, and the test derives the sidecar names from it; (B) keep diffing every `egress-*` network but tolerate ones that vanished; (C) serialise the two suites.
+- **Chosen: A.** B still fails when a neighbour creates a network mid-test, and C hides the race rather than removing it. A checks exactly what this provision would have left, and an operator reading a refusal can now find its leftovers by name.
+- **Reverse:** drop the field and return to the global comparison, with the suites serialised.
+
+### D-P11-07: One HTTP scenario per handle is enforced per adapter (known limit, owner I1)
+
+- **Ambiguous:** the unit spec refuses a second scenario "on a handle the adapter already served", and the adapter keeps the handles it served in a field of its own. A second `HttpBehavioralAdapter` built over the same provider does not know what the first served, so it runs a second scenario on that handle, and the first scenario's server, still listening, can answer it (external review of P11, codex-4, reproduced).
+- **Options:** (A) keep the refusal per adapter, and close reuse where handles are issued: every check gets a fresh sandbox; (B) move the record of served handles to the provider, shared by every adapter over it.
+- **Chosen: A.** Nothing in the codebase builds two adapters over one handle today, and nothing yet assigns sandboxes to checks at all. B would make the provider track a consumer's policy about its handles. The rule that closes the gap is P6's fresh sandbox for every check, which I1 wires. The adapter's doc comment now says the refusal is per adapter, not per handle.
+- **Owner:** I1, which wires P6's fresh sandbox per check, the rule that makes a second scenario on a served handle impossible, not merely refused. The assertion owed there: two scenarios given to two adapters never share a handle.
+- **Reverse:** implement B, keeping the served set on `LocalDockerProvider` and refusing a second detached `serve` on a handle whose probe has already run.
+
+## P11 amendments to the contracts
+
+### A-P11-01: `SandboxProvider.probe`
+
+Optional. `probe(h, { port, readyWithinMs, exchanges })` returns `{ ready, observations, durationMs }`, where each observation is a response (`status`, `headers`, `body`) or `no-response` with a reason. An implementation MUST connect to the sandbox's own loopback and nothing else, MUST charge the call to the sandbox's wall-clock budget, and MUST refuse a call on an ended sandbox. `StubSandboxProvider` does not implement it. Reasoned in D-P11-01, D-P11-02, and D-P11-04.
+
+### A-P11-02: `ExecOptions.detach`
+
+The command is started and the call returns once it has, with no output; it runs until it exits or the sandbox ends. Refused together with `stdin`. `StubSandboxProvider` refuses it. Reasoned in D-P11-03 and D-P11-05.
+
 ## P9: API + CLI
 
 ### D-P9-01: The host composes the components; a request carries data only

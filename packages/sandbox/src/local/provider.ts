@@ -13,13 +13,16 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
-import type { ExecOptions, ExecResult, MeterReading, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type {
+  ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec,
+} from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
+import { checkProbeRequest, probeRunArgs, readProbeOutput } from './probe.js';
 import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
-import { refuse, withLeftovers } from './refusal.js';
+import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
 import {
   CREDENTIAL_NAME,
   RELAY_ALIAS,
@@ -186,6 +189,12 @@ interface Sandbox {
    * second `destroy` is refused (D-P13-14).
    */
   destroyed?: boolean;
+  /**
+   * The names of probe containers whose call is still running. Removed before
+   * the sandbox's own container when it ends, so no probe outlives the
+   * namespace it joined (D-P11-02).
+   */
+  readonly probes: Set<string>;
 }
 
 function checkLimits(limits: SandboxSpec['limits']): void {
@@ -452,7 +461,8 @@ export class LocalDockerProvider implements SandboxProvider {
       // Whatever refused, the proxy, the relay, and their networks were created for a sandbox that
       // does not exist. They go with it: a leaked route out is worse than the failure that caused it,
       // and one that would not go is reported beside that failure, never instead of it or not at all.
-      throw withLeftovers(error, await this.#stopSidecars(egress));
+      const failed = withLeftovers(error, await this.#stopSidecars(egress));
+      throw failed instanceof SandboxRefusal ? new SandboxRefusal(failed.layer, failed.message, name) : failed;
     }
   }
 
@@ -553,6 +563,7 @@ export class LocalDockerProvider implements SandboxProvider {
         deadline: performance.now() + spec.limits.wallClockMs,
         runArgs: Object.freeze([...args]),
       },
+      probes: new Set(),
     };
     this.#sandboxes.set(handle, sandbox);
 
@@ -574,22 +585,18 @@ export class LocalDockerProvider implements SandboxProvider {
     const sandbox = this.#require(h);
     if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
     if (cmd.length === 0) refuse('handle', 'the command is empty; there is nothing to run');
+    const detach = options.detach === true;
+    if (detach && options.stdin !== undefined) refuse('probe', 'a detached command cannot be handed stdin; it would run without it');
     const passthrough = environmentPassthrough(options.env);
 
-    const remaining = sandbox.controls.deadline - performance.now();
-    const budget = String(sandbox.controls.limits.wallClockMs);
-    if (remaining <= 0) {
-      await this.#end(sandbox, `its wall-clock budget of ${budget}ms was already spent`);
-      refuse('lifetime', `sandbox ${h} is past its wall-clock limit of ${budget}ms; the command was not started`);
-    }
-
+    const remaining = await this.#remaining(sandbox, h);
     try {
       const result = await dockerCli(
         this.#executable,
         // `--interactive` keeps the container process's stdin attached to the one `docker` is given
         // (A-P8-02). Without it the bytes would reach the CLI and stop there, and the command would
         // run as if it had been handed nothing.
-        ['exec', ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
+        ['exec', ...(detach ? ['--detach'] : []), ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
         {
           timeoutMs: remaining,
           ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
@@ -598,17 +605,63 @@ export class LocalDockerProvider implements SandboxProvider {
       );
       return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: result.durationMs };
     } catch (error) {
-      if (!(error instanceof CliTimeout)) throw error;
-      // The budget is the sandbox's, not the command's: the container goes with it, so nothing
-      // left running inside outlives the limit that was supposed to bound it.
-      const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
-      if (removal !== undefined) {
-        // The breach is still the headline, but a container that outlived its budget *and*
-        // could not be removed is worse than one that was, and must not be reported as less.
-        refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and could not be destroyed: ${removal.message}`);
-      }
-      refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and was destroyed`);
+      return await this.#overBudget(sandbox, h, error);
     }
+  }
+
+  /**
+   * Sends a scenario's requests from a probe container in the sandbox's
+   * network namespace (A-P11-01, D-P11-01). The probe is started for this
+   * call and removed when it returns; the time it takes is the sandbox's, so a
+   * probe that outlives the budget ends the sandbox as a command would.
+   */
+  async probe(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult> {
+    const sandbox = this.#require(h);
+    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+    checkProbeRequest(request);
+    const remaining = await this.#remaining(sandbox, h);
+    const name = `probe-${randomUUID()}`;
+    sandbox.probes.add(name);
+    try {
+      const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
+        timeoutMs: remaining,
+        stdin: JSON.stringify(request),
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(`the probe exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+      }
+      return readProbeOutput(result.stdout, request.exchanges.length);
+    } catch (error) {
+      return await this.#overBudget(sandbox, h, error);
+    } finally {
+      sandbox.probes.delete(name);
+    }
+  }
+
+  /** What is left of the sandbox's wall clock, or a refusal that ends it when nothing is. */
+  async #remaining(sandbox: Sandbox, h: SandboxHandle): Promise<number> {
+    const remaining = sandbox.controls.deadline - performance.now();
+    if (remaining <= 0) {
+      const budget = String(sandbox.controls.limits.wallClockMs);
+      await this.#end(sandbox, `its wall-clock budget of ${budget}ms was already spent`);
+      refuse('lifetime', `sandbox ${h} is past its wall-clock limit of ${budget}ms; the command was not started`);
+    }
+    return remaining;
+  }
+
+  /** Rethrows anything but a timeout; a timeout ends the sandbox and refuses. */
+  async #overBudget(sandbox: Sandbox, h: SandboxHandle, error: unknown): Promise<never> {
+    if (!(error instanceof CliTimeout)) throw error;
+    const budget = String(sandbox.controls.limits.wallClockMs);
+    // The budget is the sandbox's, not the command's: the container goes with it, so nothing
+    // left running inside outlives the limit that was supposed to bound it.
+    const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
+    if (removal !== undefined) {
+      // The breach is still the headline, but a container that outlived its budget *and*
+      // could not be removed is worse than one that was, and must not be reported as less.
+      refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and could not be destroyed: ${removal.message}`);
+    }
+    refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and was destroyed`);
   }
 
   /**
@@ -662,7 +715,7 @@ export class LocalDockerProvider implements SandboxProvider {
       clearTimeout(sandbox.timer);
       sandbox.timer = undefined;
     }
-    sandbox.ending = this.#dismantle(sandbox.controls);
+    sandbox.ending = this.#dismantle(sandbox.controls, sandbox.probes);
     return sandbox.ending;
   }
 
@@ -676,8 +729,11 @@ export class LocalDockerProvider implements SandboxProvider {
    * there to make that a failing test rather than a thing somebody notices in
    * `docker ps` a week later.
    */
-  async #dismantle(controls: AppliedControls): Promise<Ended> {
-    // The container first: a network still holding an endpoint cannot be removed, and a meter read
+  async #dismantle(controls: AppliedControls, probes: ReadonlySet<string>): Promise<Ended> {
+    // Probes first: each is in the container's namespace, and none may outlive it (D-P11-02).
+    // A probe that already finished removed itself, so a failure here is not reported.
+    await Promise.all([...probes].map((name) => this.#remove(name)));
+    // Then the container: a network still holding an endpoint cannot be removed, and a meter read
     // while the sandbox runs can be overtaken by a process still calling the relay (D-P13-07).
     const container = await this.#remove(controls.containerId);
     const relay = relayOf(controls.egress);
