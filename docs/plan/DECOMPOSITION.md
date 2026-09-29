@@ -640,3 +640,4 @@ runs with weaker guarantees than its level claims.
 2. **Stop at the boundary.** A unit's out-of-scope list is binding. Adjacent work becomes an issue, not a commit.
 3. **Conformance before implementation.** Write the unit's conformance suite first; it is the acceptance criteria in executable form.
 4. **Invariants outrank convenience.** A change that makes a unit easier and weakens I1–I10 is wrong, however clean.
+5. **Confirm before building; never assume.** A unit's entry here is a claim about the code, not evidence of it. Read the code the unit touches, state the plan and every assumption, and wait for the maintainer to confirm before writing anything. What cannot be verified is asked. `CLAUDE.md`, working rule 6, holds the full rule.

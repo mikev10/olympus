@@ -1,6 +1,6 @@
 ---
 name: triage-review
-description: Triage the two external reviews of a shipped unit. Heads each reply the runner wrote with a provenance header derived from its manifest, pairs what both families raised, verifies every finding against the cited code before acting on it, writes the triage record, applies the accepted fixes to the unit branch, and stops before merge. Use when run-review has reported both runs. Takes a unit id, e.g. triage-review P1.
+description: Triage the two external reviews of a shipped unit. Heads each reply the runner wrote with a provenance header derived from its manifest, pairs what both families raised, verifies every finding against the cited code before acting on it, writes the triage record, waits for the maintainer to confirm it, applies the accepted fixes to the unit branch, and stops before merge. Use when run-review has reported both runs. Takes a unit id, e.g. triage-review P1.
 ---
 
 # Triage the two reviews
@@ -272,6 +272,12 @@ not hold. That number is how reviewer calibration becomes visible over units, an
 it is only useful if it is recorded when it is unflattering.
 
 ## 7. Apply the accepted fixes
+
+**Confirm first.** Print each accepted fix as one line naming the finding, the
+file, and the change, plus any fix that rests on an unverified assumption,
+marked as such. Then stop and wait. Apply nothing until the maintainer
+confirms (`CLAUDE.md`, working rule 6). A fix that turns out larger or
+different from the line confirmed stops again.
 
 On the unit branch, never on `v2`. Re-run the unit's full acceptance criteria
 afterwards, not just the tests near the change.
