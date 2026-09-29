@@ -198,3 +198,26 @@ describe.each(adapters)('%s', (_, adapter) => {
     await expect(adapter.detectSkipMarkers(join(root, 'a.test.ts'))).rejects.toThrow(AdapterRefusal);
   });
 });
+
+describe.each(adapters)('%s enumerateCases', (_, adapter) => {
+  async function cases(body: string): Promise<string[]> {
+    const root = await repo({ 'a.test.ts': body });
+    return adapter.enumerateCases(join(root, 'a.test.ts'));
+  }
+
+  test('names each case by its describe-qualified title, in source order', async () => {
+    const body = "describe('math', () => {\n  it('adds', () => {});\n  describe.each([1])('with %i', () => { test.skip('scales', () => {}); });\n});\ntest.todo('later');";
+    expect(await cases(body)).toEqual(['math > adds', 'math > with %i > scales', 'later']);
+  });
+
+  test('follows a renamed or extended declarer, and a fixture builder declares no case', async () => {
+    const body = "import { test as check } from 'vitest';\nconst my = check.extend({});\nmy('uses a fixture', () => {});\ncheck('plain', () => {});";
+    expect(await cases(body)).toEqual(['uses a fixture', 'plain']);
+  });
+
+  test('a title that is not a literal refuses, naming the file and line', async () => {
+    const error = await cases("const name = 'x';\ntest('ok', () => {});\ntest(name, () => {});").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AdapterRefusal);
+    expect((error as AdapterRefusal).message).toMatch(/a\.test\.ts:3 /);
+  });
+});

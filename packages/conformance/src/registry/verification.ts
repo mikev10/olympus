@@ -27,13 +27,13 @@ const PASSING = { id: 'passes', kind: 'compile', command: ['node', '-e', 'proces
 const FAILING = { ...PASSING, id: 'fails', command: ['node', '-e', 'process.exit(1)'] };
 
 /** Runs a Node script in the task's own workspace, through the sandbox the line provisioned for it. */
-async function inTask(sandbox: SandboxProvider, req: TaskRequest, script: string): Promise<string> {
+export async function inTask(sandbox: SandboxProvider, req: TaskRequest, script: string): Promise<string> {
   const result = await sandbox.exec(req.sandbox, ['node', '-e', script]);
   if (result.exitCode !== 0) throw new Error(`a script in task ${req.taskId} exited ${String(result.exitCode)}: ${result.stderr}`);
   return result.stdout;
 }
 
-function writes(files: Record<string, string>): string {
+export function writes(files: Record<string, string>): string {
   return [
     "const fs = require('node:fs'); const path = require('node:path');",
     ...Object.entries(files).map(
@@ -61,7 +61,7 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
   };
 }
 
-async function bundles(vault: Vault, state: RunState): Promise<EvidenceBundle[]> {
+export async function bundles(vault: Vault, state: RunState): Promise<EvidenceBundle[]> {
   return Promise.all(state.evidenceRefs.map((ref) => readRecord<EvidenceBundle>(vault, ref)));
 }
 
@@ -70,10 +70,10 @@ function statusOf(state: RunState, task: TaskId): string | undefined {
 }
 
 /** A run of the hello fixture with the given driver behaviour, returning what it left. */
-async function runHello(
+export async function runHello(
   rig: LineRig,
   options: { during?: (sandbox: SandboxProvider, req: TaskRequest) => Promise<void>; claim?: readonly string[]; overrides?: Partial<ComponentGraph> } = {},
-): Promise<{ outcome: RunOutcome; state: RunState; vault: Vault; violations: IntegrityViolation[] }> {
+): Promise<{ outcome: RunOutcome; state: RunState; vault: Vault; violations: IntegrityViolation[]; requests: readonly TaskRequest[] }> {
   const { startRun } = await api();
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
   const sandbox = new StubSandboxProvider();
@@ -91,7 +91,7 @@ async function runHello(
   const base = await rig.components({ sandbox, driver: author, reviewer: driver, ...options.overrides });
   const vault = recording(base.vault, violations);
   const outcome = await startRun(await rig.request({ ...base, vault }));
-  return { outcome, state: await rig.state(), vault, violations };
+  return { outcome, state: await rig.state(), vault, violations, requests: driver.requests };
 }
 
 export const STATUS_DERIVED_FROM_CHECK_RESULTS: LocalAssertion = runtime({

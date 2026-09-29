@@ -55,6 +55,7 @@ function bundle(): EvidenceBundle {
     unstarted: [],
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
+  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
     collectedBy: 'runtime',
     driverProvenanceId: 'local-vault-test@1.0.0',
     contractVersion: '1.0.0',

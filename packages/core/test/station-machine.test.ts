@@ -156,7 +156,7 @@ describe('approvals (I4)', () => {
 });
 
 describe('transition', () => {
-  const base = { level: 1 as AutonomyLevel, tampered: [], grants: [], protectedPathsTouched: [] };
+  const base = { level: 1 as AutonomyLevel, tampered: [], grants: [], protectedPathsTouched: [], tamperFindings: [] };
 
   test('a tampered lock refuses whatever the approval says', () => {
     const t = transition({ ...base, from: 'build', to: 'verify', policy: policyWith({ 'build:1': 'auto' }), tampered: [{ path: 'spec.md', expected: 'a', actual: 'b' }] });

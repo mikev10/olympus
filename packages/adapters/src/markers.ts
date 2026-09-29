@@ -255,3 +255,59 @@ export function extractSkipMarkers(sf: ts.SourceFile): string[] {
   visit(sf);
   return out;
 }
+
+/** Declarers that open a suite, whose title qualifies every case inside it. */
+const SUITES: ReadonlySet<string> = new Set(['describe', 'suite', 'xdescribe', 'fdescribe']);
+/** Declarers that declare one case. `bench` is neither: a benchmark is not a test. */
+const CASES: ReadonlySet<string> = new Set(['it', 'test', 'xit', 'xtest', 'fit', 'ftest']);
+/** Chain parts that build a declarer rather than call one: `test.extend({...})` declares no case. */
+const BUILDERS: ReadonlySet<string> = new Set(['extend', 'scoped']);
+
+/**
+ * The cases a file declares, each by its describe-qualified title joined with
+ * ` > `, in source order. A `.each` case is its title template, once: the
+ * table is data, and a table that shrinks is a change to the file the
+ * assertion comparison sees. A title that is not a literal — a variable, a
+ * function, a template with a substitution — is refused rather than dropped,
+ * because a case the list leaves out reads as a case deleted, or a deletion
+ * as nothing (I5).
+ */
+export function extractCases(sf: ts.SourceFile, file: string): string[] {
+  const names = declarersIn(sf);
+  assertNoEscape(sf, names);
+  const out: string[] = [];
+  const titleOf = (call: ts.CallExpression): string => {
+    const first = call.arguments[0];
+    const value = first === undefined ? undefined : unwrap(first);
+    if (value !== undefined && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) return value.text;
+    const line = sf.getLineAndCharacterOfPosition(call.getStart(sf)).line + 1;
+    return refuse(
+      'unsupported-feature',
+      `${file}:${String(line)} declares a test whose title is not a literal, so the case cannot be named and a deletion of it could not be seen`,
+    );
+  };
+  const visit = (node: ts.Node, suites: readonly string[]): void => {
+    if (ts.isCallExpression(node) && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
+      const chain = chainOf(node.expression, sf, names);
+      // `test.extend({...})` itself ends in the bare builder; a call through what it built,
+      // `my('x')`, ends in the builder already called, `extend({...})`, and declares a case.
+      const building = chain !== undefined && BUILDERS.has(chain.parts[chain.parts.length - 1] ?? '');
+      if (chain !== undefined && !building) {
+        if (CASES.has(chain.root)) {
+          out.push([...suites, titleOf(node)].join(' > '));
+        } else if (SUITES.has(chain.root)) {
+          const inner = [...suites, titleOf(node)];
+          node.forEachChild((child) => {
+            visit(child, inner);
+          });
+          return;
+        }
+      }
+    }
+    node.forEachChild((child) => {
+      visit(child, suites);
+    });
+  };
+  visit(sf, []);
+  return out;
+}

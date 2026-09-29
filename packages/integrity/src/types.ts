@@ -80,7 +80,13 @@ export interface TamperReport {
   skipMarkersAdded: Array<{ file: string; marker: string }>;
   testsDeleted: string[];             // renames, moves, case-set reduction all count
   snapshotsRegenerated: string[];
-  coverageDelta: number;
+  /**
+   * The coverage of the lines the diff changed, as the coverage adapter reads it
+   * from the report a pinned coverage check wrote, or `null` when the manifest
+   * pins no coverage check. A pinned check with no readable report refuses; it
+   * is never a zero and never a `null` (A-P7-02).
+   */
+  coverageDelta: number | null;
   protectedPathsTouched: string[];
 }
 

@@ -8,7 +8,7 @@
  * The Vault stores both.
  */
 import type { AgentClaim, Policy, Run, RunId, RunState, StationId, TaskId, TaskResult, VaultRef } from '@olympus-ai/core';
-import type { CheckResult, IntegrityViolation } from '@olympus-ai/integrity';
+import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { MeterReading } from '@olympus-ai/sandbox';
 
 /**
@@ -61,6 +61,12 @@ export interface EvidenceBundle {
   unstarted: readonly UnstartedCheck[];
   claim: AgentClaim;                  // stored beside evidence, never merged into it
   claimEvidenceDiff: string[];        // I2: where the model's story and the facts differ
+  /**
+   * The runtime's reading of this task's diff, over the tree it was handed and
+   * the tree it was verified in. Every finding escalates the `integrate` exit;
+   * none decides the task's status (A-P7-03).
+   */
+  tamper: TamperReport;
   collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
   contractVersion: string;

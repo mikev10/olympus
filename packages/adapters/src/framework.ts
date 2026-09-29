@@ -7,7 +7,7 @@
 import { compareAssertions, extractAssertions } from './assertions.js';
 import { jestSuites, vitestSuites } from './discovery.js';
 import { readRegularFile, SOURCE_FILE_CAP } from './files.js';
-import { extractSkipMarkers } from './markers.js';
+import { extractCases, extractSkipMarkers } from './markers.js';
 import { refuse } from './refusal.js';
 import { parseModule, syntaxErrors } from './static.js';
 import type { Assertion, AssertionDelta, TestFrameworkAdapter } from './types.js';
@@ -35,6 +35,10 @@ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
 
   async detectSkipMarkers(file: string): Promise<string[]> {
     return extractSkipMarkers(await parseTestFile(file));
+  }
+
+  async enumerateCases(file: string): Promise<string[]> {
+    return extractCases(await parseTestFile(file), file);
   }
 }
 

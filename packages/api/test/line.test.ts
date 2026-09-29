@@ -256,6 +256,21 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     if (ref === undefined) return;
     expect((await read<EvidenceBundle>(components.vault, ref)).checks[0]?.suiteCount).toBe(1);
   });
+
+  // D-P7-05: a check over a read-only tree has nowhere to write a report the host can read.
+  test('a pinned coverage check is refused rather than read as covering nothing, and no evidence is written', async () => {
+    await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cov', kind: 'coverage' }]);
+    await expect(startRun(runRequest(runId, workspace, components))).rejects.toThrow(/coverage check/);
+  });
+
+  test('every bundle carries a tamper report, empty for a task that touched no test', async () => {
+    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+    const [ref] = state.evidenceRefs;
+    if (ref === undefined) throw new Error('no evidence written');
+    expect((await read<EvidenceBundle>(components.vault, ref)).tamper).toEqual({
+      assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [],
+    });
+  });
 });
 
 describe('each check runs alone (codex-2, codex-7)', () => {

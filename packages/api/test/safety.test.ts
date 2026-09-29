@@ -54,10 +54,12 @@ describe('unsafeComponents', () => {
 });
 
 describe('SKELETON_LINE', () => {
-  test('declares what the line still cannot enforce: tamper analysis, and no longer the policy, the stations P4 paid, or the claim/evidence diff P6 paid', () => {
+  test('declares only the composition gap: not the policy or the stations P4 paid, the claim/evidence diff P6 paid, or the tamper analysis P7 paid', () => {
     expect(SKELETON_LINE.unsafe.component).toBe('SkeletonLine');
     const text = SKELETON_LINE.unsafe.cannotEnforce.join('\n');
-    expect(text).toMatch(/tamper/i);
+    expect(SKELETON_LINE.unsafe.cannotEnforce).toHaveLength(1);
+    expect(text).toMatch(/provenance/i);
+    expect(text).not.toMatch(/tamper/i);
     expect(text).not.toMatch(/claim/i);
     expect(text).not.toMatch(/policy engine/i);
     expect(text).not.toMatch(/no station beyond/i);
