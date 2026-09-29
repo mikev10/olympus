@@ -1,0 +1,59 @@
+{
+  "unit": "P7",
+  "family": "codex",
+  "artifacts": {
+    "promptFile": "2026-09-29-P7-tamper-detection-review-prompt.txt",
+    "bundleFile": "2026-09-29-P7-tamper-detection-review-bundle.txt",
+    "matchingPairs": 1
+  },
+  "invocation": {
+    "kind": "cli",
+    "command": "C:\\Program Files\\nodejs\\node.exe",
+    "argv": [
+      "C:\\Users\\Mike\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+      "exec",
+      "--sandbox",
+      "read-only",
+      "--ignore-user-config",
+      "--skip-git-repo-check",
+      "--json",
+      "-o",
+      "C:\\Users\\Mike\\AppData\\Local\\Temp\\olympus-codex-scratch-VD4moz\\last-message.txt",
+      "-"
+    ],
+    "envOverrides": {
+      "CODEX_HOME": "C:\\Users\\Mike\\AppData\\Local\\Temp\\olympus-codex-scratch-VD4moz\\config"
+    }
+  },
+  "cleanRoom": {
+    "configHome": [
+      "auth.json"
+    ],
+    "workDir": []
+  },
+  "exitCode": 0,
+  "timedOut": false,
+  "startedAt": "2026-09-29T19:46:44.063Z",
+  "endedAt": "2026-09-29T19:48:26.039Z",
+  "durationMs": 101976,
+  "cliVersion": "0.155.1",
+  "modelReported": "gpt-6-astra",
+  "tokenUsage": {
+    "input_tokens": 99517
+  },
+  "payloadSha256": "c296f494023d16106c8e8c01986757015aa17701b5002ce1ff35ec03dccd1a46",
+  "payloadBytes": 338885,
+  "ingestion": {
+    "kind": "complete",
+    "inputTokens": 99517,
+    "floor": 67777
+  },
+  "postRunFileCount": 362,
+  "recordedApprovalPolicy": "never",
+  "bundleSha256": "60bf727f9a108bc7733d7fbd2969528bf1367adc39183390678be8724bc236f5",
+  "integrity": {
+    "kind": "verified"
+  },
+  "replySha256": "e84e100bd0b8da8f2c2babedd5862e3d1d23798bcdee7fa84e8982973aec8194",
+  "outcome": "counted"
+}
