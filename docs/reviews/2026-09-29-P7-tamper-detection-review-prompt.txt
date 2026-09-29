@@ -1,0 +1,137 @@
+The code under review is in the file
+`2026-09-29-P7-tamper-detection-review-bundle.txt` (SHA-256 60bf727f9a108bc7733d7fbd2969528bf1367adc39183390678be8724bc236f5) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the tamper-detection layer of a TypeScript project: a runtime
+that has model-driven agents change a repository and then decides, from
+evidence it collects itself, whether the change is accepted. You have the source
+and nothing else — no design documents, no author reasoning, no prior version,
+no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+Each agent task runs in a fresh copy of the repository. When it finishes, the
+runtime diffs the copy against what it handed the task, builds a tree from that
+diff, and runs pinned checks over that tree. This unit adds `analyzeTamper`
+(packages/api/src/tamper.ts), which compares the tree the task was handed with
+the tree its checks ran over and reports what the task did to the tests that
+judge it: weakened, removed, or tolerance-widened assertions; added skip, only,
+todo, and similar markers; deleted test cases, where a case moved or renamed
+elsewhere is not a deletion; regenerated snapshot files; protected-path and
+config-file changes; and changed-line coverage. Parsing goes through a
+per-framework adapter for vitest and jest (packages/adapters), which gains
+`enumerateCases` here. The line (packages/api/src/line.ts) records each kind of
+finding as an integrity violation, stores the report in the task's evidence
+bundle, shows the findings to the review seat, and raises the approval required
+to leave the `integrate` station to a human (packages/core/src/station/machine.ts,
+packages/api/src/run.ts). A finding does not fail or halt the run by design.
+
+It must hold against a capable, motivated party trying to change, skip, or
+remove the tests and checks that judge its work, or change what a pinned check
+command actually runs, while the tamper report comes back empty or incomplete.
+Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the contents of every file it writes in its own workspace
+copy, within the paths its role may write — test files, source files, framework
+and package configuration, snapshot files — including their names, their
+locations, and their syntax, and it controls the result object its driver
+returns. It does not control the components the runtime is wired with — the
+Vault, the sandbox provider, the workspace store, and the drivers are
+runtime-selected and trusted, even where a function takes one as an argument —
+and it does not control the tree it was handed (the base), the policy, the
+pinned check list, or code running inside the runtime's own process.
+
+The invariants at stake:
+
+An agent may not be judged by an artifact it can write. Specs and acceptance
+tests are hashed before the build and re-verified at every station transition;
+this unit extends the principle to the repository's own tests and the
+configuration that decides what a check runs.
+
+Fail closed. A missing check, an absent capability, an unsupported stack, or a
+shrunken suite is a refusal — never a silent degrade, never a warning that lets
+the run continue. An input the analysis cannot read must not read as an input
+with no findings.
+
+The runtime derives status; the model never reports it. The report is the
+runtime's reading of the diff it collected, never the driver's account of it.
+
+No agent writes to the Vault, and nothing on the host executes repository code:
+the analysis parses files and must not load or run any of them.
+
+The mechanisms that matter most:
+
+- test-file selection: which files are read on each side (changed, or a test on
+  one side only), and which adapter reads them (built from the base tree)
+- pairing across files: assertions, markers, and case titles matched as
+  multisets, so a move is not a deletion
+- case and marker extraction from the syntax tree, including renamed, aliased,
+  and extended test declarers
+- the escalation path: report stored in the evidence bundle, read back from the
+  Vault at the `integrate` exit and by the status view, and turned into a
+  required human approval
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The identifiers in parentheses name later units of work and mean nothing to you;
+treat each line as "not built here, by design".
+
+- deleting `SKELETON_LINE`, and component provenance that survives composition (I1)
+- coverage that cannot be forged by the suite it measures, and mutation testing (M3)
+- judging whether a test change was justified. P7 names what changed; the human at `integrate` decides
+- any stack other than TypeScript with vitest or jest
+
+THE QUESTION
+
+As the task, how would you weaken, skip, or delete a test that judges your
+work, or change what a pinned check command runs, so that the checks still pass
+and the tamper report in your evidence bundle names nothing, or names less than
+you did?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
