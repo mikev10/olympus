@@ -25,6 +25,7 @@
 | P11 | Sandbox network probe + HTTP behavioral | 2 | maintainer | P8, P10 | 2 |
 | P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
 | P13 | Cost control: budget at the relay, cost in evidence | 2 | maintainer | P6, P12 | 2 |
+| P14 | Enforcement record | 2 | maintainer | P1, P4, P10, P13 | 2 |
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
@@ -469,6 +470,19 @@ Beside it, a `BehavioralAdapter` of kind `http` in `packages/adapters`. A scenar
 - `git ls-files -- .plan/` prints nothing
 **Invariants:** I5 is the subject — an unenforceable control is a refusal, and this unit makes one enforceable rather than relaxing the refusal. I1 must not regress: the proxy adds a network route and no mount, and the single-rw-mount rule is untouched. I4 is the allowlist itself: a host not granted is not reachable.
 
+### P14 — Enforcement record
+**Scope:** an append-only record of every decision a control made: each admission, station, and policy refusal with its cause; each park with its cause; each approval with the principal that granted it; each connection the egress proxy opened, tunnelled, or refused; each violation. Written by the component that decided, never by a model, and read back by R2, R7, R8, and an auditor.
+**Why:** the claim is auditable evidence that autonomous work is real, and today most refusals leave no trace. An admission refusal writes nothing, by design (P4: refused before anything is written). A station refusal returns to its caller, and `RunState` keeps `'parked'` but not why. The proxy's per-connection verdicts go to the proxy container's stdout (`packages/sandbox/src/local/proxy.ts`) and are destroyed with it. P13's usage records carry the relay's budget refusals and nothing else. So "what did this agent try that was stopped" has no answer, no rate built on refusals can be computed, and a record that was never written cannot be backfilled. A control whose decisions no auditor can see is the thing I8 exists to refuse. Added by the agent-lifecycle amendment (`docs/decisions.md`, D-A-LC-02).
+**Depends on:** P1 (the Vault), P4 (the refusals it records), P10 (the proxy whose verdicts it keeps), P13 (whose usage records already hold the relay's refusals, which this unit reads rather than duplicates).
+**Must hold, whatever the spec chooses:**
+- the record sits beside run state, not in it: an admission refusal still commits no run state and locks nothing, and is recorded all the same. Reconciling that with P4's "before anything is written" is the unit's first decision, stated rather than taken silently
+- each entry is write-once and content-addressed like evidence, so an auditor verifies one with `sha256sum` alone (P1)
+- each entry names the component that decided, the run and task where there is one, and its cause as a closed type — never free text a model wrote (I2, I7)
+- deleting the write for any one cause fails an assertion (I8)
+- the Vault gains a named kind through a contract amendment, and no generic write (I1)
+- **the ledger.** Pays `I2.enforcement-decisions-recorded-by-the-enforcer`, registered pending by the amendment that added this unit, so `pending-baseline.json` lowers I2 by one
+**Specified when it starts.** Scope, out of scope, conformance, and acceptance are written before any code, as P12's and P13's were.
+
 ---
 
 ## Phase 3
@@ -482,6 +496,8 @@ Beside it, a `BehavioralAdapter` of kind `http` in `packages/adapters`. A scenar
 - cost and cache-hit rate reported per run (cost from P13's usage records, which are `unmetered` until this unit wires the relay into the line)
 - each station's real driver calls use the model tier its role's policy scope names (`CapabilityScope.tier`), and the usage records show which model each call used. This proves the model is chosen per station, which the policy already expresses.
 - the known limits P13's review left to this unit are closed before the first metered record: an unreadable call's cost reads as a lower bound (D-P13-19), and a lost meter reading blocks resume (D-P13-20)
+- claim/evidence mismatches, gate outcomes and iterations per station, and refusals and parks by cause reported per run, each read from the Vault and P14's record, never from a model's account
+- the credential that pushes and merges is held by the runtime on the host and never provisioned into a sandbox; no sandbox can reach the git remote, so no agent merges its own change
 - `unavailableControls()` correctly refuses L3: an L3 run is refused at admission end to end, naming each missing control (`I5.adapter-refusal-refuses-l3-end-to-end`, split from P6's admission entry)
 - component provenance survives composition, and `SKELETON_LINE` is deleted only after it does: a stub wrapped without forwarding its declaration is still refused above L1 (`I5.unsafe-declaration-survives-composition`, re-owned from P6)
 
@@ -496,11 +512,18 @@ order between them is settled before any of them is picked up.
 | ID | Unit | Milestone | Depends on | Spec |
 |---|---|---|---|---|
 | R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
-| R2 | Outcome measurement | M2 | P4, P9 | — |
+| R2 | Outcome measurement | M2 | P4, P6, P9, P14 | — |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | — |
 | R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
+| R7 | False-done benchmark | M2 | P6, P7, I1 | — |
+| R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
+| R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver | — |
+| R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
+| R11 | Learning loop | M3 | R2, R7, R8, P14, R13 | — |
+| R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
+| R13 | Nightly review | M2 | P14, R2, R9, M2 triggers | — |
 
 ### R1 — Readiness
 
@@ -519,6 +542,21 @@ merged change. Every input already exists in run state and the usage records
 P13 writes from the relay's meter, so this is derivation and a reporting surface, not collection.
 Bounded by the same rule as R1: derived by the runtime, never reported by a
 model. Blocked on P4 and P9 because it reads finished runs through the API.
+
+Two kinds of number, never blended into one score. **Safety** is the share of
+work the line called done that was not: the false-done rates below, R7's
+corpus, and R8's post-merge outcomes. This is the number the reliability target
+in F1 applies to. **Throughput** is how much the line finishes without a human:
+the autonomy ratio, first-pass yield per station and rolled across the line,
+iterations to green, parks and refusals by cause, cycle time, and cost per
+merged change. A refusal or a park lowers throughput and is never a safety
+failure; a line that raises throughput by refusing less is measured on safety
+first. Every rate is published with its sample size and a confidence bound,
+never as a point estimate alone: zero failures in 300 runs bounds the failure
+rate near 1% at 95% confidence, and a claim of 99.9% needs roughly 3,000 runs
+with none. Rates are kept per model identity, role, station, and stack, so R11
+can compare them and L3 can be gated on them. Refusals and park causes are not
+in run state; P14's record supplies them, so R2 is also blocked on P14.
 
 It also owns the cost estimate before a run, taken from past runs' usage records per station and model. P9 shows the exact worst case. R2 adds the likely figure beside it, once I1's real runs have produced records to estimate from.
 
@@ -619,6 +657,111 @@ waiting on a driver per vendor. Binding:
   support, and each maps to an assertion that fails when it is removed. An
   endpoint without tool calling, or without usage figures, declares the gap,
   and `unavailableControls()` refuses the levels that need it
+
+### R7 — False-done benchmark
+
+The measurement the claim needs. A fixed corpus of tasks, each seeded with one
+known false-done — a skipped test, a weakened assertion, an edited acceptance
+test, a suite that was never run under a claim that it passed, a hard-coded
+expected output, a change outside the granted globs — beside clean controls
+that should pass. Each is run through the line and through the same driver
+alone, and the unit reports the detection rate per item of P7's taxonomy and
+the false-refusal rate on the controls, each with its sample size and bound
+(R2). Without it, "measurably reduces false-done failures" is asserted and not
+measured. The corpus lives in the Vault, is hidden from every driver and from
+R11, and is versioned, so a number is always reported against the corpus
+version that produced it.
+
+### R8 — Observe: post-merge outcomes
+
+The first unit to enter `observe`. It attributes what happens after
+`integrate` to the run that produced it: a later commit whose diff reverses an
+Olympus-merged change — found by content, not by a commit message anyone can
+write, and from git history alone, so no provider is assumed; a default-branch
+check that fails on the merge commit; and a `post-merge` or `ci-failure`
+trigger that names the change. From these come the rollback count, the
+change-failure rate, and time to restore, per run, role, and model identity,
+and the escaped false-done rate R2 says is not yet established. A signal is an
+untrusted payload (I7), and attribution is the runtime's join on commit
+identity, never a model's reading of an incident. Olympus does not deploy: the
+target's own pipeline ships, and `observe` reads what happened (D-A-LC-03).
+
+### R9 — Separation of duties across every seat
+
+Today independence is checked at one seat and by model family alone:
+`seatReviewer` refuses a reviewer who shares an author's family at L3 and
+records reduced independence at L0–L2, and the review seat sees only its
+grants, read-only, with none of the author's narrative (P6). Nothing checks
+any other pair. This unit writes the matrix and enforces every row:
+`test-design` and `build` in different families, which is the green-on-green
+defense F1 defers to M2; an identity that authored a change never reviews it,
+where identity is role, driver, and model, not family alone; a review seat
+never writes (P6); an approval never comes from the run's agent (P9); the merge
+credential never enters a sandbox (I1). Each row is a registry assertion that
+fails when its check is deleted, and each seat's identity is recorded in run
+state. It needs a second driver, because one family can only ever record
+reduced independence. A review whose verdict gates the line is the M3 panel's,
+not this unit's: until then a verdict is recorded and not interpreted
+(D-P4-07), and the human at `integrate` reads it.
+
+### R10 — Trust ratchet
+
+Within a run, capability only narrows. When a task takes in input that policy
+marks untrusted or protected — a trigger payload from an author below `owner`
+trust, a file policy classifies as sensitive — its egress, its tools, and the
+level it may run at narrow before that input reaches the model, and nothing
+restores them inside the run: work that needs them back is a newly admitted
+run. The transition fails closed, withholding the input until every
+enforcement point has adopted the narrower state, and it is recorded in P14's
+record. The admission ceiling already never widens; this adds the narrowing.
+At M1 it would hold little, since only the human trigger exists and egress is
+the model API alone. It matters the moment the trigger framework admits outside
+payloads, or any allowlist grows past the model API.
+
+### R11 — Learning loop
+
+The `learn` station and the `learning` package: self-improvement, bounded by
+the invariants rather than exempt from them. The loop reads the Vault — R2's
+rates, R7's results, R8's outcomes, P14's record, R13's review — and writes
+only proposals: to roles, prompts, task templates, and grants. An unused grant
+is proposed for removal; recurring denials that correlate with failed work are
+proposed for a human to review. A proposal is applied by a human as a
+versioned Vault edit (I4), and only to runs admitted afterwards; a live run
+keeps the policy it was admitted with. The loop never proposes a change to
+what judges: acceptance tests, `verify.yaml`, rubrics, R7's corpus, and R2's
+metric definitions are outside what it can touch (I3). A proposal is accepted
+on evidence the learner could not see, R7's held-out corpus, and one that
+improves a rate by shrinking what is measured — smaller tasks, fewer checks, a
+shorter suite — is refused (D-A-LC-05).
+
+### R12 — Telemetry export (OpenTelemetry)
+
+Traces and metrics an operator can put on a dashboard: one trace per run,
+spans per station, task, attempt, and check, carrying model identity, token use
+including cache reads and writes, cost, tool calls, and outcomes, named to the
+OpenTelemetry conventions for generative AI so any backend can chart them. The
+exporter runs on the host and reads the runtime's own records — the Vault,
+P13's usage records, and P14's record — so what it emits is what an auditor can
+recompute. Telemetry is never read back: no gate, level, or rate takes it as
+input, because a stream anyone on the collector's path can alter must not
+decide anything. No prompt, completion, or payload text is exported by default
+(I7). The CLI's own telemetry is not used; it originates inside the sandbox,
+within the agent's reach, and would need an egress grant (D-A-LC-09). A
+reference dashboard definition may ship with the unit; a hosted dashboard is
+the control plane's.
+
+### R13 — Nightly review
+
+Two jobs on the `scheduled` trigger. The first involves no model: it re-hashes
+every evidence bundle, lock, and record in the Vault, recomputes R2's published
+rates from raw records, and records a violation for any mismatch, so a record
+that has drifted is found within a day rather than at audit. The second seats
+a reviewer over the day's findings — refusals, parks, violations, failed
+checks, post-merge outcomes — handed over as typed fields, never raw text (I7).
+The reviewer's family differs from every author family whose work it reviews
+(I6). Its review is recorded as a claim and becomes R11 proposals or `intake`
+candidates, which a human admits. It never changes a run, a grant, or a status
+(D-A-LC-10).
 
 ### Recorded constraint: the Codex driver (M2)
 

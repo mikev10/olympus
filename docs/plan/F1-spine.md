@@ -17,6 +17,8 @@ That Olympus *measurably reduces* false-done failures is not asserted yet. Nothi
 
 Design for the mission. Market the claim. Never collapse the two.
 
+**Reliability target:** the nines apply to what the line calls done. Being as good as a careful human most of the time is not the bar; an escaped false-done rate held under a target set in policy, three nines at the least, is. The line meets it by refusing, not by trusting the model more. A refusal, a park, or a handoff to a human is a safe outcome that costs throughput; an escaped false-done is the failure. No rate is claimed without its sample size and confidence bound (`DECOMPOSITION.md`, R2), and L3 is never admitted on a stack whose measured bound has not met the target (D-A-LC-04).
+
 ---
 
 ## The Invariants
@@ -110,15 +112,18 @@ F1 Spine
                  P11 Sandbox network probe + HTTP behavioral  [P8, P10]
                  P12 Credential at the egress layer  [P5, P10]
                  P13 Cost control  [P6, P12]
+                 P14 Enforcement record  [P1, P4, P10, P13]
                  P9 API + CLI  [P4]
                       └─ I1 Integration + M1 proof
 ```
 
-Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10/P11/P12/P13 follow their bracketed dependencies.
+Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10/P11/P12/P13/P14 follow their bracketed dependencies.
 
 P10 is numbered after P9 and ordered before P5, which is what the bracketed dependencies are for. It was added by P5, which found that the Claude Code CLI has to run inside the sandbox and that a `deny-all` container cannot reach the model API — the allowlist P2 refused to fake. A unit is the first real use of an interface, and friction there is information.
 
 P11 was added by P8 the same way. An HTTP behavioral check has to send its request from the sandbox's network, and a client inside the product's container is one the product can replace; the probe that puts the client out of reach changes the sandbox's network posture, so it is its own unit rather than part of P8.
+
+P14 was added by an amendment rather than by a unit, after the line was checked control by control against an external account of agent-run delivery (`docs/decisions.md`, D-A-LC-02). It records every refusal and denial, which today leave no trace an auditor or a rate could count beyond the relay's budget refusals P13 keeps. It blocks I1: the M1 proof runs a real model on a real repository, and a refusal history that was never written cannot be backfilled.
 
 ---
 
@@ -140,8 +145,8 @@ A package that cannot be verified without the rest of the system is decomposed w
 
 **In:** stations 1–8, local Docker, Claude Code driver, TypeScript adapters, C1/C2/C3, trust boundary, policy engine, API + CLI, cost and cache measurement, L2, human trigger only.
 
-**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
+**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), false-done benchmark (M2), post-merge observation (M2), separation of duties beyond the review seat (M2), trust ratchet (M2), telemetry export (M2), nightly review (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
 
-The three named here alongside `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness is the one that reaches back into this document: it added the fourth term to the effective-level formula above and `readiness` to the package list, both taken deliberately as an amendment rather than by the unit that will use them.
+The units in `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness is the one that reaches back into this document: it added the fourth term to the effective-level formula above and `readiness` to the package list, both taken deliberately as an amendment rather than by the unit that will use them.
 
 Test Design at M1 is single-family. The full green-on-green defense does not exist until M2 and M1 must not claim it.
