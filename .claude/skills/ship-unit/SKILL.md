@@ -32,6 +32,35 @@ tracked planning documents live under `docs/plan/`, so a search for the word
 **Any failure stops the ship.** Report which criterion failed and stop. Do not
 open a PR with a failing gate and a note explaining it.
 
+**One exception, and only this one: the driver's paid suite runs in CI.** The
+model credential exists only as CI's Actions secret, so
+`pnpm --filter @olympus-ai/driver-claude-code test` cannot run on a
+maintainer's machine, and any change under `packages/` leaves the driver's
+recorded report stale (D-A-CI-07). A unit's "the driver test runs once"
+criterion is met by the pull request's `run-driver` job, not locally. Run
+everything else with the driver package excluded:
+
+```
+pnpm -r --no-bail --filter '!@olympus-ai/driver-claude-code' test
+```
+
+That run passes when every failure in it is the stale driver report and
+nothing else:
+
+- every failing test is a registry entry marked
+  `(external: @olympus-ai/driver-claude-code …)`, or one of the two registry
+  meta-tests that aggregate them (`registry > no entry is missing…` and
+  `I8.registry-complete`)
+- every problem line those meta-tests print either says
+  `@olympus-ai/driver-claude-code has changed since its tests ran`, or is
+  `<claim>: missing` for a `driver.*` claim
+
+Any other failure, in any package, stops the ship as above. Say in the PR's
+acceptance section that the driver criterion is pending CI, and never mark it
+passed. The merge gate still holds: WORKFLOW step 7 merges only on green pull
+request checks, and those include the paid run and a fully green conformance
+registry against the driver's fresh report.
+
 ## 3. Verify nothing ignored is staged
 
 ```

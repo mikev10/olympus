@@ -2010,6 +2010,13 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **Unverified until the first merge:** the lookup filters on the artifact API's `workflow_run.repository_id` and `head_repository_id`. No artifact existed to check them against. If either field is absent, the filter matches nothing and the merge pays, as before this change.
 - **Reverse:** delete the `pr-report` and `Keep the driver report for the merge` steps, remove `steps.pr-report.outputs.found` from the paid step's condition, and drop `actions: read`.
 
+### D-A-CI-07: the driver's paid suite is proven in CI, not before shipping
+
+- **Problem:** `ship-unit` stopped on any failing check, and every unit's accept list ran `pnpm --filter @olympus-ai/driver-claude-code test` once, locally. The model credential now exists only as CI's Actions secret (the local key was revoked for spend), so that run refuses on a maintainer's machine before any model call. Any change under `packages/` leaves the driver's recorded report stale, so the registry reports every driver entry `tree-changed`, and no unit that touches `packages/` could ship. Found shipping P7.
+- **Chosen:** the driver criterion is met by the pull request's `run-driver` job. Locally, `ship-unit` runs the recursive tests with the driver package excluded, and accepts a failure only when it is the stale report: failing tests are the driver's external registry entries or the two meta-tests that aggregate them, and every problem line they print names the driver's changed tree or a `driver.*` claim left `missing` by it. Any other failure stops the ship. The PR states the criterion as pending CI.
+- **Why the gate is not weakened:** nothing merges on it. WORKFLOW step 7 merges only on green pull request checks, which run the paid suite under `run-driver` and the conformance registry against the fresh report. What moved is where the one paid run happens, not whether a merge needs it. The exception is scoped to failures a stale report produces, so a real regression anywhere else still stops the ship.
+- **Reverse:** put a model credential back on the maintainer's machine and delete the exception from `ship-unit` step 2.
+
 ## P8: Adapters (TypeScript)
 
 ### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code
