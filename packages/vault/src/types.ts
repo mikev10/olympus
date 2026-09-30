@@ -103,7 +103,7 @@ export interface UsageRecord {
  * (D-P14-06).
  */
 export type AdmissionRefusal =
-  | { readonly reason: 'invalid-request'; readonly problems: readonly { readonly path: string; readonly code: string }[] }
+  | { readonly reason: 'invalid-request'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
   | { readonly reason: 'unsafe-above-l1'; readonly requestedLevel: AutonomyLevel; readonly components: readonly string[] }
   | { readonly reason: 'cost-unapproved'; readonly requestedLevel: AutonomyLevel; readonly worstCaseUsd: number; readonly approvedCostUsd: number | null }
   | { readonly reason: 'controls-unavailable'; readonly requestedLevel: AutonomyLevel; readonly unavailable: readonly string[] }
