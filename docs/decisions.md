@@ -3117,3 +3117,18 @@ Proposed with the unit spec and taken as recommended by the maintainer, 2026-09-
 - **Chosen: A**, with the maintainer. Each mark fails the moment it stops being true, so I1 cannot remove the skeleton's declaration without the three blocked rows failing until they gain scenarios, and a line that starts returning `capability-missing` fails the scan. B weakens the table's one property, that a cause whose write is missing fails.
 - **Reverse:** B, with each row named in I1's entry.
 - **Corrected while running the table:** station `capability-missing` is not made only before the line. The line checks the driver's capabilities again at `build` and at `review` (`packages/api/src/line.ts`), so a driver whose declaration changes after admission reaches it there. The mark's own check caught this and failed, as it was written to. The row has a scenario instead, and the **recorded under another cause** mark is dropped, since nothing else used it. This returns that row to the criterion first confirmed, that every cause has a scenario.
+
+### D-P14-13: a decision names the task and station the line found it at
+
+- **Found while running the table:** two rows expected a place the line does not decide at. An artifact changed by the build driver is found at the station's own lock check, over no task, and its violation record names no task; the table expected the task. A gate that fails its last iteration parks the task while the run is at `verify`, as the park's own message says; the table expected `build`.
+- **Options:** (A) correct the table: the tamper is expected at `build` with no task, the iterations park at `verify`; (B) have the line name the suspect task and the task's own station.
+- **Chosen: A**, with the maintainer. The decision points at its violation (D-P14-08), and B would have the two disagree about the task; B's park station is one the run was not at.
+- **Reverse:** B — the decision's task becomes the suspect `recordTamper` already derives for the violation's role, and a park's station becomes `task.station`.
+
+### D-P14-14: where the confirmed plan left the wiring open
+
+- **A run id `LocalVault` cannot name.** An empty run id is refused with nothing recorded, as D-P14-01 states. A non-empty one outside `LocalVault`'s pattern reaches `recordDecision`, which throws, so the admission throws rather than returning a refusal: nothing is admitted and nothing is recorded, and the runtime does not keep a copy of the Vault's pattern to test against first. **Reverse:** export the pattern from `vault` and skip the write for any id outside it.
+- **`controls-unavailable` at resume** is not recorded. `ResumeRefusal` does not carry it (D-P14-11), and admission refuses such a record before any state exists, so no run reaches a resume with it. **Reverse:** add the arm to `ResumeRefusal` when a run can reach it.
+- **A grant whose commit fails** leaves its `approval-granted` decision, written first (D-P14-07), followed by an `approval-refused` `not-awaiting` decision for the failed commit. The two together say it was decided and did not take effect. **Reverse:** none needed. Writing the grant after the commit is the order D-P14-07 rules out.
+- **A check's sandbox** has its egress log recorded like a driver call's, over the task and station it ran for. Today a check has no route out and reports `none`, so nothing is written. **Reverse:** read only the driver call's teardown.
+- **Who decided a station refusal** is derived from its reason: `parked`, `lock-tamper`, and `violation` are the line's, the rest the station machine's (`packages/api/src/decisions.ts`). The switch lists every reason, so a new one does not compile until it is assigned. **Reverse:** pass the decider from each refusal site.

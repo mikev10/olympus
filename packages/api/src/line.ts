@@ -76,8 +76,9 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
+import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
-import type { EgressPolicy, MeterReading, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
+import type { EgressPolicy, MeterReading, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageRecord } from '@olympus-ai/vault';
 import type { ComponentGraph, RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
@@ -135,26 +136,31 @@ const UNATTRIBUTED = 'unattributed' as RoleId;
  */
 export async function runLine(ctx: LineContext, changed: readonly TamperedPath[] = []): Promise<RunOutcome> {
   if (changed.length > 0) {
-    return refused(ctx, ctx.state.station, await recordTamper(ctx, ctx.state.station, null, [...changed], { phase: 'resume' }));
+    return refused(ctx, ctx.state.station, await recordTamper(ctx, ctx.state.station, null, [...changed], { phase: 'resume' }), null);
   }
   for (;;) {
     const cancel = ctx.state.cancelled === null ? (ctx.cancelRequested?.() ?? null) : null;
     if (cancel !== null) await commit(ctx, { cancelled: cancel });
     const step = nextStep(ctx.state, ctx.graph);
     let refusal: StationRefusal | undefined;
+    // The task a refusal was made over, for its record; null for one made over the station.
+    let task: TaskId | null = null;
     switch (step.kind) {
       case 'refuse':
-        return refused(ctx, ctx.state.station, step.refusal);
+        return refused(ctx, ctx.state.station, step.refusal, null);
       case 'work':
         refusal = await work(ctx, step.station);
         break;
       case 'build':
+        task = step.task.id;
         refusal = await build(ctx, step.task);
         break;
       case 'verify':
+        task = step.task.id;
         refusal = await verify(ctx, step.task);
         break;
       case 'review':
+        task = step.task.id;
         refusal = await review(ctx, step.task);
         break;
       case 'finish':
@@ -193,12 +199,31 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         break;
       }
     }
-    if (refusal !== undefined) return refused(ctx, ctx.state.station, refusal);
+    if (refusal !== undefined) return refused(ctx, ctx.state.station, refusal, task);
   }
 }
 
-function refused(ctx: LineContext, at: StationId, transition: StationRefusal): RunOutcome {
+/**
+ * A refusal leaves the line only once it is recorded, naming the station
+ * machine or the line as the decider (D-P14-07, D-P14-09). A park is recorded
+ * over the task it parked, however the refusal reached here.
+ */
+async function refused(ctx: LineContext, at: StationId, transition: StationRefusal, task: TaskId | null): Promise<RunOutcome> {
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: transition.reason === 'parked' ? transition.task : task, station: at },
+    { cause: 'station-refused', decidedBy: stationDecider(transition), refusal: transition },
+  );
   return { ok: false, reason: 'refused', at, transition, state: ctx.state };
+}
+
+/** Every violation the line finds is written through the Vault and then recorded as its decision, pointing at it (D-P14-08). */
+async function recordViolation(ctx: LineContext, violation: IntegrityViolation): Promise<VaultRef> {
+  const ref = await ctx.components.vault.recordViolation(violation);
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: violation.taskId, station: ctx.state.station },
+    { cause: 'violation-recorded', decidedBy: 'line', violation: ref },
+  );
+  return ref;
 }
 
 /** Marks the first unspent grant for `key` used. A spent grant stays in run state: it is the record that a human approved. */
@@ -301,7 +326,6 @@ async function recordTamper(
   ctx: LineContext, station: StationId, task: Task | null, tampered: TamperedPath[], extra: Record<string, unknown>,
   suspect: Task | null = task,
 ): Promise<StationRefusal> {
-  const { vault } = ctx.components;
   const detector = driverAt(ctx, station);
   const violation: IntegrityViolation = {
     runId: ctx.run.id,
@@ -313,7 +337,7 @@ async function recordTamper(
     detectedAt: new Date().toISOString(),
     detail: { station, ...extra, tampered },
   };
-  const ref = await vault.recordViolation(violation);
+  const ref = await recordViolation(ctx, violation);
   await commit(ctx, {
     violation: ref,
     ...(task === null ? {} : { tasks: { ...ctx.state.tasks, [task.id]: 'failed' } }),
@@ -501,21 +525,28 @@ async function runTask(
   } catch (error) {
     outcome = { ok: false, error };
   }
-  let reading: MeterReading;
+  let teardown: Teardown;
   try {
-    reading = (await sandbox.destroy(handle)).meter;
+    teardown = await sandbox.destroy(handle);
   } catch (error) {
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
       { cause: error },
     );
   }
-  await recordUsage(ctx, task, reading);
+  const site = { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station };
+  await recordEgress(site, teardown.egress);
+  const { meter } = teardown;
+  const usage = await recordUsage(ctx, task, meter);
+  // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
+  if (meter.kind === 'metered' && meter.refused > 0) {
+    await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
+  }
   return outcome;
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
-async function recordUsage(ctx: LineContext, task: Task, reading: MeterReading): Promise<void> {
+async function recordUsage(ctx: LineContext, task: Task, reading: MeterReading): Promise<VaultRef> {
   const record: UsageRecord = {
     runId: ctx.run.id,
     taskId: task.id,
@@ -526,6 +557,7 @@ async function recordUsage(ctx: LineContext, task: Task, reading: MeterReading):
   };
   const ref = await ctx.components.vault.recordUsage(record);
   await commit(ctx, { usage: ref });
+  return ref;
 }
 
 function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
@@ -634,7 +666,7 @@ async function tamperedIn(ctx: LineContext, tree: string): Promise<TamperedPath[
  */
 async function recordEscape(ctx: LineContext, task: Task, outside: string[]): Promise<StationRefusal> {
   const detector = driverAt(ctx, 'verify');
-  const ref = await ctx.components.vault.recordViolation({
+  const ref = await recordViolation(ctx, {
     runId: ctx.run.id,
     taskId: task.id,
     kind: 'capability-escape',
@@ -684,7 +716,7 @@ async function recordFindings(ctx: LineContext, task: Task, report: TamperReport
     if (found === undefined) continue;
     // Deliberately not entered in run state: a test change can be legitimate, and the call on it
     // is the human's at integrate, with the report beside the evidence (D-P7-01).
-    await ctx.components.vault.recordViolation({
+    await recordViolation(ctx, {
       runId: ctx.run.id,
       taskId: task.id,
       kind,
@@ -771,7 +803,9 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
         unstarted.push({ checkId: check.id, reason: describe(error) });
       }
     } finally {
-      await sandbox.destroy(handle);
+      // A check's sandbox has no route out today, and whatever its proxy decided is recorded all the same (D-P14-04).
+      const { egress } = await sandbox.destroy(handle);
+      await recordEgress({ vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station }, egress);
     }
   }
   const checks = results.filter((r): r is CheckResult => r !== undefined);
@@ -789,7 +823,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   if (differences.length > 0) {
     // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
     // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
-    await vault.recordViolation({
+    await recordViolation(ctx, {
       runId: ctx.run.id,
       taskId: task.id,
       kind: 'claim-mismatch',

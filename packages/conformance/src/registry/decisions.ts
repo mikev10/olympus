@@ -235,7 +235,9 @@ async function parkScenario(cause: ParkCause): Promise<void> {
       vault = components.vault;
       refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 starts');
     }
-    const d = await expectDecision(rig, vault, `station:parked:${cause}`, { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' });
+    // A gate that fails its last iteration parks the task at verify, where the run then is (D-P14-13).
+    const station = cause === 'iterations-exhausted' ? 'verify' : 'build';
+    const d = await expectDecision(rig, vault, `station:parked:${cause}`, { decidedBy: 'line', taskId: HELLO_TASK, station });
     if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'parked' || d.decision.refusal.task !== HELLO_TASK) {
       throw new Error(`P14: a ${cause} park was recorded as ${JSON.stringify(d.decision)}`);
     }
@@ -321,7 +323,8 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         const writer = await stubDriver({ during: async () => writeFile(join(rig.dirs.artifacts, 'spec.md'), '# hello\n\nWidened by the agent.\n') });
         const components = await rig.components({ driver: writer, reviewer: writer });
         refusalOf(await startRun(await rig.request(components)), 'P14 tamper');
-        await expectDecision(rig, components.vault, 'station:lock-tamper', { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' });
+        // Found at the station's lock check, over no task: the decision names what its violation names (D-P14-13).
+        await expectDecision(rig, components.vault, 'station:lock-tamper', { decidedBy: 'line', taskId: null, station: 'build' });
       });
     },
   },
