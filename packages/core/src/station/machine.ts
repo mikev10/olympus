@@ -90,7 +90,8 @@ export function approvalKey(station: StationId, level: AutonomyLevel): ApprovalK
 /**
  * The approval a station exit needs at a level: the stricter of the
  * contract's own floor and the policy cell, raised to `human-required` when a
- * protected path was touched (`protectedPathPolicy: 'escalate'`).
+ * protected path was touched or tamper analysis found anything
+ * (`protectedPathPolicy: 'escalate'`).
  *
  * The policy is total, so a missing cell means the value did not come from
  * `resolvePolicy`; it reads `human-required`, the value `resolvePolicy` gives
@@ -119,8 +120,14 @@ export interface TransitionInput {
   /** What the lock re-verification found on the way out; empty when intact. */
   readonly tampered: readonly TamperedPath[];
   readonly grants: readonly ApprovalGrant[];
-  /** Protected paths the work touched. Empty until tamper analysis exists (P7); SKELETON_LINE says so. */
+  /** Protected paths the work touched, from the tamper reports of the tasks it accepted. */
   readonly protectedPathsTouched: readonly string[];
+  /**
+   * Every other tamper finding in those reports: a weakened assertion, an added
+   * skip marker, a deleted test, a regenerated snapshot. Each escalates the exit
+   * the way a protected path does; none decides anything alone (P7).
+   */
+  readonly tamperFindings: readonly string[];
   readonly contracts?: StationContractTable;
 }
 
@@ -142,7 +149,7 @@ export function transition(input: TransitionInput): StationTransition {
   const contracts = input.contracts ?? STATION_CONTRACTS;
   const contract = contracts[input.from];
   const key = approvalKey(input.from, input.level);
-  const approval = effectiveApproval(contract, input.policy, input.level, input.protectedPathsTouched);
+  const approval = effectiveApproval(contract, input.policy, input.level, [...input.protectedPathsTouched, ...input.tamperFindings]);
   if (approval === 'blocked') {
     return { ok: false, reason: 'approval-blocked', key, message: `the exit from ${input.from} at L${String(input.level)} is blocked by policy; the run does not advance` };
   }

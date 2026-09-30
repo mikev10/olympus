@@ -27,6 +27,7 @@ export { changedLines } from './line-diff.js';
 export {
   diffTrees,
   hashRegularFile,
+  VCS_DIRECTORIES,
   walkTree,
   type ChangeKind,
   type TreeChange,

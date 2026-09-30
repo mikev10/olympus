@@ -48,10 +48,11 @@ import type {
 import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/adapters';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, EvidenceBundle, Vault } from '@olympus-ai/vault';
 import { worstCaseCost, type WorstCaseCost } from './cost.js';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
+import { acceptedEscalations } from './tamper.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
 import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
@@ -663,6 +664,10 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal } };
   if (step.kind !== 'exit') return { state, standing: { standing: 'open' } };
   const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };
+  // The same escalation the line applies, from the same bundles, so the standing and a drive agree.
+  const escalations = step.from === 'integrate'
+    ? await acceptedEscalations(state, async (ref) => JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EvidenceBundle)
+    : { protectedPathsTouched: [], tamperFindings: [] };
   const next = transition({
     from: step.from,
     to: step.to,
@@ -670,7 +675,8 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
     policy,
     tampered: verdict.ok ? [] : verdict.tampered.map((t) => ({ ...t })),
     grants: state.approvals,
-    protectedPathsTouched: [],
+    protectedPathsTouched: escalations.protectedPathsTouched,
+    tamperFindings: escalations.tamperFindings,
   });
   if (!next.ok) {
     return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key } : { standing: 'stopped', refusal: next } };

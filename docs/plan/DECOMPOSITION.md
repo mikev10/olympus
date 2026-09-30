@@ -242,7 +242,32 @@
 ### P7 — Tamper detection
 **Scope:** `TamperReport` from F2 §6. Pure functions over diffs; no system knowledge required.
 **Deliver:** AST assertion comparison (operators and arguments, not counts), skip/xfail/only detection, deletions including renames, moves, and case-set reduction, snapshot regeneration, coverage delta, protected-path touches.
+**Where it lives:** `packages/api/src/tamper.ts`, beside P6's `verification.ts`, for P6's reason: `adapters` depends on `integrity`, so an analysis in `integrity` that reads through the adapters would close a cycle. `packages/integrity` stays types-only. The analysis reads two trees the runtime owns — the task's base and its diffed head — through the adapters, and executes nothing.
+**The verdict is an escalation.** Every finding is recorded as an `IntegrityViolation` in the Vault, carried in the task's evidence bundle, and raises the `integrate` exit to `human-required`, the path `protectedPathPolicy: 'escalate'` already names. None is entered in `RunState.violations`, every entry of which halts the run: a test change can be legitimate, and the call on it is a human's, made with the report beside the evidence. A finding never lowers a gate and never passes one. At M1 `integrate`'s own floor is already `human-required`, so the escalation changes no M1 outcome; it is asserted through the machine against a contract table whose floor is `auto`, and at M1 the findings reach the people who decide through the evidence bundle and the reviewer's evidence facts.
+**Contract amendments, landed in this unit's pull request**, each an `A-P7-nn` entry in `docs/decisions.md`:
+- `TestFrameworkAdapter` gains `enumerateCases(file)`: the test cases a file declares, by their describe-qualified titles. Nothing listed cases, so case-set reduction inside a surviving or renamed file was not detectable. A title the parser cannot resolve to a literal is refused, naming the file and line, rather than skipped
+- `EvidenceBundle` gains a required `tamper: TamperReport`, the task's report over the tree it was handed and the tree it was verified in. The Vault has no read for violations, so the bundle is where `integrate`'s exit and a resume find the findings, and where review reads them
+- `TamperReport.coverageDelta` becomes `number | null`. `null` means the manifest pins no coverage check, an absence the type makes explicit; a pinned coverage check whose report is missing or malformed refuses, as P8's adapter already does, and is never a zero
+**Out of scope:**
+- deleting `SKELETON_LINE`, and component provenance that survives composition (I1)
+- coverage that cannot be forged by the suite it measures, and mutation testing (M3)
+- judging whether a test change was justified. P7 names what changed; the human at `integrate` decides
+- any stack other than TypeScript with vitest or jest
 **Conformance:** a fixture suite of taxonomy items — `assertEqual(x,5)` → `assertTrue(x)` is caught, and a rename that drops three cases counts as a deletion.
+**Accept:**
+- for both frameworks, `analyzeTamper` over a base and a head tree names: a weakened, removed, or tolerance-widened assertion with its before and after; each added `.skip`, `.only`, `.todo`, `x`/`f` prefix, `skipIf`/`runIf`, `.fails`, and `.failing`; a deleted test file; a renamed or moved test file whose cases shrank, naming the cases dropped; a surviving file whose case set shrank; an added, modified, or deleted snapshot file; every protected path the diff touches, and every config file `detectConfigChanges` names; an unchanged tree reports empty
+- a rename or move that keeps every case is not a deletion; a rename that drops three cases names all three
+- a test file the parser cannot read, or a case title it cannot resolve, refuses naming the file; it is never an empty finding
+- a task whose diff weakens an assertion records an `assertion-weakened` violation in the Vault and the finding in its evidence bundle and the reviewer's evidence facts; the same task without that change records none. A skip marker records `skip-marker`, a protected-path or config touch `protected-path`. None of them halts the run
+- a transition out of `integrate` with a finding requires a human approval under a contract table whose `integrate` floor is `auto`, and the same transition without one does not
+- a diff that rewrites the script a pinned check's command dispatches through — a `package.json` script or a runner config — is named in `protectedPathsTouched`, and the same task without that change is not (pays `I3.check-dispatch-not-writable-by-the-task`)
+- `coverageDelta` is `null` when no coverage check is pinned and the adapter's number when one ran; a pinned coverage check with no report refuses
+- `SKELETON_LINE` names only the composition gap (`I5.unsafe-declaration-survives-composition`), so every run above L1 is still refused
+- no file P7 adds executes repository code on the host
+- **the ledger.** Paid: `I3.check-dispatch-not-writable-by-the-task`. Added live: `I3.tamper-finding-escalates-integrate`, `I3.skip-marker-is-a-finding`, `I3.case-set-reduction-is-a-deletion`. So `pending-baseline.json` lowers I3 from 2 to 1
+- `pnpm typecheck`, `pnpm lint`, `pnpm test` pass; the driver's paid suite runs once, in CI under `run-driver`, and `pnpm conformance` is then green against its report (D-A-CI-07)
+- `git ls-files -- .plan/` prints nothing
+**Invariants:** I3 is the subject — an agent cannot quietly weaken, skip, or delete the tests that judge it, or change what a pinned command runs. I5 is that an unreadable file or a missing coverage report refuses rather than reading as clean. I1 must not regress: the analysis parses and never executes, and writes to the Vault only through named operations. I2: the report is the runtime's reading of the runtime-collected diff, never the driver's account of it.
 **`SKELETON_LINE`:** P7 removes the tamper-analysis line. If it is the last line left, P7 puts the composition gap in its place rather than deleting the declaration, because deleting it is I1's (see P6).
 
 ### P8 — Adapters (TypeScript)

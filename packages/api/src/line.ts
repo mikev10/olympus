@@ -17,8 +17,10 @@
  *   artifact or leaves the task's grant, builds a tree from base and the
  *   cumulative diff, and runs every check over it in a fresh sandbox, read-only
  *   and with no egress. The verdict follows the check results alone (I2); the
- *   claim is diffed against the evidence and never decides anything. No tamper
- *   analysis; SKELETON_LINE says so.
+ *   claim is diffed against the evidence and never decides anything. The
+ *   tree the task was handed and the tree the checks ran over are read for
+ *   tamper; each finding is recorded, carried in the bundle, and escalates
+ *   `integrate`'s exit, and none decides the task's status.
  * - `review`: seats a reviewer against the authors' recorded model families
  *   (I6) and runs it on context its contract grants, over a view holding only
  *   the files those grants cover.
@@ -73,11 +75,12 @@ import type {
   TaskStatus,
   VaultRef,
 } from '@olympus-ai/core';
-import type { CheckResult, CheckSpec, IntegrityViolation } from '@olympus-ai/integrity';
+import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, MeterReading, SandboxHandle, SandboxSpec } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageRecord } from '@olympus-ai/vault';
 import type { ComponentGraph, RunOutcome } from './run.js';
+import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
 import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
   attemptPaths,
@@ -115,6 +118,8 @@ export interface LineContext {
 }
 
 const engine = new StrictPolicyEngine();
+
+const NO_ESCALATIONS = { protectedPathsTouched: [], tamperFindings: [] } as const;
 
 /**
  * A violation needs a role. Before any task has run at M1 no agent has touched
@@ -157,6 +162,8 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         break;
       case 'exit': {
         const tampered = locksHeldLeaving(step.from) ? await tamperedPaths(ctx) : [];
+        // Tamper findings escalate the gate `protectedPathPolicy` names, and only that one.
+        const escalations = step.from === 'integrate' ? await acceptedEscalations(ctx.state, (ref) => readBundle(ctx, ref)) : NO_ESCALATIONS;
         const next = transition({
           from: step.from,
           to: step.to,
@@ -164,7 +171,8 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
           policy: ctx.policy,
           tampered,
           grants: ctx.state.approvals,
-          protectedPathsTouched: [],
+          protectedPathsTouched: escalations.protectedPathsTouched,
+          tamperFindings: escalations.tamperFindings,
         });
         if (!next.ok) {
           refusal = next.reason === 'lock-tamper'
@@ -646,6 +654,50 @@ async function recordEscape(ctx: LineContext, task: Task, outside: string[]): Pr
 }
 
 /**
+ * Where a pinned coverage check's report is. None has a channel yet: a check
+ * runs over a read-only tree, so the report it would write reaches no path the
+ * host reads, and a pinned coverage check is refused rather than read as
+ * covering nothing or as not pinned (D-P7-05). M3 owns coverage the suite
+ * cannot forge, and with it the channel.
+ */
+function coverageReport(ctx: LineContext): null {
+  const pinned = ctx.checks.find((c) => c.kind === 'coverage');
+  if (pinned !== undefined) {
+    throw new Error(`line: check ${pinned.id} is a coverage check, and no report from a read-only check sandbox reaches the host, so its coverage cannot be read`);
+  }
+  return null;
+}
+
+/** Each kind of finding in a task's report, as a violation: recorded in the Vault, not entered in run state, which would halt the run. */
+const FINDING_KINDS = [
+  ['assertion-weakened', (r: TamperReport) => r.assertionsWeakened.length > 0 ? { assertionsWeakened: r.assertionsWeakened } : undefined],
+  ['assertion-weakened', (r: TamperReport) => r.snapshotsRegenerated.length > 0 ? { snapshotsRegenerated: r.snapshotsRegenerated } : undefined],
+  ['skip-marker', (r: TamperReport) => r.skipMarkersAdded.length > 0 ? { skipMarkersAdded: r.skipMarkersAdded } : undefined],
+  ['suite-shrink', (r: TamperReport) => r.testsDeleted.length > 0 ? { testsDeleted: r.testsDeleted } : undefined],
+  ['protected-path', (r: TamperReport) => r.protectedPathsTouched.length > 0 ? { protectedPathsTouched: r.protectedPathsTouched } : undefined],
+] as const satisfies ReadonlyArray<readonly [IntegrityViolation['kind'], (r: TamperReport) => Record<string, unknown> | undefined]>;
+
+async function recordFindings(ctx: LineContext, task: Task, report: TamperReport): Promise<void> {
+  const detector = driverAt(ctx, 'verify');
+  for (const [kind, detail] of FINDING_KINDS) {
+    const found = detail(report);
+    if (found === undefined) continue;
+    // Deliberately not entered in run state: a test change can be legitimate, and the call on it
+    // is the human's at integrate, with the report beside the evidence (D-P7-01).
+    await ctx.components.vault.recordViolation({
+      runId: ctx.run.id,
+      taskId: task.id,
+      kind,
+      role: task.role,
+      driverProvenanceId: detector.provenanceId(),
+      contractVersion: detector.contractVersion,
+      detectedAt: new Date().toISOString(),
+      detail: { station: 'verify', phase: 'tamper', ...found },
+    });
+  }
+}
+
+/**
  * `verify`: the task's own diff, held to the locks and the grant; then the
  * checks, run over a tree built from base and the cumulative diff, where the
  * agent never ran, mounted read-only with no egress. The verdict follows the
@@ -681,6 +733,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const built = await tamperedIn(ctx, tree);
   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
   const counted = await countSuites(tree);
+  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => c.command) });
 
   // Results stay aligned with the specs by position, never matched up by id afterwards.
   const specs = ctx.checks;
@@ -747,6 +800,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
       detail: { station: 'verify', claimEvidenceDiff: differences },
     });
   }
+  await recordFindings(ctx, task, tamper);
   const evidence: EvidenceBundle = {
     runId: ctx.run.id,
     taskId: task.id,
@@ -758,6 +812,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     unstarted,
     claim: result.claim,
     claimEvidenceDiff: differences,
+    tamper,
     collectedBy: 'runtime',
     driverProvenanceId: driver.provenanceId(),
     contractVersion: driver.contractVersion,
@@ -811,6 +866,9 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
       // How many ways the claim and the diff disagree, and not the paths: a claimed path is a
       // string the author wrote, and the seat is given no author material (D-P6-03).
       claimMismatches: b.claimEvidenceDiff.length,
+      // The runtime's reading of the diff: paths it collected and assertions it parsed, not author text.
+      protectedPathsTouched: b.tamper.protectedPathsTouched,
+      tamperFindings: tamperFindings(b.tamper),
     })),
   );
 }

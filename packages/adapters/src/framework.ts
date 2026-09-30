@@ -7,7 +7,7 @@
 import { compareAssertions, extractAssertions } from './assertions.js';
 import { jestSuites, vitestSuites } from './discovery.js';
 import { readRegularFile, SOURCE_FILE_CAP } from './files.js';
-import { extractSkipMarkers } from './markers.js';
+import { extractCases, extractSkipMarkers } from './markers.js';
 import { refuse } from './refusal.js';
 import { parseModule, syntaxErrors } from './static.js';
 import type { Assertion, AssertionDelta, TestFrameworkAdapter } from './types.js';
@@ -23,6 +23,8 @@ async function parseTestFile(file: string): Promise<ReturnType<typeof parseModul
 
 abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
   abstract readonly stack: string;
+  /** Whether a test's first parameter is the framework's test context, which can skip it: vitest's, not jest's `done`. */
+  protected abstract readonly testContext: boolean;
   abstract enumerateSuites(dir: string): Promise<string[]>;
 
   async parseAssertions(file: string): Promise<Assertion[]> {
@@ -34,7 +36,11 @@ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
   }
 
   async detectSkipMarkers(file: string): Promise<string[]> {
-    return extractSkipMarkers(await parseTestFile(file));
+    return extractSkipMarkers(await parseTestFile(file), this.testContext);
+  }
+
+  async enumerateCases(file: string): Promise<string[]> {
+    return extractCases(await parseTestFile(file), file);
   }
 }
 
@@ -45,6 +51,7 @@ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
  */
 export class VitestAdapter extends ExpectFrameworkAdapter {
   readonly stack: string;
+  protected readonly testContext = true;
   constructor(major: VitestMajor) {
     super();
     this.stack = `vitest@${String(major)}`;
@@ -57,6 +64,7 @@ export class VitestAdapter extends ExpectFrameworkAdapter {
 
 export class JestAdapter extends ExpectFrameworkAdapter {
   readonly stack: string;
+  protected readonly testContext = false;
   constructor(major: JestMajor) {
     super();
     this.stack = `jest@${String(major)}`;

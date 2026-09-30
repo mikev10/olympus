@@ -198,3 +198,99 @@ describe.each(adapters)('%s', (_, adapter) => {
     await expect(adapter.detectSkipMarkers(join(root, 'a.test.ts'))).rejects.toThrow(AdapterRefusal);
   });
 });
+
+describe.each(adapters)('%s enumerateCases', (_, adapter) => {
+  async function cases(body: string): Promise<string[]> {
+    const root = await repo({ 'a.test.ts': body });
+    return adapter.enumerateCases(join(root, 'a.test.ts'));
+  }
+
+  test('names each case by its describe-qualified title, in source order', async () => {
+    const body = "describe('math', () => {\n  it('adds', () => {});\n  describe.each([1])('with %i', () => { test.skip('scales', () => {}); });\n});\ntest.todo('later');";
+    expect(await cases(body)).toEqual(['math > adds', 'math > with %i [1] > scales', 'later']);
+  });
+
+  test('follows a renamed or extended declarer, and a fixture builder declares no case', async () => {
+    const body = "import { test as check } from 'vitest';\nconst my = check.extend({});\nmy('uses a fixture', () => {});\ncheck('plain', () => {});";
+    expect(await cases(body)).toEqual(['uses a fixture', 'plain']);
+  });
+
+  test('a title that is not a literal refuses, naming the file and line', async () => {
+    const error = await cases("const name = 'x';\ntest('ok', () => {});\ntest(name, () => {});").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AdapterRefusal);
+    expect((error as AdapterRefusal).message).toMatch(/a\.test\.ts:3 /);
+  });
+});
+
+describe.each(adapters)('%s declarers shadowed', (_, adapter) => {
+  test.each([
+    ['in a block', "{ const test = (n, f) => {}; test('judging', () => { expect(x).toBe(5); }); }"],
+    ['by a parameter', "function f(test) { test.skip('a', () => {}); }\nf(() => {});"],
+    ['by a top-level function', "function it(n, f) {}\nit('judging', () => { expect(x).toBe(5); });"],
+    ['by a top-level const', "const describe = (n, f) => {};\ndescribe('s', () => {});"],
+  ])('a declarer shadowed %s refuses both the markers and the cases', async (_, body) => {
+    const root = await repo({ 'a.test.ts': body });
+    await expect(adapter.detectSkipMarkers(join(root, 'a.test.ts'))).rejects.toThrow(/shadowing the test declarer/);
+    await expect(adapter.enumerateCases(join(root, 'a.test.ts'))).rejects.toThrow(/shadowing the test declarer/);
+  });
+});
+
+describe('the test context', () => {
+  const vitest = new VitestAdapter(4);
+  const jest = new JestAdapter(30);
+  async function markers(adapter: TestFrameworkAdapter, body: string): Promise<string[]> {
+    const root = await repo({ 'a.test.ts': body });
+    return adapter.detectSkipMarkers(join(root, 'a.test.ts'));
+  }
+
+  test.each([
+    ['skip taken as a value', "test('t', (ctx) => { const omit = ctx.skip; omit(); });"],
+    ['the context aliased', "test('t', (ctx) => { const c = ctx; c.skip(); });"],
+    ['a computed key', "test('t', (ctx) => { ctx['sk' + 'ip'](); });"],
+    ['the context handed to a helper', "test('t', async (ctx) => { await helper(ctx); });"],
+    ['the context destructured in the body', "test('t', (ctx) => { const { skip } = ctx; skip(); });"],
+    ['a destructured skip taken as a value', "test('t', ({ skip }) => { const omit = skip; omit(); });"],
+    ['the second parameter of .for', "test.for([1])('t %i', (n, ctx) => { const c = ctx; c.skip(); });"],
+  ])('under vitest, %s refuses rather than reading as no marker', async (_, body) => {
+    await expect(markers(vitest, body)).rejects.toThrow(AdapterRefusal);
+  });
+
+  test('a rest of the context is the context, and its skip is a marker', async () => {
+    expect(await markers(vitest, "test('t', ({ task, ...rest }) => { rest.skip(); });")).toEqual(['rest.skip: t']);
+  });
+
+  test('reading the context by a property, and a .each row, are not escapes', async () => {
+    const body = "test('t', (ctx) => { expect(ctx.task.name).toBe('t'); });\ntest.each([1])('n %i', (n) => { expect(validate(n)).toBe(true); });";
+    expect(await markers(vitest, body)).toEqual([]);
+  });
+
+  test("jest's done may be handed on: it cannot skip", async () => {
+    expect(await markers(jest, "test('t', (done) => { setTimeout(done, 1); });")).toEqual([]);
+  });
+});
+
+describe.each(adapters)('%s tables', (_, adapter) => {
+  async function cases(body: string): Promise<string[]> {
+    const root = await repo({ 'a.test.ts': body });
+    return adapter.enumerateCases(join(root, 'a.test.ts'));
+  }
+
+  test('a .each or .for case is one case per row, inline or from a top-level const', async () => {
+    const body = "const rows = [[1, 2], [3, 4]];\ntest.each([1, 2, 3])('handles %i', (n) => {});\ntest.for(rows)('pair', () => {});";
+    expect(await cases(body)).toEqual(['handles %i [1]', 'handles %i [2]', 'handles %i [3]', 'pair [[1, 2]]', 'pair [[3, 4]]']);
+  });
+
+  test('a suite from a table repeats every case inside it per row', async () => {
+    expect(await cases("describe.each(['a', 'b'])('on %s', () => { test('x', () => {}); });")).toEqual(["on %s ['a'] > x", "on %s ['b'] > x"]);
+  });
+
+  test.each([
+    ['imported', "import { rows } from './rows';\ntest.each(rows)('t %i', () => {});"],
+    ['built at run time', "test.each(make())('t %i', () => {});"],
+    ['with a spread row', "const more = [2];\ntest.each([1, ...more])('t %i', () => {});"],
+    ['mutated after it is declared', "const rows = [1, 2];\nrows.pop();\ntest.each(rows)('t %i', () => {});"],
+    ['held by an alias of the declarer', "const each = test.each([1, 2]);\neach('t %i', () => {});"],
+  ])('a table %s refuses, naming the file and line', async (_, body) => {
+    await expect(cases(body)).rejects.toThrow(/a\.test\.ts:\d+ declares /);
+  });
+});

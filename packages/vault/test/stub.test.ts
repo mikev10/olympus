@@ -33,6 +33,7 @@ function bundle(): EvidenceBundle {
     unstarted: [],
     claim: { narrative: 'stub', filesChanged: [] },
     claimEvidenceDiff: [],
+  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
     collectedBy: 'runtime',
     driverProvenanceId: 'stub-driver@1.0.0',
     contractVersion: '1.0.0',

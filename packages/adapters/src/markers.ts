@@ -29,6 +29,15 @@ const PREFIXED: ReadonlySet<string> = new Set(['xit', 'xtest', 'xdescribe', 'fit
 /** Modifiers in a declarer's chain that are markers. */
 const MODIFIERS: ReadonlySet<string> = new Set(['skip', 'only', 'todo', 'skipIf', 'runIf', 'fails', 'failing']);
 
+/** Declarers that open a suite, whose title qualifies every case inside it. */
+const SUITES: ReadonlySet<string> = new Set(['describe', 'suite', 'xdescribe', 'fdescribe']);
+/** Declarers that declare one case. `bench` is neither: a benchmark is not a test. */
+const CASES: ReadonlySet<string> = new Set(['it', 'test', 'xit', 'xtest', 'fit', 'ftest']);
+/** Chain parts that build a declarer rather than call one: `test.extend({...})` declares no case. */
+const BUILDERS: ReadonlySet<string> = new Set(['extend', 'scoped']);
+/** Chain parts that call a declarer once per row of a table. */
+const TABLES: ReadonlySet<string> = new Set(['each', 'for']);
+
 /** A declarer call's chain: the framework name it resolves to, and the parts called on it. */
 interface Chain {
   readonly root: string;
@@ -131,43 +140,145 @@ function nameOf(call: ts.CallExpression, sf: ts.SourceFile): string {
   return `<${text(first, sf)}>`;
 }
 
-/** The first parameter of the function a declarer call passes, which vitest binds to the test context. */
-function contextParameter(call: ts.CallExpression): ts.ParameterDeclaration | undefined {
+/**
+ * The parameter of a case's function that vitest binds to the test context:
+ * the first, or for `.for` the second, after the row. A `.each` function is
+ * given only the row, and a suite's function nothing.
+ */
+function contextParameter(call: ts.CallExpression, chain: Chain): ts.ParameterDeclaration | undefined {
+  if (!CASES.has(chain.root)) return undefined;
+  const bare = chain.parts.map((p) => p.replace(/\(.*\)$/s, ''));
+  if (bare.includes('each')) return undefined;
+  // `.for` hands the row first and the context second.
   const callback = [...call.arguments].reverse().find((a) => ts.isArrowFunction(a) || ts.isFunctionExpression(a));
-  return callback !== undefined && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) ? callback.parameters[0] : undefined;
+  if (callback === undefined || !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) return undefined;
+  return callback.parameters[bare.includes('for') ? 1 : 0];
+}
+
+/** The outermost node standing for `node` itself: parentheses and type wrappers climbed. */
+function climb(node: ts.Node): ts.Node {
+  let current = node;
+  while (ts.isParenthesizedExpression(current.parent) || ts.isAsExpression(current.parent) || ts.isSatisfiesExpression(current.parent)
+    || ts.isNonNullExpression(current.parent) || ts.isTypeAssertionExpression(current.parent)) current = current.parent;
+  return current;
+}
+
+function isCalled(node: ts.Node): boolean {
+  const outer = climb(node);
+  return ts.isCallExpression(outer.parent) && outer.parent.expression === outer;
+}
+
+function lineOf(node: ts.Node, sf: ts.SourceFile): string {
+  return String(sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1);
 }
 
 /**
  * `context.skip()`, or the context's `skip` destructured, inside a test body.
  * A destructured `skip` is followed under the name it was given: `{ skip:
  * omit }` binds the same function to `omit`, and calling it skips the test.
+ *
+ * Every other way to reach `skip` is refused rather than read as no marker:
+ * `skip` taken as a value (`const omit = ctx.skip`), a key only running the
+ * file would resolve, and — where the parameter is vitest's test context —
+ * the context itself aliased or handed to a helper, which could call `skip`
+ * under any name. Jest binds the first parameter to `done`, which has no
+ * `skip` and is routinely handed on, so there the context may escape.
  */
-function contextSkips(call: ts.CallExpression, sf: ts.SourceFile, names: ReadonlyMap<string, Chain>, name: string, out: string[]): void {
-  const parameter = contextParameter(call);
+function contextSkips(call: ts.CallExpression, chain: Chain, sf: ts.SourceFile, names: ReadonlyMap<string, Chain>, name: string, out: string[], testContext: boolean): void {
+  const parameter = contextParameter(call, chain);
   if (parameter === undefined) return;
   const callback = parameter.parent;
-  const bound = ts.isIdentifier(parameter.name) ? parameter.name.text : undefined;
-  const destructured = ts.isObjectBindingPattern(parameter.name)
-    ? parameter.name.elements.find((e) => (e.propertyName ?? e.name).getText(sf) === 'skip')
-    : undefined;
+  const cannotRead = (node: ts.Node, what: string): never => refuse(
+    'unsupported-feature',
+    `${what} at line ${lineOf(node, sf)}, in the test '${name}', so whether that test skips itself cannot be read`,
+  );
+  const pattern = ts.isObjectBindingPattern(parameter.name) ? parameter.name : undefined;
+  const rest = pattern?.elements.find((e) => e.dotDotDotToken !== undefined);
+  // The names the whole context is bound to: the parameter, or what a `...rest` gathers.
+  const bound = new Set<string>();
+  if (ts.isIdentifier(parameter.name)) bound.add(parameter.name.text);
+  else if (rest !== undefined && ts.isIdentifier(rest.name)) bound.add(rest.name.text);
+  else if (rest !== undefined || ts.isArrayBindingPattern(parameter.name)) cannotRead(parameter, 'the test context is destructured into a pattern');
+  const destructured = pattern?.elements.find((e) => e !== rest && (e.propertyName ?? e.name).getText(sf) === 'skip');
+  if (destructured !== undefined && !ts.isIdentifier(destructured.name)) cannotRead(destructured, "the context's `skip` is destructured into a pattern");
   const local = destructured !== undefined && ts.isIdentifier(destructured.name) ? destructured.name.text : undefined;
+  const declarations = new Set<ts.Node>([parameter.name, ...(rest === undefined ? [] : [rest.name]), ...(destructured === undefined ? [] : [destructured.name])]);
+
   const visit = (node: ts.Node): void => {
     // A nested declarer reports its own body.
     if (node !== callback && (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) && ts.isCallExpression(node.parent)
       && node.parent !== call && isDeclarer(node.parent.expression, sf, names)) return;
-    if (ts.isCallExpression(node)) {
-      const callee = unwrap(node.expression);
-      const onBound = bound !== undefined
-        && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))
-        && ts.isIdentifier(unwrap(callee.expression))
-        && (unwrap(callee.expression) as ts.Identifier).text === bound
-        && (ts.isPropertyAccessExpression(callee) ? callee.name.text : literalKey(callee)) === 'skip';
-      if (onBound) out.push(`${bound}.skip: ${name}`);
-      else if (local !== undefined && ts.isIdentifier(callee) && callee.text === local) out.push(`${local}: ${name}`);
+    if (ts.isIdentifier(node) && !declarations.has(node) && !isPropertyName(node)) {
+      if (bound.has(node.text)) {
+        const use = climb(node);
+        const access = use.parent;
+        if ((ts.isPropertyAccessExpression(access) || ts.isElementAccessExpression(access)) && access.expression === use) {
+          const key = ts.isPropertyAccessExpression(access) ? access.name.text : literalKey(access);
+          if (key === undefined) cannotRead(access, `\`${text(access, sf)}\` selects a property of the test context by a computed key`);
+          if (key === 'skip') {
+            if (!isCalled(access)) cannotRead(access, `\`${text(access, sf)}\` takes the context's \`skip\` as a value rather than calling it`);
+            out.push(`${node.text}.skip: ${name}`);
+          }
+        } else if (testContext) {
+          cannotRead(node, `the test context \`${node.text}\` is used as a value — aliased, destructured, or handed on — rather than read by a property`);
+        }
+      } else if (node.text === local) {
+        if (!isCalled(node)) cannotRead(node, `the context's \`skip\`, bound as \`${local}\`, is used as a value rather than called`);
+        out.push(`${local}: ${name}`);
+      }
     }
     node.forEachChild(visit);
   };
   visit(callback);
+}
+
+/** An identifier that names a property rather than a binding: `a.name`, `{ name: v }`, `{ name }` in a type. */
+function isPropertyName(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return (ts.isPropertyAccessExpression(parent) && parent.name === node)
+    || (ts.isPropertyAssignment(parent) && parent.name === node)
+    || (ts.isBindingElement(parent) && parent.propertyName === node)
+    || (ts.isPropertySignature(parent) && parent.name === node)
+    || (ts.isMethodDeclaration(parent) && parent.name === node)
+    || (ts.isPropertyDeclaration(parent) && parent.name === node);
+}
+
+/**
+ * The declarations that may bind a declarer's name: the imports, and the
+ * top-level aliases `declarersIn` resolved. Any other binding of one of those
+ * names — a local `const test = ...`, a parameter named `describe`, a
+ * top-level `function it() {}` — shadows the declarer, so a call under that
+ * name would be read as declaring a test that never runs. It is refused.
+ */
+function assertNoShadow(sf: ts.SourceFile, names: ReadonlyMap<string, Chain>): void {
+  const builtin = new Set([...DECLARERS, ...PREFIXED]);
+  const allowed = new Set<ts.Node>();
+  for (const statement of sf.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) for (const element of bindings.elements) allowed.add(element.name);
+    }
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && !builtin.has(declaration.name.text) && names.has(declaration.name.text)) allowed.add(declaration.name);
+    }
+  }
+  const visit = (node: ts.Node): void => {
+    const bindingName = (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)
+      || ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+      || ts.isImportClause(node) || ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node) || ts.isEnumDeclaration(node))
+      ? node.name
+      : undefined;
+    if (bindingName !== undefined && ts.isIdentifier(bindingName) && names.has(bindingName.text) && !allowed.has(bindingName)) {
+      refuse(
+        'unsupported-feature',
+        `\`${bindingName.text}\` is declared again at line ${lineOf(bindingName, sf)}, shadowing the test declarer, `
+        + 'so which calls under that name declare tests cannot be read',
+      );
+    }
+    node.forEachChild(visit);
+  };
+  visit(sf);
 }
 
 /**
@@ -177,6 +288,7 @@ function contextSkips(call: ts.CallExpression, sf: ts.SourceFile, names: Readonl
  * read as absent.
  */
 function assertNoEscape(sf: ts.SourceFile, names: ReadonlyMap<string, Chain>): void {
+  assertNoShadow(sf, names);
   const declaredHere = new Set<ts.Node>();
   const noteDeclaration = (node: ts.Node): void => {
     if (ts.isImportSpecifier(node)) {
@@ -232,7 +344,11 @@ function assertNoEscape(sf: ts.SourceFile, names: ReadonlyMap<string, Chain>): v
   visit(sf);
 }
 
-export function extractSkipMarkers(sf: ts.SourceFile): string[] {
+/**
+ * `testContext` is whether a test's first parameter is vitest's test context,
+ * which can skip the test, rather than jest's `done` (see `contextSkips`).
+ */
+export function extractSkipMarkers(sf: ts.SourceFile, testContext: boolean): string[] {
   const names = declarersIn(sf);
   assertNoEscape(sf, names);
   const out: string[] = [];
@@ -247,11 +363,136 @@ export function extractSkipMarkers(sf: ts.SourceFile): string[] {
         if (PREFIXED.has(chain.root) || bare.some((p) => MODIFIERS.has(p))) {
           out.push(`${[chain.root, ...chain.parts].join('.')}: ${name}`);
         }
-        contextSkips(node, sf, names, name, out);
+        contextSkips(node, chain, sf, names, name, out, testContext);
       }
     }
     node.forEachChild(visit);
   };
   visit(sf);
+  return out;
+}
+
+/**
+ * The rows of the table a `.each` or `.for` call is given, each as its
+ * source text, or undefined when the declarer takes no table. The table must
+ * be an array literal, inline or in a top-level `const` that nothing else in
+ * the file touches, with no spread: a table built at run time, imported, or
+ * mutated has rows only running the file would know, and is refused, because
+ * a row it loses is a case deleted.
+ */
+function rowsOf(call: ts.CallExpression, chain: Chain, sf: ts.SourceFile, file: string): string[] | undefined {
+  if (!chain.parts.some((p) => TABLES.has(p.replace(/\(.*\)$/s, '')))) return undefined;
+  const cannotRead = (node: ts.Node, why: string): never => refuse(
+    'unsupported-feature',
+    `${file}:${lineOf(node, sf)} declares tests from a table ${why}, so its rows cannot be counted and a row dropped from it could not be seen`,
+  );
+  // The call that receives the table: the one in the callee chain whose callee ends in `each` or `for`.
+  let table: ts.CallExpression | undefined;
+  for (let node = unwrap(call.expression); table === undefined;) {
+    if (ts.isCallExpression(node)) {
+      const callee = unwrap(node.expression);
+      const part = ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isElementAccessExpression(callee) ? literalKey(callee) : undefined;
+      if (part !== undefined && TABLES.has(part)) table = node;
+      node = callee;
+    } else if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      node = unwrap(node.expression);
+    } else {
+      return cannotRead(call, 'through an alias of the declarer that already holds it');
+    }
+  }
+  const argument = table.arguments[0] === undefined ? undefined : unwrap(table.arguments[0]);
+  if (argument === undefined) return cannotRead(table, 'that is missing');
+  let rows: ts.ArrayLiteralExpression | undefined = ts.isArrayLiteralExpression(argument) ? argument : undefined;
+  if (rows === undefined && ts.isIdentifier(argument)) {
+    for (const statement of sf.statements) {
+      if (!ts.isVariableStatement(statement) || (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        const initializer = declaration.initializer === undefined ? undefined : unwrap(declaration.initializer);
+        if (ts.isIdentifier(declaration.name) && declaration.name.text === argument.text && initializer !== undefined && ts.isArrayLiteralExpression(initializer)) {
+          rows = initializer;
+        }
+      }
+    }
+    if (rows !== undefined) assertOnlyTable(sf, argument.text, rows, cannotRead);
+  }
+  if (rows === undefined) return cannotRead(argument, `\`${text(argument, sf)}\` that is not an array literal in this file`);
+  const spread = rows.elements.find((e) => ts.isSpreadElement(e));
+  if (spread !== undefined) return cannotRead(spread, 'with a spread row');
+  return rows.elements.map((e) => text(e, sf));
+}
+
+/**
+ * Refuses a table held in a `const` that the file uses as anything but a
+ * table: `rows.pop()`, `rows.length = 1`, or `rows` handed to a function
+ * could change what the declarer is given.
+ */
+function assertOnlyTable(sf: ts.SourceFile, name: string, rows: ts.ArrayLiteralExpression, cannotRead: (node: ts.Node, why: string) => never): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === name && !isPropertyName(node) && !(ts.isVariableDeclaration(node.parent) && node.parent.initializer !== undefined && unwrap(node.parent.initializer) === rows)) {
+      const outer = climb(node);
+      const call = outer.parent;
+      const callee = ts.isCallExpression(call) && call.arguments[0] === outer ? unwrap(call.expression) : undefined;
+      const part = callee === undefined ? undefined
+        : ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isElementAccessExpression(callee) ? literalKey(callee) : undefined;
+      if (part === undefined || !TABLES.has(part)) cannotRead(node, `in \`${name}\`, which is used at this line as something other than a table`);
+    }
+    node.forEachChild(visit);
+  };
+  visit(sf);
+}
+
+/**
+ * The cases a file declares, each by its describe-qualified title joined with
+ * ` > `, in source order. A `.each` or `.for` case is one case per row of its
+ * table, the row's source text in brackets after the title template, so a
+ * row dropped from the table is a case deleted; under a suite declared from a
+ * table, every case inside is one per row. A title that is not a literal — a
+ * variable, a function, a template with a substitution — is refused rather
+ * than dropped, as is a table whose rows are not literal, because a case the
+ * list leaves out reads as a case deleted, or a deletion as nothing (I5).
+ */
+export function extractCases(sf: ts.SourceFile, file: string): string[] {
+  const names = declarersIn(sf);
+  assertNoEscape(sf, names);
+  const out: string[] = [];
+  const titleOf = (call: ts.CallExpression): string => {
+    const first = call.arguments[0];
+    const value = first === undefined ? undefined : unwrap(first);
+    if (value !== undefined && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) return value.text;
+    const line = sf.getLineAndCharacterOfPosition(call.getStart(sf)).line + 1;
+    return refuse(
+      'unsupported-feature',
+      `${file}:${String(line)} declares a test whose title is not a literal, so the case cannot be named and a deletion of it could not be seen`,
+    );
+  };
+  const titlesOf = (call: ts.CallExpression, chain: Chain): string[] => {
+    const title = titleOf(call);
+    const rows = rowsOf(call, chain, sf, file);
+    return rows === undefined ? [title] : rows.map((row) => `${title} [${row}]`);
+  };
+  const visit = (node: ts.Node, suites: readonly string[]): void => {
+    if (ts.isCallExpression(node) && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
+      const chain = chainOf(node.expression, sf, names);
+      // `test.extend({...})` itself ends in the bare builder; a call through what it built,
+      // `my('x')`, ends in the builder already called, `extend({...})`, and declares a case.
+      const building = chain !== undefined && BUILDERS.has(chain.parts[chain.parts.length - 1] ?? '');
+      if (chain !== undefined && !building) {
+        if (CASES.has(chain.root)) {
+          for (const title of titlesOf(node, chain)) out.push([...suites, title].join(' > '));
+        } else if (SUITES.has(chain.root)) {
+          for (const title of titlesOf(node, chain)) {
+            node.forEachChild((child) => {
+              visit(child, [...suites, title]);
+            });
+          }
+          return;
+        }
+      }
+    }
+    node.forEachChild((child) => {
+      visit(child, suites);
+    });
+  };
+  visit(sf, []);
   return out;
 }

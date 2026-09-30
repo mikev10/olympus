@@ -2771,3 +2771,93 @@ The command is started and the call returns once it has, with no output; it runs
 `RunState` gains `halted: RunHalt | null`, where `RunHalt` is `{ at, message }`: `message` is the runtime's own account of the error, never a field a driver returned. The service commits it when a drive ends in an error rather than a refusal the line committed, unless the run is already cancelled. Once set it is never cleared. `StationRefusal` gains `{ reason: 'halted', haltedAt, message }`, and `nextStep` returns it right after the `cancelled` check, so status reads the run `stopped`, a cancel is refused as `finished`, and a resume is refused. `LocalVault` refuses a stored run state without the field or with a malformed one.
 
 Surfaced by the external review (codex-2): a driver result carrying a `status` field was refused by `taskResultProblems` and the line threw before committing anything, leaving the build task `running`. Status read the run `open`, the only record of why was the server's in-memory `lastOutcome`, and a cancel then recorded a human cancellation over a run the runtime had already stopped. Taken with the maintainer rather than recorded as a known limit. Clearing a halt, like unparking, is lifecycle this unit does not take.
+
+## P7: Tamper detection
+
+### D-P7-01: A finding escalates; it does not halt or fail
+
+- **Ambiguous:** the spec named what to detect and not what a detection does. A weakened assertion, an added skip marker, a deleted test can each be tamper or a legitimate change to a test the task was asked to make.
+- **Options:** (A) every finding is recorded as a violation in the Vault, carried in the evidence bundle, and escalates the `integrate` exit to a human; (B) a finding fails the task back to `build`; (C) split by kind.
+- **Chosen: A**, with the maintainer. It is the path `protectedPathPolicy: 'escalate'` already names and `SKELETON_LINE` described. None is entered in `RunState.violations`, every entry of which halts the run, for D-P6-03's reason: the call is a human's, made with the report beside the evidence. (B) would block every legitimate test refactor with no route to approval.
+- **Known at the time:** `integrate`'s own floor is `human-required` at M1, so the escalation changes no M1 outcome. It is asserted through the machine against a contract table whose floor is `auto` (`I3.tamper-finding-escalates-integrate`), and at M1 the findings reach the people who decide through the bundle and the review seat's evidence facts, which now carry `protectedPathsTouched` and one line per finding. Both are runtime facts — paths it collected, assertions it parsed — not author text, so D-P6-03's rule for the seat holds.
+- **Reverse:** return a `gate-failed` refusal from `verify` for the kinds that should fail.
+
+### D-P7-02: Analysis lives in `packages/api`, and the adapter set is built from the base
+
+- **Chosen:** `analyzeTamper(base, head, options)` in `packages/api/src/tamper.ts`, beside `verification.ts`, for P6's reason: `adapters` depends on `integrity`, so an analysis in `integrity` reading through the adapters would close a cycle. The set is built from `base`, the tree the task was handed, so a task cannot switch its own analysis off by editing the manifest that selects the framework; that edit is a config change and so a protected-path touch in the same report.
+- **Reverse:** move the module; the function takes two paths and options and has no line knowledge.
+
+### D-P7-03: What is compared, and how moves are told from deletions
+
+- **Chosen:** only test files that changed, or that are a test on one side only, are read; an unchanged file contributes the same to both sides. Assertions are compared through the adapter's `compareAssertions` over the concatenation of both sides with tree-relative paths, which pairs identical assertions wherever they moved. Cases, skip markers, and assertions are each paired as multisets across files, so a case moved or a file renamed loses nothing, and a rename that drops three cases names all three as `<old file>: <title>`. The adapter returns the new form of a weakened assertion; the old form is the unpaired base assertion on the same subject, same file first then nearest line, the rule the comparison pairs by.
+- **Reverse:** compare per file, which reports every move as a deletion — F2's comment "renames, moves, case-set reduction all count" read literally.
+
+### D-P7-04: Violation kinds for findings the contract did not name
+
+- **Ambiguous:** `IntegrityViolation.kind` has `assertion-weakened`, `skip-marker`, `protected-path`, and `suite-shrink`, and nothing for a deleted test or a regenerated snapshot.
+- **Chosen:** a deleted test records `suite-shrink` — a case-set reduction is the suite shrinking — and a regenerated snapshot records `assertion-weakened`, since it rewrites the value an assertion compares against. `detail` names which list the finding came from. No kind was added: the existing ones are distinguishable by `detail`, and a new kind is a contract change nothing needs yet.
+- **Reverse:** add `test-deleted` and `snapshot-regenerated` kinds.
+
+### D-P7-05: A pinned coverage check is refused at M1
+
+- **Ambiguous:** `coverageDelta` is read from the report a coverage check writes, and P6 runs every check over a read-only tree, so no report reaches a path the host reads.
+- **Chosen:** a manifest that pins a `coverage` check makes `verify` throw, naming the check, rather than report `null` (which means none is pinned) or a zero. `analyzeTamper` itself takes the report location and reads it through `IstanbulCoverageAdapter`, which refuses a missing or malformed report; the channel is what is missing. M3 owns coverage the suite cannot forge (`I3.coverage-report-is-not-writable-by-the-suite`), and the channel is part of that.
+- **Reverse:** give the check sandbox a writable output mount the runtime reads after it stops, and pass its path as `coverage`.
+
+### D-P7-06: A stack with no test adapter reports no test findings
+
+- **Chosen:** when stack detection gives `test: null`, the report's test fields are empty and the path-based ones — snapshots, protected paths, config changes — are still read. The gap is the unavailable `test` control, which admission records and which refuses L3 (P8, P6); refusing here as well would make every run over a repository without vitest or jest unrunnable at L1, including the fixture every line assertion uses. A file the adapter cannot read is not this case: it refuses.
+- **Reverse:** throw from `analyzeTamper` when `set.test` is null.
+
+### D-P7-07: `SKELETON_LINE` names the composition gap
+
+- **Chosen:** tamper analysis was the last line, so it is replaced, not removed: an empty declaration is refused by `safety.ts`, and a missing one would lift the L1 cap while a wrapped stub can pass as safe. The declaration now names only `I5.unsafe-declaration-survives-composition`'s gap. I1 deletes it (D-P6-01).
+
+### D-P7-08: The status view takes `driving` before it reads the state
+
+- **Found:** two `server.test.ts` lifecycle tests failed intermittently on this branch with `standing: 'open'` after the drive had ended at `integrate`. The view read the run state through `runStanding` and only then read whether a drive was running, so a drive that ended during the read produced a view pairing a state from before its last commits with `driving: false`, a stale standing reported as settled. P9's race; P7 widened it, because `runStanding` now reads the evidence bundles at `integrate`'s exit.
+- **Chosen:** `driving` and `lastOutcome` are taken before the read. A drive running when the read starts is reported as running, so a client polls once more; a view reporting `driving: false` holds a state read after the drive ended. Fixed here rather than recorded, because it made this unit's own gate flaky. Fifteen consecutive runs of the server, line, and tamper suites passed after it, where it had failed within a few before.
+- **Reverse:** read `runs.get(runId)` after `runStanding` again.
+
+### D-P7-09: A report over a stack with no test adapter reads as clean (known limit, owned by I1)
+
+- **Found:** by the external review (codex-6, gemini-6). D-P7-06 stands, and so does its reason. What it left unsaid is that the report such a stack gets is the same report a clean change gets: the unavailable `test` control is in the admission record, not in the report `integrate` and the review seat read.
+- **Chosen:** not changed in P7. No run is admitted above L1 while `SKELETON_LINE` stands, and at L1 a human approves `integrate` anyway. Registered as the pending `I5.unanalysed-tests-are-not-reported-clean`, owned by I1, which lifts the L1 cap and must close this gap before any L2 run can carry such a bundle. The I5 baseline rises from 2 to 3.
+- **Reverse:** throw from `analyzeTamper` when `set.test` is null (D-P7-06's reverse), or add a contract field saying the test analysis did not run.
+
+### D-P7-10: A file the pinned command names is part of what it dispatches through
+
+- **Found:** by the external review (codex-5, and the dispatched-script half of gemini-4). A pinned `node scripts/check.mjs` runs whatever that file says. The file is not a config file, so rewriting it to `process.exit(0)` left the report empty unless the policy happened to protect it.
+- **Chosen:** `TamperOptions` gains `commands`, the pinned checks' argument vectors, and a changed file that any token of them names is added to `protectedPathsTouched`. Each element is split on whitespace, quotes, and `=`, so `sh -c "node scripts/run.mjs"` and `--config=ci.config.ts` name their files as well. A token that names nothing costs nothing, while a token missed would leave a dispatch unprotected. The line passes `ctx.checks`. `I3.check-dispatch-not-writable-by-the-task` now asserts this, with a control that makes the same change with no command naming the file.
+- **Known limit:** what that script imports is not followed; it falls under D-P7-11.
+- **Reverse:** drop `commands` and rely on the policy's protected paths.
+
+### D-P7-11: What an unchanged assertion executes is not read (known limit, owned by M3)
+
+- **Found:** by the external review (codex-1, gemini-4, gemini-5), and each case was reproduced. An assertion the analysis reads as unchanged can stop judging. A helper, fixture, custom matcher, setup file, or type it depends on can be rewritten to pass everything. The assertion can be moved into a branch that never runs. None of those is a test file, and reachability cannot be decided by parsing.
+- **Chosen:** not changed in P7. The spec scopes P7 to reading the diff ("pure functions over diffs"), and the mechanism that decides what an assertion still judges is mutation testing, which the spec leaves to M3. The policy's protected paths remain the way for a repository to name the files it knows to be load-bearing. Registered as the pending `I3.unchanged-assertion-still-judges`, owned by M3. The I3 baseline rises from 1 to 2.
+- **Reverse:** follow each changed test file's import graph and report a change anywhere in it.
+
+### D-P7-12: Review fixes to what the parser reads as a test
+
+Found by the external review. Each case was reproduced before its fix, and each fix's test fails against the unfixed code.
+
+- **A shadowed declarer is refused** (gemini-1). `{ const test = () => {}; test('judging', ...) }` was read as a test that runs, with its assertions intact, although only the no-op ever ran. Any binding of a declarer's name other than an import or a top-level alias `declarersIn` resolved is now refused as `unsupported-feature`: a local `const`, a parameter, a function, a class.
+- **The test context's `skip` is followed or refused** (codex-2, gemini-3). `const omit = ctx.skip; omit()`, `const c = ctx; c.skip()`, and `ctx['sk' + 'ip']()` each skipped a test with no marker recorded. Under vitest, the context may now only be read by a literal property, and `skip` only called. An alias, a computed key, `skip` taken as a value, and the context handed to a helper are all refused. A `...rest` of the context is followed as the context. Under jest the first parameter is `done`, which cannot skip and is routinely handed on, so only the `skip` rules apply there. A `.each` callback receives a row, not the context, and `.for` passes the context as the second parameter, so the context is looked for only where the framework puts it.
+- **A table's rows are cases** (codex-3). A `.each` or `.for` case was one title template, and `extractCases` claimed that the assertion comparison would see a table shrink. It could not: an `Assertion` does not carry the table. Each row is now a case of its own, `handles %i [2]`, and under a suite declared from a table every case is repeated per row. A table must be an array literal, either inline or in a top-level `const` that the file uses only as a table. An imported table, a computed one, a spread, or a mutated one is refused, following A-P7-01's rule for titles.
+- **A marker pairs within its file** (codex-4). D-P7-03 paired markers as one multiset across files, so a `.only` moved from one surviving file to another cancelled out while a different set of tests stopped running. A marker now pairs with the same marker in the same file. Across files it pairs only from a file that left the tests to one that joined them, which is a rename or a move. Cases and assertions still pair across files, as D-P7-03 says.
+- **Reverse:** revert each fix separately; each stands alone.
+
+## P7 amendments to the contracts
+
+### A-P7-01: `TestFrameworkAdapter` gains `enumerateCases`
+
+`enumerateCases(file): Promise<string[]>`, each case by its describe-qualified title joined with ` > `, in source order. Nothing listed cases, so a rename that dropped cases, or a surviving file that lost one, was not detectable. A `.each` case is its title template, once. A title that is not a literal refuses as `unsupported-feature`, naming the file and line: a case the list leaves out reads as deleted, or a deletion as nothing. A fixture builder, `test.extend({...})`, declares no case; a call through what it built does.
+
+### A-P7-02: `TamperReport.coverageDelta` becomes `number | null`
+
+`null` means the manifest pins no coverage check, an absence the type makes explicit. A pinned check with no readable report refuses (D-P7-05). The number is the adapter's changed-line coverage — the coverage of the diff, which is what F2's "delta" measures in practice.
+
+### A-P7-03: `EvidenceBundle` gains a required `tamper: TamperReport`
+
+The task's report, over the tree it was handed and the tree its checks ran over. The Vault has no read for violations, so the bundle is where `integrate`'s exit, `runStanding`, and a resume find the findings (`acceptedEscalations`, from the latest bundle of each passed task), and where review reads them. `TransitionInput` gains `tamperFindings`, which `effectiveApproval` treats as it treats `protectedPathsTouched`; `TransitionInput` is `core`'s, not an F2 contract, and is listed here because it moves with this one.

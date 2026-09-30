@@ -212,14 +212,19 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   };
 
   const view = async (runId: RunId): Promise<RunView> => {
+    // Taken before the read, not after: a drive that ends while the state is read has committed
+    // past what was read, and a view saying `driving: false` beside that state would present a
+    // stale standing as settled. Read first, a drive running at the start is still reported.
+    const entry = runs.get(runId);
+    const driving = entry?.drive != null;
+    const lastOutcome = entry?.lastOutcome ?? null;
     let read: { state: RunState; standing: RunView['standing'] };
     try {
       read = await runStanding(components.vault, runId);
     } catch (error) {
       throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
     }
-    const entry = runs.get(runId);
-    return { runId, state: read.state, standing: read.standing, driving: entry?.drive != null, lastOutcome: entry?.lastOutcome ?? null };
+    return { runId, state: read.state, standing: read.standing, driving, lastOutcome };
   };
 
   const create = async (body: CreateRunBody): Promise<CreatedRun> => {

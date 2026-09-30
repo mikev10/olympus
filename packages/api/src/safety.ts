@@ -27,17 +27,18 @@ export interface DeclaresUnsafe {
 /**
  * The line's own declaration (S1 finding 3). If only the infrastructure stubs
  * declared themselves, replacing them would lift the L1 cap while the line
- * still faked its half. P4 paid the policy and station lines and P6 the
- * claim/evidence diff; what is left is P7's. An empty declaration is refused
- * below, so whichever unit removes the last line puts the composition gap in
- * its place, and I1 deletes this once `I5.unsafe-declaration-survives-composition`
+ * still faked its half. P4 paid the policy and station lines, P6 the
+ * claim/evidence diff, and P7 tamper analysis. An empty declaration is refused
+ * below, so the last line is the composition gap rather than nothing: a
+ * wrapper that does not forward a stub's declaration would otherwise carry a
+ * run above L1. I1 deletes this once `I5.unsafe-declaration-survives-composition`
  * is paid (D-P6-01).
  */
 export const SKELETON_LINE: DeclaresUnsafe = {
   unsafe: {
     component: 'SkeletonLine',
     cannotEnforce: [
-      'no tamper analysis: no assertion, skip marker, deletion, or protected-path touch is detected, so integrate never escalates for one',
+      'no compositional provenance: a component wrapped without forwarding its unsafe declaration passes as safe, so no run may go above L1 until provenance survives composition',
     ],
   },
 };

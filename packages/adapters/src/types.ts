@@ -12,6 +12,12 @@ export interface TestFrameworkAdapter {
   parseAssertions(file: string): Promise<Assertion[]>;
   compareAssertions(before: Assertion[], after: Assertion[]): AssertionDelta;
   detectSkipMarkers(file: string): Promise<string[]>;
+  /**
+   * The test cases a file declares, each by its describe-qualified title, e.g.
+   * `math > adds`. A title the parser cannot resolve to a literal refuses,
+   * naming the file and line, rather than dropping the case (A-P7-01).
+   */
+  enumerateCases(file: string): Promise<string[]>;
 }
 
 export interface Assertion { file: string; line: number; operator: string; args: string[]; tolerance?: number; }

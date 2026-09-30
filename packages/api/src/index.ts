@@ -12,6 +12,7 @@ export * from './cost.js';
 export * from './gate.js';
 export * from './safety.js';
 export * from './run.js';
+export * from './tamper.js';
 export * from './validate.js';
 export * from './verification.js';
 export * from './policy-file.js';
