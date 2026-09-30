@@ -3095,3 +3095,17 @@ Proposed with the unit spec and taken as recommended by the maintainer, 2026-09-
 - **Ambiguous:** the entry says a decision is written "by the component that decided". The station machine is pure and holds no Vault, and the proxy is a container with no route to one.
 - **Chosen:** `decidedBy` names the decider — `station-machine` for a refusal `nextStep` returned, `line` for one the line made, `egress-proxy` for a verdict read from the proxy's log — and the runtime that holds the Vault writes it. Nothing a model returned is an input to any field.
 - **Reverse:** give the proxy its own write path to the Vault, which would be a new route out of the sandbox's network.
+
+### D-P14-10: a refusal arm nothing constructs is marked unreachable, not given a scenario
+
+- **Found while writing the conformance table:** `StationRefusal` declares `gate-failed` and `unsafe-above-l1` (`packages/core/src/station/types.ts`), and no code in `core` or `api` constructs either. A failed gate fails the task and iterates, ending as `parked` with `iterations-exhausted`; `unsafe-above-l1` exists only as a run outcome at admission and resume.
+- **Options:** (A) the table marks each such arm unreachable, and a scan of the source fails if anything constructs it; (B) delete both arms from the contract.
+- **Chosen: A**, with the maintainer. The table keeps its property that a member with neither a scenario nor an unreachable mark does not compile, and an arm made reachable later fails the scan until it gains a scenario. B is a change to a shipped contract outside this unit's scope.
+- **Reverse:** B, as its own amendment; the unreachable marks then go with the arms.
+
+### D-P14-11: a refusal at resume is recorded as `resume-refused`
+
+- **Found while writing the conformance table:** `resumeRun` repeats two admission checks before the line runs — a component unsafe above L1, a driver missing a capability (`packages/api/src/run.ts`) — and returns its own refusal. The spec as confirmed covered admission and the line, not this.
+- **Options:** (A) a `resume-refused` cause, recorded under the run with `decidedBy: 'admission'`, since the checks are admission's; (B) out of scope.
+- **Chosen: A**, with the maintainer. B leaves a refusal with no record, which is the gap this unit closes.
+- **Reverse:** B, stated as a known limit.
