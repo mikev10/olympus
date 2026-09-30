@@ -40,7 +40,7 @@ function stateOf(outcome: RunOutcome, context: string): RunState {
 }
 
 /** Wraps a Vault so a test can act between two of its calls; every method forwards. */
-function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void>; beforeCommit?: (s: RunState) => void; afterCommit?: (count: number) => void }): Vault {
+export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void>; beforeCommit?: (s: RunState) => void; afterCommit?: (count: number) => void }): Vault {
   let commits = 0;
   return {
     read: (ref) => inner.read(ref),
@@ -54,6 +54,8 @@ function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promise<void
     recordAdmission: (a) => inner.recordAdmission(a),
     recordTaskResult: (runId, r) => inner.recordTaskResult(runId, r),
     recordUsage: (r) => inner.recordUsage(r),
+    recordDecision: (d) => inner.recordDecision(d),
+    readDecisions: (runId) => inner.readDecisions(runId),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
       hooks.beforeCommit?.(s);
@@ -535,7 +537,7 @@ async function meteredProvider(readings: Map<SandboxHandle, MeterReading>): Prom
       const n = destroyed;
       const reading: MeterReading = { kind: 'metered', calls: n, inputTokens: 100 * n, outputTokens: 10 * n, cacheReadTokens: n, cacheWriteTokens: n, costUsd: n / 1000, exhausted: 'none', refused: 0 };
       readings.set(handle, reading);
-      return reading;
+      return { meter: reading, egress: { kind: 'none' } };
     },
   };
 }

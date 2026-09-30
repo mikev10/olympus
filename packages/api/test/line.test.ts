@@ -8,7 +8,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import { StubSandboxProvider, type ExecResult, type MeterReading, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
+import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
 import type { EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, costTotals, readUsage, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
@@ -63,7 +63,7 @@ class RecordingSandbox extends DelegatingSandbox {
     return handle;
   }
 
-  override destroy(h: SandboxHandle): Promise<MeterReading> {
+  override destroy(h: SandboxHandle): Promise<Teardown> {
     this.destroyed.push(h);
     return this.inner.destroy(h);
   }
@@ -541,11 +541,11 @@ describe('what a station is handed, beyond its prompt', () => {
 class MeteredSandbox extends DelegatingSandbox {
   private destroyed = 0;
 
-  override async destroy(h: SandboxHandle): Promise<MeterReading> {
+  override async destroy(h: SandboxHandle): Promise<Teardown> {
     await this.inner.destroy(h);
     this.destroyed += 1;
     const n = this.destroyed;
-    return { kind: 'metered', calls: n, inputTokens: 100 * n, outputTokens: 10 * n, cacheReadTokens: n, cacheWriteTokens: 2 * n, costUsd: n / 1000, exhausted: 'none', refused: 0 };
+    return { meter: { kind: 'metered', calls: n, inputTokens: 100 * n, outputTokens: 10 * n, cacheReadTokens: n, cacheWriteTokens: 2 * n, costUsd: n / 1000, exhausted: 'none', refused: 0 }, egress: { kind: 'none' } };
   }
 }
 
@@ -627,7 +627,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
 
   test('a sandbox whose cost cannot be read after the driver ran stops the run, rather than retrying blind', async () => {
     class UnreadableMeter extends DelegatingSandbox {
-      override async destroy(h: SandboxHandle): Promise<MeterReading> {
+      override async destroy(h: SandboxHandle): Promise<Teardown> {
         await this.inner.destroy(h);
         throw new Error("the model relay's meter could not be read");
       }

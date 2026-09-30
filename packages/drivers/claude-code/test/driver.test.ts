@@ -9,7 +9,7 @@
  * output from the pinned CLI version, trimmed.
  */
 import { describe, expect, test } from 'vitest';
-import type { MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
   KEY_PLACEHOLDER,
@@ -60,8 +60,8 @@ class RecordingProvider implements SandboxProvider {
     return Promise.resolve({ exitCode: this.exitCode, stdout, stderr: '', durationMs: 5 });
   }
 
-  destroy(_h: SandboxHandle): Promise<MeterReading> {
-    return Promise.resolve({ kind: 'unmetered' });
+  destroy(_h: SandboxHandle): Promise<Teardown> {
+    return Promise.resolve({ meter: { kind: 'unmetered' }, egress: { kind: 'none' } });
   }
 
   capabilities(): { computerUse: boolean; gpu: boolean; os: 'linux'; persistent: boolean; remote: boolean } {

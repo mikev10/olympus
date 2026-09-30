@@ -14,14 +14,14 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type {
-  ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec,
+  EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
 } from '../types.js';
 import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
 import { checkProbeRequest, probeRunArgs, readProbeOutput } from './probe.js';
-import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
+import { EGRESS_PROXY_IMAGE, PROXY_ALIAS, PROXY_PORT, readEgress, startProxy, stopProxy, type AppliedProxy, type ProxyOptions } from './proxy.js';
 import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
 import {
   CREDENTIAL_NAME,
@@ -162,6 +162,8 @@ interface Ended {
   readonly removal: Error | undefined;
   /** The relay's reading, `unmetered` without one, or why it could not be read. */
   readonly reading: MeterReading | Error;
+  /** The proxy's decisions, `none` without one, or why they could not be read (D-P14-03). */
+  readonly egress: EgressLog | Error;
 }
 
 interface Sandbox {
@@ -670,14 +672,15 @@ export class LocalDockerProvider implements SandboxProvider {
    * served spent money whether or not it finished in time, and the runtime
    * records it either way (D-P13-14).
    */
-  async destroy(h: SandboxHandle): Promise<MeterReading> {
+  async destroy(h: SandboxHandle): Promise<Teardown> {
     const sandbox = this.#require(h);
     if (sandbox.destroyed === true) refuse('lifetime', `sandbox ${h} has already ended: ${sandbox.ended ?? 'it was destroyed'}`);
     sandbox.destroyed = true;
-    const { removal, reading } = await this.#end(sandbox, 'it was destroyed');
+    const { removal, reading, egress } = await this.#end(sandbox, 'it was destroyed');
     if (removal !== undefined) throw removal;
     if (reading instanceof Error) throw reading;
-    return reading;
+    if (egress instanceof Error) throw egress;
+    return { meter: reading, egress };
   }
 
   /**
@@ -746,8 +749,17 @@ export class LocalDockerProvider implements SandboxProvider {
         reading = new Error(`the model relay's meter could not be read: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    let egress: EgressLog | Error = { kind: 'none' };
+    if (controls.egress.mode === 'allowlist') {
+      try {
+        egress = await readEgress(controls.egress.proxy, this.#proxyOptions);
+      } catch (error) {
+        // Kept, not thrown, as the meter's is: the proxy is still torn down below, and `destroy` reports this.
+        egress = new Error(`the egress proxy's decisions could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const sidecars = await this.#stopSidecars(controls.egress);
-    return { removal: container ?? sidecars, reading };
+    return { removal: container ?? sidecars, reading, egress };
   }
 
   /**

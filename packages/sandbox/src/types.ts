@@ -121,6 +121,30 @@ export type MeterReading =
       readonly refused: number;
     };
 
+/**
+ * One connection the egress proxy decided (A-P14-02): `opened` for an
+ * absolute-form `http://` request it forwarded, `tunnelled` for a `CONNECT` it
+ * joined, `refused` for either kind to a host outside the allowlist or to no
+ * readable host. `host` is null when the request named none. `at` is the
+ * proxy's own clock when it decided.
+ */
+export interface EgressConnection {
+  readonly verdict: 'opened' | 'tunnelled' | 'refused';
+  readonly host: string | null;
+  readonly at: string;
+}
+
+/** Every connection a sandbox's proxy decided, in the order it logged them, or `none` for a sandbox with no proxy. */
+export type EgressLog =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'proxied'; readonly connections: readonly EgressConnection[] };
+
+/** What `destroy` read from a sandbox's sidecars after they stopped (A-P13-02, A-P14-02). */
+export interface Teardown {
+  readonly meter: MeterReading;
+  readonly egress: EgressLog;
+}
+
 export interface SandboxSpec {
   image: string;
   mounts: MountTable;
@@ -254,12 +278,14 @@ export interface SandboxProvider {
    */
   probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
   /**
-   * Ends the sandbox and returns what its relay counted, read after the
-   * sandbox stopped so nothing spends after the read (D-P13-07). A sandbox
-   * with no relay returns `{ kind: 'unmetered' }`. A provider that had a relay
-   * and cannot read its count MUST throw rather than return a reading, and
-   * MUST still tear the relay down.
+   * Ends the sandbox and returns what its relay counted and what its egress
+   * proxy decided, each read after the sidecar stopped so nothing spends or
+   * connects after the read (D-P13-07, D-P14-03). A sandbox with no relay
+   * returns `meter: { kind: 'unmetered' }`, and one with no proxy
+   * `egress: { kind: 'none' }`. A provider that had a relay or a proxy and
+   * cannot read its record MUST throw rather than return a reading, and MUST
+   * still tear the sidecar down.
    */
-  destroy(h: SandboxHandle): Promise<MeterReading>;
+  destroy(h: SandboxHandle): Promise<Teardown>;
   capabilities(): SandboxCapabilities;
 }

@@ -503,7 +503,7 @@ async function runTask(
   }
   let reading: MeterReading;
   try {
-    reading = await sandbox.destroy(handle);
+    reading = (await sandbox.destroy(handle)).meter;
   } catch (error) {
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,

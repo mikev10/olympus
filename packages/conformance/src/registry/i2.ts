@@ -1,4 +1,5 @@
-import { compileError, external, pending } from '../kit/assert.js';
+import { compileError, external } from '../kit/assert.js';
+import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
@@ -51,6 +52,8 @@ export const I2: InvariantEntry = {
     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
     // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
     COST_IS_RUNTIME_METERED,
+    // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
+    ENFORCEMENT_DECISIONS_RECORDED,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',
@@ -60,19 +63,5 @@ export const I2: InvariantEntry = {
       file: 'test/invariants.test.ts',
     }),
   ],
-  pending: [
-    pending({
-      id: 'I2.enforcement-decisions-recorded-by-the-enforcer',
-      owner: 'P14',
-      reason:
-        'A control that refuses leaves no record of having refused. An admission refusal writes nothing, by design; a ' +
-        "station refusal returns to its caller and RunState keeps 'parked' but not why; the egress proxy's per-connection " +
-        "verdicts go to its container's stdout and are destroyed with it. Only the relay's budget refusals reach the " +
-        "Vault, in P13's usage records. So what an agent tried and was stopped from doing is answerable from nowhere, " +
-        'and no refusal or park rate can be computed, nor backfilled later. P14 must write each decision, with its ' +
-        'cause as a closed type, from the component that made it into a write-once Vault record beside run state, and ' +
-        'assert that deleting the write for any one cause fails. Surfaced by the agent-lifecycle amendment ' +
-        '(docs/decisions.md, D-A-LC-02).',
-    }),
-  ],
+  pending: [],
 };
