@@ -524,6 +524,7 @@ order between them is settled before any of them is picked up.
 | R11 | Learning loop | M3 | R2, R7, R8, P14, R13 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
 | R13 | Nightly review | M2 | P14, R2, R9, M2 triggers | — |
+| R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 
 ### R1 — Readiness
 
@@ -548,8 +549,20 @@ work the line called done that was not: the false-done rates below, R7's
 corpus, and R8's post-merge outcomes. This is the number the reliability target
 in F1 applies to. **Throughput** is how much the line finishes without a human:
 the autonomy ratio, first-pass yield per station and rolled across the line,
-iterations to green, parks and refusals by cause, cycle time, and cost per
-merged change. A refusal or a park lowers throughput and is never a safety
+iterations to green, parks and refusals by cause, cycle time, approval wait,
+and cost per merged change. Approval wait is the time from the first refusal
+of a station exit for want of a human approval to the grant that clears it,
+per station and level, published as a median and 90th percentile with its
+sample size. Cycle time alone cannot show whether a faster line is waiting on
+its humans, and at L1 and L2 that wait is where the time goes (D-A-BR-03).
+
+Beside each rate that R8's baseline also measures, R2 publishes the baseline:
+the same rate over the target's changes Olympus did not make, each side with
+its sample size and bound. The two are shown side by side and never reduced to
+one "faster by" figure, because the work Olympus is given is not a random draw
+of the work a team does, and the comparison names that. Safety is compared
+first: a line that ships faster with a worse change-failure rate has regressed
+(D-A-BR-04). A refusal or a park lowers throughput and is never a safety
 failure; a line that raises throughput by refusing less is measured on safety
 first. Every rate is published with its sample size and a confidence bound,
 never as a point estimate alone: zero failures in 300 runs bounds the failure
@@ -686,6 +699,26 @@ untrusted payload (I7), and attribution is the runtime's join on commit
 identity, never a model's reading of an incident. Olympus does not deploy: the
 target's own pipeline ships, and `observe` reads what happened (D-A-LC-03).
 
+The unit also adds an **observation plan**, written at `test-design` and
+locked with the acceptance tests before `build`: the signal that shows the
+change working once merged, the signal that shows it regressed, and the
+condition that calls for a rollback. It is one more entry in the lock
+manifest, so the identity that builds the change cannot edit what it will be
+judged by after merge (I3). `observe` reads outcomes against it as well as
+against reverts and failing checks. A signal the plan names and the target
+does not produce is recorded as missing, never skipped, so an uninstrumented
+change is visible as one (I5). Olympus still reads the target's signals and
+never collects or emits them (D-A-BR-02).
+
+The same attribution runs over every merge to the default branch, not only
+Olympus's, so the target's own history gives a **baseline**: change-failure
+rate, time to restore, and lead time from first commit to merge for changes
+Olympus did not make, from git history alone. For Olympus's own changes the
+unit also records when the pull request `integrate` opened was merged, the one
+wait after a run that the line does not see. Pull request and review times
+need a provider's API, and come from a provider adapter, never the core
+(D-A-BR-04).
+
 ### R9 — Separation of duties across every seat
 
 Today independence is checked at one seat and by model family alone:
@@ -762,6 +795,26 @@ The reviewer's family differs from every author family whose work it reviews
 (I6). Its review is recorded as a claim and becomes R11 proposals or `intake`
 candidates, which a human admits. It never changes a run, a grant, or a status
 (D-A-LC-10).
+
+### R14 — Model tier per station and escalation
+
+Policy already sets a model tier — `fast`, `standard`, or `deep` — for each
+role, and the driver resolves a tier to a model. A role that acts at several
+stations runs at one tier at all of them, and a task whose gate keeps failing
+runs out its iterations at the tier it started on. This unit adds two things.
+A role's scope may override its tier per station, so the same role can plan at
+`deep` and build at `standard`. And policy may grant a task **escalation**: after
+a number of failed gates policy sets, the task's next iteration runs one tier
+higher, up to a ceiling policy sets. Escalation is decided by the runtime from
+the iteration count run state already keeps, never because a model asked for
+it (I2); it is absent unless granted (I4); it moves at most one tier per
+decision and never past the ceiling; and each escalation is recorded in P14's
+record with the task, the tiers, and the count that triggered it. The task's
+budget does not reset: an escalated iteration is charged against the same
+budget P13's relay enforces. Every model that built a task is one of its
+authors for seating a reviewer (I6). R2's rates are kept per model identity,
+so first-pass yield at the starting tier against yield after escalation falls
+out of data it already reads (D-A-BR-01).
 
 ### Recorded constraint: the Codex driver (M2)
 
