@@ -25,7 +25,7 @@
 | P11 | Sandbox network probe + HTTP behavioral | 2 | maintainer | P8, P10 | 2 |
 | P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
 | P13 | Cost control: budget at the relay, cost in evidence | 2 | maintainer | P6, P12 | 2 |
-| P14 | Enforcement record | 2 | maintainer | P1, P4, P10, P13 | 2 |
+| P14 | Enforcement record | 2 | maintainer | P1, P4, P10, P13 | 2–3 |
 | I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
@@ -481,7 +481,46 @@ Beside it, a `BehavioralAdapter` of kind `http` in `packages/adapters`. A scenar
 - deleting the write for any one cause fails an assertion (I8)
 - the Vault gains a named kind through a contract amendment, and no generic write (I1)
 - **the ledger.** Pays `I2.enforcement-decisions-recorded-by-the-enforcer`, registered pending by the amendment that added this unit, so `pending-baseline.json` lowers I2 by one
-**Specified when it starts.** Scope, out of scope, conformance, and acceptance are written before any code, as P12's and P13's were.
+**Specified before any code, as P12 and P13 were.** The decisions this entry rests on are D-P14-01 to D-P14-09 in `docs/decisions.md`, each with the option not taken.
+**Deliver:**
+- **A decision record in the Vault.** `EnforcementDecision` is declared beside `UsageRecord`: the run, the task and station where there is one, `decidedBy` (a closed set: `admission`, `station-machine`, `line`, `approval`, `egress-proxy`, `model-relay`), `decidedAt`, a `cause` that is a closed union with a typed payload per member, and `collectedBy: 'runtime'` as a literal. The Vault gains `recordDecision`, its one named write, which is refused unless `collectedBy` is `'runtime'`, and `readDecisions(runId)`, which lists a run's decisions. Nothing is added to `RunState` (D-P14-02).
+- **Every cause is written where it is decided:**
+  - `admitRun` records each refusal it returns — `invalid-request` included (D-P14-06) — under the requested run id, before returning it. It still writes no run state, no admission record, and no lock (D-P14-01)
+  - the line records each `StationRefusal` it returns, every arm, before returning it: `approval-required` with its time is the start of R2's approval wait (D-A-BR-03), and `parked` carries its `ParkCause` and limit. `decidedBy` is `station-machine` for a refusal `nextStep` made and `line` for one the line made. A status read (`runStanding`) derives a refusal and records nothing: reading is not deciding
+  - `approveStation` records each grant with the principal that made it, before the grant is committed, and each refusal with its reason (D-P14-07)
+  - the line records one decision per connection the egress proxy opened, tunnelled, or refused, read back from `destroy` (D-P14-03, D-P14-04)
+  - the line records one decision per violation it writes, referencing the violation record, and one per usage record whose relay refused anything, referencing the usage record, with the count and `exhausted`. Neither is copied (D-P14-05, D-P14-08)
+- **The proxy's verdicts leave the container.** Each log line becomes one JSON object with the verdict, the host or null, and a timestamp the proxy takes. Teardown stops the proxy, reads its log, and then removes it, on `destroy` and on the wall-clock expiry path alike. A log that cannot be read or parsed throws, and the proxy is still torn down (D-P14-03).
+**Where it lives:** `packages/vault` for the record and its two operations; `packages/sandbox/src/local/proxy.ts` and `provider.ts` for the verdicts and the teardown read; `packages/api/src/run.ts` for admission and approval, and `packages/api/src/line.ts` for station refusals, egress, violations, and relay refusals.
+**Contract amendments, landed in this unit's pull request**, each an `A-P14-nn` entry in `docs/decisions.md`:
+- `VaultRefKind` gains `'decision'`; `EnforcementDecision` is declared in `packages/vault/src/types.ts`; `Vault` gains `recordDecision(d: EnforcementDecision): Promise<VaultRef>` and `readDecisions(runId: RunId): Promise<readonly VaultRef[]>`. `StubVault` implements both
+- `SandboxProvider.destroy` returns `Teardown`: `{ meter: MeterReading; egress: EgressLog }`, where `EgressLog` is `{ kind: 'none' }` for a sandbox with no proxy or `{ kind: 'proxied'; connections: readonly { verdict: 'opened' | 'tunnelled' | 'refused'; host: string | null; at: string }[] }`. A provider that had a proxy and cannot read its log MUST throw rather than return `none`. `StubSandboxProvider` returns `{ meter: { kind: 'unmetered' }, egress: { kind: 'none' } }`
+**Out of scope:**
+- surfacing the record: an API endpoint, CLI output, rates, or totals. R2 derives rates and I1 reports refusals and parks by cause per run, both from `readDecisions`
+- a relay refusal's cause one by one. P13's reading keeps a count and the first reason (`refused`, `exhausted`); the per-request reason stays in the relay's log and is not collected. A candidate if R2 needs it
+- the service's own refusals: a request refused 401 carries no run it can be trusted to name, and a refused cancel changes nothing. Candidates, not this unit
+- sandbox provisioning refusals. A failed provision is a driver or sandbox failure the line already counts as a retry, and it ends as a recorded park when retries run out
+- the halt a service commits when a drive ends in error (A-P9-02). It is an error, not a control's decision; the `halted` refusal every later step meets is recorded
+- proving the record complete. Each entry is content-addressed, so a changed entry is detectable; a deleted one is not. Ordering and completeness — a hash chain, or a signed index — is a later unit
+- escalation and any other cause a later unit introduces. R14 adds its cause to the union through its own amendment
+- telemetry export (R12)
+**Conformance:** a refused admission leaves its decision and nothing else; every member of the cause union has a scenario that makes the decision and asserts it was recorded by the component named; an entry verifies with `sha256sum` alone; the proxy's verdicts reach the Vault for allowed and refused connections alike; a read of status records nothing.
+**Accept:**
+- a table of scenarios keyed by every member of the cause union, typed so that a member with no scenario does not compile; each scenario drives the component that decides, then asserts `readDecisions` holds exactly the decision expected, with its `decidedBy`, run, task, and station. Removing the write for any one cause fails its row (I8)
+- a refused admission, for each refusal `admitRun` returns, leaves one decision under the requested run id, and no run state, no admission record, no lock, and no workspace; a later admission of the same run id succeeds. A request whose run id the Vault cannot name is refused and records nothing, as a stated limit
+- a run that stops for an approval records `approval-required` with its time; approving records the grant with the principal before the grant is in run state; a Vault that refuses the decision leaves the approval unrecorded and returns an error; a refused approval is recorded with its reason
+- a line whose Vault refuses a decision write throws rather than returning an unrecorded refusal
+- a sandbox under an allowlist, against the local Docker provider, makes one connection to an allowed host by `CONNECT`, one by absolute-form `http://`, and one to a host outside the list; `destroy` returns all three with their verdicts, and the line records three decisions. A proxy log that cannot be parsed throws from `destroy`, and the proxy is still removed. A `deny-all` sandbox returns `{ kind: 'none' }`
+- a violation and a relay refusal each produce a decision whose payload is the ref of the record it points at, and the record it points at is unchanged
+- for every decision written, `sha256sum` of its file equals the ref's hash
+- the stored record carries no free text from a model or a caller: an `invalid-request` keeps each problem's path and code and not its message, and a proxy host is stored as data and read into no prompt
+- **the ledger.** `I2.enforcement-decisions-recorded-by-the-enforcer` moves from pending to live, a runtime entry over the table above, so `pending-baseline.json` lowers I2 from 1 to 0. Nothing is added pending
+- every package change has a changeset: `@olympus-ai/vault`, `@olympus-ai/core`, `@olympus-ai/sandbox`, `@olympus-ai/api`, `@olympus-ai/conformance`
+- `pnpm typecheck` and `pnpm lint` pass; `pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test` passes locally. The change reaches `core` and `sandbox`, which the driver's report key hashes, so the driver suite, the conformance package's tests, and `pnpm conformance` pass once in CI after the maintainer applies `run-driver` (D-A-CI-05)
+- `git ls-files -- .plan/` prints nothing
+**Gate paths:** `packages/vault/src/types.ts`, `packages/core/src/run/types.ts`, `packages/sandbox/src/types.ts`, and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
+**Invariants:** I2 is the subject — what a control decided is written by the runtime on the decider's behalf, and nothing a model said is an input. I8 is the table: a cause whose write is deleted fails. I5 is every write: a decision that cannot be recorded stops the run or the approval rather than letting it continue unrecorded, and a proxy log that cannot be read throws. I1 must not regress: the record reaches the Vault only through its named operation. I7 is the payload: a host an agent named and a path a caller sent are stored as data and never enter a prompt.
+**Known limits, stated now:** a deleted entry is not detectable (above). `decidedBy` names the deciding component, but the runtime writes for it, because the station machine is pure and the proxy is a container with no Vault; the proxy's verdicts are its own, read from its log after it stopped. Decisions are recorded as they happen, so a resume that meets the same refusal again records it again, with its own time; a rate counts decisions, not distinct causes.
 
 ---
 

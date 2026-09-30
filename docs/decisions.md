@@ -3036,3 +3036,62 @@ package changes; the amendment adds R14 and extends R8 and R2.
 - **Also chosen:** R12 may still ship a reference dashboard definition for a backend the operator already runs. No local dashboard or report page ships here; the CLI's text output serves a single user.
 - **Reverse:** none intended.
 - **Confirmed** by the maintainer, 2026-09-29.
+
+## P14: Enforcement record
+
+Proposed with the unit spec and taken as recommended by the maintainer, 2026-09-29, before any code. Each entry names the option not taken.
+
+### D-P14-01: a refused admission is recorded under the run id it asked for, and nothing else is written
+
+- **Ambiguous:** P4 refuses an admission "before anything is written", and P14 must record that refusal. This is the unit's first decision, named in its entry.
+- **Options:** (A) the decision is written under the requested run id, beside where its run state would be, and nothing else — no state, no admission record, no lock, no workspace; (B) a separate store for refusals that have no run, keyed by time.
+- **Chosen: A.** P4's rule protects run state, and A keeps it: `hasState` reads run state, not the run's directory (`packages/api/src/run.ts`), so a later admission of the same id still succeeds, and the refusal is found where the run's other records are. B is a second place an auditor must know to look. A request whose run id the Vault cannot name — empty, or outside `LocalVault`'s pattern — cannot be recorded under A, and is refused with nothing recorded, stated as a known limit.
+- **Reverse:** B — add a run-less store, and write every admission refusal there.
+
+### D-P14-02: the record is found by listing it, never through run state
+
+- **Options:** (A) `Vault.readDecisions(runId)` lists a run's decisions; (B) `RunState` gains refs for decisions made after admission, with a list only for admission refusals.
+- **Chosen: A.** The entry requires the record to sit beside run state, not in it, and B would put most of it in. A is one path for every decision, admitted or not, and a refusal recorded while a commit of run state failed is still found.
+- **Reverse:** B — add `RunState.decisions` and write the ref in the commit that follows each decision.
+
+### D-P14-03: the proxy's verdicts come back from `destroy`, read after the proxy stopped
+
+- **Options:** (A) `destroy` returns `{ meter, egress }`, and teardown reads the proxy's log between stopping it and removing it; (B) a separate provider method that reads the log before `destroy`.
+- **Chosen: A.** It is the shape P13 gave the meter (D-P13-07): one teardown, one read, taken when nothing more can be logged. B is a call a caller can forget, and a verdict logged between it and `destroy` would be lost. The log line becomes one JSON object with a timestamp the proxy takes, so it is parsed rather than split on spaces, and a line that does not parse throws.
+- **Reverse:** B — a `readEgress(handle)` method, called by the line before `destroy`.
+
+### D-P14-04: every connection is recorded, allowed ones as well as refused
+
+- **Options:** (A) one decision per connection, whatever its verdict; (B) refusals only; (C) one decision per sandbox holding every connection.
+- **Chosen: A.** The entry's scope names "opened, tunnelled, or refused". A refusal rate needs its denominator, and what an agent reached is as much the auditor's question as what it was stopped from reaching. C would make one entry carry many causes, against the entry's rule of one closed cause each. The volume is one file per connection, bounded by the sandbox's wall clock.
+- **Reverse:** B, or C with a count per host and verdict.
+
+### D-P14-05: relay refusals are read from P13's usage records, as counts
+
+- **Options:** (A) a decision per usage record whose relay refused anything, referencing it, with `refused` and `exhausted`; (B) collect each relay refusal's own reason, which changes P13's `MeterReading`.
+- **Chosen: A.** P14's entry says it reads P13's records rather than duplicating them. B is a change to a shipped contract that no current consumer needs. The per-request reason stays in the relay's log.
+- **Reverse:** B — extend `MeterReading` with a count per refusal reason.
+
+### D-P14-06: an invalid request is an enforcement decision
+
+- **Ambiguous:** `invalid-request` is input validation, and it also covers a policy document refused by the hardened loader (P9) and a run id already admitted.
+- **Chosen:** recorded, like every other admission refusal. Each problem keeps its path and code; its message is not stored, because a message can quote what the caller sent.
+- **Reverse:** record only the refusals a policy, a capability, a cost, or a control produced.
+
+### D-P14-07: a decision is written before it takes effect, and a write that fails stops the work
+
+- **Chosen:** an approval's decision is written before the grant is committed, so a grant never exists without its record, and a failed write fails the approval. A refusal is written before it is returned, and a failed write throws, so no refusal leaves the runtime unrecorded. A resume that meets the same refusal records it again, with its own time.
+- **Why:** a record written after the fact is a record that can be missing. A refusal repeated on resume is another decision the control made, and R2's approval wait needs the first one's time (D-A-BR-03).
+- **Reverse:** write after the effect, and treat a failed write as a warning — which is the silent degrade I5 forbids, so this is not expected to be reversed.
+
+### D-P14-08: violations and usage are referenced, not copied
+
+- **Chosen:** a violation the line writes and a usage record whose relay refused anything each get a decision holding the ref of that record. The record it points at is unchanged.
+- **Why:** each is already a write-once record by the component that found it. A reference makes `readDecisions` the one list an auditor walks, without two copies that could disagree.
+- **Reverse:** leave both out of the decision record, and have a reader walk `RunState.violations` and `RunState.usage` as well.
+
+### D-P14-09: the runtime writes for the deciding component, and names it
+
+- **Ambiguous:** the entry says a decision is written "by the component that decided". The station machine is pure and holds no Vault, and the proxy is a container with no route to one.
+- **Chosen:** `decidedBy` names the decider — `station-machine` for a refusal `nextStep` returned, `line` for one the line made, `egress-proxy` for a verdict read from the proxy's log — and the runtime that holds the Vault writes it. Nothing a model returned is an input to any field.
+- **Reverse:** give the proxy its own write path to the Vault, which would be a new route out of the sandbox's network.
