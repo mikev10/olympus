@@ -359,28 +359,50 @@ describe('the grant is the host the upstream is asked for', () => {
   });
 });
 
-describe('what the proxy records, and what that is not', () => {
-  test('each connection is one line on the proxy container stdout, and it goes when the sandbox goes', async () => {
+describe('what the proxy records, and how it leaves the sandbox', () => {
+  test('destroy returns every connection the proxy decided, in order, read after it stopped, and removes it', async () => {
     const originName = `egress-origin-${randomUUID()}`;
     const handle = await provisionWith([originName]);
     const controls = allowlistControls(handle);
     await startOrigin(originName, controls.egress.proxy.outboundNetwork);
 
-    await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
-    await throughProxy(handle, `GET http://${BLOCKED_NAME}/ HTTP/1.0`);
+    expect(await throughProxy(handle, `CONNECT ${originName}:${String(ORIGIN_PORT)} HTTP/1.1`)).toContain('200 Connection Established');
+    const absolute = await provider.exec(handle, ['sh', '-c', `wget -T 8 -O - http://${originName}:${String(ORIGIN_PORT)}/ 2>&1`]);
+    expect(absolute.stdout).toContain(ORIGIN_BODY);
+    expect(await throughProxy(handle, `GET http://${BLOCKED_NAME}/ HTTP/1.0`)).toContain('403');
 
-    const logs = await run('docker', ['logs', controls.egress.proxy.containerId]);
-    const lines = logs.stdout + logs.stderr;
-    expect(lines).toContain(`egress-proxy: opened ${originName}`);
-    expect(lines).toContain(`egress-proxy: refused ${BLOCKED_NAME}`);
-
-    // What this is not. The line lives in the proxy container and is destroyed with it, so it is
-    // readable during a run and is not evidence afterwards. Nothing collects it into an evidence
-    // bundle, and this unit claims nothing more than the line; collection is P6's.
     await removeOrigin(originName);
-    await provider.destroy(handle);
+    const { egress } = await provider.destroy(handle);
+    live.length = 0;
+    // D-P14-03: the proxy's own account, taken when it could decide nothing more; it goes with the sandbox.
+    expect(egress.kind).toBe('proxied');
+    if (egress.kind !== 'proxied') return;
+    expect(egress.connections.map((c) => [c.verdict, c.host])).toEqual([
+      ['tunnelled', originName],
+      ['opened', originName],
+      ['refused', BLOCKED_NAME],
+    ]);
+    for (const c of egress.connections) expect(Number.isNaN(Date.parse(c.at))).toBe(false);
+    expect(await containerExists(controls.egress.proxy.name)).toBe(false);
+  });
+
+  test('a log that does not parse fails destroy, and the proxy is removed all the same', async () => {
+    const handle = await provisionWith(['example.com']);
+    const controls = allowlistControls(handle);
+    // A decision line the proxy did not write, on the stream the provider reads.
+    await run('docker', ['exec', controls.egress.proxy.containerId, 'sh', '-c', "echo 'egress-proxy-decision {not json' > /proc/1/fd/1"]);
+
+    await expect(provider.destroy(handle)).rejects.toThrow(/egress proxy's decisions could not be read/);
     live.length = 0;
     expect(await containerExists(controls.egress.proxy.name)).toBe(false);
+  });
+
+  test('a sandbox with no route out has no proxy, and destroy says so', async () => {
+    const handle = await provider.provision(specFor());
+    live.push(handle);
+    const { egress } = await provider.destroy(handle);
+    live.length = 0;
+    expect(egress).toEqual({ kind: 'none' });
   });
 });
 
