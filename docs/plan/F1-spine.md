@@ -145,7 +145,7 @@ A package that cannot be verified without the rest of the system is decomposed w
 
 **In:** stations 1–8, local Docker, Claude Code driver, TypeScript adapters, C1/C2/C3, trust boundary, policy engine, API + CLI, cost and cache measurement, L2, human trigger only.
 
-**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), false-done benchmark (M2), post-merge observation (M2), separation of duties beyond the review seat (M2), trust ratchet (M2), telemetry export (M2), nightly review (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
+**Out:** Codex driver (M2), compiler (M2), trigger framework (M2), readiness (M2), outcome measurement (M2), false-done benchmark (M2), post-merge observation (M2), separation of duties beyond the review seat (M2), trust ratchet (M2), telemetry export (M2), nightly review (M2), model tier per station and escalation (M2), learning (M3), review panel (M3), mutation testing (M3), behavioral browser QA (M3), L3 (M3 canary), distributed execution (M4b), control plane (M5).
 
 The units in `DECOMPOSITION.md`'s "Beyond M1" section are out of M1 and are specified only so far as keeping them out requires. Readiness is the one that reaches back into this document: it added the fourth term to the effective-level formula above and `readiness` to the package list, both taken deliberately as an amendment rather than by the unit that will use them.
 
