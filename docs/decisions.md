@@ -3109,3 +3109,10 @@ Proposed with the unit spec and taken as recommended by the maintainer, 2026-09-
 - **Options:** (A) a `resume-refused` cause, recorded under the run with `decidedBy: 'admission'`, since the checks are admission's; (B) out of scope.
 - **Chosen: A**, with the maintainer. B leaves a refusal with no record, which is the gap this unit closes.
 - **Reverse:** B, stated as a known limit.
+
+### D-P14-12: a cause no run can reach today is marked, with a check that fails when a run can
+
+- **Found while writing the conformance table:** every run above L1 is refused `unsafe-above-l1`, because `unsafeComponents` always includes the walking skeleton's own declaration (`packages/api/src/safety.ts`), which I1 deletes. So admission `controls-unavailable` and station `same-family-reviewer` (both L3 only) and resume `unsafe-above-l1` (a run admitted above L1) are constructed in code and reached by no run. Station `capability-missing` is constructed only before the line runs, where it is recorded as `admission-refused` or `resume-refused`.
+- **Options:** (A) two marks beside D-P14-10's: **blocked above L1**, whose check asserts a run at L2 and at L3 is refused `unsafe-above-l1` today, and **recorded under another cause**, whose check asserts the admission and resume rows carry the refusal and a scan finds no line code returning it; (B) leave the four rows without a scenario, as known limits owned by I1.
+- **Chosen: A**, with the maintainer. Each mark fails the moment it stops being true, so I1 cannot remove the skeleton's declaration without the three blocked rows failing until they gain scenarios, and a line that starts returning `capability-missing` fails the scan. B weakens the table's one property, that a cause whose write is missing fails.
+- **Reverse:** B, with each row named in I1's entry.
