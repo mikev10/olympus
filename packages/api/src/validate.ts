@@ -23,6 +23,8 @@ export type RequestProblemCode =
   | 'missing'
   /** A string that must have content is blank, or is not a string. */
   | 'empty'
+  /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */
+  | 'unusable'
   /** An id or a path is listed twice. */
   | 'duplicate'
   /** `workspace` must be an absolute path. */
@@ -86,10 +88,21 @@ export interface RequestFields {
   readonly artifacts: unknown;
 }
 
+/**
+ * A run id names a directory in the Vault and in the workspace store, so it is
+ * one path segment and nothing that could leave either. The same rule as
+ * `LocalVault`'s, held here so an id neither can name is refused before
+ * anything is written, a decision included (D-P14-01, D-P14-14).
+ */
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 /** Every reason the request's own fields cannot be admitted; empty when they can. The artifacts' contents are checked separately, once read. */
 export function requestProblems(req: RequestFields): RequestProblem[] {
   const { problems, report } = collector();
   if (!isNonEmptyString(req.runId)) report('runId', 'empty', 'runId must be a non-empty string');
+  else if (!RUN_ID.test(req.runId)) {
+    report('runId', 'unusable', `runId must match ${String(RUN_ID)}; it names a directory and may not leave one`);
+  }
   if (!isNonEmptyString(req.baseCommit)) report('baseCommit', 'empty', 'baseCommit must be a non-empty string');
   if (!isAutonomyLevel(req.requestedLevel)) report('requestedLevel', 'not-a-level', 'requestedLevel must be one of 0, 1, 2, 3');
   if (!isNonEmptyString(req.workspace) || !isAbsolute(req.workspace)) {

@@ -4,7 +4,7 @@
  * Workspace. The invariant assertions themselves are the registry's; what is
  * here is the rest of the behaviour, read by field.
  */
-import { writeFile } from 'node:fs/promises';
+import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
@@ -191,6 +191,15 @@ describe('hello at L1', () => {
     const again = await startRun(runRequest(runId, workspace, components, { requestedLevel: 0 }));
     expect(again).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'runId', code: 'already-admitted' }] });
     await expect(components.vault.readRunState(runId)).resolves.toEqual(first);
+  });
+
+  test('a run id that is not one directory name is refused, and nothing is written for it (D-P14-14)', async () => {
+    for (const unusable of ['../escape', 'a/b', '.hidden']) {
+      const outcome = await startRun(runRequest(unusable as RunId, workspace, components));
+      expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'runId', code: 'unusable' }] });
+    }
+    // The workspace store's base was the first thing written for an admitted id; nothing reached outside it.
+    await expect(stat(join(components.workspaces.root, '..', 'escape'))).rejects.toThrow();
   });
 });
 
