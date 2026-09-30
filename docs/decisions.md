@@ -2874,8 +2874,8 @@ a ratchet that only narrows, and a record written by the enforcers.
 
 Every control the two describe was first checked on 2026-09-21 against the
 code on `unit/p8`. That amendment was never merged. It was carried to `v2` on
-2026-09-29, with every row below checked again against the code as P6, P9, and
-P11 to P13 left it, and its units renumbered after the ones `v2` added in the
+2026-09-29, with every row below checked again against the code as P6, P7, P9,
+and P11 to P13 left it, and its units renumbered after the ones `v2` added in the
 meantime: its P13 is P14 here, and its R4 to R10 are R7 to R13. The confirmations
 dated 2026-09-21 are the maintainer's from then, and they still hold. No
 package changed except the registry.
@@ -2885,7 +2885,7 @@ package changed except the registry.
 | Scope fixed at dispatch, never widened | Built. A write-once admission record; a resume reads level, policy, and hashes from it (`packages/api/src/run.ts`) | — |
 | Enforcement outside the prompt | Built. Mount layer (P2), egress allowlist (P10), credential relay (P12), tool grants (P3, P5) | — |
 | Status from the enforcers, not self-report | Built. `TaskResult` has no status; the claim/evidence diff records a `claim-mismatch` (P6, `packages/api/src/verification.ts`) | — |
-| Never judged by what it can write | Built. Locks re-verified at every transition (P4); checks in a fresh read-only tree (P6); assertion comparison (P8) | P7 assembles |
+| Never judged by what it can write | Built. Locks re-verified at every transition (P4); checks in a fresh read-only tree (P6); assertion comparison (P8); tamper analysis that escalates `integrate` (P7, `packages/api/src/tamper.ts`) | — |
 | Reviewer independent of author | Review seat only, by family only (`seatReviewer`, `packages/core/src/station/machine.ts`) | R9 |
 | Reviewer cannot write what it judges | Built (P6) | — |
 | Reviewer cannot read the plan | Built. The seat gets only the files its grants cover (`reviewView`, `packages/api/src/line.ts`; D-P6-08) | — |
