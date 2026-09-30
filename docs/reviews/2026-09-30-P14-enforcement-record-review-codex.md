@@ -1,3 +1,61 @@
+# External review of P14, codex, 2026-09-30
+
+An adversarial pre-merge review of P14 (the enforcement record): the runtime's
+single write path for decisions and its call sites in `run.ts` and `line.ts`,
+the egress proxy's decision log and its read at teardown, the Vault's
+acceptance rule for a decision, and the conformance table keyed by every cause.
+One of two reviews run from the same prompt and bundle; the other is
+`2026-09-30-P14-enforcement-record-review-gemini.md`. Both are triaged in
+`2026-09-30-P14-enforcement-record-triage.md`, which cites this review's
+findings as `codex-1` to `codex-9`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone. The pre-run listing of both is the manifest's
+  `cleanRoom`: `configHome` `["auth.json"]`, `workDir` `[]`. Exit 0, not timed
+  out, 215.7 s. Ingestion `complete`: 154,526 input tokens against a floor of
+  113,126. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `8a08ae0fd6cc686138869ea832d395907e804afcc8481b2b31a35b7c23b6e5e6`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-3 (the proxy's 400 refusals are not
+  logged) was raised by gemini too, as gemini-1. codex-1 (egress verdicts lost
+  between the proxy acting and the Vault holding the record) pairs with
+  gemini-2, which describes the same mechanism from a failed log read rather
+  than an interrupted process. codex-2, codex-4 to codex-9 were raised by codex
+  alone.
+- **Date:** 2026-09-30 (run started 2026-09-30T20:40Z).
+- **Bundle:** `2026-09-30-P14-enforcement-record-review-bundle.txt`, SHA-256
+  `dcb8b51f87c93a0cc6e209fe2ac9f69c99ea1ff255a84fd4ebf4403e76fa6596`, base
+  `329c049` (`reviewed/P7`), head `5762bb2` (the last P14 implementation
+  commit). It held the full contents of every changed source, test, registry,
+  and skill file, `CLAUDE.md`, and the changeset; the changed docs
+  (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, `docs/plan/F1-spine.md`,
+  `docs/plan/WORKFLOW.md`, `docs/plan/WORKFLOW-DIAGRAM.md`) were listed in the
+  diffstat and excluded. Prompt:
+  `2026-09-30-P14-enforcement-record-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated "No prior project context.
+  No external lookups", that a local filesystem listing was blocked, and that it
+  ran no tests, so its findings are from source, not reproduced. A self-report,
+  not independently verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Items 1
+  and 3 are answered by codex-1 to codex-5 and codex-8, item 2 by codex-6 and
+  codex-7, item 4 in part by codex-4 (a JSON value bypassing a TypeScript
+  annotation) and codex-7 (`as const` and quoted keys escaping a source scan),
+  item 6 in the closing list, and item 7 by codex-9 and the closing paragraphs,
+  which propose separating "durably recorded before its effect", "recoverably
+  collected afterward", and "faithfully attributed". Item 5 (configuration
+  satisfied without doing what it appears to) was not addressed.
+- **Citations:** line numbers refer to positions in the reviewed source files
+  as the bundle carried them, not to the repository at any later commit. They
+  are hints; the triage located each construct by name.
+
+---
+
 BASE: reviewed/P7  
 HEAD: 5762bb2  
 packages/vault/src/types.ts  

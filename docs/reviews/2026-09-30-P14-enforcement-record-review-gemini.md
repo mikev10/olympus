@@ -1,3 +1,58 @@
+# External review of P14, gemini, 2026-09-30
+
+An adversarial pre-merge review of P14 (the enforcement record): the runtime's
+single write path for decisions and its call sites in `run.ts` and `line.ts`,
+the egress proxy's decision log and its read at teardown, the Vault's
+acceptance rule for a decision, and the conformance table keyed by every cause.
+One of two reviews run from the same prompt and bundle; the other is
+`2026-09-30-P14-enforcement-record-review-codex.md`. Both are triaged in
+`2026-09-30-P14-enforcement-record-triage.md`, which cites this review's five
+unnumbered findings, in the order they appear, as `gemini-1` to `gemini-5`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`
+  (`POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent`),
+  offering no tools. `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 254.1 s. Ingestion `complete`: 157,298
+  input tokens against a floor of 113,126. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `f9b76c80a742c49b6ebc721541e6c5f71804b6dcb5e3af3b79cfa07743751a2e`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-1 (the proxy's 400 refusals are not
+  logged) was raised by codex too, as codex-3. gemini-2 (a failed log read
+  discards the verdicts the proxy already acted on) pairs with codex-1, which
+  describes the same loss from an interrupted process. gemini-3, gemini-4, and
+  gemini-5 were raised by gemini alone.
+- **Date:** 2026-09-30 (run started 2026-09-30T20:40Z).
+- **Bundle:** `2026-09-30-P14-enforcement-record-review-bundle.txt`, SHA-256
+  `dcb8b51f87c93a0cc6e209fe2ac9f69c99ea1ff255a84fd4ebf4403e76fa6596`, base
+  `329c049` (`reviewed/P7`), head `5762bb2` (the last P14 implementation
+  commit). It held the full contents of every changed source, test, registry,
+  and skill file, `CLAUDE.md`, and the changeset; the changed docs
+  (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, `docs/plan/F1-spine.md`,
+  `docs/plan/WORKFLOW.md`, `docs/plan/WORKFLOW-DIAGRAM.md`) were listed in the
+  diffstat and excluded. Prompt:
+  `2026-09-30-P14-enforcement-record-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated "I have no prior context
+  about this project, and I performed no lookups." A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Items 1
+  and 3 are answered by gemini-1, gemini-2, gemini-3, and gemini-5, and item 2
+  by gemini-4. gemini-3 touches item 4 (a non-string value past a TypeScript
+  type) without naming it. Items 4 (as a question in its own right), 5
+  (configuration satisfied without doing what it appears to), 6 (which
+  mechanisms are sound), and 7 (whether the framing is right) came back empty.
+  Silence on 6 and 7 is not an endorsement of any mechanism or of the framing.
+- **Citations:** line numbers refer to positions in the reviewed source files
+  as the bundle carried them, not to the repository at any later commit. They
+  are hints; the triage located each construct by name. gemini-5's citation
+  (`run.ts:620`, an early return) names no construct the code has.
+
+---
+
 Before reviewing, I must state the four required values:
 BASE: reviewed/P7
 HEAD: 5762bb2
