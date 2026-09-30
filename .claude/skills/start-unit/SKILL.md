@@ -1,6 +1,6 @@
 ---
 name: start-unit
-description: Begin work on a decomposition unit. Loads the spine and the unit's spec, states the boundary back before starting, and works the unit to its done-when criteria. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
+description: Begin work on a decomposition unit. Loads the spine and the unit's spec, reads the code the unit touches, states the boundary and every assumption back, waits for the maintainer to confirm, then works the unit to its done-when criteria. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
 ---
 
 # Start a unit
@@ -26,21 +26,34 @@ The unit entry names what it depends on. Verify each dependency has shipped —
 its branch merged into `v2`, its acceptance criteria met. If one has not, say so
 and stop. A unit built on an unshipped dependency will be rewritten.
 
-## 3. State the boundary before working
+## 3. Read the code the unit touches
 
-Print, and wait for nothing — this is a record, not a question:
+The unit entry is a claim about the code, not evidence of it. Read what the
+unit will change or build on: the packages it names, the types it consumes,
+and the pending registry entries it owes. Note every place where the code
+differs from what the entry says. An entry that says an input already exists
+has been wrong before.
+
+## 4. State the boundary and every assumption, then wait
+
+Print the following, then stop. Write no code, no test, and no file until the
+maintainer confirms (`CLAUDE.md`, working rule 6).
 
 - Unit id and title
 - Deliverables, one line each
 - **Out of scope**, verbatim
 - Acceptance criteria, as the commands that will prove them
 - Which invariants this unit touches, and which pending registry entries it owes
+- **Every assumption the plan rests on.** Mark each one verified, naming the
+  file:line or the command that verified it, or unverified. Each unverified
+  assumption is a question, asked here with a recommended answer
+- Where the code differs from the unit entry, from step 3
 
-If any of those five is absent from the spec, say which, propose what it should
-be, and ask. An underspecified unit is a spec defect — fix it in
+If any of the first five is absent from the spec, say which, propose what it
+should be, and ask. An underspecified unit is a spec defect, fixed in
 `docs/plan/DECOMPOSITION.md` before writing code, not after.
 
-## 4. Work the unit
+## 5. Work the unit
 
 - Conformance suite first. It is the acceptance criteria in executable form.
 - Stay inside scope. Adjacent work becomes a note in the PR body, not a commit.
@@ -51,7 +64,7 @@ be, and ask. An underspecified unit is a spec defect — fix it in
 - Pay down pending registry entries this unit owns. Adding a new one requires
   editing the committed baseline — a deliberate act, visible in the diff.
 
-## 5. Stop conditions
+## 6. Stop conditions
 
 Stop and ask when:
 
@@ -59,10 +72,17 @@ Stop and ask when:
 - Meeting an acceptance criterion would require weakening an invariant
 - The work needs a contract change (those are amendments, not unit work)
 - A destructive operation has no safe default
+- A fact the work depends on turns out different from what was confirmed
+- A decision the confirmed plan does not cover would change an interface, a
+  deliverable, the scope, or an acceptance criterion
+- The next step depends on something that has not been verified and cannot be
+  verified from here
 
-Otherwise decide, record it, and keep moving.
+A choice inside the confirmed plan that changes none of those is made,
+recorded in `docs/decisions.md`, and the work continues. Anything outside it
+waits for the maintainer.
 
-## 6. Finish
+## 7. Finish
 
 Run the acceptance criteria. When they pass, invoke `ship-unit`.
 

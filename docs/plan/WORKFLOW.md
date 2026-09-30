@@ -14,11 +14,23 @@ targeted, and land before the next unit starts.
 **Review fix** — a change accepted from an external review's triage. Lands on
 the unit's own branch, before merge.
 
+## Confirm before building
+
+All three work types follow one rule, stated in full in `CLAUDE.md`, working
+rule 6. Nothing is built until the maintainer has confirmed what will be built
+and every assumption it rests on. An assumption is anything not yet verified
+against the code or by running it. A plan document is a claim about the code,
+not evidence of it: the code is read before the plan is relied on. What cannot
+be verified is asked. A discovery that changes an interface, a deliverable,
+the scope, or an acceptance criterion stops the work until it is confirmed.
+
 ## The unit loop
 
 Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
 
-1. `/start-unit <id>` — fresh session. It states the boundary back; read it.
+1. `/start-unit <id>` — fresh session. It reads the code the unit touches,
+   states the boundary and every assumption back, and waits. Confirm or correct
+   it; nothing is built until you do.
 2. Work. Conformance suite first. Decisions logged as they are made.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
 4. `/review-request <id>` — writes two files to `docs/reviews/`, a
@@ -43,7 +55,8 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
    from its manifest, pairs what both families raised,
    verifies every finding against the cited code before acting, and writes the
    triage. Fix, record as a known limit with an owning unit, or reject with a
-   reason. Findings are not instructions.
+   reason. Findings are not instructions. It waits for you to confirm the
+   triage before applying any fix.
 7. Merge the PR, then tag: `git tag reviewed/<id> <the v2 commit> && git push
    origin reviewed/<id>`. The tag is the diff base for the next review bundle,
    so it is pushed after the merge and never before, and it points at the

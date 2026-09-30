@@ -10,10 +10,12 @@ who runs each step, and where one Claude session ends and the next begins.
  ┌──────────────────────────────┐
  │ /start-unit P5               │  Claude, NEW session
  │  loads spec, checks deps,    │
- │  states the boundary         │
+ │  reads the code it touches,  │
+ │  states the boundary and     │
+ │  every assumption            │
  └──────────────┬───────────────┘
-                │ spec missing parts, or contract change needed?
-                ├──────────────► asks YOU, then continues
+                │ always, and again whenever the work finds something new
+                ├──────────────► waits for YOU to confirm, then continues
                 ▼
  ┌──────────────────────────────┐
  │ work the unit                │  Claude, same session
@@ -53,8 +55,9 @@ who runs each step, and where one Claude session ends and the next begins.
  │ /triage-review P5            │  Claude, NEW session
  │  reads both replies from disk│  on branch unit/p5
  │  checks each finding against │
- │  the code, fixes on branch,  │
- │  writes triage, stops        │
+ │  the code, writes triage,    │
+ │  waits for YOU, then fixes   │
+ │  on branch, stops            │
  └──────────────┬───────────────┘
                 ▼
  ╔══════════════════════════════╗
@@ -72,13 +75,15 @@ who runs each step, and where one Claude session ends and the next begins.
 
 ## Your five touch points, in order
 
-1. Type `/start-unit <id>`, and answer if it asks.
+1. Type `/start-unit <id>`, then confirm or correct the boundary and
+   assumptions it states. Nothing is built until you do.
 2. When `REVIEW ARTIFACTS READY` prints, type `/run-review <id>`. It is a
    separate command, and not part of the chain, because it is the step that
    sends the bundle to OpenAI and Google, and that cannot be taken back.
 3. Read the two outcomes it prints, one per family. Only `counted` is a review.
 4. In a new session, type `/triage-review <id>`. It reads both replies from
-   disk; there is nothing to hand it.
+   disk; there is nothing to hand it. Confirm the triage before any fix is
+   applied.
 5. Merge the PR, then push the tag.
 
 ## Session boundaries
