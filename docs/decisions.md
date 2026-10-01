@@ -3193,3 +3193,59 @@ report that someone outside wrote. Each row was checked against the code on
 - **Why M2:** it needs the trigger framework and R15.
 - **Reverse:** allow the human trigger only, and drop the tracker trigger.
 - **Proposed;** not yet confirmed by the maintainer.
+## Amendment: I1 split into I1a and I1b
+
+The I1 entry was checked against the code on `v2` at 7fcb611 before any work began. It said to replace every S1 stub with the real component. The real components exist, but nothing composes them outside conformance, `integrate` does nothing, nothing pushes or merges, `UsageRecord` does not name its model, and no per-run report exists. The maintainer confirmed each choice below on 2026-10-01. No package changes; the amendment rewrites the I1 entry and the spine's graph.
+
+### D-A-I1-01: I1 is two units, I1a and I1b
+
+- **Ambiguous:** one entry held a production host, provenance, the skeleton's deletion, three owed assertions, two P13 limits, two contract changes, a git integration, a report, and a paid proof run.
+- **Chosen:** I1a composes the real line and pays everything owed to it; I1b adds the merge, the report, and the proof. Each has its own branch, review, and `reviewed/` tag. Every M1 criterion is assigned to exactly one.
+- **Why:** a single pull request of that size cannot be reviewed adversarially in one bundle, and the merge path should be reviewed on a line already known to be real.
+- **Reverse:** fold I1b's entry back into I1a's before I1a ships.
+
+### D-A-I1-02: the canary is a new repository, `mikev10/olympus-canary`
+
+- **Ambiguous:** "the canary repo" was named nowhere.
+- **Chosen:** a small public TypeScript repository with a vitest suite, created by I1b, so the TypeScript adapters cover it and nothing Olympus did not make is put at risk.
+- **Reverse:** point I1b at any repository the adapters support.
+
+### D-A-I1-03: at M1 a human supplies the spec, tests, manifest, and task graph
+
+- **Ambiguous:** "one real feature reaches a merged PR" did not say who writes the artifacts that judge it. Today `spec`, `test-design`, and `plan` lock what was admitted and call no model (`packages/api/src/line.ts`).
+- **Chosen:** as the line works today. The model works at `build` and `review`. Model-authored early stations are out of I1.
+- **Why:** an author that writes its own acceptance tests at M1 would be judged by an artifact from its own family, and F1 already says M1 test design is single-family and must not claim the defense.
+- **Reverse:** a later unit gives those stations a driver.
+
+### D-A-I1-04: the model on `UsageRecord` is a contract amendment landed in I1a
+
+- **Ambiguous:** the M1 criterion needs usage records to show each call's model, and `UsageRecord` has no such field.
+- **Chosen:** `A-I1a-01` in I1a's pull request, as P14 landed its own. The runtime sets it from the tier the scope named and the driver resolved.
+- **Reverse:** read the model from the evidence bundle instead, at the cost of a join for every report.
+
+### D-A-I1-05: provenance by a sole graph builder
+
+- **Ambiguous:** `I5.unsafe-declaration-survives-composition` allows trusted metadata a wrapper must propagate, or a construction layer that owns provenance.
+- **Chosen:** one function builds the component graph, reads each component's declaration as it builds, and returns a branded graph; `startRun` and `resumeRun` take only that brand.
+- **Why:** propagation fails the first time a wrapper forgets, which is the failure the entry exists for. A brand makes an unbuilt graph a compile error.
+- **Reverse:** drop the brand and require wrappers to forward; the assertion stays.
+
+### D-A-I1-06: an unanalysed suite escalates at `integrate`, read from the admission record
+
+- **Ambiguous:** `I5.unanalysed-tests-are-not-reported-clean` allows the tamper report to say so, or an escalation derived from it.
+- **Chosen:** `integrate` reads `unavailableControls` from the admission record in the Vault and escalates an L2 run whose `test` control is unavailable. `TamperReport` is unchanged.
+- **Why:** the admission record already holds the fact, and a resume already reads it from the Vault rather than from its caller. A new report field would be a second copy of it.
+- **Reverse:** add a field to `TamperReport`; the assertion stays.
+
+### D-A-I1-07: the runtime merges, with a token only the host holds
+
+- **Ambiguous:** who merges at L2, and where the credential lives.
+- **Chosen:** the runtime pushes, opens the pull request, and merges after every gate passed, through the REST API with a fine-grained token scoped to the target repository and held in the host's environment. No `gh` dependency. No sandbox receives it and no egress allowlist reaches the git remote.
+- **Why:** the merge is the runtime's decision from evidence, and a credential a task could read would let an agent merge its own change.
+- **Reverse:** at L1, stop at the open pull request and let a human merge.
+
+### D-A-I1-08: paid runs are capped by the maintainer before the first one
+
+- **Ambiguous:** the proof spends API credit, and no budget was set.
+- **Chosen:** I1a spends only what the existing driver suite spends under `run-driver`. Before I1b's first paid run, the maintainer sets a cap and the relay enforces it.
+- **Reverse:** none needed; the cap is policy.

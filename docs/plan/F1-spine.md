@@ -114,7 +114,8 @@ F1 Spine
                  P13 Cost control  [P6, P12]
                  P14 Enforcement record  [P1, P4, P10, P13]
                  P9 API + CLI  [P4]
-                      └─ I1 Integration + M1 proof
+                      └─ I1a Integration: the real line
+                           └─ I1b Integration: merge + M1 proof
 ```
 
 Everything blocks on F2. After F2 and S1, P1/P2/P3/P8 start immediately and in parallel; P4/P5/P6/P7/P9/P10/P11/P12/P13/P14 follow their bracketed dependencies.
