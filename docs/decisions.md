@@ -2018,6 +2018,13 @@ is the amendment WORKFLOW.md expects between a unit and the next one.
 - **Why the gate is not weakened:** nothing merges on it. WORKFLOW step 7 merges only on green pull request checks, which run the paid suite under `run-driver` and the conformance registry against the fresh report. What moved is where the one paid run happens, not whether a merge needs it. The exception is scoped to failures a stale report produces, so a real regression anywhere else still stops the ship.
 - **Reverse:** put a model credential back on the maintainer's machine and delete the exception from `ship-unit` step 2.
 
+### D-A-CI-08: a review bundle may quote CLAUDE.md's reference to the planning directory
+
+- **Problem:** CI refuses any tracked file that names a path under the maintainer-local planning directory, and exempts `CLAUDE.md`, which holds the rule itself. A unit that changes `CLAUDE.md` ships it in its review bundle, byte for byte, and bundles are tracked (`triage-review` step 8). P14's bundle did, and its pull request went red. The bundle cannot be edited: its SHA-256 in the review prompt is the record of what the reviewers were sent.
+- **Chosen:** the check also exempts `docs/reviews/*-review-bundle.txt`.
+- **Why the gate is not weakened:** a bundle holds only the contents of tracked files at a recorded commit, and each of those files is checked in its own right where it lives, so a reference anywhere but `CLAUDE.md` still fails at its source. The exemption covers a copy of what the check already allows, and nothing else.
+- **Reverse:** drop the second pathspec, and have `review-request` leave `CLAUDE.md` out of bundles.
+
 ## P8: Adapters (TypeScript)
 
 ### D-P8-01: The unit spec was completed before the code, and one of its decisions was reversed before any code

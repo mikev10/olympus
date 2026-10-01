@@ -60,7 +60,8 @@ jobs:
             echo "::error::files under the maintainer-local planning directory are tracked"
             exit 1
           fi
-          refs="$(git grep -nE '\.plan/[A-Za-z0-9_-]' -- ':!CLAUDE.md' || true)"
+          # A review bundle is a byte copy of what a reviewer was sent, CLAUDE.md included when a unit changed it; it is never edited (D-A-CI-08).
+          refs="$(git grep -nE '\.plan/[A-Za-z0-9_-]' -- ':!CLAUDE.md' ':!docs/reviews/*-review-bundle.txt' || true)"
           if [ -n "$refs" ]; then
             echo "$refs"
             echo "::error::tracked files reference a path under the maintainer-local planning directory"
