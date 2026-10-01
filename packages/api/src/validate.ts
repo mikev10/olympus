@@ -43,6 +43,8 @@ export type RequestProblemCode =
   | 'none-required'
   /** `requestedLevel` is not one of 0, 1, 2, 3. */
   | 'not-a-level'
+  /** `approvedCostUsd` is neither a finite number nor null. */
+  | 'not-a-cost'
   /** An artifact could not be read from the workspace. */
   | 'unreadable'
   /** An artifact that must be JSON is not. */
@@ -86,6 +88,7 @@ export interface RequestFields {
   readonly requestedLevel: unknown;
   readonly workspace: unknown;
   readonly artifacts: unknown;
+  readonly approvedCostUsd: unknown;
 }
 
 /**
@@ -105,6 +108,10 @@ export function requestProblems(req: RequestFields): RequestProblem[] {
   }
   if (!isNonEmptyString(req.baseCommit)) report('baseCommit', 'empty', 'baseCommit must be a non-empty string');
   if (!isAutonomyLevel(req.requestedLevel)) report('requestedLevel', 'not-a-level', 'requestedLevel must be one of 0, 1, 2, 3');
+  // Checked here as well as at the HTTP layer: a cost-unapproved refusal records this value (External review of P14, codex-4).
+  if (req.approvedCostUsd !== null && (typeof req.approvedCostUsd !== 'number' || !Number.isFinite(req.approvedCostUsd))) {
+    report('approvedCostUsd', 'not-a-cost', 'approvedCostUsd must be a finite number or null');
+  }
   if (!isNonEmptyString(req.workspace) || !isAbsolute(req.workspace)) {
     report('workspace', 'not-absolute', 'workspace must be an absolute path');
   }

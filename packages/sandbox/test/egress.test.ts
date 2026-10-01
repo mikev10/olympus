@@ -386,6 +386,26 @@ describe('what the proxy records, and how it leaves the sandbox', () => {
     expect(await containerExists(controls.egress.proxy.name)).toBe(false);
   });
 
+  test('a request refused for having no readable target is recorded, with no host, before it is answered', async () => {
+    const handle = await provisionWith(['example.com']);
+
+    // Origin form, an https:// target, and bytes that are not HTTP: each is answered 400, and
+    // each is a refusal the closing count must hold. External review of P14, codex-3 / gemini-1.
+    expect(await throughProxy(handle, 'GET / HTTP/1.1\\r\\nHost: example.com\\r\\nConnection: close')).toContain('400');
+    expect(await throughProxy(handle, 'GET https://example.com/ HTTP/1.0')).toContain('400');
+    expect(await throughProxy(handle, 'NOT HTTP AT ALL')).toContain('400');
+
+    const { egress } = await provider.destroy(handle);
+    live.length = 0;
+    expect(egress.kind).toBe('proxied');
+    if (egress.kind !== 'proxied') return;
+    expect(egress.connections.map((c) => [c.verdict, c.host])).toEqual([
+      ['refused', null],
+      ['refused', null],
+      ['refused', null],
+    ]);
+  });
+
   test('a log that does not parse fails destroy, and the proxy is removed all the same', async () => {
     const handle = await provisionWith(['example.com']);
     const controls = allowlistControls(handle);

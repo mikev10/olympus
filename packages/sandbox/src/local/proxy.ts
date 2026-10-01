@@ -144,6 +144,8 @@ const server = http.createServer(function (req, res) {
   let url = null;
   try { url = new URL(req.url); } catch (error) { url = null; }
   if (url === null || url.protocol !== 'http:') {
+    // A refusal like any other: no readable host, so none is named (External review of P14, codex-3).
+    record('refused', null);
     res.writeHead(400, { 'content-type': 'text/plain' });
     res.end('egress-proxy: an absolute-form http:// request is required; https goes through CONNECT\\n');
     return;
@@ -217,7 +219,10 @@ server.on('connect', function (req, socket, head) {
 // A malformed request must not take the proxy down with it; the sandbox it
 // serves would lose its only route out for a reason it did not cause.
 server.on('clientError', function (error, socket) {
-  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\\r\\nConnection: close\\r\\n\\r\\n');
+  // Only a request that is answered was refused; a client that hung up was not.
+  if (!socket.writable) return;
+  record('refused', null);
+  socket.end('HTTP/1.1 400 Bad Request\\r\\nConnection: close\\r\\n\\r\\n');
 });
 
 // The provider stops this proxy after the sandbox is gone, then reads the log.

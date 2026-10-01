@@ -123,10 +123,13 @@ export type MeterReading =
 
 /**
  * One connection the egress proxy decided (A-P14-02): `opened` for an
- * absolute-form `http://` request it forwarded, `tunnelled` for a `CONNECT` it
- * joined, `refused` for either kind to a host outside the allowlist or to no
- * readable host. `host` is null when the request named none. `at` is the
- * proxy's own clock when it decided.
+ * absolute-form `http://` request it permitted to be forwarded, `tunnelled`
+ * for a `CONNECT` it permitted to be joined, `refused` for either kind to a
+ * host outside the allowlist, or for any request with no readable host. The
+ * verdict is the proxy's decision, logged before it acts on it: a permitted
+ * connection whose upstream then fails is still `opened` or `tunnelled`, and
+ * the client is answered 502. `host` is null when the request named none.
+ * `at` is the proxy's own clock when it decided.
  */
 export interface EgressConnection {
   readonly verdict: 'opened' | 'tunnelled' | 'refused';

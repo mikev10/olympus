@@ -5,6 +5,7 @@
  * runtime that holds the Vault, naming the decider (D-P14-09). A write that
  * fails throws: a decision with no record does not take effect (I5, D-P14-07).
  */
+import { randomUUID } from 'node:crypto';
 import type { RunId, StationId, StationRefusal, TaskId, VaultRef } from '@olympus-ai/core';
 import type { EgressLog } from '@olympus-ai/sandbox';
 import type { AdmissionRefusal, DecisionCause, Vault } from '@olympus-ai/vault';
@@ -23,6 +24,7 @@ export async function recordDecision(site: DecisionSite, decision: DecisionCause
     taskId: site.taskId,
     station: site.station,
     decidedAt: new Date().toISOString(),
+    occurrence: randomUUID(),
     decision,
     collectedBy: 'runtime',
   });

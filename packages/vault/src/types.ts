@@ -156,6 +156,13 @@ export interface EnforcementDecision {
   readonly taskId: TaskId | null;
   readonly station: StationId | null;
   readonly decidedAt: string;
+  /**
+   * A random id the runtime gives each decision it makes, so two decisions
+   * alike in every other field are two entries, not one: a record is
+   * content-addressed, and a count of entries is a count of decisions
+   * (external review of P14, codex-5).
+   */
+  readonly occurrence: string;
   readonly decision: DecisionCause;
   readonly collectedBy: 'runtime';
 }

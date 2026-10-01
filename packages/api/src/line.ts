@@ -209,11 +209,42 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
  * over the task it parked, however the refusal reached here.
  */
 async function refused(ctx: LineContext, at: StationId, transition: StationRefusal, task: TaskId | null): Promise<RunOutcome> {
+  // A park this drive made was recorded by `park`, before it was committed; a park found on resume is recorded again here (D-P14-07).
+  if (transition.reason === 'parked' && parksRecorded(ctx).has(transition.task)) return { ok: false, reason: 'refused', at, transition, state: ctx.state };
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: transition.reason === 'parked' ? transition.task : task, station: at },
     { cause: 'station-refused', decidedBy: stationDecider(transition), refusal: transition },
   );
   return { ok: false, reason: 'refused', at, transition, state: ctx.state };
+}
+
+/** The parks each drive recorded itself, so the refusal it stops on is not recorded twice. */
+const PARKS_RECORDED = new WeakMap<LineContext, Set<TaskId>>();
+
+function parksRecorded(ctx: LineContext): Set<TaskId> {
+  let parks = PARKS_RECORDED.get(ctx);
+  if (parks === undefined) {
+    parks = new Set();
+    PARKS_RECORDED.set(ctx, parks);
+  }
+  return parks;
+}
+
+/**
+ * Parks a task. The park is a decision, so it is recorded before the parked
+ * status is committed: committed state never holds a park its record lacks,
+ * and a stop between the two leaves a record of a park that did not take
+ * effect, never the reverse (D-P14-07; external review of P14, codex-2).
+ */
+async function park(ctx: LineContext, task: Task, change: StateChange): Promise<StationRefusal> {
+  const refusal = parkRefusal({ ...ctx.state, attempts: change.attempts ?? ctx.state.attempts }, task);
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+    { cause: 'station-refused', decidedBy: stationDecider(refusal), refusal },
+  );
+  parksRecorded(ctx).add(task.id);
+  await commit(ctx, { ...change, tasks: { ...ctx.state.tasks, [task.id]: 'parked' } });
+  return refusal;
 }
 
 /** Every violation the line finds is written through the Vault and then recorded as its decision, pointing at it (D-P14-08). */
@@ -372,8 +403,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
     ? { ...spent, starts: spent.starts + 1 }
     : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1 };
   if (attempt.starts > maxStarts(contract)) {
-    await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'parked' }, attempts: { ...ctx.state.attempts, [task.id]: spent } });
-    return parkRefusal(ctx.state, task);
+    return park(ctx, task, { attempts: { ...ctx.state.attempts, [task.id]: spent } });
   }
   await commit(ctx, {
     tasks: { ...ctx.state.tasks, [task.id]: 'running' },
@@ -391,8 +421,7 @@ async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal 
   const spent = attemptsOf(ctx.state, task);
   const attempts = { ...ctx.state.attempts, [task.id]: { ...spent, retries: spent.retries + 1 } };
   if (spent.retries + 1 > contract.retry.max) {
-    await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'parked' }, attempts });
-    return parkRefusal(ctx.state, task);
+    return park(ctx, task, { attempts });
   }
   await commit(ctx, { attempts });
   await new Promise((done) => setTimeout(done, contract.retry.backoffMs));
@@ -855,7 +884,9 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task.
   const spent = attemptsOf(ctx.state, task).iterations;
   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
-  await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: status }, evidence: ref });
+  // The station machine returns this park to the line on its next step; it is recorded here, first.
+  if (status === 'parked') await park(ctx, task, { evidence: ref });
+  else await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: status }, evidence: ref });
   return undefined;
 }
 

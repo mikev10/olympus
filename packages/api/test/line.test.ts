@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
-import type { EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, costTotals, readUsage, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
 import {
@@ -110,6 +110,30 @@ class KillsBeforeCommit extends DelegatingVault {
 
   override commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
     if (this.when(s)) throw new Error('killed');
+    return this.inner.commitRunState(s, ifVersion);
+  }
+}
+
+/** The park decisions recorded for a run, as the Vault holds them. */
+async function parkDecisions(vault: Vault, id: RunId): Promise<EnforcementDecision[]> {
+  const all = await Promise.all((await vault.readDecisions(id)).map((ref) => read<EnforcementDecision>(vault, ref)));
+  return all.filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked');
+}
+
+/**
+ * Stops the run at the commit that would park a task, noting first whether
+ * that park's decision is already in the Vault. A park committed before its
+ * decision leaves parked state with no record if the process stops between
+ * the two (external review of P14, codex-2).
+ */
+class StopsAtPark extends DelegatingVault {
+  recordedFirst: boolean | undefined;
+
+  override async commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
+    if (Object.values(s.tasks).includes('parked')) {
+      this.recordedFirst = (await parkDecisions(this.inner, s.runId)).length > 0;
+      throw new Error('stopped at park');
+    }
     return this.inner.commitRunState(s, ifVersion);
   }
 }
@@ -219,6 +243,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     expect(state.tasks[hello]).toBe('parked');
     expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3 });
     expect(state.evidenceRefs).toHaveLength(3);
+    expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
     for (const ref of state.evidenceRefs) {
       const bundle = await read<EvidenceBundle>(components.vault, ref);
       expect(bundle.checks[0]?.exitCode).toBe(3);
@@ -346,9 +371,27 @@ describe('retries are bounded (I5)', () => {
     const state = refusedState(outcome);
     expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3 });
 
+    expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
+
     // A resume with a driver that works does not get the task back: parked is parked.
     const resumed = await resumeRun({ runId, components });
     expect(resumed).toMatchObject({ ok: false, reason: 'refused', transition: { reason: 'parked', cause: 'retries-exhausted' } });
+  });
+});
+
+describe('a park is recorded before it is committed (D-P14-07)', () => {
+  test('failing checks: the park decision is in the Vault when the parked status is committed', async () => {
+    await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
+    const driver = new ChosenDriver();
+    const vault = new StopsAtPark(components.vault);
+    await expect(startRun(runRequest(runId, workspace, { ...components, vault, driver, reviewer: driver }))).rejects.toThrow('stopped at park');
+    expect(vault.recordedFirst).toBe(true);
+  });
+
+  test('a failing driver: the park decision is in the Vault when the parked status is committed', async () => {
+    const vault = new StopsAtPark(components.vault);
+    await expect(startRun(runRequest(runId, workspace, { ...components, vault, driver: new ThrowingDriver(new ChosenDriver()) }))).rejects.toThrow('stopped at park');
+    expect(vault.recordedFirst).toBe(true);
   });
 });
 
@@ -464,6 +507,7 @@ describe('a replayed attempt is spent, not free (I5)', () => {
     const parked = await resumeRun({ runId, components: base });
     expect(parked).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
+    expect(await parkDecisions(base.vault, runId)).toHaveLength(1);
   });
 });
 

@@ -108,8 +108,8 @@ prompt said so.
 **Outcome: known limit**, recorded in `docs/decisions.md`: verdicts are
 collected after the fact, and a process stop between teardown and
 `recordEgress`, or an unreadable log, loses them while the run fails closed.
-Owner: the later unit the P14 entry names for ordering and completeness, which
-has no id yet (see the decision below).
+Owner: the later unit the P14 entry names for ordering and completeness,
+opened as issue #24 (D-P14-15).
 
 ## codex-2 — the park and the violation are written before their decisions
 
@@ -269,15 +269,53 @@ every not-ok outcome (run.ts:385-392), and `admissionRefusalOf` has the case
 
 **Outcome: reject.**
 
+## Applied
+
+The maintainer confirmed every fix and each recommended default. Where a fix
+changes behaviour a test covers, the test was run against the old code first.
+
+- **codex-3 / gemini-1:** `proxy.ts` records `refused` with a null host
+  before each 400, and before a `clientError` 400 only when the socket is still
+  writable, since a client that hung up was not refused. A new test in
+  `packages/sandbox/test/egress.test.ts` sends an origin-form request, an
+  `https://` target, and bytes that are not HTTP. Against the old proxy, all
+  three got 400 and the log was empty; now there are three `refused` entries.
+- **codex-2 (park):** `line.ts` gains `park`. It records the park decision,
+  then commits the parked status, at all three sites. The run's stopping
+  refusal is not recorded a second time within one drive. Two new tests stop
+  the run at the parked commit and check whether the decision is already
+  there; both failed against the old line. Three existing park tests now also
+  assert exactly one park decision.
+- **codex-4:** `requestProblems` refuses an `approvedCostUsd` that is not a
+  finite number or null, with the new code `not-a-cost`. The new admission
+  test failed against the old validator.
+- **codex-5:** `EnforcementDecision.occurrence` is a random id from
+  `recordDecision`, and `LocalVault` refuses a decision without one (A-P14-01
+  amended). The codex-4 test reproduced the collapse on its own: four
+  identical refusals read back as two entries. They read back as four after
+  the fix. Two new Vault tests cover the id.
+- **codex-6:** the `violation-recorded` row also runs a claim-mismatch
+  scenario and finds that violation's decision. With the reviewer's mutation
+  applied, the P14 entry now fails, naming the missing decision; it passed
+  before. The line half of `failsClosed` requires that the line attempted a
+  decision write before it threw.
+- **codex-7:** `reasonOf` reads quoted keys, and literals inside parentheses,
+  `as`, `satisfies`, or an angle-bracket assertion. Before the scan runs, a
+  control checks that each of nine spellings is read as the arm it names.
+- **codex-8:** wording only. `EgressConnection`'s doc and A-P14-02 say a
+  verdict is the proxy's decision, logged before it acts.
+- **Known limits:** D-P14-15 in `docs/decisions.md`, owned by issue #24 (record
+  completeness).
+
 ## Gates
 
-- The P14 conformance table passes at `5762bb2`. The full suite has 13
-  failures locally, all the Claude Code driver's external reports
-  (`tree-changed`: the driver's tests changed in P14 and its funded run has not
-  been redone) and the registry-completeness check they feed. Not caused by
-  this triage.
-- CI on `9180391` is red at the check that no tracked file names a path under
+- The P14 conformance entry passes. Locally the conformance suite has 13
+  failures, the same 13 as before this triage: the Claude Code driver's
+  external reports are `tree-changed`, plus the two registry checks they feed.
+  Under D-A-CI-07, that report is refreshed only by the pull request's funded
+  `run-driver` job.
+- CI on `9180391` was red at the check that no tracked file names a path under
   the gitignored planning directory: the bundle carries `CLAUDE.md` verbatim,
-  and the check exempts only `CLAUDE.md` itself (`.github/workflows/ci.yml:63`).
-  The bundle cannot be edited — its hash is the record — so the exemption must
-  cover tracked bundles. That is a gate change on `v2`, not a review fix.
+  and the check exempted only `CLAUDE.md` itself. Fixed as a gate change on
+  `v2` (`374565e`, D-A-CI-08), which also exempts `docs/reviews/*-review-bundle.txt`.
+  A planted reference in a non-bundle review file is still caught.

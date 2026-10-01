@@ -251,6 +251,7 @@ function decisionProblem(d: unknown): string | undefined {
   if (d.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
   if (!isNullableString(d, 'taskId') || !isNullableString(d, 'station')) return 'its task and station are neither strings nor null';
   if (!hasString(d, 'decidedAt')) return 'it carries no time';
+  if (!hasString(d, 'occurrence')) return 'it carries no occurrence id, so it could be one entry with a decision alike in every other field';
   const decision = d.decision;
   if (!isRecord(decision) || typeof decision.cause !== 'string' || !Object.hasOwn(DECIDERS, decision.cause)) return 'its cause is not a known cause';
   const deciders = DECIDERS[decision.cause as DecisionCause['cause']];

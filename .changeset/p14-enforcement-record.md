@@ -19,3 +19,9 @@ parsed as JSON lines (A-P14-02). Admission refuses a run id that is not one
 directory name (`runId`/`unusable`), so nothing is written for it. The
 conformance table `I2.enforcement-decisions-recorded-by-the-enforcer` has a row
 for every cause.
+
+After review: `EnforcementDecision` carries an `occurrence` id, so identical
+decisions are separate entries. A park is recorded before it is committed. The
+proxy records the requests it answers 400 as `refused` with no host. Admission
+refuses an `approvedCostUsd` that is neither a finite number nor null
+(`approvedCostUsd`/`not-a-cost`).

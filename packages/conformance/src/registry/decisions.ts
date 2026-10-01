@@ -22,7 +22,7 @@ import { packageProgram, walk } from '../kit/scan.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { around } from './line-assertions.js';
-import { inTask, writes } from './verification.js';
+import { inTask, runHello, writes } from './verification.js';
 import { HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
@@ -194,6 +194,31 @@ async function escapeScenario(check: (rig: LineRig, vault: Vault, state: RunStat
     const refusal = refusalOf(await startRun(await rig.request(components, { policy })), 'P14 escape');
     if (refusal.transition.reason !== 'violation' || refusal.state === null) throw new Error(`P14: the escape was refused as ${refusal.transition.reason}`);
     await check(rig, components.vault, refusal.state);
+  });
+}
+
+/**
+ * The violation site that keeps its finding out of run state (D-P6-03): a
+ * claim naming a file the diff lacks. An escape alone does not cover it,
+ * since that violation reaches state through another call (external review of
+ * P14, codex-6).
+ */
+async function claimMismatchScenario(): Promise<void> {
+  await withLine('p14-claim-mismatch-', async (rig) => {
+    await writeManifest(rig.dirs, [{ id: 'passes', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 }]);
+    const { vault, violations } = await runHello(rig, { claim: ['src/claimed.ts'] });
+    const mismatch = violations.find((v) => v.kind === 'claim-mismatch');
+    if (mismatch === undefined) throw new Error('P14: the claim mismatch recorded no violation');
+    const recorded = (await decisionsOf(rig, vault)).filter((d) => d.decision.cause === 'violation-recorded');
+    const kinds = await Promise.all(
+      recorded.map(async (d) => (d.decision.cause === 'violation-recorded' ? (await readRecord<{ kind: string }>(vault, d.decision.violation)).kind : null)),
+    );
+    const at = kinds.indexOf('claim-mismatch');
+    const d = recorded[at];
+    if (d === undefined) throw new Error(`P14: no violation-recorded decision points at the claim mismatch; recorded: ${JSON.stringify(kinds)}`);
+    if (d.decision.decidedBy !== 'line' || d.taskId !== HELLO_TASK || d.station !== 'verify') {
+      throw new Error(`P14: the claim mismatch's decision is by ${d.decision.decidedBy} at ${String(d.station)}/${String(d.taskId)}`);
+    }
   });
 }
 
@@ -482,7 +507,7 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         throw new Error(`P14: the violation decision points at ${JSON.stringify(d.decision)}, not ${JSON.stringify(violation)}`);
       }
       if (Buffer.compare(Buffer.from(before), Buffer.from(await vault.read(violation))) !== 0) throw new Error('P14: the violation record changed');
-    }),
+    }).then(claimMismatchScenario),
   },
   'relay-refused': {
     kind: 'scenario',
@@ -506,6 +531,48 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
 };
 
 /** The literals whose `reason` property is declared by `StationRefusal`, found in a package's own source. */
+/**
+ * The string a literal's `reason` property is set to, however it is spelled:
+ * a quoted key, and a literal inside parentheses, `as`, `satisfies`, or an
+ * angle-bracket assertion, all count (external review of P14, codex-7).
+ */
+function reasonOf(node: ts.ObjectLiteralExpression): string | undefined {
+  for (const property of node.properties) {
+    if (!ts.isPropertyAssignment(property)) continue;
+    const { name } = property;
+    if (!((ts.isIdentifier(name) || ts.isStringLiteral(name)) && name.text === 'reason')) continue;
+    let value: ts.Expression = property.initializer;
+    while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isSatisfiesExpression(value) || ts.isTypeAssertionExpression(value)) {
+      value = value.expression;
+    }
+    if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) return value.text;
+  }
+  return undefined;
+}
+
+/** The control for `reasonOf`: each spelling of one arm is read as that arm, so a scan that finds nothing is not blind to it. */
+function reasonOfReadsEverySpelling(): void {
+  const spellings = [
+    "({ reason: 'gate-failed' })",
+    "({ 'reason': 'gate-failed' })",
+    "({ \"reason\": 'gate-failed' })",
+    "({ reason: ('gate-failed') })",
+    "({ reason: 'gate-failed' as const })",
+    "({ reason: ('gate-failed' as const) })",
+    "({ reason: 'gate-failed' satisfies string })",
+    "({ reason: <const>'gate-failed' })",
+    '({ reason: `gate-failed` })',
+  ];
+  for (const text of spellings) {
+    const sf = ts.createSourceFile('spelling.ts', text, ts.ScriptTarget.Latest, true);
+    let read: string | undefined;
+    walk(sf, (node) => {
+      if (ts.isObjectLiteralExpression(node)) read = reasonOf(node);
+    });
+    if (read !== 'gate-failed') throw new Error(`P14: the scan reads ${text} as ${String(read)}, so that spelling would construct the arm unseen`);
+  }
+}
+
 function stationRefusalReasons(packageName: string): Array<{ reason: string; file: string }> {
   const pkg = workspacePackages().find((p) => p.name === packageName);
   if (pkg === undefined) throw new Error(`P14: no workspace package ${packageName}`);
@@ -515,15 +582,15 @@ function stationRefusalReasons(packageName: string): Array<{ reason: string; fil
     if (!sf.fileName.includes('/src/')) continue;
     walk(sf, (node) => {
       if (!ts.isObjectLiteralExpression(node)) return;
-      const property = node.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === 'reason');
-      if (property === undefined || !ts.isPropertyAssignment(property) || !ts.isStringLiteral(property.initializer)) return;
+      const reason = reasonOf(node);
+      if (reason === undefined) return;
       const contextual = checker.getContextualType(node);
       if (contextual === undefined) return;
       const members = contextual.isUnion() ? contextual.types : [contextual];
       const declaredByStationRefusal = members.some((member) =>
         (member.getProperty('reason')?.declarations ?? []).some((d) => d.getSourceFile().fileName.endsWith('core/src/station/types.ts')),
       );
-      if (declaredByStationRefusal) found.push({ reason: property.initializer.text, file: workspaceRelative(sf.fileName) });
+      if (declaredByStationRefusal) found.push({ reason, file: workspaceRelative(sf.fileName) });
     });
   }
   return found;
@@ -533,6 +600,7 @@ async function checkMark(key: CauseKey, row: Exclude<Row, { kind: 'scenario' }>)
   switch (row.kind) {
     case 'unconstructed': {
       const reason = key.slice('station:'.length);
+      reasonOfReadsEverySpelling();
       const built = [...stationRefusalReasons('@olympus-ai/core'), ...stationRefusalReasons('@olympus-ai/api')];
       // The control: arms the line is known to build are found, so an empty scan is not read as proof.
       for (const known of ['lock-tamper', 'parked', 'approval-required']) {
@@ -594,12 +662,16 @@ async function failsClosed(): Promise<void> {
   await withLine('p14-closed-line-', async (rig) => {
     const { startRun } = await api();
     const base = await rig.components();
+    // The throw must be the refused write's: any other exception before it would pass a bare "it threw" (external review of P14, codex-6).
+    let attempts = 0;
+    const vault: Vault = { ...refusingDecisions(base.vault), recordDecision: () => { attempts += 1; return refusingDecisions(base.vault).recordDecision(null as never); } };
     let threw = false;
     try {
-      await startRun(await rig.request({ ...base, vault: refusingDecisions(base.vault) }));
+      await startRun(await rig.request({ ...base, vault }));
     } catch {
       threw = true;
     }
+    if (attempts === 0) throw new Error('the line never tried to write a decision, so its throw is not the refused write');
     if (!threw) throw new Error('a line whose Vault refused a decision returned instead of throwing');
   });
   await withLine('p14-closed-approval-', async (rig) => {
