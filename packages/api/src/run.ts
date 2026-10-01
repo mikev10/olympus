@@ -48,8 +48,9 @@ import type {
 import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/adapters';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, EvidenceBundle, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
 import { worstCaseCost, type WorstCaseCost } from './cost.js';
+import { problemCodes, recordDecision } from './decisions.js';
 import { runLine, type LineContext } from './line.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { acceptedEscalations } from './tamper.js';
@@ -383,6 +384,39 @@ export async function startRun(req: RunRequest): Promise<RunOutcome> {
  */
 export async function admitRun(req: RunRequest): Promise<AdmissionOutcome> {
   requireContractTable();
+  const outcome = await admission(req);
+  if (outcome.ok) return outcome;
+  // Recorded under the run id asked for, before the refusal is returned (D-P14-01, D-P14-07). A run id
+  // that is not a non-empty string names nowhere to record it, and is refused with nothing recorded.
+  if (!requestProblems(req).some((p) => p.path === 'runId')) {
+    await recordDecision(
+      { vault: req.components.vault, runId: req.runId, taskId: null, station: null },
+      { cause: 'admission-refused', decidedBy: 'admission', refusal: admissionRefusalOf(outcome) },
+    );
+  }
+  return outcome;
+}
+
+/** A refused admission as the enforcement record holds it: the typed fields a reader counts by, and no caller text. */
+function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): AdmissionRefusal {
+  switch (outcome.reason) {
+    case 'invalid-request':
+      return problemCodes(outcome.problems);
+    case 'unsafe-above-l1':
+      return { reason: 'unsafe-above-l1', requestedLevel: outcome.requestedLevel, components: outcome.unsafe.map((u) => u.component) };
+    case 'cost-unapproved':
+      return { reason: 'cost-unapproved', requestedLevel: outcome.requestedLevel, worstCaseUsd: outcome.worstCase.usd, approvedCostUsd: outcome.approvedCostUsd };
+    case 'controls-unavailable':
+      return { reason: 'controls-unavailable', requestedLevel: outcome.requestedLevel, unavailable: outcome.unavailable };
+    case 'policy-refused':
+      return { reason: 'policy-refused', station: outcome.station, role: outcome.role, refusal: outcome.refusal };
+    case 'refused':
+      return { reason: 'refused', at: outcome.at, refusal: outcome.transition };
+  }
+}
+
+/** Every check admission makes, in order; `admitRun` records whichever refuses. */
+async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const problems = [...requestProblems(req), ...storeProblems(req)];
   if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
 
@@ -545,12 +579,23 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
   const { record, policy } = await readAdmission(vault, state);
   const level = record.run.requestedLevel;
 
+  // Admission's own checks, repeated: a refusal here is recorded as a resume refusal, by admission (D-P14-11).
+  const resumeRefused = async (refusal: ResumeRefusal): Promise<void> => {
+    await recordDecision({ vault, runId: req.runId, taskId: null, station: null }, { cause: 'resume-refused', decidedBy: 'admission', refusal });
+  };
   const unsafe = unsafeComponents(req.components);
-  if (unsafe.length > 0 && level > 1) return { ok: false, reason: 'unsafe-above-l1', requestedLevel: level, unsafe };
+  if (unsafe.length > 0 && level > 1) {
+    await resumeRefused({ reason: 'unsafe-above-l1', requestedLevel: level, components: unsafe.map((u) => u.component) });
+    return { ok: false, reason: 'unsafe-above-l1', requestedLevel: level, unsafe };
+  }
+  // Not recorded: admission refuses this record before any state exists, so no run reaches a resume with it.
   const controls = admissionRefusal(record);
   if (controls !== undefined) return controls;
   const capability = capabilityRefusalFor(req.components);
-  if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state };
+  if (capability !== undefined) {
+    await resumeRefused({ reason: 'refused', at: capability.at, refusal: capability.refusal });
+    return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state };
+  }
   // The base every workspace is built from must be the one admission recorded. A store that lost
   // it, or holds another run's, is refused rather than built on.
   const base = await treeDigest(basePath(req.components.workspaces, req.runId)).catch(() => 'missing');
@@ -585,39 +630,49 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
  * visit now waiting, so a rebuild is approved in its own right (A-P4-04).
  */
 export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutcome> {
-  if (typeof req.approvedBy !== 'string' || req.approvedBy.trim() === '') {
-    return { ok: false, reason: 'invalid-request', message: 'approvedBy must name who approved' };
-  }
-  if (!isApprovalKey(req.key)) return { ok: false, reason: 'invalid-request', message: `'${String(req.key)}' is not a station:level approval key` };
+  // Every refusal and every grant is recorded before it takes effect (D-P14-07). The key is kept only when it is one:
+  // anything else is the caller's text.
+  const key = isApprovalKey(req.key) ? req.key : null;
+  const refuse = async (reason: 'invalid-request' | 'not-awaiting', message: string, station: StationId | null): Promise<ApprovalOutcome> => {
+    // A run id that is not a non-empty string names nowhere to record the refusal.
+    if (typeof req.runId === 'string' && req.runId !== '') {
+      await recordDecision({ vault: req.vault, runId: req.runId, taskId: null, station }, { cause: 'approval-refused', decidedBy: 'approval', key, reason });
+    }
+    return { ok: false, reason, message };
+  };
+  if (typeof req.approvedBy !== 'string' || req.approvedBy.trim() === '') return refuse('invalid-request', 'approvedBy must name who approved', null);
+  if (key === null) return refuse('invalid-request', `'${req.key}' is not a station:level approval key`, null);
   const state = await req.vault.readRunState(req.runId);
   const { record, policy } = await readAdmission(req.vault, state);
   const level = record.run.requestedLevel;
   const { graph, changed } = await reloadExecuted(record);
-  if (changed.length > 0) return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} has an admitted artifact that changed; it is not awaiting approval` };
+  if (changed.length > 0) return refuse('not-awaiting', `run ${req.runId} has an admitted artifact that changed; it is not awaiting approval`, state.station);
 
   const step = nextStep(state, graph);
   const expected = approvalKey(state.station, level);
   // A spent grant for the last exit is a run that passed; there is nothing left to approve.
   const passed = step.kind === 'exit' && !M1_STATIONS.includes(step.to) && state.approvals.some((grant) => grant.key === expected && grant.usedAt !== null);
   const awaiting =
-    step.kind === 'exit' && !passed && !isBackward(step.from, step.to) && req.key === expected &&
+    step.kind === 'exit' && !passed && !isBackward(step.from, step.to) && key === expected &&
     effectiveApproval(STATION_CONTRACTS[state.station], policy, level, []) === 'human-required' &&
     !state.approvals.some((grant) => grant.key === expected && grant.usedAt === null);
   if (!awaiting) {
-    return {
-      ok: false,
-      reason: 'not-awaiting',
-      message: `run ${req.runId} is not waiting for an approval of ${req.key}; it is ${state.phase} at ${state.station} at L${String(level)}`,
-    };
+    return refuse('not-awaiting', `run ${req.runId} is not waiting for an approval of ${key}; it is ${state.phase} at ${state.station} at L${String(level)}`, state.station);
   }
+  // Written before the grant is committed, so a grant never exists without its record; a write that fails throws and grants nothing.
+  await recordDecision(
+    { vault: req.vault, runId: req.runId, taskId: null, station: state.station },
+    { cause: 'approval-granted', decidedBy: 'approval', key, principal: req.approvedBy },
+  );
   try {
     const next = await req.vault.commitRunState(
-      { ...state, approvals: [...state.approvals, { key: req.key, approvedBy: req.approvedBy, approvedAt: new Date().toISOString(), usedAt: null }] },
+      { ...state, approvals: [...state.approvals, { key, approvedBy: req.approvedBy, approvedAt: new Date().toISOString(), usedAt: null }] },
       state.version,
     );
     return { ok: true, state: next };
   } catch (error) {
-    return { ok: false, reason: 'not-awaiting', message: `run ${req.runId} moved while the approval was recorded: ${describe(error)}` };
+    // The grant's record stands beside this refusal: it was decided, and did not take effect.
+    return refuse('not-awaiting', `run ${req.runId} moved while the approval was recorded: ${describe(error)}`, state.station);
   }
 }
 

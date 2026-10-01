@@ -109,7 +109,7 @@ async function metered(budget: RelayBudget = TEST_BUDGET, overrides: Partial<San
 /** Takes the handle out of the afterEach list: the test destroys it itself. */
 function destroyed(handle: SandboxHandle): Promise<MeterReading> {
   live.splice(live.indexOf(handle), 1);
-  return provider.destroy(handle);
+  return provider.destroy(handle).then((t) => t.meter);
 }
 
 interface Sent {

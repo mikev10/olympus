@@ -7,9 +7,11 @@
  * holds them; IntegrityViolation lives in integrity because it produces them.
  * The Vault stores both.
  */
-import type { AgentClaim, Policy, Run, RunId, RunState, StationId, TaskId, TaskResult, VaultRef } from '@olympus-ai/core';
+import type {
+  AgentClaim, ApprovalKey, AutonomyLevel, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+} from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
-import type { MeterReading } from '@olympus-ai/sandbox';
+import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
 
 /**
  * I3: an agent may not be judged by an artifact it can write. Specs and
@@ -93,6 +95,78 @@ export interface UsageRecord {
   collectedBy: 'runtime';
 }
 
+/**
+ * A refusal returned before a run's first state, as admission returned it
+ * (A-P14-01). Each arm keeps the typed fields a reader counts by; nothing here
+ * is text a caller sent. An invalid request keeps each problem's path and
+ * code and not its message, because a message can quote the request
+ * (D-P14-06).
+ */
+export type AdmissionRefusal =
+  | { readonly reason: 'invalid-request'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+  | { readonly reason: 'unsafe-above-l1'; readonly requestedLevel: AutonomyLevel; readonly components: readonly string[] }
+  | { readonly reason: 'cost-unapproved'; readonly requestedLevel: AutonomyLevel; readonly worstCaseUsd: number; readonly approvedCostUsd: number | null }
+  | { readonly reason: 'controls-unavailable'; readonly requestedLevel: AutonomyLevel; readonly unavailable: readonly string[] }
+  | { readonly reason: 'policy-refused'; readonly station: StationId; readonly role: RoleId | null; readonly refusal: PolicyRefusal }
+  | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal };
+
+/** The admission checks a resume repeats before the line runs, refused there (D-P14-11). */
+export type ResumeRefusal = Extract<AdmissionRefusal, { reason: 'unsafe-above-l1' | 'refused' }>;
+
+/**
+ * What a control decided, and which control it was. `decidedBy` is fixed by
+ * the cause wherever one component alone can make it, so a decision cannot
+ * be attributed to a component that does not make it. The runtime writes
+ * every one of them on the decider's behalf: the station machine is pure and
+ * the proxy is a container with no route to the Vault (D-P14-09).
+ */
+export type DecisionCause =
+  | { readonly cause: 'admission-refused'; readonly decidedBy: 'admission'; readonly refusal: AdmissionRefusal }
+  | { readonly cause: 'resume-refused'; readonly decidedBy: 'admission'; readonly refusal: ResumeRefusal }
+  /** `station-machine` for a refusal `nextStep` or a capability check returned, `line` for one the line made itself. */
+  | { readonly cause: 'station-refused'; readonly decidedBy: 'station-machine' | 'line'; readonly refusal: StationRefusal }
+  /** `principal` is what the caller authenticated, as `ApprovalGrant.approvedBy` records it. */
+  | { readonly cause: 'approval-granted'; readonly decidedBy: 'approval'; readonly key: ApprovalKey; readonly principal: string }
+  /** `key` is null when what the caller sent was not an approval key; it is not stored, since it is the caller's text. */
+  | { readonly cause: 'approval-refused'; readonly decidedBy: 'approval'; readonly key: ApprovalKey | null; readonly reason: 'invalid-request' | 'not-awaiting' }
+  /** One connection the egress proxy decided, read from its log after it stopped. `host` is the agent's choice: data, never a prompt (I7). */
+  | { readonly cause: 'egress-connection'; readonly decidedBy: 'egress-proxy'; readonly connection: EgressConnection }
+  /** A violation already recorded; the decision points at it rather than copying it (D-P14-08). */
+  | { readonly cause: 'violation-recorded'; readonly decidedBy: 'line'; readonly violation: VaultRef }
+  /** A driver call whose relay refused anything, pointing at its usage record (D-P14-05). */
+  | {
+      readonly cause: 'relay-refused';
+      readonly decidedBy: 'model-relay';
+      readonly usage: VaultRef;
+      readonly refused: number;
+      readonly exhausted: Extract<MeterReading, { kind: 'metered' }>['exhausted'];
+    };
+
+export type DecidingComponent = DecisionCause['decidedBy'];
+
+/**
+ * One decision a control made, recorded by the runtime beside run state and
+ * never in it (A-P14-01, D-P14-02). Write-once and content-addressed like
+ * evidence. I2: every field is the runtime's; nothing a model returned is an
+ * input. `taskId` and `station` are null where the decision had none — an
+ * admission refusal has neither.
+ */
+export interface EnforcementDecision {
+  readonly runId: RunId;
+  readonly taskId: TaskId | null;
+  readonly station: StationId | null;
+  readonly decidedAt: string;
+  /**
+   * A random id the runtime gives each decision it makes, so two decisions
+   * alike in every other field are two entries, not one: a record is
+   * content-addressed, and a count of entries is a count of decisions
+   * (external review of P14, codex-5).
+   */
+  readonly occurrence: string;
+  readonly decision: DecisionCause;
+  readonly collectedBy: 'runtime';
+}
+
 /** An artifact as admitted: where it sits in the workspace, and the SHA-256 of its bytes at admission. */
 export interface AdmittedArtifact {
   readonly path: string;
@@ -144,6 +218,15 @@ export interface Vault {
   recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef>;
   /** What one driver call cost, as the runtime read it from the relay. Refused unless `collectedBy` is `'runtime'`. */
   recordUsage(r: UsageRecord): Promise<VaultRef>;
+  /**
+   * One enforcement decision, as the runtime recorded it for the component
+   * that made it. Refused unless `collectedBy` is `'runtime'`. Needs no run
+   * state: a refused admission is recorded under the run id it asked for, and
+   * nothing else is written for it (D-P14-01).
+   */
+  recordDecision(d: EnforcementDecision): Promise<VaultRef>;
+  /** Every decision recorded for a run, in no promised order; empty for a run with none (D-P14-02). */
+  readDecisions(runId: RunId): Promise<readonly VaultRef[]>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

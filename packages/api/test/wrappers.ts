@@ -20,8 +20,8 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { ExecOptions, ExecResult, MeterReading, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, EvidenceBundle, LockManifest, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, LockManifest, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
   protected readonly inner: Vault;
@@ -62,6 +62,14 @@ export class DelegatingVault implements Vault {
     return this.inner.recordUsage(r);
   }
 
+  recordDecision(d: EnforcementDecision): Promise<VaultRef> {
+    return this.inner.recordDecision(d);
+  }
+
+  readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.inner.readDecisions(runId);
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     return this.inner.readRunState(runId);
   }
@@ -88,7 +96,7 @@ export class DelegatingSandbox implements SandboxProvider {
     return this.inner.exec(h, cmd, options);
   }
 
-  destroy(h: SandboxHandle): Promise<MeterReading> {
+  destroy(h: SandboxHandle): Promise<Teardown> {
     return this.inner.destroy(h);
   }
 

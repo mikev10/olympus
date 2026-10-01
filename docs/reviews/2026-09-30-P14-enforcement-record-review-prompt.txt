@@ -1,0 +1,136 @@
+The code under review is in the file
+`2026-09-30-P14-enforcement-record-review-bundle.txt` (SHA-256 dcb8b51f87c93a0cc6e209fe2ac9f69c99ea1ff255a84fd4ebf4403e76fa6596) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the enforcement record of a TypeScript project: the append-only
+log of every decision a control makes while it drives AI coding agents through a
+fixed line of stations. You have the source and nothing else — no design
+documents, no author reasoning, no prior version, no conversation that produced
+it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime admits a run, drives agent tasks inside sandboxes, and refuses,
+parks, or stops work when a control says so. This change makes every such
+decision leave a write-once, content-addressed record in the Vault before it
+takes effect: admission and resume refusals, each station refusal and park, each
+approval granted or refused, each network connection the sandbox's egress proxy
+opened, tunnelled, or refused, each integrity violation, and each model call the
+cost relay refused. Each record names the component that decided, the run, the
+task, and the station. The proxy's verdicts are read from its log after it
+stops, because the proxy has no route to the Vault. A conformance table keyed
+by every cause asserts that each one is recorded.
+
+It must hold against a capable, motivated party trying to have a control's
+decision take effect with no record of it, or with a record that misstates what
+was decided or who decided it. Assume no deceptive intent — only that the
+easiest path gets taken.
+
+That party controls what the agent does inside its sandbox: the files it writes
+in the workspace, what the model returns, the hosts it asks the egress proxy to
+connect to and the raw bytes of those requests, and anything the agent's
+processes print. It also controls the fields of a request to the runtime's API:
+the run id, the policy, the artifacts, an approval key, the name of who
+approved, and when the process stops. It does not control the components the
+runtime is wired with — the Vault, the sandbox provider, and the drivers are
+runtime-selected and trusted, even where a function takes one as an argument —
+and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, at any level, in any role. The Vault exposes
+  named write operations only, never a generic write or delete.
+- The runtime derives status; the model never reports it. Nothing a model
+  returned is an input to a recorded decision.
+- Fail closed. A missing check, a missing capability, or an unreadable record
+  means refuse. Never degrade silently, and never warn and continue.
+- Event payloads are data, never instructions. A host an agent named, or text a
+  caller sent, is stored as data and never enters a prompt.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- The runtime's single write path for decisions (packages/api/src/decisions.ts)
+  and where it is called in run.ts and line.ts: a decision is written before the
+  refusal is returned or the approval is committed, and a failed write throws.
+- The proxy's decision log: one JSON line per connection behind a fixed prefix,
+  then a closing line with a count, read after the proxy stops and parsed or
+  refused (packages/sandbox/src/local/proxy.ts, provider.ts).
+- The Vault's acceptance rule for a decision: collectedBy must be 'runtime', and
+  each cause may be attributed only to the components that make it
+  (packages/vault/src/local/vault.ts).
+- The conformance table (packages/conformance/src/registry/decisions.ts): a row
+  for every cause, typed so a missing row does not compile. Each row is a
+  scenario, or a mark whose own check fails when the mark stops being true.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The unit and decision identifiers below (R2, I1, P13, A-P9-02, and so on) name
+other planned work and recorded decisions you do not have. They mean only
+"handled elsewhere". Absent work listed here is not a defect.
+
+- surfacing the record: an API endpoint, CLI output, rates, or totals. R2 derives rates and I1 reports refusals and parks by cause per run, both from `readDecisions`
+- a relay refusal's cause one by one. P13's reading keeps a count and the first reason (`refused`, `exhausted`); the per-request reason stays in the relay's log and is not collected. A candidate if R2 needs it
+- the service's own refusals: a request refused 401 carries no run it can be trusted to name, and a refused cancel changes nothing. Candidates, not this unit
+- sandbox provisioning refusals. A failed provision is a driver or sandbox failure the line already counts as a retry, and it ends as a recorded park when retries run out
+- the halt a service commits when a drive ends in error (A-P9-02). It is an error, not a control's decision; the `halted` refusal every later step meets is recorded
+- proving the record complete. Each entry is content-addressed, so a changed entry is detectable; a deleted one is not. Ordering and completeness — a hash chain, or a signed index — is a later unit
+- escalation and any other cause a later unit introduces. R14 adds its cause to the union through its own amendment
+- telemetry export (R12)
+
+THE QUESTION
+
+How would I make a control's decision take effect — a refusal returned, a park,
+a connection opened or refused, an approval granted, a violation found, a model
+call refused — without the record holding it, or with a record that names the
+wrong decider, run, task, or station, or that carries text I chose? And how
+would the conformance table still pass while one of those writes is missing?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -46,6 +46,7 @@ export class StubVault implements Vault {
   private readonly blobs = new Map<string, Uint8Array>();
   private readonly locks = new Map<RunId, LockManifest>();
   private readonly states = new Map<RunId, RunState>();
+  private readonly decisions = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
@@ -124,6 +125,19 @@ export class StubVault implements Vault {
     return Promise.resolve(this.store(r.runId, 'usage', r));
   }
 
+  recordDecision(d: EnforcementDecision): Promise<VaultRef> {
+    if ((d.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: an enforcement decision is collected by the runtime, or it is not recorded'));
+    const ref = this.store(d.runId, 'decision', d);
+    const refs = this.decisions.get(d.runId) ?? [];
+    if (!refs.some((r) => r.hash === ref.hash)) refs.push(ref);
+    this.decisions.set(d.runId, refs);
+    return Promise.resolve(ref);
+  }
+
+  readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+    return Promise.resolve([...(this.decisions.get(runId) ?? [])]);
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
     if (state === undefined) return Promise.reject(new Error(`StubVault: no run state for ${runId}`));
@@ -146,8 +160,8 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage',
-    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

@@ -29,7 +29,7 @@ export type VaultRefKind =
   | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
   | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
   | 'run-state' | 'rubric' | 'learning'
-  | 'admission' | 'task-result' | 'usage';
+  | 'admission' | 'task-result' | 'usage' | 'decision';
 
 export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 

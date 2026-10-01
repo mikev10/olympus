@@ -242,6 +242,31 @@ describe('usage records (A-P13-03)', () => {
   });
 });
 
+describe('enforcement decisions (A-P14-01)', () => {
+  const decision = {
+    runId,
+    taskId: null,
+    station: null,
+    decidedAt: '2026-09-30T00:00:00.000Z',
+    occurrence: 'first',
+    decision: { cause: 'admission-refused' as const, decidedBy: 'admission' as const, refusal: { reason: 'invalid-request' as const, problems: [] } },
+    collectedBy: 'runtime' as const,
+  };
+
+  test('two decisions alike in every field but their occurrence are two entries', async () => {
+    // External review of P14, codex-5: content addressing alone made these one entry.
+    await vault.recordDecision(decision);
+    await vault.recordDecision({ ...decision, occurrence: 'second' });
+    expect(await vault.readDecisions(runId)).toHaveLength(2);
+  });
+
+  test('refuses a decision with no occurrence id', async () => {
+    const { occurrence: _omitted, ...bare } = decision;
+    await expect(vault.recordDecision(bare as never)).rejects.toThrow(/occurrence/);
+    expect(await vault.readDecisions(runId)).toHaveLength(0);
+  });
+});
+
 describe('locking', () => {
   beforeEach(async () => {
     await writeFile(join(artifacts, 'spec.md'), SPEC);

@@ -163,6 +163,21 @@ describe('the task graph', () => {
 });
 
 describe('policy and capabilities, checked before anything is admitted (I4, I5)', () => {
+  test('an approved cost that is not a finite number or null is refused, and never reaches a recorded decision', async () => {
+    // The HTTP layer refuses these before admission; the runtime's own API must too, since the value
+    // would otherwise be copied into a cost-unapproved decision as the caller sent it. External review of P14, codex-4.
+    for (const approvedCostUsd of [{ text: 'caller-chosen payload' }, '0.5', Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expectInvalid(await start({ requestedLevel: 1, approvedCostUsd: approvedCostUsd as unknown as number }), 'approvedCostUsd', 'not-a-cost');
+    }
+    const refs = await components.vault.readDecisions(runId);
+    const recorded = await Promise.all(refs.map(async (ref) => new TextDecoder().decode(await components.vault.read(ref))));
+    expect(recorded).toHaveLength(4);
+    for (const text of recorded) {
+      expect(text).toContain('"invalid-request"');
+      expect(text).not.toContain('caller-chosen payload');
+    }
+  });
+
   test('a policy that does not validate is refused', async () => {
     await expectInvalid(await start({ policy: { ...policy(), globalCap: 4 } as never }), 'policy', 'invalid-policy');
   });

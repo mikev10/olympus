@@ -32,7 +32,7 @@ import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -74,7 +74,7 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
-  'admission', 'task-result', 'usage',
+  'admission', 'task-result', 'usage', 'decision',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
@@ -223,6 +223,41 @@ function usageProblem(r: unknown): string | undefined {
   const bad = READING_COUNTS.filter((k) => typeof reading[k] !== 'number' || !Number.isFinite(reading[k]) || reading[k] < 0);
   if (bad.length > 0) return `the reading's ${bad.join(', ')} are not non-negative finite numbers`;
   if (typeof reading.exhausted !== 'string' || !EXHAUSTED.has(reading.exhausted)) return "the reading's exhausted is not a known reason";
+  return undefined;
+}
+
+/**
+ * The component each cause may name. A decision attributed to a component
+ * that does not make its cause is refused, so the record cannot say the
+ * proxy refused an admission (D-P14-09).
+ */
+const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
+  'admission-refused': ['admission'],
+  'resume-refused': ['admission'],
+  'station-refused': ['station-machine', 'line'],
+  'approval-granted': ['approval'],
+  'approval-refused': ['approval'],
+  'egress-connection': ['egress-proxy'],
+  'violation-recorded': ['line'],
+  'relay-refused': ['model-relay'],
+};
+
+function isNullableString(r: Record<string, unknown>, key: string): boolean {
+  return r[key] === null || typeof r[key] === 'string';
+}
+
+function decisionProblem(d: unknown): string | undefined {
+  if (!isRecord(d) || !hasString(d, 'runId')) return 'it names no run';
+  if (d.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (!isNullableString(d, 'taskId') || !isNullableString(d, 'station')) return 'its task and station are neither strings nor null';
+  if (!hasString(d, 'decidedAt')) return 'it carries no time';
+  if (!hasString(d, 'occurrence')) return 'it carries no occurrence id, so it could be one entry with a decision alike in every other field';
+  const decision = d.decision;
+  if (!isRecord(decision) || typeof decision.cause !== 'string' || !Object.hasOwn(DECIDERS, decision.cause)) return 'its cause is not a known cause';
+  const deciders = DECIDERS[decision.cause as DecisionCause['cause']];
+  if (typeof decision.decidedBy !== 'string' || !deciders.includes(decision.decidedBy)) {
+    return `a ${decision.cause} decision is not made by ${String(decision.decidedBy)}`;
+  }
   return undefined;
 }
 
@@ -477,6 +512,34 @@ export class LocalVault implements Vault {
     const problem = usageProblem(r);
     if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a usage record: ${problem}`));
     return storeObject(this.#store, r.runId, 'usage', r);
+  }
+
+  /**
+   * I2: only a decision the runtime recorded, attributed to a component that
+   * makes its cause. Written under the run's directory whether or not the run
+   * has state, so a refused admission leaves this and nothing else (D-P14-01).
+   */
+  recordDecision(d: EnforcementDecision): Promise<VaultRef> {
+    const problem = decisionProblem(d);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing an enforcement decision: ${problem}`));
+    return storeObject(this.#store, d.runId, 'decision', d);
+  }
+
+  /** Every decision file under the run, by its name; the name is the hash, so each ref reads back the file it names. */
+  async readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+    const dir = join(runDir(this.#store, runId), 'objects', 'decision');
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    return names
+      .map((name) => /^([0-9a-f]{64})\.json$/.exec(name)?.[1])
+      .filter((hash): hash is string => hash !== undefined)
+      .sort()
+      .map((hash) => ({ runId, kind: 'decision', hash }));
   }
 
   async readRunState(runId: RunId): Promise<RunState> {

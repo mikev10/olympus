@@ -293,7 +293,7 @@ async function withMeteredSandbox(
     });
     await docker('docker', ['rm', '--force', '--volumes', upstreamName]);
     destroyed = true;
-    return await provider.destroy(handle);
+    return (await provider.destroy(handle)).meter;
   } finally {
     if (!destroyed) {
       await docker('docker', ['rm', '--force', '--volumes', upstreamName]).catch(() => undefined);

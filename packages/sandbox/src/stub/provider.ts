@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { refuse } from '../local/refusal.js';
 import { writeStdin } from '../stdin.js';
-import type { ExecOptions, ExecResult, MeterReading, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec } from '../types.js';
+import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '../types.js';
 
 async function isDirectory(path: string): Promise<boolean> {
   try {
@@ -125,10 +125,10 @@ export class StubSandboxProvider implements SandboxProvider {
     });
   }
 
-  /** Always `unmetered`: this provider refuses every relay, so nothing it ran was counted (A-P13-02). */
-  destroy(h: SandboxHandle): Promise<MeterReading> {
+  /** Always `unmetered` and `none`: this provider refuses every relay and starts no proxy, so nothing it ran was counted or proxied (A-P13-02, A-P14-02). */
+  destroy(h: SandboxHandle): Promise<Teardown> {
     if (!this.workspaces.delete(h)) return Promise.reject(new Error(`StubSandboxProvider: unknown handle ${h}`));
-    return Promise.resolve({ kind: 'unmetered' });
+    return Promise.resolve({ meter: { kind: 'unmetered' }, egress: { kind: 'none' } });
   }
 
   /** `persistent: true` is true: nothing is ever torn down, so one exec's files are there for the next. */

@@ -266,7 +266,7 @@ export async function withDriver<T>(
     return await body(harness);
   } finally {
     // The reading is kept, or why it could not be taken: the meter control fails on either.
-    const reading = await provider.destroy(handle).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+    const reading = await provider.destroy(handle).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
     meteredSessions.push({ test, reading, cli });
     await rm(base, { recursive: true, force: true });
   }

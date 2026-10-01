@@ -25,6 +25,7 @@
  * built and nothing is mounted into the proxy container. The container is the
  * provider's, started with the sandbox and destroyed with it.
  */
+import type { EgressConnection, EgressLog } from '../types.js';
 import { dockerCli } from './docker.js';
 
 /**
@@ -124,12 +125,16 @@ function authorityOf(target, standard) {
   return target.port === null || target.port === standard ? host : host + ':' + String(target.port);
 }
 
-// One line per connection, to this container's stdout. It is readable with
-// \`docker logs\` for as long as the sandbox lives and goes when the sandbox
-// goes: nothing collects it into an evidence bundle, and this unit claims
-// nothing more than the line. Collection is P6's.
+// One line per connection, to this container's stdout, which the provider
+// reads after it stops this proxy and the runtime records (D-P14-03). JSON
+// behind a prefix, so it is parsed rather than split on spaces: the host went
+// through split() and JSON.stringify escapes whatever is left in it, so no
+// request can write a line of its own.
+let decisions = 0;
 function record(verdict, target) {
-  console.log('egress-proxy: ' + verdict + ' ' + (target === null ? '(no host)' : target.host));
+  decisions += 1;
+  const host = target === null || target.host === '' ? null : target.host;
+  console.log('egress-proxy-decision ' + JSON.stringify({ event: 'connection', verdict: verdict, host: host, at: new Date().toISOString() }));
 }
 
 const server = http.createServer(function (req, res) {
@@ -139,6 +144,8 @@ const server = http.createServer(function (req, res) {
   let url = null;
   try { url = new URL(req.url); } catch (error) { url = null; }
   if (url === null || url.protocol !== 'http:') {
+    // A refusal like any other: no readable host, so none is named (External review of P14, codex-3).
+    record('refused', null);
     res.writeHead(400, { 'content-type': 'text/plain' });
     res.end('egress-proxy: an absolute-form http:// request is required; https goes through CONNECT\\n');
     return;
@@ -212,7 +219,22 @@ server.on('connect', function (req, socket, head) {
 // A malformed request must not take the proxy down with it; the sandbox it
 // serves would lose its only route out for a reason it did not cause.
 server.on('clientError', function (error, socket) {
-  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\\r\\nConnection: close\\r\\n\\r\\n');
+  // Only a request that is answered was refused; a client that hung up was not.
+  if (!socket.writable) return;
+  record('refused', null);
+  socket.end('HTTP/1.1 400 Bad Request\\r\\nConnection: close\\r\\n\\r\\n');
+});
+
+// The provider stops this proxy after the sandbox is gone, then reads the log.
+// The closed line is written last and carries the count, so a log without it,
+// or holding a different number of connections than it names, was cut short
+// (D-P14-03).
+process.on('SIGTERM', function () {
+  console.log('egress-proxy-decision ' + JSON.stringify({ event: 'closed', connections: decisions }));
+  server.close();
+  server.closeAllConnections();
+  // stdout to a pipe is synchronous on Linux, so the line is written before this exits.
+  setImmediate(function () { process.exit(0); });
 });
 
 server.listen(port, '0.0.0.0', function () {
@@ -400,4 +422,72 @@ async function teardown(options: ProxyOptions, container: string, networks: read
  */
 export function stopProxy(applied: AppliedProxy, options: ProxyOptions): Promise<Error | undefined> {
   return teardown(options, applied.containerId, [applied.internalNetwork, applied.outboundNetwork]);
+}
+
+/** The prefix of each decision line the proxy writes; every other stdout line is its own start-up note. */
+export const EGRESS_PREFIX = 'egress-proxy-decision ';
+
+/** How long the proxy is given to write its closed line and exit after SIGTERM. */
+const STOP_SECONDS = 10;
+
+const VERDICTS: ReadonlySet<string> = new Set(['opened', 'tunnelled', 'refused']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The proxy's decisions, from its log (A-P14-02). Throws rather than return a
+ * partial list: a line that does not parse, a verdict outside the closed
+ * set, a log with no closed line, or a count that disagrees with it all mean
+ * the log is not the proxy's whole account, and a list read from it would
+ * present some connections as all of them.
+ */
+export function egressLogFrom(log: string): Extract<EgressLog, { kind: 'proxied' }> {
+  const connections: EgressConnection[] = [];
+  let closed: number | undefined;
+  for (const line of log.split(/\r?\n/u)) {
+    if (!line.startsWith(EGRESS_PREFIX)) continue;
+    if (closed !== undefined) throw new Error('the egress proxy wrote a decision after its closed line');
+    let event: unknown;
+    try {
+      event = JSON.parse(line.slice(EGRESS_PREFIX.length));
+    } catch {
+      throw new Error(`the egress proxy's decision line is not JSON: ${line.slice(0, 200)}`);
+    }
+    if (!isRecord(event)) throw new Error(`the egress proxy's decision line is not a record: ${line.slice(0, 200)}`);
+    if (event.event === 'closed') {
+      if (typeof event.connections !== 'number' || !Number.isInteger(event.connections)) throw new Error('the egress proxy closed its log without a count');
+      closed = event.connections;
+      continue;
+    }
+    const { verdict, host, at } = event;
+    if (event.event !== 'connection' || typeof verdict !== 'string' || !VERDICTS.has(verdict) || (host !== null && typeof host !== 'string') || typeof at !== 'string') {
+      throw new Error(`the egress proxy's decision line is not a connection it could have logged: ${line.slice(0, 200)}`);
+    }
+    connections.push({ verdict: verdict as EgressConnection['verdict'], host, at });
+  }
+  if (closed === undefined) throw new Error('the egress proxy did not write its closed line, so its log may not hold every connection it decided');
+  if (closed !== connections.length) {
+    throw new Error(`the egress proxy's closed line names ${String(closed)} connections and its log holds ${String(connections.length)}`);
+  }
+  return { kind: 'proxied', connections };
+}
+
+/**
+ * Stops the proxy and reads its decisions (D-P14-03). Run after the sandbox
+ * container is gone, so no connection is decided after the read. The proxy
+ * container is left for `stopProxy` to remove, which the caller does whether
+ * this succeeded or threw.
+ */
+export async function readEgress(applied: AppliedProxy, options: ProxyOptions): Promise<Extract<EgressLog, { kind: 'proxied' }>> {
+  const stopped = await dockerCli(options.executable, ['stop', '--time', String(STOP_SECONDS), applied.containerId], { timeoutMs: options.timeoutMs });
+  if (stopped.exitCode !== 0) {
+    throw new Error(`docker stop exited ${String(stopped.exitCode)} for the egress proxy ${applied.name}: ${stopped.stderr.trim()}`);
+  }
+  const logs = await dockerCli(options.executable, ['logs', applied.containerId], { timeoutMs: options.timeoutMs });
+  if (logs.exitCode !== 0) {
+    throw new Error(`docker logs exited ${String(logs.exitCode)} for the egress proxy ${applied.name}: ${logs.stderr.trim()}`);
+  }
+  return egressLogFrom(logs.stdout);
 }
