@@ -26,7 +26,8 @@
 | P12 | Credential at the egress layer | 2 | maintainer | P5, P10 | 2 |
 | P13 | Cost control: budget at the relay, cost in evidence | 2 | maintainer | P6, P12 | 2 |
 | P14 | Enforcement record | 2 | maintainer | P1, P4, P10, P13 | 2–3 |
-| I1 | Integration + M1 proof | 3 | maintainer | all | 2–3 |
+| I1a | Integration: the real line | 3 | maintainer | P1–P14 | 3 |
+| I1b | Integration: merge + M1 proof | 3 | maintainer | I1a | 2–3 |
 
 **Parallel after F3 and S1:** P1, P2, P3, P8 have no sibling dependencies and can be worked simultaneously.
 
@@ -528,18 +529,60 @@ Beside it, a `BehavioralAdapter` of kind `http` in `packages/adapters`. A scenar
 ## Phase 3
 
 ### I1 — Integration + M1 proof
-**Deliver:** replace every S1 stub with the real component; run on the canary repo.
+
+I1 is two units, worked in order, each with its own branch, review, and tag: **I1a** composes the real line, and **I1b** merges through it and proves M1 on the canary repository. Where another entry depends on `I1`, it depends on both. The split and every choice below are D-A-I1-01 to D-A-I1-08 in `docs/decisions.md`.
+
+The single entry this replaces assumed the real components only had to be swapped in. Checked against `v2` at 7fcb611, they had nowhere to go: `LocalVault`, `LocalDockerProvider`, and `ClaudeCodeDriver` are constructed only by conformance, and the one host that composes a line is a test fixture over stubs (`packages/api/test/fixtures/headless-host.ts`). `integrate` is a no-op (`packages/api/src/line.ts`), nothing in the repository pushes or merges, `UsageRecord` does not name the model a call used, and no per-run report exists. The M1 criteria are unchanged; each is assigned below to exactly one half.
+
+**At M1 the spec, the acceptance tests, the verification manifest, and the task graph are written by a human and supplied at admission**, as the line takes them today: `spec`, `test-design`, and `plan` lock what was admitted and call no model. The model works at `build` and `review` (D-A-I1-03).
+
+### I1a — The real line
+**Depends on:** P1–P14.
+**Deliver:**
+- **A production host.** One composition, in `packages/api/src/host/`, that builds the component graph from the real components: `LocalVault`, `LocalDockerProvider`, `ClaudeCodeDriver` as driver and as reviewer under the policy's seats, the TypeScript adapter set, and the strict policy engine. A host entry point serves the API over it, so `olympus create` against a running host drives a real run. The CLI stays a client and composes nothing.
+- **Provenance that a wrapper cannot drop.** The component graph is built only by one function, which records each component's declaration as it builds and returns a branded graph; `startRun` and `resumeRun` accept nothing else. A wrapper that does not forward a stub's `unsafe` declaration is still refused above L1, because the declaration was read when the graph was built, not from the wrapper (D-A-I1-05). Then `SKELETON_LINE` is deleted.
+- **What the skeleton hid, now asserted.** With `SKELETON_LINE` gone, an L3 run is refused at admission naming each control its adapter set lacks; and the three causes P14 marked *blocked above L1* — admission `controls-unavailable`, resume `unsafe-above-l1`, station `same-family-reviewer` — each gain their scenario in P14's table, since the mark's check fails the moment the skeleton goes (D-P14-12).
+- **An unanalysed test suite is not reported clean.** `integrate` reads the run's admission record from the Vault, and where `test` is among the unavailable controls, an L2 run escalates to a human rather than exiting on a tamper report whose empty test fields read as clean (D-A-I1-06).
+- **The relay in the line.** The line provisions each build sandbox with the driver's relay request (`MODEL_RELAY`) and a budget from policy, so the usage record of every real call is metered. The `Driver` contract gains the method that returns the relay request, the consumer D-P12-05 said it waited for.
+- **The model on every usage record.** `UsageRecord` gains the model the call ran on, set by the runtime from the tier the policy scope named, never from the driver's account.
+- **P13's two known limits closed:** a call whose usage could not be read makes the run's cost total a lower bound, counted apart from exact calls (D-P13-19); and a spent call whose meter reading was lost blocks resume rather than being re-run unseen (D-P13-20).
+**Contract amendments, landed in this unit's pull request**, each an `A-I1a-nn` entry in `docs/decisions.md`: `UsageRecord` gains `model`; the `Driver` contract gains its relay request; the cost totals gain the lower-bound count. Anything further found in the work stops the unit for confirmation.
+**Out of scope:**
+- `integrate`'s push, pull request, and merge, the host-held git credential, the per-run report, and the canary run (I1b)
+- model-authored `spec`, `test-design`, and `plan`. A human supplies their artifacts at admission (D-A-I1-03)
+- a tier per station and escalation (R14). Tier stays per role
+- lifting the L3 refusal. L3 is M3
+- rates over finished runs (R2), parallel tasks (R4), the Codex driver, triggers, telemetry export
+- `observe` and `learn` doing anything
+**Conformance:** a stub wrapped without forwarding its declaration is refused above L1; an L3 run is refused through `startRun` naming each missing control; an L2 run over a repository with no vitest or jest escalates at `integrate`; a run on the composed host cannot write the Vault — the Vault is mounted nowhere and a mount of it is refused; a locked acceptance test changed by the task fails the run on the composed host; every usage record of a real call is metered and names its model; an unreadable call makes the total a lower bound; a lost meter reading blocks resume.
+**Accept:**
+- **the ledger.** Paid: `I5.unsafe-declaration-survives-composition`, `I5.adapter-refusal-refuses-l3-end-to-end`, `I5.unanalysed-tests-are-not-reported-clean`. So `pending-baseline.json` lowers I5 from 3 to 0. Nothing is added pending
+- `SKELETON_LINE` no longer exists: `git grep -n SKELETON_LINE -- packages` prints nothing
+- P14's scenario table has a row for each of the three causes it marked blocked above L1, and no cause keeps that mark
+- every package change has a changeset
+- `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass, and `pnpm conformance` passes in CI after the maintainer applies `run-driver` (D-A-CI-05)
+- `git ls-files -- .plan/` prints nothing
+**Gate paths:** `packages/vault/src/types.ts`, `packages/core/src/driver/contract.ts`, and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
+**Invariants:** I5 is the subject — the skeleton's blanket refusal goes, and the three controls it stood in for must each refuse on their own. I1 is the proof on the real line: nothing composed by the host mounts the Vault. I2: the model on a usage record is the runtime's, and the cost is the meter's. I4: the relay's budget comes from policy. I9: the host is a service and the CLI composes nothing.
+
+### I1b — Integrate + M1 proof
+**Depends on:** I1a.
+**Deliver:**
+- **`integrate` merges.** After every gate has passed, the runtime pushes the task's branch, opens a pull request, and merges it at L2, using a fine-grained token scoped to the target repository and held in the host's environment. The token is never provisioned into a sandbox and never granted by policy to a task, and no sandbox's egress allowlist reaches the git remote, so no agent merges its own change (D-A-I1-07).
+- **A per-run report**, read from the Vault and P14's record and never from a model's account: cost and cache-hit rate; claim/evidence mismatches; gate outcomes and iterations per station; refusals and parks by cause. Exposed by the API and printed by the CLI.
+- **The M1 proof.** A run on `mikev10/olympus-canary`, a small public TypeScript repository with a vitest suite (D-A-I1-02), carries one human-specified feature to a merged pull request. The run's report is committed beside the proof.
+**Out of scope:** everything I1a lists, and any rate computed across runs (R2).
+**Paid runs:** the proof and the driver suite spend Anthropic API credit. The maintainer sets a cap before the first paid run, and the relay's budget enforces it (D-A-I1-08).
 **Accept (M1 criteria):**
-- one real feature reaches a merged PR
+- one real feature reaches a merged PR on the canary repository
 - modifying a locked test fails the run
 - writing to the Vault fails at the mount layer
-- cost and cache-hit rate reported per run (cost from P13's usage records, which are `unmetered` until this unit wires the relay into the line)
-- each station's real driver calls use the model tier its role's policy scope names (`CapabilityScope.tier`), and the usage records show which model each call used. This proves the model is chosen per station, which the policy already expresses.
-- the known limits P13's review left to this unit are closed before the first metered record: an unreadable call's cost reads as a lower bound (D-P13-19), and a lost meter reading blocks resume (D-P13-20)
-- claim/evidence mismatches, gate outcomes and iterations per station, and refusals and parks by cause reported per run, each read from the Vault and P14's record, never from a model's account
-- the credential that pushes and merges is held by the runtime on the host and never provisioned into a sandbox; no sandbox can reach the git remote, so no agent merges its own change
-- `unavailableControls()` correctly refuses L3: an L3 run is refused at admission end to end, naming each missing control (`I5.adapter-refusal-refuses-l3-end-to-end`, split from P6's admission entry)
-- component provenance survives composition, and `SKELETON_LINE` is deleted only after it does: a stub wrapped without forwarding its declaration is still refused above L1 (`I5.unsafe-declaration-survives-composition`, re-owned from P6)
+- cost and cache-hit rate reported per run, from the metered usage records
+- each station's real driver calls use the model tier its role's policy scope names, and the usage records show which model each call used
+- claim/evidence mismatches, gate outcomes and iterations per station, and refusals and parks by cause reported per run, each read from the Vault and P14's record
+- the credential that pushes and merges is held by the runtime on the host and never provisioned into a sandbox; an assertion runs a sandbox under each egress policy the line grants and requires that the git remote is unreachable
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` pass
+**Invariants:** I1 and I4 are the credential: the one write the line makes outside the Vault is the runtime's, from the host, with a grant no task holds. I2 is the report. I5: a push or merge that fails stops the run at `integrate`; it never reports done.
 
 ---
 
