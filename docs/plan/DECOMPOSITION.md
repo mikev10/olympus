@@ -565,6 +565,8 @@ order between them is settled before any of them is picked up.
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
 | R13 | Nightly review | M2 | P14, R2, R9, M2 triggers | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
+| R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
+| R16 | Bug-fix intake | M2 | R15, P14, M2 triggers | — |
 
 ### R1 — Readiness
 
@@ -855,6 +857,116 @@ budget P13's relay enforces. Every model that built a task is one of its
 authors for seating a reviewer (I6). R2's rates are kept per model identity,
 so first-pass yield at the starting tier against yield after escalation falls
 out of data it already reads (D-A-BR-01).
+
+### R15 — Acceptance checks run on the base before build
+
+Today the acceptance tests are locked at `test-design` and run once, at
+`verify`, over base plus the diff. Nothing shows that they could fail. A test
+that already passes on the unchanged tree passes whatever `build` does, so a
+gate it holds proves nothing about the change: the run reports a fix that the
+evidence never required. This unit runs the acceptance checks over the base
+before any driver is invoked, and refuses to continue unless each one does
+what its manifest says it does there (D-A-BF-01).
+
+The base already holds what this needs. The acceptance tests and the
+verification manifest are in the workspace at admission, so the snapshot P6
+takes holds them, and the checks can run over it exactly as `verify` runs
+them over base plus the diff: a fresh directory, mounted read-only, in a fresh
+sandbox with `deny-all` egress. No model is called. Binding:
+
+- every check of kind `acceptance` declares what it does on the base,
+  `'fails'` or `'passes'`, in the manifest locked at `test-design`. There is no
+  default: a manifest with an acceptance check that declares neither is
+  refused, naming the check (I5). `'passes'` is for a guard on behaviour that
+  exists and must survive the change
+- at the `test-design` exit, after the lock and before `plan`, the runtime
+  runs every acceptance check over the base. A check declared `'fails'` that
+  exits 0, or one declared `'passes'` that does not, refuses the exit, naming
+  the check, its declaration, and its exit code. The refusal is the runtime's
+  and is recorded in P14's record with its own cause
+- a manifest in which no acceptance check is declared `'fails'` is refused:
+  the run has nothing to show the change did
+- a check that does not start, or a base whose suites enumerate below the
+  check's `expectedSuiteCount`, refuses. A test that never ran did not fail,
+  and a test file the runner never loaded is not a reproduction
+- the base results are `CheckResult`s collected by the runtime and written to
+  the Vault beside the lock manifest (I2). `verify`'s evidence bundle refers to
+  them, so review and `integrate` see the same check failing before the change
+  and passing after it, from records the runtime made both times
+- a resume reads the base results from the Vault and does not run them again;
+  a resume of a run refused here stays refused
+
+**Known limit, stated now:** a check can fail on the base for a reason that is
+not the defect, such as a module a feature has not built yet or a test with
+its own error. The runtime records the output and the reviewer reads it; it
+does not judge why a check failed. Showing that a test fails for the right
+reason is mutation testing's question (M3), and R7 adds a corpus item for an
+acceptance check that passes on the base.
+
+**Conformance:** an acceptance check that passes on the base refuses the
+`test-design` exit before any driver is invoked; a check with no declaration
+is refused at admission; a manifest with no `'fails'` check is refused; a
+check that does not start on the base refuses rather than counting as a
+failure; `verify`'s evidence names the base results the runtime recorded.
+
+**Why M2:** M1's scope is closed and I1 proves it. The unit adds one sandbox run
+per admitted run and no model call, so it is cheap to take early in M2, and
+R16 depends on it.
+
+### R16 — Bug-fix intake
+
+The first work class with an outside source: a defect someone reported. A bug
+report is free text written by whoever filed it, so it is the payload I7 exists
+for. Its steps to reproduce cannot pass through the extractor either: the
+field schemas the trigger framework owes (`I7.extracted-field-schemas`) cap
+length and character class, which is the point of them. So no model reads a
+report. A person turns it into a spec, and the line runs from there
+(D-A-BF-02). Binding:
+
+- bug fix is a task template the policy pre-declares, entered at `spec`. A
+  report may arrive through the human trigger, which exists today, or through
+  a tracker trigger the M2 trigger framework adds. The tracker trigger's
+  extracted fields are the issue's reference, labels from an allowlist the
+  policy names, and the author's trust. No field carries the title, body, or
+  comments
+- the `spec` exit for this template is `human-required` at every level, and
+  admission refuses a policy that sets it otherwise (I4). The spec is written
+  by a person who read the report. Whether the report was workable is that
+  person's call, never a model's
+- the spec has a fixed shape with required parts: the steps that show the
+  defect, what happens, what should happen, where in the product it shows,
+  and what the check needs to run it, such as data, an account, or a service.
+  A spec missing any part is refused at `spec`, naming the part. This is where
+  a vague report stops: it cannot become a spec, so nothing is built from it
+- `test-design` for this template requires at least one acceptance check that
+  follows the spec's steps and is declared `'fails'` on the base (R15). The
+  runtime running that check over the unchanged tree is the reproduction. A
+  defect the check cannot show is refused at the `test-design` exit rather
+  than fixed on a guess
+- a model may draft the acceptance check at `test-design`. It is granted the
+  locked spec only, as today, so it never sees the report. Under R9 it is a
+  different family from the model that builds the fix
+- a report that never becomes a spec, and a spec refused at `spec` or at the
+  `test-design` exit, is recorded in P14's record with its cause, so R2 can
+  count reports that went nowhere and why
+
+**Not in this unit:** writing back to the tracker, such as asking the reporter
+for missing steps (a provider adapter); following the pull request through CI
+and review comments, whose text is untrusted for the same reason; seeding the
+data and accounts a reproduction needs (R1 probes whether a target can);
+finding defects that recur in one area (R11, R13); and a model that summarises
+reports for the person writing the spec. If that summariser is ever built, its
+output is untrusted too, and it reaches a person, never a prompt.
+
+**Conformance:** a tracker event whose extractor would carry body text is
+refused; no driver request in a bug-fix run contains any of the report's text;
+the `spec` exit refuses without a human grant at every level; a spec missing a
+required part is refused, naming it; `test-design` with no acceptance check
+declared `'fails'` is refused.
+
+**Depends on** the two I7 controls owed before any non-human trigger is
+enabled, `I7.extracted-field-schemas` and `I7.untrusted-sink-lint-rule`,
+through M2 triggers.
 
 ### Recorded constraint: the Codex driver (M2)
 
