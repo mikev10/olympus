@@ -86,8 +86,8 @@ describe('geminiRequest', () => {
     expect(request.body).not.toHaveProperty('toolConfig');
   });
 
-  it('sets generationConfig.maxOutputTokens to 32768, since Gemini otherwise applies its own default limit', () => {
-    expect(request.body.generationConfig.maxOutputTokens).toBe(32768);
+  it('sets generationConfig.maxOutputTokens to 65536, since Gemini otherwise applies its own default limit', () => {
+    expect(request.body.generationConfig.maxOutputTokens).toBe(65536);
   });
 
   it('lists x-goog-api-key and content-type as header names, carrying no values', () => {
