@@ -58,6 +58,7 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
     recordUsage: (r) => inner.recordUsage(r),
     recordDecision: (d) => inner.recordDecision(d),
     readDecisions: (runId) => inner.readDecisions(runId),
+    readUsage: (runId) => inner.readUsage(runId),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: (s, ifVersion) => inner.commitRunState(s, ifVersion),
   };
@@ -401,7 +402,7 @@ export const REVIEW_SEAT_READS_ONLY_ITS_GRANTS: LocalAssertion = runtime({
   },
 });
 
-/** The line's provisioning, with an image and limits a real daemon accepts; the line does not choose either before I1. */
+/** The line's provisioning, with an image and limits a real daemon accepts: the rig's graphs carry no sandbox profile (D-I1a-01). */
 function onImage(provider: SandboxProvider): SandboxProvider {
   return {
     id: provider.id,

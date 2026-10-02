@@ -167,6 +167,9 @@ importers:
       '@olympus-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@olympus-ai/driver-claude-code':
+        specifier: workspace:*
+        version: link:../drivers/claude-code
       '@olympus-ai/integrity':
         specifier: workspace:*
         version: link:../integrity
@@ -183,6 +186,9 @@ importers:
         specifier: 2.9.1
         version: 2.9.1
     devDependencies:
+      '@olympus-ai/conformance':
+        specifier: workspace:*
+        version: link:../conformance
       '@types/picomatch':
         specifier: ^4.0.3
         version: 4.0.3

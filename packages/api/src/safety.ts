@@ -1,20 +1,21 @@
 /**
- * I5 applied to the skeleton. A component that cannot enforce what its
+ * I5 applied to the components. A component that cannot enforce what its
  * contract implies declares that through a property on its own interface.
- * The runtime enumerates the declarations before a run starts and refuses
- * to carry a run above L1 while any exist, naming each one. Nothing in the
- * contracts changes: the declaration is a property a stub adds, and the
- * runtime's ComponentGraph is where it is read.
+ * The runtime refuses to carry a run above L1 while any declaration exists,
+ * naming each one. The declarations are read once, by `buildGraph`, when the
+ * graph is built (D-A-I1-05), together with the ones the builder gives a
+ * component it cannot attest (D-I1a-06).
  *
- * `unsafeComponents` reads the property structurally (`'unsafe' in
+ * `declarationOf` reads the property structurally (`'unsafe' in
  * component`), so a stub in vault, sandbox, or core needs no import from this
  * package to declare itself. The conformance fixture I5.stubs-declare-unsafe
  * is what pins each stub's property to this type.
  */
+import { provenanceOf } from './graph.js';
 import type { ComponentGraph } from './run.js';
 
 export interface UnsafeDeclaration {
-  /** The exported name: 'StubVault', 'SkeletonLine'. */
+  /** The exported name: 'StubVault', 'StubDriver'. */
   readonly component: string;
   /** One line per control the component does not provide. Never empty. */
   readonly cannotEnforce: readonly string[];
@@ -23,25 +24,6 @@ export interface UnsafeDeclaration {
 export interface DeclaresUnsafe {
   readonly unsafe: UnsafeDeclaration;
 }
-
-/**
- * The line's own declaration (S1 finding 3). If only the infrastructure stubs
- * declared themselves, replacing them would lift the L1 cap while the line
- * still faked its half. P4 paid the policy and station lines, P6 the
- * claim/evidence diff, and P7 tamper analysis. An empty declaration is refused
- * below, so the last line is the composition gap rather than nothing: a
- * wrapper that does not forward a stub's declaration would otherwise carry a
- * run above L1. I1 deletes this once `I5.unsafe-declaration-survives-composition`
- * is paid (D-P6-01).
- */
-export const SKELETON_LINE: DeclaresUnsafe = {
-  unsafe: {
-    component: 'SkeletonLine',
-    cannotEnforce: [
-      'no compositional provenance: a component wrapped without forwarding its unsafe declaration passes as safe, so no run may go above L1 until provenance survives composition',
-    ],
-  },
-};
 
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every((v) => typeof v === 'string');
@@ -53,7 +35,7 @@ function isStringArray(value: unknown): value is readonly string[] {
  * an absence: a component that tries to declare and fails must not pass as
  * safe.
  */
-function declarationOf(slot: 'vault' | 'sandbox' | 'driver' | 'reviewer', component: object): UnsafeDeclaration | undefined {
+export function declarationOf(slot: 'vault' | 'sandbox' | 'driver' | 'reviewer', component: object): UnsafeDeclaration | undefined {
   if (!('unsafe' in component)) return undefined;
   const unsafe: unknown = component.unsafe;
   if (typeof unsafe !== 'object' || unsafe === null || !('component' in unsafe) || !('cannotEnforce' in unsafe)) {
@@ -70,17 +52,10 @@ function declarationOf(slot: 'vault' | 'sandbox' | 'driver' | 'reviewer', compon
 }
 
 /**
- * Every declaration in the graph, plus the line's own. Order: vault, sandbox,
- * driver, reviewer, line. A reviewer that is the driver itself is listed once.
+ * Every declaration recorded when the graph was built, in the builder's order:
+ * vault, sandbox, driver, reviewer. A graph `buildGraph` did not make is one
+ * declaration, naming it unbuilt.
  */
-export function unsafeComponents(graph: Pick<ComponentGraph, 'vault' | 'sandbox' | 'driver' | 'reviewer'>): UnsafeDeclaration[] {
-  const declarations: UnsafeDeclaration[] = [];
-  const slots = [['vault', graph.vault], ['sandbox', graph.sandbox], ['driver', graph.driver], ['reviewer', graph.reviewer]] as const;
-  for (const [slot, component] of slots) {
-    if (slot === 'reviewer' && component === graph.driver) continue;
-    const declaration = declarationOf(slot, component);
-    if (declaration !== undefined) declarations.push(declaration);
-  }
-  declarations.push(SKELETON_LINE.unsafe);
-  return declarations;
+export function unsafeComponents(graph: ComponentGraph): UnsafeDeclaration[] {
+  return [...provenanceOf(graph)];
 }

@@ -216,10 +216,15 @@ function usageProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId') || !hasString(r, 'station')) return 'it names no run, task, and station';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
   if (typeof r.attempt !== 'number' || !Number.isInteger(r.attempt) || r.attempt < 1) return 'attempt is not a positive whole number';
+  const model = r.model;
+  if (!isRecord(model) || !hasString(model, 'provider') || !hasString(model, 'family') || !hasString(model, 'model') || model.family === '' || model.model === '') {
+    return 'it names no model the call ran on (A-I1a-01)';
+  }
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
   if (reading.kind === 'unmetered') return undefined;
-  if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is neither metered nor unmetered`;
+  if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
+  if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, or lost`;
   const bad = READING_COUNTS.filter((k) => typeof reading[k] !== 'number' || !Number.isFinite(reading[k]) || reading[k] < 0);
   if (bad.length > 0) return `the reading's ${bad.join(', ')} are not non-negative finite numbers`;
   if (typeof reading.exhausted !== 'string' || !EXHAUSTED.has(reading.exhausted)) return "the reading's exhausted is not a known reason";
@@ -526,8 +531,17 @@ export class LocalVault implements Vault {
   }
 
   /** Every decision file under the run, by its name; the name is the hash, so each ref reads back the file it names. */
-  async readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
-    const dir = join(runDir(this.#store, runId), 'objects', 'decision');
+  readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.#objects(runId, 'decision');
+  }
+
+  /** Every usage file under the run, referenced from run state or not (A-I1a-05). */
+  readUsage(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.#objects(runId, 'usage');
+  }
+
+  async #objects(runId: RunId, kind: 'decision' | 'usage'): Promise<readonly VaultRef[]> {
+    const dir = join(runDir(this.#store, runId), 'objects', kind);
     let names: string[];
     try {
       names = await readdir(dir);
@@ -539,7 +553,7 @@ export class LocalVault implements Vault {
       .map((name) => /^([0-9a-f]{64})\.json$/.exec(name)?.[1])
       .filter((hash): hash is string => hash !== undefined)
       .sort()
-      .map((hash) => ({ runId, kind: 'decision', hash }));
+      .map((hash) => ({ runId, kind, hash }));
   }
 
   async readRunState(runId: RunId): Promise<RunState> {

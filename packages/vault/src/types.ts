@@ -8,7 +8,7 @@
  * The Vault stores both.
  */
 import type {
-  AgentClaim, ApprovalKey, AutonomyLevel, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  AgentClaim, ApprovalKey, AutonomyLevel, ModelIdentity, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
@@ -91,9 +91,21 @@ export interface UsageRecord {
   station: StationId;
   /** The task's `starts` count for this call: which invocation of the task it was. */
   attempt: number;
-  reading: MeterReading;
+  /**
+   * The model the runtime resolved the call's tier to before it made the call
+   * (A-I1a-01). I2: never `TaskResult.model`, the driver's account of itself.
+   */
+  model: ModelIdentity;
+  reading: UsageReading;
   collectedBy: 'runtime';
 }
+
+/**
+ * What the relay counted, or `lost`: the call was made and its sandbox could
+ * not be destroyed and read, so what it cost is unknown (A-I1a-04). A run
+ * holding a lost reading is not resumed (D-P13-20).
+ */
+export type UsageReading = MeterReading | { readonly kind: 'lost'; readonly detail: string };
 
 /**
  * A refusal returned before a run's first state, as admission returned it
@@ -110,8 +122,14 @@ export type AdmissionRefusal =
   | { readonly reason: 'policy-refused'; readonly station: StationId; readonly role: RoleId | null; readonly refusal: PolicyRefusal }
   | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal };
 
-/** The admission checks a resume repeats before the line runs, refused there (D-P14-11). */
-export type ResumeRefusal = Extract<AdmissionRefusal, { reason: 'unsafe-above-l1' | 'refused' }>;
+/**
+ * The admission checks a resume repeats before the line runs, refused there
+ * (D-P14-11), and the one only a resume makes: a call whose cost was lost is
+ * not replayed on top of it (A-I1a-06).
+ */
+export type ResumeRefusal =
+  | Extract<AdmissionRefusal, { reason: 'unsafe-above-l1' | 'refused' }>
+  | { readonly reason: 'meter-lost'; readonly tasks: readonly TaskId[] };
 
 /**
  * What a control decided, and which control it was. `decidedBy` is fixed by
@@ -227,6 +245,12 @@ export interface Vault {
   recordDecision(d: EnforcementDecision): Promise<VaultRef>;
   /** Every decision recorded for a run, in no promised order; empty for a run with none (D-P14-02). */
   readDecisions(runId: RunId): Promise<readonly VaultRef[]>;
+  /**
+   * Every usage record stored for a run, in no promised order, whether or not
+   * run state references it: a record stored before a crash took the commit
+   * that would have referenced it is still found (A-I1a-05).
+   */
+  readUsage(runId: RunId): Promise<readonly VaultRef[]>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

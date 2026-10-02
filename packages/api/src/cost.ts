@@ -9,8 +9,10 @@
  *
  * A call whose sandbox had no relay is `unmetered`. Its cost is not zero, it
  * is unknown, so a total counts such calls separately and its figures cover
- * the metered calls alone. A consumer that shows a total with a non-zero
- * `unmetered` beside it is showing a floor, and the type says so.
+ * the metered calls alone. A call whose usage the relay could not read is
+ * charged what it could count, and a call whose reading was lost is charged
+ * nothing; both make a total a lower bound (D-P13-19, A-I1a-04). `bound`
+ * says which a total is, so a consumer does not have to work it out.
  */
 import { isAgentStation, maxStarts, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
 import type { Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
@@ -26,6 +28,12 @@ export interface MeteredTotal {
   readonly costUsd: number;
   /** Calls whose budget ran out, for whatever reason the reading gives. */
   readonly exhausted: number;
+  /**
+   * Calls whose usage the relay could not read, also counted in `exhausted`.
+   * Each is charged `max_tokens` of output and nothing for input or cache, so
+   * its cost is a lower bound (D-P13-19).
+   */
+  readonly unreadable: number;
 }
 
 export interface UsageTotal {
@@ -33,7 +41,11 @@ export interface UsageTotal {
   readonly calls: number;
   /** Calls with no reading behind them. While this is non-zero, `metered` is a floor, not the total. */
   readonly unmetered: number;
+  /** Calls made whose sandbox could not be read, so nothing counted them (A-I1a-04). */
+  readonly lost: number;
   readonly metered: MeteredTotal;
+  /** `exact` only when every call was metered and read; any unmetered, lost, or unreadable call makes it `lower`. */
+  readonly bound: 'exact' | 'lower';
 }
 
 export interface CostTotals {
@@ -45,16 +57,22 @@ export interface CostTotals {
 const EMPTY: UsageTotal = {
   calls: 0,
   unmetered: 0,
-  metered: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, exhausted: 0 },
+  lost: 0,
+  metered: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, exhausted: 0, unreadable: 0 },
+  bound: 'exact',
 };
 
 function add(total: UsageTotal, record: UsageRecord): UsageTotal {
   const r = record.reading;
-  if (r.kind === 'unmetered') return { ...total, calls: total.calls + 1, unmetered: total.unmetered + 1 };
+  if (r.kind === 'unmetered') return { ...total, calls: total.calls + 1, unmetered: total.unmetered + 1, bound: 'lower' };
+  if (r.kind === 'lost') return { ...total, calls: total.calls + 1, lost: total.lost + 1, bound: 'lower' };
   const m = total.metered;
+  const unreadable = r.exhausted === 'unreadable';
   return {
     calls: total.calls + 1,
     unmetered: total.unmetered,
+    lost: total.lost,
+    bound: unreadable ? 'lower' : total.bound,
     metered: {
       calls: m.calls + 1,
       inputTokens: m.inputTokens + r.inputTokens,
@@ -63,6 +81,7 @@ function add(total: UsageTotal, record: UsageRecord): UsageTotal {
       cacheWriteTokens: m.cacheWriteTokens + r.cacheWriteTokens,
       costUsd: m.costUsd + r.costUsd,
       exhausted: m.exhausted + (r.exhausted === 'none' ? 0 : 1),
+      unreadable: m.unreadable + (unreadable ? 1 : 0),
     },
   };
 }
@@ -81,13 +100,17 @@ export function costTotals(records: readonly UsageRecord[]): CostTotals {
 }
 
 /**
- * The run's usage records, read back from the Vault in the order run state
- * references them. A record that is not one the runtime wrote for this run is
- * refused rather than summed.
+ * The run's usage records, read back from the Vault: those run state
+ * references, in its order, then any the Vault holds that it does not — a
+ * record stored before a crash took the commit that referenced it (D-P13-20).
+ * A record that is not one the runtime wrote for this run is refused rather
+ * than summed.
  */
 export async function readUsage(vault: Vault, state: RunState): Promise<UsageRecord[]> {
   const records: UsageRecord[] = [];
-  for (const ref of state.usage) {
+  const referenced = new Set(state.usage.map((ref) => ref.hash));
+  const orphans = (await vault.readUsage(state.runId)).filter((ref) => !referenced.has(ref.hash));
+  for (const ref of [...state.usage, ...orphans]) {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(await vault.read(ref)));
     const record = parsed as Partial<UsageRecord> | null;
     if (record?.collectedBy !== 'runtime' || record.runId !== state.runId || typeof record.taskId !== 'string' || typeof record.reading !== 'object') {

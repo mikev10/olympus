@@ -11,9 +11,11 @@ import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
 import type { EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { approveStation, costTotals, readUsage, resumeRun, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
+import { approveStation, costTotals, readUsage, resumeRun, runStanding, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
+import { integrateEscalations, UNANALYSED_TESTS } from '../src/line.js';
 import {
   approvals,
+  built,
   ChosenDriver,
   HELLO_CHECK,
   makeWorkspace,
@@ -179,7 +181,7 @@ describe('hello at L1', () => {
     await startRun(runRequest(runId, workspace, components));
     const approved = await approveStation({ runId, key: 'integrate:1', approvedBy: 'maintainer', vault: components.vault });
     expect(approved.ok).toBe(true);
-    const outcome = await resumeRun({ runId, components });
+    const outcome = await resumeRun({ runId, components: built(components) });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.state).toMatchObject({ station: 'integrate', phase: 'exiting' });
@@ -374,7 +376,7 @@ describe('retries are bounded (I5)', () => {
     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
 
     // A resume with a driver that works does not get the task back: parked is parked.
-    const resumed = await resumeRun({ runId, components });
+    const resumed = await resumeRun({ runId, components: built(components) });
     expect(resumed).toMatchObject({ ok: false, reason: 'refused', transition: { reason: 'parked', cause: 'retries-exhausted' } });
   });
 });
@@ -410,7 +412,7 @@ describe('locks are re-verified at every transition (I3)', () => {
     // the mismatch was found, so no role is named for it (D-P4-08, A-P4-05).
     expect(await read<IntegrityViolation>(components.vault, ref)).toMatchObject({ kind: 'lock-tamper', taskId: hello, role: 'unattributed' });
 
-    const resumed = await resumeRun({ runId, components });
+    const resumed = await resumeRun({ runId, components: built(components) });
     expect(resumed).toMatchObject({ ok: false, reason: 'refused', transition: { reason: 'violation', violations: [ref] } });
   });
 
@@ -433,7 +435,7 @@ describe('approvals gate the station (I4)', () => {
     expect(outcome).toMatchObject({ at: 'plan', transition: { reason: 'approval-blocked', key: 'plan:1' } });
     const approved = await approveStation({ runId, key: 'plan:1', approvedBy: 'maintainer', vault: components.vault });
     expect(approved).toMatchObject({ ok: false, reason: 'not-awaiting' });
-    expect(refusedState(await resumeRun({ runId, components }))).toMatchObject({ station: 'plan', phase: 'exiting' });
+    expect(refusedState(await resumeRun({ runId, components: built(components) }))).toMatchObject({ station: 'plan', phase: 'exiting' });
   });
 
   test('a human-required cell waits for exactly its own key; any other approval is refused', async () => {
@@ -444,7 +446,7 @@ describe('approvals gate the station (I4)', () => {
     }
     expect(await approveStation({ runId, key: 'spec:1', approvedBy: '  ', vault: components.vault })).toMatchObject({ reason: 'invalid-request' });
     expect(await approveStation({ runId, key: 'spec:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
-    expect(await resumeRun({ runId, components })).toMatchObject({ at: 'integrate', transition: { reason: 'approval-required' } });
+    expect(await resumeRun({ runId, components: built(components) })).toMatchObject({ at: 'integrate', transition: { reason: 'approval-required' } });
   });
 
   test('a grant authorises one exit: the rebuild after a failed verify waits for a second approval', async () => {
@@ -457,7 +459,7 @@ describe('approvals gate the station (I4)', () => {
     expect(await approveStation({ runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
 
     // The first check fails, so `verify` sends the task back to `build`, and it is built a second time.
-    const second = await resumeRun({ runId, components });
+    const second = await resumeRun({ runId, components: built(components) });
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(2);
     expect(second).toMatchObject({ at: 'build', transition: { reason: 'approval-required', key: 'build:1' } });
     const spent = refusedState(second).approvals;
@@ -466,7 +468,7 @@ describe('approvals gate the station (I4)', () => {
 
     // The second visit is approved in its own right, and the run then goes on.
     expect(await approveStation({ runId, key: 'build:1', approvedBy: 'maintainer', vault: components.vault })).toMatchObject({ ok: true });
-    expect(await resumeRun({ runId, components })).toMatchObject({ at: 'integrate' });
+    expect(await resumeRun({ runId, components: built(components) })).toMatchObject({ at: 'integrate' });
   });
 });
 
@@ -484,7 +486,7 @@ describe('a replayed attempt is spent, not free (I5)', () => {
     // Each resume runs the driver again; each one is counted, and the iteration is not re-spent.
     for (const starts of [2, 3]) {
       const components = { ...base, vault: new KillsBeforeCommit(base.vault, kill) };
-      await expect(resumeRun({ runId, components })).rejects.toThrow('killed');
+      await expect(resumeRun({ runId, components: built(components) })).rejects.toThrow('killed');
       expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 1, retries: 0, starts } } });
     }
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(3);
@@ -678,7 +680,26 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     expect(totals.run).toMatchObject({ calls: 2, unmetered: 2, metered: { calls: 0 } });
   });
 
-  test('a sandbox whose cost cannot be read after the driver ran stops the run, rather than retrying blind', async () => {
+  test('every usage record names the model the runtime resolved the scope tier to, not the one the driver reported', async () => {
+    class MisreportingDriver extends ChosenDriver {
+      override async runTask(req: TaskRequest): Promise<TaskResult> {
+        const result = await super.runTask(req);
+        return { ...result, model: { ...result.model, model: 'what-the-driver-says' } };
+      }
+    }
+    const driver = new MisreportingDriver({ narrative: 'built' });
+    const reviewer = new ChosenDriver({ family: 'other' });
+    const vault = new CountingVault(components.vault);
+    await startRun(runRequest(runId, workspace, { ...components, vault, driver, reviewer }));
+    expect(vault.usage.length).toBeGreaterThan(0);
+    for (const record of vault.usage) {
+      const seat = record.station === 'review' ? reviewer : driver;
+      const tier = record.station === 'review' ? 'deep' : 'standard';
+      expect(record.model).toStrictEqual(seat.resolveModel(tier));
+    }
+  });
+
+  test('a sandbox whose cost cannot be read after the driver ran records the call as lost and stops the run, and a resume over it is refused and recorded', async () => {
     class UnreadableMeter extends DelegatingSandbox {
       override async destroy(h: SandboxHandle): Promise<Teardown> {
         await this.inner.destroy(h);
@@ -691,6 +712,90 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
       /could not be destroyed and its cost read/u,
     );
     expect(driver.requests).toHaveLength(1);
-    expect(vault.usage).toHaveLength(0);
+    expect(vault.usage).toHaveLength(1);
+    expect(vault.usage[0]?.reading).toMatchObject({ kind: 'lost' });
+    const totals = costTotals(await readUsage(vault, await vault.readRunState(runId)));
+    expect(totals.run).toMatchObject({ calls: 1, lost: 1, bound: 'lower' });
+
+    // The same graph, metered this time: the resume is refused for the lost reading, not driven on top of it.
+    const resumed = await resumeRun({ runId, components: built({ ...components, vault, driver }) });
+    expect(resumed).toMatchObject({ ok: false, reason: 'meter-lost', tasks: [hello] });
+    expect(driver.requests).toHaveLength(1);
+    const decisions = await Promise.all((await vault.readDecisions(runId)).map((ref) => read<EnforcementDecision>(vault, ref)));
+    expect(decisions.map((d) => d.decision)).toContainEqual({ cause: 'resume-refused', decidedBy: 'admission', refusal: { reason: 'meter-lost', tasks: [hello] } });
+  });
+
+  test('a usage record stored before the commit that would reference it is still read, and a lost one in it still refuses the resume', async () => {
+    class DiesAfterUsage extends DelegatingVault {
+      private stored = false;
+      override async recordUsage(r: UsageRecord): Promise<VaultRef> {
+        const ref = await this.inner.recordUsage({ ...r, reading: { kind: 'lost', detail: 'test' } });
+        this.stored = true;
+        return ref;
+      }
+      override commitRunState(state: RunState, ifVersion: string): Promise<RunState> {
+        if (this.stored) return Promise.reject(new Error('the process died'));
+        return this.inner.commitRunState(state, ifVersion);
+      }
+    }
+    const vault = new DiesAfterUsage(components.vault);
+    await expect(startRun(runRequest(runId, workspace, { ...components, vault }))).rejects.toThrow(/the process died/u);
+    const state = await components.vault.readRunState(runId);
+    expect(state.usage).toHaveLength(0);
+    expect(await readUsage(components.vault, state)).toHaveLength(1);
+    expect(await resumeRun({ runId, components: built(components) })).toMatchObject({ ok: false, reason: 'meter-lost' });
+  });
+
+  test('a call whose usage the relay could not read makes its total a lower bound, counted apart from exact calls (D-P13-19)', () => {
+    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), collectedBy: 'runtime' as const };
+    const exact = { kind: 'metered' as const, calls: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, exhausted: 'none' as const, refused: 0 };
+    expect(costTotals([{ ...base, reading: exact }]).run).toMatchObject({ bound: 'exact', metered: { unreadable: 0 } });
+    const totals = costTotals([{ ...base, reading: exact }, { ...base, attempt: 2, reading: { ...exact, exhausted: 'unreadable' } }]);
+    expect(totals.run).toMatchObject({ bound: 'lower', metered: { calls: 2, unreadable: 1, exhausted: 1 } });
+  });
+});
+
+describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1a-02)', () => {
+  const PROFILE = { buildImage: 'build-image', checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
+  const RELAY = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages' as const, prices: {} } };
+
+  class RelayingDriver extends ChosenDriver {
+    override relayRequest(): typeof RELAY {
+      return RELAY;
+    }
+  }
+
+  test('a build sandbox runs the profile\'s build image and limits, the scope\'s wall clock, and the driver\'s relay under the budget policy grants the role', async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    const driver = new RelayingDriver({ narrative: 'built' });
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, driver, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
+    const build = sandbox.specs.find((s) => s.relay !== undefined);
+    expect(build).toMatchObject({
+      image: 'build-image',
+      limits: { cpus: 1, memoryMb: 512, pids: 64, wallClockMs: 60_000 },
+      relay: { ...RELAY, budget: { maxTokens: 1000, maxCostUsd: 1 } },
+      mounts: { others: [] },
+    });
+  });
+
+  test('a check sandbox runs the profile\'s check image under the check\'s own timeout, with no relay and no network', async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
+    const check = sandbox.specs.find((s) => s.image === 'check-image');
+    expect(check).toMatchObject({ limits: { cpus: 1, wallClockMs: HELLO_CHECK.timeoutMs }, egress: { mode: 'deny-all' }, mounts: { others: [] } });
+    expect(check?.relay).toBeUndefined();
+  });
+});
+
+describe('integrate escalates a run whose tests were never analysed (D-A-I1-06)', () => {
+  test('a repository with no test framework adds the finding, read from the admission record, and the approver is told it', async () => {
+    const outcome = await startRun(runRequest(runId, workspace, { ...components, reviewer: new ChosenDriver({ family: 'other' }) }));
+    expect(outcome).toMatchObject({ at: 'integrate', transition: { reason: 'approval-required', escalations: [UNANALYSED_TESTS] } });
+    expect((await runStanding(components.vault, runId)).standing).toMatchObject({ standing: 'awaiting-approval', escalations: [UNANALYSED_TESTS] });
+    const state = await components.vault.readRunState(runId);
+    const record = await read<{ unavailableControls: string[] }>(components.vault, state.admission);
+    expect(record.unavailableControls).toContain('test');
+    const escalations = await integrateEscalations(components.vault, state, (ref) => read<EvidenceBundle>(components.vault, ref));
+    expect(escalations.tamperFindings).toContain(UNANALYSED_TESTS);
   });
 });

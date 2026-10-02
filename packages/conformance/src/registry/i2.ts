@@ -62,6 +62,15 @@ export const I2: InvariantEntry = {
       package: '@olympus-ai/driver-claude-code',
       file: 'test/invariants.test.ts',
     }),
+    // I1a's paid run: on the composed host, every real call is metered by the relay the line provisioned, and its record names the runtime's model.
+    external({
+      id: 'I2.line-usage-is-metered-and-names-its-model',
+      title:
+        "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
+      level: 'runtime',
+      package: '@olympus-ai/api',
+      file: 'test/paid/line.paid.test.ts',
+    }),
   ],
   pending: [],
 };

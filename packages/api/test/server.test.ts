@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
-import { createApiServer, egressFor, worstCaseCost, type ApiServer, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
+import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
 import { ARTIFACTS, BASE_COMMIT, makeWorkspace, policy, policyDocument, removeWorkspace, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
 import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
 
@@ -16,7 +16,7 @@ const TOKEN = 't'.repeat(40);
 const PRINCIPAL = 'local-operator';
 
 let workspace: string;
-let components: ComponentGraph;
+let components: BuiltGraph;
 let server: ApiServer | undefined;
 let url: string;
 
@@ -28,7 +28,7 @@ async function writePolicy(doc: PolicyDocument = policyDocument()): Promise<stri
 }
 
 async function serve(overrides: Partial<ComponentGraph> = {}, doc?: PolicyDocument): Promise<void> {
-  components = { ...stubComponents(workspace), ...overrides };
+  components = stubComponents(workspace, overrides);
   server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc) });
   url = await server.listen(0, '127.0.0.1');
 }
@@ -104,7 +104,7 @@ describe('the run lifecycle over HTTP', () => {
     const run = await created();
     expect(run.state.station).toBe('intake');
     const waiting = await settled(run.runId);
-    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1' });
+    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] });
     expect(waiting.lastOutcome).toMatchObject({ kind: 'outcome', outcome: { ok: false, reason: 'refused', transition: { reason: 'approval-required' } } });
 
     // Who approved is the token's principal; a body that tries to say otherwise is refused.
@@ -150,7 +150,7 @@ describe('the worst-case cost, approved before a run starts (D-P9-03)', () => {
   test('at L0 no figure is needed', async () => {
     await serve();
     const run = await created({ requestedLevel: 0, approvedCostUsd: null });
-    expect((await settled(run.runId)).standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:0' });
+    expect((await settled(run.runId)).standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:0', escalations: [UNANALYSED_TESTS] });
   });
 });
 
@@ -290,7 +290,7 @@ describe('the event stream', () => {
       return { event: name.replace('event: ', ''), data: JSON.parse(data.replace('data: ', '')) as unknown };
     });
     expect(events[0]?.event).toBe('state');
-    expect(events.at(-2)).toEqual({ event: 'standing', data: { standing: 'awaiting-approval', key: 'integrate:1' } });
+    expect(events.at(-2)).toEqual({ event: 'standing', data: { standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] } });
     expect(events.at(-1)).toMatchObject({ event: 'end', data: { kind: 'outcome' } });
     const versions = events.filter((e) => e.event === 'state').map((e) => Number((e.data as RunState).version));
     expect(versions.length).toBeGreaterThan(3);

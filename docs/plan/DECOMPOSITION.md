@@ -558,11 +558,11 @@ The single entry this replaces assumed the real components only had to be swappe
 **Accept:**
 - **the ledger.** Paid: `I5.unsafe-declaration-survives-composition`, `I5.adapter-refusal-refuses-l3-end-to-end`, `I5.unanalysed-tests-are-not-reported-clean`. So `pending-baseline.json` lowers I5 from 3 to 0. Nothing is added pending
 - `SKELETON_LINE` no longer exists: `git grep -n SKELETON_LINE -- packages` prints nothing
-- P14's scenario table has a row for each of the three causes it marked blocked above L1, and no cause keeps that mark
+- P14's scenario table has a scenario for `admission:controls-unavailable` and `resume:unsafe-above-l1`, and marks `station:same-family-reviewer` blocked until M3 with a check that fails when an L3 run is admitted (D-I1a-02); no cause keeps the blocked-above-L1 mark
 - every package change has a changeset
 - `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass, and `pnpm conformance` passes in CI after the maintainer applies `run-driver` (D-A-CI-05)
 - `git ls-files -- .plan/` prints nothing
-**Gate paths:** `packages/vault/src/types.ts`, `packages/core/src/driver/contract.ts`, and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
+**Gate paths:** `packages/vault/src/types.ts`, `packages/core/src/driver/contract.ts`, `packages/core/src/station/types.ts`, `packages/conformance/`, the `vitest.config.*` files, and `.github/workflows/ci.yml` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
 **Invariants:** I5 is the subject — the skeleton's blanket refusal goes, and the three controls it stood in for must each refuse on their own. I1 is the proof on the real line: nothing composed by the host mounts the Vault. I2: the model on a usage record is the runtime's, and the cost is the meter's. I4: the relay's budget comes from policy. I9: the host is a service and the CLI composes nothing.
 
 ### I1b — Integrate + M1 proof

@@ -22,10 +22,22 @@ import { packageProgram, walk } from '../kit/scan.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { around } from './line-assertions.js';
+import { realComponents, realPolicy } from './real-line.js';
 import { inTask, runHello, writes } from './verification.js';
 import { HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
+
+/** A provider that forwards every method to `inner`, so an assertion can replace one. */
+function forwarding(inner: SandboxProvider): SandboxProvider {
+  return {
+    id: inner.id,
+    capabilities: () => inner.capabilities(),
+    provision: (spec) => inner.provision(spec),
+    exec: (h, cmd, opts) => inner.exec(h, cmd, opts),
+    destroy: (h) => inner.destroy(h),
+  };
+}
 
 /** Every cause a decision can have, at the grain a rate counts by. */
 export type CauseKey =
@@ -62,13 +74,15 @@ export function keyOf(d: DecisionCause): CauseKey {
 
 /**
  * A row: a scenario, or one of two marks. `unconstructed`: no code builds
- * the arm (D-P14-10). `blocked-above-l1`: the cause can only happen above L1,
- * which every run is refused today (D-P14-12).
+ * the arm (D-P14-10). `blocked-until-m3`: the cause can only happen at L3,
+ * which admission refuses every run while no adapter set provides mutation
+ * testing (M3) (D-I1a-02). I1a removed D-P14-12's `blocked-above-l1` mark
+ * with the skeleton line it waited on.
  */
 type Row =
   | { readonly kind: 'scenario'; readonly run: () => Promise<void> }
   | { readonly kind: 'unconstructed' }
-  | { readonly kind: 'blocked-above-l1' };
+  | { readonly kind: 'blocked-until-m3' };
 
 interface Expected {
   readonly decidedBy: DecisionCause['decidedBy'];
@@ -312,7 +326,10 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     const { startRun } = await api();
     await startRun(await rig.request(await rig.components(), { approvedCostUsd: 0 }));
   }),
-  'admission:controls-unavailable': { kind: 'blocked-above-l1' },
+  'admission:controls-unavailable': admissionRow('admission:controls-unavailable', 'p14-controls-', async (rig) => {
+    const { startRun } = await api();
+    await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
+  }),
   'admission:policy-refused': admissionRow('admission:policy-refused', 'p14-policy-', async (rig) => {
     const { startRun } = await api();
     await startRun(await rig.request(await rig.components(), { policy: await linePolicy({}, { stationCaps: { build: 0 } }) }));
@@ -322,7 +339,52 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     const lacking = await stubDriver({ capabilities: { parallelism: 0 } });
     await startRun(await rig.request(await rig.components({ driver: lacking, reviewer: await stubDriver() })));
   }),
-  'resume:unsafe-above-l1': { kind: 'blocked-above-l1' },
+  'resume:unsafe-above-l1': {
+    kind: 'scenario',
+    run: async () => {
+      // Admitted at L2 on the real composition, then resumed on the stubs: the resume repeats admission's check.
+      await withLine('p14-resume-unsafe-', async (rig) => {
+        const { admitRun, resumeRun } = await api();
+        const admitted = await admitRun(await rig.request(await realComponents(rig), { requestedLevel: 2, policy: await realPolicy(2) }));
+        if (!admitted.ok) throw new Error(`P14: the real composition at L2 was refused (${admitted.reason}), so no resume can be refused`);
+        const components = await rig.components();
+        const outcome = await resumeRun({ runId: rig.runId, components });
+        if (outcome.ok || outcome.reason !== 'unsafe-above-l1') throw new Error(`P14: a resume on the stubs at L2 was ${outcome.ok ? 'driven' : outcome.reason}`);
+        const d = await expectDecision(rig, components.vault, 'resume:unsafe-above-l1', { decidedBy: 'admission', taskId: null, station: null });
+        if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'unsafe-above-l1' || !d.decision.refusal.components.includes('StubSandboxProvider')) {
+          throw new Error(`P14: a resume refused as unsafe was recorded as ${JSON.stringify(d.decision)}`);
+        }
+      });
+    },
+  },
+  'resume:meter-lost': {
+    kind: 'scenario',
+    run: async () => {
+      // A call whose sandbox could not be read stops the run with the reading recorded lost; the resume is refused for it (D-P13-20).
+      await withLine('p14-meter-lost-', async (rig) => {
+        const { resumeRun, startRun } = await api();
+        const base = await rig.components();
+        const unreadable: SandboxProvider = {
+          ...forwarding(base.sandbox),
+          destroy: async (h) => {
+            await base.sandbox.destroy(h);
+            throw new Error("the relay's meter could not be read");
+          },
+        };
+        await startRun(await rig.request({ ...base, sandbox: unreadable })).then(
+          () => { throw new Error('P14: a run whose meter could not be read was not stopped'); },
+          (error: unknown) => { if (!String(error).includes('could not be destroyed')) throw error; },
+        );
+        const components = await rig.components();
+        const outcome = await resumeRun({ runId: rig.runId, components });
+        if (outcome.ok || outcome.reason !== 'meter-lost') throw new Error(`P14: a resume over a lost reading was ${outcome.ok ? 'driven' : outcome.reason}`);
+        const d = await expectDecision(rig, components.vault, 'resume:meter-lost', { decidedBy: 'admission', taskId: null, station: null });
+        if (d.decision.cause !== 'resume-refused' || d.decision.refusal.reason !== 'meter-lost' || !d.decision.refusal.tasks.includes(HELLO_TASK)) {
+          throw new Error(`P14: a resume over a lost reading was recorded as ${JSON.stringify(d.decision)}`);
+        }
+      });
+    },
+  },
   'resume:refused': {
     kind: 'scenario',
     run: async () => {
@@ -411,7 +473,7 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
       });
     },
   },
-  'station:same-family-reviewer': { kind: 'blocked-above-l1' },
+  'station:same-family-reviewer': { kind: 'blocked-until-m3' },
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },
@@ -610,16 +672,15 @@ async function checkMark(key: CauseKey, row: Exclude<Row, { kind: 'scenario' }>)
       if (site !== undefined) throw new Error(`P14: ${key} is marked unconstructed and ${site.file} constructs it; give it a scenario (D-P14-10)`);
       return;
     }
-    case 'blocked-above-l1': {
-      for (const level of [2, 3] as const) {
-        await withLine(`p14-blocked-l${String(level)}-`, async (rig) => {
-          const { startRun } = await api();
-          const outcome = await startRun(await rig.request(await rig.components(), { requestedLevel: level }));
-          if (outcome.ok || outcome.reason !== 'unsafe-above-l1' || !outcome.unsafe.some((u) => u.component === 'SkeletonLine')) {
-            throw new Error(`P14: ${key} is marked blocked above L1 and an L${String(level)} run was not refused for the skeleton line; give it a scenario (D-P14-12)`);
-          }
-        });
-      }
+    case 'blocked-until-m3': {
+      // L3 on the real composition, which nothing else could refuse: still refused for mutation, so no L3 seat is filled.
+      await withLine('p14-blocked-l3-', async (rig) => {
+        const { startRun } = await api();
+        const outcome = await startRun(await rig.request(await realComponents(rig), { requestedLevel: 3, policy: await realPolicy(3) }));
+        if (outcome.ok || outcome.reason !== 'controls-unavailable' || !outcome.unavailable.includes('mutation')) {
+          throw new Error(`P14: ${key} is marked blocked until M3 and an L3 run on the real composition was not refused for mutation; give it a scenario (D-I1a-02)`);
+        }
+      });
       return;
     }
   }

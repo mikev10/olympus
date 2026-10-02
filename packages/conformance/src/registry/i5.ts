@@ -1,6 +1,6 @@
-import type { ComponentGraph } from '@olympus-ai/api';
 import type { AutonomyLevel, RunId, StationId } from '@olympus-ai/core';
-import { compileError, compileOk, pending, runtime } from '../kit/assert.js';
+import { compileError, compileOk, external, runtime } from '../kit/assert.js';
+import { ADAPTER_REFUSAL_REFUSES_L3_END_TO_END, UNANALYSED_TESTS_ESCALATE_THE_APPROVAL, UNSAFE_DECLARATION_SURVIVES_COMPOSITION } from './composition.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { withLine } from './line.js';
@@ -27,8 +27,8 @@ import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 
-/** The declaration order the entry point promises: vault, sandbox, driver, then the line itself. */
-const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'SkeletonLine'];
+/** The declaration order the graph builder promises: vault, sandbox, driver. */
+const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver'];
 
 /** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
 const CONTENDERS = 8;
@@ -71,13 +71,13 @@ export const I5: InvariantEntry = {
     compileOk({
       id: 'I5.stubs-declare-unsafe',
       title:
-        'StubVault, StubSandboxProvider, StubDriver, and SKELETON_LINE are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+        'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
       fixture: 'i5/stubs-declare-unsafe.ts',
     }),
     runtime({
       id: 'I5.unsafe-component-refused-above-l1',
       title:
-        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and SkeletonLine in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, and StubDriver in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
       run: async () => {
         await withLine('s1-hello-', async (rig) => {
           const [api, core, sandbox, vault] = await Promise.all([
@@ -87,13 +87,13 @@ export const I5: InvariantEntry = {
             import('@olympus-ai/vault'),
           ]);
           const driver = new core.StubDriver();
-          const components: ComponentGraph = {
+          const components = api.buildGraph({
             vault: new vault.StubVault(rig.dirs.artifacts),
             sandbox: new sandbox.StubSandboxProvider(),
             driver,
             reviewer: driver,
             workspaces: rig.workspaces,
-          };
+          });
 
           for (const level of [2, 3] as const) {
             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
@@ -439,43 +439,18 @@ export const I5: InvariantEntry = {
     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
-  ],
-  pending: [
-    pending({
-      id: 'I5.unsafe-declaration-survives-composition',
-      owner: 'I1',
-      reason:
-        "unsafeComponents reads each component's `unsafe` property structurally, so a wrapper around a stub that does " +
-        'not forward the property carries no declaration and passes as safe. Today that is no route above L1: ' +
-        'SKELETON_LINE is appended unconditionally, and any declaration refuses. P4 narrowed SKELETON_LINE to the ' +
-        'two controls P6 and P7 still owe, and the unit that pays the last of them deletes it, at which point a ' +
-        'wrapped stub would carry a run to L2 or L3. Before SKELETON_LINE is deleted, component provenance must be ' +
-        'compositional: trusted metadata a wrapper must propagate, a graph-construction layer that owns provenance, ' +
-        'or an equivalent; and the assertion must wrap a stub without forwarding and require the refusal. Recorded by ' +
-        'S1 (D-S1-07 known limit) and registered by P4 (D-P4-01). Owned by I1, the unit that replaces every S1 stub ' +
-        'and deletes SKELETON_LINE, rather than by whichever of P6 and P7 lands second (D-P6-01).',
-    }),
-    pending({
-      id: 'I5.adapter-refusal-refuses-l3-end-to-end',
-      owner: 'I1',
-      reason:
-        'Split from I5.adapter-refusal-enforced-at-admission (D-P6-01). An L3 run started through startRun must be ' +
-        'refused at admission naming each control its adapter set lacks. While SKELETON_LINE declares the line unsafe, ' +
-        'every run above L1 is refused for that reason first, so this assertion would pass whether or not the adapter ' +
-        'refusal is wired. I1 deletes SKELETON_LINE, so the assertion lands with it.',
-    }),
-    pending({
+    // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+    UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+    ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+    UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+    external({
       id: 'I5.unanalysed-tests-are-not-reported-clean',
-      owner: 'I1',
-      reason:
-        'A stack with no test adapter gives a tamper report whose test fields are empty, the same report a clean change '
-        + 'gives (D-P7-06): the unavailable `test` control is recorded at admission, not in the report `integrate` and the '
-        + 'review seat read. At L1 that is no route past a human, and while SKELETON_LINE stands no run is admitted above '
-        + 'L1. Once I1 deletes it, an L2 run over such a stack would carry an evidence bundle that reads as analysed and '
-        + 'clean. Before then the report, or the escalation derived from it, must say the test analysis did not run, and '
-        + 'the assertion must run a task over a repository with no vitest or jest at L2 and require that `integrate` '
-        + 'escalates or refuses. Raised by the P7 external review (codex-6, gemini-6) and recorded as D-P7-09. Owned by I1, '
-        + 'which lifts the L1 cap.',
+      title:
+        'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+      level: 'runtime',
+      package: '@olympus-ai/api',
+      file: 'test/paid/line.paid.test.ts',
     }),
   ],
+  pending: [],
 };

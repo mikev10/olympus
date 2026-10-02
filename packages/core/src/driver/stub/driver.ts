@@ -70,6 +70,11 @@ export class StubDriver implements Driver {
     return { provider: 'stub', family: 'stub' as ModelFamily, model: 'stub', version: '0' };
   }
 
+  /** No model is called, so there is nothing to relay. */
+  relayRequest(): null {
+    return null;
+  }
+
   runTask(req: TaskRequest): Promise<TaskResult> {
     const { narrative, filesChanged } = this.canned.claim;
     return Promise.resolve({

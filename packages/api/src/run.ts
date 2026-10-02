@@ -44,16 +44,17 @@ import type {
   StationId,
   StationRefusal,
   TaskGraph,
+  TaskId,
 } from '@olympus-ai/core';
 import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/adapters';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
-import { worstCaseCost, type WorstCaseCost } from './cost.js';
+import { readUsage, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { runLine, type LineContext } from './line.js';
+import { integrateEscalations, runLine, type LineContext } from './line.js';
+import type { BuiltGraph } from './graph.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
-import { acceptedEscalations } from './tamper.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
 import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
@@ -96,7 +97,8 @@ export interface RunRequest {
   readonly artifacts: RequestedArtifacts;
   /** A resolved Policy, validated again here all the same. `loadPolicyFile` is how a service reads one from disk. */
   readonly policy: Policy;
-  readonly components: ComponentGraph;
+  /** Only a graph `buildGraph` made: provenance is read when it is built, never from a graph handed in (D-A-I1-05). */
+  readonly components: BuiltGraph;
   /**
    * The worst-case cost a person approved, in dollars, or null. Above L0 it
    * must equal the figure admission computes, or the run is refused before
@@ -116,7 +118,7 @@ export interface DriveHooks {
 /** Deliberately no level, policy, or artifacts: a resume reads them from the run's admission record (A-P4-03). */
 export interface ResumeRequest {
   readonly runId: RunId;
-  readonly components: ComponentGraph;
+  readonly components: BuiltGraph;
 }
 
 export interface ApprovalRequest {
@@ -172,6 +174,13 @@ export type RunOutcome =
       readonly at: StationId;
       readonly transition: StationRefusal;
       readonly state: RunState | null;
+    }
+  | {
+      readonly ok: false;
+      /** A resume only: a call was made and what it cost was lost, so the run is not driven on top of it (A-I1a-06). */
+      readonly reason: 'meter-lost';
+      readonly tasks: readonly TaskId[];
+      readonly state: RunState;
     };
 
 /** A run admitted and recorded, not yet driven. */
@@ -181,7 +190,7 @@ export interface AdmittedRun {
   drive(hooks?: DriveHooks): Promise<RunOutcome>;
 }
 
-export type AdmissionOutcome = { readonly ok: true; readonly admitted: AdmittedRun } | Exclude<RunOutcome, { ok: true }>;
+export type AdmissionOutcome = { readonly ok: true; readonly admitted: AdmittedRun } | Exclude<RunOutcome, { ok: true } | { reason: 'meter-lost' }>;
 
 export type ApprovalOutcome =
   | { readonly ok: true; readonly state: RunState }
@@ -572,6 +581,12 @@ async function reloadExecuted(record: AdmissionRecord): Promise<Reloaded> {
  * components are the caller's, and they are held to the same safety and
  * capability checks as at admission.
  */
+/** The tasks with a call whose reading was lost, read from every usage record the Vault holds for the run, referenced or not. */
+async function lostReadings(vault: Vault, state: RunState): Promise<TaskId[]> {
+  const records = await readUsage(vault, state);
+  return [...new Set(records.filter((r) => r.reading.kind === 'lost').map((r) => r.taskId))].sort();
+}
+
 export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Promise<RunOutcome> {
   requireContractTable();
   const { vault } = req.components;
@@ -587,6 +602,12 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
   if (unsafe.length > 0 && level > 1) {
     await resumeRefused({ reason: 'unsafe-above-l1', requestedLevel: level, components: unsafe.map((u) => u.component) });
     return { ok: false, reason: 'unsafe-above-l1', requestedLevel: level, unsafe };
+  }
+  // A call whose cost was lost is not replayed on top of it: a human cancels the run (D-P13-20, D-I1a-08).
+  const lost = await lostReadings(vault, state);
+  if (lost.length > 0) {
+    await resumeRefused({ reason: 'meter-lost', tasks: lost });
+    return { ok: false, reason: 'meter-lost', tasks: lost, state };
   }
   // Not recorded: admission refuses this record before any state exists, so no run reaches a resume with it.
   const controls = admissionRefusal(record);
@@ -682,13 +703,14 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
  *
  * - `passed`: every M1 exit gate is crossed; a resume would return at once.
  * - `stopped`: the line refuses to continue, and says why.
- * - `awaiting-approval`: the next exit needs a human's approval of `key`.
+ * - `awaiting-approval`: the next exit needs a human's approval of `key`;
+ *   `escalations` says what raised it beyond its floor, if anything (A-I1a-07).
  * - `open`: there is work left, and a drive would do it.
  */
 export type RunStanding =
   | { readonly standing: 'passed' }
   | { readonly standing: 'stopped'; readonly refusal: StationRefusal }
-  | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey }
+  | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[] }
   | { readonly standing: 'open' };
 
 /** The station whose exit ends an M1 run. */
@@ -721,7 +743,7 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };
   // The same escalation the line applies, from the same bundles, so the standing and a drive agree.
   const escalations = step.from === 'integrate'
-    ? await acceptedEscalations(state, async (ref) => JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EvidenceBundle)
+    ? await integrateEscalations(vault, state, async (ref) => JSON.parse(new TextDecoder().decode(await vault.read(ref))) as EvidenceBundle)
     : { protectedPathsTouched: [], tamperFindings: [] };
   const next = transition({
     from: step.from,
@@ -734,7 +756,7 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
     tamperFindings: escalations.tamperFindings,
   });
   if (!next.ok) {
-    return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key } : { standing: 'stopped', refusal: next } };
+    return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key, escalations: next.escalations } : { standing: 'stopped', refusal: next } };
   }
   return { state, standing: M1_STATIONS.includes(next.next) ? { standing: 'open' } : { standing: 'passed' } };
 }

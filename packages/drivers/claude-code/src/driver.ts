@@ -161,7 +161,18 @@ const TIER_MODELS: Readonly<Record<ModelTier, string>> = {
  */
 const INSPECT_TIMEOUT_SECONDS = 60;
 
+/**
+ * The CLI's home. The image's own home belongs to its `node` user, uid 1000,
+ * and the line runs a sandbox as the runtime's uid, whose copies of the tree it
+ * can write (D-P6-10): on a host whose runtime is any other uid —
+ * a GitHub runner is 1001 — the CLI could not write its own state. `/tmp` is
+ * writable by every uid, and is outside the workspace, so nothing the CLI keeps
+ * there reaches the diff (D-I1a-09).
+ */
+const CLI_HOME = '/tmp/claude-home';
+
 const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
+  HOME: CLI_HOME,
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   DISABLE_AUTOUPDATER: '1',
   DISABLE_TELEMETRY: '1',
@@ -347,6 +358,11 @@ export class ClaudeCodeDriver implements Driver {
 
   declaredTools(): readonly string[] {
     return DECLARED_TOOLS;
+  }
+
+  /** The relay every sandbox this driver runs in is provisioned with (A-I1a-02). */
+  relayRequest(): Omit<RelaySpec, 'budget'> {
+    return { ...MODEL_RELAY, paths: [...MODEL_RELAY.paths] };
   }
 
   /**
@@ -545,7 +561,7 @@ export class ClaudeCodeDriver implements Driver {
       [
         'sh',
         '-c',
-        `cd ${shellQuote(this.#workdir)} && exec timeout ${String(INSPECT_TIMEOUT_SECONDS)} "$@"`,
+        `mkdir -p "$HOME" && cd ${shellQuote(this.#workdir)} && exec timeout ${String(INSPECT_TIMEOUT_SECONDS)} "$@"`,
         'driver',
         'claude',
         '--print', 'the session is read before any turn',
@@ -685,7 +701,7 @@ export class ClaudeCodeDriver implements Driver {
     // argv element the shell never re-reads. Only the working directory is
     // interpolated, and it is quoted.
     return {
-      argv: ['sh', '-c', `cd ${shellQuote(this.#workdir)} && exec "$@"`, 'driver', ...cli],
+      argv: ['sh', '-c', `mkdir -p "$HOME" && cd ${shellQuote(this.#workdir)} && exec "$@"`, 'driver', ...cli],
       env: CLI_KEY_ENVIRONMENT,
     };
   }
