@@ -1,0 +1,142 @@
+The code under review is in the file
+`2026-10-02-I1a-real-line-review-bundle.txt` (SHA-256 93f3dab0b565f993fc721005e3d58c1b9d85c67854f4a30364fd29ab040efa2e) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the integration of a software-factory runtime's real
+components into its station line, of a TypeScript project. You have the source
+and nothing else — no design documents, no author reasoning, no prior version,
+no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a coding task through fixed stations (intake, spec,
+test-design, plan, build, verify, review, integrate), with a model driver doing
+the work at build and review inside a Docker sandbox, and the runtime deriving
+every status from evidence it collects itself. Until this change the line ran
+only on stubs and refused every run above autonomy level L1 because of a
+blanket declaration of the line's own; this change composes the real
+components (a filesystem Vault, a local Docker sandbox provider, a Claude Code
+CLI driver) through a single graph builder, removes the blanket refusal, wires
+a metering model relay into every driver sandbox, records which model each call
+used, and makes several fail-closed paths concrete: an unanalysed test suite, a
+lost meter reading, and a component the builder cannot vouch for.
+
+It must hold against a capable, motivated party trying to get a run carried
+above L1 on components that cannot enforce what their contracts imply, to make
+a driver call go unmetered or be recorded against the wrong model or a lower
+cost, to bring a change to the integrate approval looking analysed and clean
+when it was not, or to reach the Vault from inside a sandbox. Assume no
+deceptive intent — only that the easiest path gets taken.
+
+That party controls what the model returns and everything a task writes in its
+workspace, the contents of the repository a run is admitted from, and when the
+runtime's process stops. The code that assembles a component graph is trusted
+but is not assumed to be careful: it may wrap a component in a delegating
+object, for logging or counting, without forwarding every property. It does
+not control the components themselves — the Vault, the sandbox provider, and
+the drivers are runtime-selected and trusted, even where a function takes one
+as an argument — and it does not control code running inside the runtime's own
+process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, at any autonomy level, in any role. Enforced at
+  the mount layer, not in application code.
+- The runtime derives status; the model never reports it. An agent's narrative
+  is a claim, stored apart from evidence; cost and the model a call used are
+  the runtime's measurements, never the driver's account.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build and re-verified at every station transition.
+- Default deny. A capability not granted in policy is unavailable; a budget
+  comes from policy.
+- Fail closed. A missing check, an absent capability, an unsupported stack, a
+  component that cannot enforce its contract, or an unknown cost is a refusal
+  or an escalation to a human — never a silent degrade and never a
+  warn-and-continue.
+- The runtime is a service; the command-line client composes nothing and
+  assumes no terminal in the runtime.
+
+The mechanisms that matter most:
+
+- The graph builder (`buildGraph`, `provenanceOf`): provenance read once when a
+  graph is built, positive (a component counts as safe only if it is an
+  instance of the real class for its slot), recorded against the frozen graph
+  object, and read back by admission and resume.
+- The relay and the usage record in the line's `runTask`: the relay request the
+  driver supplies plus the budget the policy grants, the model resolved before
+  the call, and the `lost` record written when a sandbox cannot be read.
+- The resume check for lost readings and the cost totals' exact/lower bound,
+  both read through the Vault's listing of usage records.
+- The integrate escalation: the admission record's unavailable controls turned
+  into a finding carried on the approval refusal and the run's standing.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- `integrate`'s push, pull request, and merge, the host-held git credential, the per-run report, and the canary run (I1b)
+- model-authored `spec`, `test-design`, and `plan`. A human supplies their artifacts at admission (D-A-I1-03)
+- a tier per station and escalation (R14). Tier stays per role
+- lifting the L3 refusal. L3 is M3
+- rates over finished runs (R2), parallel tasks (R4), the Codex driver, triggers, telemetry export
+- `observe` and `learn` doing anything
+
+The identifiers in that list (I1b, R14, M3, D-A-I1-03, and the like) name
+later work and recorded decisions you do not have; treat each line as a plain
+statement that the described work is absent by design. Absent work listed here
+is not a defect.
+
+THE QUESTION
+
+How would you get a run admitted or resumed above L1 on a component that
+cannot enforce its contract, get a real model call recorded as cheaper than it
+was, as exact when it was not, or against a model other than the one the
+runtime chose, bring an unanalysed or tampered change to the integrate approval
+without the approver being told, or reach the Vault from a sandbox the
+composed line provisions?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
