@@ -97,18 +97,24 @@ invariantTest(
   'I2.line-usage-is-metered-and-names-its-model',
   "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
   () => {
-    const stations = usage.map((r) => r.station);
+    // Each call is recorded pending before it is made, and every pending record was followed by the call's reading (D-I1a-12).
+    const readings = usage.filter((r) => r.reading.kind !== 'pending');
+    const calls = (rs: readonly UsageRecord[]): string[] => rs.map((r) => `${r.taskId}#${String(r.attempt)}`).sort();
+    expect(calls(usage.filter((r) => r.reading.kind === 'pending'))).toStrictEqual(calls(readings));
+    const stations = readings.map((r) => r.station);
     expect(stations).toContain('build');
     expect(stations).toContain('review');
     const expected = components.driver.resolveModel(TIER);
     for (const record of usage) {
       expect(record.collectedBy).toBe('runtime');
+      expect(record.model).toStrictEqual(expected);
+    }
+    for (const record of readings) {
       expect(record.reading).toMatchObject({ kind: 'metered', exhausted: 'none' });
       if (record.reading.kind === 'metered') {
         expect(record.reading.calls).toBeGreaterThan(0);
         expect(record.reading.costUsd).toBeGreaterThan(0);
       }
-      expect(record.model).toStrictEqual(expected);
     }
   },
 );
