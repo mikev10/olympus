@@ -70,6 +70,10 @@ export class DelegatingVault implements Vault {
     return this.inner.readDecisions(runId);
   }
 
+  readUsage(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.inner.readUsage(runId);
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     return this.inner.readRunState(runId);
   }
@@ -130,6 +134,10 @@ export class DelegatingDriver implements Driver {
 
   resolveModel(tier: ModelTier): ModelIdentity {
     return this.inner.resolveModel(tier);
+  }
+
+  relayRequest(): ReturnType<Driver['relayRequest']> {
+    return this.inner.relayRequest();
   }
 
   runTask(req: TaskRequest): Promise<TaskResult> {

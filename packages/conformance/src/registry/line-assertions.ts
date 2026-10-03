@@ -56,6 +56,7 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     recordUsage: (r) => inner.recordUsage(r),
     recordDecision: (d) => inner.recordDecision(d),
     readDecisions: (runId) => inner.readDecisions(runId),
+    readUsage: (runId) => inner.readUsage(runId),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
       hooks.beforeCommit?.(s);
@@ -572,11 +573,22 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
         },
       };
       const state = stateOf(await startRun(await rig.request({ ...base, vault })), 'I2 metered');
-      const records = await readUsage(vault, state);
+      const all = await readUsage(vault, state);
+      // Each call is recorded pending before it is made, and its reading follows; run state references the readings, and the Vault lists the pending ones by run (D-I1a-12).
+      const kinds = recorded.map((r) => (r.reading.kind === 'pending' ? 'pending' : 'read'));
+      if (JSON.stringify(kinds) !== JSON.stringify(['pending', 'read', 'pending', 'read', 'pending', 'read'])) {
+        throw new Error(`I2: the usage records were not a pending record before each call and its reading after: ${JSON.stringify(kinds)}`);
+      }
+      const isPending = (r: UsageRecord): boolean => r.reading.kind === 'pending';
+      const records = all.filter((r) => !isPending(r));
+      // Readings in run state's order; pending records in whatever order the Vault lists them.
+      const unordered = (rs: readonly UsageRecord[]): string => JSON.stringify(rs.map((r) => JSON.stringify(r)).sort());
+      if (JSON.stringify(records) !== JSON.stringify(recorded.filter((r) => !isPending(r))) || unordered(all.filter(isPending)) !== unordered(recorded.filter(isPending))) {
+        throw new Error('I2: a usage record the run holds did not come through recordUsage');
+      }
       const shape = records.map((r) => `${r.taskId}@${r.station}#${String(r.attempt)}`);
       const expected = [`${HELLO_TASK}@build#1`, `${HELLO_TASK}@build#2`, `${HELLO_REVIEW}@review#1`];
       if (JSON.stringify(shape) !== JSON.stringify(expected)) throw new Error(`I2: the usage records were ${JSON.stringify(shape)}, expected ${JSON.stringify(expected)}`);
-      if (JSON.stringify(records) !== JSON.stringify(recorded)) throw new Error('I2: a usage record in run state did not come through recordUsage');
       // Each record carries what destroy returned for the sandbox that driver call ran in, and the check sandboxes between them record nothing.
       const sandboxes = [...handles, ...reviewer.requests.map((req) => req.sandbox)];
       records.forEach((r, i) => {
@@ -586,7 +598,7 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
           throw new Error(`I2: usage record ${String(i)} does not carry its sandbox's meter reading: ${JSON.stringify(r)}`);
         }
       });
-      const totals = costTotals(records);
+      const totals = costTotals(all);
       const cost = (rs: readonly UsageRecord[]): number => rs.reduce((s, r) => s + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
       const builds = records.filter((r) => r.station === 'build');
       if (
@@ -605,6 +617,50 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
       if (totals.run.calls !== 2 || totals.run.unmetered !== 2 || totals.run.metered.calls !== 0) {
         throw new Error(`I2: an unmetered line reported ${JSON.stringify(totals.run)}`);
       }
+    });
+  },
+});
+
+export const CALL_RECORDED_BEFORE_IT_IS_MADE: LocalAssertion = runtime({
+  id: 'I2.call-recorded-before-it-is-made',
+  title:
+    'a driver call is recorded pending before it is made, so a process stop while it is in flight, which lets nothing after it reach the Vault, still leaves the call on record: the run total counts it as lost and reads as a lower bound, and a resume is refused rather than calling the driver again',
+  run: async () => {
+    const { costTotals, readUsage, resumeRun, startRun } = await api();
+    await withLine('i1a-pending-', async (rig) => {
+      const base = await rig.components();
+      let stopped = false;
+      const write = <T>(fn: () => Promise<T>): Promise<T> => (stopped ? Promise.reject(new Error('the process stopped')) : fn());
+      // Once the call begins, the process is gone: no write after it reaches the Vault.
+      const vault: Vault = {
+        ...around(base.vault, {}),
+        writeEvidence: (b) => write(() => base.vault.writeEvidence(b)),
+        recordTaskResult: (runId, r) => write(() => base.vault.recordTaskResult(runId, r)),
+        recordUsage: (r) => write(() => base.vault.recordUsage(r)),
+        recordDecision: (d) => write(() => base.vault.recordDecision(d)),
+        commitRunState: (s, ifVersion) => write(() => base.vault.commitRunState(s, ifVersion)),
+      };
+      const inner = await stubDriver();
+      const driver = {
+        ...inner,
+        runTask: (): Promise<never> => {
+          stopped = true;
+          return Promise.reject(new Error('the process stopped during the call'));
+        },
+      };
+      await startRun(await rig.request({ ...base, vault, driver })).then(
+        () => { throw new Error('I2: a run whose process stopped during a driver call kept going'); },
+        (error: unknown) => { if (!String(error).includes('the process stopped')) throw error; },
+      );
+      const components = await rig.components();
+      const totals = costTotals(await readUsage(components.vault, await components.vault.readRunState(rig.runId)));
+      if (totals.run.calls !== 1 || totals.run.lost !== 1 || totals.run.bound !== 'lower') {
+        throw new Error(`I2: a call in flight at a process stop left the total ${JSON.stringify(totals.run)}, not one lost call and a lower bound`);
+      }
+      const replay = await stubDriver();
+      const outcome = await resumeRun({ runId: rig.runId, components: await rig.components({ driver: replay }) });
+      if (outcome.ok || outcome.reason !== 'meter-lost') throw new Error(`I2: a resume over a call in flight at a process stop was ${outcome.ok ? 'driven' : outcome.reason}`);
+      if (replay.requests.length !== 0) throw new Error('I2: the resume called the driver again over a call nothing read');
     });
   },
 });

@@ -47,6 +47,7 @@ export class StubVault implements Vault {
   private readonly locks = new Map<RunId, LockManifest>();
   private readonly states = new Map<RunId, RunState>();
   private readonly decisions = new Map<RunId, VaultRef[]>();
+  private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
@@ -122,7 +123,15 @@ export class StubVault implements Vault {
 
   recordUsage(r: UsageRecord): Promise<VaultRef> {
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: a usage record is collected by the runtime, or it is not recorded"));
-    return Promise.resolve(this.store(r.runId, 'usage', r));
+    const ref = this.store(r.runId, 'usage', r);
+    const refs = this.usage.get(r.runId) ?? [];
+    if (!refs.some((u) => u.hash === ref.hash)) refs.push(ref);
+    this.usage.set(r.runId, refs);
+    return Promise.resolve(ref);
+  }
+
+  readUsage(runId: RunId): Promise<readonly VaultRef[]> {
+    return Promise.resolve([...(this.usage.get(runId) ?? [])]);
   }
 
   recordDecision(d: EnforcementDecision): Promise<VaultRef> {

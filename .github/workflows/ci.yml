@@ -188,6 +188,63 @@ jobs:
           include-hidden-files: true
           retention-days: 30
 
+      # The composed line's paid assertions (D-I1a-07): one L2 run on the
+      # production composition, under the same rules as the driver's above —
+      # the run-driver label, one run per tree, a merge reusing the pull
+      # request's report. The key is the api package's tree, which takes in
+      # the driver, since api depends on it.
+      - name: Line tree hash
+        id: line-tree
+        run: echo "hash=$(node scripts/driver-report-key.ts packages/api)" >> "$GITHUB_OUTPUT"
+
+      - name: Line report from an earlier run of the same tree
+        id: line-report
+        uses: actions/cache/restore@v6
+        with:
+          path: packages/api/.conformance/run.json
+          key: line-report-${{ steps.line-tree.outputs.hash }}
+
+      - name: Line report from the merged pull request's run
+        id: line-pr-report
+        if: github.event_name == 'push' && steps.line-report.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HASH: ${{ steps.line-tree.outputs.hash }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/${{ github.repository }}/actions/artifacts?name=line-report-${HASH}&per_page=100"             --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == .workflow_run.repository_id)] | first | .id // empty')"
+          if [ -z "$id" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/actions/artifacts/${id}/zip" > "$RUNNER_TEMP/line-report.zip"
+          mkdir -p packages/api/.conformance
+          unzip -o "$RUNNER_TEMP/line-report.zip" -d packages/api/.conformance
+          echo "::notice::line assertions not re-run; reusing the merged pull request's report for tree ${HASH}"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+      - name: Line assertions, which write the api package's conformance run report
+        if: steps.line-report.outputs.cache-hit != 'true' && steps.line-pr-report.outputs.found != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: pnpm --filter @olympus-ai/api exec vitest run --config vitest.config.paid.ts
+
+      - name: Keep the line report for the next run of the same tree
+        if: steps.line-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        uses: actions/cache/save@v6
+        with:
+          path: packages/api/.conformance/run.json
+          key: line-report-${{ steps.line-tree.outputs.hash }}
+
+      - name: Keep the line report for the merge
+        if: github.event_name == 'pull_request' && steps.line-report.outputs.cache-hit != 'true' && contains(github.event.pull_request.labels.*.name, 'run-driver')
+        uses: actions/upload-artifact@v4
+        with:
+          name: line-report-${{ steps.line-tree.outputs.hash }}
+          path: packages/api/.conformance/run.json
+          include-hidden-files: true
+          retention-days: 30
+
       # Every package but the driver, which the step above already ran: its
       # assertions call a real model, and a second pass bills every one of
       # them again to prove nothing the first did not. The report it wrote is
@@ -210,11 +267,17 @@ jobs:
       # thing in the log: every invariant's state, every pending entry, and
       # the unit that owes it. A `missing` invariant fails this step.
       - name: Conformance registry
-        if: steps.driver-report.outputs.cache-hit == 'true' || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: (steps.driver-report.outputs.cache-hit == 'true' && steps.line-report.outputs.cache-hit == 'true') || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: pnpm conformance
 
       - name: Driver suite not yet run for this tree
         if: steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: |
           echo "::error::the driver's real-model assertions have not run for tree ${{ steps.driver-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model once."
+          exit 1
+
+      - name: Line suite not yet run for this tree
+        if: steps.line-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        run: |
+          echo "::error::the composed line's real-model assertions have not run for tree ${{ steps.line-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model twice."
           exit 1

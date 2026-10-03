@@ -78,9 +78,10 @@ import type {
 import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
-import type { EgressPolicy, MeterReading, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageRecord } from '@olympus-ai/vault';
-import type { ComponentGraph, RunOutcome } from './run.js';
+import type { EgressPolicy, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { BuiltGraph } from './graph.js';
+import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
 import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
@@ -103,7 +104,7 @@ export interface LineContext {
   readonly artifacts: AdmissionRecord['artifacts'];
   readonly graph: TaskGraph;
   readonly checks: readonly CheckSpec[];
-  readonly components: ComponentGraph;
+  readonly components: BuiltGraph;
   /** The digest of the base the runtime snapshotted at admission. */
   readonly baseTreeSha256: string;
   /** Replaced by every commit. */
@@ -169,7 +170,7 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
       case 'exit': {
         const tampered = locksHeldLeaving(step.from) ? await tamperedPaths(ctx) : [];
         // Tamper findings escalate the gate `protectedPathPolicy` names, and only that one.
-        const escalations = step.from === 'integrate' ? await acceptedEscalations(ctx.state, (ref) => readBundle(ctx, ref)) : NO_ESCALATIONS;
+        const escalations = step.from === 'integrate' ? await integrateEscalations(ctx.components.vault, ctx.state, (ref) => readBundle(ctx, ref)) : NO_ESCALATIONS;
         const next = transition({
           from: step.from,
           to: step.to,
@@ -487,20 +488,26 @@ export function egressFor(network: { egress: 'none' | string[] }): EgressPolicy 
  * checks run or a reviewer reads, so the checks get a tree they cannot modify
  * (I3). The container runs as the user the store made the tree writable by.
  */
-function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy): SandboxSpec {
+/**
+ * A sandbox over one tree and nothing else: no other mount, so the Vault is
+ * mounted nowhere (I1). The image and limits are the host's profile
+ * (D-I1a-01); a graph built with none — the stub sandbox's — names no image,
+ * and a provider that runs images refuses it.
+ */
+function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy, image: 'build' | 'check', wallClockMs: number): SandboxSpec {
+  const { profile } = ctx.components;
   return {
-    image: 'none',
+    image: profile === null ? 'none' : image === 'build' ? profile.buildImage : profile.checkImage,
     mounts: { workspace: { source, target: '/workspace', mode }, others: [] },
     egress,
-    limits: { cpus: 0, memoryMb: 0, pids: 0, wallClockMs: 0 },
+    limits: profile === null ? { cpus: 0, memoryMb: 0, pids: 0, wallClockMs } : { ...profile.limits, wallClockMs },
     user: { ...ctx.components.workspaces.user },
   };
 }
 
 /** One check's sandbox: the verified tree read-only, no network, and the check's own timeout as its wall clock. */
 function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec): SandboxSpec {
-  const spec = workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] });
-  return { ...spec, limits: { ...spec.limits, wallClockMs: check.timeoutMs } };
+  return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs);
 }
 
 function scopeFor(ctx: LineContext, task: Task) {
@@ -530,10 +537,23 @@ async function runTask(
   const scope = scopeFor(ctx, task);
   const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
   let handle: SandboxHandle;
+  let model: ModelIdentity;
   try {
-    handle = await sandbox.provision(workspaceOnly(ctx, workspace, mode, egressFor(scope.network)));
+    // The runtime's resolution of the tier the scope names, taken before the call: the record's model is never the driver's account (I2, A-I1a-01).
+    model = driver.resolveModel(scope.tier);
+    const spec = workspaceOnly(ctx, workspace, mode, egressFor(scope.network), 'build', scope.budget.maxWallClockMs);
+    // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02).
+    const relay = driver.relayRequest();
+    handle = await sandbox.provision(relay === null ? spec : { ...spec, relay: { ...relay, budget: { maxTokens: scope.budget.maxTokens, maxCostUsd: scope.budget.maxCostUsd } } });
   } catch (error) {
     return { ok: false, error };
+  }
+  // The call is recorded before it is made: a process stop during it leaves this record and nothing after it, and a resume finds it (D-I1a-12).
+  try {
+    await recordPending(ctx, task, model);
+  } catch (error) {
+    await sandbox.destroy(handle).catch(() => undefined);
+    throw error;
   }
   let outcome: { ok: true; result: TaskResult } | { ok: false; error: unknown };
   try {
@@ -558,6 +578,8 @@ async function runTask(
   try {
     teardown = await sandbox.destroy(handle);
   } catch (error) {
+    // The call was made and what it cost is unknown: recorded as lost before the run stops, so a resume finds it and refuses (D-P13-20).
+    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model);
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
       { cause: error },
@@ -566,7 +588,7 @@ async function runTask(
   const site = { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station };
   await recordEgress(site, teardown.egress);
   const { meter } = teardown;
-  const usage = await recordUsage(ctx, task, meter);
+  const usage = await recordUsage(ctx, task, meter, model);
   // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
@@ -575,18 +597,31 @@ async function runTask(
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
-async function recordUsage(ctx: LineContext, task: Task, reading: MeterReading): Promise<VaultRef> {
-  const record: UsageRecord = {
+async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): Promise<VaultRef> {
+  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model));
+  await commit(ctx, { usage: ref });
+  return ref;
+}
+
+/**
+ * A call about to be made, stored and not referenced from run state: the
+ * Vault lists it by run (A-I1a-05), and a state a resume can start from never
+ * holds a call that has not begun (D-I1a-12).
+ */
+async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity): Promise<void> {
+  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model));
+}
+
+function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): UsageRecord {
+  return {
     runId: ctx.run.id,
     taskId: task.id,
     station: ctx.state.station,
     attempt: attemptsOf(ctx.state, task).starts,
+    model,
     reading,
     collectedBy: 'runtime',
   };
-  const ref = await ctx.components.vault.recordUsage(record);
-  await commit(ctx, { usage: ref });
-  return ref;
 }
 
 function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
@@ -598,6 +633,32 @@ function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
   const { spec, acceptanceTests, verificationManifest, taskGraph } = ctx.artifacts;
   return [...spec, ...acceptanceTests, verificationManifest, taskGraph];
 }
+
+/**
+ * What escalates the `integrate` exit: the tamper reports of the accepted
+ * work, and a test analysis that never ran. A stack with no test adapter gives
+ * a report whose test fields are empty, the report a clean change gives, so
+ * the admission record — read from the Vault, not restated by a caller — is
+ * what says the analysis did not run (D-A-I1-06).
+ */
+export async function integrateEscalations(
+  vault: Vault, state: RunState, bundleAt: (ref: VaultRef) => Promise<EvidenceBundle>,
+): Promise<{ protectedPathsTouched: readonly string[]; tamperFindings: readonly string[] }> {
+  const accepted = await acceptedEscalations(state, bundleAt);
+  const record = JSON.parse(decode(await vault.read(state.admission))) as Partial<AdmissionRecord> | null;
+  const controls: unknown = record?.unavailableControls;
+  if (!Array.isArray(controls) || !controls.every((c) => typeof c === 'string')) {
+    throw new Error(`line: the admission record of run ${state.runId} names no unavailable controls, so whether its tests were analysed is unknown`);
+  }
+  if (!controls.includes('test')) return accepted;
+  return {
+    protectedPathsTouched: accepted.protectedPathsTouched,
+    tamperFindings: [...accepted.tamperFindings, UNANALYSED_TESTS],
+  };
+}
+
+/** The finding an unanalysed suite escalates under. */
+export const UNANALYSED_TESTS = 'test analysis did not run: the adapter set has no test framework, so an empty tamper report is not a clean one (D-A-I1-06)';
 
 /** A bundle read back from the Vault, checked for the fields the line builds on. */
 async function readBundle(ctx: LineContext, ref: VaultRef): Promise<EvidenceBundle> {

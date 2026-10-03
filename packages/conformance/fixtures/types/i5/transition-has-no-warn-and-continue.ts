@@ -32,14 +32,15 @@ export const lockTamper: StationTransition = {
 export const unsafe: StationTransition = {
   ok: false,
   reason: 'unsafe-above-l1',
-  components: ['StubVault', 'SkeletonLine'],
-  message: 'L2 requested; StubVault and SkeletonLine cannot enforce their contracts',
+  components: ['StubVault', 'StubDriver'],
+  message: 'L2 requested; StubVault and StubDriver cannot enforce their contracts',
 };
 
 export const approvalRequired: StationTransition = {
   ok: false,
   reason: 'approval-required',
   key: 'integrate:2',
+  escalations: [],
   message: 'integrate at L2 needs a human approval, and none is recorded',
 };
 

@@ -10,6 +10,7 @@
  */
 export * from './cost.js';
 export * from './gate.js';
+export * from './graph.js';
 export * from './safety.js';
 export * from './run.js';
 export * from './tamper.js';
@@ -25,6 +26,7 @@ export {
   type ContainerUser,
   type WorkspaceStore,
 } from './workspace.js';
-export { egressFor } from './line.js';
+export { egressFor, integrateEscalations, UNANALYSED_TESTS } from './line.js';
 export * from './http/server.js';
+export * from './host/compose.js';
 export type * from './http/wire.js';

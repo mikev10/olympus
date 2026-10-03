@@ -154,7 +154,9 @@ export function transition(input: TransitionInput): StationTransition {
     return { ok: false, reason: 'approval-blocked', key, message: `the exit from ${input.from} at L${String(input.level)} is blocked by policy; the run does not advance` };
   }
   if (approval === 'human-required' && !input.grants.some((g) => g.key === key && g.usedAt === null)) {
-    return { ok: false, reason: 'approval-required', key, message: `the exit from ${input.from} at L${String(input.level)} needs a human approval, and none is recorded` };
+    const escalations = [...input.protectedPathsTouched.map((path) => `protected path touched: ${path}`), ...input.tamperFindings];
+    const why = escalations.length === 0 ? '' : `; escalated by: ${escalations.join('; ')}`;
+    return { ok: false, reason: 'approval-required', key, escalations, message: `the exit from ${input.from} at L${String(input.level)} needs a human approval, and none is recorded${why}` };
   }
   return { ok: true, next: input.to, spends: approval === 'human-required' ? key : null };
 }

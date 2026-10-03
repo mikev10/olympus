@@ -3,10 +3,10 @@
  * implement, and the only shape through which a model's output re-enters the
  * runtime.
  */
-import type { SandboxHandle } from '@olympus-ai/sandbox';
+import type { RelaySpec, SandboxHandle } from '@olympus-ai/sandbox';
 import type { ModelTier, RoleId, TaskId } from '../run/types.js';
 
-export const DRIVER_CONTRACT_VERSION = '1.0.0';
+export const DRIVER_CONTRACT_VERSION = '1.1.0';
 
 /**
  * I6: reviewers never share the author's model family. Branded so a driver
@@ -133,6 +133,14 @@ export interface Driver {
    */
   declaredTools(): readonly string[];
   resolveModel(tier: ModelTier): ModelIdentity;
+  /**
+   * The model relay a sandbox this driver runs in must be provisioned with,
+   * less its budget: the budget is the task's, and whoever provisions the
+   * sandbox adds it (A-I1a-02, D-P12-05). `null` for a driver that calls no
+   * model through a relay. Its calls are unmetered, so the line runs no task
+   * on it above L1.
+   */
+  relayRequest(): Omit<RelaySpec, 'budget'> | null;
   runTask(req: TaskRequest): Promise<TaskResult>;
   spawnSubagent?(role: RoleId, req: TaskRequest): Promise<TaskResult>;
   steer?(taskId: TaskId, message: string): Promise<void>;   // runtime-only; never a human channel

@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { createApiServer, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
+import { buildGraph, createApiServer, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
 import { StubDriver } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
@@ -68,13 +68,13 @@ beforeEach(async () => {
   const user = process.getuid === undefined ? { uid: 0, gid: 0 } : undefined;
   const store = join(root, 'store');
   server = createApiServer({
-    components: {
+    components: buildGraph({
       vault: new StubVault(workspace),
       sandbox: new StubSandboxProvider(),
       driver,
       reviewer: driver,
       workspaces: localWorkspaceStore(user === undefined ? { root: store } : { root: store, user }),
-    },
+    }),
     token: TOKEN,
     principal: 'cli-test',
     policyFile,
@@ -142,7 +142,7 @@ describe('the CLI is a client of a remote API URL', () => {
     expect(events.out.some((line) => line.startsWith('state {'))).toBe(true);
 
     const waiting = await settle(run.runId);
-    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1' });
+    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] });
 
     const approved = await cli(remote('approve', run.runId, 'integrate:1'));
     expect(approved.code).toBe(0);

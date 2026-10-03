@@ -20,7 +20,9 @@ const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models
 // Measured 2026-09-21: Gemini applies its own default output limit, and a
 // long review that reaches it comes back cut off mid-sentence. Set explicitly
 // so a truncated reply can never be mistaken for a short-but-complete one.
-const MAX_OUTPUT_TOKENS = 32_768;
+// Set to the model's ceiling: thinking tokens count against this limit, and
+// on 2026-10-02 the I1a review spent 31458 of 32768 thinking and was cut off.
+const MAX_OUTPUT_TOKENS = 65_536;
 
 export interface GeminiPart {
   readonly text: string;

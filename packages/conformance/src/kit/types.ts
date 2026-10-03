@@ -32,7 +32,7 @@ export const INVARIANTS: Readonly<Record<InvariantId, string>> = {
  */
 export type UnitId =
   | 'S1' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10' | 'P12'
-  | 'P14' | 'I1' | 'M2' | 'M3';
+  | 'P14' | 'R14' | 'I1' | 'M2' | 'M3';
 
 export const UNITS: Readonly<Record<UnitId, string>> = {
   S1: 'Walking skeleton',
@@ -48,6 +48,7 @@ export const UNITS: Readonly<Record<UnitId, string>> = {
   P10: 'Sandbox egress allowlist',
   P12: 'Credential at the egress layer',
   P14: 'Enforcement record',
+  R14: 'Model tier per station and escalation',
   I1: 'Integration + M1 proof',
   M2: 'Milestone 2 (compiler, Codex driver, trigger framework)',
   M3: 'Milestone 3 (learning, review panel, mutation testing, L3 canary)',

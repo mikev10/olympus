@@ -94,7 +94,12 @@ export type StationRefusal =
   | { ok: false; reason: 'unsafe-above-l1'; components: string[]; message: string }
   | { ok: false; reason: 'capability-missing'; station: StationId; capability: DriverCapability; message: string }
   | { ok: false; reason: 'approval-blocked'; key: ApprovalKey; message: string }
-  | { ok: false; reason: 'approval-required'; key: ApprovalKey; message: string }
+  /**
+   * `escalations`: what raised the exit to a human beyond its own floor and
+   * the policy cell — each protected path touched and each tamper finding —
+   * so the person approving is told why (A-I1a-07). Empty when nothing did.
+   */
+  | { ok: false; reason: 'approval-required'; key: ApprovalKey; escalations: string[]; message: string }
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
   | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string }
   | { ok: false; reason: 'cancelled'; cancelledBy: string; cancelledAt: string; message: string }

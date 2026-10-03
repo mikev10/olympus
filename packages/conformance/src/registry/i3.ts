@@ -13,6 +13,7 @@ import {
   TAMPER_FINDING_ESCALATES_INTEGRATE,
 } from './tamper.js';
 import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
+import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -210,6 +211,8 @@ export const I3: InvariantEntry = {
     TAMPER_FINDING_ESCALATES_INTEGRATE,
     SKIP_MARKER_IS_A_FINDING,
     CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK,
+    // I1a: on the composed line, a task that rewrites a locked test fails the run.
+    COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS,
   ],
   pending: [
     pending({

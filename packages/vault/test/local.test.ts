@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
+import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { LocalVault, type AdmissionRecord, type EvidenceBundle } from '../src/index.js';
@@ -217,12 +217,13 @@ describe('admission and task results', () => {
   });
 });
 
-describe('usage records (A-P13-03)', () => {
+describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
   const record = {
     runId,
     taskId: 'hello' as TaskId,
     station: 'build' as const,
     attempt: 1,
+    model: { provider: 'anthropic', family: 'claude' as ModelFamily, model: 'sonnet', version: '1' },
     reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
     collectedBy: 'runtime' as const,
   };
@@ -239,6 +240,28 @@ describe('usage records (A-P13-03)', () => {
     await expect(vault.recordUsage({ ...record, attempt: 0 })).rejects.toThrow(/attempt/);
     await expect(vault.recordUsage({ ...record, reading: { ...record.reading, costUsd: Number.NaN } })).rejects.toThrow(/costUsd/);
     await expect(vault.recordUsage({ ...record, reading: { kind: 'guessed' } } as never)).rejects.toThrow(/kind/);
+  });
+
+  test('refuses a record that names no model the call ran on', async () => {
+    const { model: _omitted, ...unnamed } = record;
+    await expect(vault.recordUsage(unnamed as never)).rejects.toThrow(/model/);
+    await expect(vault.recordUsage({ ...record, model: { ...record.model, model: '' } })).rejects.toThrow(/model/);
+  });
+
+  test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' } })).resolves.toMatchObject({ kind: 'usage' });
+  });
+
+  test('stores a lost reading that says why, and refuses one that does not', async () => {
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: 'the sandbox could not be read' } })).resolves.toMatchObject({ kind: 'usage' });
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: '' } })).rejects.toThrow(/lost/);
+  });
+
+  test('lists every usage record stored for the run, and none for a run with none', async () => {
+    expect(await vault.readUsage(runId)).toEqual([]);
+    const first = await vault.recordUsage(record);
+    const second = await vault.recordUsage({ ...record, attempt: 2 });
+    expect([...(await vault.readUsage(runId))].map((r) => r.hash).sort()).toEqual([first.hash, second.hash].sort());
   });
 });
 

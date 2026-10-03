@@ -1,9 +1,9 @@
-import { compileError, external } from '../kit/assert.js';
+import { compileError, external, pending } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
-import { COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 
 /** I2: The runtime derives status; the model never reports it. */
@@ -52,6 +52,8 @@ export const I2: InvariantEntry = {
     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
     // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
     COST_IS_RUNTIME_METERED,
+    // I1a: a call is on record before it is made, so a process stop during it is a lost reading, not a silence (D-I1a-12).
+    CALL_RECORDED_BEFORE_IT_IS_MADE,
     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
     ENFORCEMENT_DECISIONS_RECORDED,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
@@ -62,6 +64,28 @@ export const I2: InvariantEntry = {
       package: '@olympus-ai/driver-claude-code',
       file: 'test/invariants.test.ts',
     }),
+    // I1a's paid run: on the composed host, every real call is metered by the relay the line provisioned, and its record names the runtime's model.
+    external({
+      id: 'I2.line-usage-is-metered-and-names-its-model',
+      title:
+        "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
+      level: 'runtime',
+      package: '@olympus-ai/api',
+      file: 'test/paid/line.paid.test.ts',
+    }),
   ],
-  pending: [],
+  pending: [
+    pending({
+      id: 'I2.relay-bound-to-tier-model',
+      owner: 'R14',
+      reason:
+        "A usage record names the model the runtime resolved the scope's tier to, but nothing makes the call use it: "
+        + '`relayRequest()` returns one relay for every tier, and the relay prices each request by the model that '
+        + 'request names, so a task with a command tool can call any priced model under the tier\'s alias. The cost '
+        + 'is still what the relay counted, against the task\'s budget; what is not runtime-derived is which model '
+        + 'served the call. Closing it means the relay refuses a model outside the tier, which needs the tier\'s '
+        + 'alias resolved to the concrete model ids the CLI sends. Owner is R14, where model selection per station '
+        + 'and its enforcement are decided. Raised by I1a\'s external review (codex-2); D-I1a-13.',
+    }),
+  ],
 };

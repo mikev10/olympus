@@ -14,11 +14,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { isAbsolute } from 'node:path';
 import { isApprovalKey, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
 import { loadPolicyFile } from '../policy-file.js';
-import { admitRun, approveStation, cancelRun, resumeRun, runStanding, type ComponentGraph, type DriveHooks, type RunOutcome } from '../run.js';
+import { admitRun, approveStation, cancelRun, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
+import type { BuiltGraph } from '../graph.js';
 import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
-  readonly components: ComponentGraph;
+  readonly components: BuiltGraph;
   /** The local token every request must bear. At least 32 characters; a shorter one is refused at construction. */
   readonly token: string;
   /** Who a request bearing the token is, as approvals and cancellations record it. */

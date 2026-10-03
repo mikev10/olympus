@@ -11,7 +11,7 @@
  */
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ComponentGraph, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
+import type { BuiltGraph, GraphParts, RunOutcome, RunRequest, WorkspaceStore } from '@olympus-ai/api';
 import type {
   ApprovalKey,
   ApprovalOutcome,
@@ -36,6 +36,12 @@ import type {
 import type { Vault } from '@olympus-ai/vault';
 import { workspaceRoot } from '../kit/workspace.js';
 import { withVaultDirs, type VaultDirs } from './local-vault.js';
+
+/** `parts` as a built graph: itself when `buildGraph` already made it, else built now. */
+export async function built(parts: GraphParts): Promise<BuiltGraph> {
+  const { buildGraph, isBuilt } = await import('@olympus-ai/api');
+  return isBuilt(parts) ? parts : buildGraph(parts);
+}
 
 /** The fixture the api package's own tests drive: a spec, an acceptance file, a one-check manifest, and a graph of one build task and its review. */
 export const HELLO_FIXTURE = join('packages', 'api', 'test', 'fixtures', 'hello');
@@ -127,6 +133,7 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
     capabilities: () => ({ ...inner.capabilities(), ...options.capabilities }),
     declaredTools: () => inner.declaredTools(),
     resolveModel,
+    relayRequest: () => inner.relayRequest(),
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       requests.push(req);
       if (options.failing === true) throw new Error('the model provider is unreachable');
@@ -147,9 +154,10 @@ export interface LineRig {
   readonly runId: RunId;
   /** The runtime's trees for the run: beside the Vault and the workspace, inside neither. */
   readonly workspaces: WorkspaceStore;
-  /** A fresh component graph over the same store, as a new process would open it. */
-  components(overrides?: Partial<ComponentGraph>): Promise<ComponentGraph>;
-  request(components: ComponentGraph, overrides?: Partial<RunRequest>): Promise<RunRequest>;
+  /** A fresh component graph over the same store, as a new process would open it, built through `buildGraph`. */
+  components(overrides?: Partial<GraphParts>): Promise<BuiltGraph>;
+  /** `components` is built here when it is not already, so an assertion can override one slot of a built graph by spreading it. */
+  request(components: GraphParts, overrides?: Partial<RunRequest>): Promise<RunRequest>;
   /** A run state, read back from the store. */
   state(): Promise<RunState>;
 }
@@ -182,9 +190,10 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
       components: async (overrides = {}) => {
         const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
         const driver = await stubDriver();
-        return { vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces, ...overrides };
+        return built({ vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces, ...overrides });
       },
-      request: async (components, overrides = {}) => {
+      request: async (parts, overrides = {}) => {
+        const components = await built(parts);
         const req: RunRequest = {
           runId,
           baseCommit: '0'.repeat(40),

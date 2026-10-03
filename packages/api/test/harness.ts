@@ -29,7 +29,7 @@ import {
 import type { CheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
-import { localWorkspaceStore, worstCaseCost, type ComponentGraph, type RunRequest, type WorkspaceStore } from '../src/index.js';
+import { buildGraph, isBuilt, localWorkspaceStore, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { DelegatingDriver } from './wrappers.js';
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
@@ -166,9 +166,15 @@ export class ChosenDriver extends DelegatingDriver {
   }
 }
 
-export function stubComponents(workspace: string, overrides: Partial<ComponentGraph> = {}): ComponentGraph {
+/** `parts` as a built graph: itself when it already is one, else built now. */
+export function built(parts: GraphParts): BuiltGraph {
+  return isBuilt(parts) ? parts : buildGraph(parts);
+}
+
+/** The stub graph, built: every run on it is refused above L1 for the stubs' own declarations. */
+export function stubComponents(workspace: string, overrides: Partial<GraphParts> = {}): BuiltGraph {
   const driver = new StubDriver();
-  return { vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces: storeFor(workspace), ...overrides };
+  return buildGraph({ vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces: storeFor(workspace), ...overrides });
 }
 
 /**
@@ -177,7 +183,8 @@ export function stubComponents(workspace: string, overrides: Partial<ComponentGr
  * as it stands when the request is made; a graph a test cannot resolve gets
  * null, and admission refuses for the reason that makes it unresolvable.
  */
-export function runRequest(runId: RunId, workspace: string, components: ComponentGraph, overrides: Partial<RunRequest> = {}): RunRequest {
+/** `components` is built here when it was not already, so a test can override one slot of a built graph by spreading it. */
+export function runRequest(runId: RunId, workspace: string, parts: GraphParts, overrides: Partial<RunRequest> = {}): RunRequest {
   const req: RunRequest = {
     runId,
     baseCommit: BASE_COMMIT,
@@ -185,7 +192,7 @@ export function runRequest(runId: RunId, workspace: string, components: Componen
     workspace,
     artifacts: ARTIFACTS,
     policy: policy(),
-    components,
+    components: built(parts),
     approvedCostUsd: null,
     ...overrides,
   };
