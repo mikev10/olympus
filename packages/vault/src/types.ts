@@ -104,8 +104,13 @@ export interface UsageRecord {
  * What the relay counted, or `lost`: the call was made and its sandbox could
  * not be destroyed and read, so what it cost is unknown (A-I1a-04). A run
  * holding a lost reading is not resumed (D-P13-20).
+ *
+ * `pending` is written before the call is made, and a terminal reading for the
+ * same task and attempt follows it. A `pending` with no terminal reading is a
+ * call a process stop took before anything could be read, and is lost
+ * (D-I1a-12).
  */
-export type UsageReading = MeterReading | { readonly kind: 'lost'; readonly detail: string };
+export type UsageReading = MeterReading | { readonly kind: 'lost'; readonly detail: string } | { readonly kind: 'pending' };
 
 /**
  * A refusal returned before a run's first state, as admission returned it

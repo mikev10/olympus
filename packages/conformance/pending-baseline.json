@@ -2,7 +2,7 @@
   "$comment": "The pending ratchet. Each number is the most pending entries that invariant or capability claim may carry in src/registry. The meta-test fails when a count exceeds its number. A decrease is always allowed and shows as a delta in the report; lower the number in the same pull request that pays the work down. Raising a number is a deliberate edit here, reviewed in the diff, never a side effect of adding an entry.",
   "invariants": {
     "I1": 0,
-    "I2": 0,
+    "I2": 1,
     "I3": 2,
     "I4": 0,
     "I5": 0,

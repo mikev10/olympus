@@ -548,6 +548,13 @@ async function runTask(
   } catch (error) {
     return { ok: false, error };
   }
+  // The call is recorded before it is made: a process stop during it leaves this record and nothing after it, and a resume finds it (D-I1a-12).
+  try {
+    await recordPending(ctx, task, model);
+  } catch (error) {
+    await sandbox.destroy(handle).catch(() => undefined);
+    throw error;
+  }
   let outcome: { ok: true; result: TaskResult } | { ok: false; error: unknown };
   try {
     const request: TaskRequest = {
@@ -591,7 +598,22 @@ async function runTask(
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
 async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): Promise<VaultRef> {
-  const record: UsageRecord = {
+  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model));
+  await commit(ctx, { usage: ref });
+  return ref;
+}
+
+/**
+ * A call about to be made, stored and not referenced from run state: the
+ * Vault lists it by run (A-I1a-05), and a state a resume can start from never
+ * holds a call that has not begun (D-I1a-12).
+ */
+async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity): Promise<void> {
+  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model));
+}
+
+function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): UsageRecord {
+  return {
     runId: ctx.run.id,
     taskId: task.id,
     station: ctx.state.station,
@@ -600,9 +622,6 @@ async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, 
     reading,
     collectedBy: 'runtime',
   };
-  const ref = await ctx.components.vault.recordUsage(record);
-  await commit(ctx, { usage: ref });
-  return ref;
 }
 
 function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {

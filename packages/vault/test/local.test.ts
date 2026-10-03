@@ -248,6 +248,10 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     await expect(vault.recordUsage({ ...record, model: { ...record.model, model: '' } })).rejects.toThrow(/model/);
   });
 
+  test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' } })).resolves.toMatchObject({ kind: 'usage' });
+  });
+
   test('stores a lost reading that says why, and refuses one that does not', async () => {
     await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: 'the sandbox could not be read' } })).resolves.toMatchObject({ kind: 'usage' });
     await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: '' } })).rejects.toThrow(/lost/);

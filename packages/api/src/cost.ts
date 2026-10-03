@@ -11,8 +11,11 @@
  * is unknown, so a total counts such calls separately and its figures cover
  * the metered calls alone. A call whose usage the relay could not read is
  * charged what it could count, and a call whose reading was lost is charged
- * nothing; both make a total a lower bound (D-P13-19, A-I1a-04). `bound`
- * says which a total is, so a consumer does not have to work it out.
+ * nothing; both make a total a lower bound (D-P13-19, A-I1a-04). A `pending`
+ * reading that no terminal reading followed is a call a process stop took,
+ * and is counted as lost; one that was followed is not a call of its own
+ * (D-I1a-12). `bound` says which a total is, so a consumer does not have to
+ * work it out.
  */
 import { isAgentStation, maxStarts, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
 import type { Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
@@ -65,7 +68,8 @@ const EMPTY: UsageTotal = {
 function add(total: UsageTotal, record: UsageRecord): UsageTotal {
   const r = record.reading;
   if (r.kind === 'unmetered') return { ...total, calls: total.calls + 1, unmetered: total.unmetered + 1, bound: 'lower' };
-  if (r.kind === 'lost') return { ...total, calls: total.calls + 1, lost: total.lost + 1, bound: 'lower' };
+  // A pending reading reaches here only when nothing followed it (`costTotals`): the call was made and nothing read it.
+  if (r.kind === 'lost' || r.kind === 'pending') return { ...total, calls: total.calls + 1, lost: total.lost + 1, bound: 'lower' };
   const m = total.metered;
   const unreadable = r.exhausted === 'unreadable';
   return {
@@ -86,12 +90,25 @@ function add(total: UsageTotal, record: UsageRecord): UsageTotal {
   };
 }
 
+/** The call a reading stands for: a task, and which of its starts made the call. */
+function callOf(record: UsageRecord): string {
+  return `${record.taskId}#${String(record.attempt)}`;
+}
+
+/** The pending readings no terminal reading followed: calls made that a process stop took before anything was read (D-I1a-12). */
+export function unsettledCalls(records: readonly UsageRecord[]): UsageRecord[] {
+  const settled = new Set(records.filter((r) => r.reading.kind !== 'pending').map(callOf));
+  return records.filter((r) => r.reading.kind === 'pending' && !settled.has(callOf(r)));
+}
+
 /** Totals per run, per station, and per task, each the sum of its records in the order they were written. */
 export function costTotals(records: readonly UsageRecord[]): CostTotals {
   let run = EMPTY;
   const byStation: Partial<Record<StationId, UsageTotal>> = {};
   const byTask: Record<TaskId, UsageTotal> = {};
+  const unsettled = new Set(unsettledCalls(records));
   for (const record of records) {
+    if (record.reading.kind === 'pending' && !unsettled.has(record)) continue;
     run = add(run, record);
     byStation[record.station] = add(byStation[record.station] ?? EMPTY, record);
     byTask[record.taskId] = add(Object.hasOwn(byTask, record.taskId) ? (byTask[record.taskId] ?? EMPTY) : EMPTY, record);

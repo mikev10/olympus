@@ -50,7 +50,7 @@ import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
-import { readUsage, worstCaseCost, type WorstCaseCost } from './cost.js';
+import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { problemCodes, recordDecision } from './decisions.js';
 import { integrateEscalations, runLine, type LineContext } from './line.js';
 import type { BuiltGraph } from './graph.js';
@@ -581,10 +581,15 @@ async function reloadExecuted(record: AdmissionRecord): Promise<Reloaded> {
  * components are the caller's, and they are held to the same safety and
  * capability checks as at admission.
  */
-/** The tasks with a call whose reading was lost, read from every usage record the Vault holds for the run, referenced or not. */
+/**
+ * The tasks with a call whose reading was lost, read from every usage record
+ * the Vault holds for the run, referenced or not: a `lost` reading, or a
+ * `pending` one no terminal reading followed (D-I1a-12).
+ */
 async function lostReadings(vault: Vault, state: RunState): Promise<TaskId[]> {
   const records = await readUsage(vault, state);
-  return [...new Set(records.filter((r) => r.reading.kind === 'lost').map((r) => r.taskId))].sort();
+  const lost = [...records.filter((r) => r.reading.kind === 'lost'), ...unsettledCalls(records)];
+  return [...new Set(lost.map((r) => r.taskId))].sort();
 }
 
 export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Promise<RunOutcome> {

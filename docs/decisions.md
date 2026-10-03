@@ -3323,6 +3323,19 @@ The I1 entry was checked against the code on `v2` at 7fcb611 before any work beg
 - **Chosen:** the runtime check is the guard. Provenance lives in a `WeakMap` keyed by the frozen object `buildGraph` returned, so a copy carries none and is refused above L1 as `unbuilt graph`; `I5.unsafe-declaration-survives-composition` asserts exactly that case.
 - **Reverse:** a class-private brand the spread cannot copy, at the cost of a class for what is now a plain frozen object.
 
+### D-I1a-12: a driver call is recorded `pending` before it is made
+
+- **Found by I1a's external review** (codex-1, gemini-1, both families): a process stop while a driver call was in flight left no usage record of any kind. `startAttempt` commits `running` and `starts + 1` before the call, and nothing else was written until the sandbox was destroyed and read, so a resume found no lost reading, replayed the task, and the run total read `exact` without the killed call. D-I1a-08 closed the destroy failure and the record-then-commit crash; neither covers a stop during the call.
+- **Options:** (A) `runTask` writes a `pending` reading through `recordUsage` after provisioning and before `driver.runTask`; a `pending` no terminal reading for the same task and attempt followed is lost, so the resume is refused `meter-lost` and the total is `lower`; (B) infer the loss at resume from a `running` task whose `starts` has no usage record, which is the inference D-I1a-08 declined, and makes `costTotals` take run state.
+- **Chosen: A**, with the maintainer (A-I1a-08). The evidence of a call is a record written before it, not a counter read afterwards. Its one over-caution, a stop between the pending write and the call, refuses a resume that was safe: fail closed, and a human cancels. A pending write that fails destroys the sandbox and stops the run before any call. The pending record is stored and not referenced from run state, since `readUsage` lists a run's records whether referenced or not (A-I1a-05): no committed state holds a call that has not begun, so `I2.resume-derives-state-from-the-vault`'s resume at every committed state still holds, and the refusal arises only from a stop inside the call's window. `I2.call-recorded-before-it-is-made` fails when the pending write is deleted.
+- **Reverse:** B.
+
+### D-I1a-13: the relay does not bind a sandbox to the tier's model; owned by R14
+
+- **Found by I1a's external review** (codex-2, held in part): `relayRequest()` returns one relay for every tier, and the relay prices each request by the model that request names, so a task with a command tool can call any priced model while its usage record names the tier's alias. The cost is not misstated, since each request is charged at its own model's price against the task's budget; the tier policy names is not enforced at the relay.
+- **Chosen:** a known limit, owned by R14 (a tier per station), where model selection and its enforcement are decided. Pinning the relay needs the tier's alias resolved to the concrete model ids the CLI sends, which the driver does not know today, and recording observed models is D-I1a-03's reverse, a `MeterReading` change. Carried as the pending entry `I2.relay-bound-to-tier-model`, with I2's baseline raised 0 → 1 (the D-S1-18 precedent).
+- **Reverse:** pin the relay's price table to the tier's models in I1a.
+
 ## I1a amendments to the contracts
 
 ### A-I1a-01: `UsageRecord.model`
@@ -3352,3 +3365,7 @@ Every usage record stored for a run, referenced from run state or not, like `rea
 ### A-I1a-07: `approval-required` carries its escalations
 
 `StationRefusal`'s `approval-required` arm gains `escalations: string[]`: each protected path touched and each tamper finding that raised the exit, empty when none did. `runStanding`'s `awaiting-approval` carries the same (D-I1a-10).
+
+### A-I1a-08: the `pending` reading
+
+`UsageReading` gains `{ kind: 'pending' }`, written through `recordUsage` before each driver call; the call's terminal reading follows for the same task and attempt. A `pending` with no terminal reading is lost: the resume is refused `meter-lost`, and the totals count it as a lost call and report `lower`. A followed `pending` is not a call of its own (D-I1a-12).

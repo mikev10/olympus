@@ -222,9 +222,9 @@ function usageProblem(r: unknown): string | undefined {
   }
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
-  if (reading.kind === 'unmetered') return undefined;
+  if (reading.kind === 'unmetered' || reading.kind === 'pending') return undefined;
   if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
-  if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, or lost`;
+  if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, pending, or lost`;
   const bad = READING_COUNTS.filter((k) => typeof reading[k] !== 'number' || !Number.isFinite(reading[k]) || reading[k] < 0);
   if (bad.length > 0) return `the reading's ${bad.join(', ')} are not non-negative finite numbers`;
   if (typeof reading.exhausted !== 'string' || !EXHAUSTED.has(reading.exhausted)) return "the reading's exhausted is not a known reason";
