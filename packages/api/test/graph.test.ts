@@ -11,7 +11,7 @@ import { ClaudeCodeDriver, MODEL_RELAY } from '@olympus-ai/driver-claude-code';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { LocalVault, StubVault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { buildGraph, isBuilt, provenanceOf, unsafeComponents, type GraphParts } from '../src/index.js';
+import { buildGraph, GitHubIntegrator, isBuilt, provenanceOf, unsafeComponents, type GraphParts } from '../src/index.js';
 import { storeFor } from './harness.js';
 import { DelegatingDriver, DelegatingSandbox, DelegatingVault } from './wrappers.js';
 
@@ -34,15 +34,16 @@ function stubs(): GraphParts {
 function real(): GraphParts {
   const sandbox = new StubSandboxProvider();
   const driver = new ClaudeCodeDriver({ provider: sandbox });
-  return { vault: new LocalVault({ store: join(root, 'store'), artifacts: join(root, 'repo') }), sandbox, driver, reviewer: driver, workspaces: storeFor(join(root, 'ws')) };
+  const integrator = new GitHubIntegrator({ repository: 'test/never-reached', baseBranch: 'main', token: 'never-sent', apiBase: 'http://127.0.0.1:9' });
+  return { vault: new LocalVault({ store: join(root, 'store'), artifacts: join(root, 'repo') }), sandbox, driver, reviewer: driver, workspaces: storeFor(join(root, 'ws')), integrator };
 }
 
 const names = (parts: GraphParts): string[] => unsafeComponents(buildGraph(parts)).map((d) => d.component);
 
 describe('buildGraph', () => {
   test('lists the stubs\' declarations in slot order, and a reviewer that is the driver once; nothing for the line itself', () => {
-    expect(names(stubs())).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver']);
-    expect(names({ ...stubs(), reviewer: new StubDriver() })).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver', 'StubDriver']);
+    expect(names(stubs())).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator']);
+    expect(names({ ...stubs(), reviewer: new StubDriver() })).toEqual(['StubVault', 'StubSandboxProvider', 'StubDriver', 'StubDriver', 'no integrator']);
   });
 
   test('attests the real vault and driver, and names nothing for them', () => {
@@ -53,7 +54,7 @@ describe('buildGraph', () => {
     const parts = stubs();
     const driver = new DelegatingDriver(parts.driver);
     expect(names({ ...parts, vault: new DelegatingVault(parts.vault), sandbox: new DelegatingSandbox(parts.sandbox), driver, reviewer: driver }))
-      .toEqual(['unattested vault', 'unattested sandbox', 'unattested driver']);
+      .toEqual(['unattested vault', 'unattested sandbox', 'unattested driver', 'no integrator']);
   });
 
   test('a wrapper around a real component is unattested too: provenance is positive, so a wrapper fails closed', () => {
@@ -65,6 +66,15 @@ describe('buildGraph', () => {
     const parts = real();
     const driver = new Proxy(parts.driver, {});
     expect(names({ ...parts, driver, reviewer: driver })).toEqual(['StubSandboxProvider']);
+  });
+
+  test('a graph with no integrator, or one that is not a GitHubIntegrator, cannot merge and is declared so (D-I1b-05)', () => {
+    const parts = real();
+    expect(names({ ...parts, integrator: null })).toEqual(['StubSandboxProvider', 'no integrator']);
+    const integrator = parts.integrator;
+    if (integrator === undefined || integrator === null) throw new Error('real() composes an integrator');
+    const wrapped = { repository: integrator.repository, baseBranch: integrator.baseBranch, remoteDomains: integrator.remoteDomains, open: integrator.open.bind(integrator), merge: integrator.merge.bind(integrator) };
+    expect(names({ ...parts, integrator: wrapped })).toEqual(['StubSandboxProvider', 'unattested integrator']);
   });
 
   test('a driver with no relay is declared unmetered (A-I1a-02)', () => {

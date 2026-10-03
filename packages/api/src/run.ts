@@ -52,8 +52,9 @@ import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { integrateEscalations, runLine, type LineContext } from './line.js';
+import { integrateEscalations, readIntegration, runLine, type LineContext } from './line.js';
 import type { BuiltGraph } from './graph.js';
+import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
 import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
@@ -75,6 +76,12 @@ export interface ComponentGraph {
    * workspace or one verification's read-only tree (D-P6-02).
    */
   readonly workspaces: WorkspaceStore;
+  /**
+   * Opens and merges the run's pull request at `integrate` (D-I1b-01). Absent,
+   * the line stops at the passed exit and a human merges; the graph builder
+   * declares that, so no such run goes above L1 (D-I1b-05).
+   */
+  readonly integrator?: Integrator | null;
 }
 
 /** Workspace-relative paths. Each is hashed at admission and locked by its station: `spec`, then `test-design` (tests and manifest), then `plan` (graph). */
@@ -368,6 +375,31 @@ function policyRefusal(level: AutonomyLevel, graph: TaskGraph, policy: Policy): 
   return undefined;
 }
 
+/**
+ * No sandbox the line provisions may reach the git remote: the merge is the
+ * runtime's, from the host, and an agent that could reach the remote could
+ * push its own change (D-A-I1-07, D-I1b-05). The remote's domains are the
+ * integrator's; with none, the remote is GitHub's.
+ */
+function remoteEgress(policy: Policy, integrator: Integrator | null): RequestProblem[] {
+  const domains = integrator?.remoteDomains ?? ['github.com', 'githubusercontent.com'];
+  const problems: RequestProblem[] = [];
+  for (const [role, scope] of Object.entries(policy.roles)) {
+    const egress = scope.network.egress;
+    if (egress === 'none') continue;
+    egress.forEach((host, i) => {
+      if (reachesRemote(host, domains)) {
+        problems.push({
+          path: `policy.roles.${role}.network.egress[${String(i)}]`,
+          code: 'reaches-git-remote',
+          message: `${host} reaches the git remote; no sandbox may, since the merge is the runtime's alone (D-I1b-05)`,
+        });
+      }
+    });
+  }
+  return problems;
+}
+
 async function hasState(vault: Vault, runId: RunId): Promise<boolean> {
   try {
     await vault.readRunState(runId);
@@ -440,6 +472,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
 
   const capability = capabilityRefusalFor(req.components);
   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
+  const remote = remoteEgress(policy.policy, req.components.integrator ?? null);
+  if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy);
   if (refused !== undefined) return refused;
   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
@@ -763,7 +797,11 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   if (!next.ok) {
     return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key, escalations: next.escalations } : { standing: 'stopped', refusal: next } };
   }
-  return { state, standing: M1_STATIONS.includes(next.next) ? { standing: 'open' } : { standing: 'passed' } };
+  if (M1_STATIONS.includes(next.next)) return { state, standing: { standing: 'open' } };
+  // Approved, and a pull request opened that is not yet merged: a drive merges it before the run is done (D-I1b-01).
+  const integration = await readIntegration(vault, runId);
+  if (integration.some((r) => r.kind === 'opened') && !integration.some((r) => r.kind === 'merged')) return { state, standing: { standing: 'open' } };
+  return { state, standing: { standing: 'passed' } };
 }
 
 export interface CancelRequest {

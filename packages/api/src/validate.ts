@@ -62,7 +62,9 @@ export type RequestProblemCode =
   /** The run already has state: it was admitted once, and is resumed, not started again. */
   | 'already-admitted'
   /** The workspace store and the workspace lie one inside the other. */
-  | 'overlaps';
+  | 'overlaps'
+  /** A role's egress allowlist names a host the git remote is reached on (D-I1b-05). */
+  | 'reaches-git-remote';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */

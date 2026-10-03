@@ -190,6 +190,37 @@ export interface EnforcementDecision {
   readonly collectedBy: 'runtime';
 }
 
+/**
+ * What `integrate` did on the git remote, as the runtime did it (A-I1b-01).
+ * Write-once and content-addressed under the run, like a decision, and
+ * carrying no time, so the same act recorded again by a resume is the same
+ * entry. `opened` is written when the pull request exists at `commit`;
+ * `merged` when it was merged at that commit. I2: every field is the
+ * runtime's or GitHub's answer to the runtime, never a model's.
+ */
+export interface IntegrationOpened {
+  readonly runId: RunId;
+  readonly kind: 'opened';
+  /** `owner/name` on GitHub. */
+  readonly repository: string;
+  readonly baseBranch: string;
+  /** The commit the run was admitted at; the pushed commit's only parent. */
+  readonly baseCommit: string;
+  readonly branch: string;
+  /** The commit the runtime built: `baseCommit`'s tree with the accepted diff applied. */
+  readonly commit: string;
+  readonly pullRequest: number;
+  readonly url: string;
+  readonly collectedBy: 'runtime';
+}
+
+export interface IntegrationMerged extends Omit<IntegrationOpened, 'kind'> {
+  readonly kind: 'merged';
+  readonly mergeCommit: string;
+}
+
+export type IntegrationRecord = IntegrationOpened | IntegrationMerged;
+
 /** An artifact as admitted: where it sits in the workspace, and the SHA-256 of its bytes at admission. */
 export interface AdmittedArtifact {
   readonly path: string;
@@ -256,6 +287,10 @@ export interface Vault {
    * that would have referenced it is still found (A-I1a-05).
    */
   readUsage(runId: RunId): Promise<readonly VaultRef[]>;
+  /** What `integrate` did on the remote. Refused unless `collectedBy` is `'runtime'` (A-I1b-01). */
+  recordIntegration(r: IntegrationRecord): Promise<VaultRef>;
+  /** Every integration record of a run, in no promised order; empty for a run that never integrated. */
+  readIntegration(runId: RunId): Promise<readonly VaultRef[]>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

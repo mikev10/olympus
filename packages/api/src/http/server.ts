@@ -16,6 +16,7 @@ import { isApprovalKey, type RunCancellation, type RunId, type RunState } from '
 import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import type { BuiltGraph } from '../graph.js';
+import { runReport, type RunReport } from '../report.js';
 import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
@@ -212,6 +213,16 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     }
   };
 
+  /** The per-run report, read from the Vault alone (D-I1b-07). */
+  const report = async (runId: RunId): Promise<RunReport> => {
+    try {
+      await components.vault.readRunState(runId);
+    } catch (error) {
+      throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+    }
+    return runReport(components.vault, runId);
+  };
+
   const view = async (runId: RunId): Promise<RunView> => {
     // Taken before the read, not after: a drive that ends while the state is read has committed
     // past what was read, and a view saying `driving: false` beside that state would present a
@@ -319,6 +330,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (action === undefined) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, await view(runId));
+      return;
+    }
+    if (action === 'report') {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await report(runId));
       return;
     }
     if (action === 'events') {

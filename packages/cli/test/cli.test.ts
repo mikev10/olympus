@@ -147,6 +147,14 @@ describe('the CLI is a client of a remote API URL', () => {
     const approved = await cli(remote('approve', run.runId, 'integrate:1'));
     expect(approved.code).toBe(0);
     expect((await settle(run.runId)).standing).toEqual({ standing: 'passed' });
+
+    // The report is the server's, read from the Vault (D-I1b-07).
+    const report = await cli(remote('report', run.runId));
+    expect(report.code).toBe(0);
+    const body = JSON.parse(report.out.join('\n')) as { runId: string; standing: unknown; decisions: Record<string, number> };
+    expect(body).toMatchObject({ runId: run.runId, standing: { standing: 'passed' } });
+    expect(body.decisions['approval-granted']).toBe(1);
+    expect((await cli(remote('report', 'no-such-run'))).code).toBe(1);
   });
 
   test('cancel stops a run; cancelling it again is refused with the runtime\'s reason', async () => {

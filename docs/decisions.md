@@ -3369,3 +3369,62 @@ Every usage record stored for a run, referenced from run state or not, like `rea
 ### A-I1a-08: the `pending` reading
 
 `UsageReading` gains `{ kind: 'pending' }`, written through `recordUsage` before each driver call; the call's terminal reading follows for the same task and attempt. A `pending` with no terminal reading is lost: the resume is refused `meter-lost`, and the totals count it as a lost call and report `lower`. A followed `pending` is not a call of its own (D-I1a-12).
+
+## I1b: Integrate + M1 proof
+
+The maintainer confirmed every choice below on 2026-10-03, before any code was written.
+
+### D-I1b-01: the pull request opens at `integrate`'s work, and the merge follows the human's approval of its exit
+
+- **Ambiguous:** the entry says the runtime "merges it at L2", but `integrate` states `human-required` as its own floor and no policy relaxes it (D-P4-03), so at M1 no run of any level crosses that exit without a human.
+- **Chosen:** `integrate`'s work pushes the run's commit and opens the pull request; the human approves the exit with the pull request in front of them; the runtime then merges, before it commits the spent grant that ends the run. A crash between the merge and that commit leaves the grant unspent, and the resume finds the pull request already merged at the same commit and records nothing new.
+- **Why:** the approver sees exactly what will merge, and the merge is still the runtime's act from evidence, never an agent's.
+- **Reverse:** open and merge both after the approval.
+
+### D-I1b-02: one branch per run, pushed through the GitHub Git Data API, never by `git`
+
+- **Ambiguous:** the entry says "the task's branch"; `integrate` is one station after every task, and the accepted diff is cumulative.
+- **Chosen:** one branch per run, `factory/<runId>`, holding one commit: `baseCommit`'s tree with the accepted cumulative diff applied, built from blobs, a tree, and a commit through the REST API. The commit's author and dates are the runtime's and the run's admission time, so a resume rebuilds the same sha. A branch that already exists at another commit is refused, never forced. No `git` executable runs, so no git config is executed at all (D-P8-04).
+- **Reverse:** push from a clone the runtime makes; the token would then sit in a credential helper on disk.
+
+### D-I1b-03: the merged tree is the verified tree, or the run halts at `integrate`
+
+- **Ambiguous:** `baseCommit` is the caller's word and was never compared with the base the runtime snapshotted (A-P6-03), and the base branch can move after admission. Either would merge a tree no check ran over.
+- **Chosen:** before pushing, every file `baseCommit`'s tree holds is hashed as a git blob from the base snapshot and compared; any difference, a tree entry that is not a blob, or a truncated listing halts the run. The base branch must still point at `baseCommit` when the pull request is opened and when it is merged ("evidence is void if the base moves"), and the merge passes the commit's sha so a head moved in between is refused by GitHub.
+- **Known limit:** files the snapshot holds that `baseCommit` does not track (`node_modules`, say) were present when the checks ran and are absent from the merge. They are not compared, because which untracked files are ignored is a `.gitignore` question the runtime does not answer without `git`. An added file is pushed with mode `100644`, since `DiffEntry` carries no mode; a modified file keeps the mode `baseCommit` gave it.
+- **Reverse:** compare at admission instead, by reading the working copy's `git` state.
+
+### D-I1b-04: a failed push, base check, or merge halts the run
+
+- **Ambiguous:** `StationRefusal` has no integration reason, and adding one is a contract change.
+- **Chosen:** an integration failure throws; the service commits it as the run's halt, which the station machine refuses on for good and P14 records as a station refusal (A-P9-02). A transient GitHub error halts too. The run never reports done.
+- **Reverse:** add an `integration-failed` reason to `StationRefusal`, so a resume could retry.
+
+### D-I1b-05: the integrator is a slot of the graph, attested like the rest
+
+- **Chosen:** `buildGraph` takes an optional `integrator`. Only a `GitHubIntegrator` is attested; a graph with none, or with any other, declares that it cannot merge, so no run on it goes above L1 — at L0 and L1 the line stops at the passed exit and a human merges (D-A-I1-07's reverse). The integrator names the hosts its remote is reached on, and admission refuses a policy whose egress allowlist names one of them (`reaches-git-remote`), so no sandbox the line provisions can reach the remote.
+- **Reverse:** make the integrator required.
+
+### D-I1b-06: the host holds the token, from three variables
+
+`FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and `FACTORY_GIT_TOKEN`, a fine-grained token scoped to that repository with contents and pull requests read and write. Missing any one stops the host before it listens. The token is held in a private field of the integrator, sent only in the `Authorization` header to the GitHub API, and handed to no sandbox provider.
+
+### D-I1b-07: the per-run report
+
+`GET /runs/:id/report`, printed by `olympus report <runId>`. Every figure is read from the Vault: cost from the usage records (`costTotals`, its bound included); cache-hit rate as cache-read tokens over all input tokens (input, cache read, cache write) of the metered calls, null when there are none; claim/evidence mismatches from each evidence bundle; iterations, retries, and starts per task, grouped by the stations its graph names; gate outcomes per station from the decisions P14 recorded at it and the approvals granted for it; refusals and parks by cause from P14's record; the integration from its records.
+
+### D-I1b-08: the canary's spec and acceptance tests are drafted by Claude and approved by a human
+
+- **Ambiguous:** D-A-I1-03 says a human writes them.
+- **Chosen:** Claude drafts them in the session; the maintainer reads and approves them unchanged before admission. The proof says so: the tests come from the build driver's model family, so the run carries no independent-test-design claim, which F1 already withholds at M1.
+- **Reverse:** the maintainer writes them.
+
+### D-I1b-09: paid runs are capped at $10 in total
+
+The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budget and the admission's approved worst case bound each run; the session stops before a run whose worst case would carry the total past $10.
+
+## I1b amendments to the contracts
+
+### A-I1b-01: the integration record
+
+`IntegrationRecord`, write-once and content-addressed under the run like a decision, with `Vault.recordIntegration` and `Vault.readIntegration(runId)`, and `'integration'` added to `VaultRefKind`. Two kinds: `opened` (repository, base branch, base commit, branch, commit, pull request number and URL) and `merged` (the same, plus the merge commit). `collectedBy: 'runtime'`, refused otherwise. Reasoned in D-I1b-01: the report and a resume read the merge from the Vault, not from GitHub.

@@ -32,7 +32,7 @@ import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -74,7 +74,7 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
-  'admission', 'task-result', 'usage', 'decision',
+  'admission', 'task-result', 'usage', 'decision', 'integration',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
@@ -263,6 +263,19 @@ function decisionProblem(d: unknown): string | undefined {
   if (typeof decision.decidedBy !== 'string' || !deciders.includes(decision.decidedBy)) {
     return `a ${decision.cause} decision is not made by ${String(decision.decidedBy)}`;
   }
+  return undefined;
+}
+
+/** A-I1b-01: the runtime's record of what it did on the remote, whole, or refused. */
+function integrationProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (r.kind !== 'opened' && r.kind !== 'merged') return 'its kind is neither opened nor merged';
+  for (const key of ['repository', 'baseBranch', 'baseCommit', 'branch', 'commit', 'url']) {
+    if (!hasString(r, key) || r[key] === '') return `it carries no ${key}`;
+  }
+  if (typeof r.pullRequest !== 'number' || !Number.isInteger(r.pullRequest) || r.pullRequest < 1) return 'it names no pull request';
+  if (r.kind === 'merged' && (!hasString(r, 'mergeCommit') || r.mergeCommit === '')) return 'a merge record carries no merge commit';
   return undefined;
 }
 
@@ -540,7 +553,18 @@ export class LocalVault implements Vault {
     return this.#objects(runId, 'usage');
   }
 
-  async #objects(runId: RunId, kind: 'decision' | 'usage'): Promise<readonly VaultRef[]> {
+  /** I2: only what the runtime did, whole. The same act recorded twice is one entry, since the record carries no time. */
+  recordIntegration(r: IntegrationRecord): Promise<VaultRef> {
+    const problem = integrationProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing an integration record: ${problem}`));
+    return storeObject(this.#store, r.runId, 'integration', r);
+  }
+
+  readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
+    return this.#objects(runId, 'integration');
+  }
+
+  async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {
     const dir = join(runDir(this.#store, runId), 'objects', kind);
     let names: string[];
     try {

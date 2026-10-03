@@ -23,4 +23,5 @@ export * from './kit/vitest.js';
 export * from './kit/run-report.js';
 export * from './kit/reconcile.js';
 export * from './kit/reporter.js';
+export * from './kit/fake-github.js';
 export { REGISTRY } from './registry/index.js';

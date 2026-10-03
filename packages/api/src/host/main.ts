@@ -11,6 +11,9 @@
  * - `FACTORY_LISTEN_PORT`, and `FACTORY_LISTEN_HOST` (default `127.0.0.1`)
  * - `ANTHROPIC_API_KEY`: held by the sandbox provider for its relays, given to no sandbox
  * - `FACTORY_PRINCIPAL` (default `local`): who a request bearing the token is
+ * - `FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and
+ *   `FACTORY_GIT_TOKEN`: the remote a passed run merges into, and the token
+ *   that merges it, held by the host and given to no sandbox (D-I1b-06)
  *
  * A missing variable stops the host before it listens (I5).
  */
@@ -31,6 +34,11 @@ const components = await composeHost({
   repository: required('FACTORY_REPOSITORY'),
   trees: required('FACTORY_TREES'),
   modelKey: required('ANTHROPIC_API_KEY'),
+  git: {
+    repository: required('FACTORY_GIT_REPOSITORY'),
+    baseBranch: required('FACTORY_GIT_BASE_BRANCH'),
+    token: required('FACTORY_GIT_TOKEN'),
+  },
 });
 const server = createApiServer({
   components,

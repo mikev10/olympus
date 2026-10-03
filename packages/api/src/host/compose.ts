@@ -8,6 +8,7 @@ import { BASE_IMAGE, ClaudeCodeDriver, ensureImage, MODEL_CREDENTIAL } from '@ol
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
 import { buildGraph, type BuiltGraph, type SandboxProfile } from '../graph.js';
+import { GitHubIntegrator, type GitHubIntegratorOptions } from '../integrate.js';
 import { localWorkspaceStore } from '../workspace.js';
 
 export interface HostConfig {
@@ -25,6 +26,12 @@ export interface HostConfig {
   readonly limits?: SandboxProfile['limits'];
   /** The image checks run in. Defaults to the Node image the driver's image is built from. */
   readonly checkImage?: string;
+  /**
+   * The remote a passed run is merged into, and the token that merges it,
+   * held here and handed to no sandbox provider (D-I1b-06). Null composes a
+   * host that cannot merge, which carries no run above L1 (D-I1b-05).
+   */
+  readonly git: GitHubIntegratorOptions | null;
 }
 
 /** Bounds every sandbox the line provisions, whichever task it serves. */
@@ -47,6 +54,7 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     // One driver in both seats: below L3 the seat is filled and run state records its independence as reduced (I6).
     reviewer: driver,
     workspaces: localWorkspaceStore({ root: config.trees }),
+    integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
   });
 }
