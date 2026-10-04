@@ -1,0 +1,268 @@
+{
+  "runId": "904f6dab-5ae1-41ea-84b8-efd035024b2a",
+  "requestedLevel": 2,
+  "standing": {
+    "standing": "passed"
+  },
+  "cost": {
+    "run": {
+      "calls": 2,
+      "unmetered": 0,
+      "lost": 0,
+      "bound": "exact",
+      "metered": {
+        "calls": 2,
+        "inputTokens": 52,
+        "outputTokens": 5270,
+        "cacheReadTokens": 231179,
+        "cacheWriteTokens": 25940,
+        "costUsd": 0.14783670000000004,
+        "exhausted": 0,
+        "unreadable": 0
+      }
+    },
+    "byStation": {
+      "build": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 34,
+          "outputTokens": 4412,
+          "cacheReadTokens": 223003,
+          "cacheWriteTokens": 17198,
+          "costUsd": 0.13178360000000003,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "review": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 18,
+          "outputTokens": 858,
+          "cacheReadTokens": 8176,
+          "cacheWriteTokens": 8742,
+          "costUsd": 0.0160531,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      }
+    },
+    "byTask": {
+      "slugify": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 34,
+          "outputTokens": 4412,
+          "cacheReadTokens": 223003,
+          "cacheWriteTokens": 17198,
+          "costUsd": 0.13178360000000003,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      },
+      "slugify-review": {
+        "calls": 1,
+        "unmetered": 0,
+        "lost": 0,
+        "bound": "exact",
+        "metered": {
+          "calls": 1,
+          "inputTokens": 18,
+          "outputTokens": 858,
+          "cacheReadTokens": 8176,
+          "cacheWriteTokens": 8742,
+          "costUsd": 0.0160531,
+          "exhausted": 0,
+          "unreadable": 0
+        }
+      }
+    }
+  },
+  "cacheHitRate": 0.898931061433832,
+  "calls": [
+    {
+      "taskId": "slugify",
+      "station": "build",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "sonnet",
+        "version": "2.1.277"
+      }
+    },
+    {
+      "taskId": "slugify-review",
+      "station": "review",
+      "attempt": 1,
+      "model": {
+        "provider": "anthropic",
+        "family": "claude",
+        "model": "haiku",
+        "version": "2.1.277"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "taskId": "slugify",
+      "station": "build",
+      "status": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1
+      }
+    },
+    {
+      "taskId": "slugify-review",
+      "station": "review",
+      "status": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1
+      }
+    }
+  ],
+  "stations": [
+    {
+      "station": "intake",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "spec",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "test-design",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "plan",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "build",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "verify",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "review",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 1,
+        "retries": 0,
+        "starts": 1
+      },
+      "approvals": 0,
+      "refusals": {}
+    },
+    {
+      "station": "integrate",
+      "gate": "passed",
+      "attempts": {
+        "iterations": 0,
+        "retries": 0,
+        "starts": 0
+      },
+      "approvals": 1,
+      "refusals": {
+        "approval-required": 1
+      }
+    }
+  ],
+  "mismatches": [],
+  "decisions": {
+    "approval-granted": 1,
+    "station-refused": 1
+  },
+  "refusals": {
+    "approval-required": 1
+  },
+  "parks": {},
+  "integration": [
+    {
+      "runId": "904f6dab-5ae1-41ea-84b8-efd035024b2a",
+      "kind": "opened",
+      "repository": "mikev10/olympus-canary",
+      "baseBranch": "main",
+      "baseCommit": "ec47a23db5f395b70983d71013beb8e98640147e",
+      "branch": "factory/904f6dab-5ae1-41ea-84b8-efd035024b2a",
+      "commit": "52fd9e82181f8e565637b7d804165b690c99dcf3",
+      "pullRequest": 1,
+      "url": "https://github.com/mikev10/olympus-canary/pull/1",
+      "collectedBy": "runtime"
+    },
+    {
+      "runId": "904f6dab-5ae1-41ea-84b8-efd035024b2a",
+      "kind": "merged",
+      "repository": "mikev10/olympus-canary",
+      "baseBranch": "main",
+      "baseCommit": "ec47a23db5f395b70983d71013beb8e98640147e",
+      "branch": "factory/904f6dab-5ae1-41ea-84b8-efd035024b2a",
+      "commit": "52fd9e82181f8e565637b7d804165b690c99dcf3",
+      "pullRequest": 1,
+      "url": "https://github.com/mikev10/olympus-canary/pull/1",
+      "collectedBy": "runtime",
+      "mergeCommit": "3d10f1aabec0eff8829656d6232ca7d6a83d1eeb"
+    }
+  ]
+}

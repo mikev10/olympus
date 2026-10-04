@@ -3432,7 +3432,7 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 ### D-I1b-10: the host names its container user where it has no uids
 
 - **Ambiguous:** the M1 proof runs the host on the maintainer's Windows machine, where `localWorkspaceStore` has no uid to derive the container user from and refuses, as it should, to guess one.
-- **Chosen:** `HostConfig.containerUser`, set from `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither. On a host with uids the store still refuses any user other than the process's own. The maintainer confirmed this on 2026-10-03. The entry point is run with `pnpm dlx tsx`, since the repository holds no TypeScript runner and adding one is not this unit's.
+- **Chosen:** `HostConfig.containerUser`, set from `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither. On a host with uids the store still refuses any user other than the process's own. The maintainer confirmed this on 2026-10-03. The entry point is run with `npx -y tsx@4.23.15` (`pnpm dlx` refuses esbuild's install script), since the repository holds no TypeScript runner and adding one is not this unit's.
 - **Reverse:** run the host only on a host with uids.
 
 ### D-I1b-11: a sandbox command runs in the workspace
