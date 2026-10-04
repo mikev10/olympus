@@ -9,7 +9,7 @@ import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
 import { buildGraph, type BuiltGraph, type SandboxProfile } from '../graph.js';
 import { GitHubIntegrator, type GitHubIntegratorOptions } from '../integrate.js';
-import { localWorkspaceStore } from '../workspace.js';
+import { localWorkspaceStore, type ContainerUser } from '../workspace.js';
 
 export interface HostConfig {
   /** What the Vault owns. Mounted into no sandbox (I1). */
@@ -32,6 +32,12 @@ export interface HostConfig {
    * host that cannot merge, which carries no run above L1 (D-I1b-05).
    */
   readonly git: GitHubIntegratorOptions | null;
+  /**
+   * Who sandboxes run as. Derived from this process on a host with uids, and
+   * refused there if it differs; required on one without, such as Windows,
+   * where there is nothing to derive it from (D-I1b-10).
+   */
+  readonly containerUser?: ContainerUser;
 }
 
 /** Bounds every sandbox the line provisions, whichever task it serves. */
@@ -53,7 +59,7 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     driver,
     // One driver in both seats: below L3 the seat is filled and run state records its independence as reduced (I6).
     reviewer: driver,
-    workspaces: localWorkspaceStore({ root: config.trees }),
+    workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
   });

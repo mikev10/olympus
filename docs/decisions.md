@@ -3428,3 +3428,9 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 ### A-I1b-01: the integration record
 
 `IntegrationRecord`, write-once and content-addressed under the run like a decision, with `Vault.recordIntegration` and `Vault.readIntegration(runId)`, and `'integration'` added to `VaultRefKind`. Two kinds: `opened` (repository, base branch, base commit, branch, commit, pull request number and URL) and `merged` (the same, plus the merge commit). `collectedBy: 'runtime'`, refused otherwise. Reasoned in D-I1b-01: the report and a resume read the merge from the Vault, not from GitHub.
+
+### D-I1b-10: the host names its container user where it has no uids
+
+- **Ambiguous:** the M1 proof runs the host on the maintainer's Windows machine, where `localWorkspaceStore` has no uid to derive the container user from and refuses, as it should, to guess one.
+- **Chosen:** `HostConfig.containerUser`, set from `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither. On a host with uids the store still refuses any user other than the process's own. The maintainer confirmed this on 2026-10-03. The entry point is run with `pnpm dlx tsx`, since the repository holds no TypeScript runner and adding one is not this unit's.
+- **Reverse:** run the host only on a host with uids.

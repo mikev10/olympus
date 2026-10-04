@@ -14,6 +14,8 @@
  * - `FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and
  *   `FACTORY_GIT_TOKEN`: the remote a passed run merges into, and the token
  *   that merges it, held by the host and given to no sandbox (D-I1b-06)
+ * - `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither: who
+ *   sandboxes run as, required on a host with no uids (D-I1b-10)
  *
  * A missing variable stops the host before it listens (I5).
  */
@@ -29,7 +31,21 @@ function required(name: string): string {
 const port = Number(required('FACTORY_LISTEN_PORT'));
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factory-host: FACTORY_LISTEN_PORT is not a port');
 
+/** Both, or neither: a uid with no gid is a half-named user, refused rather than completed. */
+function containerUser(): { uid: number; gid: number } | undefined {
+  const uid = process.env.FACTORY_CONTAINER_UID;
+  const gid = process.env.FACTORY_CONTAINER_GID;
+  if ((uid === undefined || uid === '') && (gid === undefined || gid === '')) return undefined;
+  const user = { uid: Number(uid), gid: Number(gid) };
+  if (!Number.isInteger(user.uid) || user.uid < 0 || !Number.isInteger(user.gid) || user.gid < 0) {
+    throw new Error('factory-host: FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID must both be non-negative integers');
+  }
+  return user;
+}
+
+const user = containerUser();
 const components = await composeHost({
+  ...(user === undefined ? {} : { containerUser: user }),
   store: required('FACTORY_VAULT_STORE'),
   repository: required('FACTORY_REPOSITORY'),
   trees: required('FACTORY_TREES'),
