@@ -13,6 +13,7 @@ import type { Family, Invocation, Manifest } from './review-runner/evidence.ts';
 import { CODEX_KEEP, RECORDABLE_ENV, outcomeOf, redactEnv, stripSessionLog } from './review-runner/evidence.ts';
 import type { GeminiResult } from './review-runner/gemini.ts';
 import { GEMINI_MODEL, GeminiRequestError, callGemini, geminiRequest, isTimeout } from './review-runner/gemini.ts';
+import { estimateGeminiCost, PAYLOAD_BYTES_CEILING, PROMPT_TOKEN_TIER } from './review-runner/cost.ts';
 import { verifyIngestion } from './review-runner/ingestion.ts';
 import type { BundleMarkers } from './review-runner/integrity.ts';
 import { bundleMarkers, verifyEcho } from './review-runner/integrity.ts';
@@ -844,7 +845,7 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
   const markers = bundleMarkers(bundleText);
 
   // Step 4. A bundle with no end nonce can reach INTEGRITY_UNVERIFIED at best,
-  // never `counted`, so sending it would spend the full source of every
+  // never `counted`, so sending it would spend the source of every
   // changed file on a third party for nothing.
   if (markers.endNonce === null) {
     throw new Error(
@@ -857,12 +858,22 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
   // `markers.endNonce` is non-null here: step 4 above refuses a bundle without
   // one, and the delimiters are built from it.
   const payload = composePayload(promptText, artifacts.bundleFile, bundleText, markers.endNonce);
+  const payloadBytes = Buffer.byteLength(payload, 'utf8');
+  // Past the ceiling the request is billed at the long-context rate, about
+  // double, and a bundle that large should be cut down, not paid for.
+  if (payloadBytes > PAYLOAD_BYTES_CEILING) {
+    throw new Error(
+      `step 5: the payload is ${String(payloadBytes)} bytes, over the ${String(PAYLOAD_BYTES_CEILING)}-byte ceiling ` +
+        `that keeps it under Gemini's ${String(PROMPT_TOKEN_TIER)}-token pricing tier. Regenerate the bundle ` +
+        `with review-request ${args.unit}, which sends modified files as function-context diffs, or split the range.`,
+    );
+  }
   return {
     artifacts,
     markers,
     payload,
     payloadSha256: sha256(payload),
-    payloadBytes: Buffer.byteLength(payload, 'utf8'),
+    payloadBytes,
     bundleSha256: sha256(bundleText),
     stem,
     outputs,
@@ -1202,6 +1213,11 @@ async function runGemini(
     console.log(`  request         POST ${request.url}`);
     console.log(`  api version     ${cliVersion}`);
     console.log(`  header names    ${request.headerNames.join(', ')}`);
+    const estimate = estimateGeminiCost(p.payloadBytes);
+    console.log(
+      `  est. cost       about $${estimate.dollars.toFixed(2)}: up to ${String(estimate.inputTokens)} input ` +
+        `and ${String(estimate.outputTokens)} output tokens, at the standard rate`,
+    );
     printWouldArchive(wouldArchive);
     return 0;
   }

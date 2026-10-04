@@ -19,6 +19,7 @@ import {
   planArchive,
   reconcileAuthAfterRun,
 } from '../../run-external-review.ts';
+import { PAYLOAD_BYTES_CEILING } from '../cost.ts';
 import type { Manifest } from '../evidence.ts';
 import { RECORDABLE_ENV, keylessUrl, outcomeOf, redactEnv } from '../evidence.ts';
 import type { GeminiResult } from '../gemini.ts';
@@ -905,6 +906,8 @@ describe('main: egress order', () => {
 
   interface Options {
     readonly nonce?: boolean;
+    /** The bundle carries enough code to put the payload over the byte ceiling. */
+    readonly oversized?: boolean;
     readonly untracked?: boolean;
     readonly modified?: boolean;
     /** The artifacts' last commit is not on the upstream. */
@@ -958,9 +961,10 @@ describe('main: egress order', () => {
     mkdirSync(reviews, { recursive: true });
     writeFileSync(join(reviews, PROMPT), 'Review the bundle.\n');
     const tail = options.nonce === false ? [] : [`=== BUNDLE END === ${NONCE}`];
+    const body = options.oversized === true ? 'export const a = 1;\n'.repeat(PAYLOAD_BYTES_CEILING / 20) : 'export const a = 1;';
     writeFileSync(
       join(reviews, BUNDLE),
-      ['BASE: 1111111', 'HEAD: 2222222', '', '===== packages/core/src/a.ts =====', 'export const a = 1;', ...tail, ''].join('\n'),
+      ['BASE: 1111111', 'HEAD: 2222222', '', '===== packages/core/src/a.ts =====', body, ...tail, ''].join('\n'),
     );
     const install = join(root, 'codex-install');
     mkdirSync(join(install, 'bin'), { recursive: true });
@@ -1124,6 +1128,7 @@ describe('main: egress order', () => {
     { name: 'the artifacts are committed but not pushed', families: ['codex', 'gemini'], options: { unpushed: true } },
     { name: 'the branch has no upstream', families: ['codex', 'gemini'], options: { noUpstream: true } },
     { name: 'the bundle has no end nonce', families: ['codex', 'gemini'], options: { nonce: false } },
+    { name: 'the payload is over the byte ceiling', families: ['codex', 'gemini'], options: { oversized: true } },
     {
       name: 'a counted review is present',
       families: ['codex', 'gemini'],
@@ -1194,6 +1199,20 @@ describe('main: egress order', () => {
       expect(outcomeOf(manifest)).toBe('counted');
     });
   }
+
+  it('gemini: --dry-run prints a cost estimate', async () => {
+    const h = harness();
+
+    expect(await main([UNIT, 'gemini', '--dry-run'], h.deps)).toBe(0);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toMatch(/est\. cost {7}about \$\d+\.\d{2}: up to \d+ input/);
+  });
+
+  it('gemini: --dry-run refuses an oversized payload and names the ceiling', async () => {
+    const h = harness({ oversized: true });
+
+    expect(await main([UNIT, 'gemini', '--dry-run'], h.deps)).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(`${String(PAYLOAD_BYTES_CEILING)}-byte ceiling`);
+  });
 
   it('gemini: a reply carrying GEMINI_API_KEY is checked before writing, so no file is written at all', async () => {
     const h = harness({ replyExtra: `the key is ${FAKE_KEY}` });

@@ -141,7 +141,7 @@ before anything acts on it, and chaining does not move it.
 
 **And the chain stops there, deliberately.** The unit loop's next step after
 `review-request` is `/run-review <id>`, which falsifies those clauses: it sends
-the bundle — the full source of every changed file — to OpenAI and to Google.
+the bundle — the source of every changed file — to OpenAI and to Google.
 That egress is the one act in the unit loop that cannot be undone, and deleting
 a file afterwards recovers nothing. The reasoning that makes chaining into
 `review-request` free stops applying exactly where sending begins, so the

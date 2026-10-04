@@ -1,6 +1,6 @@
 ---
 name: run-review
-description: Run a shipped unit's external review by invoking the review runner once per family, which sends the committed prompt and bundle — the full source of every changed file — to two third-party services, OpenAI through the Codex CLI and Google through a direct Gemini API call, then commits what the runner wrote, untouched, and reports each run's outcome. Use after review-request has committed and pushed the prompt and the bundle. Takes a unit id, e.g. run-review P5.
+description: Run a shipped unit's external review by invoking the review runner once per family, which sends the committed prompt and bundle — the source of every changed file — to two third-party services, OpenAI through the Codex CLI and Google through a direct Gemini API call, then commits what the runner wrote, untouched, and reports each run's outcome. Use after review-request has committed and pushed the prompt and the bundle. Takes a unit id, e.g. run-review P5.
 ---
 
 # Run the external review
@@ -10,8 +10,8 @@ the bundle; this skill puts them in front of two reviewers, commits what came
 back exactly as it came back, and reports it. It does nothing else, and that
 limit is what the evidence rests on.
 
-**This step sends the unit's source out of the repository.** The bundle is the
-full text of every changed file, and it goes to OpenAI and to Google. That is
+**This step sends the unit's source out of the repository.** The bundle carries the
+source of every changed file, and it goes to OpenAI and to Google. That is
 the first irreversible act in the unit loop — deleting a file afterwards
 recovers nothing — so it is invoked deliberately, on a named unit, and never
 chained into from `ship-unit` or `review-request`.
@@ -28,7 +28,7 @@ Codex sign-in, Windows or the push is missing. Do the fifth before every unit.
 - **A paid `GEMINI_API_KEY`**, from a Google Cloud project with billing
   enabled, in the environment the runner starts from. Paid, because on the free
   tier Google's terms let it use submitted content to improve its products and
-  let human reviewers read it, and the bundle is the full source of every
+  let human reviewers read it, and the bundle carries the source of every
   changed file. The pinned model, `gemini-3.1-pro-preview`, has no free tier, so
   a free key fails loudly and the run records `FAILED` — but only after the
   request, bundle included, has reached Google. Check billing before the first
@@ -53,7 +53,7 @@ Codex sign-in, Windows or the push is missing. Do the fifth before every unit.
 
   A dry run makes every check the real run makes before sending, except that
   `GEMINI_API_KEY` is set, and prints what would be sent — the bundle and
-  payload hashes, the payload size and its ingestion floor, Codex's version and
+  payload hashes, the payload size and its ingestion floor, Gemini's estimated cost, Codex's version and
   clean-room listing, Gemini's endpoint and header names — and what would be
   archived. It sends nothing and writes and renames nothing in the repository.
 
@@ -89,7 +89,7 @@ clean room:
 
 Give the runner the unit and the family and nothing else; `--dry-run` is its
 only flag, and it sends nothing. It refuses on its own terms — an absent,
-uncommitted, modified, or unpushed prompt or bundle, a bundle with no end nonce,
+uncommitted, modified, or unpushed prompt or bundle, a bundle with no end nonce, a payload over the 600,000-byte ceiling,
 a counted review already on record for that bundle, a missing credential, a
 platform Codex has not been measured on, a failed clean-room assertion — and a
 refusal is its answer, not an obstacle to route around. Adding a flag, editing

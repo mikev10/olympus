@@ -21,7 +21,7 @@ to open:
 | File | What it is | What `/run-review` does with it |
 |---|---|---|
 | `<date>-<UNIT>-<slug>-review-prompt.txt` | The instructions, and nothing but the instructions | Sends all of it, verbatim, to each reviewer, with the bundle inlined after it |
-| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every changed file, in full | Inlines it into the text it sends, after the prompt, between delimiters that name this file |
+| `<date>-<UNIT>-<slug>-review-bundle.txt` | The code: every new file in full, every modified file as a diff showing each changed function whole | Inlines it into the text it sends, after the prompt, between delimiters that name this file |
 
 `<date>` is today, `<UNIT>` keeps its case, `<slug>` names the unit:
 `2026-09-14-P4-station-machine-review-prompt.txt`.
@@ -72,8 +72,20 @@ If no tag exists, ask which commit to diff from. Do not guess.
 
 ## 2. Generate the bundle
 
-Full contents of changed files, not diff hunks — a reviewer hunting for bypasses
-needs surrounding context, and a hunk hides it.
+A file that did not exist at the base goes in full. A file that did goes in as
+a diff with function context (`-W`): every hunk widened to the whole function
+around it, so a reviewer hunting for bypasses sees each change in the code that
+calls and guards it, not a three-line hunk.
+
+Whole files were the rule until I1b, and they made the bundle the cost. I1b's
+30 modified files were 453 KB in full and 172 KB as function-context diffs;
+I1a's payload crossed Gemini's 200k-token tier and was billed at double the
+input rate (D-TOOLING-07). The price is real: a reviewer no longer sees the
+unchanged functions of a modified file, so a bypass through one of them, called
+from changed code, can go unreported. git has no TypeScript diff driver, so a
+function starts at any column-0 line: top-level `function`, `class`, and
+`const` declarations bound it, and a change inside a class method shows the
+whole class.
 
 ```bash
 {
@@ -83,7 +95,12 @@ needs surrounding context, and a hunk hides it.
   git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
     case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
-    printf '\n===== %s =====\n' "$f"; cat "$f"
+    printf '\n===== %s =====\n' "$f"
+    if git cat-file -e "<base>:$f" 2>/dev/null; then
+      git diff --no-color --no-ext-diff -W <base>..HEAD -- "$f"
+    else
+      cat "$f"
+    fi
   done
   printf '\n=== BUNDLE END === %s\n' "$(openssl rand -hex 16)"
 } > docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt
@@ -239,8 +256,10 @@ opinions.
 
 ```
 The code under review is in the file
-`<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — the full contents of
-every changed file, with the commit range at its top. It is provided with this
+`<date>-<UNIT>-<slug>-review-bundle.txt` (SHA-256 <hash>) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
 prompt: attached to this message, present in your working directory, or included
 in the prompt text itself. If you cannot read it, stop and say so; do not review
 from the description below alone. Before reviewing, state on four separate
@@ -399,6 +418,19 @@ exists lets a reader judge whether the reviewer was steered, and check that the
 findings were not selected to match the framing.
 
 ## 5. Commit both files
+
+**First, check the size.** The runner refuses a payload over 600,000 bytes,
+which keeps it under Gemini's 200k-token pricing tier at the lowest
+bytes-per-token ratio yet measured. The payload is the prompt and the bundle
+plus under 1 KB of delimiters and reminder, so check the two files against a
+little less:
+
+```bash
+[ "$(cat docs/reviews/<date>-<UNIT>-<slug>-review-prompt.txt docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt | wc -c)" -le 599000 ] || echo 'FAIL: over the payload ceiling'
+```
+
+Over it, do not commit. Say so, with the size, and propose splitting the range
+into two reviews; the maintainer decides.
 
 On the unit branch, both files in one commit, and push. The runner refuses to
 send a prompt and bundle unless the commit that last touched them is on the
