@@ -328,6 +328,8 @@ function environmentPassthrough(env: Readonly<Record<string, string>> | undefine
 
 function runArgsFor(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): string[] {
   const args = ['run', '--detach', '--init', '--name', name, '--network', egress.network, '--user', `${String(spec.user.uid)}:${String(spec.user.gid)}`];
+  // Every exec inherits it: a command runs in the workspace, never in whatever directory the image left set.
+  args.push('--workdir', spec.mounts.workspace.target);
   const relay = relayOf(egress);
   if (egress.mode === 'allowlist') args.push(...proxyEnvironment(relay !== undefined));
   // The relay's address, not a secret: the credential is in the relay, and this is where to find it.

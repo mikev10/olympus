@@ -9,7 +9,7 @@
  * (I5, D-P2-02).
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -139,6 +139,16 @@ describe('the mount table is what the container gets', () => {
     const result = await provider.exec(handle, ['sh', '-c', 'echo made > /workspace/made.txt']);
     expect(result.exitCode).toBe(0);
     expect((await readFile(join(workspace, 'made.txt'), 'utf8')).trim()).toBe('made');
+  });
+
+  test('a command runs in the workspace, so a path relative to it names a file in the tree', async () => {
+    await writeFile(join(workspace, 'here.txt'), 'found');
+    // A target the image does not already use as its WORKDIR, so the image cannot pass this for the provider.
+    const handle = await provision({ mounts: { workspace: { source: workspace, target: '/srv/tree', mode: 'ro' }, others: [] } });
+    const where = await provider.exec(handle, ['pwd']);
+    expect(where.stdout.trim()).toBe('/srv/tree');
+    const read = await provider.exec(handle, ['cat', 'here.txt']);
+    expect(read.stdout).toBe('found');
   });
 
   test('a write outside the workspace reaches no host path', async () => {

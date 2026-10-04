@@ -3434,3 +3434,15 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 - **Ambiguous:** the M1 proof runs the host on the maintainer's Windows machine, where `localWorkspaceStore` has no uid to derive the container user from and refuses, as it should, to guess one.
 - **Chosen:** `HostConfig.containerUser`, set from `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither. On a host with uids the store still refuses any user other than the process's own. The maintainer confirmed this on 2026-10-03. The entry point is run with `pnpm dlx tsx`, since the repository holds no TypeScript runner and adding one is not this unit's.
 - **Reverse:** run the host only on a host with uids.
+
+### D-I1b-11: a sandbox command runs in the workspace
+
+- **Found:** the first M1 proof run (`12088e75-91a3-4633-a455-1ba47441edc3`, $0.29) parked at `verify`: the builder's change was correct, but every check failed with `Cannot find module '/node_modules/typescript/bin/tsc'`. `SandboxProvider.exec` never said where a command runs. The stub runs it in the workspace; `LocalDockerProvider` set no working directory, so a command ran wherever the image left it (`/`). The driver hid the gap by changing directory itself, and every check in the suite was `node -e`, which reads no path.
+- **Chosen:** the contract says a command runs with the Workspace as its working directory, and `LocalDockerProvider` starts the container with `--workdir` at the workspace target. `packages/sandbox/test/local.test.ts` asserts it with a target no image uses as its default.
+- **Also seen:** the hand check that the canary's acceptance test fails on the base passed for the same wrong reason, an instance of D-A-BF-01's known limit: a check that cannot find its runner fails like one whose assertion fails.
+- **Reverse:** none sensible; the alternative is absolute paths in every manifest, which ties a repository to the container's layout.
+
+### D-I1b-12: the proof host runs with Windows Developer Mode
+
+- **Found:** the runtime copies the working copy with its symlinks (`packages/api/src/workspace.ts:189`), which Windows refuses to an unprivileged process unless Developer Mode is on, so admission failed with `EPERM` on `node_modules/.bin`.
+- **Chosen:** the M1 proof runs with Developer Mode on. The long-term host on Windows is WSL2, with a start-up check that refuses where a symlink cannot be created: issue #28, outside this unit.
