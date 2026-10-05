@@ -278,3 +278,12 @@ Every package's tests pass. In the local conformance run, the external entries
 whose packages' paid suites have not run on this tree refuse on `tree-changed`,
 and the registry-completeness checks fail on those alone. The paid suites run
 in CI under the pull request's `run-driver` label.
+
+**The same fix, a second knock-on, also confirmed.** CI's paid line suite
+(run 37312602465) halted in its setup with "accepted no change": its fixture,
+`hello`, needs no change (its one check is `process.exit(0)`), so the real
+model rightly wrote nothing. A run above L1 cannot drop its integrator
+(D-I1b-05), so the maintainer chose a paid-only fixture,
+`packages/api/test/fixtures/hello-change`, whose check needs `hello.txt`
+written. The run reaches the integrate approval with a change, as the suite
+asserts; the shared `hello` fixture and every assertion are unchanged.

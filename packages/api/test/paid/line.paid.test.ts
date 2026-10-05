@@ -21,6 +21,9 @@ import { afterAll, beforeAll, expect } from 'vitest';
 import { composeHost, readUsage, runStanding, startRun, UNANALYSED_TESTS, type BuiltGraph, type RunOutcome } from '../../src/index.js';
 import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER } from '../harness.js';
 
+/** hello with a task that needs one file written, so a real run reaches the integrate approval with a change to merge: an empty change halts at integrate's work (D-I1b-04). */
+const HELLO_CHANGE = join(HELLO, '..', 'hello-change');
+
 const runId = 'paid-line' as RunId;
 const TIER: ModelTier = 'fast';
 
@@ -55,8 +58,8 @@ beforeAll(async () => {
   if (key === undefined || key === '') throw new Error('the paid line suite needs ANTHROPIC_API_KEY; it is never skipped');
   base = await mkdtemp(join(tmpdir(), 'paid-line-'));
   const repository = join(base, 'repository');
-  // The hello fixture declares no package.json, so neither vitest nor jest: its tests cannot be analysed.
-  await cp(HELLO, repository, { recursive: true });
+  // The fixture declares no package.json, so neither vitest nor jest: its tests cannot be analysed.
+  await cp(HELLO_CHANGE, repository, { recursive: true });
   await mkdir(join(base, 'store'), { recursive: true });
   // The remote is a GitHub held in process: the run stops at the integrate approval, so nothing merges, and no real repository is touched.
   github = new FakeGitHub({ token: 'paid-line-token' });

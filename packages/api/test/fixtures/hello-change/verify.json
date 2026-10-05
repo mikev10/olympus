@@ -1,0 +1,5 @@
+{
+  "checks": [
+    { "id": "hello-file", "kind": "behavioral", "command": ["node", "-e", "process.exit(require('node:fs').readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1)"], "required": true, "timeoutMs": 10000 }
+  ]
+}
