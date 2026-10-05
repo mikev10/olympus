@@ -675,15 +675,19 @@ export async function readIntegration(vault: Vault, runId: RunId): Promise<Integ
  * so the human approving the exit sees what will merge (D-I1b-01). Once per
  * run: a resume that finds the record does not open it again. With no
  * integrator, nothing: the run is at L1 or below, and a human merges. With no
- * accepted change, nothing either: there is no pull request to open, and the
- * merge after the approval halts the run rather than call it done (D-I1b-04).
+ * accepted change, a throw: there is no pull request to open, and the run
+ * halts at the work rather than wait on an approval of nothing (D-I1b-04).
  */
 async function openAccepted(ctx: LineContext): Promise<void> {
   const { integrator, vault } = ctx.components;
   if (integrator === null) return;
   if ((await readIntegration(vault, ctx.run.id)).some((r) => r.kind === 'opened')) return;
   const { diff, tree } = await accepted(ctx);
-  if (diff.length === 0) return;
+  if (diff.length === 0) {
+    // Refused here rather than at the merge: no human is asked to approve a merge of nothing, and no
+    // approved exit stands with no integration record to say the run is unfinished (D-I1b-04).
+    throw new Error(`line: run ${ctx.run.id} accepted no change, so there is nothing to merge, and a run that merged nothing is not done`);
+  }
   const opened = await integrator.open({
     runId: ctx.run.id,
     baseCommit: ctx.run.baseCommit,

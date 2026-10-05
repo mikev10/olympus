@@ -21,7 +21,7 @@ type GitObject = Blob | TreeObject | Commit;
 interface Pull {
   readonly number: number;
   readonly headRef: string;
-  readonly base: string;
+  base: string;
   state: 'open' | 'closed';
   mergedAt: string | null;
   mergeCommit: string | null;
@@ -67,6 +67,8 @@ export class FakeGitHub {
   readonly requests: FakeGitHubRequest[] = [];
   /** Set to make the next merge answer 405, as GitHub does for a merge it will not make. */
   failMerge = false;
+  /** Called inside the next merge request, before it merges: a push that lands between the runtime's base check and its merge. */
+  beforeNextMerge: (() => void) | null = null;
   readonly #token: string;
   readonly #untracked: ReadonlySet<string>;
   readonly #objects = new Map<string, GitObject>();
@@ -130,6 +132,21 @@ export class FakeGitHub {
     const moved = this.#commit(tree, [head], 'someone else pushed');
     this.#refs.set(this.baseBranch, moved);
     return moved;
+  }
+
+  /** Merges a pull request onto its base as it now stands, as a collaborator pressing the button would. */
+  mergeAsSomeoneElse(number: number): string {
+    const pull = this.#pulls[number - 1];
+    if (pull === undefined) throw new Error(`fake GitHub: no pull request #${String(number)}`);
+    return this.#merge(pull);
+  }
+
+  /** Points a pull request at another base branch, creating it at the current base head if absent. */
+  retarget(number: number, base: string): void {
+    const pull = this.#pulls[number - 1];
+    if (pull === undefined) throw new Error(`fake GitHub: no pull request #${String(number)}`);
+    if (!this.#refs.has(base)) this.#refs.set(base, this.head(this.baseBranch));
+    pull.base = base;
   }
 
   head(branch: string): string {
@@ -233,6 +250,17 @@ export class FakeGitHub {
     return sha;
   }
 
+  /** A merge commit of the pull request's head over its base's current head, as `merge_method: 'merge'` makes. */
+  #merge(pull: Pull): string {
+    const head = this.head(pull.headRef);
+    const merged = this.#commit(this.#object(head, 'commit').tree, [this.head(pull.base), head], `Merge pull request #${String(pull.number)}`);
+    this.#refs.set(pull.base, merged);
+    pull.state = 'closed';
+    pull.mergedAt = new Date(0).toISOString();
+    pull.mergeCommit = merged;
+    return merged;
+  }
+
   #pullView(p: Pull): unknown {
     const [owner] = this.repository.split('/');
     return {
@@ -334,12 +362,10 @@ export class FakeGitHub {
         if (this.failMerge) return send(res, 405, { message: 'Pull Request is not mergeable' });
         if (pull.mergedAt !== null) return send(res, 405, { message: 'Pull Request is already merged' });
         if (body.sha !== head) return send(res, 409, { message: 'Head branch was modified' });
-        const merged = this.#commit(this.#object(head, 'commit').tree, [this.head(pull.base), head], `Merge pull request #${String(pull.number)}`);
-        this.#refs.set(pull.base, merged);
-        pull.state = 'closed';
-        pull.mergedAt = new Date(0).toISOString();
-        pull.mergeCommit = merged;
-        return send(res, 200, { merged: true, sha: merged, message: 'Pull Request successfully merged' });
+        const before = this.beforeNextMerge;
+        this.beforeNextMerge = null;
+        before?.();
+        return send(res, 200, { merged: true, sha: this.#merge(pull), message: 'Pull Request successfully merged' });
       }
     }
     return send(res, 404, { message: `no route ${method} ${path}` });

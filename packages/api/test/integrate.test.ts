@@ -1,6 +1,9 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RunId } from '@olympus-ai/core';
+import { withFakeGitHub, type FakeGitHub } from '@olympus-ai/conformance/fake-github';
+import type { IntegrationOpened } from '@olympus-ai/vault';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { baseMismatches, GitHubIntegrator, gitBlobSha, reachesRemote } from '../src/index.js';
 
@@ -41,9 +44,22 @@ describe('baseMismatches', () => {
     expect(problems[2]).toMatch(/vendor is a commit/);
   });
 
+  test('a tracked symlink the base holds as a regular file of the same text is named (codex-3)', async () => {
+    const problems = await baseMismatches(root, [{ ...hello, mode: '120000' }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/hello\.txt is a symlink at the base commit and a regular file/u);
+  });
+
   test.skipIf(process.platform === 'win32')('a symlink is compared by its target, as git stores it', async () => {
     await symlink('hello.txt', join(root, 'link'));
     expect(await baseMismatches(root, [{ path: 'link', mode: '120000', type: 'blob', sha: gitBlobSha(new TextEncoder().encode('hello.txt')) }])).toEqual([]);
+  });
+
+  test.skipIf(process.platform === 'win32')('a tracked regular file the base holds as a symlink of the same text is named (codex-3)', async () => {
+    await symlink('hello.txt', join(root, 'file-as-link'));
+    const problems = await baseMismatches(root, [{ path: 'file-as-link', mode: '100644', type: 'blob', sha: gitBlobSha(new TextEncoder().encode('hello.txt')) }]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/file-as-link is a regular file at the base commit and a symlink/u);
   });
 });
 
@@ -68,5 +84,79 @@ describe('GitHubIntegrator', () => {
     const integrator = new GitHubIntegrator({ repository: 'a/b', baseBranch: 'main', token: 'secret-token-value' });
     expect(integrator.remoteDomains).toEqual(expect.arrayContaining(['github.com', 'api.github.com']));
     expect(JSON.stringify(integrator)).not.toContain('secret-token-value');
+  });
+});
+
+describe('GitHubIntegrator against a GitHub server', () => {
+  const token = 'integrate-test-token';
+  const runId = 'run-integrate' as RunId;
+
+  /** A base of `hello.txt`, a verified tree that adds `feature.txt`, and the pull request opened over them. */
+  async function opened<T>(body: (github: FakeGitHub, integrator: GitHubIntegrator, record: IntegrationOpened, reopen: () => Promise<IntegrationOpened>) => Promise<T>): Promise<T> {
+    const base = await mkdtemp(join(tmpdir(), 'integrate-base-'));
+    const tree = await mkdtemp(join(tmpdir(), 'integrate-tree-'));
+    try {
+      await writeFile(join(base, 'hello.txt'), 'hello\n');
+      await cp(base, tree, { recursive: true });
+      await writeFile(join(tree, 'feature.txt'), 'feature\n');
+      return await withFakeGitHub(base, { token }, async (github, baseCommit) => {
+        const integrator = new GitHubIntegrator({ repository: github.repository, baseBranch: github.baseBranch, token, apiBase: github.apiBase });
+        const reopen = async (): Promise<IntegrationOpened> => integrator.open({ runId, baseCommit, base, tree, diff: [{ path: 'feature.txt', change: 'added', sha256: null }], admittedAt: new Date(0).toISOString() });
+        const record = await reopen();
+        return body(github, integrator, record, reopen);
+      });
+    } finally {
+      await rm(base, { recursive: true, force: true });
+      await rm(tree, { recursive: true, force: true });
+    }
+  }
+
+  test('a merge whose record was lost is found merged over the base commit and recorded again (control)', async () => {
+    await opened(async (_github, integrator, record) => {
+      const first = await integrator.merge(record);
+      const again = await integrator.merge(record);
+      expect(again.mergeCommit).toBe(first.mergeCommit);
+    });
+  });
+
+  test('a push that lands between the base check and the merge halts the run (codex-1)', async () => {
+    await opened(async (github, integrator, record) => {
+      github.beforeNextMerge = () => github.moveBase();
+      await expect(integrator.merge(record)).rejects.toThrow(/not over .* the commit the run was verified over/u);
+    });
+  });
+
+  test('a pull request merged by someone else after the base moved is not recorded as the run\'s merge (gemini-1)', async () => {
+    await opened(async (github, integrator, record) => {
+      github.moveBase();
+      github.mergeAsSomeoneElse(record.pullRequest);
+      await expect(integrator.merge(record)).rejects.toThrow(/not over .* the commit the run was verified over/u);
+    });
+  });
+
+  test.skipIf(process.platform === 'win32')('a changed path is published as the type the verified tree holds, not the base\'s (codex-3)', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'integrate-base-'));
+    const tree = await mkdtemp(join(tmpdir(), 'integrate-tree-'));
+    try {
+      await symlink('production', join(base, 'config'));
+      await writeFile(join(tree, 'config'), 'staging');
+      await withFakeGitHub(base, { token }, async (github, baseCommit) => {
+        const integrator = new GitHubIntegrator({ repository: github.repository, baseBranch: github.baseBranch, token, apiBase: github.apiBase });
+        const record = await integrator.open({ runId, baseCommit, base, tree, diff: [{ path: 'config', change: 'modified', sha256: null }], admittedAt: new Date(0).toISOString() });
+        expect(github.files(record.commit).get('config')?.mode).toBe('100644');
+      });
+    } finally {
+      await rm(base, { recursive: true, force: true });
+      await rm(tree, { recursive: true, force: true });
+    }
+  });
+
+  test('a pull request retargeted to another branch is refused at open and at merge (gemini-2)', async () => {
+    await opened(async (github, integrator, record, reopen) => {
+      github.retarget(record.pullRequest, 'elsewhere');
+      await expect(reopen()).rejects.toThrow(/targets elsewhere, not main/u);
+      await expect(integrator.merge(record)).rejects.toThrow(/targets elsewhere, not main/u);
+      expect(github.pulls()[0]?.merged).toBe(false);
+    });
   });
 });

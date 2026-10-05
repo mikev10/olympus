@@ -1,3 +1,63 @@
+# External review of I1b, codex, 2026-10-03
+
+An adversarial pre-merge review of I1b (the merge step and the M1 proof): the
+`GitHubIntegrator` that pushes the accepted change over the admitted base and
+merges after the human's approval, the integrate sequencing in the line and
+the run service, the Vault's integration record, the per-run report, host
+configuration for the merge token and the container user, and the sandbox
+working-directory fix. One of two reviews run from the same prompt and bundle;
+the other is `2026-10-03-I1b-merge-m1-proof-review-gemini.md`. Both are triaged
+in `2026-10-03-I1b-merge-m1-proof-triage.md`, which cites this review's
+findings as `codex-1` to `codex-7`, as the reply numbers them.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 227.5 s. Ingestion `complete`: 148,704
+  input tokens against a floor of 107,733. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `ad8eef29b5881902649db00e688cf7415a1ae7274016ee81cda1c7135174174a`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-4 (an accepted empty change leaves no
+  integration record, and the standing reads `passed` once the exit is
+  approved) was raised by gemini too, as gemini-3. codex-7 (an empty
+  `FACTORY_CONTAINER_UID` or `_GID` parses as 0) was raised by gemini too, as
+  gemini-4. codex-1 (the base can move between the check and the merge) and
+  gemini-1 (an already-merged pull request skips the base check) concern the
+  same property by different constructions and are not paired. codex-2,
+  codex-3, codex-5, and codex-6 were raised by codex alone.
+- **Date:** 2026-10-03 (run started 2026-10-04T01:49Z).
+- **Bundle:** `2026-10-03-I1b-merge-m1-proof-review-bundle.txt`, SHA-256
+  `3ce7e2aae37d708b252152d472ebeedfa3671ab97c46b4a661854b8951a1d482`, base
+  `e37aab6` (`reviewed/I1a`), head `288555b` ("I1b: the M1 proof — run
+  904f6dab merged canary PR #1"). It held the full contents of 38 of the 39
+  changed paths across four commits: source, tests, registry, the two
+  changesets, and the M1 proof README and report. The changed
+  `docs/decisions.md` was excluded, and so was every unchanged file. Prompt:
+  `2026-10-03-I1b-merge-m1-proof-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no external lookups, that local filesystem access was
+  blocked, and that it did not execute tests. A self-report, not independently
+  verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Item 1
+  is answered by codex-1 to codex-5; item 2 by codex-6; item 3 by codex-4;
+  item 4 by a closing paragraph finding no bypass from casts or brands under
+  the stated trust model; item 5 by codex-7; item 6 by a list of mechanisms
+  assessed sound (credential separation, approval sequencing, head binding,
+  the working directory); item 7 by a closing paragraph refining the question
+  to which exact tree was verified and what atomic operation binds approval,
+  tree, and destination. No item came back empty.
+- **Citations:** line numbers refer to positions in each file as the bundle
+  carried it, not to the repository at any later commit. They are hints; the
+  triage located each construct by name.
+
+---
+
 BASE: e37aab6  
 HEAD: 288555b  
 packages/vault/src/types.ts  

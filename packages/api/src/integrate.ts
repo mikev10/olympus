@@ -10,10 +10,13 @@
  *
  * What merges is what was verified, or nothing merges (D-I1b-03):
  * - every file `baseCommit` tracks must hash, as a git blob, to the same bytes
- *   in the base the runtime snapshotted at admission;
+ *   and be the same kind, symlink or regular file, in the base the runtime
+ *   snapshotted at admission;
  * - the base branch must still point at `baseCommit` when the pull request is
  *   opened and when it is merged, and the merge names the pushed commit, so a
- *   head moved in between is refused by GitHub itself.
+ *   head moved in between is refused by GitHub itself;
+ * - the pull request must target the base branch, and the merge commit must
+ *   have `baseCommit` and the pushed commit as its parents.
  * Any failure throws, and the run halts at `integrate` (D-I1b-04).
  */
 import { createHash } from 'node:crypto';
@@ -77,7 +80,7 @@ export function gitBlobSha(bytes: Uint8Array): string {
 }
 
 /** A file's bytes as git stores them: a symlink's are its target. Null when the path holds neither. */
-async function blobBytes(root: string, path: string): Promise<Uint8Array | null> {
+async function blobOf(root: string, path: string): Promise<{ bytes: Uint8Array; symlink: boolean } | null> {
   const at = join(root, ...path.split('/'));
   let stat;
   try {
@@ -85,9 +88,16 @@ async function blobBytes(root: string, path: string): Promise<Uint8Array | null>
   } catch {
     return null;
   }
-  if (stat.isSymbolicLink()) return new TextEncoder().encode(await readlink(at));
+  if (stat.isSymbolicLink()) return { bytes: new TextEncoder().encode(await readlink(at)), symlink: true };
   if (!stat.isFile()) return null;
-  return readFile(at);
+  return { bytes: await readFile(at), symlink: false };
+}
+
+const SYMLINK = '120000';
+
+/** A file's kind as git names it. */
+function kindOf(symlink: boolean): string {
+  return symlink ? 'a symlink' : 'a regular file';
 }
 
 interface TreeEntry {
@@ -99,7 +109,9 @@ interface TreeEntry {
 
 /**
  * Every file `baseCommit` tracks, compared with the base snapshot by git blob
- * sha. Untracked files in the snapshot are not compared (D-I1b-03, known limit).
+ * sha and by kind, symlink or regular file, since a symlink's blob is its
+ * target text. Untracked files in the snapshot are not compared, and neither
+ * is the executable bit (D-I1b-03, known limits).
  */
 export async function baseMismatches(base: string, tracked: readonly TreeEntry[]): Promise<string[]> {
   const problems: string[] = [];
@@ -109,9 +121,12 @@ export async function baseMismatches(base: string, tracked: readonly TreeEntry[]
       problems.push(`${entry.path} is a ${entry.type}, which the runtime does not snapshot`);
       continue;
     }
-    const bytes = await blobBytes(base, entry.path);
-    if (bytes === null) problems.push(`${entry.path} is tracked at the base commit and absent from the base the run was built over`);
-    else if (gitBlobSha(bytes) !== entry.sha) problems.push(`${entry.path} differs between the base commit and the base the run was built over`);
+    const blob = await blobOf(base, entry.path);
+    if (blob === null) problems.push(`${entry.path} is tracked at the base commit and absent from the base the run was built over`);
+    else if (gitBlobSha(blob.bytes) !== entry.sha) problems.push(`${entry.path} differs between the base commit and the base the run was built over`);
+    else if ((entry.mode === SYMLINK) !== blob.symlink) {
+      problems.push(`${entry.path} is ${kindOf(entry.mode === SYMLINK)} at the base commit and ${kindOf(blob.symlink)} in the base the run was built over`);
+    }
   }
   return problems;
 }
@@ -159,11 +174,13 @@ export class GitHubIntegrator implements Integrator {
         entries.push({ path: change.path, mode: modes.get(change.path) ?? '100644', type: 'blob', sha: null });
         continue;
       }
-      const bytes = await blobBytes(req.tree, change.path);
-      if (bytes === null) throw new Error(`integrate: ${change.path} is in the accepted diff and not in the tree it was verified over`);
-      const blob = await this.#call<{ sha: string }>('POST', '/git/blobs', { content: Buffer.from(bytes).toString('base64'), encoding: 'base64' });
-      if (blob.sha !== gitBlobSha(bytes)) throw new Error(`integrate: the remote stored ${change.path} as other bytes than were sent`);
-      entries.push({ path: change.path, mode: modes.get(change.path) ?? '100644', type: 'blob', sha: blob.sha });
+      const verified = await blobOf(req.tree, change.path);
+      if (verified === null) throw new Error(`integrate: ${change.path} is in the accepted diff and not in the tree it was verified over`);
+      const blob = await this.#call<{ sha: string }>('POST', '/git/blobs', { content: Buffer.from(verified.bytes).toString('base64'), encoding: 'base64' });
+      if (blob.sha !== gitBlobSha(verified.bytes)) throw new Error(`integrate: the remote stored ${change.path} as other bytes than were sent`);
+      // The kind is the verified tree's; a regular file keeps the base's executable bit, which is not compared (D-I1b-03).
+      const mode = verified.symlink ? SYMLINK : modes.get(change.path) === '100755' ? '100755' : '100644';
+      entries.push({ path: change.path, mode, type: 'blob', sha: blob.sha });
     }
     const tree = await this.#call<{ sha: string }>('POST', '/git/trees', { base_tree: baseTree, tree: entries });
     const who = { name: 'Factory runtime', email: 'runtime@factory.invalid', date: req.admittedAt };
@@ -189,6 +206,7 @@ export class GitHubIntegrator implements Integrator {
       base: this.baseBranch,
       body: `Opened by the factory runtime for run \`${req.runId}\`, built over \`${req.baseCommit}\`. It merges after a human approves the run's integrate gate.`,
     });
+    this.#targetsBase(pull);
     if (pull.state === 'closed' && pull.merged_at === null) throw new Error(`integrate: pull request #${String(pull.number)} was closed without merging`);
     if (pull.head.sha !== commit) throw new Error(`integrate: pull request #${String(pull.number)} is at ${pull.head.sha}, not at ${commit}`);
     return {
@@ -208,6 +226,7 @@ export class GitHubIntegrator implements Integrator {
   async merge(opened: IntegrationOpened): Promise<IntegrationMerged> {
     if (opened.repository !== this.repository) throw new Error(`integrate: the run opened its pull request on ${opened.repository}, not ${this.repository}`);
     const pull = await this.#call<PullRequest>('GET', `/pulls/${String(opened.pullRequest)}`);
+    this.#targetsBase(pull);
     if (pull.head.sha !== opened.commit) throw new Error(`integrate: pull request #${String(pull.number)} moved to ${pull.head.sha} from ${opened.commit}`);
     let mergeCommit: string;
     if (pull.merged_at !== null) {
@@ -221,7 +240,19 @@ export class GitHubIntegrator implements Integrator {
       if (!merged.merged) throw new Error(`integrate: GitHub did not merge pull request #${String(opened.pullRequest)}`);
       mergeCommit = merged.sha;
     }
+    // Either way, the merge must be over the commit the run was verified over. GitHub's merge pins the
+    // head and not the base, so a push between `#baseUnmoved` and the merge is merged in; this refuses
+    // to record it, and the run halts (D-I1b-04). The merge itself is not undone (D-I1b-13).
+    const parents = (await this.#call<{ parents: Array<{ sha: string }> }>('GET', `/git/commits/${mergeCommit}`)).parents.map((p) => p.sha);
+    if (parents.length !== 2 || parents[0] !== opened.baseCommit || parents[1] !== opened.commit) {
+      throw new Error(`integrate: pull request #${String(pull.number)} merged as ${mergeCommit} over ${parents.join(', ')}, not over ${opened.baseCommit}, the commit the run was verified over (D-I1b-03)`);
+    }
     return { ...opened, kind: 'merged', mergeCommit };
+  }
+
+  /** The pull request merges into the base branch, not another a collaborator retargeted it to. */
+  #targetsBase(pull: PullRequest): void {
+    if (pull.base.ref !== this.baseBranch) throw new Error(`integrate: pull request #${String(pull.number)} targets ${pull.base.ref}, not ${this.baseBranch}`);
   }
 
   /** The base branch still points at the commit the run was built over ("evidence is void if the base moves"). */
@@ -259,6 +290,7 @@ interface PullRequest {
   readonly merged_at: string | null;
   readonly merge_commit_sha: string | null;
   readonly head: { readonly ref: string; readonly sha: string };
+  readonly base: { readonly ref: string };
 }
 
 /** Whether an egress host is one of the remote's domains or lies under one. */

@@ -3391,13 +3391,13 @@ The maintainer confirmed every choice below on 2026-10-03, before any code was w
 
 - **Ambiguous:** `baseCommit` is the caller's word and was never compared with the base the runtime snapshotted (A-P6-03), and the base branch can move after admission. Either would merge a tree no check ran over.
 - **Chosen:** before pushing, every file `baseCommit`'s tree holds is hashed as a git blob from the base snapshot and compared; any difference, a tree entry that is not a blob, or a truncated listing halts the run. The base branch must still point at `baseCommit` when the pull request is opened and when it is merged ("evidence is void if the base moves"), and the merge passes the commit's sha so a head moved in between is refused by GitHub.
-- **Known limit:** files the snapshot holds that `baseCommit` does not track (`node_modules`, say) were present when the checks ran and are absent from the merge. They are not compared, because which untracked files are ignored is a `.gitignore` question the runtime does not answer without `git`. An added file is pushed with mode `100644`, since `DiffEntry` carries no mode; a modified file keeps the mode `baseCommit` gave it.
+- **Known limit:** files the snapshot holds that `baseCommit` does not track (`node_modules`, say) were present when the checks ran and are absent from the merge. They are not compared, because which untracked files are ignored is a `.gitignore` question the runtime does not answer without `git`. An added file is pushed with mode `100644`, since `DiffEntry` carries no mode; a modified file keeps the mode `baseCommit` gave it. D-I1b-14 amends this: the kind, symlink or regular file, is the verified tree's.
 - **Reverse:** compare at admission instead, by reading the working copy's `git` state.
 
 ### D-I1b-04: a failed push, base check, or merge halts the run
 
 - **Ambiguous:** `StationRefusal` has no integration reason, and adding one is a contract change.
-- **Chosen:** an integration failure throws; the service commits it as the run's halt, which the station machine refuses on for good and P14 records as a station refusal (A-P9-02). A transient GitHub error halts too. The run never reports done.
+- **Chosen:** an integration failure throws; the service commits it as the run's halt, which the station machine refuses on for good and P14 records as a station refusal (A-P9-02). A transient GitHub error halts too. The run never reports done. An accepted empty change halts at `integrate`'s work, before a human is asked to approve a merge of nothing, so no approved exit stands with no integration record (review fix, codex-4 and gemini-3).
 - **Reverse:** add an `integration-failed` reason to `StationRefusal`, so a resume could retry.
 
 ### D-I1b-05: the integrator is a slot of the graph, attested like the rest
@@ -3446,3 +3446,24 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 
 - **Found:** the runtime copies the working copy with its symlinks (`packages/api/src/workspace.ts:189`), which Windows refuses to an unprivileged process unless Developer Mode is on, so admission failed with `EPERM` on `node_modules/.bin`.
 - **Chosen:** the M1 proof runs with Developer Mode on. The long-term host on Windows is WSL2, with a start-up check that refuses where a symlink cannot be created: issue #28, outside this unit.
+
+### D-I1b-13: a merge is recorded only over the commit the run was verified over (review fix)
+
+- **Found:** the external review (`docs/reviews/2026-10-03-I1b-merge-m1-proof-triage.md`, codex-1, gemini-1, gemini-2). GitHub's merge endpoint pins the head and not the base, so a push between `#baseUnmoved` and the merge is merged in and was recorded; a pull request found already merged was accepted without any base check; and a pull request's target branch was never read, so one retargeted by a collaborator would merge elsewhere while the record named the configured base.
+- **Chosen:** after either merge path, `GitHubIntegrator.merge` reads the merge commit and requires its parents to be exactly the run's `baseCommit` and pushed commit, or throws and the run halts (D-I1b-04). `open` and `merge` refuse a pull request whose base is not the configured branch.
+- **Known limit:** a push in the one round-trip between the base check and the merge is still merged in. The run halts and is never recorded merged or reported passed, but the merge is not undone; the message names it for a human to revert.
+- **Reverse:** move the base ref by a non-forced fast-forward to the run's commit, which GitHub refuses atomically if the base moved. Not taken: it bypasses the pull request merge, and branch protection that requires pull requests refuses it, which would leave the runtime unable to merge on most real repositories.
+
+### D-I1b-14: the base comparison compares file kind; the executable bit is a known limit (review fix)
+
+- **Found:** the external review (codex-3). A symlink's git blob is its target text, so a tracked symlink and a snapshot regular file of the same text compared equal, and a changed path was pushed with the base's mode, so a regular file over a base symlink became a link.
+- **Chosen:** `baseMismatches` requires a `120000` entry to be a symlink in the snapshot and any other blob entry not to be. A changed path is pushed as the kind the verified tree holds; a regular file keeps `100755` where the base had it, else `100644`. This amends D-I1b-03's mode sentence.
+- **Known limit:** the executable bit is not compared, and an added file is never `100755`. Comparing it rests on two things not verified in this unit: that the runtime's snapshot preserves mode bits, and that the host reports them (a Windows host, D-I1b-10, does not). Owned by issue #28's host work, where a WSL2 host makes the bits reportable.
+- **Reverse:** compare the bit on hosts that report it, and refuse where they do not.
+
+### D-I1b-15: an unfinished run's report includes a live workspace observation (known limit)
+
+- **Found:** the external review (codex-5). `runReport` reads its standing from `runStanding`, which re-hashes the admitted artifacts from the working copy unless the run is cancelled, halted, or past its last exit. A run awaiting approval whose artifact is edited reports `stopped` with `lock-tamper`, a finding the read path returns and does not record.
+- **Chosen:** no change in this unit. For a finished run the report is read from the Vault alone, since each of the three short-circuits precedes the re-hash (P9 review, codex-3). For an unfinished run the standing is live by design: lock re-verification is what keeps an admitted artifact from being swapped, and the line refuses on the same finding at its next transition.
+- **Known limit:** the report presents that live observation in the same field as recorded facts. Separating them is a change to `RunReport`'s shape, owned by R2, which reads reports across finished runs.
+- **Reverse:** persist the observation as a decision before reporting it, which turns a read into a write.

@@ -12,7 +12,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { GraphParts, RunOutcome } from '@olympus-ai/api';
 import type { Policy, RoleId, VaultRef } from '@olympus-ai/core';
-import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { MeterReading, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { IntegrationRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import { withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
@@ -24,6 +24,9 @@ const api = async () => import('@olympus-ai/api');
 
 const TOKEN = 'ghp_conformance-token-never-in-a-sandbox';
 const REPORT_TOKEN = 'conformance-report-token-of-32-characters-or-more';
+
+/** What every sandbox in the report scenario reads: 300 of 500 input tokens from the cache. */
+const REPORT_METER: MeterReading = { kind: 'metered', calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 100, costUsd: 0.002, exhausted: 'none', refused: 0 };
 
 /** What the build task adds: one file, so the run has a change to merge. */
 const FEATURE = { 'src/feature.ts': 'export const feature = 1;\n' };
@@ -39,7 +42,8 @@ interface Integrating {
 }
 
 /** The hello fixture, seeded as the remote's base commit, with a build task that adds `FEATURE`. */
-async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>): Promise<T> {
+/** `meter`, when given, is what every sandbox reads at its destroy. */
+async function withIntegration<T>(prefix: string, body: (it: Integrating) => Promise<T>, meter?: MeterReading): Promise<T> {
   return withLine(prefix, async (rig) =>
     withFakeGitHub(rig.dirs.artifacts, { token: TOKEN }, async (github, baseCommit) => {
       const { GitHubIntegrator } = await api();
@@ -48,6 +52,7 @@ async function withIntegration<T>(prefix: string, body: (it: Integrating) => Pro
       const components: Integrating['components'] = async (overrides = {}) => {
         const inner = new StubSandboxProvider();
         const sandbox: SandboxProvider = Object.assign(Object.create(inner) as SandboxProvider, {
+          ...(meter === undefined ? {} : { destroy: async (handle: Parameters<SandboxProvider['destroy']>[0]) => ({ ...(await inner.destroy(handle)), meter }) }),
           provision: (spec: SandboxSpec) => {
             specs.push(spec);
             return inner.provision(spec);
@@ -171,7 +176,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
 export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
   id: 'I5.failed-integration-never-reports-done',
   title:
-    "a merge GitHub refuses, a base branch that moved after the run was verified, and a base commit that is not the base the run was built over each stop the run at integrate with nothing merged; none stands passed",
+    "a merge GitHub refuses, a base branch that moved after the run was verified, an accepted empty change, and a base commit that is not the base the run was built over each stop the run at integrate with nothing merged; none stands passed",
   run: async () => {
     const { runStanding } = await api();
     const { LocalVault } = await import('@olympus-ai/vault');
@@ -202,6 +207,19 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
       it.github.moveBase();
       await rejects(approveAndResume(it), /moved/u, 'a base branch moved after verification');
       await notPassed(it, 'a moved base');
+    });
+
+    await withIntegration('i1b-empty-', async (it) => {
+      // A build that writes nothing: no pull request to open, so the run halts at integrate's work, before a human is asked to approve a merge of nothing.
+      const { startRun } = await api();
+      const idle = await stubDriver();
+      await rejects(
+        (async () => startRun(await it.rig.request(await it.components({ driver: idle, reviewer: idle }), { baseCommit: it.baseCommit })))(),
+        /accepted no change/u,
+        'an accepted empty change',
+      );
+      if (it.github.pulls().length !== 0) throw new Error('I5: a pull request was opened for an empty change');
+      await notPassed(it, 'an accepted empty change');
     });
 
     await withIntegration('i1b-drift-', async (it) => {
@@ -310,6 +328,14 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
       const state = await vault.readRunState(it.rig.runId);
       const usage = await readUsage(vault, state);
       if (JSON.stringify(report.cost) !== JSON.stringify(costTotals(usage))) throw new Error('I2: the report cost is not the totals of the usage records');
+      // The arithmetic, against figures computed here and not by the helper production calls: every call read REPORT_METER.
+      const read = usage.filter((r) => r.reading.kind !== 'pending').length;
+      const m = report.cost.run.metered;
+      if (read === 0 || report.calls.length !== read) throw new Error(`I2 control: the report lists ${String(report.calls.length)} calls for ${String(read)} readings`);
+      if (m.calls !== read || m.inputTokens !== 100 * read || m.outputTokens !== 10 * read || m.cacheReadTokens !== 300 * read || m.cacheWriteTokens !== 100 * read || Math.abs(m.costUsd - 0.002 * read) > 1e-12) {
+        throw new Error(`I2: the report's metered totals are not ${String(read)} calls of the reading each made: ${JSON.stringify(m)}`);
+      }
+      if (report.cacheHitRate !== 0.6) throw new Error(`I2: the report's cache-hit rate is ${String(report.cacheHitRate)}, not 300 cached of 500 input tokens`);
       if (report.calls.length === 0 || report.calls.some((c) => typeof c.model.family !== 'string' || c.model.family === '')) throw new Error('I2: a call in the report names no model');
       if (report.standing.standing !== 'passed') throw new Error(`I2: the report says ${report.standing.standing} for a merged run`);
       const integrate = report.stations.find((s) => s.station === 'integrate');
@@ -334,6 +360,17 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
       } finally {
         await server.close();
       }
+    }, REPORT_METER);
+
+    // With no meter there is no input to rate: the cache-hit rate is null, not 0.
+    await withIntegration('i1b-report-unmetered-', async (it) => {
+      const { runReport } = await api();
+      const { LocalVault } = await import('@olympus-ai/vault');
+      await toApproval(it);
+      if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the unmetered run did not pass');
+      const report = await runReport(new LocalVault(it.rig.dirs), it.rig.runId);
+      if (report.cost.run.unmetered === 0) throw new Error('I2 control: the unmetered run recorded a metered call');
+      if (report.cacheHitRate !== null) throw new Error(`I2: an unmetered run's cache-hit rate is ${String(report.cacheHitRate)}, not null`);
     });
   },
 });

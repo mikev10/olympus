@@ -43,6 +43,19 @@ export interface HostConfig {
 /** Bounds every sandbox the line provisions, whichever task it serves. */
 export const DEFAULT_LIMITS: SandboxProfile['limits'] = { cpus: 2, memoryMb: 4096, pids: 512 };
 
+/** Both, or neither: a uid with no gid is a half-named user, refused rather than completed (D-I1b-10). */
+export function containerUser(env: Readonly<Record<string, string | undefined>>): ContainerUser | undefined {
+  const uid = env.FACTORY_CONTAINER_UID;
+  const gid = env.FACTORY_CONTAINER_GID;
+  if ((uid === undefined || uid === '') && (gid === undefined || gid === '')) return undefined;
+  // Decimal digits only: `Number('')` and `Number(' ')` are 0, so a half-set pair would otherwise name root's group.
+  const decimal = /^\d+$/u;
+  if (uid === undefined || gid === undefined || !decimal.test(uid) || !decimal.test(gid)) {
+    throw new Error('factory-host: FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID must both be set, as decimal integers, or neither');
+  }
+  return { uid: Number(uid), gid: Number(gid) };
+}
+
 export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
   const docker = config.docker === undefined ? {} : { executable: config.docker };
