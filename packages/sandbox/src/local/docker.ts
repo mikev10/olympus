@@ -31,6 +31,31 @@ export interface CliOptions {
   readonly env?: Readonly<Record<string, string>>;
   /** Written to the `docker` process's standard input, which is then closed. Omitted means none is attached. */
   readonly stdin?: string;
+  /**
+   * The most bytes of stdout and stderr together this process holds for the
+   * command. Past it the child is killed and `CliOutputExceeded` is thrown.
+   * Omitted means `DEFAULT_MAX_OUTPUT_BYTES`, never unbounded (D-P8-15).
+   */
+  readonly maxOutputBytes?: number;
+}
+
+/**
+ * The output a command may produce before it is killed, when the caller sets
+ * no other cap: 64 MiB, far above anything a check or a model session prints
+ * to report on itself, and far below what exhausts the host (D-R14-04).
+ */
+export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Thrown when a command printed more than its cap. The output is not
+ * returned, cut short or otherwise: a truncated stream compared against an
+ * expectation is a verdict about something other than what ran (D-P8-15).
+ */
+export class CliOutputExceeded extends Error {
+  override readonly name = 'CliOutputExceeded';
+  constructor(readonly maxOutputBytes: number) {
+    super(`the docker command printed more than ${String(maxOutputBytes)} bytes and was killed`);
+  }
 }
 
 /** Thrown when a call exceeded its bound. The caller decides what the bound meant. */
@@ -52,6 +77,11 @@ export class DockerUnavailable extends Error {
  * belongs to the caller, not here.
  */
 export function dockerCli(executable: string, args: string[], options: CliOptions = {}): Promise<CliResult> {
+  const cap = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  // A cap that is not a positive count compares false against every length and bounds nothing (I5).
+  if (!Number.isSafeInteger(cap) || cap <= 0) {
+    return Promise.reject(new Error(`maxOutputBytes must be a positive integer; ${String(cap)} bounds nothing`));
+  }
   return new Promise((resolvePromise, rejectPromise) => {
     const started = performance.now();
     const child = spawn(executable, args, {
@@ -62,6 +92,7 @@ export function dockerCli(executable: string, args: string[], options: CliOption
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let held = 0;
     let timer: NodeJS.Timeout | undefined;
     let settled = false;
 
@@ -94,12 +125,24 @@ export function dockerCli(executable: string, args: string[], options: CliOption
     // Both are 'pipe' above, so Node always creates them; the conditional stdin entry is what
     // hides that from spawn's overloads.
     if (child.stdout === null || child.stderr === null) throw new Error('docker was spawned without output pipes');
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout.push(chunk);
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr.push(chunk);
-    });
+    // Counted as it arrives, before it is kept: the bound is on what this process holds, so a
+    // command that prints faster than its timeout expires is stopped by the bytes, not the clock.
+    const keep = (into: Buffer[]) => (chunk: Buffer): void => {
+      if (settled) return;
+      held += chunk.length;
+      if (held > cap) {
+        child.kill('SIGKILL');
+        stdout.length = 0;
+        stderr.length = 0;
+        settle(() => {
+          rejectPromise(new CliOutputExceeded(cap));
+        });
+        return;
+      }
+      into.push(chunk);
+    };
+    child.stdout.on('data', keep(stdout));
+    child.stderr.on('data', keep(stderr));
     child.on('error', (error: Error) => {
       settle(() => {
         rejectPromise(new DockerUnavailable(`${executable} could not be run: ${error.message}`));

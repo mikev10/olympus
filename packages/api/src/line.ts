@@ -39,6 +39,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   capabilityRefusal,
+  escalationAt,
   grantedContext,
   locksHeldLeaving,
   M1_STATIONS,
@@ -48,6 +49,7 @@ import {
   seatReviewer,
   STATION_CONTRACTS,
   StrictPolicyEngine,
+  tierFor,
   transition,
 } from '@olympus-ai/core';
 import type {
@@ -77,9 +79,10 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
+import { readUsage } from './cost.js';
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
-import type { EgressPolicy, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import type { BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
@@ -412,6 +415,16 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
   if (attempt.starts > maxStarts(contract)) {
     return park(ctx, task, { attempts: { ...ctx.state.attempts, [task.id]: spent } });
   }
+  // An escalation is a decision, recorded before the attempt that carries it is committed, as a park
+  // is: a stop between the two leaves a record of an escalation that did not take effect, and the
+  // resume decides it again from the same counts (A-R14-02, D-P14-07). A replay is the same iteration.
+  const escalation = replay ? null : escalationAt(scopeFor(ctx, task), ctx.state.station, attempt);
+  if (escalation !== null) {
+    await recordDecision(
+      { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+      { cause: 'tier-escalated', decidedBy: 'line', ...escalation },
+    );
+  }
   await commit(ctx, {
     tasks: { ...ctx.state.tasks, [task.id]: 'running' },
     attempts: { ...ctx.state.attempts, [task.id]: attempt },
@@ -542,15 +555,21 @@ async function runTask(
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
   const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
+  // The tier this call runs at: the scope's at this station, raised only by a granted escalation, from the counts run state keeps (I2, A-R14-01).
+  const tier = tierFor(scope, task.station, attemptsOf(ctx.state, task));
   let handle: SandboxHandle;
   let model: ModelIdentity;
   try {
-    // The runtime's resolution of the tier the scope names, taken before the call: the record's model is never the driver's account (I2, A-I1a-01).
-    model = driver.resolveModel(scope.tier);
+    // The runtime's resolution of that tier, taken before the call: the record's model is never the driver's account (I2, A-I1a-01).
+    model = driver.resolveModel(tier);
     const spec = workspaceOnly(ctx, workspace, mode, egressFor(scope.network), 'build', scope.budget.maxWallClockMs);
-    // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02).
+    // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02),
+    // and priced for the resolved model alone, so a request naming any other is refused before it is sent (D-R14-01).
     const relay = driver.relayRequest();
-    handle = await sandbox.provision(relay === null ? spec : { ...spec, relay: { ...relay, budget: { maxTokens: scope.budget.maxTokens, maxCostUsd: scope.budget.maxCostUsd } } });
+    handle = await sandbox.provision(relay === null ? spec : {
+      ...spec,
+      relay: { ...relay, meter: boundTo(relay.meter, model.model), budget: { maxTokens: scope.budget.maxTokens, maxCostUsd: scope.budget.maxCostUsd } },
+    });
   } catch (error) {
     return { ok: false, error };
   }
@@ -568,7 +587,7 @@ async function runTask(
       role: task.role,
       stablePrefix: context,
       variableSuffix: task.id,
-      tier: scope.tier,
+      tier,
       tools: [...scope.tools],
       sandbox: handle,
       timeoutMs: scope.budget.maxWallClockMs,
@@ -600,6 +619,21 @@ async function runTask(
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
   }
   return outcome;
+}
+
+/**
+ * The driver's price table cut to the one model the runtime resolved for the
+ * call. The relay refuses a model it has no price for before forwarding it, so
+ * this is what binds a sandbox to its tier: a task that names another model,
+ * however it reaches the relay, is refused (I2, D-R14-01). A resolved model
+ * the driver has no price for is refused here rather than sent unpriced.
+ */
+export function boundTo(meter: RelayMeter, model: string): RelayMeter {
+  const price = Object.hasOwn(meter.prices, model) ? meter.prices[model] : undefined;
+  if (price === undefined) {
+    throw new Error(`line: the driver resolved the model ${JSON.stringify(model)}, which its relay has no price for, so the call could not be metered`);
+  }
+  return { dialect: meter.dialect, prices: { [model]: { ...price } } };
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
@@ -1071,9 +1105,9 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
 
   const reviewed = ctx.graph.tasks.filter((t) => task.dependsOn.includes(t.id));
   const authored = await Promise.all(reviewed.map((t) => readResult(ctx, t)));
-  const authors = authored.map((r) => r.model);
+  const authors = await authorsOf(ctx, reviewed, authored);
   const level = ctx.run.requestedLevel;
-  const planned = seatReviewer(task.id, authors, reviewer.resolveModel(scopeFor(ctx, task).tier), level);
+  const planned = seatReviewer(task.id, authors, reviewer.resolveModel(tierFor(scopeFor(ctx, task), 'review', attemptsOf(ctx.state, task))), level);
   if (!planned.ok) return planned;
 
   const spec = await readText(ctx, ctx.artifacts.spec);
@@ -1112,6 +1146,27 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     review: seated.seat,
   });
   return undefined;
+}
+
+/**
+ * Every model that built the reviewed tasks (I6, D-A-BR-01): the model each
+ * recorded result names, and the model of every call the runtime made for
+ * them, failed and escalated iterations included. After an escalation the
+ * last result names only the last tier's model, and a model whose iteration
+ * failed still worked the task the reviewer judges.
+ */
+async function authorsOf(ctx: LineContext, reviewed: readonly Task[], authored: readonly TaskResult[]): Promise<ModelIdentity[]> {
+  const ids = new Set(reviewed.map((t) => t.id));
+  const calls = (await readUsage(ctx.components.vault, ctx.state)).filter((r) => ids.has(r.taskId));
+  // Each model once: a call replayed after a stop is the same model twice, and a seat taken on resume
+  // lists the authors a run that never stopped would list (I2.resume-derives-state-from-the-vault).
+  const distinct = new Map<string, ModelIdentity>();
+  for (const model of [...authored.map((r) => r.model), ...calls.map((r) => r.model)]) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- read back from the Vault: the type is the writer's claim, not the bytes'.
+    if (typeof model?.family !== 'string') throw new Error(`line: a call recorded for ${reviewed.map((t) => t.id).join(', ')} names no model family, so a reviewer of it cannot be seated`);
+    distinct.set(JSON.stringify([model.provider, model.family, model.model, model.version]), model);
+  }
+  return [...distinct.values()];
 }
 
 interface StateChange {

@@ -1,10 +1,11 @@
-import { compileError, external, pending } from '../kit/assert.js';
+import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
 import { RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
 import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 
 /** I2: The runtime derives status; the model never reports it. */
@@ -58,6 +59,9 @@ export const I2: InvariantEntry = {
     CALL_RECORDED_BEFORE_IT_IS_MADE,
     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
     ENFORCEMENT_DECISIONS_RECORDED,
+    // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
+    ESCALATION_DECIDED_FROM_FAILED_GATES,
+    RELAY_BOUND_TO_TIER_MODEL,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',
@@ -76,18 +80,5 @@ export const I2: InvariantEntry = {
       file: 'test/paid/line.paid.test.ts',
     }),
   ],
-  pending: [
-    pending({
-      id: 'I2.relay-bound-to-tier-model',
-      owner: 'R14',
-      reason:
-        "A usage record names the model the runtime resolved the scope's tier to, but nothing makes the call use it: "
-        + '`relayRequest()` returns one relay for every tier, and the relay prices each request by the model that '
-        + 'request names, so a task with a command tool can call any priced model under the tier\'s alias. The cost '
-        + 'is still what the relay counted, against the task\'s budget; what is not runtime-derived is which model '
-        + 'served the call. Closing it means the relay refuses a model outside the tier, which needs the tier\'s '
-        + 'alias resolved to the concrete model ids the CLI sends. Owner is R14, where model selection per station '
-        + 'and its enforcement are decided. Raised by I1a\'s external review (codex-2); D-I1a-13.',
-    }),
-  ],
+  pending: [],
 };

@@ -7,6 +7,7 @@ import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
 } from './policy.js';
+import { ESCALATION_ONLY_UNDER_A_GRANT, TIER_PER_STATION_FOLLOWS_POLICY } from './tier.js';
 import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF } from './verification.js';
 
 /** I4: Default deny. */
@@ -295,6 +296,9 @@ export const I4: InvariantEntry = {
     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
     // P13: spending is a capability, bounded where the task cannot reach it.
     MODEL_RELAY_ENFORCES_BUDGET,
+    // R14: the tier a call runs at is policy's, per station, and escalation is a grant (A-R14-01).
+    TIER_PER_STATION_FOLLOWS_POLICY,
+    ESCALATION_ONLY_UNDER_A_GRANT,
   ],
   pending: [],
 };

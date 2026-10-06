@@ -26,10 +26,10 @@ import type {
 } from '../run/types.js';
 import {
   isApprovalKey, isApprovalOutcome, isAuthorTrust, isAutonomyLevel,
-  isModelTier, isStationId, isTriggerKind,
+  isModelTier, isStationId, isTriggerKind, tierRank,
 } from './constants.js';
 import type {
-  ApprovalKey, ApprovalOutcome, CapabilityScope, PolicyDocument, TriggerPolicy,
+  ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
 } from './types.js';
 
 /** One thing wrong, at the path it is wrong at. */
@@ -62,7 +62,11 @@ const DOCUMENT_KEYS: Readonly<Record<keyof PolicyDocument, true>> = {
 
 const SCOPE_KEYS: Readonly<Record<keyof CapabilityScope, true>> = {
   stations: true, writableGlobs: true, tools: true, network: true,
-  tier: true, autonomyCeiling: true, triggerKinds: true, budget: true,
+  tier: true, tierByStation: true, escalation: true, autonomyCeiling: true, triggerKinds: true, budget: true,
+};
+
+const ESCALATION_KEYS: Readonly<Record<keyof Exclude<EscalationGrant, 'none'>, true>> = {
+  afterFailedGates: true, ceiling: true,
 };
 
 const NETWORK_KEYS: Readonly<Record<keyof CapabilityScope['network'], true>> = { egress: true };
@@ -305,6 +309,56 @@ function validateEgress(
   return undefined;
 }
 
+/**
+ * `'none'`, or a grant with a positive failure count and a ceiling tier
+ * (A-R14-01). Required, like every scope key: a scope that does not say
+ * whether it escalates is refused rather than read as not escalating.
+ */
+function validateEscalation(record: Readonly<Record<string, unknown>>, path: string, defects: PolicyDefect[]): EscalationGrant | undefined {
+  const at = child(path, 'escalation');
+  if (!Object.hasOwn(record, 'escalation')) {
+    defects.push({ path: at, problem: `required key is missing; expected 'none' or { afterFailedGates, ceiling }` });
+    return undefined;
+  }
+  const value = record.escalation;
+  if (value === 'none') return 'none';
+  if (!isRecord(value)) {
+    defects.push({ path: at, problem: `expected 'none' or { afterFailedGates, ceiling }, found ${describe(value)}` });
+    return undefined;
+  }
+  const grant = shape(value, at, keysOf(ESCALATION_KEYS), defects);
+  if (grant === undefined) return undefined;
+  const afterFailedGates = read(grant, 'afterFailedGates', at, 'a positive integer', isPositiveInteger, defects);
+  const ceiling = read<ModelTier>(grant, 'ceiling', at, `one of 'fast', 'standard', 'deep'`, isModelTier, defects);
+  if (afterFailedGates === undefined || ceiling === undefined) return undefined;
+  return { afterFailedGates, ceiling };
+}
+
+/**
+ * What the per-station tiers and the escalation ceiling mean together. A tier
+ * for a station the role may not act at applies nowhere, as a cap keyed by a
+ * misspelt station would; a ceiling below a tier the role starts at would
+ * cap nothing it could reach. Both are refused rather than read as meaning
+ * something (I5).
+ */
+function tierDefects(scope: CapabilityScope, path: string, defects: PolicyDefect[]): void {
+  for (const station of Object.keys(scope.tierByStation)) {
+    if (!scope.stations.includes(station as StationId)) {
+      defects.push({ path: child(child(path, 'tierByStation'), station), problem: `the role may not act at '${station}', so a tier for it applies nowhere` });
+    }
+  }
+  if (scope.escalation === 'none') return;
+  const { ceiling } = scope.escalation;
+  const starting = [scope.tier, ...Object.values(scope.tierByStation)];
+  const above = starting.filter((tier) => tierRank(tier) > tierRank(ceiling));
+  if (above.length > 0) {
+    defects.push({
+      path: child(child(path, 'escalation'), 'ceiling'),
+      problem: `the ceiling '${ceiling}' is below the tier '${above[0] ?? ceiling}' the role starts at; a ceiling caps escalation and never lowers a tier`,
+    });
+  }
+}
+
 function validateScope(value: unknown, path: string, defects: PolicyDefect[]): CapabilityScope | undefined {
   const record = shape(value, path, keysOf(SCOPE_KEYS), defects);
   if (record === undefined) return undefined;
@@ -312,6 +366,10 @@ function validateScope(value: unknown, path: string, defects: PolicyDefect[]): C
   const writableGlobs = readArray<string>(record, 'writableGlobs', path, 'a non-empty glob string', isNonEmptyString, defects);
   const tools = readArray<string>(record, 'tools', path, 'a non-empty tool name', isNonEmptyString, defects);
   const tier = read<ModelTier>(record, 'tier', path, `one of 'fast', 'standard', 'deep'`, isModelTier, defects);
+  const tierByStation = readPartialMap<StationId, ModelTier>(
+    record, 'tierByStation', path, 'a station id', isStationId, `one of 'fast', 'standard', 'deep'`, isModelTier, defects,
+  );
+  const escalation = validateEscalation(record, path, defects);
   const autonomyCeiling = read<AutonomyLevel>(record, 'autonomyCeiling', path, 'an autonomy level 0-3', isAutonomyLevel, defects);
   const triggerKinds = readArray<TriggerKind>(record, 'triggerKinds', path, 'a trigger kind', isTriggerKind, defects);
   const network = Object.hasOwn(record, 'network')
@@ -328,10 +386,14 @@ function validateScope(value: unknown, path: string, defects: PolicyDefect[]): C
   }
   if (
     stations === undefined || writableGlobs === undefined || tools === undefined
-    || tier === undefined || autonomyCeiling === undefined || triggerKinds === undefined
+    || tier === undefined || tierByStation === undefined || escalation === undefined
+    || autonomyCeiling === undefined || triggerKinds === undefined
     || network === undefined || budget === undefined
   ) return undefined;
-  return { stations, writableGlobs, tools, network, tier, autonomyCeiling, triggerKinds, budget };
+  const scope: CapabilityScope = { stations, writableGlobs, tools, network, tier, tierByStation, escalation, autonomyCeiling, triggerKinds, budget };
+  const before = defects.length;
+  tierDefects(scope, path, defects);
+  return defects.length === before ? scope : undefined;
 }
 
 function validateTriggers(value: unknown, path: string, defects: PolicyDefect[]): TriggerPolicy | undefined {

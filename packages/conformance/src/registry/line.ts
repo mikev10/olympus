@@ -66,6 +66,8 @@ export function lineScope(stations: CapabilityScope['stations'], tier: ModelTier
     tools: ['read'],
     network: { egress: 'none' },
     tier,
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },

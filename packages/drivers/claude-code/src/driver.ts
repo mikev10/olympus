@@ -135,15 +135,34 @@ export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
 const FAMILY = 'claude' as ModelFamily;
 
 /**
- * Tier to model alias. Aliases rather than pinned model names: the CLI
- * resolves an alias to the current model and reports what it resolved, and
- * `ModelIdentity.model` carries that answer rather than this driver's guess.
+ * Tier to model, by the exact id the CLI sends, never an alias (D-R14-01). The
+ * line prices a call's relay for the model resolved here and no other, so the
+ * relay refuses any request naming another; an alias the CLI resolved for
+ * itself would name a model the runtime never chose. Each is in
+ * `MODEL_METER.prices`, which the driver's tests assert.
  */
 const TIER_MODELS: Readonly<Record<ModelTier, string>> = {
-  fast: 'haiku',
-  standard: 'sonnet',
-  deep: 'opus',
+  fast: 'claude-haiku-4-5',
+  standard: 'claude-sonnet-5',
+  deep: 'claude-opus-5-5',
 };
+
+/**
+ * Every setting through which the CLI picks a model of its own: the model it
+ * uses for background work, the one each alias stands for, and the one a
+ * subagent runs on. Each is pointed at the call's model, so every request the
+ * session sends names the model the relay was priced for; one left to the
+ * CLI's default would be refused by the relay and the call would fail for a
+ * reason that is not the task's (D-R14-02).
+ */
+const MODEL_VARIABLES: readonly string[] = [
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+];
+
 
 /**
  * Environment the CLI gets on every exec, beside the key placeholder.
@@ -187,6 +206,11 @@ const CLI_ENVIRONMENT: Readonly<Record<string, string>> = {
 
 /** Every exec's environment: the settings above and the placeholder. No value in it is secret. */
 const CLI_KEY_ENVIRONMENT: Readonly<Record<string, string>> = Object.freeze({ ...CLI_ENVIRONMENT, [KEY_VARIABLE]: KEY_PLACEHOLDER });
+
+/** The exec environment for one call: the fixed settings, the key placeholder, and every model setting pinned to `model`. */
+function environmentFor(model: string): Readonly<Record<string, string>> {
+  return Object.freeze({ ...CLI_KEY_ENVIRONMENT, ...Object.fromEntries(MODEL_VARIABLES.map((name) => [name, model])) });
+}
 
 /**
  * An MCP server this driver can put in front of a task, as the CLI's
@@ -702,7 +726,7 @@ export class ClaudeCodeDriver implements Driver {
     // interpolated, and it is quoted.
     return {
       argv: ['sh', '-c', `mkdir -p "$HOME" && cd ${shellQuote(this.#workdir)} && exec "$@"`, 'driver', ...cli],
-      env: CLI_KEY_ENVIRONMENT,
+      env: environmentFor(identity.model),
     };
   }
 

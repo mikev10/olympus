@@ -3481,3 +3481,45 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 - **Found:** at I1b's close-out, the pending entry D-P8-15 gave to P10, "the next unit to change the provider", still names P10, which shipped without closing it. `dockerCli` still holds a command's whole output in the runtime's process (`packages/sandbox/src/local/docker.ts`).
 - **Chosen:** owner R14, by D-P8-15's own rule: R14 owns `I2.relay-bound-to-tier-model`, which is closed by changing the relay in `packages/sandbox`, so it is the next unit to change the provider. The I9 baseline is unchanged. The fix keeps D-P8-15's shape: a byte cap enforced while reading, which kills the command and refuses rather than truncates.
 - **Reverse:** a unit of its own for the sandbox's output bound.
+
+## R14 amendments to the contracts
+
+### A-R14-01: a tier per station, and escalation, in `CapabilityScope`
+
+`CapabilityScope` gains `tierByStation: Partial<Record<StationId, ModelTier>>` and `escalation: EscalationGrant`, where `EscalationGrant` is `'none' | { afterFailedGates: number; ceiling: ModelTier }`. Both keys are required, as every scope key is, so a scope that does not say whether it escalates is refused rather than read as not escalating. Validation refuses a per-station tier for a station the role may not act at, a failure count that is not a positive integer, and a ceiling below the scope's tier or any per-station tier. `core` gains `tierFor`, `stationTier`, `failedGates`, and `escalationAt`, and `MODEL_TIERS` and `tierRank` for the order escalation climbs.
+
+### A-R14-02: `tier-escalated` in the enforcement record
+
+`DecisionCause` gains `{ cause: 'tier-escalated'; decidedBy: 'line'; from: ModelTier; to: ModelTier; failedGates: number }`. `LocalVault` accepts it from the line alone.
+
+### D-R14-01: the relay is bound to the tier by the price table, and a tier names an exact model
+
+- **Ambiguous:** `I2.relay-bound-to-tier-model` needed the relay to refuse a model outside the call's tier, and the driver mapped tiers to aliases (`haiku`, `sonnet`, `opus`) that the CLI resolves for itself, while the relay prices exact ids.
+- **Chosen:** the Claude Code driver maps each tier to an exact id in `MODEL_METER.prices` (`claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5-5`), and the line provisions each call's relay with the price table cut to the model it resolved (`boundTo`, `packages/api/src/line.ts`). The relay already refuses a model with no price before forwarding it (`I5.model-relay-fails-closed-on-unmetered-usage`), so no relay change and no `Driver` contract change was needed. A resolved model the driver has no price for throws inside the call's provisioning, which the line counts as a failed attempt like any other provisioning failure, so it ends in a recorded `retries-exhausted` park rather than an unpriced call.
+- **Why:** the alias gained nothing. The price table already pinned exact ids, so a CLI that resolved an alias to a newer model was refused anyway.
+- **Reverse:** return to aliases and give the driver a per-tier list of allowed ids, a `Driver` contract change.
+
+### D-R14-02: every model setting the CLI reads is pinned to the call's model
+
+- **Ambiguous:** whether the CLI sends any request on a model other than `--model`, for background work or a subagent. Binding the relay to one model would refuse such a request. This could not be verified without a paid run.
+- **Chosen:** the driver sets `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, and `CLAUDE_CODE_SUBAGENT_MODEL` to the call's model on every exec. The driver's paid suite under `run-driver` is where this is shown to hold: a request on any other model is a relay refusal, which P14 records against the call's usage.
+- **Reverse:** price the CLI's background model alongside the tier's, which reopens the gap the pending entry named.
+
+### D-R14-03: what counts as a failed gate, and when an escalation is recorded
+
+- **Ambiguous:** the entry says escalation follows "a number of failed gates" and is decided from the iteration count.
+- **Chosen:** the failed gates before an iteration are `iterations - 1`. `iterations` is committed before the attempt it counts, and an iteration ends either in a gate verdict or a park, so every earlier iteration ended in a failed gate. Retries and replays are not counted. The escalation is recorded in `startAttempt` before the attempt is committed, as a park is (D-P14-07), and only for a new iteration, never a replay. A stop between the record and the commit leaves a record of an escalation that did not take effect, and the resume records it again, which is P14's stated limit that a rate counts decisions, not distinct causes.
+- **Not changed:** `StationContract.tier` is validated and read by nothing. Per-station tiers live in policy, as the entry says, and the contract field is left as it was rather than removed in this unit.
+- **Reverse:** count failed gates from the evidence bundles' verdicts instead of from attempts.
+
+### D-R14-04: the output cap ends the sandbox, and defaults to 64 MiB everywhere
+
+- **Ambiguous:** D-P8-15 asked for a cap that "kills the command". Killing the `docker exec` client does not stop the process inside the container.
+- **Chosen:** `dockerCli` counts stdout and stderr together as they arrive, and past the cap it kills the child, drops what it held, and throws `CliOutputExceeded`. `LocalDockerProvider` turns that into a refusal at the new `'output'` layer and ends the sandbox, removing the container and the command with it, as the wall-clock path does. The cap is the provider's `maxOutputBytes` option, 64 MiB by default and refused at construction if it is not a positive integer. Every other `dockerCli` call (the proxy's and relay's logs, inspection) gets the same default, so nothing reads output without a bound. A proxy log past the cap makes teardown throw, which P14 already treats as a failure.
+- **Reverse:** a per-exec cap on `ExecOptions`, a `SandboxProvider` contract change.
+
+### D-R14-05: the reviewer's authors are every model the runtime ran for the reviewed tasks
+
+- **Ambiguous:** "every model that built a task" could mean the iterations that produced the accepted diff, or every call.
+- **Chosen:** every call. The authors are the model on each recorded result together with the model on every usage record for the reviewed tasks, including failed attempts and calls that were only begun, each distinct model once, so a seat taken after a resume that replayed a call lists the authors an uninterrupted run would (`I2.resume-derives-state-from-the-vault`). A failed iteration's tree is discarded, but its model still worked the task the reviewer judges, and the stricter set can only lower independence, never raise it.
+- **Reverse:** read only the iterations whose evidence the accepted diff came from.

@@ -22,6 +22,8 @@ function scope(stations: string[], tier: string): Record<string, unknown> {
     tools: ['read', 'write'],
     network: { egress: 'none' },
     tier,
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 0.25, maxWallClockMs: 60_000 },

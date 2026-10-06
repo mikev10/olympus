@@ -1,6 +1,7 @@
 import { compileError } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { REVIEW_SEAT_FAMILY_CHECK, REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL } from './line-assertions.js';
+import { EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR } from './tier.js';
 import { REVIEW_SEAT_READS_ONLY_ITS_GRANTS } from './verification.js';
 
 /** I6: Reviewers never share the author's model family. */
@@ -20,6 +21,8 @@ export const I6: InvariantEntry = {
     REVIEW_SEAT_FAMILY_CHECK,
     REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL,
     REVIEW_SEAT_READS_ONLY_ITS_GRANTS,
+    // R14: after an escalation, every model that built a task is one of its authors (D-A-BR-01).
+    EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR,
   ],
   pending: [],
 };

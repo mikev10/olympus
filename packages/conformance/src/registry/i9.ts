@@ -1,8 +1,9 @@
-import { compileError, pending, runtime } from '../kit/assert.js';
+import { compileError, runtime } from '../kit/assert.js';
 import { moduleSpecifiers, packageProgram, propertyChains, sourceFilesOutsideProgram, terminalBindings } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { workspacePackages } from '../kit/workspace.js';
 import { assertApiRunsHeadless } from './headless.js';
+import { SANDBOX_OUTPUT_IS_BOUNDED } from './output.js';
 
 /**
  * Modules that exist to drive a terminal, and `process` as a module, which
@@ -78,22 +79,8 @@ export const I9: InvariantEntry = {
       title: 'the compiler lib has no DOM: document, window, navigator, localStorage, and addEventListener are unknown names',
       fixture: 'i9/core-has-no-dom.ts',
     }),
+    // R14: what a command prints is bounded while it is read, so a check cannot exhaust the runtime's host (D-P8-15).
+    SANDBOX_OUTPUT_IS_BOUNDED,
   ],
-  pending: [
-    pending({
-      id: 'I9.sandbox-output-is-bounded',
-      owner: 'R14',
-      reason:
-        "`dockerCli` keeps every chunk a command writes to stdout and stderr until the process ends, then joins "
-        + 'them (packages/sandbox/src/local/docker.ts). The bytes are held in the runtime\'s own process, so the '
-        + "container's memory limit does not bound them, and the optional timeout bounds how long a command runs "
-        + 'rather than how much it prints: a command that prints quickly enough exhausts the host before it '
-        + 'expires. Everything a check runs inside the sandbox writes down this path, and what a check prints is '
-        + 'the repository\'s to decide. Closing it means a byte cap enforced while the output is read, which kills '
-        + 'the command and refuses rather than truncating — a truncated stream compared against an expectation is a '
-        + 'verdict about something other than what ran. Owner is R14, the next unit to change the provider: P10, the '
-        + 'first owner, shipped without closing it, and R14 changes the relay, which is this package. Raised by P8\'s external review (codex-9) against code P2 wrote; P8 added '
-        + 'only stdin to that function. Recorded as D-P8-15.',
-    }),
-  ],
+  pending: [],
 };

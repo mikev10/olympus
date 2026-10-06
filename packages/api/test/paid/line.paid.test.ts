@@ -35,6 +35,8 @@ function paidScope(stations: CapabilityScope['stations'], tools: string[]): Capa
     tools,
     network: { egress: 'none' },
     tier: TIER,
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 400_000, maxCostUsd: 0.5, maxWallClockMs: 300_000 },

@@ -28,6 +28,22 @@ const LEVEL_SET: Readonly<Record<AutonomyLevel, true>> = { 0: true, 1: true, 2: 
 
 const TIER_SET: Readonly<Record<ModelTier, true>> = { fast: true, standard: true, deep: true };
 
+/**
+ * Each tier's place in the order escalation climbs (A-R14-01). A total record,
+ * like the sets above, so a tier added to the union has no rank until it is
+ * placed here deliberately.
+ */
+const TIER_RANK: Readonly<Record<ModelTier, number>> = { fast: 0, standard: 1, deep: 2 };
+
+/** The tiers in climbing order, cheapest first. */
+export const MODEL_TIERS: readonly ModelTier[] = Object.freeze(
+  (Object.keys(TIER_RANK) as ModelTier[]).sort((a, b) => TIER_RANK[a] - TIER_RANK[b]),
+);
+
+export function tierRank(tier: ModelTier): number {
+  return TIER_RANK[tier];
+}
+
 const TRIGGER_KIND_SET: Readonly<Record<TriggerKind, true>> = {
   human: true, 'ci-failure': true, 'review-feedback': true, 'post-merge': true, scheduled: true,
 };

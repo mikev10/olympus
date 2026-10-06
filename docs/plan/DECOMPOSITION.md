@@ -907,6 +907,33 @@ D-I1a-13), and `I9.sandbox-output-is-bounded` (a byte cap on a command's
 output, enforced while it is read, that kills and refuses rather than
 truncates; D-P8-15, D-I1b-16, issue #30).
 
+**Depends on:** P3, P4, P13, P14.
+**Deliver:**
+- **A tier per station.** A role's scope carries `tierByStation`, a sparse map from station to tier; a station it omits runs at the scope's `tier`. One function in `core` resolves the tier for a scope, a station, and a task's attempt counts, and the line reads the tier through it at the two places it reads one today: the build call and the reviewer seat.
+- **Escalation, a grant.** A role's scope carries `escalation`, either `'none'` or `{ afterFailedGates, ceiling }`. Granted, a task's tier rises one step for every `afterFailedGates` iterations whose gate failed, read from `TaskAttempts.iterations`, and never past `ceiling`. Not granted, the tier never moves. The budget does not reset.
+- **Escalation recorded.** The enforcement record's cause union gains `tier-escalated`, carrying the task, the station, the tier it rose from and to, and the failed-gate count that triggered it, written by the line when an iteration starts at a higher tier than the one before. P14's scenario table gains its row.
+- **Every model that built a task is its author.** The reviewer is seated against the model of every usage record the reviewed tasks have, not only the model on the last result.
+- **The relay bound to the tier's model.** The Claude Code driver maps each tier to a concrete model id rather than an alias, and points the CLI's small-model setting at the same id, so every call it makes names that model. The line provisions the relay with its price table narrowed to the model it resolved for the call, and the relay refuses any model it has no price for, so a request for a model outside the tier is refused.
+- **Sandbox output bounded.** `dockerCli` counts the bytes of stdout and stderr together as it reads them; past a cap, set on the provider's construction and 64 MiB by default, it kills the command and refuses rather than returning a truncated stream.
+**Contract amendments, landed in this unit's pull request**, each an `A-R14-nn` entry in `docs/decisions.md`: `CapabilityScope` gains `tierByStation` and `escalation`, both required keys; `EnforcementDecision` gains `tier-escalated`. Anything further found in the work stops the unit for confirmation.
+**Out of scope:**
+- rates per model, and first-pass yield against yield after escalation (R2)
+- a reviewer of another family; the Codex driver is M2's
+- a model asking for a tier, or any input from a model to the tier
+- escalating more than one tier per decision, or skipping one
+- resetting or extending a budget on escalation
+- recording which models the relay observed, a `MeterReading` change (D-I1a-03's reverse)
+- surfacing escalations in the API, the CLI, or a report
+**Conformance:** a station override changes the model the call is resolved to; a failed gate under no grant never changes the tier; under a grant the tier rises one step per `afterFailedGates` failures and stops at the ceiling; each escalation leaves one `tier-escalated` decision; a stub driver whose families differ by tier has its reviewer checked against every author; the relay refuses a request naming a model outside the call's tier; a command that prints past the cap is killed and refused, not truncated.
+**Accept:**
+- **the ledger.** Paid: `I2.relay-bound-to-tier-model` and `I9.sandbox-output-is-bounded`, so `pending-baseline.json` lowers I2 from 1 to 0 and I9 from 1 to 0. Nothing is added pending
+- a policy whose `escalation.ceiling` is below its tier, or that names a tier outside the union, is refused at validation
+- every package change has a changeset: `@olympus-ai/core`, `@olympus-ai/vault`, `@olympus-ai/sandbox`, `@olympus-ai/api`, `@olympus-ai/driver-claude-code`, `@olympus-ai/conformance`
+- `pnpm typecheck` and `pnpm lint` pass; `pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test` passes locally. The driver suite, the conformance package's tests, and `pnpm conformance` pass once in CI after the maintainer applies `run-driver`, and that run is where the CLI is shown to call no model outside the tier
+- `git ls-files -- .plan/` prints nothing
+**Gate paths:** `packages/core/src/policy/types.ts`, `packages/vault/src/types.ts`, and `packages/conformance/` are protected, so the pull request carries the `gate-change` label and the squash body carries `Gate-Change: acknowledged`.
+**Invariants:** I2 is the subject — the tier is derived from counts the runtime keeps, and the relay, not the request, decides which model serves a call. I4: no override and no escalation without a grant. I5: a bad tier or ceiling is refused at validation, output past the cap is refused rather than truncated, and an escalation that cannot be recorded stops the run. I6: every model that built a task is an author. I8: each deliverable has an assertion that fails when it is deleted.
+
 ### R15 — Acceptance checks run on the base before build
 
 Today the acceptance tests are locked at `test-design` and run once, at

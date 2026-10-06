@@ -204,8 +204,29 @@ describe('the invocation', () => {
     expect(argv).not.toContain('--max-budget-usd');
   });
 
-  // Which model a tier's alias resolves to is the CLI's answer at run time, so no offline test can
-  // name that set; a model missing from the table is refused by the relay before it is sent (D-P13-06).
+  // Each tier names the exact id the CLI sends, and the line prices a call's relay for that id
+  // alone; a tier whose model had no price would be refused before the call was made (D-R14-01).
+  test('every tier resolves to an exact model id the meter prices, never an alias', () => {
+    const driver = driverWith(new RecordingProvider());
+    for (const tier of ['fast', 'standard', 'deep'] as const) {
+      const { model } = driver.resolveModel(tier);
+      expect(Object.hasOwn(MODEL_METER.prices, model), `${tier} resolves to ${model}`).toBe(true);
+      expect(['haiku', 'sonnet', 'opus']).not.toContain(model);
+    }
+  });
+
+  test('every setting through which the CLI picks a model of its own names the model of the call (D-R14-02)', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request({ tier: 'deep' }));
+    const call = taskCall(provider);
+    const model = driverWith(provider).resolveModel('deep').model;
+    expect(call?.cmd[call.cmd.indexOf('--model') + 1]).toBe(model);
+    for (const name of ['ANTHROPIC_SMALL_FAST_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL']) {
+      expect(call?.env?.[name], name).toBe(model);
+    }
+  });
+
   test('the meter names at least one model, and every model it names carries all five prices, each a non-negative finite number', () => {
     expect(MODEL_METER.dialect).toBe('anthropic-messages');
     const fields = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'] as const;
