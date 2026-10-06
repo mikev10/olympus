@@ -3475,3 +3475,9 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 - **Chosen:** no change in this unit. For a finished run the report is read from the Vault alone, since each of the three short-circuits precedes the re-hash (P9 review, codex-3). For an unfinished run the standing is live by design: lock re-verification is what keeps an admitted artifact from being swapped, and the line refuses on the same finding at its next transition.
 - **Known limit:** the report presents that live observation in the same field as recorded facts. Separating them is a change to `RunReport`'s shape, owned by R2, which reads reports across finished runs.
 - **Reverse:** persist the observation as a decision before reporting it, which turns a read into a write.
+
+### D-I1b-16: `I9.sandbox-output-is-bounded` passes from P10 to R14
+
+- **Found:** at I1b's close-out, the pending entry D-P8-15 gave to P10, "the next unit to change the provider", still names P10, which shipped without closing it. `dockerCli` still holds a command's whole output in the runtime's process (`packages/sandbox/src/local/docker.ts`).
+- **Chosen:** owner R14, by D-P8-15's own rule: R14 owns `I2.relay-bound-to-tier-model`, which is closed by changing the relay in `packages/sandbox`, so it is the next unit to change the provider. The I9 baseline is unchanged. The fix keeps D-P8-15's shape: a byte cap enforced while reading, which kills the command and refuses rather than truncates.
+- **Reverse:** a unit of its own for the sandbox's output bound.

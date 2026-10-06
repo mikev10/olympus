@@ -901,6 +901,12 @@ authors for seating a reviewer (I6). R2's rates are kept per model identity,
 so first-pass yield at the starting tier against yield after escalation falls
 out of data it already reads (D-A-BR-01).
 
+**Also owes two pending registry entries**, both in `packages/sandbox`:
+`I2.relay-bound-to-tier-model` (the relay refuses a model outside the tier,
+D-I1a-13), and `I9.sandbox-output-is-bounded` (a byte cap on a command's
+output, enforced while it is read, that kills and refuses rather than
+truncates; D-P8-15, D-I1b-16, issue #30).
+
 ### R15 — Acceptance checks run on the base before build
 
 Today the acceptance tests are locked at `test-design` and run once, at
