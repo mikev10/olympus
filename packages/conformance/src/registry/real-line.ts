@@ -8,7 +8,9 @@
  * assertion that uses this stops at admission or before the line drives; the
  * one scenario that needs a real call is paid and lives in `@olympus-ai/api`'s
  * paid suite (D-I1a-07). The credential the provider holds is a placeholder
- * no relay ever forwards, since no sandbox is asked for here.
+ * no relay ever forwards, since no sandbox is asked for here, and the
+ * integrator's token is one no request ever carries, since no run here
+ * reaches `integrate`.
  */
 import type { BuiltGraph } from '@olympus-ai/api';
 import type { AutonomyLevel, CapabilityScope, Policy, RoleId } from '@olympus-ai/core';
@@ -16,7 +18,7 @@ import { lineScope, linePolicy, type LineRig } from './line.js';
 
 /** Real components over the rig's store. Needs a Docker daemon, as the sandbox assertions do. */
 export async function realComponents(rig: LineRig): Promise<BuiltGraph> {
-  const [{ buildGraph }, { LocalDockerProvider }, { LocalVault }, driverPackage] = await Promise.all([
+  const [{ buildGraph, GitHubIntegrator }, { LocalDockerProvider }, { LocalVault }, driverPackage] = await Promise.all([
     import('@olympus-ai/api'),
     import('@olympus-ai/sandbox'),
     import('@olympus-ai/vault'),
@@ -33,6 +35,8 @@ export async function realComponents(rig: LineRig): Promise<BuiltGraph> {
     driver,
     reviewer: driver,
     workspaces: rig.workspaces,
+    // Attested like the host's, and never called: no assertion over this graph drives a run to integrate.
+    integrator: new GitHubIntegrator({ repository: 'conformance/never-reached', baseBranch: 'main', token: 'placeholder-never-sent', apiBase: 'http://127.0.0.1:9' }),
     profile: { buildImage: driverPackage.BASE_IMAGE, checkImage: driverPackage.BASE_IMAGE, limits: { cpus: 1, memoryMb: 512, pids: 128 } },
   });
 }

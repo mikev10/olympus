@@ -1,5 +1,6 @@
 import { compileError, external, pending } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
+import { RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
@@ -10,6 +11,7 @@ import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTAR
 export const I2: InvariantEntry = {
   title: INVARIANTS.I2,
   assertions: [
+    RUN_REPORT_READS_ONLY_RECORDS,
     compileError({
       id: 'I2.task-result-has-no-status',
       title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',

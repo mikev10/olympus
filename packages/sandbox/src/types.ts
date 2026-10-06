@@ -267,6 +267,12 @@ export type SandboxCapabilities = {
 export interface SandboxProvider {
   readonly id: string;
   provision(spec: SandboxSpec): Promise<SandboxHandle>;
+  /**
+   * Runs `cmd` with the Workspace as its working directory, so a path
+   * relative to it names a file in the tree. Implementations MUST set it
+   * themselves rather than rely on an image's own default, which a check's
+   * pinned argument vector cannot see and a different image changes.
+   */
   exec(h: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
   /**
    * Sends HTTP requests to the sandbox's own loopback from a client the

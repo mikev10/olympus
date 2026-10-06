@@ -1,5 +1,6 @@
 import { compileError, external, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
 import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
 import {
@@ -12,6 +13,8 @@ import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_T
 export const I4: InvariantEntry = {
   title: INVARIANTS.I4,
   assertions: [
+    MERGE_TOKEN_REACHES_NO_SANDBOX,
+    GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
     compileError({
       id: 'I4.capability-scope-is-explicit',
       title: 'CapabilityScope requires every grant to be stated, and egress is none or an explicit list',

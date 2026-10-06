@@ -32,6 +32,7 @@ const USAGE = [
   '  approve  <run id> <station:level>',
   '  cancel   <run id>',
   '  events   <run id>',
+  '  report   <run id>      cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault',
   '',
   'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
 ].join('\n');
@@ -240,6 +241,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       case 'events': {
         const [runId = ''] = one(rest, ['<run id>']);
         return await events(io, t, runId);
+      }
+      case 'report': {
+        const [runId = ''] = one(rest, ['<run id>']);
+        return report(io, await call(io, t, 'GET', runPath(runId, 'report')));
       }
       default:
         throw new UsageError(`unknown command '${command}'`);

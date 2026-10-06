@@ -8,7 +8,8 @@ import { BASE_IMAGE, ClaudeCodeDriver, ensureImage, MODEL_CREDENTIAL } from '@ol
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
 import { buildGraph, type BuiltGraph, type SandboxProfile } from '../graph.js';
-import { localWorkspaceStore } from '../workspace.js';
+import { GitHubIntegrator, type GitHubIntegratorOptions } from '../integrate.js';
+import { localWorkspaceStore, type ContainerUser } from '../workspace.js';
 
 export interface HostConfig {
   /** What the Vault owns. Mounted into no sandbox (I1). */
@@ -25,10 +26,35 @@ export interface HostConfig {
   readonly limits?: SandboxProfile['limits'];
   /** The image checks run in. Defaults to the Node image the driver's image is built from. */
   readonly checkImage?: string;
+  /**
+   * The remote a passed run is merged into, and the token that merges it,
+   * held here and handed to no sandbox provider (D-I1b-06). Null composes a
+   * host that cannot merge, which carries no run above L1 (D-I1b-05).
+   */
+  readonly git: GitHubIntegratorOptions | null;
+  /**
+   * Who sandboxes run as. Derived from this process on a host with uids, and
+   * refused there if it differs; required on one without, such as Windows,
+   * where there is nothing to derive it from (D-I1b-10).
+   */
+  readonly containerUser?: ContainerUser;
 }
 
 /** Bounds every sandbox the line provisions, whichever task it serves. */
 export const DEFAULT_LIMITS: SandboxProfile['limits'] = { cpus: 2, memoryMb: 4096, pids: 512 };
+
+/** Both, or neither: a uid with no gid is a half-named user, refused rather than completed (D-I1b-10). */
+export function containerUser(env: Readonly<Record<string, string | undefined>>): ContainerUser | undefined {
+  const uid = env.FACTORY_CONTAINER_UID;
+  const gid = env.FACTORY_CONTAINER_GID;
+  if ((uid === undefined || uid === '') && (gid === undefined || gid === '')) return undefined;
+  // Decimal digits only: `Number('')` and `Number(' ')` are 0, so a half-set pair would otherwise name root's group.
+  const decimal = /^\d+$/u;
+  if (uid === undefined || gid === undefined || !decimal.test(uid) || !decimal.test(gid)) {
+    throw new Error('factory-host: FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID must both be set, as decimal integers, or neither');
+  }
+  return { uid: Number(uid), gid: Number(gid) };
+}
 
 export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
@@ -46,7 +72,8 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     driver,
     // One driver in both seats: below L3 the seat is filled and run state records its independence as reduced (I6).
     reviewer: driver,
-    workspaces: localWorkspaceStore({ root: config.trees }),
+    workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
+    integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
   });
 }

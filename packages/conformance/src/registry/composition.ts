@@ -142,7 +142,8 @@ async function composedAtL1(rig: LineRig, during: (sandbox: SandboxProvider, req
   };
   const driver = await stubDriver({ during: (req) => (req.taskId === HELLO_TASK ? during(real.sandbox, req) : Promise.resolve()) });
   // Below L2, where a scripted driver and a recording wrapper are named and not refused; the Vault and the containers are real.
-  return { components: buildGraph({ ...real, sandbox: recording, driver, reviewer: driver }), real, specs };
+  // No integrator: at L1 a human merges (D-I1b-05), and a task that writes nothing halts at an integrator's open (D-I1b-04).
+  return { components: buildGraph({ ...real, sandbox: recording, driver, reviewer: driver, integrator: null }), real, specs };
 }
 
 export const COMPOSED_HOST_MOUNTS_NO_VAULT: LocalAssertion = runtime({

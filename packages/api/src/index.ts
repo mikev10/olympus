@@ -11,12 +11,14 @@
 export * from './cost.js';
 export * from './gate.js';
 export * from './graph.js';
+export * from './integrate.js';
 export * from './safety.js';
 export * from './run.js';
 export * from './tamper.js';
 export * from './validate.js';
 export * from './verification.js';
 export * from './policy-file.js';
+export * from './report.js';
 export {
   composeDiff,
   diffDigest,
@@ -26,7 +28,7 @@ export {
   type ContainerUser,
   type WorkspaceStore,
 } from './workspace.js';
-export { egressFor, integrateEscalations, UNANALYSED_TESTS } from './line.js';
+export { egressFor, integrateEscalations, readIntegration, UNANALYSED_TESTS } from './line.js';
 export * from './http/server.js';
 export * from './host/compose.js';
 export type * from './http/wire.js';

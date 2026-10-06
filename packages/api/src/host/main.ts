@@ -11,11 +11,16 @@
  * - `FACTORY_LISTEN_PORT`, and `FACTORY_LISTEN_HOST` (default `127.0.0.1`)
  * - `ANTHROPIC_API_KEY`: held by the sandbox provider for its relays, given to no sandbox
  * - `FACTORY_PRINCIPAL` (default `local`): who a request bearing the token is
+ * - `FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and
+ *   `FACTORY_GIT_TOKEN`: the remote a passed run merges into, and the token
+ *   that merges it, held by the host and given to no sandbox (D-I1b-06)
+ * - `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither: who
+ *   sandboxes run as, required on a host with no uids (D-I1b-10)
  *
  * A missing variable stops the host before it listens (I5).
  */
 import { createApiServer } from '../http/server.js';
-import { composeHost } from './compose.js';
+import { composeHost, containerUser } from './compose.js';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -26,11 +31,18 @@ function required(name: string): string {
 const port = Number(required('FACTORY_LISTEN_PORT'));
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factory-host: FACTORY_LISTEN_PORT is not a port');
 
+const user = containerUser(process.env);
 const components = await composeHost({
+  ...(user === undefined ? {} : { containerUser: user }),
   store: required('FACTORY_VAULT_STORE'),
   repository: required('FACTORY_REPOSITORY'),
   trees: required('FACTORY_TREES'),
   modelKey: required('ANTHROPIC_API_KEY'),
+  git: {
+    repository: required('FACTORY_GIT_REPOSITORY'),
+    baseBranch: required('FACTORY_GIT_BASE_BRANCH'),
+    token: required('FACTORY_GIT_TOKEN'),
+  },
 });
 const server = createApiServer({
   components,

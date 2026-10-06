@@ -1,0 +1,149 @@
+The code under review is in the file
+`2026-10-03-I1b-merge-m1-proof-review-bundle.txt` (SHA-256 3ce7e2aae37d708b252152d472ebeedfa3671ab97c46b4a661854b8951a1d482) — the full contents of
+every changed file, with the commit range at its top. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the merge step and the per-run report of a software-factory
+runtime, of a TypeScript project. You have the source and nothing else — no
+design documents, no author reasoning, no prior version, no conversation that
+produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a coding task through fixed stations (intake, spec,
+test-design, plan, build, verify, review, integrate), with a model driver doing
+the work at build and review inside a Docker sandbox, and the runtime deriving
+every status from evidence it collects itself. Until this change the line
+stopped at the integrate approval and a human merged by hand. This change makes
+`integrate` push the run's accepted change to GitHub as one commit over the
+admitted base commit, open a pull request, and, once a human approves the
+integrate exit, merge it with a token the host process holds. It adds a Vault
+record of the integration, a per-run report read from the Vault (cost,
+cache-hit rate, gate outcomes, iterations, refusals and parks), host
+configuration for the token and for the container user, and a sandbox fix
+making every command run with the workspace as its working directory. It also
+commits the report of one real run that merged a pull request on a small
+public repository.
+
+It must hold against a capable, motivated party trying to get a change merged
+that is not the tree the runtime's checks ran over, to get a merge without the
+human approval, to obtain or use the merge credential from inside a sandbox,
+to have a failed or partial integration reported as done, or to make the
+per-run report say something the Vault's records do not. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls what the model returns and everything a task writes in its
+workspace, the contents of the working copy a run is admitted from, the
+`baseCommit` value supplied at admission, when the runtime's process stops, and
+what else is pushed to the remote repository while a run is in flight, the
+base branch included. It does not control the components the runtime is wired
+with — the Vault, the sandbox provider, the drivers, and the integrator are
+runtime-selected and trusted, even where a function takes one as an argument —
+it does not control the GitHub API's responses, and it does not control code
+running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, at any autonomy level, in any role. Enforced at
+  the mount layer, not in application code.
+- The runtime derives status; the model never reports it. An agent's narrative
+  is a claim, stored apart from evidence; every figure in a report is read from
+  the runtime's own records.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build and re-verified at every station transition.
+- Default deny. A capability not granted in policy is unavailable; no task is
+  ever granted the credential that pushes or merges, and no sandbox can reach
+  the git remote.
+- Fail closed. A missing check, a failed push, a moved base, or a failed merge
+  stops the run; it never degrades silently and never reports done.
+- The runtime is a service; the command-line client composes nothing and
+  assumes no terminal in the runtime.
+
+The mechanisms that matter most:
+
+- The integrator (`GitHubIntegrator`): the comparison of `baseCommit`'s tree
+  with the base snapshot as git blob hashes, the commit built from the verified
+  tree, the base-branch checks at open and at merge, and the merge pinned to
+  the commit's sha.
+- The sequencing at `integrate` in the line and the run service: the pull
+  request opened as the station's work, the merge only after the human's
+  approval of the exit and before that grant is spent, and every integration
+  failure recorded as the run's halt.
+- Credential custody: the token held by the host and the integrator only,
+  attested as a graph slot, with admission refusing any egress allowlist that
+  names a host the remote is reached on.
+- The per-run report (`runReport`) and the integration record in the Vault.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Everything I1a lists, and any rate computed across runs (R2).
+
+The earlier unit's list, which "everything I1a lists" refers to:
+
+- model-authored `spec`, `test-design`, and `plan`. A human supplies their artifacts at admission (D-A-I1-03)
+- a tier per station and escalation (R14). Tier stays per role
+- lifting the L3 refusal. L3 is M3
+- rates over finished runs (R2), parallel tasks (R4), the Codex driver, triggers, telemetry export
+- `observe` and `learn` doing anything
+
+The identifiers in those lines (I1a, R2, R14, M3, D-A-I1-03, and the like)
+name other work and recorded decisions you do not have; treat each line as a
+plain statement that the described work is absent by design. Absent work listed
+here is not a defect. The single model family is also by design at this stage:
+a reviewer sharing the author's family is recorded as reduced independence, not
+claimed as independent.
+
+THE QUESTION
+
+How would you get a tree merged that differs from the tree the checks passed,
+merge without the human's approval or after the base moved, put the merge token
+within reach of a sandbox or a task, leave a run reported as passed when its
+push or merge failed or half-completed, or make the per-run report show a cost,
+outcome, or merge that the Vault's records do not support?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

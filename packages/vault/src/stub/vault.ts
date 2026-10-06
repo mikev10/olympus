@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -47,6 +47,7 @@ export class StubVault implements Vault {
   private readonly locks = new Map<RunId, LockManifest>();
   private readonly states = new Map<RunId, RunState>();
   private readonly decisions = new Map<RunId, VaultRef[]>();
+  private readonly integration = new Map<RunId, VaultRef[]>();
   private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
 
@@ -147,6 +148,19 @@ export class StubVault implements Vault {
     return Promise.resolve([...(this.decisions.get(runId) ?? [])]);
   }
 
+  recordIntegration(r: IntegrationRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: an integration record is collected by the runtime, or it is not recorded'));
+    const ref = this.store(r.runId, 'integration', r);
+    const refs = this.integration.get(r.runId) ?? [];
+    if (!refs.some((i) => i.hash === ref.hash)) refs.push(ref);
+    this.integration.set(r.runId, refs);
+    return Promise.resolve(ref);
+  }
+
+  readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
+    return Promise.resolve([...(this.integration.get(runId) ?? [])]);
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
     if (state === undefined) return Promise.reject(new Error(`StubVault: no run state for ${runId}`));
@@ -169,8 +183,8 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision',
-    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

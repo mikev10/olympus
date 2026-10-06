@@ -1,6 +1,7 @@
 import type { AutonomyLevel, RunId, StationId } from '@olympus-ai/core';
 import { compileError, compileOk, external, runtime } from '../kit/assert.js';
 import { ADAPTER_REFUSAL_REFUSES_L3_END_TO_END, UNANALYSED_TESTS_ESCALATE_THE_APPROVAL, UNSAFE_DECLARATION_SURVIVES_COMPOSITION } from './composition.js';
+import { FAILED_INTEGRATION_NEVER_REPORTS_DONE, INTEGRATE_MERGES_THE_VERIFIED_TREE } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { withLine } from './line.js';
@@ -27,8 +28,8 @@ import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 
-/** The declaration order the graph builder promises: vault, sandbox, driver. */
-const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver'];
+/** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
+const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator'];
 
 /** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
 const CONTENDERS = 8;
@@ -37,6 +38,8 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    INTEGRATE_MERGES_THE_VERIFIED_TREE,
+    FAILED_INTEGRATION_NEVER_REPORTS_DONE,
     runtime({
       id: 'I5.policy-document-load-is-hardened',
       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
@@ -77,7 +80,7 @@ export const I5: InvariantEntry = {
     runtime({
       id: 'I5.unsafe-component-refused-above-l1',
       title:
-        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, and StubDriver in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and its missing integrator in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
       run: async () => {
         await withLine('s1-hello-', async (rig) => {
           const [api, core, sandbox, vault] = await Promise.all([

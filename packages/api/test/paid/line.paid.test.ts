@@ -13,12 +13,16 @@
 import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FakeGitHub } from '@olympus-ai/conformance/fake-github';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { CapabilityScope, ModelTier, RunId, RunState } from '@olympus-ai/core';
 import type { UsageRecord } from '@olympus-ai/vault';
 import { afterAll, beforeAll, expect } from 'vitest';
 import { composeHost, readUsage, runStanding, startRun, UNANALYSED_TESTS, type BuiltGraph, type RunOutcome } from '../../src/index.js';
-import { ARTIFACTS, BASE_COMMIT, BUILDER, HELLO, policy, REVIEWER } from '../harness.js';
+import { ARTIFACTS, BUILDER, HELLO, policy, REVIEWER } from '../harness.js';
+
+/** hello with a task that needs one file written, so a real run reaches the integrate approval with a change to merge: an empty change halts at integrate's work (D-I1b-04). */
+const HELLO_CHANGE = join(HELLO, '..', 'hello-change');
 
 const runId = 'paid-line' as RunId;
 const TIER: ModelTier = 'fast';
@@ -43,6 +47,7 @@ const L2_AUTO = Object.fromEntries(
 );
 
 let base: string;
+let github: FakeGitHub;
 let components: BuiltGraph;
 let outcome: RunOutcome;
 let state: RunState;
@@ -53,13 +58,23 @@ beforeAll(async () => {
   if (key === undefined || key === '') throw new Error('the paid line suite needs ANTHROPIC_API_KEY; it is never skipped');
   base = await mkdtemp(join(tmpdir(), 'paid-line-'));
   const repository = join(base, 'repository');
-  // The hello fixture declares no package.json, so neither vitest nor jest: its tests cannot be analysed.
-  await cp(HELLO, repository, { recursive: true });
+  // The fixture declares no package.json, so neither vitest nor jest: its tests cannot be analysed.
+  await cp(HELLO_CHANGE, repository, { recursive: true });
   await mkdir(join(base, 'store'), { recursive: true });
-  components = await composeHost({ store: join(base, 'store'), repository, trees: join(base, 'trees'), modelKey: key });
+  // The remote is a GitHub held in process: the run stops at the integrate approval, so nothing merges, and no real repository is touched.
+  github = new FakeGitHub({ token: 'paid-line-token' });
+  await github.start();
+  const baseCommit = await github.seed(repository);
+  components = await composeHost({
+    store: join(base, 'store'),
+    repository,
+    trees: join(base, 'trees'),
+    modelKey: key,
+    git: { repository: github.repository, baseBranch: github.baseBranch, token: 'paid-line-token', apiBase: github.apiBase },
+  });
   const request = {
     runId,
-    baseCommit: BASE_COMMIT,
+    baseCommit,
     requestedLevel: 2 as const,
     workspace: repository,
     artifacts: ARTIFACTS,
@@ -79,6 +94,7 @@ beforeAll(async () => {
 }, 1_200_000);
 
 afterAll(async () => {
+  await github.stop();
   await rm(base, { recursive: true, force: true });
 });
 

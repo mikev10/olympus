@@ -6,10 +6,10 @@ import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { COMPOSED_HOST_MOUNTS_NO_VAULT } from './composition.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
 
-/** The thirteen named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05). Nothing else may be reachable on an instance. */
+/** The fifteen named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01). Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
   'read', 'lock', 'verifyLocks', 'writeEvidence', 'recordViolation', 'recordAdmission', 'recordTaskResult', 'recordUsage',
-  'recordDecision', 'readDecisions', 'readUsage', 'readRunState', 'commitRunState',
+  'recordDecision', 'readDecisions', 'readUsage', 'recordIntegration', 'readIntegration', 'readRunState', 'commitRunState',
 ];
 
 /** I1: No agent writes to the Vault. */
@@ -34,7 +34,7 @@ export const I1: InvariantEntry = {
     runtime({
       id: 'I1.vault-implementation-exposes-only-named-operations',
       title:
-        'the filesystem Vault carries exactly the thirteen named operations at run time: no generic write, no delete, and no helper left reachable on the prototype for a caller to mutate the store past them',
+        'the filesystem Vault carries exactly the fifteen named operations at run time: no generic write, no delete, and no helper left reachable on the prototype for a caller to mutate the store past them',
       run: async () => {
         const { LocalVault } = await import('@olympus-ai/vault');
         const reachable = Object.getOwnPropertyNames(LocalVault.prototype).filter((name) => name !== 'constructor');

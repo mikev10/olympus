@@ -21,6 +21,8 @@ import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
 import type { ComponentGraph } from './run.js';
+
+import { GitHubIntegrator, type Integrator } from './integrate.js';
 import { declarationOf, type UnsafeDeclaration } from './safety.js';
 
 /**
@@ -46,6 +48,7 @@ declare const BUILT: unique symbol;
 /** A graph `buildGraph` made. The brand makes an unbuilt graph a compile error; the record makes one a runtime refusal. */
 export type BuiltGraph = ComponentGraph & {
   readonly profile: SandboxProfile | null;
+  readonly integrator: Integrator | null;
   readonly [BUILT]: true;
 };
 
@@ -87,6 +90,22 @@ function relayless(slot: 'driver' | 'reviewer', driver: ComponentGraph['driver']
 }
 
 /**
+ * A graph that cannot merge carries no run above L1: at L2 the runtime merges
+ * after the integrate approval, and nothing else may (D-I1b-05). Only a
+ * `GitHubIntegrator` is attested, as only the real components are.
+ */
+function unmerged(integrator: object | null): UnsafeDeclaration | undefined {
+  if (integrator === null) {
+    return { component: 'no integrator', cannotEnforce: ['the graph has no integrator, so a passed run cannot be merged by the runtime; a human merges it, so no run on it goes above L1 (D-I1b-05)'] };
+  }
+  if (integrator instanceof GitHubIntegrator) return undefined;
+  return {
+    component: 'unattested integrator',
+    cannotEnforce: ['the integrator is not a GitHubIntegrator, the integrator the graph builder can attest, so what it merges and with which credential is unknown (D-I1b-05)'],
+  };
+}
+
+/**
  * Builds the graph, reading every component's provenance as it does. Order of
  * the declarations: vault, sandbox, driver, reviewer. A reviewer that is the
  * driver itself is read once.
@@ -110,7 +129,9 @@ export function buildGraph(parts: GraphParts): BuiltGraph {
       if (unmetered !== undefined) declarations.push(unmetered);
     }
   }
-  const graph = Object.freeze({ ...components, profile: profile ?? null }) as BuiltGraph;
+  const merger = unmerged(components.integrator ?? null);
+  if (merger !== undefined) declarations.push(merger);
+  const graph = Object.freeze({ ...components, integrator: components.integrator ?? null, profile: profile ?? null }) as BuiltGraph;
   provenance.set(graph, Object.freeze(declarations));
   return graph;
 }

@@ -62,6 +62,7 @@ import type {
   Policy,
   RoleId,
   Run,
+  RunId,
   RunState,
   StationId,
   StationRefusal,
@@ -79,7 +80,7 @@ import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import type { BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
@@ -193,6 +194,9 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         const approvals = spend(ctx.state.approvals, next.spends);
         // The run has passed its last M1 exit gate; `observe` is never entered at M1.
         if (!M1_STATIONS.includes(next.next)) {
+          // Merged before the grant is spent: a stop between the two leaves the grant unspent, and the
+          // resume finds the pull request merged at the same commit and records the same act (D-I1b-01).
+          if (step.from === 'integrate') await mergeAccepted(ctx);
           if (next.spends !== null) await commit(ctx, { approvals });
           return { ok: true, state: ctx.state };
         }
@@ -293,7 +297,9 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       return undefined;
     }
     case 'intake':
+      break;
     case 'integrate':
+      await openAccepted(ctx);
       break;
     case 'build':
     case 'verify':
@@ -655,6 +661,55 @@ export async function integrateEscalations(
     protectedPathsTouched: accepted.protectedPathsTouched,
     tamperFindings: [...accepted.tamperFindings, UNANALYSED_TESTS],
   };
+}
+
+/** Every integration record of the run, read back from the Vault. */
+export async function readIntegration(vault: Vault, runId: RunId): Promise<IntegrationRecord[]> {
+  const records: IntegrationRecord[] = [];
+  for (const ref of await vault.readIntegration(runId)) records.push(JSON.parse(decode(await vault.read(ref))) as IntegrationRecord);
+  return records;
+}
+
+/**
+ * `integrate`'s work: the accepted change pushed and opened as a pull request,
+ * so the human approving the exit sees what will merge (D-I1b-01). Once per
+ * run: a resume that finds the record does not open it again. With no
+ * integrator, nothing: the run is at L1 or below, and a human merges. With no
+ * accepted change, a throw: there is no pull request to open, and the run
+ * halts at the work rather than wait on an approval of nothing (D-I1b-04).
+ */
+async function openAccepted(ctx: LineContext): Promise<void> {
+  const { integrator, vault } = ctx.components;
+  if (integrator === null) return;
+  if ((await readIntegration(vault, ctx.run.id)).some((r) => r.kind === 'opened')) return;
+  const { diff, tree } = await accepted(ctx);
+  if (diff.length === 0) {
+    // Refused here rather than at the merge: no human is asked to approve a merge of nothing, and no
+    // approved exit stands with no integration record to say the run is unfinished (D-I1b-04).
+    throw new Error(`line: run ${ctx.run.id} accepted no change, so there is nothing to merge, and a run that merged nothing is not done`);
+  }
+  const opened = await integrator.open({
+    runId: ctx.run.id,
+    baseCommit: ctx.run.baseCommit,
+    base: basePath(ctx.components.workspaces, ctx.run.id),
+    tree,
+    diff,
+    admittedAt: ctx.run.createdAt,
+  });
+  await vault.recordIntegration(opened);
+}
+
+/** After the integrate approval: the pull request `integrate` opened, merged by the runtime (D-I1b-01). A failure throws, and the run halts (D-I1b-04). */
+async function mergeAccepted(ctx: LineContext): Promise<void> {
+  const { integrator, vault } = ctx.components;
+  if (integrator === null) return;
+  const records = await readIntegration(vault, ctx.run.id);
+  if (records.some((r) => r.kind === 'merged')) return;
+  const opened = records.find((r): r is IntegrationOpened => r.kind === 'opened');
+  if (opened === undefined) {
+    throw new Error(`line: run ${ctx.run.id} reached the integrate exit with no pull request recorded: it accepted no change, so there is nothing to merge, and a run that merged nothing is not done`);
+  }
+  await vault.recordIntegration(await integrator.merge(opened));
 }
 
 /** The finding an unanalysed suite escalates under. */
