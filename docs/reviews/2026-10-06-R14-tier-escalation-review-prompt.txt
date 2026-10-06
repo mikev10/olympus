@@ -1,0 +1,98 @@
+The code under review is in the file
+`2026-10-06-R14-tier-escalation-review-bundle.txt` (SHA-256 cbd8fd6f1f6012ccc23cf91755a87120c52d5a0bdba4afa37bf2dcee5876faee) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing how a software-delivery runtime chooses which model a task runs on, raises that choice when the task keeps failing, binds each model call to the chosen model, and bounds the output a sandboxed command can make the runtime hold. It is part of a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime drives tasks through a fixed line of stations (build, verify, review, and others). A policy grants each role a capability scope, and the scope now names a model tier (`fast`, `standard`, `deep`) for the role, may override it per station (`tierByStation`), and may grant escalation (`escalation`: `'none'`, or a failure count and a ceiling): when a task's checks keep failing, its next build iteration runs one tier higher, never past the ceiling. The runtime resolves the tier to a model through the driver, provisions each model call's sandbox with a relay — a proxy that holds the API credential and meters spending — whose price table now holds only the resolved model, so the relay refuses a request naming any other model. Each escalation is written to an enforcement record. A reviewer must not share a model family with the task's authors, and the authors are now every model that worked the task, not only the last. Separately, the Docker CLI wrapper now caps how many bytes of a command's output it holds, and the Docker provider ends the sandbox when a command passes the cap.
+
+It must hold against a capable, motivated party trying to get a stronger, more expensive, or different model than policy grants, keep a task at a tier its record does not show, be reviewed by a model of its own family, or exhaust the host running the runtime through what a command prints. Assume no deceptive intent — only
+that the easiest path gets taken.
+
+That party controls what the model returns from a task (its result, including the model identity it reports), every file in the task's workspace and anything a command run inside the sandbox does — including which model name an HTTP request from inside the sandbox names, and how much a check or command prints — and when the runtime process stops. It does not control the components the runtime is wired with — the Vault, the sandbox provider, the relay implementation, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — it does not control the policy document, which a human authors and the runtime validates, and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. Nothing a model returns may decide a task's status, its tier, which model served a call, or what a call cost.
+- Default deny. A capability not granted in policy is unavailable; a per-station tier or an escalation that policy does not grant must not happen.
+- Fail closed. A missing check, missing capability, malformed policy, unpriced model, unreadable or oversized output is a refusal — never a silent degrade, never a warning that lets the run continue, never a truncated result treated as complete.
+- Reviewers never share the author's model family. Where the only reviewer available shares a family, the seat records reduced independence rather than claiming independence; at the highest autonomy level it is refused.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted.
+
+The mechanisms that matter most:
+
+- `tierFor` / `escalationAt` (packages/core/src/policy/tier.ts) and their use in `startAttempt`, `runTask`, and `review` in packages/api/src/line.ts: the tier is a function of policy and the attempt counts run state keeps.
+- `boundTo` in packages/api/src/line.ts and the Claude Code driver's tier-to-model map and environment (packages/drivers/claude-code/src/driver.ts): the relay is priced for the resolved model alone.
+- `authorsOf` in packages/api/src/line.ts: the reviewer's authors are every distinct model the runtime ran for the reviewed tasks.
+- `dockerCli`'s byte cap (packages/sandbox/src/local/docker.ts) and `LocalDockerProvider`'s handling of it (packages/sandbox/src/local/provider.ts).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Unit identifiers in this list (R2 and similar) name later work in the project's plan and mean nothing more to you than "elsewhere".
+
+- rates per model, and first-pass yield against yield after escalation (R2)
+- a reviewer of another family; the Codex driver is M2's
+- a model asking for a tier, or any input from a model to the tier
+- escalating more than one tier per decision, or skipping one
+- resetting or extending a budget on escalation
+- recording which models the relay observed, a `MeterReading` change
+- surfacing escalations in the API, the CLI, or a report
+
+Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would a task end up served by a model its policy did not grant at that station and iteration — through what it returns, what it writes, what it sends from inside the sandbox, or when the process stops — or be reviewed by a model whose family matches one that worked it while the seat records independence, or make the runtime hold unbounded output, and how would each of those go unrecorded or be passed by the conformance assertions that claim to prove the opposite?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
