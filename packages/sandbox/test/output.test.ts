@@ -31,6 +31,8 @@ describe('dockerCli bounds what it holds of a command\'s output', () => {
 
   test('with no cap given, the default applies; a cap that bounds nothing is refused', async () => {
     expect(DEFAULT_MAX_OUTPUT_BYTES).toBe(64 * 1024 * 1024);
+    // The omitted-cap path itself, one byte past the default: pinning the constant alone guards nothing (codex-2).
+    await expect(dockerCli(NODE, printing(DEFAULT_MAX_OUTPUT_BYTES + 1, 0, 60_000))).rejects.toBeInstanceOf(CliOutputExceeded);
     for (const cap of [0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
       await expect(dockerCli(NODE, printing(1, 0), { maxOutputBytes: cap })).rejects.toThrow(/bounds nothing/);
     }

@@ -1092,7 +1092,8 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
  * `review`: one seat. The authors' families come from their recorded results;
  * the seat is checked before the reviewer runs, from the model it resolves, and
  * again after, from the model its result reports, so a driver that runs another
- * model than it resolved is held to the one that ran (I6).
+ * model than it resolved is held to the one that ran (I6). The stricter seat is
+ * the one committed.
  */
 async function review(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const { reviewer, vault } = ctx.components;
@@ -1139,11 +1140,13 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   }
   const seated = seatReviewer(task.id, authors, ran.result.model, level);
   if (!seated.ok) return seated;
+  // The stricter of the two seats: what the reviewer reports never widens what the runtime resolved (I2, I6; codex-1, gemini-1).
+  const seat = planned.seat.independence === 'reduced' ? planned.seat : seated.seat;
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, {
     tasks: { ...ctx.state.tasks, [task.id]: 'passed' },
     results: { ...ctx.state.results, [task.id]: ref },
-    review: seated.seat,
+    review: seat,
   });
   return undefined;
 }

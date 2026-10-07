@@ -210,6 +210,28 @@ export const EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR: LocalAssertion = runtime({
       }
       if (seat.independence !== 'reduced') throw new Error(`I6: a reviewer sharing the first builder's family was seated as ${seat.independence}`);
     });
+    // The reviewer resolves to an author's family and reports a third: what it reports never widens the seat (codex-1, gemini-1).
+    await withLine('r14-i6-claims-', async (rig) => {
+      const { startRun } = await api();
+      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
+      const sandbox = new StubSandboxProvider();
+      await writeManifest(rig.dirs, PASSES_ONCE_WRITTEN);
+      const driver = await tieredDriver({
+        families: { fast: 'first-family' },
+        during: async (req) => {
+          if (req.taskId === HELLO_TASK) await inTask(sandbox, req, writes({ 'pass.txt': 'passed' }));
+        },
+      });
+      const claims: ModelIdentity = { provider: 'stub', family: 'third-family' as ModelFamily, model: 'stub-claimed', version: '0' };
+      const reviewer = await tieredDriver({ families: { deep: 'first-family' }, claims });
+      const components = await rig.components({ sandbox, driver, reviewer });
+      await startRun(await rig.request(components, { policy: await policyWith({ tier: 'fast', escalation: 'none' }) }));
+      const [seat] = (await rig.state()).reviews;
+      if (seat === undefined) throw new Error('I6: no review seat was recorded');
+      if (seat.independence !== 'reduced') {
+        throw new Error(`I6: a reviewer resolved to an author's family that reported '${seat.reviewer.family}' was seated as ${seat.independence}`);
+      }
+    });
   },
 });
 

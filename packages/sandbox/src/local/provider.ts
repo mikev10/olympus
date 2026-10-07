@@ -16,7 +16,7 @@ import { resolve as resolvePath } from 'node:path';
 import type {
   EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
 } from '../types.js';
-import { CliOutputExceeded, CliTimeout, DEFAULT_MAX_OUTPUT_BYTES, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
+import { CliOutputExceeded, CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
@@ -383,7 +383,8 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #proxyImage: string;
   readonly #credentials: ReadonlyMap<string, string>;
   readonly #relayTrust: string | undefined;
-  readonly #maxOutputBytes: number;
+  /** Passed to `dockerCli` only when policy set one: the default lives there alone, where a test runs it (codex-2). */
+  readonly #outputCap: { readonly maxOutputBytes?: number };
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
 
   private constructor(
@@ -393,7 +394,7 @@ export class LocalDockerProvider implements SandboxProvider {
     proxyImage: string,
     credentials: ReadonlyMap<string, string>,
     relayTrust: string | undefined,
-    maxOutputBytes: number,
+    maxOutputBytes: number | undefined,
   ) {
     this.#executable = executable;
     this.#vaultPaths = vaultPaths;
@@ -401,7 +402,7 @@ export class LocalDockerProvider implements SandboxProvider {
     this.#proxyImage = proxyImage;
     this.#credentials = credentials;
     this.#relayTrust = relayTrust;
-    this.#maxOutputBytes = maxOutputBytes;
+    this.#outputCap = maxOutputBytes === undefined ? {} : { maxOutputBytes };
   }
 
   /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
@@ -427,8 +428,8 @@ export class LocalDockerProvider implements SandboxProvider {
     const credentials = heldCredentials(options.credentials);
     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
     const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
-    const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-    if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
+    const maxOutputBytes = options.maxOutputBytes;
+    if (maxOutputBytes !== undefined && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0)) {
       refuse('limits', `maxOutputBytes must be a positive integer; ${String(maxOutputBytes)} bounds nothing`);
     }
     return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, maxOutputBytes);
@@ -617,7 +618,7 @@ export class LocalDockerProvider implements SandboxProvider {
         ['exec', ...(detach ? ['--detach'] : []), ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
         {
           timeoutMs: remaining,
-          maxOutputBytes: this.#maxOutputBytes,
+          ...this.#outputCap,
           ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
           ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
         },
@@ -644,7 +645,7 @@ export class LocalDockerProvider implements SandboxProvider {
     try {
       const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
         timeoutMs: remaining,
-        maxOutputBytes: this.#maxOutputBytes,
+        ...this.#outputCap,
         stdin: JSON.stringify(request),
       });
       if (result.exitCode !== 0) {
