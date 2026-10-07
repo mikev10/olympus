@@ -1,3 +1,54 @@
+# External review of R14, gemini, 2026-10-06
+
+An adversarial pre-merge review of R14 (model tier per station and
+escalation): `tierFor` and `escalationAt`, the tier's use in the line's
+`startAttempt`, `runTask`, and `review`, `boundTo` and the Claude Code
+driver's tier-to-model map, `authorsOf`, and the Docker CLI output cap with
+the provider's handling of it. One of two reviews run from the same prompt and
+bundle; the other is `2026-10-06-R14-tier-escalation-review-codex.md`. Both are triaged in
+`2026-10-06-R14-tier-escalation-triage.md`, which cites this review's single finding as `gemini-1`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering
+  no tools; `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 243.8 s. Ingestion `complete`: 61,973
+  input tokens against a floor of 43,663. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `4f89215546393e39f976f7eb62e48b4b0f727c8394eae52ef05d6dd5421dd2f1`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-1 (the post-run seat uses the reviewer's
+  reported model and can record false independence) was raised by codex too,
+  as codex-1. Gemini raised nothing alone.
+- **Date:** 2026-10-06 (run started 2026-10-06T20:40Z).
+- **Bundle:** `2026-10-06-R14-tier-escalation-review-bundle.txt`, SHA-256
+  `cbd8fd6f1f6012ccc23cf91755a87120c52d5a0bdba4afa37bf2dcee5876faee`, base
+  `4bf9487` (`reviewed/I1b`), head `cdb4af6` ("R14: Model tier per station
+  and escalation"). It held the full contents of 36 of the 39 changed paths
+  across two commits (`8055cb4`, `cdb4af6`): source, tests, registry,
+  fixtures, the pending baseline, and the two changesets. The changed
+  `docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, and
+  `docs/plan/F2-contracts.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-06-R14-tier-escalation-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and performed no external lookups. A self-report, not independently
+  verifiable.
+- **Coverage, and any gap:** items 1 and 3 are answered by gemini-1, which it
+  labels "fails open"; item 6 by four mechanisms assessed sound (the output
+  cap and provider teardown, `boundTo`, `tierFor`/`escalationAt`,
+  `authorsOf`); item 7 by a paragraph accepting the framing. Items 2
+  (tautological checks), 4 (language escape hatches), and 5 (configuration
+  satisfied without doing what it appears to do) came back empty. Its item-6
+  verdict that the output cap is sound concerns the mechanism, not the tests
+  that claim it, which is where codex-2 found the gap.
+- **Citations:** line numbers refer to positions in each file as the bundle
+  carried it, not to the repository at any later commit. They are hints; the
+  triage located each construct by name.
+
+---
+
 BASE: 4bf9487
 HEAD: cdb4af6
 packages/vault/test/local.test.ts

@@ -1,3 +1,63 @@
+# External review of R14, codex, 2026-10-06
+
+An adversarial pre-merge review of R14 (model tier per station and
+escalation): `tierFor` and `escalationAt`, the tier's use in the line's
+`startAttempt`, `runTask`, and `review`, `boundTo` and the Claude Code
+driver's tier-to-model map, `authorsOf`, and the Docker CLI output cap with
+the provider's handling of it. One of two reviews run from the same prompt and
+bundle; the other is `2026-10-06-R14-tier-escalation-review-gemini.md`. Both are triaged in
+`2026-10-06-R14-tier-escalation-triage.md`, which cites this review's findings as `codex-1` and
+`codex-2`, as the reply numbers them.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 72.6 s. Ingestion `complete`: 68,915
+  input tokens against a floor of 43,663. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `024653c50e1884da43b3485fb342aa5cfeb1044ef96241a19b1bb10bd16e08ba`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-1 (the committed review seat is computed
+  from the model the reviewer's result reports, so a reported family can turn
+  reduced independence into independence) was raised by gemini too, as
+  gemini-1. codex-2 (no test runs the default output cap) was raised by codex
+  alone.
+- **Date:** 2026-10-06 (run started 2026-10-06T20:39Z).
+- **Bundle:** `2026-10-06-R14-tier-escalation-review-bundle.txt`, SHA-256
+  `cbd8fd6f1f6012ccc23cf91755a87120c52d5a0bdba4afa37bf2dcee5876faee`, base
+  `4bf9487` (`reviewed/I1b`), head `cdb4af6` ("R14: Model tier per station
+  and escalation"). It held the full contents of 36 of the 39 changed paths
+  across two commits (`8055cb4`, `cdb4af6`): source, tests, registry,
+  fixtures, the pending baseline, and the two changesets. The changed
+  `docs/decisions.md`, `docs/plan/DECOMPOSITION.md`, and
+  `docs/plan/F2-contracts.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-06-R14-tier-escalation-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context, performed no lookups, and did not execute tests. A self-report, not
+  independently verifiable.
+- **Coverage, and any gap:** findings are not numbered by prompt item. Item 1
+  is answered by codex-1; item 2 by a paragraph finding no strictly
+  tautological assertion and calling codex-2 narrower than its name; item 3 by
+  the same paragraph, which finds no exception-to-pass path and notes the
+  helpers and runner were not in the bundle; item 4 by a paragraph finding no
+  in-scope bypass through casts or brands; item 6 by a list of mechanisms
+  assessed sound (policy-derived tiers, relay restriction, command output,
+  escalation recording); item 7 by a closing paragraph accepting the framing
+  and refining it (separate enforcement from the assertions, a per-command
+  bound from total memory safety). Item 5 (configuration satisfied without
+  doing what it appears to do) got no answer of its own; codex-2 is the
+  nearest.
+- **Citations:** line numbers refer to positions in each file as the bundle
+  carried it, not to the repository at any later commit. They are hints; the
+  triage located each construct by name.
+
+---
+
 BASE: 4bf9487  
 HEAD: cdb4af6  
 packages/vault/test/local.test.ts  
