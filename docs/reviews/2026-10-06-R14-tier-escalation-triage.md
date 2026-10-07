@@ -40,8 +40,8 @@ by family and number, as each reply numbers them.
 
 | Finding | Restatement | Raised by | Verdict | Outcome |
 |---|---|---|---|---|
-| codex-1 / gemini-1 | The committed review seat is computed from the reviewer's reported model, so a reported family different from the resolved one records false independence | codex, gemini | Holds in part | Fix now (proposed) |
-| codex-2 | No test or assertion runs the default output cap; a fallback raised to no bound leaves every assertion green | codex | Holds | Fix now (proposed) |
+| codex-1 / gemini-1 | The committed review seat is computed from the reviewer's reported model, so a reported family different from the resolved one records false independence | codex, gemini | Holds in part | Fixed, `8b7dffb` |
+| codex-2 | No test or assertion runs the default output cap; a fallback raised to no bound leaves every assertion green | codex | Holds | Fixed, `8b7dffb` |
 
 ## codex-1 / gemini-1 — the seat trusts the reviewer's reported model
 
