@@ -69,6 +69,8 @@ function cloneScope(scope: CapabilityScope): CapabilityScope {
         : { egress: frozenCopy(scope.network.egress) },
     ),
     tier: scope.tier,
+    tierByStation: frozen({ ...scope.tierByStation }),
+    escalation: scope.escalation === 'none' ? 'none' : frozen({ ...scope.escalation }),
     autonomyCeiling: scope.autonomyCeiling,
     triggerKinds: frozenCopy(scope.triggerKinds),
     budget: frozen({ ...scope.budget }),

@@ -23,6 +23,7 @@ import type { LocalAssertion } from '../kit/types.js';
 import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { around } from './line-assertions.js';
 import { realComponents, realPolicy } from './real-line.js';
+import { failingRun } from './tier.js';
 import { inTask, runHello, writes } from './verification.js';
 import { HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
@@ -49,7 +50,8 @@ export type CauseKey =
   | `approval-refused:${Extract<DecisionCause, { cause: 'approval-refused' }>['reason']}`
   | `egress:${EgressConnection['verdict']}`
   | 'violation-recorded'
-  | 'relay-refused';
+  | 'relay-refused'
+  | 'tier-escalated';
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -69,6 +71,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'violation-recorded';
     case 'relay-refused':
       return 'relay-refused';
+    case 'tier-escalated':
+      return 'tier-escalated';
   }
 }
 
@@ -587,6 +591,19 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         // A call whose relay refused nothing records no relay decision.
         const relayed = (await decisionsOf(rig, components.vault)).filter((x) => x.decision.cause === 'relay-refused');
         if (relayed.length !== 1) throw new Error(`P14: ${String(relayed.length)} relay decisions for one refusing call`);
+      });
+    },
+  },
+  'tier-escalated': {
+    kind: 'scenario',
+    run: async () => {
+      await withLine('p14-escalate-', async (rig) => {
+        const run = await failingRun(rig, { tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'standard' } });
+        const vault = (await rig.components()).vault;
+        const d = await expectDecision(rig, vault, 'tier-escalated', { decidedBy: 'line', taskId: HELLO_TASK, station: 'build' });
+        if (d.decision.cause !== 'tier-escalated' || d.decision.from !== 'fast' || d.decision.to !== 'standard' || d.decision.failedGates !== 1 || run.decisions.length !== 1) {
+          throw new Error(`P14: an escalation was recorded as ${JSON.stringify(d.decision)}, among ${String(run.decisions.length)}`);
+        }
       });
     },
   },

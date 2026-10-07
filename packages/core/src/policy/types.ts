@@ -18,10 +18,29 @@ export interface CapabilityScope {
   tools: string[];                    // default deny (I4)
   network: { egress: 'none' | string[] };
   tier: ModelTier;
+  /**
+   * The tier at a station this role acts at, where it differs from `tier`
+   * (A-R14-01). Sparse: a station absent here runs at `tier`. A station the
+   * role may not act at is refused at validation, since its tier would apply
+   * nowhere.
+   */
+  tierByStation: Partial<Record<StationId, ModelTier>>;
+  /** Whether a task whose gate keeps failing runs its next iteration a tier higher. `'none'` unless policy grants it (I4, A-R14-01). */
+  escalation: EscalationGrant;
   autonomyCeiling: AutonomyLevel;
   triggerKinds: TriggerKind[];
   budget: Budget;
 }
+
+/**
+ * Escalation, granted or not (A-R14-01). Granted, a task's tier rises one step
+ * for every `afterFailedGates` iterations whose gate failed, and never past
+ * `ceiling`. The runtime counts the failures from the attempts it keeps; no
+ * model asks for a stronger one (I2). The task's budget does not reset.
+ */
+export type EscalationGrant =
+  | 'none'
+  | { afterFailedGates: number; ceiling: ModelTier };
 
 export type ApprovalOutcome = 'auto' | 'human-required' | 'blocked';
 

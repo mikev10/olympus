@@ -24,6 +24,8 @@ function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
     tools: ['read', 'write'],
     network: { egress: 'none' },
     tier: 'standard',
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 3,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
@@ -202,7 +204,7 @@ describe('default deny: an ungranted role or station has nothing (I4)', () => {
     expect(outcome.scope.tools).toStrictEqual(['read', 'write']);
     expect(outcome.scope.network.egress).toBe('none');
     expect(Object.keys(outcome.scope).sort()).toStrictEqual([
-      'autonomyCeiling', 'budget', 'network', 'stations', 'tier', 'tools', 'triggerKinds', 'writableGlobs',
+      'autonomyCeiling', 'budget', 'escalation', 'network', 'stations', 'tier', 'tierByStation', 'tools', 'triggerKinds', 'writableGlobs',
     ]);
   });
 

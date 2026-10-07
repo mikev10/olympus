@@ -8,7 +8,7 @@ import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import { StubSandboxProvider, type ExecResult, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
+import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
 import type { EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, costTotals, readUsage, resumeRun, runStanding, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
@@ -804,7 +804,8 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
 
 describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1a-02)', () => {
   const PROFILE = { buildImage: 'build-image', checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
-  const RELAY = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages' as const, prices: {} } };
+  const PRICE = { inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
+  const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } } };
 
   class RelayingDriver extends ChosenDriver {
     override relayRequest(): typeof RELAY {
@@ -820,9 +821,28 @@ describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1
     expect(build).toMatchObject({
       image: 'build-image',
       limits: { cpus: 1, memoryMb: 512, pids: 64, wallClockMs: 60_000 },
-      relay: { ...RELAY, budget: { maxTokens: 1000, maxCostUsd: 1 } },
+      relay: { ...RELAY, meter: { ...RELAY.meter, prices: { stub: PRICE } }, budget: { maxTokens: 1000, maxCostUsd: 1 } },
       mounts: { others: [] },
     });
+  });
+
+  test('the relay is priced for the model the call resolved and no other, so a request naming another is refused by the relay (D-R14-01)', async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    const driver = new RelayingDriver({ narrative: 'built' });
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, driver, reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
+    const build = sandbox.specs.find((s) => s.relay !== undefined);
+    expect(Object.keys(build?.relay?.meter.prices ?? {})).toStrictEqual(['stub']);
+  });
+
+  test('a resolved model the relay has no price for is never provisioned', async () => {
+    const sandbox = new RecordingSandbox(new StubSandboxProvider());
+    class UnpricedDriver extends ChosenDriver {
+      override relayRequest(): typeof RELAY {
+        return { ...RELAY, meter: { ...RELAY.meter, prices: { 'another-model': PRICE } } };
+      }
+    }
+    await startRun(runRequest(runId, workspace, { ...components, sandbox, driver: new UnpricedDriver({ narrative: 'built' }), reviewer: new ChosenDriver({ family: 'other' }), profile: PROFILE }));
+    expect(sandbox.specs.filter((s) => s.relay !== undefined)).toHaveLength(0);
   });
 
   test('a check sandbox runs the profile\'s check image under the check\'s own timeout, with no relay and no network', async () => {

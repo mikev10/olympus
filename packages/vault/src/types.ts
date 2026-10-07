@@ -8,7 +8,7 @@
  * The Vault stores both.
  */
 import type {
-  AgentClaim, ApprovalKey, AutonomyLevel, ModelIdentity, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  AgentClaim, ApprovalKey, AutonomyLevel, ModelIdentity, ModelTier, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
@@ -163,6 +163,18 @@ export type DecisionCause =
       readonly usage: VaultRef;
       readonly refused: number;
       readonly exhausted: Extract<MeterReading, { kind: 'metered' }>['exhausted'];
+    }
+  /**
+   * A task's next iteration raised one tier under an escalation grant,
+   * decided by the line from the failed gates run state counts, never from
+   * anything a model returned (A-R14-02, I2).
+   */
+  | {
+      readonly cause: 'tier-escalated';
+      readonly decidedBy: 'line';
+      readonly from: ModelTier;
+      readonly to: ModelTier;
+      readonly failedGates: number;
     };
 
 export type DecidingComponent = DecisionCause['decidedBy'];

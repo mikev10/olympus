@@ -92,6 +92,8 @@ function scope(stations: CapabilityScope['stations'], tier: ModelTier): Capabili
     tools: ['read', 'write'],
     network: { egress: 'none' },
     tier,
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },

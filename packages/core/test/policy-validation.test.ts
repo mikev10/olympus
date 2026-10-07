@@ -21,6 +21,8 @@ function scope(): Record<string, unknown> {
     tools: ['read', 'write'],
     network: { egress: 'none' },
     tier: 'standard',
+    tierByStation: {},
+    escalation: 'none',
     autonomyCeiling: 2,
     triggerKinds: ['human'],
     budget: { maxTokens: 1000, maxCostUsd: 1.5, maxWallClockMs: 60_000 },
@@ -295,5 +297,58 @@ describe('an egress entry names one host (D-P3-08, review finding 1)', () => {
     expect(accept(document).roles[BUILDER]?.network.egress).toStrictEqual([
       'registry.npmjs.org', 'api.github.com', '192.0.2.10', 'localhost:8080',
     ]);
+  });
+});
+
+describe('a tier per station and escalation (A-R14-01)', () => {
+  function withScope(overrides: Record<string, unknown>): Record<string, unknown> {
+    const document = authored();
+    document.roles = { builder: { ...scope(), stations: ['plan', 'build'], ...overrides } };
+    return document;
+  }
+
+  test('a scope with a per-station tier and an escalation grant is accepted as written', () => {
+    const document = accept(withScope({ tierByStation: { plan: 'deep' }, escalation: { afterFailedGates: 1, ceiling: 'deep' } }));
+    const builder = document.roles[BUILDER];
+    expect(builder?.tierByStation).toStrictEqual({ plan: 'deep' });
+    expect(builder?.escalation).toStrictEqual({ afterFailedGates: 1, ceiling: 'deep' });
+  });
+
+  test('a scope that does not say whether it escalates is refused, not read as not escalating', () => {
+    const document = withScope({});
+    delete (document.roles as Record<string, Record<string, unknown>>).builder?.escalation;
+    expect(lines(refuse(document))).toContainEqual(expect.stringContaining('roles.builder.escalation: required key is missing'));
+  });
+
+  test('a scope with no per-station map is refused', () => {
+    const document = withScope({});
+    delete (document.roles as Record<string, Record<string, unknown>>).builder?.tierByStation;
+    expect(lines(refuse(document))).toContainEqual(expect.stringContaining('roles.builder.tierByStation: required key is missing'));
+  });
+
+  test('a ceiling below the tier the role starts at is refused', () => {
+    expect(lines(refuse(withScope({ escalation: { afterFailedGates: 1, ceiling: 'fast' } }))))
+      .toContainEqual(expect.stringContaining('roles.builder.escalation.ceiling'));
+  });
+
+  test('a ceiling below a per-station tier is refused', () => {
+    expect(lines(refuse(withScope({ tierByStation: { plan: 'deep' }, escalation: { afterFailedGates: 1, ceiling: 'standard' } }))))
+      .toContainEqual(expect.stringContaining('roles.builder.escalation.ceiling'));
+  });
+
+  test('a tier outside the union is refused, as a per-station tier and as a ceiling', () => {
+    expect(lines(refuse(withScope({ tierByStation: { build: 'huge' } })))).toContainEqual(expect.stringContaining('roles.builder.tierByStation.build'));
+    expect(lines(refuse(withScope({ escalation: { afterFailedGates: 1, ceiling: 'huge' } })))).toContainEqual(expect.stringContaining('roles.builder.escalation.ceiling'));
+  });
+
+  test('a tier for a station the role may not act at is refused', () => {
+    expect(lines(refuse(withScope({ tierByStation: { review: 'deep' } })))).toContainEqual(expect.stringContaining('roles.builder.tierByStation.review'));
+  });
+
+  test('a failure count that is not a positive integer, an unknown key, and any other string are refused', () => {
+    expect(lines(refuse(withScope({ escalation: { afterFailedGates: 0, ceiling: 'deep' } })))).toContainEqual(expect.stringContaining('afterFailedGates'));
+    expect(lines(refuse(withScope({ escalation: { afterFailedGates: 1.5, ceiling: 'deep' } })))).toContainEqual(expect.stringContaining('afterFailedGates'));
+    expect(lines(refuse(withScope({ escalation: { afterFailedGates: 1, ceiling: 'deep', reset: true } })))).toContainEqual(expect.stringContaining('escalation.reset: unknown key'));
+    expect(lines(refuse(withScope({ escalation: 'always' })))).toContainEqual(expect.stringContaining('roles.builder.escalation'));
   });
 });

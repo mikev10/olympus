@@ -30,7 +30,9 @@ export type RefusalLayer =
   /** A relay request this provider cannot apply: an unheld credential, an upstream that is not an https origin, an empty grant, an upstream host the allowlist also names, or a relay that did not come up. */
   | 'relay'
   /** A probe request this provider cannot send: a port, a wait, or an exchange it cannot read, or `detach` with `stdin`. */
-  | 'probe';
+  | 'probe'
+  /** A command printed more than the provider's output cap; the sandbox was ended and nothing it printed is returned (D-P8-15). */
+  | 'output';
 
 export class SandboxRefusal extends Error {
   override readonly name = 'SandboxRefusal';

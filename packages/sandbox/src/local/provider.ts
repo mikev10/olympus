@@ -16,7 +16,7 @@ import { resolve as resolvePath } from 'node:path';
 import type {
   EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
 } from '../types.js';
-import { CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
+import { CliOutputExceeded, CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
 import { mountArgument, mountTable, resolveMounts, type ResolvedMount } from './mounts.js';
 import { canCreateIn } from './ownership.js';
@@ -80,6 +80,13 @@ export interface LocalDockerOptions {
    * off: the upstream's certificate is always checked against its name.
    */
   readonly relayTrust?: string;
+  /**
+   * The most bytes of stdout and stderr together one command or probe may
+   * print. Past it the sandbox is ended and the call refused, never answered
+   * with what was read so far (D-P8-15). Defaults to 64 MiB; a value that is
+   * not a positive integer is refused at construction.
+   */
+  readonly maxOutputBytes?: number;
 }
 
 /**
@@ -376,6 +383,8 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #proxyImage: string;
   readonly #credentials: ReadonlyMap<string, string>;
   readonly #relayTrust: string | undefined;
+  /** Passed to `dockerCli` only when policy set one: the default lives there alone, where a test runs it (codex-2). */
+  readonly #outputCap: { readonly maxOutputBytes?: number };
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
 
   private constructor(
@@ -385,6 +394,7 @@ export class LocalDockerProvider implements SandboxProvider {
     proxyImage: string,
     credentials: ReadonlyMap<string, string>,
     relayTrust: string | undefined,
+    maxOutputBytes: number | undefined,
   ) {
     this.#executable = executable;
     this.#vaultPaths = vaultPaths;
@@ -392,6 +402,7 @@ export class LocalDockerProvider implements SandboxProvider {
     this.#proxyImage = proxyImage;
     this.#credentials = credentials;
     this.#relayTrust = relayTrust;
+    this.#outputCap = maxOutputBytes === undefined ? {} : { maxOutputBytes };
   }
 
   /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
@@ -417,7 +428,11 @@ export class LocalDockerProvider implements SandboxProvider {
     const credentials = heldCredentials(options.credentials);
     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
     const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
-    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust);
+    const maxOutputBytes = options.maxOutputBytes;
+    if (maxOutputBytes !== undefined && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0)) {
+      refuse('limits', `maxOutputBytes must be a positive integer; ${String(maxOutputBytes)} bounds nothing`);
+    }
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, maxOutputBytes);
   }
 
   /** What the probe established about the daemon behind this provider. */
@@ -603,6 +618,7 @@ export class LocalDockerProvider implements SandboxProvider {
         ['exec', ...(detach ? ['--detach'] : []), ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
         {
           timeoutMs: remaining,
+          ...this.#outputCap,
           ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
           ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
         },
@@ -629,6 +645,7 @@ export class LocalDockerProvider implements SandboxProvider {
     try {
       const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
         timeoutMs: remaining,
+        ...this.#outputCap,
         stdin: JSON.stringify(request),
       });
       if (result.exitCode !== 0) {
@@ -653,8 +670,21 @@ export class LocalDockerProvider implements SandboxProvider {
     return remaining;
   }
 
-  /** Rethrows anything but a timeout; a timeout ends the sandbox and refuses. */
+  /**
+   * Rethrows anything but a timeout or an output overrun; either ends the
+   * sandbox and refuses. Killing the `docker exec` client does not stop the
+   * command inside the container, so the container goes, and with it the
+   * command (D-P8-15).
+   */
   async #overBudget(sandbox: Sandbox, h: SandboxHandle, error: unknown): Promise<never> {
+    if (error instanceof CliOutputExceeded) {
+      const cap = String(error.maxOutputBytes);
+      const { removal } = await this.#end(sandbox, `a command printed more than ${cap} bytes`);
+      if (removal !== undefined) {
+        refuse('output', `sandbox ${h} ran a command that printed more than ${cap} bytes, and could not be destroyed: ${removal.message}`);
+      }
+      refuse('output', `sandbox ${h} ran a command that printed more than ${cap} bytes; it was killed with its sandbox, and none of its output is returned`);
+    }
     if (!(error instanceof CliTimeout)) throw error;
     const budget = String(sandbox.controls.limits.wallClockMs);
     // The budget is the sandbox's, not the command's: the container goes with it, so nothing

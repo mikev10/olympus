@@ -288,6 +288,13 @@ describe('enforcement decisions (A-P14-01)', () => {
     await expect(vault.recordDecision(bare as never)).rejects.toThrow(/occurrence/);
     expect(await vault.readDecisions(runId)).toHaveLength(0);
   });
+
+  test('an escalation is the line\'s decision and no other component\'s (A-R14-02)', async () => {
+    const escalated = { cause: 'tier-escalated' as const, decidedBy: 'line' as const, from: 'fast' as const, to: 'standard' as const, failedGates: 1 };
+    await vault.recordDecision({ ...decision, decision: escalated });
+    await expect(vault.recordDecision({ ...decision, occurrence: 'second', decision: { ...escalated, decidedBy: 'model-relay' } } as never)).rejects.toThrow(/not made by model-relay/);
+    expect(await vault.readDecisions(runId)).toHaveLength(1);
+  });
 });
 
 describe('locking', () => {

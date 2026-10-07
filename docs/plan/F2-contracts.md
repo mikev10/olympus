@@ -249,10 +249,15 @@ export interface CapabilityScope {
   tools: string[];                    // default deny (I4)
   network: { egress: 'none' | string[] };
   tier: ModelTier;
+  tierByStation: Partial<Record<StationId, ModelTier>>;   // A-R14-01: a station absent here runs at `tier`
+  escalation: EscalationGrant;                            // A-R14-01: 'none' unless granted (I4)
   autonomyCeiling: AutonomyLevel;
   triggerKinds: TriggerKind[];
   budget: Budget;
 }
+
+/** A-R14-01: one tier per `afterFailedGates` failed gates, never past `ceiling`; the budget does not reset. */
+export type EscalationGrant = 'none' | { afterFailedGates: number; ceiling: ModelTier };
 
 export type ApprovalOutcome = 'auto' | 'human-required' | 'blocked';
 

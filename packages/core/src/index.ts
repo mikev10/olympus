@@ -14,6 +14,7 @@ export * from './station/types.js';
 export * from './policy/constants.js';
 export * from './policy/validation.js';
 export * from './policy/engine.js';
+export * from './policy/tier.js';
 export * from './policy/default.js';
 export * from './driver/stub/driver.js';
 export * from './station/contracts.js';
