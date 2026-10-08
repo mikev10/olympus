@@ -1,0 +1,2986 @@
+BASE: 0023602
+HEAD: 0f7a3d8
+
+=== COMMITS ===
+0f7a3d8 R1: Readiness
+
+=== CHANGED ===
+ .changeset/r1-readiness.md                         |  15 +
+ docs/decisions.md                                  |  58 +++
+ docs/plan/R1-readiness.md                          |  63 +--
+ .../i2/readiness-outcome-is-runtime-derived.ts     |  25 ++
+ .../fixtures/types/i4/absent-scan-is-not-a-pass.ts |  25 ++
+ packages/conformance/src/registry/i2.ts            |   2 +
+ packages/conformance/src/registry/i4.ts            |   3 +
+ packages/conformance/src/registry/i5.ts            |   4 +
+ packages/conformance/src/registry/i8.ts            |   2 +
+ packages/conformance/src/registry/readiness.ts     | 326 +++++++++++++++
+ packages/conformance/tsconfig.json                 |   1 +
+ packages/readiness/package.json                    |  28 ++
+ packages/readiness/src/derive.ts                   |  36 ++
+ packages/readiness/src/index.ts                    |  27 ++
+ packages/readiness/src/probes.ts                   |  68 ++++
+ packages/readiness/src/report.ts                   |  38 ++
+ packages/readiness/src/resolve.ts                  | 108 +++++
+ packages/readiness/src/scan.ts                     | 439 +++++++++++++++++++++
+ packages/readiness/src/tree.ts                     | 128 ++++++
+ packages/readiness/src/types.ts                    | 103 +++++
+ packages/readiness/test/derive.test.ts             |  64 +++
+ packages/readiness/test/repo.ts                    | 118 ++++++
+ packages/readiness/test/scan.test.ts               | 152 +++++++
+ packages/readiness/tsconfig.json                   |   4 +
+ packages/readiness/vitest.config.ts                |  13 +
+ pnpm-lock.yaml                                     |  22 ++
+ 26 files changed, 1848 insertions(+), 24 deletions(-)
+
+
+===== .changeset/r1-readiness.md =====
+---
+"@olympus-ai/readiness": minor
+---
+
+R1: a new `readiness` package. `scan()` copies one repository's tree at one
+commit and runs seventeen probes over it. Most run in fresh sandboxes over that
+copy, and the rest are static reads or a caller-supplied branch-protection
+checker. The scan derives an autonomy ceiling of L0, L1, or L2 (never L3) and
+names the probe that holds it. `resolveWithReadiness()` applies that ceiling as
+the fourth term of the effective-level formula: it calls the policy engine
+unchanged and only ever refuses on top of the engine's own verdict. A refusal
+names every term that bound it (readiness, the global cap, the station cap, or
+the role ceiling) instead of a bare `exceeds-cap`. An unscanned repository
+passes `NOT_SCANNED`, which is an explicit state and never `undefined`.
+Nothing wires the ceiling into run creation yet.
+
+===== packages/conformance/fixtures/types/i2/readiness-outcome-is-runtime-derived.ts =====
+// I2 (R1 §4): a probe's outcome is computed by the runtime from what it
+// observed, never supplied by a model or a driver. A ProbeResult and a
+// ReadinessReport say so with a `collectedBy: 'runtime'` literal no other
+// value satisfies, and neither has a field that can be written after the
+// runtime built it.
+import type { ProbeResult, ReadinessReport } from '@olympus-ai/readiness';
+
+declare const result: ProbeResult;
+declare const report: ReadinessReport;
+
+export const fromRuntime: ProbeResult = { ...result, collectedBy: 'runtime' };
+export const fromModel: ProbeResult = { ...result, collectedBy: 'model' }; // expect-error TS2322: Type '"model"' is not assignable to type '"runtime"'
+export const fromDriver: ProbeResult = { ...result, collectedBy: 'driver' }; // expect-error TS2322: Type '"driver"' is not assignable to type '"runtime"'
+export const unstated: ProbeResult = { ...result, collectedBy: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type '"runtime"'
+export const reportFromModel: ReadinessReport = { ...report, collectedBy: 'model' }; // expect-error TS2322: Type '"model"' is not assignable to type '"runtime"'
+
+export function overwrite(target: ProbeResult): void {
+  target.outcome = 'supported'; // expect-error TS2540: Cannot assign to 'outcome' because it is a read-only property
+}
+export function relabel(target: ReadinessReport): void {
+  target.ceiling.level = 2; // expect-error TS2540: Cannot assign to 'level' because it is a read-only property
+}
+export function append(target: ReadinessReport): void {
+  target.probes.push(result); // expect-error TS2339: Property 'push' does not exist on type 'readonly ProbeResult[]'
+}
+
+===== packages/conformance/fixtures/types/i4/absent-scan-is-not-a-pass.ts =====
+// I4 (R1 §4): an absent scan is not a pass. The readiness term is never
+// optional: a run on an unscanned repository passes `NOT_SCANNED`, an explicit
+// state, and there is no `undefined` that could flow through a comparison and
+// read as clearance. A level is reachable only after narrowing to a scan.
+import type { AutonomyLevel, Policy, PolicyEngine, RoleId, StationId } from '@olympus-ai/core';
+import { NOT_SCANNED, resolveWithReadiness, type ReadinessCeiling, type ReadinessReport } from '@olympus-ai/readiness';
+
+declare const engine: PolicyEngine;
+declare const policy: Policy;
+declare const role: RoleId;
+declare const station: StationId;
+declare const requested: AutonomyLevel;
+declare const ceiling: ReadinessCeiling;
+declare const maybe: ReadinessReport | undefined;
+
+export const unscanned = resolveWithReadiness(engine, requested, station, role, policy, NOT_SCANNED);
+export const omitted = resolveWithReadiness(engine, requested, station, role, policy); // expect-error TS2554: Expected 6 arguments, but got 5
+export const passedUndefined = resolveWithReadiness(engine, requested, station, role, policy, undefined); // expect-error TS2345: Argument of type 'undefined' is not assignable to parameter of type 'ReadinessCeiling'
+export const fromMaybe = resolveWithReadiness(engine, requested, station, role, policy, maybe?.ceiling); // expect-error TS2345: Argument of type '{ readonly kind: "scanned"; readonly level: ScanLevel; readonly heldBy: HeldBy; readonly commit: string; } | undefined' is not assignable to parameter of type 'ReadinessCeiling'
+
+export const unnarrowed: AutonomyLevel = ceiling.level; // expect-error TS2339: Property 'level' does not exist on type 'ReadinessCeiling'
+export const narrowed: AutonomyLevel | null = ceiling.kind === 'scanned' ? ceiling.level : null;
+
+export const grantsL3: ReadinessCeiling = { kind: 'scanned', level: 3, heldBy: { kind: 'scan-limit' }, commit: 'c' }; // expect-error TS2322: Type '3' is not assignable to type 'ScanLevel'
+export const blank: ReadinessCeiling = { kind: 'scanned' }; // expect-error TS2322: is missing the following properties from type '{ readonly kind: "scanned"; readonly level: ScanLevel; readonly heldBy: HeldBy; readonly commit: string; }': level, heldBy, commit
+
+===== packages/conformance/src/registry/i2.ts =====
+diff --git a/packages/conformance/src/registry/i2.ts b/packages/conformance/src/registry/i2.ts
+index f3c0d77..d29b4dc 100644
+--- a/packages/conformance/src/registry/i2.ts
++++ b/packages/conformance/src/registry/i2.ts
+@@ -7,78 +7,80 @@ import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_
+ import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
+ import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
+ import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
++import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
+ 
+ /** I2: The runtime derives status; the model never reports it. */
+ export const I2: InvariantEntry = {
+   title: INVARIANTS.I2,
+   assertions: [
++    READINESS_OUTCOME_IS_RUNTIME_DERIVED,
+     RUN_REPORT_READS_ONLY_RECORDS,
+     compileError({
+       id: 'I2.task-result-has-no-status',
+       title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',
+       fixture: 'i2/task-result-has-no-status.ts',
+     }),
+     compileError({
+       id: 'I2.task-status-lives-in-run-state',
+       title: 'Task carries no status; RunState.tasks is the only place it can be read from',
+       fixture: 'i2/task-status-lives-in-run-state.ts',
+     }),
+     compileError({
+       id: 'I2.evidence-collected-by-runtime',
+       title: 'EvidenceBundle.collectedBy admits only "runtime" and the bundle has no pass/fail field',
+       fixture: 'i2/evidence-collected-by-runtime.ts',
+     }),
+     compileError({
+       id: 'I2.gate-verdict-single-source',
+       title: 'GateResult has one verdict and no second boolean to disagree with it',
+       fixture: 'i2/gate-verdict-single-source.ts',
+     }),
+     compileError({
+       id: 'I2.records-are-readonly',
+       title:
+         'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
+       fixture: 'i2/records-are-readonly.ts',
+     }),
+     compileError({
+       id: 'I2.check-result-declares-expectation',
+       title:
+         'CheckResult.expectation is required, null for a check with none; a held expectation carries no mismatch and a failed one at least one',
+       fixture: 'i2/check-result-declares-expectation.ts',
+     }),
+     RESUME_DERIVES_STATE_FROM_THE_VAULT,
+     UNMET_EXPECTATION_FAILS_THE_GATE,
+     // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
+     HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
+     HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
+     STATUS_DERIVED_FROM_CHECK_RESULTS,
+     TASK_RESULT_KEY_SET_ENFORCED,
+     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
+     // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
+     COST_IS_RUNTIME_METERED,
+     // I1a: a call is on record before it is made, so a process stop during it is a lost reading, not a silence (D-I1a-12).
+     CALL_RECORDED_BEFORE_IT_IS_MADE,
+     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
+     ENFORCEMENT_DECISIONS_RECORDED,
+     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
+     ESCALATION_DECIDED_FROM_FAILED_GATES,
+     RELAY_BOUND_TO_TIER_MODEL,
+     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
+     external({
+       id: 'I2.relay-meter-agrees-with-session',
+       title: "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     // I1a's paid run: on the composed host, every real call is metered by the relay the line provisioned, and its record names the runtime's model.
+     external({
+       id: 'I2.line-usage-is-metered-and-names-its-model',
+       title:
+         "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i4.ts =====
+diff --git a/packages/conformance/src/registry/i4.ts b/packages/conformance/src/registry/i4.ts
+index 5512c84..c5b67f9 100644
+--- a/packages/conformance/src/registry/i4.ts
++++ b/packages/conformance/src/registry/i4.ts
+@@ -9,296 +9,299 @@ import {
+ } from './policy.js';
+ import { ESCALATION_ONLY_UNDER_A_GRANT, TIER_PER_STATION_FOLLOWS_POLICY } from './tier.js';
+ import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF } from './verification.js';
++import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readiness.js';
+ 
+ /** I4: Default deny. */
+ export const I4: InvariantEntry = {
+   title: INVARIANTS.I4,
+   assertions: [
++    READINESS_NEVER_RAISES_A_CAP,
++    ABSENT_SCAN_IS_NOT_A_PASS,
+     MERGE_TOKEN_REACHES_NO_SANDBOX,
+     GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
+     compileError({
+       id: 'I4.capability-scope-is-explicit',
+       title: 'CapabilityScope requires every grant to be stated, and egress is none or an explicit list',
+       fixture: 'i4/capability-scope-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I4.task-request-tools-are-required',
+       title: 'TaskRequest cannot be built without the policy-granted tool list or the sandbox',
+       fixture: 'i4/task-request-tools-are-required.ts',
+     }),
+     compileError({
+       id: 'I4.compiled-role-carries-no-grants',
+       title: 'CompiledRole has no field for tools, network, globs, or autonomy; policy is the only source of grants',
+       fixture: 'i4/compiled-role-carries-no-grants.ts',
+     }),
+     compileError({
+       id: 'I4.resolved-policy-is-total',
+       title: 'Policy.approvals requires all forty station:level keys; only PolicyDocument may be sparse',
+       fixture: 'i4/resolved-policy-is-total.ts',
+     }),
+     compileError({
+       id: 'I4.tool-grant-requires-an-inventory',
+       title:
+         'validateToolGrants cannot be called without the driver tool inventory: the parameter has no default and is not optional, so there is no path that validates nothing',
+       fixture: 'i4/tool-grant-requires-an-inventory.ts',
+     }),
+     runtime({
+       id: 'I4.unlisted-capability-refused',
+       title:
+         'the real engine refuses a role the policy does not define (capability-missing) and a station outside a defined role scope (station-forbidden); a granted station returns exactly the stated scope, so the refusals are rules rather than an empty policy',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const undefinedRole = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+         if (undefinedRole.ok) {
+           throw new Error('I4: a role the policy does not define resolved to a capability scope');
+         }
+         if (undefinedRole.reason !== 'capability-missing') {
+           throw new Error(`I4: an undefined role was refused as '${undefinedRole.reason}'; expected 'capability-missing'`);
+         }
+ 
+         const forbidden = engine.resolveCapabilities(GRANTED_ROLE, FORBIDDEN_STATION, policy);
+         if (forbidden.ok) {
+           throw new Error(`I4: role '${GRANTED_ROLE}' resolved a scope at '${FORBIDDEN_STATION}', which its policy does not list`);
+         }
+         if (forbidden.reason !== 'station-forbidden') {
+           throw new Error(`I4: a station outside the role scope was refused as '${forbidden.reason}'; expected 'station-forbidden'`);
+         }
+ 
+         // The control: an engine that refuses everything would satisfy both
+         // checks above while granting nothing, so a granted station must
+         // resolve, and to exactly what the document states.
+         for (const station of GRANTED_STATIONS) {
+           const granted = engine.resolveCapabilities(GRANTED_ROLE, station, policy);
+           if (!granted.ok) {
+             throw new Error(`I4: role '${GRANTED_ROLE}' was refused at '${station}', which its policy grants (${granted.reason})`);
+           }
+           if (granted.scope.tools.join(',') !== GRANTED_TOOLS.join(',')) {
+             throw new Error(`I4: the resolved scope at '${station}' carries tools [${granted.scope.tools.join(', ')}]; expected [${GRANTED_TOOLS.join(', ')}]`);
+           }
+           if (granted.scope.tools.includes(UNGRANTED_TOOL)) {
+             throw new Error(`I4: the resolved scope carries '${UNGRANTED_TOOL}', which no role in the document grants`);
+           }
+           if (granted.scope.network.egress !== 'none') {
+             throw new Error('I4: the resolved scope widened egress beyond what the document granted');
+           }
+         }
+ 
+         // A grant is not a handle on the policy: widening what came back must
+         // not widen what the next caller receives.
+         const held = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!held.ok) throw new Error('I4: the control resolution was refused');
+         try {
+           held.scope.tools.push(UNGRANTED_TOOL);
+         } catch {
+           // Frozen, which is the intended arrangement.
+         }
+         const next = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!next.ok) throw new Error('I4: the second resolution was refused');
+         if (next.scope.tools.includes(UNGRANTED_TOOL)) {
+           throw new Error(`I4: mutating a resolved scope added '${UNGRANTED_TOOL}' to what the policy grants`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.omitted-approval-is-human-required',
+       title:
+         'resolvePolicy fills every approval the document omits with human-required and never auto, while carrying a stated approval through unchanged, so the filling is a default rather than a rewrite',
+       run: async () => {
+         const { APPROVAL_KEYS, AUTONOMY_LEVELS, STATION_IDS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const stated = APPROVAL_KEYS.filter((key) => document.approvals[key] !== undefined);
+         if (stated.length !== 1) {
+           throw new Error(`I4: the fixture document must state exactly one approval for this assertion to mean anything; it states ${String(stated.length)}`);
+         }
+         const policy = engine.resolvePolicy(document);
+ 
+         const expected = STATION_IDS.length * AUTONOMY_LEVELS.length;
+         const keys = Object.keys(policy.approvals);
+         if (keys.length !== expected) {
+           throw new Error(`I4: the resolved policy carries ${String(keys.length)} approvals; the table must be total at ${String(expected)}`);
+         }
+         // Totality is proved by the count above; this loop is about what the
+         // omitted keys were filled with.
+         for (const key of APPROVAL_KEYS) {
+           if (stated.includes(key)) continue;
+           const outcome = policy.approvals[key];
+           if (outcome !== 'human-required') {
+             throw new Error(`I4: '${key}' was omitted by the document and resolved to '${outcome}'; an unconfigured approval must be human-required`);
+           }
+         }
+         // The stated entry survives: a resolver that overwrote everything with
+         // human-required would pass the loop above and be wrong.
+         const [statedKey] = stated;
+         if (statedKey === undefined) throw new Error('I4: the stated approval list has one entry and no entry in it');
+         if (policy.approvals[statedKey] !== document.approvals[statedKey]) {
+           throw new Error(`I4: the document stated '${statedKey}' and the resolved policy reports '${policy.approvals[statedKey]}'`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.empty-inventory-refuses-every-grant',
+       title:
+         'validateToolGrants against an empty inventory refuses every tool the policy grants, naming each with its role; an empty inventory is never read as allow-all',
+       run: async () => {
+         const { StrictPolicyEngine, validateToolGrants } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const empty = validateToolGrants(policy, []);
+         if (empty.ok) {
+           throw new Error(`I4: an empty inventory admitted ${String(GRANTED_TOOLS.length)} granted tool(s); an inventory offering nothing grants nothing`);
+         }
+         if (empty.ungranted.length !== GRANTED_TOOLS.length) {
+           throw new Error(`I4: an empty inventory named ${String(empty.ungranted.length)} ungranted tool(s); expected all ${String(GRANTED_TOOLS.length)}`);
+         }
+         for (const tool of GRANTED_TOOLS) {
+           if (!empty.ungranted.some((u) => u.tool === tool && u.role === GRANTED_ROLE)) {
+             throw new Error(`I4: '${tool}' was granted to '${GRANTED_ROLE}' and the refusal does not name the pair`);
+           }
+         }
+ 
+         // The control: a full inventory passes, so the refusal above is the
+         // inventory doing work rather than the function refusing always.
+         const full = validateToolGrants(policy, [...GRANTED_TOOLS]);
+         if (!full.ok) {
+           throw new Error(`I4: an inventory covering every grant was still refused (${full.detail})`);
+         }
+         // And one short of the grants refuses exactly the missing one.
+         const [first] = GRANTED_TOOLS;
+         if (first === undefined) throw new Error('I4: the granted tool list is empty');
+         const partial = validateToolGrants(policy, [first]);
+         if (partial.ok) throw new Error('I4: an inventory missing a granted tool was accepted');
+         if (partial.ungranted.length !== GRANTED_TOOLS.length - 1) {
+           throw new Error(`I4: a partial inventory named ${String(partial.ungranted.length)} ungranted tool(s); expected ${String(GRANTED_TOOLS.length - 1)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.egress-entry-names-one-host',
+       title:
+         'an egress host list carrying a wildcard, a path, a prefix length, or whitespace is refused; a list of literal hosts is accepted, so the refusal is the entry being read and not the list being rejected',
+       run: async () => {
+         const { validatePolicyDocument } = await import('@olympus-ai/core');
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I4: the fixture document defines no granted role');
+ 
+         // Refusing the bare string 'all' while accepting ['*'] would leave the
+         // authored form reading as an explicit allowlist while denoting every
+         // host. Each of these denotes a set, or is not a host at all.
+         for (const entry of ['*', '*.example.com', '0.0.0.0/0', '::/0', 'https://example.com', 'exa mple.com']) {
+           const widened = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: [entry] } } } };
+           const outcome = validatePolicyDocument(widened);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: a policy granting egress to ${JSON.stringify(entry)} was accepted. An egress list admits no ` +
+                 'wildcard, so an entry that denotes a set makes a restrictive-looking policy unrestricted.',
+             );
+           }
+         }
+ 
+         // The control: literal hosts are accepted, so the check above is the
+         // entry being read rather than every list being refused.
+         const literal = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: ['registry.npmjs.org', '192.0.2.10'] } } } };
+         const accepted = validatePolicyDocument(literal);
+         if (!accepted.ok) {
+           throw new Error(`I4: a list of literal hosts was refused: ${accepted.defects.map((d) => d.problem).join('; ')}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.role-lookup-ignores-the-prototype-chain',
+       title:
+         'a role the policy does not define is refused with capability-missing even when Object.prototype carries a scope-shaped value under that name, and a role named for a prototype member refuses rather than throwing; the resolved role map has no prototype',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+         const prototype = Object.prototype as Record<string, unknown>;
+ 
+         if (Object.getPrototypeOf(policy.roles) !== null) {
+           throw new Error('I4: the resolved role map has a prototype, so an undefined role can be answered by it');
+         }
+ 
+         // Pollution somewhere else in the process must not become a grant here.
+         prototype[UNDEFINED_ROLE] = { stations: ['build'], tools: ['read'] };
+         try {
+           const outcome = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: role '${UNDEFINED_ROLE}' is defined nowhere in the policy and resolved to a grant because ` +
+                 'Object.prototype carried that name. Default deny has to be total, and a lookup that reads the ' +
+                 'prototype chain is not.',
+             );
+           }
+           if (outcome.reason !== 'capability-missing') {
+             throw new Error(`I4: the polluted role was refused as '${outcome.reason}'; expected 'capability-missing'`);
+           }
+           if (engine.resolveAutonomy(1, 'build', UNDEFINED_ROLE, policy).ok) {
+             throw new Error('I4: resolveAutonomy granted a level to a role that exists only on Object.prototype');
+           }
+         } finally {
+           Reflect.deleteProperty(prototype, UNDEFINED_ROLE);
+         }
+ 
+         // A role named for a prototype member must refuse, not throw: an
+         // exception is not the refusal the contract promises, and a caller that
+         // catches it has no reason recorded.
+         for (const name of ['__proto__', 'constructor', 'toString', 'valueOf']) {
+           const role = name as typeof UNDEFINED_ROLE;
+           let refused: string;
+           try {
+             const outcome = engine.resolveCapabilities(role, 'build', policy);
+             refused = outcome.ok ? 'granted' : outcome.reason;
+           } catch {
+             throw new Error(`I4: an ungranted role named '${name}' threw instead of refusing with capability-missing`);
+           }
+           if (refused !== 'capability-missing') {
+             throw new Error(`I4: an ungranted role named '${name}' resolved as '${refused}'`);
+           }
+         }
+ 
+         // The control: a real grant still resolves.
+         if (!engine.resolveCapabilities(GRANTED_ROLE, 'build', policy).ok) {
+           throw new Error('I4: the granted role was refused, so the guard is refusing everything');
+         }
+       },
+     }),
+     APPROVAL_OUTCOME_GATES_THE_STATION,
+     external({
+       id: 'I4.driver-tool-inventory-validated',
+       title:
+         'the CLI session offers exactly the tools the task granted and no wider set, every declared tool is one the CLI really has, '
+         + 'and a grant outside the declaration is refused before the task starts',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK,
+     WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF,
+     // Paid by P12. Surfaced by P5's external review, which read the credential out of a child of
+     // the CLI and, through /proc, out of a later exec given none (D-P5-20). The credential now
+     // lives in a relay the provider owns, and the assertion replays that exploit and finds nothing.
+     external({
+       id: 'I4.model-credential-not-readable-by-the-task',
+       title:
+         'the model credential never enters the sandbox: a child of the CLI, a later exec, a process left running, every file of the container, '
+         + 'its docker inspect, and the workspace hold no trace of it, while the task reaches the model through the relay that holds it; '
+         + 'the same search finds a value an exec was given, so it is not blind',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
+     // P13: spending is a capability, bounded where the task cannot reach it.
+     MODEL_RELAY_ENFORCES_BUDGET,
+     // R14: the tier a call runs at is policy's, per station, and escalation is a grant (A-R14-01).
+     TIER_PER_STATION_FOLLOWS_POLICY,
+     ESCALATION_ONLY_UNDER_A_GRANT,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i5.ts =====
+diff --git a/packages/conformance/src/registry/i5.ts b/packages/conformance/src/registry/i5.ts
+index 93fb948..e70aabd 100644
+--- a/packages/conformance/src/registry/i5.ts
++++ b/packages/conformance/src/registry/i5.ts
+@@ -27,6 +27,7 @@ import { contendOnCommit, withVaultDirs } from './local-vault.js';
+ import { assertPolicyLoadIsHardened } from './policy-file.js';
+ import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
+ import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
++import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
+ 
+ /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
+ const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator'];
+@@ -37,423 +38,426 @@ const CONTENDERS = 8;
+ /** I5: Fail closed. */
+ export const I5: InvariantEntry = {
+   title: INVARIANTS.I5,
+   assertions: [
++    INDETERMINATE_PROBE_LOWERS,
++    UNSUPPORTED_STACK_REFUSES,
++    REFUSAL_NAMES_THE_BOUNDING_TERM,
+     INTEGRATE_MERGES_THE_VERIFIED_TREE,
+     FAILED_INTEGRATION_NEVER_REPORTS_DONE,
+     runtime({
+       id: 'I5.policy-document-load-is-hardened',
+       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+       run: assertPolicyLoadIsHardened,
+     }),
+     compileError({
+       id: 'I5.transition-has-no-warn-and-continue',
+       title:
+         'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+       fixture: 'i5/transition-has-no-warn-and-continue.ts',
+     }),
+     compileError({
+       id: 'I5.policy-refusal-is-explicit',
+       title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+       fixture: 'i5/policy-refusal-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I5.station-requires-declared-capabilities',
+       title: 'StationContract.requires accepts only keys of DriverCapabilities',
+       fixture: 'i5/station-requires-declared-capabilities.ts',
+     }),
+     compileError({
+       id: 'I5.adapter-set-declares-absent-controls',
+       title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+       fixture: 'i5/adapter-set-declares-absent-controls.ts',
+     }),
+     compileError({
+       id: 'I5.check-result-declares-suite-count',
+       title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+       fixture: 'i5/check-result-declares-suite-count.ts',
+     }),
+     compileOk({
+       id: 'I5.stubs-declare-unsafe',
+       title:
+         'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+       fixture: 'i5/stubs-declare-unsafe.ts',
+     }),
+     runtime({
+       id: 'I5.unsafe-component-refused-above-l1',
+       title:
+         'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and its missing integrator in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+       run: async () => {
+         await withLine('s1-hello-', async (rig) => {
+           const [api, core, sandbox, vault] = await Promise.all([
+             import('@olympus-ai/api'),
+             import('@olympus-ai/core'),
+             import('@olympus-ai/sandbox'),
+             import('@olympus-ai/vault'),
+           ]);
+           const driver = new core.StubDriver();
+           const components = api.buildGraph({
+             vault: new vault.StubVault(rig.dirs.artifacts),
+             sandbox: new sandbox.StubSandboxProvider(),
+             driver,
+             reviewer: driver,
+             workspaces: rig.workspaces,
+           });
+ 
+           for (const level of [2, 3] as const) {
+             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+               const got = outcome.ok ? 'ok' : outcome.reason;
+               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+             }
+             const names = outcome.unsafe.map((u) => u.component);
+             if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+               throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+             }
+             for (const u of outcome.unsafe) {
+               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+             }
+             let recorded = true;
+             try {
+               await components.vault.readRunState(rig.runId);
+             } catch {
+               recorded = false;
+             }
+             if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+           }
+ 
+           const l1 = await api.startRun(await rig.request(components));
+           if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+             const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+             throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.stale-commit-is-refused-under-contention',
+       title:
+         'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+       run: async () => {
+         await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+           const runId = 'i5-contend';
+           const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+ 
+           const winners = outcomes.filter((o) => o.ok);
+           if (winners.length !== 1) {
+             const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+             throw new Error(
+               `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                 'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                 `\n  ${detail.join('\n  ')}`,
+             );
+           }
+           const [winner] = winners;
+           if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+           if (winner.version !== '1') {
+             throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+           }
+           for (const loser of outcomes.filter((o) => !o.ok)) {
+             if (loser.message === '') {
+               throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+             }
+           }
+ 
+           // The record that landed must be one writer's whole state, not a
+           // blend: each child tags its own `tasks`, so the stored state names
+           // exactly one of them.
+           const { LocalVault } = await import('@olympus-ai/vault');
+           const vault = new LocalVault(dirs);
+           const stored = await vault.readRunState(runId as RunId);
+           if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+           const tags = Object.keys(stored.tasks);
+           if (tags.length !== 1 || tags[0] !== winner.tag) {
+             throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+           }
+ 
+           // The same refusal, uncontended: a commit from a version that has
+           // already been superseded stores nothing at all.
+           let stale = true;
+           try {
+             await vault.commitRunState({ ...stored, version: '0' }, '0');
+           } catch {
+             stale = false;
+           }
+           if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+           const after = await vault.readRunState(runId as RunId);
+           if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+             throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.over-request-refused',
+       title:
+         'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         // Three bounds, three different values, so each refusal names the one
+         // that actually bit. `build` is capped below the role ceiling, which is
+         // itself below the global cap.
+         const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+           { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+           { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+         ];
+         for (const { level, station, bound } of overRequests) {
+           const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                 'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                 'agree to, while reporting success.',
+             );
+           }
+           if (outcome.reason !== 'exceeds-cap') {
+             throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+           }
+           if (Object.hasOwn(outcome, 'level')) {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+           }
+           if (outcome.detail === '') {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+           }
+         }
+ 
+         // The global cap, which the fixture document sets to the maximum and
+         // so can never bite on its own. Lowered here, it must refuse a request
+         // the station cap and role ceiling would both have allowed.
+         const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+         const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+         if (global.ok) {
+           throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+         }
+         if (global.reason !== 'exceeds-cap') {
+           throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+         }
+         if (!global.detail.includes('global L0')) {
+           throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+         }
+         if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+           throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+         }
+ 
+         // The control: a request within every bound is granted, and granted at
+         // the level requested rather than raised or lowered to a cap. An engine
+         // that refused everything would satisfy the loop above.
+         for (const level of [0, 1] as const) {
+           const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+           if (!outcome.ok) {
+             throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+           }
+           if (outcome.level !== level) {
+             throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-document-refused-at-resolve',
+       title:
+         'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+ 
+         // Each of these is what a caller produces by writing `value as
+         // PolicyDocument`. Without the guard, the first resolves a global cap
+         // of 99 and grants every level; the rest widen a scope the document
+         // never authorised.
+         const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+           { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+           { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+           { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+           { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+         ];
+         for (const { what, value } of rogues) {
+           let refused = false;
+           try {
+             engine.resolvePolicy(value as never);
+           } catch {
+             refused = true;
+           }
+           if (!refused) {
+             throw new Error(
+               `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                 'only while every caller remembers to validate first is not closed.',
+             );
+           }
+         }
+ 
+         // The control: a genuine document resolves. A guard that threw on
+         // everything would satisfy the loop above and break the engine.
+         const policy = engine.resolvePolicy(document);
+         if (policy.globalCap !== document.globalCap) {
+           throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-autonomy-level-refused',
+       title:
+         'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+       run: async () => {
+         const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         for (const [label, level] of [
+           ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+         ] as const) {
+           let refused = false;
+           try {
+             const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+             if (outcome.ok) {
+               throw new Error(
+                 `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                   'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                   'level nobody can honour.',
+               );
+             }
+           } catch (error) {
+             if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+             refused = true;
+           }
+           if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+         }
+ 
+         // The control: every real level is still answered normally.
+         for (const level of AUTONOMY_LEVELS) {
+           const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+           const allowed = level <= ROLE_CEILING;
+           if (outcome.ok !== allowed) {
+             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.sandbox-egress-allowlist-enforced',
+       title:
+         'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+         'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+         'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+       run: async () => {
+         await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+           // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+           // name, and it is not permission to reach everything; either reading would be the
+           // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+           const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+           if (empty.layer !== 'egress') {
+             throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+           }
+ 
+           // deny-all is untouched by the allowlist existing: no proxy is started beside a
+           // sandbox entitled to no egress, and no network is created for it.
+           await withSandbox(provider, specFor(dirs), async (handle) => {
+             const controls = provider.appliedControls(handle);
+             if (controls.egress.mode !== 'deny-all') {
+               throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+             }
+             // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+             // read here is what Docker was actually told and what the container actually got.
+             if (!controls.runArgs.join(' ').includes('--network none')) {
+               throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+             }
+             const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+             if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+               throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+             }
+           });
+ 
+           const name = originName();
+           const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+           const { egress } = allowlistControls(provider, handle);
+           try {
+             await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+               // The grant. The body proves the origin answered, not the proxy on its behalf.
+               const reached = await provider.exec(handle, [
+                 'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (!reached.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+               }
+ 
+               // Refused by name, and by address. The second is the one that matters: a refusal
+               // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+               for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                 const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                 if (!answer.includes('403') || !answer.includes(host)) {
+                   throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                 }
+               }
+ 
+               // The strongest form: the origin's own address, which the proxy demonstrably
+               // reaches, refused for the one reason under test — the address is not on the list.
+               const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+               if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+               }
+ 
+               // There is nothing to bypass. The internal network carries no default route, so a
+               // process that unsets every proxy variable is left with no second path to take.
+               const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+               if (routes.stdout.includes('default')) {
+                 throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+               }
+               const bypass = await provider.exec(handle, [
+                 'sh', '-c',
+                 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                   `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+               }
+             });
+           } finally {
+             await provider.destroy(handle);
+           }
+ 
+           // The proxy is the sandbox's, and goes with it. One left running is a route off the
+           // host with no workload behind it and nobody watching it.
+           for (const [kind, leaked] of [
+             ['container', egress.proxy.name],
+             ['network', egress.proxy.internalNetwork],
+             ['network', egress.proxy.outboundNetwork],
+           ] as const) {
+             if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+           }
+         });
+       },
+     }),
+     STATION_MISSING_CAPABILITY_REFUSED,
+     TASK_ATTEMPTS_ARE_BOUNDED,
+     OVER_REQUEST_REFUSED_AT_ADMISSION,
+     UNSUPPORTED_STACK_IS_LOUD,
+     // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+     HTTP_PROBE_ABSENT_IS_NAMED,
+     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+     CHECK_COMMAND_HAS_A_GRAMMAR,
+     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+     UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+     external({
+       id: 'I5.unanalysed-tests-are-not-reported-clean',
+       title:
+         'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i8.ts =====
+diff --git a/packages/conformance/src/registry/i8.ts b/packages/conformance/src/registry/i8.ts
+index 863eaa0..5566ffd 100644
+--- a/packages/conformance/src/registry/i8.ts
++++ b/packages/conformance/src/registry/i8.ts
+@@ -7,6 +7,7 @@ import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js'
+ import { conformanceRoot, entryDivergence, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
+ import { claimKeys } from './claims.js';
+ import { assertReconciliationRefuses } from './reconciliation.js';
++import { CEILING_BEARING_PROBE_HAS_AN_ASSERTION } from './readiness.js';
+ 
+ const CONFORMANCE = '@olympus-ai/conformance';
+ 
+@@ -13,125 +14,126 @@ const CONFORMANCE = '@olympus-ai/conformance';
+ /** I8: Every capability claim maps to an executable assertion. */
+ export const I8: InvariantEntry = {
+   title: INVARIANTS.I8,
+   assertions: [
++    CEILING_BEARING_PROBE_HAS_AN_ASSERTION,
+     runtime({
+       id: 'I8.registry-complete',
+       title: 'every invariant and capability claim is asserted, or pending with a named owner and reason; no record is malformed',
+       run: async () => {
+         const { REGISTRY } = await import('./index.js');
+         const evaluation = evaluateRegistry(REGISTRY, { baseline: readPendingBaseline() });
+         if (evaluation.problems.length > 0 || evaluation.counts.missing > 0) {
+           throw new Error(`I8: the registry is incomplete\n${formatReport(evaluation)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I8.pending-count-never-exceeds-baseline',
+       title: 'every entry has a committed pending baseline, none owes more than it allows, and one pending entry added without a baseline edit is refused',
+       run: async () => {
+         const { REGISTRY } = await import('./index.js');
+         const baseline = readPendingBaseline();
+         const real = evaluateRegistry(REGISTRY, { baseline });
+         const violations = real.problems.filter((p) => p.includes(PENDING_BASELINE_FILE));
+         if (violations.length > 0) throw new Error(`I8: the pending ratchet is violated\n  ${violations.join('\n  ')}`);
+         // The ratchet must fire, not merely exist: raise I1 to one entry above
+         // its baseline, keep the baseline, and require the refusal.
+         const current = REGISTRY.invariants.I1;
+         const allowed = baseline.invariants.I1 ?? 0;
+         const extra = Array.from({ length: allowed + 1 - current.pending.length }, (_, i) =>
+           pending({ id: `I1.ratchet-self-test-${String(i)}`, owner: 'S1', reason: 'must be refused by the ratchet' }),
+         );
+         const raised: Registry = {
+           ...REGISTRY,
+           invariants: { ...REGISTRY.invariants, I1: { ...current, pending: [...current.pending, ...extra] } },
+         };
+         const expected = `I1: pending count ${String(allowed + 1)} exceeds baseline ${String(allowed)}`;
+         if (!evaluateRegistry(raised, { baseline }).problems.some((p) => p.startsWith(expected))) {
+           throw new Error(`I8: the pending ratchet did not refuse a count one above its baseline (expected "${expected}")`);
+         }
+       },
+     }),
+     compileError({
+       id: 'I8.registry-type-is-total',
+       title: 'the registry type rejects a missing invariant, an invented one, an unknown owner, and a stray claim family at compile time',
+       fixture: 'kit/registry-total-over-invariants.ts',
+     }),
+     keysEqual({
+       id: 'I8.driver-capability-keys-registered',
+       title:
+         'the registry lists exactly the keys of DriverCapabilities as driver.* claims, in both directions, and the interface has a finite non-empty key set',
+       name: 'generated/driver-capability-keys.ts',
+       typeName: 'DriverCapabilities',
+       declare: `import type { DriverCapabilities } from '@olympus-ai/core';`,
+       keys: () => claimKeys('driver'),
+     }),
+     keysEqual({
+       id: 'I8.sandbox-capability-keys-registered',
+       title:
+         'the registry lists exactly the keys of SandboxCapabilities as sandbox.* claims, in both directions, and the interface has a finite non-empty key set',
+       name: 'generated/sandbox-capability-keys.ts',
+       typeName: 'SandboxCapabilities',
+       declare: `import type { SandboxCapabilities } from '@olympus-ai/sandbox';`,
+       keys: () => claimKeys('sandbox'),
+     }),
+     runtime({
+       id: 'I8.every-fixture-is-registered',
+       title: 'every file under fixtures/ is read by a registered assertion; a fixture nothing runs is not evidence',
+       run: async () => {
+         const { REGISTRY } = await import('./index.js');
+         const referenced = new Set<string>();
+         for (const entry of [...Object.values(REGISTRY.invariants), ...Object.values(REGISTRY.claims)]) {
+           for (const a of entry.assertions) if (a.kind === 'local' && a.fixture !== undefined) referenced.add(a.fixture);
+         }
+         const prefix = 'packages/conformance/';
+         const onDisk = walkFiles(join(conformanceRoot(), 'fixtures')).map((f) => workspaceRelative(f).slice(prefix.length));
+         if (onDisk.length === 0) throw new Error('I8: no fixtures found');
+         const orphans = onDisk.filter((f) => !referenced.has(f));
+         if (orphans.length > 0) {
+           throw new Error(`I8: fixtures exist that no registered assertion reads\n  ${orphans.join('\n  ')}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I8.fixture-paths-match-published-entries',
+       title:
+         'the conformance tsconfig maps every sibling package to its published entry, whose main and types name the same file, so fixtures assert against the real contracts',
+       run: () => {
+         const paths = conformancePathsMap();
+         const packages = workspacePackages().filter((p) => p.name !== CONFORMANCE);
+         if (packages.length === 0) throw new Error('I8: no sibling packages found');
+         const problems: string[] = [];
+         for (const pkg of packages) {
+           const divergence = entryDivergence(pkg);
+           if (divergence !== undefined) problems.push(divergence);
+           const mapped = paths[pkg.name];
+           const target = mapped?.length === 1 ? mapped[0] : undefined;
+           if (target === undefined) {
+             problems.push(`${pkg.name}: not mapped to exactly one target in packages/conformance/tsconfig.json`);
+             continue;
+           }
+           if (pkg.entry === undefined) {
+             problems.push(`${pkg.name}: package.json declares no types or main entry`);
+             continue;
+           }
+           const expected = toPosix(resolve(pkg.dir, pkg.entry));
+           const actual = toPosix(resolve(conformanceRoot(), target));
+           if (expected !== actual) problems.push(`${pkg.name}: mapped to ${target} but its published entry is ${pkg.entry}`);
+         }
+         for (const key of Object.keys(paths)) {
+           if (!packages.some((p) => p.name === key)) problems.push(`${key}: mapped but not a workspace package`);
+         }
+         if (problems.length > 0) throw new Error(`I8: fixture resolution does not follow the published entries\n  ${problems.join('\n  ')}`);
+       },
+     }),
+     runtime({
+       id: EXTERNAL_RECONCILIATION_ID,
+       title:
+         'an external assertion counts only when the owning package reported that exact test passing in that exact file, against the tree being evaluated; a missing report, a changed tree, an id nothing ran, a skipped test, and a failed test are five distinct refusals',
+       run: async () => {
+         await assertReconciliationRefuses();
+       },
+     }),
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/readiness.ts =====
+/**
+ * The assertions R1 owns, over `@olympus-ai/readiness`: that a readiness
+ * ceiling only ever lowers (I4), that an indeterminate probe derives as an
+ * absent one and a refusal names the term that bound it (I5), and that every
+ * probe declared ceiling-bearing has an assertion that fails when the probe
+ * is deleted (I8). The compile-error assertions read fixtures under
+ * fixtures/types; the one that scans a repository needs a Docker daemon and
+ * fails without one, for the reason `local-sandbox.ts` gives.
+ */
+import { execFile } from 'node:child_process';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
+import type { AutonomyLevel, Policy, RoleId, StationId } from '@olympus-ai/core';
+import type { ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ScanOptions } from '@olympus-ai/readiness';
+import type { SandboxProvider } from '@olympus-ai/sandbox';
+import { compileError, runtime } from '../kit/assert.js';
+import type { LocalAssertion } from '../kit/types.js';
+import { withProvider } from './local-sandbox.js';
+import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
+
+const run = promisify(execFile);
+const readiness = () => import('@olympus-ai/readiness');
+const LEVELS: readonly AutonomyLevel[] = [0, 1, 2, 3];
+const OUTCOMES: readonly ProbeOutcome[] = ['supported', 'absent', 'indeterminate'];
+
+/** A result the runtime would have built, with static evidence: derivation reads only the outcome. */
+function result(probe: ProbeId, outcome: ProbeOutcome): ProbeResult {
+  return {
+    probe,
+    pillar: 'testing',
+    ceilingBearing: true,
+    outcome,
+    detail: `fixture: ${probe} ${outcome}`,
+    evidence: { via: 'static', read: 'fixture' },
+    collectedBy: 'runtime',
+  };
+}
+
+/** Every assignment of an outcome to each probe, as result arrays. 3^n of them. */
+function* permutations(probes: readonly ProbeId[]): Generator<ProbeResult[]> {
+  const total = OUTCOMES.length ** probes.length;
+  for (let n = 0; n < total; n++) {
+    let rest = n;
+    const out: ProbeResult[] = [];
+    for (const probe of probes) {
+      out.push(result(probe, OUTCOMES[rest % OUTCOMES.length] ?? 'absent'));
+      rest = Math.floor(rest / OUTCOMES.length);
+    }
+    yield out;
+  }
+}
+
+/** Every policy shape the attribution has to tell apart: each cap from L0 to L3, the station cap set or not. */
+function policies(base: Policy): Policy[] {
+  const out: Policy[] = [];
+  const role = base.roles[GRANTED_ROLE];
+  if (role === undefined) throw new Error('readiness fixture: the granting document lost its role');
+  for (const globalCap of LEVELS) {
+    for (const stationCap of [undefined, ...LEVELS]) {
+      for (const autonomyCeiling of LEVELS) {
+        out.push({
+          ...base,
+          globalCap,
+          stationCaps: stationCap === undefined ? {} : { build: stationCap },
+          roles: { ...base.roles, [GRANTED_ROLE]: { ...role, autonomyCeiling } },
+        });
+      }
+    }
+  }
+  return out;
+}
+
+export const READINESS_OUTCOME_IS_RUNTIME_DERIVED: LocalAssertion = compileError({
+  id: 'I2.readiness-outcome-is-runtime-derived',
+  title:
+    "ProbeResult and ReadinessReport carry collectedBy: 'runtime' and no other value, and no field of either can be written after the runtime built it; a model- or driver-supplied outcome does not typecheck",
+  fixture: 'i2/readiness-outcome-is-runtime-derived.ts',
+});
+
+export const READINESS_NEVER_RAISES_A_CAP: LocalAssertion = runtime({
+  id: 'I4.readiness-never-raises-a-cap',
+  title:
+    'over every outcome permutation of the ceiling-bearing probes the derived ceiling is L0-L2, never L3; and over every derived ceiling, policy cap, and requested level, the four-term resolver grants only what the policy engine alone grants, at the same level, and never above the readiness ceiling',
+  run: async () => {
+    const { CEILING_BEARING, deriveCeiling, resolveWithReadiness, NOT_SCANNED } = await readiness();
+    const { StrictPolicyEngine } = await import('@olympus-ai/core');
+    const engine = new StrictPolicyEngine();
+
+    const ceilings = new Map<string, ReadinessCeiling>([['not-scanned', NOT_SCANNED]]);
+    for (const results of permutations(CEILING_BEARING)) {
+      const derived = deriveCeiling(results);
+      if (!([0, 1, 2] as number[]).includes(derived.level)) {
+        throw new Error(`I4: a scan derived L${String(derived.level)}; no scan may derive above L2`);
+      }
+      const key = `${String(derived.level)}:${derived.heldBy.kind === 'probe' ? derived.heldBy.probe : 'scan-limit'}`;
+      if (!ceilings.has(key)) ceilings.set(key, { kind: 'scanned', ...derived, commit: 'fixture' });
+    }
+    if (![...ceilings.values()].some((c) => c.kind === 'scanned' && c.level === 2)) {
+      throw new Error('I4 control: no permutation derived L2, so the derivation lowers everything and proves nothing');
+    }
+
+    const station: StationId = 'build';
+    for (const policy of policies(engine.resolvePolicy(grantingDocument()))) {
+      for (const requested of LEVELS) {
+        const alone = engine.resolveAutonomy(requested, station, GRANTED_ROLE, policy);
+        for (const ceiling of ceilings.values()) {
+          const four = resolveWithReadiness(engine, requested, station, GRANTED_ROLE, policy, ceiling);
+          if (!four.ok) continue;
+          if (!alone.ok) {
+            throw new Error(`I4: readiness granted L${String(requested)} the policy engine refused (${alone.detail})`);
+          }
+          if (four.level !== alone.level) {
+            throw new Error(`I4: readiness changed a granted level from L${String(alone.level)} to L${String(four.level)}`);
+          }
+          if (ceiling.kind === 'scanned' && four.level > ceiling.level) {
+            throw new Error(`I4: L${String(four.level)} was granted above a readiness ceiling of L${String(ceiling.level)}`);
+          }
+        }
+        // An absent scan leaves the other three terms exactly as they were.
+        const unscanned = resolveWithReadiness(engine, requested, station, GRANTED_ROLE, policy, NOT_SCANNED);
+        if (unscanned.ok !== alone.ok || (unscanned.ok && alone.ok && unscanned.level !== alone.level)) {
+          throw new Error(`I4: an unscanned repository resolved L${String(requested)} differently from the policy alone`);
+        }
+      }
+    }
+  },
+});
+
+export const ABSENT_SCAN_IS_NOT_A_PASS: LocalAssertion = compileError({
+  id: 'I4.absent-scan-is-not-a-pass',
+  title:
+    "the readiness term is a required parameter with an explicit 'not-scanned' state: omitting it, passing undefined, or passing a possibly-absent report's ceiling does not typecheck, a level is unreachable before narrowing to a scan, and a scanned ceiling cannot carry L3",
+  fixture: 'i4/absent-scan-is-not-a-pass.ts',
+});
+
+export const INDETERMINATE_PROBE_LOWERS: LocalAssertion = runtime({
+  id: 'I5.indeterminate-probe-lowers',
+  title:
+    'for each ceiling-bearing probe and every outcome permutation of the others, the probe indeterminate derives exactly the ceiling and holding probe it derives absent, and never above what it derives supported',
+  run: async () => {
+    const { CEILING_BEARING, deriveCeiling } = await readiness();
+    for (const probe of CEILING_BEARING) {
+      const others = CEILING_BEARING.filter((p) => p !== probe);
+      for (const rest of permutations(others)) {
+        const indeterminate = deriveCeiling([...rest, result(probe, 'indeterminate')]);
+        const absent = deriveCeiling([...rest, result(probe, 'absent')]);
+        const supported = deriveCeiling([...rest, result(probe, 'supported')]);
+        if (indeterminate.level !== absent.level || JSON.stringify(indeterminate.heldBy) !== JSON.stringify(absent.heldBy)) {
+          throw new Error(
+            `I5: ${probe} indeterminate derived L${String(indeterminate.level)} ${JSON.stringify(indeterminate.heldBy)}, ` +
+            `absent derived L${String(absent.level)} ${JSON.stringify(absent.heldBy)}`,
+          );
+        }
+        if (indeterminate.level > supported.level) {
+          throw new Error(`I5: ${probe} indeterminate derived above the same probe supported`);
+        }
+      }
+    }
+    // A probe the results do not carry at all is not supported, and is named.
+    const missing = deriveCeiling([]);
+    if (missing.level !== 0 || missing.heldBy.kind !== 'probe') throw new Error('I5: an empty result set did not derive L0 naming a probe');
+  },
+});
+
+/** A git repository holding `files` in one commit, under `root`. */
+async function gitRepository(root: string, files: Readonly<Record<string, string>>): Promise<void> {
+  for (const [path, text] of Object.entries(files)) {
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), text);
+  }
+  const git = (...args: string[]) => run('git', ['-C', root, '-c', 'user.email=conformance@example.invalid', '-c', 'user.name=conformance', ...args]);
+  await git('init', '--quiet', '--initial-branch=main');
+  await git('add', '--all');
+  await git('commit', '--quiet', '--message', 'fixture');
+}
+
+/** Scan options over the conformance node image, with modest limits and no branch-protection checker. */
+export async function scanOptions(provider: SandboxProvider, checkout: string): Promise<ScanOptions> {
+  const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
+  const { NPM_REGISTRY, SECRET_SCAN_IMAGE } = await readiness();
+  return {
+    checkout,
+    revision: 'HEAD',
+    provider,
+    image: EGRESS_PROXY_IMAGE,
+    secretScanImage: SECRET_SCAN_IMAGE,
+    limits: { cpus: 1, memoryMb: 1024, pids: 256 },
+    user: { uid: 0, gid: 0 },
+    timeouts: { installMs: 300_000, probeMs: 120_000, coldProvisionMs: 60_000 },
+    registries: NPM_REGISTRY,
+    protectedPaths: ['.github/**', 'package.json'],
+    branchProtection: null,
+  };
+}
+
+export const UNSUPPORTED_STACK_REFUSES: LocalAssertion = runtime({
+  id: 'I5.unsupported-stack-refuses',
+  title:
+    'a repository that builds clean but declares no supported test framework derives L0 held by testing.adapter, whose detail names the missing adapter, and enumeration is never reported supported over an empty suite (needs Docker)',
+  run: async () => {
+    const { scan } = await readiness();
+    await withProvider('conformance-readiness-', async (provider, dirs) => {
+      await gitRepository(dirs.readable, {
+        'package.json': JSON.stringify({ name: 'fixture', version: '1.0.0', private: true, scripts: { build: 'node -e "0"' }, devDependencies: {} }),
+        'package-lock.json': JSON.stringify({
+          name: 'fixture', version: '1.0.0', lockfileVersion: 3, requires: true,
+          packages: { '': { name: 'fixture', version: '1.0.0' } },
+        }),
+        'index.js': 'module.exports = 1;\n',
+      });
+      const report = await scan(await scanOptions(provider, dirs.readable));
+      const outcome = (id: ProbeId) => report.probes.find((p) => p.probe === id);
+      for (const id of ['build.pinned-manifest', 'build.install', 'build.clean'] as const) {
+        if (outcome(id)?.outcome !== 'supported') {
+          throw new Error(`I5 control: ${id} was ${outcome(id)?.outcome ?? 'missing'} (${outcome(id)?.detail ?? ''}), so the build did not isolate the adapter`);
+        }
+      }
+      const { ceiling } = report;
+      if (ceiling.level !== 0 || ceiling.heldBy.kind !== 'probe' || ceiling.heldBy.probe !== 'testing.adapter') {
+        throw new Error(`I5: an unsupported stack derived L${String(ceiling.level)} held by ${JSON.stringify(ceiling.heldBy)}`);
+      }
+      const adapter = outcome('testing.adapter');
+      if (adapter?.outcome !== 'absent' || !adapter.detail.includes('neither vitest nor jest')) {
+        throw new Error(`I5: testing.adapter did not name the missing adapter: ${adapter?.detail ?? 'missing'}`);
+      }
+      if (outcome('testing.enumerate')?.outcome === 'supported') {
+        throw new Error('I5: an unsupported stack reported its suite enumeration supported');
+      }
+    });
+  },
+});
+
+export const REFUSAL_NAMES_THE_BOUNDING_TERM: LocalAssertion = runtime({
+  id: 'I5.refusal-names-the-bounding-term',
+  title:
+    "a request refused by the readiness ceiling names readiness and its holding probe; one refused by the global cap, the station cap, or the role ceiling names that cap; one over several names each; none reports a bare 'exceeds-cap', and non-cap refusals pass through as the engine made them",
+  run: async () => {
+    const { resolveWithReadiness, NOT_SCANNED } = await readiness();
+    const { StrictPolicyEngine } = await import('@olympus-ai/core');
+    const engine = new StrictPolicyEngine();
+    const base = engine.resolvePolicy(grantingDocument());
+    const station: StationId = 'build';
+    const held: ReadinessCeiling = { kind: 'scanned', level: 1, heldBy: { kind: 'probe', probe: 'testing.coverage' }, commit: 'abc123' };
+    const terms = (policy: Policy, requested: AutonomyLevel, ceiling: ReadinessCeiling, role: RoleId = GRANTED_ROLE): string[] => {
+      const resolved = resolveWithReadiness(engine, requested, station, role, policy, ceiling);
+      if (resolved.ok) return [];
+      if ((resolved.reason as string) === 'exceeds-cap') throw new Error(`I5: a refusal reported a bare exceeds-cap: ${resolved.detail}`);
+      if (resolved.reason !== 'exceeds-bound') return [resolved.reason];
+      return resolved.bounds.map((b) => b.term);
+    };
+    const expect = (label: string, got: string[], want: string[]) => {
+      if (JSON.stringify([...got].sort()) !== JSON.stringify([...want].sort())) {
+        throw new Error(`I5: ${label} named [${got.join(', ')}], expected [${want.join(', ')}]`);
+      }
+    };
+    const loose: Policy = { ...base, globalCap: 3, stationCaps: {}, roles: { ...base.roles } };
+    const role = loose.roles[GRANTED_ROLE];
+    if (role === undefined) throw new Error('I5 fixture: the granting document lost its role');
+    const open: Policy = { ...loose, roles: { ...loose.roles, [GRANTED_ROLE]: { ...role, autonomyCeiling: 3 } } };
+
+    expect('readiness alone', terms(open, 2, held), ['readiness']);
+    const resolved = resolveWithReadiness(engine, 2, station, GRANTED_ROLE, open, held);
+    if (resolved.ok || resolved.reason !== 'exceeds-bound' || !resolved.detail.includes('testing.coverage')) {
+      throw new Error('I5: a readiness refusal did not name the probe holding the ceiling');
+    }
+    expect('the global cap alone', terms({ ...open, globalCap: 1 }, 2, NOT_SCANNED), ['global-cap']);
+    expect('the station cap alone', terms({ ...open, stationCaps: { build: BUILD_CAP } }, 2, NOT_SCANNED), ['station-cap']);
+    expect('the role ceiling alone', terms({ ...open, roles: { ...open.roles, [GRANTED_ROLE]: { ...role, autonomyCeiling: 1 } } }, 2, NOT_SCANNED), ['role-ceiling']);
+    expect('readiness and the global cap', terms({ ...open, globalCap: 1 }, 2, held), ['readiness', 'global-cap']);
+    if (base.globalCap !== 3 || BUILD_CAP !== 1 || ROLE_CEILING !== 2) throw new Error('I5 fixture: the granting document no longer has caps L3, L1, L2');
+    expect('every term below the request', terms(base, 3, held), ['readiness', 'station-cap', 'role-ceiling']);
+    expect('within every bound', terms(open, 1, held), []);
+    expect('a role the policy does not define', terms(open, 1, held, 'reviewer' as RoleId), ['capability-missing']);
+  },
+});
+
+/**
+ * One assertion per ceiling-bearing probe: with every other ceiling-bearing
+ * probe supported and this one absent, the ceiling drops to the stated level
+ * and names this probe. The keys are compared both ways with the package's
+ * declared set, so deleting a probe, or one the derivation stops reading,
+ * fails here.
+ */
+const PROBE_LOWERS_TO: Readonly<Record<string, AutonomyLevel>> = {
+  'build.pinned-manifest': 0,
+  'build.install': 0,
+  'build.clean': 0,
+  'testing.adapter': 0,
+  'testing.enumerate': 0,
+  'testing.green-at-base': 0,
+  'testing.coverage': 1,
+  'testing.tamper-analysis': 1,
+  'integrate.protected-paths': 1,
+  'integrate.secret-scan': 1,
+  'integrate.branch-protection': 1,
+};
+
+export const CEILING_BEARING_PROBE_HAS_AN_ASSERTION: LocalAssertion = runtime({
+  id: 'I8.ceiling-bearing-probe-has-an-assertion',
+  title:
+    'every probe the readiness package declares ceiling-bearing has an entry here and every entry is a declared ceiling-bearing probe; each one, absent while every other is supported, lowers the ceiling to its stated level and is named as the probe holding it',
+  run: async () => {
+    const { CEILING_BEARING, PROBES, deriveCeiling } = await readiness();
+    const declared = new Set<string>(CEILING_BEARING);
+    const asserted = new Set(Object.keys(PROBE_LOWERS_TO));
+    const unasserted = [...declared].filter((id) => !asserted.has(id));
+    const undeclared = [...asserted].filter((id) => !declared.has(id));
+    if (unasserted.length > 0) throw new Error(`I8: ceiling-bearing probes with no assertion: ${unasserted.join(', ')}`);
+    if (undeclared.length > 0) throw new Error(`I8: assertions for probes no longer declared ceiling-bearing: ${undeclared.join(', ')}`);
+    if (new Set(PROBES.map((p) => p.id)).size !== PROBES.length) throw new Error('I8: a probe is declared twice');
+
+    const all = CEILING_BEARING.map((id) => result(id, 'supported'));
+    const top = deriveCeiling(all);
+    if (top.level !== 2) throw new Error(`I8 control: every probe supported derived L${String(top.level)}, not L2`);
+    for (const [probe, level] of Object.entries(PROBE_LOWERS_TO)) {
+      const derived = deriveCeiling(all.map((r) => (r.probe === probe ? result(r.probe, 'absent') : r)));
+      if (derived.level !== level || derived.heldBy.kind !== 'probe' || derived.heldBy.probe !== probe) {
+        throw new Error(
+          `I8: ${probe} absent derived L${String(derived.level)} held by ${JSON.stringify(derived.heldBy)}; ` +
+          `expected L${String(level)} held by ${probe}`,
+        );
+      }
+    }
+  },
+});
+
+===== packages/conformance/tsconfig.json =====
+diff --git a/packages/conformance/tsconfig.json b/packages/conformance/tsconfig.json
+index b0a2ad1..1cb7e9c 100644
+--- a/packages/conformance/tsconfig.json
++++ b/packages/conformance/tsconfig.json
+@@ -1,24 +1,25 @@
+ {
+   "extends": "../../tsconfig.base.json",
+   "compilerOptions": {
+     // The kit has no package.json dependency on any sibling, so a Phase 2
+     // package can devDepend on the kit without forming a workspace cycle.
+     // Fixtures still need the sibling contracts, so each package name maps to
+     // its published entry (the `types` field of its package.json). The
+     // registry asserts that this map and those fields agree.
+     "paths": {
+       "@olympus-ai/core": ["../core/src/index.ts"],
+       "@olympus-ai/vault": ["../vault/src/index.ts"],
+       "@olympus-ai/integrity": ["../integrity/src/index.ts"],
+       "@olympus-ai/sandbox": ["../sandbox/src/index.ts"],
+       "@olympus-ai/triggers": ["../triggers/src/index.ts"],
+       "@olympus-ai/adapters": ["../adapters/src/index.ts"],
++      "@olympus-ai/readiness": ["../readiness/src/index.ts"],
+       "@olympus-ai/api": ["../api/src/index.ts"],
+       "@olympus-ai/driver-claude-code": ["../drivers/claude-code/src/index.ts"],
+       "olympus-ai": ["../cli/src/cli.ts"]
+     }
+   },
+   // fixtures/types is deliberately absent: those files fail to compile by
+   // design and are compiled one at a time by the fixture compiler.
+   "include": ["src", "test", "fixtures/lint", "vitest.config.ts"]
+ }
+
+===== packages/readiness/package.json =====
+{
+  "name": "@olympus-ai/readiness",
+  "version": "0.0.0",
+  "description": "Readiness: derives the autonomy ceiling a repository can support from probes that executed",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@olympus-ai/adapters": "workspace:*",
+    "@olympus-ai/core": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*",
+    "picomatch": "4.0.7"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.3",
+    "vitest": "^4.1.11"
+  }
+}
+
+===== packages/readiness/src/derive.ts =====
+/**
+ * The derivation: probe results in, a ceiling and the probe that holds it out.
+ * Total over the probe set, with no defaulting rule left implicit (R1 §4):
+ *
+ *   L0  a Build system or Testing probe in L0_PROBES is not `supported`
+ *   L1  those hold, and coverage or tamper analysis is not `supported`
+ *   L1  those hold, and an `integrate` probe is not `supported`
+ *   L2  every ceiling-bearing probe is `supported`
+ *   L3  never; `ScanLevel` cannot carry it
+ *
+ * Only `supported` passes. `absent` and `indeterminate` derive identically
+ * (I5); a probe missing from the results is treated as not supported and
+ * named, never skipped.
+ */
+import { L0_PROBES, L1_PROBES, L2_PROBES } from './probes.js';
+import type { HeldBy, ProbeId, ProbeResult, ScanLevel } from './types.js';
+
+export interface Derivation {
+  readonly level: ScanLevel;
+  readonly heldBy: HeldBy;
+}
+
+export function deriveCeiling(results: readonly ProbeResult[]): Derivation {
+  // Every result for the probe must pass, so a duplicate cannot outvote a gap.
+  const supported = (id: ProbeId): boolean => {
+    const mine = results.filter((r) => r.probe === id);
+    return mine.length > 0 && mine.every((r) => r.outcome === 'supported');
+  };
+  const firstGap = (ids: readonly ProbeId[]): ProbeId | undefined => ids.find((id) => !supported(id));
+
+  const l0 = firstGap(L0_PROBES);
+  if (l0 !== undefined) return { level: 0, heldBy: { kind: 'probe', probe: l0 } };
+  const l1 = firstGap([...L1_PROBES, ...L2_PROBES]);
+  if (l1 !== undefined) return { level: 1, heldBy: { kind: 'probe', probe: l1 } };
+  return { level: 2, heldBy: { kind: 'scan-limit' } };
+}
+
+===== packages/readiness/src/index.ts =====
+/**
+ * Readiness (R1): scans one repository at one commit and derives the highest
+ * autonomy level it can support, from probes that executed, with the probe
+ * that holds the ceiling named. Subtractive only (I4): the ceiling is the
+ * fourth term of the effective-level formula and lowers a level or does
+ * nothing.
+ */
+export * from './types.js';
+export { CEILING_BEARING, L0_PROBES, L1_PROBES, L2_PROBES, PROBES, definitionOf, type ProbeDefinition } from './probes.js';
+export { deriveCeiling, type Derivation } from './derive.js';
+export {
+  resolveWithReadiness,
+  type BoundingTerm,
+  type BoundRefusal,
+  type ReadinessResolution,
+  type ScopeRefusal,
+} from './resolve.js';
+export {
+  NOT_SCANNED,
+  NPM_REGISTRY,
+  SECRET_SCAN_IMAGE,
+  ceilingOf,
+  scan,
+  type BranchProtectionChecker,
+  type ScanOptions,
+} from './scan.js';
+export { renderReport } from './report.js';
+
+===== packages/readiness/src/probes.ts =====
+/**
+ * The probe set: each probe's pillar and whether it bears on the ceiling.
+ * Adding a probe means naming both here, and a ceiling-bearing probe needs a
+ * registry assertion that fails when it is deleted (I8,
+ * `I8.ceiling-bearing-probe-has-an-assertion`).
+ */
+import type { Pillar, ProbeId } from './types.js';
+
+export interface ProbeDefinition {
+  readonly id: ProbeId;
+  readonly pillar: Pillar;
+  readonly ceilingBearing: boolean;
+}
+
+/**
+ * Every probe, in derivation order. A ceiling is held by the first probe in
+ * this order that is not `supported` among those its tier reads, so the order
+ * is part of the derivation, not presentation: the more fundamental gap is
+ * named first.
+ */
+export const PROBES: readonly ProbeDefinition[] = [
+  { id: 'build.pinned-manifest', pillar: 'build-system', ceilingBearing: true },
+  { id: 'build.install', pillar: 'build-system', ceilingBearing: true },
+  { id: 'build.clean', pillar: 'build-system', ceilingBearing: true },
+  { id: 'testing.adapter', pillar: 'testing', ceilingBearing: true },
+  { id: 'testing.enumerate', pillar: 'testing', ceilingBearing: true },
+  { id: 'testing.green-at-base', pillar: 'testing', ceilingBearing: true },
+  { id: 'testing.coverage', pillar: 'testing', ceilingBearing: true },
+  { id: 'testing.tamper-analysis', pillar: 'testing', ceilingBearing: true },
+  { id: 'integrate.protected-paths', pillar: 'security-and-governance', ceilingBearing: true },
+  { id: 'integrate.secret-scan', pillar: 'security-and-governance', ceilingBearing: true },
+  { id: 'integrate.branch-protection', pillar: 'security-and-governance', ceilingBearing: true },
+  { id: 'style.lint', pillar: 'style-and-validation', ceilingBearing: false },
+  { id: 'style.format', pillar: 'style-and-validation', ceilingBearing: false },
+  { id: 'style.typecheck', pillar: 'style-and-validation', ceilingBearing: false },
+  { id: 'dev.cold-provision', pillar: 'dev-environment', ceilingBearing: false },
+  { id: 'docs.agent-instructions', pillar: 'documentation', ceilingBearing: false },
+  { id: 'quality.file-size', pillar: 'code-quality', ceilingBearing: false },
+];
+
+/** Below L1: a repository that cannot be built clean or has no derivable status supports manual work only. */
+export const L0_PROBES: readonly ProbeId[] = [
+  'build.pinned-manifest',
+  'build.install',
+  'build.clean',
+  'testing.adapter',
+  'testing.enumerate',
+  'testing.green-at-base',
+];
+
+/** Below L2: the line cannot measure coverage or detect a weakened suite. */
+export const L1_PROBES: readonly ProbeId[] = ['testing.coverage', 'testing.tamper-analysis'];
+
+/** Below L2 as well: autonomous merge with no backstop at `integrate`. */
+export const L2_PROBES: readonly ProbeId[] = [
+  'integrate.protected-paths',
+  'integrate.secret-scan',
+  'integrate.branch-protection',
+];
+
+/** The probes the derivation reads. Exactly those declared ceiling-bearing. */
+export const CEILING_BEARING: readonly ProbeId[] = PROBES.filter((p) => p.ceilingBearing).map((p) => p.id);
+
+export function definitionOf(id: ProbeId): ProbeDefinition {
+  const found = PROBES.find((p) => p.id === id);
+  if (found === undefined) throw new Error(`readiness: ${id} is not a declared probe`);
+  return found;
+}
+
+===== packages/readiness/src/report.ts =====
+/**
+ * A report as a table: the ceiling, the probe that holds it there, and every
+ * probe's outcome grouped by pillar (R1 §7). The reason is always one probe,
+ * never a pillar and never a score.
+ */
+import type { ProbeEvidence, ReadinessReport } from './types.js';
+
+export function renderReport(report: ReadinessReport): string {
+  const { ceiling } = report;
+  const held = ceiling.heldBy;
+  const reason = held.kind === 'scan-limit'
+    ? 'every ceiling-bearing probe is supported, and no scan grants L3'
+    : `held by ${held.probe}: ${report.probes.find((p) => p.probe === held.probe)?.detail ?? 'no result recorded'}`;
+  const lines = [`Readiness ceiling L${String(ceiling.level)} at ${report.commit}, ${reason}`, ''];
+  const rows = report.probes.map((p) => [p.pillar, p.probe, p.ceilingBearing ? 'yes' : 'no', p.outcome, how(p.evidence), p.detail]);
+  const header = ['pillar', 'probe', 'ceiling', 'outcome', 'how', 'detail'];
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (i === header.length - 1 ? 0 : (r[i] ?? '').length))));
+  const line = (cells: readonly string[]) => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] ?? 0))).join('  ');
+  lines.push(line(header));
+  for (const row of rows) lines.push(line(row));
+  for (const s of report.skipped) lines.push(`skipped: ${s}`);
+  return lines.join('\n');
+}
+
+function how(evidence: ProbeEvidence): string {
+  switch (evidence.via) {
+    case 'executed': {
+      const run = evidence.run.kind === 'exited' ? `exit ${String(evidence.run.exitCode)}` : 'stopped';
+      return `${evidence.argv.join(' ')} (${run}, ${String(Math.round(evidence.run.durationMs))}ms)`;
+    }
+    case 'static':
+      return `read: ${evidence.read}`;
+    case 'checker':
+      return `checker: ${evidence.checker}`;
+    case 'not-run':
+      return `not run: ${evidence.because}`;
+  }
+}
+
+===== packages/readiness/src/resolve.ts =====
+/**
+ * The four-term effective level, with the term that bound it named:
+ * `min(run.requested, policy.stationCap, policy.globalCap, readiness.ceiling)`,
+ * where the policy engine also bounds by the role's own ceiling.
+ *
+ * The engine's verdict is the authority on the policy terms, called unchanged;
+ * readiness only adds a refusal it could not make (I4: a ceiling subtracts or
+ * does nothing). Attribution reads the same public `Policy` fields the engine
+ * does, so a refusal can say which cap bound it, and if the two ever disagree
+ * the resolver throws rather than report a refusal it cannot attribute (I5).
+ *
+ * Nothing here is wired into run creation (R1 §5).
+ */
+import type { AutonomyLevel, Policy, PolicyEngine, PolicyRefusal, RoleId, StationId } from '@olympus-ai/core';
+import type { HeldBy, ReadinessCeiling, ScanLevel } from './types.js';
+
+export type BoundingTerm =
+  | { readonly term: 'readiness'; readonly ceiling: ScanLevel; readonly heldBy: HeldBy; readonly commit: string }
+  | { readonly term: 'global-cap'; readonly cap: AutonomyLevel }
+  | { readonly term: 'station-cap'; readonly station: StationId; readonly cap: AutonomyLevel }
+  | { readonly term: 'role-ceiling'; readonly role: RoleId; readonly cap: AutonomyLevel };
+
+/** A refusal over a cap names every term the request exceeds; there is no bare `exceeds-cap`. */
+export interface BoundRefusal {
+  readonly ok: false;
+  readonly reason: 'exceeds-bound';
+  readonly requested: AutonomyLevel;
+  readonly bounds: readonly [BoundingTerm, ...BoundingTerm[]];
+  readonly detail: string;
+}
+
+/** The engine's refusals that are not about a cap pass through as it made them. */
+export type ScopeRefusal = PolicyRefusal & { readonly reason: 'station-forbidden' | 'capability-missing' };
+
+export type ReadinessResolution =
+  | { readonly ok: true; readonly level: AutonomyLevel; readonly readiness: ReadinessCeiling }
+  | BoundRefusal
+  | ScopeRefusal;
+
+export function resolveWithReadiness(
+  engine: PolicyEngine,
+  requested: AutonomyLevel,
+  station: StationId,
+  role: RoleId,
+  policy: Policy,
+  readiness: ReadinessCeiling,
+): ReadinessResolution {
+  const verdict = engine.resolveAutonomy(requested, station, role, policy);
+  if (!verdict.ok && verdict.reason !== 'exceeds-cap') {
+    return { ok: false, reason: verdict.reason, detail: verdict.detail };
+  }
+
+  const bounds: BoundingTerm[] = [];
+  if (readiness.kind === 'scanned' && requested > readiness.level) {
+    bounds.push({ term: 'readiness', ceiling: readiness.level, heldBy: readiness.heldBy, commit: readiness.commit });
+  }
+  if (!verdict.ok) {
+    const caps = policyBounds(requested, station, role, policy);
+    if (caps.length === 0) {
+      throw new Error(
+        `readiness: the policy engine refused L${String(requested)} over a cap, and no cap in the policy is below it; ` +
+        `refused rather than reported unattributed (${verdict.detail})`,
+      );
+    }
+    bounds.push(...caps);
+  }
+
+  const [first, ...rest] = bounds;
+  if (first === undefined) {
+    if (!verdict.ok) throw new Error('readiness: unreachable, a refused verdict always carries a bound');
+    return { ok: true, level: verdict.level, readiness };
+  }
+  return {
+    ok: false,
+    reason: 'exceeds-bound',
+    requested,
+    bounds: [first, ...rest],
+    detail:
+      `L${String(requested)} requested for role '${role}' at '${station}' exceeds ` +
+      `${bounds.map(describe).join('; ')}. Refused, not downgraded.`,
+  };
+}
+
+/** Each policy cap the request exceeds, read from own properties only, as the engine reads them. */
+function policyBounds(requested: AutonomyLevel, station: StationId, role: RoleId, policy: Policy): BoundingTerm[] {
+  const out: BoundingTerm[] = [];
+  if (requested > policy.globalCap) out.push({ term: 'global-cap', cap: policy.globalCap });
+  const stationCap = Object.hasOwn(policy.stationCaps, station) ? policy.stationCaps[station] : undefined;
+  if (stationCap !== undefined && requested > stationCap) out.push({ term: 'station-cap', station, cap: stationCap });
+  const scope = Object.hasOwn(policy.roles, role) ? policy.roles[role] : undefined;
+  if (scope !== undefined && requested > scope.autonomyCeiling) out.push({ term: 'role-ceiling', role, cap: scope.autonomyCeiling });
+  return out;
+}
+
+function describe(bound: BoundingTerm): string {
+  switch (bound.term) {
+    case 'readiness': {
+      const held = bound.heldBy.kind === 'probe' ? `held by probe ${bound.heldBy.probe}` : 'no scan grants L3';
+      return `the readiness ceiling L${String(bound.ceiling)} (${held}, commit ${bound.commit})`;
+    }
+    case 'global-cap':
+      return `the global cap L${String(bound.cap)}`;
+    case 'station-cap':
+      return `the ${bound.station} station cap L${String(bound.cap)}`;
+    case 'role-ceiling':
+      return `role '${bound.role}' ceiling L${String(bound.cap)}`;
+  }
+}
+
+===== packages/readiness/src/scan.ts =====
+/**
+ * One scan: one repository, one commit, every probe, one ceiling.
+ *
+ * The commit's tree is copied to a directory the scan owns (`tree.ts`), and
+ * every executed probe runs in a fresh sandbox over that copy and nothing
+ * else: no other mount, so no Vault (I1), and no network except the install,
+ * which reaches the package registries named and no other host. The target
+ * repository is read through git and never written (R1 §5).
+ *
+ * A probe the sandbox stopped — a timeout, an output overrun, a provisioning
+ * failure — is `indeterminate`, and derives as `absent` (I5).
+ */
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildAdapterSet, JestAdapter, VitestAdapter, type AdapterSet } from '@olympus-ai/adapters';
+import type { EgressPolicy, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import picomatch from 'picomatch';
+import { deriveCeiling } from './derive.js';
+import { PROBES } from './probes.js';
+import { materialize, resolveCommit } from './tree.js';
+import type { ProbeEvidence, ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ReadinessReport } from './types.js';
+
+/** gitleaks 8.21.2, pinned by digest so a scan's secret probe is the one its report names. */
+export const SECRET_SCAN_IMAGE = 'zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46';
+
+/** The public npm registry, the one host an install reaches unless the caller names others. */
+export const NPM_REGISTRY: readonly string[] = ['registry.npmjs.org'];
+
+/** The readiness term for a repository no scan has run on: explicit, never `undefined` (I4). */
+export const NOT_SCANNED: ReadinessCeiling = { kind: 'not-scanned' };
+
+/**
+ * Whether the integration branch is protected. A fact that lives with the
+ * host, not in the repository, so the caller supplies the port that asks it;
+ * a scan given none records the probe `indeterminate` and stops below L2.
+ */
+export interface BranchProtectionChecker {
+  /** Names the checker in the report, e.g. `github:owner/repo@main`. */
+  readonly name: string;
+  check(): Promise<{ readonly protected: boolean; readonly detail: string }>;
+}
+
+/**
+ * Every field is required: a scan that defaulted its image, its limits, or
+ * its registries would be a scan whose report could not say what it ran.
+ */
+export interface ScanOptions {
+  /** A git repository on the host. Read, never written. */
+  readonly checkout: string;
+  /** The revision scanned, resolved to a commit before anything runs. */
+  readonly revision: string;
+  readonly provider: SandboxProvider;
+  /** The build image: node with npm and corepack. The host's build profile, as the line's own sandboxes take it. */
+  readonly image: string;
+  readonly secretScanImage: string;
+  readonly limits: { readonly cpus: number; readonly memoryMb: number; readonly pids: number };
+  readonly user: { readonly uid: number; readonly gid: number };
+  readonly timeouts: {
+    /** The install's wall clock. */
+    readonly installMs: number;
+    /** Every other executed probe's wall clock. */
+    readonly probeMs: number;
+    /** How long a cold container may take to provision and answer before the dev-environment probe fails. */
+    readonly coldProvisionMs: number;
+  };
+  /** The hosts the install may reach. Every other host is refused by the sandbox's egress proxy. */
+  readonly registries: readonly string[];
+  /** The policy's protected-path globs. */
+  readonly protectedPaths: readonly string[];
+  readonly branchProtection: BranchProtectionChecker | null;
+}
+
+const MOUNT = '/scan';
+const TREE = `${MOUNT}/tree`;
+const COVERAGE_DIR = `${MOUNT}/out/coverage`;
+const ENV: Readonly<Record<string, string>> = {
+  HOME: `${MOUNT}/home`,
+  npm_config_cache: `${MOUNT}/home/.npm`,
+  npm_config_update_notifier: 'false',
+  COREPACK_HOME: `${MOUNT}/home/corepack`,
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
+  CI: 'true',
+};
+const DENY_ALL: EgressPolicy = { mode: 'deny-all', allow: [] };
+const AGENT_INSTRUCTIONS = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.github/copilot-instructions.md', '.cursorrules'];
+const SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
+const LOCKFILES = { 'pnpm-lock.yaml': 'pnpm', 'package-lock.json': 'npm', 'npm-shrinkwrap.json': 'npm', 'yarn.lock': 'yarn' } as const;
+type Manager = (typeof LOCKFILES)[keyof typeof LOCKFILES];
+
+/** Runs `argv` with the copied tree as its working directory. The wrapper is part of the argv the report records. */
+function inTree(argv: readonly string[], then?: string): string[] {
+  return ['sh', '-c', `cd ${TREE} && "$@"${then === undefined ? '' : ` && ${then}`}`, 'readiness', ...argv];
+}
+
+interface Context {
+  readonly options: ScanOptions;
+  readonly scanDir: string;
+  readonly tree: string;
+  readonly files: readonly string[];
+}
+
+interface Observation {
+  readonly outcome: ProbeOutcome;
+  readonly detail: string;
+  readonly evidence: ProbeEvidence;
+}
+
+export async function scan(options: ScanOptions): Promise<ReadinessReport> {
+  const commit = await resolveCommit(options.checkout, options.revision);
+  const base = await mkdtemp(join(tmpdir(), 'readiness-'));
+  try {
+    const scanDir = join(base, 'scan');
+    const tree = join(scanDir, 'tree');
+    const { files, skipped } = await materialize(options.checkout, commit, tree);
+    await mkdir(join(scanDir, 'home'), { recursive: true });
+    await mkdir(join(scanDir, 'out'), { recursive: true });
+    const ctx: Context = { options, scanDir, tree, files };
+    const seen = new Map<ProbeId, Observation>();
+    const record = (id: ProbeId, o: Observation) => { seen.set(id, o); return o; };
+
+    // Static reads first, and the secret scan, while the copy is exactly the commit's tree.
+    const manifest = await readManifest(tree, files);
+    const manager = record('build.pinned-manifest', pinnedManifest(manifest, files)).outcome === 'supported' ? managerOf(files) : null;
+    const adapters = await adapterSet(tree);
+    record('testing.adapter', adapterProbe(adapters));
+    record('testing.enumerate', await enumerate(adapters, tree));
+    record('testing.tamper-analysis', tamperAnalysis(adapters));
+    record('integrate.protected-paths', protectedPaths(options.protectedPaths, files));
+    record('docs.agent-instructions', agentInstructions(files));
+    record('quality.file-size', await fileSizes(tree, files));
+    record('integrate.secret-scan', await secretScan(ctx));
+    record('integrate.branch-protection', await branchProtection(options.branchProtection));
+
+    // Then the executed probes over an installed tree, each in its own fresh container.
+    record('dev.cold-provision', await coldProvision(ctx));
+    record('build.install', await install(ctx, manager));
+    const runner = manager === 'pnpm' ? ['corepack', 'pnpm'] : ['npm'];
+    record('build.clean', await build(ctx, manifest, runner));
+    const framework = adapters.set?.test ?? null;
+    record('testing.green-at-base', await suite(ctx, framework, 'green'));
+    record('testing.coverage', await suite(ctx, framework, 'coverage'));
+    record('style.lint', await tool(ctx, ['node_modules/.bin/eslint', '.'], 'a linter'));
+    record('style.format', await tool(ctx, ['node_modules/.bin/prettier', '--check', '.'], 'a formatter'));
+    record('style.typecheck', files.includes('tsconfig.json')
+      ? await tool(ctx, ['node_modules/.bin/tsc', '--noEmit'], 'a type checker')
+      : { outcome: 'absent', detail: 'there is no tsconfig.json at the root, so there is nothing to typecheck against', evidence: { via: 'static', read: 'the tree listing' } });
+
+    const probes: ProbeResult[] = PROBES.map((p) => {
+      const o = seen.get(p.id);
+      if (o === undefined) throw new Error(`readiness: probe ${p.id} was declared and never observed`);
+      return { probe: p.id, pillar: p.pillar, ceilingBearing: p.ceilingBearing, ...o, collectedBy: 'runtime' };
+    });
+    const derived = deriveCeiling(probes);
+    return { commit, ceiling: { kind: 'scanned', ...derived, commit }, probes, skipped, collectedBy: 'runtime' };
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+}
+
+/** The ceiling a report derived. A report always carries one; only `NOT_SCANNED` stands for none. */
+export function ceilingOf(report: ReadinessReport): ReadinessCeiling {
+  return report.ceiling;
+}
+
+// ---- static probes ---------------------------------------------------------
+
+type Manifest =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unreadable'; readonly why: string }
+  | { readonly kind: 'read'; readonly scripts: Readonly<Record<string, unknown>> };
+
+async function readManifest(tree: string, files: readonly string[]): Promise<Manifest> {
+  if (!files.includes('package.json')) return { kind: 'none' };
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(tree, 'package.json'), 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { kind: 'unreadable', why: 'package.json is not an object' };
+    const scripts: unknown = (parsed as Record<string, unknown>).scripts;
+    return { kind: 'read', scripts: typeof scripts === 'object' && scripts !== null ? (scripts as Record<string, unknown>) : {} };
+  } catch (error) {
+    return { kind: 'unreadable', why: `package.json is not valid JSON: ${message(error)}` };
+  }
+}
+
+function lockfilesIn(files: readonly string[]): Array<keyof typeof LOCKFILES> {
+  return (Object.keys(LOCKFILES) as Array<keyof typeof LOCKFILES>).filter((name) => files.includes(name));
+}
+
+function managerOf(files: readonly string[]): Manager | null {
+  const [only] = lockfilesIn(files);
+  return only === undefined ? null : LOCKFILES[only];
+}
+
+function pinnedManifest(manifest: Manifest, files: readonly string[]): Observation {
+  const evidence: ProbeEvidence = { via: 'static', read: 'the tree listing and package.json' };
+  if (manifest.kind === 'none') return { outcome: 'absent', detail: 'the repository has no package.json at its root', evidence };
+  if (manifest.kind === 'unreadable') return { outcome: 'absent', detail: manifest.why, evidence };
+  const locks = lockfilesIn(files);
+  if (locks.length === 0) return { outcome: 'absent', detail: 'no lockfile is committed, so a clean install cannot reproduce the dependencies', evidence };
+  if (locks.length > 1) {
+    return { outcome: 'absent', detail: `several lockfiles are committed (${locks.join(', ')}), and which is authoritative is not something to guess`, evidence };
+  }
+  return { outcome: 'supported', detail: `dependencies are pinned by ${locks.join('')}`, evidence };
+}
+
+type Adapters = { readonly set: AdapterSet; readonly reason: string | null } | { readonly set: null; readonly reason: string };
+
+async function adapterSet(tree: string): Promise<Adapters> {
+  try {
+    const set = await buildAdapterSet(tree, { provider: null, coverage: null });
+    return { set, reason: set.reasons.get('test') ?? null };
+  } catch (error) {
+    return { set: null, reason: `the adapter set could not be built: ${message(error)}` };
+  }
+}
+
+function adapterProbe(adapters: Adapters): Observation {
+  const evidence: ProbeEvidence = { via: 'static', read: 'buildAdapterSet over the tree (@olympus-ai/adapters)' };
+  if (adapters.set === null) return { outcome: 'indeterminate', detail: adapters.reason, evidence };
+  if (adapters.set.test === null) return { outcome: 'absent', detail: `no test adapter for this stack: ${adapters.reason ?? 'no reason recorded'}`, evidence };
+  return { outcome: 'supported', detail: `test adapter for ${adapters.set.test.stack}`, evidence };
+}
+
+async function enumerate(adapters: Adapters, tree: string): Promise<Observation> {
+  const test = adapters.set?.test ?? null;
+  if (test === null) return { outcome: 'indeterminate', detail: 'no test adapter, so no suite can be enumerated', evidence: { via: 'not-run', because: 'testing.adapter' } };
+  const evidence: ProbeEvidence = { via: 'static', read: `${test.stack} enumerateSuites over the tree` };
+  try {
+    const suites = await test.enumerateSuites(tree);
+    if (suites.length === 0) return { outcome: 'absent', detail: `the ${test.stack} adapter enumerated no test files`, evidence };
+    return { outcome: 'supported', detail: `${String(suites.length)} test file(s) enumerated`, evidence };
+  } catch (error) {
+    return { outcome: 'indeterminate', detail: `enumeration refused: ${message(error)}`, evidence };
+  }
+}
+
+function tamperAnalysis(adapters: Adapters): Observation {
+  const evidence: ProbeEvidence = { via: 'static', read: 'the adapter set\'s test and manifest slots' };
+  if (adapters.set === null) return { outcome: 'indeterminate', detail: adapters.reason, evidence };
+  const missing = [adapters.set.test === null ? 'test' : null, adapters.set.manifest === null ? 'manifest' : null].filter((m) => m !== null);
+  if (missing.length > 0) {
+    return { outcome: 'absent', detail: `tamper analysis compares assertions and config through the test and manifest adapters, and this stack lacks ${missing.join(' and ')}`, evidence };
+  }
+  return { outcome: 'supported', detail: 'test and manifest adapters are present', evidence };
+}
+
+function protectedPaths(globs: readonly string[], files: readonly string[]): Observation {
+  const evidence: ProbeEvidence = { via: 'static', read: 'the policy\'s protectedPaths over the tree listing' };
+  if (globs.length === 0) return { outcome: 'absent', detail: 'the policy declares no protected paths', evidence };
+  const matches = picomatch([...globs], { dot: true });
+  const hit = files.filter((f) => matches(f));
+  if (hit.length === 0) return { outcome: 'absent', detail: `no tracked file matches the protected paths ${globs.join(', ')}`, evidence };
+  return { outcome: 'supported', detail: `${String(hit.length)} tracked file(s) fall under the protected paths`, evidence };
+}
+
+function agentInstructions(files: readonly string[]): Observation {
+  const evidence: ProbeEvidence = { via: 'static', read: 'the tree listing' };
+  const found = files.filter((f) => AGENT_INSTRUCTIONS.includes(f) || f.startsWith('.cursor/rules/'));
+  if (found.length === 0) return { outcome: 'absent', detail: `none of ${AGENT_INSTRUCTIONS.join(', ')} or .cursor/rules/ is present`, evidence };
+  return { outcome: 'supported', detail: `agent instructions at ${found.join(', ')}`, evidence };
+}
+
+/** Recorded, never ceiling-bearing: the distribution, with no threshold to argue with. */
+async function fileSizes(tree: string, files: readonly string[]): Promise<Observation> {
+  const evidence: ProbeEvidence = { via: 'static', read: 'line counts of tracked source files' };
+  const sizes: Array<{ file: string; lines: number }> = [];
+  for (const file of files.filter((f) => SOURCE.test(f))) {
+    try {
+      const text = await readFile(join(tree, ...file.split('/')), 'utf8');
+      sizes.push({ file, lines: text.split('\n').length });
+    } catch {
+      // A symlink to nowhere has no lines; it is not a source file to measure.
+    }
+  }
+  if (sizes.length === 0) return { outcome: 'absent', detail: 'no tracked source files to measure', evidence };
+  sizes.sort((a, b) => a.lines - b.lines);
+  const at = (q: number) => sizes[Math.min(sizes.length - 1, Math.floor(q * sizes.length))]?.lines ?? 0;
+  const largest = sizes[sizes.length - 1];
+  return {
+    outcome: 'supported',
+    detail: `${String(sizes.length)} source files; median ${String(at(0.5))} lines, p90 ${String(at(0.9))}, largest ${largest?.file ?? ''} at ${String(largest?.lines ?? 0)}`,
+    evidence,
+  };
+}
+
+async function branchProtection(checker: BranchProtectionChecker | null): Promise<Observation> {
+  if (checker === null) {
+    return { outcome: 'indeterminate', detail: 'no branch-protection checker was given, so protection on the integration branch is not established', evidence: { via: 'checker', checker: 'none' } };
+  }
+  const evidence: ProbeEvidence = { via: 'checker', checker: checker.name };
+  try {
+    const answer = await checker.check();
+    return { outcome: answer.protected ? 'supported' : 'absent', detail: answer.detail, evidence };
+  } catch (error) {
+    return { outcome: 'indeterminate', detail: `the checker failed: ${message(error)}`, evidence };
+  }
+}
+
+// ---- executed probes -------------------------------------------------------
+
+interface Ran {
+  readonly evidence: Extract<ProbeEvidence, { via: 'executed' }>;
+  /** Combined output, kept only to explain a failure in the detail. */
+  readonly output: string;
+}
+
+/** One command in one fresh sandbox over the scan directory, destroyed after. */
+async function execute(
+  ctx: Context, argv: readonly string[], spec: { image?: string; mode?: 'rw' | 'ro'; egress?: EgressPolicy; wallClockMs?: number } = {},
+): Promise<Ran> {
+  const { options } = ctx;
+  const image = spec.image ?? options.image;
+  const sandbox: SandboxSpec = {
+    image,
+    mounts: { workspace: { source: ctx.scanDir, target: MOUNT, mode: spec.mode ?? 'rw' }, others: [] },
+    egress: spec.egress ?? DENY_ALL,
+    limits: { ...options.limits, wallClockMs: spec.wallClockMs ?? options.timeouts.probeMs },
+    user: { ...options.user },
+  };
+  const evidence = (run: Ran['evidence']['run']): Ran['evidence'] => ({ via: 'executed', argv: [...argv], image, run });
+  const started = performance.now();
+  let handle: SandboxHandle;
+  try {
+    handle = await options.provider.provision(sandbox);
+  } catch (error) {
+    return { evidence: evidence({ kind: 'stopped', reason: `the sandbox could not be provisioned: ${message(error)}`, durationMs: elapsed(started) }), output: '' };
+  }
+  try {
+    const result = await options.provider.exec(handle, [...argv], { env: ENV });
+    const outputSha256 = createHash('sha256').update(result.stdout).update('\0').update(result.stderr).digest('hex');
+    return {
+      evidence: evidence({ kind: 'exited', exitCode: result.exitCode, durationMs: result.durationMs, outputSha256 }),
+      output: `${result.stdout}\n${result.stderr}`.trim(),
+    };
+  } catch (error) {
+    return { evidence: evidence({ kind: 'stopped', reason: message(error), durationMs: elapsed(started) }), output: '' };
+  } finally {
+    try {
+      await options.provider.destroy(handle);
+    } catch {
+      // A sandbox its wall clock ended is already gone; the observation above stands either way.
+    }
+  }
+}
+
+/** Exit 0 is supported; any other exit is absent; a stopped run is indeterminate. */
+function judged(ran: Ran, what: string): Observation {
+  const { run } = ran.evidence;
+  if (run.kind === 'stopped') return { outcome: 'indeterminate', detail: `${what} did not finish: ${run.reason}`, evidence: ran.evidence };
+  if (run.exitCode === 0) return { outcome: 'supported', detail: `${what} exited 0`, evidence: ran.evidence };
+  const missing = run.exitCode === 127 ? ' (command not found)' : '';
+  return { outcome: 'absent', detail: `${what} exited ${String(run.exitCode)}${missing}: ${tail(ran.output)}`, evidence: ran.evidence };
+}
+
+async function secretScan(ctx: Context): Promise<Observation> {
+  // --exit-code 2 separates "leaks found" from gitleaks' own failure, which exits 1.
+  const ran = await execute(ctx, ['gitleaks', 'dir', 'tree', '--no-banner', '--redact', '--exit-code', '2'], { image: ctx.options.secretScanImage, mode: 'ro' });
+  const { run } = ran.evidence;
+  if (run.kind === 'exited' && run.exitCode === 2) return { outcome: 'absent', detail: `the secret scan found leaks: ${tail(ran.output)}`, evidence: ran.evidence };
+  if (run.kind === 'exited' && run.exitCode !== 0) {
+    return { outcome: 'indeterminate', detail: `the secret scan failed with exit ${String(run.exitCode)}: ${tail(ran.output)}`, evidence: ran.evidence };
+  }
+  return judged(ran, 'the secret scan');
+}
+
+async function coldProvision(ctx: Context): Promise<Observation> {
+  const budget = ctx.options.timeouts.coldProvisionMs;
+  const started = performance.now();
+  const ran = await execute(ctx, ['node', '--version'], { wallClockMs: budget });
+  const took = elapsed(started);
+  const { run } = ran.evidence;
+  if (run.kind === 'exited' && run.exitCode === 0 && took > budget) {
+    return { outcome: 'absent', detail: `a cold container took ${String(took)}ms to provision and answer, over ${String(budget)}ms`, evidence: ran.evidence };
+  }
+  const judgedRun = judged(ran, 'a cold container');
+  return judgedRun.outcome === 'supported' ? { ...judgedRun, detail: `a cold container provisioned and answered in ${String(took)}ms` } : judgedRun;
+}
+
+async function install(ctx: Context, manager: Manager | null): Promise<Observation> {
+  if (manager === null) {
+    return { outcome: 'absent', detail: 'there is no single pinned manifest to install from', evidence: { via: 'not-run', because: 'build.pinned-manifest' } };
+  }
+  if (manager === 'yarn') {
+    return { outcome: 'indeterminate', detail: 'a yarn install is not one this scan performs; the install is not established', evidence: { via: 'static', read: 'yarn.lock' } };
+  }
+  const argv = manager === 'pnpm' ? ['corepack', 'pnpm', 'install', '--frozen-lockfile'] : ['npm', 'ci', '--no-audit', '--no-fund'];
+  const ran = await execute(ctx, inTree(argv), {
+    egress: { mode: 'allowlist', allow: [...ctx.options.registries] },
+    wallClockMs: ctx.options.timeouts.installMs,
+  });
+  return judged(ran, `${manager} install from the lockfile`);
+}
+
+async function build(ctx: Context, manifest: Manifest, runner: readonly string[]): Promise<Observation> {
+  const scripts = manifest.kind === 'read' ? manifest.scripts : {};
+  if (typeof scripts.build === 'string') return judged(await execute(ctx, inTree([...runner, 'run', 'build'])), 'the build script in a fresh container');
+  if (ctx.files.includes('tsconfig.json')) return judged(await execute(ctx, inTree(['node_modules/.bin/tsc', '--noEmit'])), 'a clean typecheck build in a fresh container');
+  return { outcome: 'absent', detail: 'there is no build script and no tsconfig.json, so a clean build has nothing to run', evidence: { via: 'static', read: 'package.json scripts and the tree listing' } };
+}
+
+async function suite(ctx: Context, test: AdapterSet['test'], kind: 'green' | 'coverage'): Promise<Observation> {
+  if (test === null) return { outcome: 'indeterminate', detail: 'no test adapter, so no suite can run', evidence: { via: 'not-run', because: 'testing.adapter' } };
+  const report = `${COVERAGE_DIR}/coverage-final.json`;
+  let argv: string[];
+  if (test instanceof VitestAdapter) {
+    argv = kind === 'green'
+      ? ['node_modules/.bin/vitest', 'run']
+      : ['node_modules/.bin/vitest', 'run', '--coverage.enabled=true', '--coverage.reporter=json', `--coverage.reportsDirectory=${COVERAGE_DIR}`];
+  } else if (test instanceof JestAdapter) {
+    argv = kind === 'green'
+      ? ['node_modules/.bin/jest', '--ci']
+      : ['node_modules/.bin/jest', '--ci', '--coverage', '--coverageReporters=json', `--coverageDirectory=${COVERAGE_DIR}`];
+  } else {
+    return { outcome: 'indeterminate', detail: `no command is known for the ${test.stack} adapter`, evidence: { via: 'static', read: 'the adapter set' } };
+  }
+  if (kind === 'green') return judged(await execute(ctx, inTree(argv)), 'the suite at base');
+  return judged(await execute(ctx, inTree(argv, `test -s ${report}`)), 'the suite with coverage, writing an Istanbul report');
+}
+
+async function tool(ctx: Context, argv: readonly string[], what: string): Promise<Observation> {
+  return judged(await execute(ctx, inTree(argv)), what);
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function elapsed(started: number): number {
+  return Math.round(performance.now() - started);
+}
+
+function tail(output: string): string {
+  const flat = output.replace(/\s+/gu, ' ').trim();
+  return flat.length > 400 ? `…${flat.slice(-400)}` : flat || '(no output)';
+}
+
+
+===== packages/readiness/src/tree.ts =====
+/**
+ * The copy a scan runs against: the commit's tree as git stores it, written to
+ * a directory the scan owns, so the target repository is read and never
+ * written (R1 §5) and nothing untracked in a working directory — a stale
+ * `dist/`, an installed `node_modules/` — can make a build look clean that is
+ * not (D-R1-11).
+ *
+ * Blobs are read raw through `git cat-file --batch`. `git archive` and a
+ * checkout would apply the repository's attributes and configured filters,
+ * which are commands the repository's own configuration names; reading object
+ * contents runs none.
+ */
+import { execFile, spawn } from 'node:child_process';
+import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
+
+/** `git` against `checkout`, with the one setting that could start a configured process on a read turned off. */
+function gitArgs(checkout: string, ...args: string[]): string[] {
+  return ['-C', checkout, '-c', 'core.fsmonitor=false', ...args];
+}
+
+/** The full object name `revision` names, or a refusal saying why it names none. */
+export async function resolveCommit(checkout: string, revision: string): Promise<string> {
+  if (revision === '' || revision.startsWith('-')) {
+    throw new Error(`readiness: '${revision}' is not a revision; refused rather than passed to git as an option`);
+  }
+  try {
+    const { stdout } = await run('git', gitArgs(checkout, 'rev-parse', '--verify', '--quiet', `${revision}^{commit}`));
+    const commit = stdout.trim();
+    if (!/^[0-9a-f]{40,64}$/u.test(commit)) throw new Error(`git printed '${commit}'`);
+    return commit;
+  } catch (error) {
+    throw new Error(`readiness: ${checkout} has no commit '${revision}': ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+interface TreeEntry {
+  readonly mode: string;
+  readonly type: string;
+  readonly oid: string;
+  readonly path: string;
+}
+
+export interface Materialized {
+  /** Every regular file and symlink written, by its path in the tree, POSIX separators, sorted. */
+  readonly files: readonly string[];
+  /** Entries not reproduced, each named with why. */
+  readonly skipped: readonly string[];
+}
+
+/** Writes the tree of `commit` under `dest`. */
+export async function materialize(checkout: string, commit: string, dest: string): Promise<Materialized> {
+  const { stdout } = await run('git', gitArgs(checkout, 'ls-tree', '-r', '-z', '--full-tree', commit), { maxBuffer: 256 * 1024 * 1024 });
+  const entries: TreeEntry[] = [];
+  const skipped: string[] = [];
+  for (const record of stdout.split('\0')) {
+    if (record === '') continue;
+    const tab = record.indexOf('\t');
+    const [mode, type, oid] = record.slice(0, tab).split(' ');
+    const path = record.slice(tab + 1);
+    if (tab < 0 || mode === undefined || type === undefined || oid === undefined) throw new Error(`readiness: unreadable tree entry '${record}'`);
+    checkPath(path);
+    if (type === 'commit') skipped.push(`${path}: a submodule (${oid}); a clean checkout does not initialise it`);
+    else if (type === 'blob') entries.push({ mode, type, oid, path });
+    else throw new Error(`readiness: tree entry ${path} has type ${type}`);
+  }
+
+  await mkdir(dest, { recursive: true });
+  const child = spawn('git', gitArgs(checkout, 'cat-file', '--batch'), { stdio: ['pipe', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.setEncoding('utf8').on('data', (text: string) => { stderr += text; });
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  child.stdin.end(entries.map((e) => `${e.oid}\n`).join(''));
+
+  let pending = Buffer.alloc(0);
+  let index = 0;
+  for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
+    pending = Buffer.concat([pending, chunk]);
+    for (;;) {
+      const entry = entries[index];
+      if (entry === undefined) break;
+      const newline = pending.indexOf(0x0a);
+      if (newline < 0) break;
+      const header = pending.subarray(0, newline).toString('utf8').split(' ');
+      const size = Number(header[2]);
+      if (header[0] !== entry.oid || header[1] !== 'blob' || !Number.isSafeInteger(size)) {
+        child.kill();
+        throw new Error(`readiness: git cat-file answered '${header.join(' ')}' for ${entry.path} (${entry.oid})`);
+      }
+      if (pending.length < newline + 1 + size + 1) break;
+      const body = pending.subarray(newline + 1, newline + 1 + size);
+      pending = pending.subarray(newline + 1 + size + 1);
+      await writeEntry(dest, entry, body);
+      index++;
+    }
+  }
+  const code = await exited;
+  if (code !== 0 || index !== entries.length) {
+    throw new Error(`readiness: git cat-file exited ${String(code)} after ${String(index)} of ${String(entries.length)} objects: ${stderr.trim()}`);
+  }
+  return { files: entries.map((e) => e.path).sort(), skipped };
+}
+
+/** Git refuses these paths itself; a tree that carries one anyway is refused before anything is written. */
+function checkPath(path: string): void {
+  const segments = path.split('/');
+  if (path.startsWith('/') || segments.some((s) => s === '' || s === '.' || s === '..' || s.toLowerCase() === '.git' || s.includes('\\'))) {
+    throw new Error(`readiness: tree path '${path}' could escape the copy; refused`);
+  }
+}
+
+async function writeEntry(dest: string, entry: TreeEntry, body: Buffer): Promise<void> {
+  const target = join(dest, ...entry.path.split('/'));
+  await mkdir(dirname(target), { recursive: true });
+  if (entry.mode === '120000') {
+    // A link that cannot be created is a tree the copy does not reproduce, and a scan of a different tree is refused (I5).
+    await symlink(body.toString('utf8'), target);
+    return;
+  }
+  await writeFile(target, body);
+  if (entry.mode === '100755') await chmod(target, 0o755);
+}
+
+===== packages/readiness/src/types.ts =====
+/**
+ * Readiness: what one repository at one commit can support, as an autonomy
+ * ceiling the policy engine enforces, derived from probes that ran.
+ *
+ * Every type here is the runtime's record of an observation. None has a field
+ * a model or a driver writes (I2): a probe's outcome is computed from what the
+ * runtime saw, and `collectedBy` is the literal that says so.
+ */
+import type { AutonomyLevel } from '@olympus-ai/core';
+
+/**
+ * The levels a scan can derive. L3 is absent from the type, not merely from
+ * the derivation: the M3 canary owns L3, and no scan grants it.
+ */
+export type ScanLevel = Exclude<AutonomyLevel, 3>;
+
+/** `indeterminate` is a probe that could not be executed. It derives exactly as `absent` does (I5). */
+export type ProbeOutcome = 'supported' | 'absent' | 'indeterminate';
+
+/** Groups probes in a report. A pillar carries no weight of its own; only a probe can hold a ceiling. */
+export type Pillar =
+  | 'build-system'
+  | 'testing'
+  | 'security-and-governance'
+  | 'style-and-validation'
+  | 'dev-environment'
+  | 'documentation'
+  | 'code-quality';
+
+export type ProbeId =
+  | 'build.pinned-manifest'
+  | 'build.install'
+  | 'build.clean'
+  | 'testing.adapter'
+  | 'testing.enumerate'
+  | 'testing.green-at-base'
+  | 'testing.coverage'
+  | 'testing.tamper-analysis'
+  | 'integrate.protected-paths'
+  | 'integrate.secret-scan'
+  | 'integrate.branch-protection'
+  | 'style.lint'
+  | 'style.format'
+  | 'style.typecheck'
+  | 'dev.cold-provision'
+  | 'docs.agent-instructions'
+  | 'quality.file-size';
+
+/**
+ * What a probe observed, and how. An executed probe that ran carries its exit
+ * code and a hash of its output; one the sandbox stopped (a timeout, an output
+ * overrun, a provisioning failure) carries why, and no exit code, because it
+ * has none.
+ */
+export type ProbeEvidence =
+  | {
+    readonly via: 'executed';
+    readonly argv: readonly string[];
+    readonly image: string;
+    readonly run:
+      | { readonly kind: 'exited'; readonly exitCode: number; readonly durationMs: number; readonly outputSha256: string }
+      | { readonly kind: 'stopped'; readonly reason: string; readonly durationMs: number };
+  }
+  | { readonly via: 'static'; readonly read: string }
+  | { readonly via: 'checker'; readonly checker: string }
+  | { readonly via: 'not-run'; readonly because: ProbeId };
+
+export interface ProbeResult {
+  readonly probe: ProbeId;
+  readonly pillar: Pillar;
+  readonly ceilingBearing: boolean;
+  readonly outcome: ProbeOutcome;
+  /** Why the outcome is what it is, in words a maintainer can act on. */
+  readonly detail: string;
+  readonly evidence: ProbeEvidence;
+  readonly collectedBy: 'runtime';
+}
+
+/** What holds a scanned ceiling where it is: one probe, or the rule that no scan grants L3. */
+export type HeldBy =
+  | { readonly kind: 'probe'; readonly probe: ProbeId }
+  | { readonly kind: 'scan-limit' };
+
+/**
+ * The fourth term of the effective-level formula. Never optional: a run on an
+ * unscanned repository carries `not-scanned`, which leaves the other three
+ * terms as they are and is visible as absence rather than vanishing inside a
+ * comparison (I4, R1 §4).
+ */
+export type ReadinessCeiling =
+  | { readonly kind: 'scanned'; readonly level: ScanLevel; readonly heldBy: HeldBy; readonly commit: string }
+  | { readonly kind: 'not-scanned' };
+
+export interface ReadinessReport {
+  /** The full object name of the commit scanned. */
+  readonly commit: string;
+  readonly ceiling: Extract<ReadinessCeiling, { kind: 'scanned' }>;
+  /** Every probe, in derivation order. */
+  readonly probes: readonly ProbeResult[];
+  /** Tree entries the scan could not reproduce in its copy, e.g. submodules, each named. */
+  readonly skipped: readonly string[];
+  readonly collectedBy: 'runtime';
+}
+
+===== packages/readiness/test/derive.test.ts =====
+import { describe, expect, it } from 'vitest';
+import { CEILING_BEARING, NOT_SCANNED, PROBES, deriveCeiling, renderReport, resolveWithReadiness, type ProbeId, type ProbeOutcome, type ProbeResult } from '../src/index.js';
+import { StrictPolicyEngine, type PolicyDocument, type RoleId } from '@olympus-ai/core';
+
+const result = (probe: ProbeId, outcome: ProbeOutcome): ProbeResult => ({
+  probe, pillar: 'testing', ceilingBearing: true, outcome, detail: `${probe} ${outcome}`, evidence: { via: 'static', read: 'test' }, collectedBy: 'runtime',
+});
+const allSupported = () => CEILING_BEARING.map((id) => result(id, 'supported'));
+
+describe('deriveCeiling', () => {
+  it('names the first gap in derivation order', () => {
+    const results = allSupported().map((r) => (r.probe === 'testing.green-at-base' || r.probe === 'build.clean' ? result(r.probe, 'absent') : r));
+    expect(deriveCeiling(results)).toEqual({ level: 0, heldBy: { kind: 'probe', probe: 'build.clean' } });
+  });
+
+  it('a duplicate supported result cannot outvote a gap', () => {
+    expect(deriveCeiling([...allSupported(), result('testing.coverage', 'absent')])).toEqual({ level: 1, heldBy: { kind: 'probe', probe: 'testing.coverage' } });
+  });
+
+  it('declares every probe once, advisory probes included', () => {
+    expect(new Set(PROBES.map((p) => p.id)).size).toBe(PROBES.length);
+    expect(PROBES.filter((p) => !p.ceilingBearing).map((p) => p.pillar)).toEqual(
+      expect.arrayContaining(['style-and-validation', 'dev-environment', 'documentation', 'code-quality']),
+    );
+  });
+});
+
+describe('resolveWithReadiness', () => {
+  const engine = new StrictPolicyEngine();
+  const role = 'builder' as RoleId;
+  const document: PolicyDocument = {
+    globalCap: 3,
+    stationCaps: {},
+    approvals: {},
+    roles: {
+      [role]: {
+        stations: ['build'], writableGlobs: ['**'], tools: [], network: { egress: 'none' }, tier: 'standard', tierByStation: {},
+        escalation: 'none', autonomyCeiling: 3, triggerKinds: ['human'], budget: { maxTokens: 1000, maxCostUsd: 1, maxWallClockMs: 60_000 },
+      },
+    },
+    protectedPaths: [],
+    triggers: {
+      enabled: ['human'], entryStation: { human: 'intake' }, taskTemplate: {}, maxAutonomy: { human: 3 },
+      minAuthorTrust: { human: 'owner' }, maxTriggerDepth: 1, budgetPerWindow: { runs: 1, windowMs: 1000 },
+    },
+    concurrency: { maxParallelTasks: 1, maxConflictRetries: 0 },
+  };
+
+  it('grants exactly what the engine grants when the repository is unscanned, and refuses above a scanned ceiling', () => {
+    const policy = engine.resolvePolicy(document);
+    expect(resolveWithReadiness(engine, 3, 'build', role, policy, NOT_SCANNED)).toMatchObject({ ok: true, level: 3 });
+    const refused = resolveWithReadiness(engine, 2, 'build', role, policy, { kind: 'scanned', level: 1, heldBy: { kind: 'probe', probe: 'testing.coverage' }, commit: 'c0ffee' });
+    expect(refused).toMatchObject({ ok: false, reason: 'exceeds-bound', bounds: [{ term: 'readiness', ceiling: 1 }] });
+  });
+});
+
+describe('renderReport', () => {
+  it('names the holding probe, never a score', () => {
+    const probes = allSupported().map((r) => (r.probe === 'integrate.branch-protection' ? result(r.probe, 'indeterminate') : r));
+    const text = renderReport({ commit: 'abc', ceiling: { kind: 'scanned', level: 1, heldBy: { kind: 'probe', probe: 'integrate.branch-protection' }, commit: 'abc' }, probes, skipped: [], collectedBy: 'runtime' });
+    expect(text).toContain('Readiness ceiling L1 at abc, held by integrate.branch-protection: integrate.branch-protection indeterminate');
+    expect(text).not.toMatch(/score|index/iu);
+  });
+});
+
+===== packages/readiness/test/repo.ts =====
+/**
+ * Fixture repositories and a real provider for the scan tests. These need a
+ * Docker daemon and fail without one (D-P2-02): a scan test that skipped
+ * itself would report a ceiling derived from nothing.
+ */
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
+import { promisify } from 'node:util';
+import { EGRESS_PROXY_IMAGE, LocalDockerProvider } from '@olympus-ai/sandbox';
+import { NPM_REGISTRY, SECRET_SCAN_IMAGE, type BranchProtectionChecker, type ScanOptions } from '../src/index.js';
+
+const run = promisify(execFile);
+
+export const IMAGE = EGRESS_PROXY_IMAGE;
+
+export interface Workbench {
+  readonly provider: LocalDockerProvider;
+  readonly base: string;
+}
+
+export async function withWorkbench<T>(body: (bench: Workbench) => Promise<T>): Promise<T> {
+  const base = await mkdtemp(join(tmpdir(), 'readiness-test-'));
+  try {
+    await mkdir(join(base, 'vault'));
+    const provider = await LocalDockerProvider.create({ vaultPaths: [join(base, 'vault')] });
+    return await body({ provider, base });
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+}
+
+export async function writeFiles(root: string, files: Readonly<Record<string, string>>): Promise<void> {
+  for (const [path, text] of Object.entries(files)) {
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), text);
+  }
+}
+
+/** A git repository at `root` with `files` committed. */
+export async function gitRepository(root: string, files: Readonly<Record<string, string>>): Promise<void> {
+  await writeFiles(root, files);
+  const git = (...args: string[]) => run('git', ['-C', root, '-c', 'user.email=readiness@example.invalid', '-c', 'user.name=readiness', ...args]);
+  await git('init', '--quiet', '--initial-branch=main');
+  await git('add', '--all');
+  await git('commit', '--quiet', '--message', 'fixture');
+}
+
+export function manifest(fields: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify({ name: 'fixture', version: '1.0.0', private: true, ...fields }, null, 2);
+}
+
+/** A lockfile for a package with no dependencies: `npm ci` installs it without reaching the registry. */
+export const EMPTY_LOCK = JSON.stringify({
+  name: 'fixture', version: '1.0.0', lockfileVersion: 3, requires: true,
+  packages: { '': { name: 'fixture', version: '1.0.0' } },
+});
+
+/**
+ * A lockfile for `dir`'s package.json, resolved in a sandbox on the scan's
+ * own image with egress to the registry only, so the fixture's dependency
+ * tree is the one an install in that image reproduces.
+ */
+export async function lockfileFor(bench: Workbench, dir: string): Promise<void> {
+  const handle = await bench.provider.provision({
+    image: IMAGE,
+    mounts: { workspace: { source: dir, target: '/workspace', mode: 'rw' }, others: [] },
+    egress: { mode: 'allowlist', allow: [...NPM_REGISTRY] },
+    limits: { cpus: 1, memoryMb: 1024, pids: 256, wallClockMs: 300_000 },
+    user: { uid: 0, gid: 0 },
+  });
+  try {
+    const result = await bench.provider.exec(handle, ['npm', 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+      env: { HOME: '/tmp', npm_config_update_notifier: 'false' },
+    });
+    if (result.exitCode !== 0) throw new Error(`fixture lockfile: npm exited ${String(result.exitCode)}: ${result.stderr}`);
+  } finally {
+    await bench.provider.destroy(handle);
+  }
+}
+
+export function options(bench: Workbench, checkout: string, overrides: Partial<ScanOptions> = {}): ScanOptions {
+  return {
+    checkout,
+    revision: 'HEAD',
+    provider: bench.provider,
+    image: IMAGE,
+    secretScanImage: SECRET_SCAN_IMAGE,
+    limits: { cpus: 2, memoryMb: 2048, pids: 512 },
+    user: { uid: 0, gid: 0 },
+    timeouts: { installMs: 300_000, probeMs: 180_000, coldProvisionMs: 60_000 },
+    registries: NPM_REGISTRY,
+    protectedPaths: ['package.json', '.github/**'],
+    branchProtection: null,
+    ...overrides,
+  };
+}
+
+export const PROTECTED: BranchProtectionChecker = {
+  name: 'fixture:protected',
+  check: () => Promise.resolve({ protected: true, detail: 'main requires a review and passing checks' }),
+};
+
+/** Every file under `root`, `.git` included, with its content hash: what "byte-identical" is checked against. */
+export async function treeHash(root: string): Promise<string> {
+  const entries: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else entries.push(`${relative(root, path)}\0${createHash('sha256').update(await readFile(path)).digest('hex')}`);
+    }
+  };
+  await walk(root);
+  return createHash('sha256').update(entries.sort().join('\n')).digest('hex');
+}
+
+===== packages/readiness/test/scan.test.ts =====
+/**
+ * The acceptance criteria of R1 §8 that need a scan, over real fixture
+ * repositories and a real Docker daemon.
+ */
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { renderReport, scan, type ProbeId, type ProbeResult, type ReadinessReport } from '../src/index.js';
+import { EMPTY_LOCK, PROTECTED, gitRepository, lockfileFor, manifest, options, treeHash, withWorkbench, writeFiles, type Workbench } from './repo.js';
+
+const probe = (report: ReadinessReport, id: ProbeId): ProbeResult => {
+  const found = report.probes.find((p) => p.probe === id);
+  if (found === undefined) throw new Error(`no result for ${id}`);
+  return found;
+};
+
+/** A package with vitest and v8 coverage, one source file, and one passing test. */
+async function greenRepository(bench: Workbench, dir: string, extra: Readonly<Record<string, string>> = {}): Promise<void> {
+  await writeFiles(dir, {
+    'package.json': manifest({
+      type: 'module',
+      scripts: { build: 'node -e "0"', test: 'vitest run' },
+      devDependencies: { vitest: '3.2.4', '@vitest/coverage-v8': '3.2.4' },
+    }),
+    ...extra,
+  });
+  await lockfileFor(bench, dir);
+  await gitRepository(dir, {});
+}
+
+describe('a repository that supports every ceiling-bearing probe', () => {
+  it('derives L2 held by the scan limit, deterministically, without changing the repository, with full evidence', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'green');
+      await greenRepository(bench, dir, {
+        'sum.js': 'export const sum = (a, b) => a + b;\n',
+        'sum.test.js': "import { expect, test } from 'vitest';\nimport { sum } from './sum.js';\ntest('adds', () => expect(sum(1, 2)).toBe(3));\n",
+        'AGENTS.md': '# Agents\n',
+      });
+      const before = await treeHash(dir);
+
+      const first = await scan(options(bench, dir, { branchProtection: PROTECTED }));
+      expect(first.ceiling, renderReport(first)).toMatchObject({ kind: 'scanned', level: 2, heldBy: { kind: 'scan-limit' } });
+      expect(await treeHash(dir)).toBe(before);
+
+      for (const result of first.probes) {
+        expect(result.collectedBy).toBe('runtime');
+        if (result.evidence.via !== 'executed') continue;
+        expect(result.evidence.argv.length).toBeGreaterThan(0);
+        expect(result.evidence.image).not.toBe('');
+        if (result.evidence.run.kind === 'exited') {
+          expect(Number.isInteger(result.evidence.run.exitCode)).toBe(true);
+          expect(result.evidence.run.durationMs).toBeGreaterThanOrEqual(0);
+          expect(result.evidence.run.outputSha256).toMatch(/^[0-9a-f]{64}$/u);
+        }
+      }
+      for (const id of ['build.install', 'build.clean', 'testing.green-at-base', 'testing.coverage', 'integrate.secret-scan'] as const) {
+        expect(probe(first, id).evidence.via, id).toBe('executed');
+      }
+
+      const second = await scan(options(bench, dir, { branchProtection: PROTECTED }));
+      expect(second.ceiling).toEqual(first.ceiling);
+      expect(await treeHash(dir)).toBe(before);
+    });
+  });
+});
+
+describe('a repository with no test suite', () => {
+  it('derives L0 and names the enumeration probe', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'no-suite');
+      await greenRepository(bench, dir, { 'sum.js': 'export const sum = (a, b) => a + b;\n' });
+      const report = await scan(options(bench, dir));
+      expect(probe(report, 'build.clean').outcome, renderReport(report)).toBe('supported');
+      expect(probe(report, 'testing.adapter').outcome).toBe('supported');
+      expect(report.ceiling).toMatchObject({ level: 0, heldBy: { kind: 'probe', probe: 'testing.enumerate' } });
+      expect(renderReport(report)).toContain('held by testing.enumerate');
+    });
+  });
+});
+
+/** A build that reads a file the commit does not carry: present in the working directory, ignored by git. */
+const INCREMENTAL = {
+  '.gitignore': 'dist/\n',
+  'package-lock.json': EMPTY_LOCK,
+  'package.json': manifest({ scripts: { build: 'node -e "require(\'fs\').accessSync(\'dist/prebuilt.js\')"' } }),
+};
+
+describe('a repository that builds only incrementally', () => {
+  it('derives L0 held by the clean build, reported with the argv and exit code that produced it', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'incremental');
+      await gitRepository(dir, INCREMENTAL);
+      await writeFiles(dir, { 'dist/prebuilt.js': 'module.exports = 1;\n' });
+
+      const report = await scan(options(bench, dir));
+      expect(report.ceiling, renderReport(report)).toMatchObject({ level: 0, heldBy: { kind: 'probe', probe: 'build.clean' } });
+      const built = probe(report, 'build.clean');
+      expect(built.outcome).toBe('absent');
+      if (built.evidence.via !== 'executed' || built.evidence.run.kind !== 'exited') throw new Error(`build.clean did not exit: ${built.detail}`);
+      expect(built.evidence.argv).toContain('build');
+      expect(built.evidence.run.exitCode).not.toBe(0);
+      expect(renderReport(report)).toMatch(/npm run build \(exit [1-9]/u);
+    });
+  });
+});
+
+describe('a probe that times out and a probe that fails', () => {
+  it('derive the same ceiling, and the report tells them apart', async () => {
+    await withWorkbench(async (bench) => {
+      const failing = join(bench.base, 'failing');
+      const hanging = join(bench.base, 'hanging');
+      await gitRepository(failing, { 'package-lock.json': EMPTY_LOCK, 'package.json': manifest({ scripts: { build: 'node -e "process.exit(1)"' } }) });
+      await gitRepository(hanging, { 'package-lock.json': EMPTY_LOCK, 'package.json': manifest({ scripts: { build: 'node -e "setTimeout(() => {}, 600000)"' } }) });
+      const timeouts = { installMs: 120_000, probeMs: 20_000, coldProvisionMs: 60_000 };
+
+      const failed = await scan(options(bench, failing, { timeouts }));
+      const stopped = await scan(options(bench, hanging, { timeouts }));
+      expect(probe(failed, 'build.clean').outcome, renderReport(failed)).toBe('absent');
+      expect(probe(stopped, 'build.clean').outcome, renderReport(stopped)).toBe('indeterminate');
+      expect(stopped.ceiling.level).toBe(failed.ceiling.level);
+      expect(stopped.ceiling.heldBy).toEqual(failed.ceiling.heldBy);
+      expect(probe(stopped, 'build.clean').detail).not.toBe(probe(failed, 'build.clean').detail);
+    });
+  });
+});
+
+describe('a committed secret', () => {
+  it('is found by the secret scan, which holds the ceiling below L2', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'secret');
+      // Assembled at run time so this file is not itself a finding.
+      const token = ['ghp', '_', 'k7Qx2Lm9Pz4Rt8Vw1Ny6Bc3Hd5Fg0Js2Ka7E'].join('');
+      await gitRepository(dir, { 'package-lock.json': EMPTY_LOCK, 'package.json': manifest({}), 'config.js': `export const token = '${token}';\n` });
+      const report = await scan(options(bench, dir));
+      const secret = probe(report, 'integrate.secret-scan');
+      expect(secret.outcome, renderReport(report)).toBe('absent');
+      expect(secret.detail).toContain('found leaks');
+      expect(secret.detail).not.toContain(token);
+    });
+  });
+});
+
+describe('a revision', () => {
+  it('that names no commit is refused before anything runs', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'repo');
+      await gitRepository(dir, { 'package.json': manifest({}) });
+      await expect(scan(options(bench, dir, { revision: 'no-such-branch' }))).rejects.toThrow(/has no commit 'no-such-branch'/u);
+      await expect(scan(options(bench, dir, { revision: '--output=x' }))).rejects.toThrow(/refused rather than passed to git as an option/u);
+    });
+  });
+});
+
+===== packages/readiness/tsconfig.json =====
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "test", "vitest.config.ts"]
+}
+
+===== packages/readiness/vitest.config.ts =====
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    include: ['test/**/*.test.ts'],
+    // A scan provisions several containers, and the fixtures that declare a
+    // test framework install it from the registry. Generous rather than
+    // absent: a hung daemon must still end the run.
+    testTimeout: 600_000,
+    hookTimeout: 600_000,
+    fileParallelism: false,
+  },
+});
+
+===== pnpm-lock.yaml =====
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index c302ae4..383eb88 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -108,160 +108,182 @@ settings:
+ importers:
+ 
+   .:
+     devDependencies:
+       '@changesets/cli':
+         specifier: ^3.0.2
+         version: 3.0.2
+       '@eslint/js':
+         specifier: ^10.0.1
+         version: 10.0.1(eslint@10.10.0)
+       '@types/node':
+         specifier: ^22
+         version: 22.20.1
+       eslint:
+         specifier: ^10.10.0
+         version: 10.10.0
+       typescript:
+         specifier: 6.0.3
+         version: 6.0.3
+       typescript-eslint:
+         specifier: ^8.70.0
+         version: 8.70.0(eslint@10.10.0)(typescript@6.0.3)
+       vitest:
+         specifier: ^4.1.11
+         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+ 
+   packages/adapters:
+     dependencies:
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+       '@olympus-ai/integrity':
+         specifier: workspace:*
+         version: link:../integrity
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../sandbox
+       picomatch:
+         specifier: 4.0.7
+         version: 4.0.7
+       tinyglobby:
+         specifier: 0.2.17
+         version: 0.2.17
+       typescript:
+         specifier: 6.0.3
+         version: 6.0.3
+     devDependencies:
+       '@types/picomatch':
+         specifier: ^4.0.3
+         version: 4.0.3
+       vitest:
+         specifier: ^4.1.11
+         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+ 
+   packages/api:
+     dependencies:
+       '@olympus-ai/adapters':
+         specifier: workspace:*
+         version: link:../adapters
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+       '@olympus-ai/driver-claude-code':
+         specifier: workspace:*
+         version: link:../drivers/claude-code
+       '@olympus-ai/integrity':
+         specifier: workspace:*
+         version: link:../integrity
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../sandbox
+       '@olympus-ai/vault':
+         specifier: workspace:*
+         version: link:../vault
+       picomatch:
+         specifier: 4.0.7
+         version: 4.0.7
+       yaml:
+         specifier: 2.9.1
+         version: 2.9.1
+     devDependencies:
+       '@olympus-ai/conformance':
+         specifier: workspace:*
+         version: link:../conformance
+       '@types/picomatch':
+         specifier: ^4.0.3
+         version: 4.0.3
+ 
+   packages/cli:
+     devDependencies:
+       '@olympus-ai/api':
+         specifier: workspace:*
+         version: link:../api
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../sandbox
+       '@olympus-ai/vault':
+         specifier: workspace:*
+         version: link:../vault
+ 
+   packages/conformance:
+     dependencies:
+       eslint:
+         specifier: ^10.10.0
+         version: 10.10.0
+       typescript:
+         specifier: 6.0.3
+         version: 6.0.3
+     devDependencies:
+       vitest:
+         specifier: ^4.1.11
+         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+ 
+   packages/core:
+     dependencies:
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../sandbox
+ 
+   packages/drivers/claude-code:
+     dependencies:
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../../core
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../../sandbox
+     devDependencies:
+       '@olympus-ai/conformance':
+         specifier: workspace:*
+         version: link:../../conformance
+ 
+   packages/integrity:
+     dependencies:
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+ 
++  packages/readiness:
++    dependencies:
++      '@olympus-ai/adapters':
++        specifier: workspace:*
++        version: link:../adapters
++      '@olympus-ai/core':
++        specifier: workspace:*
++        version: link:../core
++      '@olympus-ai/sandbox':
++        specifier: workspace:*
++        version: link:../sandbox
++      picomatch:
++        specifier: 4.0.7
++        version: 4.0.7
++    devDependencies:
++      '@types/picomatch':
++        specifier: ^4.0.3
++        version: 4.0.3
++      vitest:
++        specifier: ^4.1.11
++        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
++
+   packages/sandbox: {}
+ 
+   packages/triggers:
+     dependencies:
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+ 
+   packages/vault:
+     dependencies:
+       '@olympus-ai/core':
+         specifier: workspace:*
+         version: link:../core
+       '@olympus-ai/integrity':
+         specifier: workspace:*
+         version: link:../integrity
+       '@olympus-ai/sandbox':
+         specifier: workspace:*
+         version: link:../sandbox
+
+=== BUNDLE END === 7d078e4b932d667881919a2fc9e12604
