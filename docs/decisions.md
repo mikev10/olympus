@@ -3523,3 +3523,61 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 - **Ambiguous:** "every model that built a task" could mean the iterations that produced the accepted diff, or every call.
 - **Chosen:** every call. The authors are the model on each recorded result together with the model on every usage record for the reviewed tasks, including failed attempts and calls that were only begun, each distinct model once, so a seat taken after a resume that replayed a call lists the authors an uninterrupted run would (`I2.resume-derives-state-from-the-vault`). A failed iteration's tree is discarded, but its model still worked the task the reviewer judges, and the stricter set can only lower independence, never raise it.
 - **Reverse:** read only the iterations whose evidence the accepted diff came from.
+
+## R1: Readiness
+
+D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the start of the unit (Q1–Q7), plus the calls made inside that confirmed plan.
+
+### D-R1-09: probes observe in three ways, and observability left the probe set
+
+- **Ambiguous:** §3 said every probe is a sandbox command carrying an argv. But whether a test adapter exists is decided by P8's static discovery on the host, and branch protection is a fact about the host, not the repository. The Observability pillar had no definition a probe could execute.
+- **Chosen:** `ProbeEvidence` is one of `executed` (argv, image, and either an exit code, duration, and output hash, or why the sandbox stopped it), `static` (a read through the same code the line uses), `checker` (a port the caller supplies), or `not-run` (naming the probe it depends on). §8's evidence criterion now applies to executed probes. Suite enumeration is static, through `AdapterSet.test.enumerateSuites`, because that is how P6 enumerates. Readiness probes the mechanism the line will actually use. Observability is dropped from this unit, and an issue is opened for it.
+- **Why:** an argv attached to a static read would be fabricated evidence. Probing the line's own enumeration means a pass here predicts a pass at `verify`.
+- **Reverse:** to run enumeration in the sandbox instead, add `vitest list`/`jest --listTests` as an executed probe. To restore observability, add a probe once `observe` defines a channel.
+
+### D-R1-10: refusal attribution is readiness-local, and reads three policy caps
+
+- **Ambiguous:** `PolicyRefusal.reason` in the core contract has only `'exceeds-cap'`, and contract edits are out of scope (§5). The engine's cap is also three policy terms (global cap, station cap, role ceiling), not the two the spine names.
+- **Chosen:** `resolveWithReadiness` calls `engine.resolveAutonomy` unchanged. It then adds `readiness` when the request exceeds a scanned ceiling. If the engine refused over a cap, it names each policy cap the request exceeds, reading those caps from own properties as the engine does. It returns `reason: 'exceeds-bound'` with a non-empty `bounds` list. `station-forbidden` and `capability-missing` pass through untouched. If the engine refused over a cap but no cap is below the request, it throws instead of reporting an unattributed refusal.
+- **Why:** the engine stays the only authority on policy, and core does not change. Adding a refusal reason to the contract would be an amendment, not unit work.
+- **Reverse:** amend `PolicyRefusal` to carry the bound, then have the wrapper pass it through.
+
+### D-R1-11: the scan runs over a copy of the commit's tree, read raw from git
+
+- **Ambiguous:** the scan must leave the repository byte-identical, but install and build write files. A clean checkout must also exclude whatever untracked artifacts sit in a working directory.
+- **Chosen:** the scan resolves the revision to a commit, then writes that commit's tree to a temporary directory it owns. It reads the tree with `git ls-tree` and `git cat-file --batch`, never `git archive` or a checkout, because both of those apply attributes and filters the repository's own configuration names. Every executed probe mounts that directory and nothing else. Only the install has egress, and only to the registries named (npm by default). Build, tests, and tools run with no network. Submodules are recorded as skipped. A symlink that cannot be created fails the scan. Paths that could escape the copy are refused.
+- **Why:** a copy makes "read-only" true by construction, and copying from the object store is what makes an incremental-only build fail the way a fresh verify sandbox would.
+- **Reverse:** mount the checkout `ro` and copy it inside the container instead.
+
+### D-R1-12: what the build and suite probes run
+
+- **Chosen:**
+  - **Install:** `npm ci` for `package-lock.json`/`npm-shrinkwrap.json`, or `corepack pnpm install --frozen-lockfile` for `pnpm-lock.yaml`. A `yarn.lock` makes the install `indeterminate`. Several lockfiles, or none, leave the pinned-manifest probe `absent`.
+  - **Build:** the `build` script if there is one, else `tsc --noEmit` when a `tsconfig.json` exists, else `absent`.
+  - **Suite:** the framework's own binary, `vitest run` or `jest --ci`.
+  - **Coverage:** the same run with Istanbul JSON output to a directory outside the tree, and the report must exist.
+  - **Tamper analysis:** available when both the test and manifest adapters exist, since those are what P7 reads.
+- **Why:** these run the same tools the line runs, and none of them guesses.
+- **Known limit:** the pnpm path is not exercised by a test. It relies on corepack's cache, written during the install, being readable by the offline sandboxes that follow. The first repository scanned with pnpm proves or disproves it.
+- **Reverse:** change the argv tables in `scan.ts`.
+
+### D-R1-13: integrate probes
+
+- **Chosen:**
+  - **Branch protection:** answered by a `BranchProtectionChecker` the caller supplies. `null` is allowed but must be passed explicitly, and it makes the probe `indeterminate`, so the ceiling stays at L1 or below.
+  - **Secret scan:** gitleaks 8.21.2, pinned by digest, with no network, before the install so `node_modules` is never scanned. The scan uses `--exit-code 2`, which separates "leaks found" (`absent`) from the tool's own failure (`indeterminate`).
+  - **Protected paths:** at least one tracked file must match the policy's `protectedPaths`.
+- **Reverse:** wire a real GitHub checker in whichever unit stores or acts on a scan.
+
+### D-R1-14: the seven assertions land live, and the baseline is unchanged
+
+- **Ambiguous:** §6 listed seven assertions while its baseline text counted five raised and four paid down. §8 said six.
+- **Chosen:** all seven are live in this pull request, and `pending-baseline.json` is untouched. §6 and §8 were corrected first.
+- **Reverse:** none needed.
+
+### D-R1-15: the conformance scan and the package tests reach the npm registry
+
+- **Ambiguous:** proving that a repository can reach L2, or that no suite derives L0 held by enumeration, needs a real test framework installed in the sandbox.
+- **Chosen:** `packages/readiness/test/scan.test.ts` resolves its fixture lockfiles and installs vitest 3.2.4 from `registry.npmjs.org` through the sandbox's egress allowlist. The registry assertion (`I5.unsupported-stack-refuses`) uses a dependency-free fixture and needs no network.
+- **Why:** a fixture with a fake framework would prove the scan against something the line never runs.
+- **Reverse:** commit the fixture lockfiles, or serve a local registry.
