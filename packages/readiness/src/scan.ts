@@ -10,8 +10,8 @@
  * A probe the sandbox stopped — a timeout, an output overrun, a provisioning
  * failure — is `indeterminate`, and derives as `absent` (I5).
  */
-import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildAdapterSet, JestAdapter, VitestAdapter, type AdapterSet } from '@olympus-ai/adapters';
@@ -74,7 +74,6 @@ export interface ScanOptions {
 
 const MOUNT = '/scan';
 const TREE = `${MOUNT}/tree`;
-const COVERAGE_DIR = `${MOUNT}/out/coverage`;
 const ENV: Readonly<Record<string, string>> = {
   HOME: `${MOUNT}/home`,
   npm_config_cache: `${MOUNT}/home/.npm`,
@@ -90,8 +89,8 @@ const LOCKFILES = { 'pnpm-lock.yaml': 'pnpm', 'package-lock.json': 'npm', 'npm-s
 type Manager = (typeof LOCKFILES)[keyof typeof LOCKFILES];
 
 /** Runs `argv` with the copied tree as its working directory. The wrapper is part of the argv the report records. */
-function inTree(argv: readonly string[], then?: string): string[] {
-  return ['sh', '-c', `cd ${TREE} && "$@"${then === undefined ? '' : ` && ${then}`}`, 'readiness', ...argv];
+function inTree(argv: readonly string[]): string[] {
+  return ['sh', '-c', `cd ${TREE} && "$@"`, 'readiness', ...argv];
 }
 
 interface Context {
@@ -401,21 +400,50 @@ async function build(ctx: Context, manifest: Manifest, runner: readonly string[]
 
 async function suite(ctx: Context, test: AdapterSet['test'], kind: 'green' | 'coverage'): Promise<Observation> {
   if (test === null) return { outcome: 'indeterminate', detail: 'no test adapter, so no suite can run', evidence: { via: 'not-run', because: 'testing.adapter' } };
-  const report = `${COVERAGE_DIR}/coverage-final.json`;
+  // A directory made empty for this run alone, so no earlier probe's file can stand in for this run's report.
+  const name = `${kind}-${randomUUID()}`;
+  await mkdir(join(ctx.scanDir, 'out', name));
+  const out = `${MOUNT}/out/${name}`;
   let argv: string[];
   if (test instanceof VitestAdapter) {
     argv = kind === 'green'
-      ? ['node_modules/.bin/vitest', 'run']
-      : ['node_modules/.bin/vitest', 'run', '--coverage.enabled=true', '--coverage.reporter=json', `--coverage.reportsDirectory=${COVERAGE_DIR}`];
+      ? ['node_modules/.bin/vitest', 'run', '--reporter=json', `--outputFile=${out}/results.json`]
+      : ['node_modules/.bin/vitest', 'run', '--coverage.enabled=true', '--coverage.reporter=json', `--coverage.reportsDirectory=${out}`];
   } else if (test instanceof JestAdapter) {
     argv = kind === 'green'
-      ? ['node_modules/.bin/jest', '--ci']
-      : ['node_modules/.bin/jest', '--ci', '--coverage', '--coverageReporters=json', `--coverageDirectory=${COVERAGE_DIR}`];
+      ? ['node_modules/.bin/jest', '--ci', '--json', `--outputFile=${out}/results.json`]
+      : ['node_modules/.bin/jest', '--ci', '--coverage', '--coverageReporters=json', `--coverageDirectory=${out}`];
   } else {
     return { outcome: 'indeterminate', detail: `no command is known for the ${test.stack} adapter`, evidence: { via: 'static', read: 'the adapter set' } };
   }
-  if (kind === 'green') return judged(await execute(ctx, inTree(argv)), 'the suite at base');
-  return judged(await execute(ctx, inTree(argv, `test -s ${report}`)), 'the suite with coverage, writing an Istanbul report');
+  const what = kind === 'green' ? 'the suite at base' : 'the suite with coverage, writing an Istanbul report';
+  const ran = judged(await execute(ctx, inTree(argv)), what);
+  if (ran.outcome !== 'supported') return ran;
+  // An exit 0 says the runner found nothing to fail; the report says whether anything ran (I5).
+  const report = await readReport(join(ctx.scanDir, 'out', name, kind === 'green' ? 'results.json' : 'coverage-final.json'));
+  if (report === null) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and wrote no readable report` };
+  if (kind === 'green') {
+    const passed = report.numPassedTests;
+    const failed = report.numFailedTests;
+    if (typeof passed !== 'number' || typeof failed !== 'number') return { ...ran, outcome: 'absent', detail: `${what} exited 0 and its report carries no test counts` };
+    if (failed > 0) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and its report counts ${String(failed)} failed` };
+    if (passed < 1) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and no test passed: every test was skipped, todo, or filtered out` };
+    return { ...ran, detail: `${what} exited 0 with ${String(passed)} test(s) passed` };
+  }
+  const measured = Object.values(report).filter((entry) => typeof entry === 'object' && entry !== null && 's' in entry).length;
+  if (measured === 0) return { ...ran, outcome: 'absent', detail: `${what} exited 0 and measured no file` };
+  return { ...ran, detail: `${what} exited 0 and measured ${String(measured)} file(s)` };
+}
+
+/** A JSON object the sandbox wrote as a regular file, or null for anything else. */
+async function readReport(path: string): Promise<Readonly<Record<string, unknown>> | null> {
+  try {
+    if (!(await lstat(path)).isFile()) return null;
+    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function tool(ctx: Context, argv: readonly string[], what: string): Promise<Observation> {

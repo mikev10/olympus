@@ -78,6 +78,41 @@ describe('a repository with no test suite', () => {
   });
 });
 
+describe('a suite whose every test is skipped', () => {
+  it('is not green at base: an exit 0 with nothing passed holds the ceiling at L0', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'skipped');
+      await greenRepository(bench, dir, {
+        'sum.js': 'export const sum = (a, b) => a + b;\n',
+        'sum.test.js': "import { expect, test } from 'vitest';\nimport { sum } from './sum.js';\ntest.skip('adds', () => expect(sum(1, 2)).toBe(3));\n",
+      });
+      const report = await scan(options(bench, dir, { branchProtection: PROTECTED }));
+      expect(probe(report, 'testing.enumerate').outcome, renderReport(report)).toBe('supported');
+      expect(probe(report, 'testing.green-at-base').outcome).toBe('absent');
+      expect(probe(report, 'testing.green-at-base').detail).toMatch(/no test passed/u);
+      expect(report.ceiling).toMatchObject({ level: 0, heldBy: { kind: 'probe', probe: 'testing.green-at-base' } });
+    });
+  });
+});
+
+describe('a coverage run that measures no file', () => {
+  it('is not coverage: an empty Istanbul report holds the ceiling at L1', async () => {
+    await withWorkbench(async (bench) => {
+      const dir = join(bench.base, 'unmeasured');
+      await greenRepository(bench, dir, {
+        'sum.js': 'export const sum = (a, b) => a + b;\n',
+        'sum.test.js': "import { expect, test } from 'vitest';\nimport { sum } from './sum.js';\ntest('adds', () => expect(sum(1, 2)).toBe(3));\n",
+        'vitest.config.js': "export default { test: { coverage: { include: ['nothing/**'] } } };\n",
+      });
+      const report = await scan(options(bench, dir, { branchProtection: PROTECTED }));
+      expect(probe(report, 'testing.green-at-base').outcome, renderReport(report)).toBe('supported');
+      expect(probe(report, 'testing.coverage').outcome).toBe('absent');
+      expect(probe(report, 'testing.coverage').detail).toMatch(/measured no file/u);
+      expect(report.ceiling).toMatchObject({ level: 1, heldBy: { kind: 'probe', probe: 'testing.coverage' } });
+    });
+  });
+});
+
 /** A build that reads a file the commit does not carry: present in the working directory, ignored by git. */
 const INCREMENTAL = {
   '.gitignore': 'dist/\n',

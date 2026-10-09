@@ -74,7 +74,7 @@ function policies(base: Policy): Policy[] {
 export const READINESS_OUTCOME_IS_RUNTIME_DERIVED: LocalAssertion = compileError({
   id: 'I2.readiness-outcome-is-runtime-derived',
   title:
-    "ProbeResult and ReadinessReport carry collectedBy: 'runtime' and no other value, and no field of either can be written after the runtime built it; a model- or driver-supplied outcome does not typecheck",
+    "ProbeResult and ReadinessReport carry collectedBy: 'runtime' and no other value, and no field of either can be written after it is built; an outcome labelled as a model's or a driver's does not typecheck. A shape check: the label is a literal any caller can write, so where an outcome came from rests on scan() being what builds it, not on this type",
   fixture: 'i2/readiness-outcome-is-runtime-derived.ts',
 });
 
