@@ -1,3 +1,59 @@
+# External review of R1, gemini, 2026-10-08
+
+An adversarial pre-merge review of R1 (repository readiness): `materialize`
+in `tree.ts`, `scan` and its probes in `scan.ts`, the probe tiers and
+`deriveCeiling`, `resolveWithReadiness` and its cap attribution, and the
+conformance assertions and type fixtures that state those properties. One of
+two reviews run from the same prompt and bundle; the other is
+`2026-10-08-R1-readiness-review-codex.md`. Both are triaged in
+`2026-10-08-R1-readiness-triage.md`, which cites this review's findings as
+`gemini-1` to `gemini-3`, as the reply numbers them.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`
+  (`generativelanguage/v1beta`), offering no tools. `cleanRoom` is `null`
+  because an API call loads no local configuration. Exit 0, not timed out,
+  229.6 s. Ingestion `complete`: 44,843 prompt tokens against a floor of
+  32,028. Integrity `verified`: the reply echoes every required bundle marker.
+  Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `9844129dfb214af8ab0b839c90b13e98fa4628806ea13b68c039294856048a71`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-1 (static and executed probes share one
+  writable scan directory, so the build script can rewrite what the suite
+  probes run) was raised by codex too, as codex-2. gemini-2 and codex-1 both
+  concern symlinks that `materialize` reconstructs on the host, but by
+  different mechanisms (a host-side read through a link, against a write
+  through a colliding destination path), and are not paired. gemini-2 and
+  gemini-3 were raised by gemini alone.
+- **Date:** 2026-10-08 (run started 2026-10-08T20:32Z).
+- **Bundle:** `2026-10-08-R1-readiness-review-bundle.txt`, SHA-256
+  `356f9f3cfff3af288a7addb85116a616410f270518c6fe6355e48552d5a2d81f`, base
+  `0023602` (`reviewed/R14`), head `0f7a3d8` ("R1: Readiness"). It held the
+  full contents of 24 of the 26 changed paths in that one commit: the
+  `readiness` package source and tests, the conformance registry entries and
+  the two type fixtures, the changeset, configuration, and the lockfile diff.
+  The changed `docs/decisions.md` and `docs/plan/R1-readiness.md` were
+  excluded, and so was every unchanged file. Prompt:
+  `2026-10-08-R1-readiness-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  about the project and performed no external lookups. This is a self-report
+  and is not independently verifiable.
+- **Coverage, and any gap:** items 1 (gemini-1, gemini-2), 4 ("Language
+  Escapes: none found"), 6 (the "Sound Mechanisms" list) and 7 (the framing is
+  "exactly the right question") were answered. Item 2 (tautological checks)
+  and item 5 (configuration satisfied without doing what it appears to do)
+  came back empty: the reply neither reports a finding nor states that it
+  found none. Item 3 (fail-open) is touched only by gemini-3's remark that the
+  memory exhaustion it describes fails closed; it makes no general statement.
+  Silence on those items is not a clearance.
+- **Citations:** line numbers refer to positions in the bundle's files (new
+  side of each diff), not to the repository. They are hints; the triage
+  locates each construct before citing it.
+
+---
+
 BASE: 0023602
 HEAD: 0f7a3d8
 pnpm-lock.yaml

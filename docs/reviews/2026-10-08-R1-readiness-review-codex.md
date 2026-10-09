@@ -1,3 +1,61 @@
+# External review of R1, codex, 2026-10-08
+
+An adversarial pre-merge review of R1 (repository readiness): `materialize`
+in `tree.ts`, `scan` and its probes in `scan.ts`, the probe tiers and
+`deriveCeiling`, `resolveWithReadiness` and its cap attribution, and the
+conformance assertions and type fixtures that state those properties. One of
+two reviews run from the same prompt and bundle; the other is
+`2026-10-08-R1-readiness-review-gemini.md`. Both are triaged in
+`2026-10-08-R1-readiness-triage.md`, which cites this review's findings as
+`codex-1` to `codex-8`, as the reply numbers them.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 284.1 s. Ingestion `complete`: 54,082
+  input tokens against a floor of 32,028. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `02d9d666e798086b0621943990330327ee9edced49f045af7757ce528a04360b`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-2 (repository commands run in one
+  writable scan directory, so an earlier command can rewrite what later probes
+  execute and read) was raised by gemini too, as gemini-1. codex-1 and
+  gemini-2 both concern symlinks that `materialize` reconstructs on the host,
+  but by different mechanisms (a write through a colliding destination path,
+  against a host-side read through a link), and are not paired. codex-1 and
+  codex-3 to codex-8 were raised by codex alone.
+- **Date:** 2026-10-08 (run started 2026-10-08T20:27Z).
+- **Bundle:** `2026-10-08-R1-readiness-review-bundle.txt`, SHA-256
+  `356f9f3cfff3af288a7addb85116a616410f270518c6fe6355e48552d5a2d81f`, base
+  `0023602` (`reviewed/R14`), head `0f7a3d8` ("R1: Readiness"). It held the
+  full contents of 24 of the 26 changed paths in that one commit: the
+  `readiness` package source and tests, the conformance registry entries and
+  the two type fixtures, the changeset, configuration, and the lockfile diff.
+  The changed `docs/decisions.md` and `docs/plan/R1-readiness.md` were
+  excluded, and so was every unchanged file. Prompt:
+  `2026-10-08-R1-readiness-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups, and that shell execution was blocked,
+  so its findings are source readings, not reproductions. This is a
+  self-report and is not independently verifiable.
+- **Coverage, and any gap:** the reply does not number its answers by prompt
+  item, but each of the seven is addressed: item 1 by codex-1, codex-2 and
+  codex-7; item 2 by codex-5; item 3 by codex-3 and codex-4; item 4 by codex-8;
+  item 5 by codex-6; item 6 by the closing list of sound mechanisms; item 7 by
+  the closing paragraph, which argues the readiness half of the framing asks
+  the wrong question (which observations are independently checked, against
+  which merely repeat a repository-chosen command's success).
+- **Citations:** line numbers refer to positions in the bundle's files (new
+  side of each diff), not to the repository. They are hints; the triage
+  locates each construct before citing it.
+
+---
+
 BASE: 0023602  
 HEAD: 0f7a3d8  
 pnpm-lock.yaml  
