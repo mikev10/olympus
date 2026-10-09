@@ -3523,3 +3523,110 @@ The maintainer set the cap on 2026-10-03 (D-A-I1-08). The relay's per-call budge
 - **Ambiguous:** "every model that built a task" could mean the iterations that produced the accepted diff, or every call.
 - **Chosen:** every call. The authors are the model on each recorded result together with the model on every usage record for the reviewed tasks, including failed attempts and calls that were only begun, each distinct model once, so a seat taken after a resume that replayed a call lists the authors an uninterrupted run would (`I2.resume-derives-state-from-the-vault`). A failed iteration's tree is discarded, but its model still worked the task the reviewer judges, and the stricter set can only lower independence, never raise it.
 - **Reverse:** read only the iterations whose evidence the accepted diff came from.
+
+## R1: Readiness
+
+D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the start of the unit (Q1–Q7), plus the calls made inside that confirmed plan.
+
+### D-R1-09: probes observe in three ways, and observability left the probe set
+
+- **Ambiguous:** §3 said every probe is a sandbox command carrying an argv. But whether a test adapter exists is decided by P8's static discovery on the host, and branch protection is a fact about the host, not the repository. The Observability pillar had no definition a probe could execute.
+- **Chosen:** `ProbeEvidence` is one of `executed` (argv, image, and either an exit code, duration, and output hash, or why the sandbox stopped it), `static` (a read through the same code the line uses), `checker` (a port the caller supplies), or `not-run` (naming the probe it depends on). §8's evidence criterion now applies to executed probes. Suite enumeration is static, through `AdapterSet.test.enumerateSuites`, because that is how P6 enumerates. Readiness probes the mechanism the line will actually use. Observability is dropped from this unit, and an issue is opened for it.
+- **Why:** an argv attached to a static read would be fabricated evidence. Probing the line's own enumeration means a pass here predicts a pass at `verify`.
+- **Reverse:** to run enumeration in the sandbox instead, add `vitest list`/`jest --listTests` as an executed probe. To restore observability, add a probe once `observe` defines a channel.
+
+### D-R1-10: refusal attribution is readiness-local, and reads three policy caps
+
+- **Ambiguous:** `PolicyRefusal.reason` in the core contract has only `'exceeds-cap'`, and contract edits are out of scope (§5). The engine's cap is also three policy terms (global cap, station cap, role ceiling), not the two the spine names.
+- **Chosen:** `resolveWithReadiness` calls `engine.resolveAutonomy` unchanged. It then adds `readiness` when the request exceeds a scanned ceiling. If the engine refused over a cap, it names each policy cap the request exceeds, reading those caps from own properties as the engine does. It returns `reason: 'exceeds-bound'` with a non-empty `bounds` list. `station-forbidden` and `capability-missing` pass through untouched. If the engine refused over a cap but no cap is below the request, it throws instead of reporting an unattributed refusal.
+- **Why:** the engine stays the only authority on policy, and core does not change. Adding a refusal reason to the contract would be an amendment, not unit work.
+- **Reverse:** amend `PolicyRefusal` to carry the bound, then have the wrapper pass it through.
+
+### D-R1-11: the scan runs over a copy of the commit's tree, read raw from git
+
+- **Ambiguous:** the scan must leave the repository byte-identical, but install and build write files. A clean checkout must also exclude whatever untracked artifacts sit in a working directory.
+- **Chosen:** the scan resolves the revision to a commit, then writes that commit's tree to a temporary directory it owns. It reads the tree with `git ls-tree` and `git cat-file --batch`, never `git archive` or a checkout, because both of those apply attributes and filters the repository's own configuration names. Every executed probe mounts that directory and nothing else. Only the install has egress, and only to the registries named (npm by default). Build, tests, and tools run with no network. Submodules are recorded as skipped. A symlink that cannot be created fails the scan. Paths that could escape the copy are refused. After review (D-R1-16), that refusal covers four cases: a name that is not UTF-8, a symlink whose target could resolve outside the copy, a write through a path the copy already holds as a symlink or file, and a file the copy already holds.
+- **Why:** a copy makes "read-only" true by construction, and copying from the object store is what makes an incremental-only build fail the way a fresh verify sandbox would.
+- **Reverse:** mount the checkout `ro` and copy it inside the container instead.
+
+### D-R1-12: what the build and suite probes run
+
+- **Chosen:**
+  - **Install:** `npm ci` for `package-lock.json`/`npm-shrinkwrap.json`, or `corepack pnpm install --frozen-lockfile` for `pnpm-lock.yaml`. A `yarn.lock` makes the install `indeterminate`. Several lockfiles, or none, leave the pinned-manifest probe `absent`.
+  - **Build:** the `build` script if there is one, else `tsc --noEmit` when a `tsconfig.json` exists, else `absent`.
+  - **Suite:** the framework's own binary, `vitest run` or `jest --ci`.
+  - **Coverage:** the same run with Istanbul JSON output to a directory outside the tree, and the report must exist. After review (D-R1-17), the directory is new and empty for each run, the suite writes its own JSON results there too, and the runtime reads both reports.
+  - **Tamper analysis:** available when both the test and manifest adapters exist, since those are what P7 reads.
+- **Why:** these run the same tools the line runs, and none of them guesses.
+- **Known limit:** the pnpm path is not exercised by a test. It relies on corepack's cache, written during the install, being readable by the offline sandboxes that follow. The first repository scanned with pnpm proves or disproves it.
+- **Reverse:** change the argv tables in `scan.ts`.
+
+### D-R1-13: integrate probes
+
+- **Chosen:**
+  - **Branch protection:** answered by a `BranchProtectionChecker` the caller supplies. `null` is allowed but must be passed explicitly, and it makes the probe `indeterminate`, so the ceiling stays at L1 or below.
+  - **Secret scan:** gitleaks 8.21.2, pinned by digest, with no network, before the install so `node_modules` is never scanned. The scan uses `--exit-code 2`, which separates "leaks found" (`absent`) from the tool's own failure (`indeterminate`).
+  - **Protected paths:** at least one tracked file must match the policy's `protectedPaths`.
+- **Reverse:** wire a real GitHub checker in whichever unit stores or acts on a scan.
+
+### D-R1-14: the seven assertions land live, and the baseline is unchanged
+
+- **Ambiguous:** §6 listed seven assertions while its baseline text counted five raised and four paid down. §8 said six.
+- **Chosen:** all seven are live in this pull request, and `pending-baseline.json` is untouched. §6 and §8 were corrected first.
+- **Reverse:** none needed.
+
+### D-R1-15: the conformance scan and the package tests reach the npm registry
+
+- **Ambiguous:** proving that a repository can reach L2, or that no suite derives L0 held by enumeration, needs a real test framework installed in the sandbox.
+- **Chosen:** `packages/readiness/test/scan.test.ts` resolves its fixture lockfiles and installs vitest 3.2.4 from `registry.npmjs.org` through the sandbox's egress allowlist. The registry assertion (`I5.unsupported-stack-refuses`) uses a dependency-free fixture and needs no network.
+- **Why:** a fixture with a fake framework would prove the scan against something the line never runs.
+- **Reverse:** commit the fixture lockfiles, or serve a local registry.
+
+### D-R1-16: the copy refuses names and links that could land outside it
+
+- **Found:** by the external review (codex-1, gemini-2), reproduced. `materialize` decoded `ls-tree -z` output as lenient UTF-8, so two names that are not UTF-8 both became U+FFFD. A symlink written under the first then carried the write of the second outside the copy, on the host, before any sandbox. Symlinks were also written with any target, so a committed `package.json` linking to an absolute path made the host-side manifest read return content the commit does not hold, and that content decided `build.pinned-manifest` and the build command.
+- **Chosen:** the listing is read as bytes, and a name that is not UTF-8 is refused. A symlink's target must be relative, may climb with `..` only at its start and no higher than its own directory, and may not contain `..` after a name, because a name can itself be a link. Each parent directory is created one at a time and refused if it already exists as a symlink or a file. A file is written with `wx`, so a path the filesystem folds into one already written is never written through. A refusal kills `git cat-file` before throwing. `packages/readiness/test/tree.test.ts` builds each case object by object.
+- **Why:** the copy is the boundary every host-side read and every sandbox mount trusts. Refusing at the copy covers readers this package does not own, such as the adapters' own reads, which a check at each reader would miss.
+- **Reverse:** none intended. To admit links that climb out deliberately, resolve them against the copy's real path and refuse only when the result leaves it.
+
+### D-R1-17: the suite probes read what the runner reported, not only its exit code
+
+- **Found:** by the external review (codex-3, codex-4), reproduced against the scan. A suite whose every test is skipped exits 0, so `testing.green-at-base` was `supported` with nothing run. A coverage run that measured no file wrote `{}`, and `test -s` accepted it, as it would have accepted any non-empty file an earlier probe left at the fixed path.
+- **Chosen:** each suite run gets a new, empty directory under `out/` named for that run. The green run writes the runner's JSON results there (`--reporter=json`, or `--json`), and the runtime requires at least one passed test and none failed. The coverage run writes its Istanbul report there, and the runtime requires at least one measured file. A report that is missing, not a regular file, or not a JSON object is `absent`. Tests: "a suite whose every test is skipped" and "a coverage run that measures no file" in `scan.test.ts`.
+- **Why:** exit 0 means the runner found nothing to fail. The report says whether anything ran (I5).
+- **Reverse:** return to exit-code judgment in `suite()`.
+
+### D-R1-18: executed probes trust the code the repository runs
+
+- **Found:** by the external review (codex-2, gemini-1). Install, build, suite, coverage and the style tools share one writable scan directory, so an earlier repository command can replace `node_modules/.bin/*` or the tests a later probe runs.
+- **Chosen:** known limit, no change. Every executed probe runs repository code. Install lifecycle scripts run before everything else, and a repository's test script or config can exit 0 by itself, so a fresh tree per probe would not close this. A repository acting deceptively can fake any executed probe. R1's threat model assumes no deceptive intent, only the easy path, and D-R1-17 closes the easy-path cases: an all-skipped suite, an empty report, and a stale file.
+- **Why:** an executed probe establishes that the repository's own command reported success, not that the property holds. The ceiling is a readiness signal for the factory's own runs, whose verify station re-runs the hashed acceptance tests independently (I3).
+- **Reverse:** to resist a deceptive repository, run probes with runner binaries and configuration the runtime supplies, outside the repository's writable tree. That is a different unit with a different threat model.
+
+### D-R1-19: per-probe deletion coverage, and the gap in I8's readiness entry
+
+- **Found:** by the external review (codex-5), tested by mutation. `I8.ceiling-bearing-probe-has-an-assertion` builds outcomes and calls `deriveCeiling`, and never runs a probe. Making `tamperAnalysis` return `supported` unconditionally left that entry and every package test passing.
+- **Chosen:** the entry meets R1 §6 as written ("deleting the probe fails it": removing it from the declared set). A negative fixture per ceiling-bearing probe is a new deliverable, and most need Docker, so it is left to an amendment, tracked as issue #33. Coverage of the probe checks as of the review fixes: `integrate.secret-scan`, `testing.enumerate`, `build.clean`, `testing.green-at-base` and `testing.coverage` have negative scan tests, and `testing.adapter` has one in `I5.unsupported-stack-refuses`. `build.pinned-manifest`, `build.install`, `testing.tamper-analysis`, `integrate.protected-paths` and `integrate.branch-protection` have none.
+- **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, the capability is its check, not its place in the set.
+- **Reverse:** the amendment lands one negative fixture per probe, and the I8 entry runs them.
+
+### D-R1-20: `testing.tamper-analysis` means the analysis is available
+
+- **Found:** by the external review (codex-6). The probe returns `supported` when the test and manifest adapters exist, and runs no analysis.
+- **Chosen:** no change. The probe means "this stack's tamper analysis is available", which is what R1's spec asks for ("unavailable for the stack") and what D-R1-12 chose. The analysis itself runs at verify, under P7, which refuses what it cannot analyze there (D-P7-06).
+- **Why:** running P7's analysis at scan time would judge a base commit that no change has touched yet.
+- **Reverse:** call the analysis on the base tree and require it to complete.
+
+### D-R1-21: the ceiling covers the scanned tree; submodules are their own repositories
+
+- **Found:** by the external review (codex-7). Gitlinks are listed in `skipped` and never reach `deriveCeiling`, so a root that passes reaches L2 whatever a submodule holds.
+- **Chosen:** no change. A run on this repository changes a submodule's pointer, not its content. Root code that imports a submodule fails `build.clean`, because the copy omits it. The ceiling therefore states the readiness of the tree a run changes. A submodule is scanned as its own repository, and the report's `skipped` names each one.
+- **Why:** refusing L2 for any submodule would hold a repository below the level its own tree supports, for code no run on it can change.
+- **Reverse:** have `deriveCeiling` take `skipped`, and hold the ceiling while it is non-empty.
+
+### D-R1-22: a large blob is held in memory while it is copied
+
+- **Found:** by the external review (gemini-3). `materialize` grows one buffer per blob with `Buffer.concat`, so copying is quadratic in a blob's size and the whole blob is held at once. No size limit applies to `git cat-file`.
+- **Chosen:** known limit, no change. A huge blob makes the scan fail, which is closed: it never yields a wrong ceiling.
+- **Why:** this costs only resources, and the scan's caller owns its process limits.
+- **Reverse:** stream each blob to disk, and refuse blobs over a size read from `ls-tree -l`.

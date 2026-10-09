@@ -246,6 +246,28 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/readiness:
+    dependencies:
+      '@olympus-ai/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      picomatch:
+        specifier: 4.0.7
+        version: 4.0.7
+    devDependencies:
+      '@types/picomatch':
+        specifier: ^4.0.3
+        version: 4.0.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+
   packages/sandbox: {}
 
   packages/triggers:
