@@ -1,3 +1,63 @@
+# External review of R2, codex, 2026-10-11
+
+An adversarial pre-merge review of R2 (outcome measurement): `outcomes.ts` and
+the bounds in `bounds.ts`, the run endings and record-only standing in
+`run.ts`, GitHub's merge time in `integrate.ts`, the run listing in both
+vaults, the HTTP and CLI surfaces, and the conformance entries that state those
+properties, together with the R1 amendment's negative fixtures that share the
+diff range. One of two reviews run from the same prompt and bundle; the other
+is `2026-10-11-R2-outcome-measurement-review-gemini.md`. Both are triaged in
+`2026-10-11-R2-outcome-measurement-triage.md`, which cites this review's
+findings as `codex-1` to `codex-6`, as the reply numbers them.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 127.8 s. Ingestion `complete`: 80,532
+  input tokens against a floor of 52,054. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `5e4d91fc9105293a46a49b39b903b356e05910d9a8de6a9816a906b4d56f9497`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-2 (a merge read from the integration
+  record while spent approvals are read from run state, so a run can read as
+  merged with no approval spent) was raised by gemini too, as gemini-1; codex-2
+  also names a concurrent-reader interleaving that gemini-1 does not. codex-1
+  and codex-3 to codex-6 were raised by codex alone.
+- **Date:** 2026-10-11 (run started 2026-10-11T22:41Z).
+- **Bundle:** `2026-10-11-R2-outcome-measurement-review-bundle.txt`, SHA-256
+  `3a2cb047dfb3610f00af4b03f23f181a488776c6eec803890a098880df57cf34`, base
+  `9021655` (`reviewed/R1`), head `0a7141d` ("R2: outcome measurement"). The
+  range holds three commits: the R1 amendment adding a negative fixture for
+  every ceiling-bearing probe (#34), the R2 spec and amendments, and R2 itself.
+  It held the full contents or whole-function diffs of 32 of the 36 changed
+  paths; the four documentation paths (`docs/decisions.md`,
+  `docs/plan/DECOMPOSITION.md`, `docs/plan/R1-readiness.md`,
+  `docs/plan/R2-outcomes.md`) were excluded, and so was every unchanged file.
+  Prompt: `2026-10-11-R2-outcome-measurement-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups, and that filesystem access was blocked,
+  so it neither checked the bundle hash nor ran tests; its findings are source
+  readings, not reproductions. This is a self-report and is not independently
+  verifiable.
+- **Coverage, and any gap:** the reply numbers findings, not prompt items.
+  Items 1 and 3 are answered by codex-1 to codex-6; item 2 by the paragraph
+  finding no wholly tautological new test; item 4 by the paragraph on type
+  assertions and JSON casts; item 6 by the list of sound mechanisms; item 7 by
+  the closing paragraph, which accepts the framing and adds that the bounds'
+  sampling assumptions (correlated attempts, caller-chosen windows) are
+  unestablished. Item 5 (configuration satisfied without doing what it appears
+  to do) received no answer.
+- **Citations:** line numbers refer to positions in the bundle's files (new
+  side of each diff), not to the repository. They are hints; the triage
+  locates each construct before citing it.
+
+---
+
 BASE: 9021655  
 HEAD: 0a7141d  
 packages/vault/src/types.ts  

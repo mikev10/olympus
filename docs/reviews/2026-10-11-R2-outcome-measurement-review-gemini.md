@@ -1,3 +1,58 @@
+# External review of R2, gemini, 2026-10-11
+
+An adversarial pre-merge review of R2 (outcome measurement): `outcomes.ts` and
+the bounds in `bounds.ts`, the run endings and record-only standing in
+`run.ts`, GitHub's merge time in `integrate.ts`, the run listing in both
+vaults, the HTTP and CLI surfaces, and the conformance entries that state those
+properties, together with the R1 amendment's negative fixtures that share the
+diff range. One of two reviews run from the same prompt and bundle; the other
+is `2026-10-11-R2-outcome-measurement-review-codex.md`. Both are triaged in
+`2026-10-11-R2-outcome-measurement-triage.md`, which cites this review's
+findings as `gemini-1` to `gemini-4`, numbered in the order they appear under
+the reply's item-1 heading (the reply itself does not number them).
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools; `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 251.2 s. Ingestion `complete`: 75,780
+  prompt tokens against a floor of 52,054. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `86ed4ec785467588f3f1230aff313643a69d1994915b69095fafa996178ea614`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-1 (a run that halts after the integration
+  record is written but before run state records the spent approval reads as
+  merged and autonomous) was raised by codex too, as codex-2. gemini-2 to
+  gemini-4 were raised by gemini alone.
+- **Date:** 2026-10-11 (run started 2026-10-11T22:41Z).
+- **Bundle:** `2026-10-11-R2-outcome-measurement-review-bundle.txt`, SHA-256
+  `3a2cb047dfb3610f00af4b03f23f181a488776c6eec803890a098880df57cf34`, base
+  `9021655` (`reviewed/R1`), head `0a7141d` ("R2: outcome measurement"). The
+  range holds three commits: the R1 amendment adding a negative fixture for
+  every ceiling-bearing probe (#34), the R2 spec and amendments, and R2 itself.
+  It held the full contents or whole-function diffs of 32 of the 36 changed
+  paths; the four documentation paths (`docs/decisions.md`,
+  `docs/plan/DECOMPOSITION.md`, `docs/plan/R1-readiness.md`,
+  `docs/plan/R2-outcomes.md`) were excluded, and so was every unchanged file.
+  Prompt: `2026-10-11-R2-outcome-measurement-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no lookups. This is a self-report and is not
+  independently verifiable.
+- **Coverage, and any gap:** the reply answers three of the seven prompt items
+  under their own headings: item 1 (all four findings), item 6 (sound
+  mechanisms: the bounds, approval-wait collapsing, unmetered-usage exclusion)
+  and item 7 (the framing is right). Items 2 (tautological checks), 3 (fail
+  open), 4 (language escape hatches) and 5 (configuration) came back empty;
+  gemini-4 describes a fail-open validation but is filed under item 1.
+  Silence on those four items is not a finding that they are clean.
+- **Citations:** line numbers refer to positions in the bundle's files (new
+  side of each diff), not to the repository. They are hints; the triage
+  locates each construct before citing it.
+
+---
+
 BASE: 9021655
 HEAD: 0a7141d
 packages/vault/src/types.ts
