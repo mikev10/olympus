@@ -1,6 +1,6 @@
 import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
-import { RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
+import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
@@ -67,6 +67,7 @@ export const I2: InvariantEntry = {
     RELAY_BOUND_TO_TIER_MODEL,
     // R2: a rate over every run reads the set the store names, never one a caller chose.
     VAULT_LISTS_EVERY_RUN,
+    OUTCOMES_DERIVED_FROM_RUN_RECORDS,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',

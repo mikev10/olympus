@@ -9,7 +9,7 @@ import type { ModelIdentity, RunId, StationId, TaskAttempts, TaskId, TaskStatus 
 import type { EnforcementDecision, EvidenceBundle, IntegrationRecord, Vault } from '@olympus-ai/vault';
 import { costTotals, readUsage, type CostTotals } from './cost.js';
 import { readIntegration } from './line.js';
-import { runStanding, type RunStanding } from './run.js';
+import { runStanding, type RunStanding, type StandingSource } from './run.js';
 
 /** Where a station's exit gate stands, derived from the run's position and standing. */
 export type GateOutcome = 'passed' | 'awaiting-approval' | 'stopped' | 'open' | 'not-reached';
@@ -29,6 +29,8 @@ export interface RunReport {
   readonly runId: RunId;
   readonly requestedLevel: number;
   readonly standing: RunStanding;
+  /** `records` when the standing was read from the Vault alone; `workspace` when it includes a live lock check of the working copy (D-I1b-15). */
+  readonly standingSource: StandingSource;
   readonly cost: CostTotals;
   /**
    * Cache-read tokens over all input tokens — input, cache read, and cache
@@ -63,7 +65,7 @@ function gateAt(index: number, current: number, standing: RunStanding): GateOutc
 }
 
 export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> {
-  const { state, standing } = await runStanding(vault, runId);
+  const { state, standing, source } = await runStanding(vault, runId);
   const admission = decode(await vault.read(state.admission)) as { run?: { requestedLevel?: unknown } } | null;
   const requestedLevel = admission?.run?.requestedLevel;
   if (typeof requestedLevel !== 'number') throw new Error(`report: the admission record of run ${runId} names no level`);
@@ -123,6 +125,7 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
     runId,
     requestedLevel,
     standing,
+    standingSource: source,
     cost,
     cacheHitRate: input === 0 ? null : m.cacheReadTokens / input,
     calls,

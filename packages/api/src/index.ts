@@ -19,6 +19,8 @@ export * from './validate.js';
 export * from './verification.js';
 export * from './policy-file.js';
 export * from './report.js';
+export * from './bounds.js';
+export * from './outcomes.js';
 export {
   composeDiff,
   diffDigest,

@@ -13,8 +13,8 @@ import { lstat, readFile, readdir, readlink } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
-/** The time every merge on the fake is reported at: fixed and in the past, so no runtime clock produces it. */
-export const MERGED_AT = '2001-02-03T04:05:06Z';
+/** The time every merge on the fake is reported at: fixed and far ahead, so no runtime clock produces it. */
+export const MERGED_AT = '2099-01-02T03:04:05.000Z';
 
 interface Blob { readonly type: 'blob'; readonly bytes: Uint8Array }
 interface TreeObject { readonly type: 'tree'; readonly entries: ReadonlyArray<{ name: string; mode: string; sha: string }> }

@@ -23,6 +23,7 @@ import {
   withSandbox,
 } from './local-sandbox.js';
 import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
+import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
@@ -39,6 +40,8 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
+    OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
     INDETERMINATE_PROBE_LOWERS,
     UNSUPPORTED_STACK_REFUSES,
     REFUSAL_NAMES_THE_BOUNDING_TERM,

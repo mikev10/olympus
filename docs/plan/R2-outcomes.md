@@ -54,8 +54,9 @@ shows can be recomputed from these records alone).
    returns:
 
    - **Population.** Runs by terminal kind read from records alone — refused
-     at admission (decisions and no state), merged, cancelled, halted, parked
-     (a task `parked`) — and `unfinished` for every other run, counted and
+     at admission (decisions and no state), merged, passed (its last exit
+     crossed with no merge recorded, which a human merges), cancelled, halted,
+     parked (a task `parked`) — and `unfinished` for every other run, counted and
      excluded from run-level rates rather than dropped silently.
    - **Safety.**
      - *Caught false-done rate.* An attempt is one evidence bundle. Its
@@ -103,8 +104,8 @@ shows can be recomputed from these records alone).
    `cost-unapproved` refusal carries it beside the worst case, and the CLI
    prints it on the next line. The worst case remains the figure approved.
 
-4. **`RunReport` separates what was recorded from what was observed.** Its
-   standing carries `source: 'records' | 'workspace'`, so an unfinished run's
+4. **`RunReport` separates what was recorded from what was observed.** It
+   carries `standingSource: 'records' | 'workspace'` beside its standing, so an unfinished run's
    live lock check is never read as a recorded fact (D-I1b-15).
 
 5. **A surface.** `GET /outcomes` on the service, and `olympus outcomes` in the
@@ -149,8 +150,8 @@ refused at admission.
 
 - `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass
 - `pnpm conformance`: the R2 assertions are registered and pass; `pending-baseline.json` is unchanged
-- `olympus outcomes` over the M1 proof run's records prints the same figures the library returns
-- changesets for `@olympus-ai/vault`, `@olympus-ai/api`, `@olympus-ai/cli`, `@olympus-ai/conformance`
+- `olympus outcomes` prints the same figures the library returns over the same Vault (the CLI test). The M1 proof run's Vault is not committed, only its report, so it cannot be the input (D-R2-02)
+- changesets for `@olympus-ai/vault`, `@olympus-ai/api`, `olympus-ai` (the CLI), `@olympus-ai/conformance`
 - `git ls-files -- .plan/` prints nothing
 
 **Gate paths:** `packages/vault/src/types.ts` and `packages/conformance/` are

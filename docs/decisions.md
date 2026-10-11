@@ -3658,6 +3658,21 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Confirmed** by the maintainer, 2026-10-11, all eight recommendations, with stack to be recorded where it will not be forgotten.
 - **Reverse:** drop the amendments; cycle time is `not-established` and the caller names the runs.
 
+### D-R2-02: the CLI acceptance check runs over a Vault the test builds, not the M1 proof run
+
+- **Found:** the spec asked for `olympus outcomes` over the M1 proof run's records. Only that run's report is committed (`docs/proof/m1/report-904f6dab.json`); its Vault is not, so it cannot be read.
+- **Chosen:** the CLI test drives three runs through the served API, two refused at admission and one passed, and requires `olympus outcomes` to print exactly what `outcomes()` returns over the same Vault. The end-to-end conformance entry does the same over a merged run.
+- **Reverse:** commit a proof run's Vault and point the check at it.
+
+### D-R2-03: choices inside the confirmed spec
+
+- **A run that passed with no merge recorded is `passed`.** At L1 with no integrator, a human merges, so no merge record exists. Without this, the CLI test showed such a run as `unfinished`. It is read the way `runStanding` reads it: the grant for the `integrate` exit was spent (D-P9-08). It counts as finished and never as a merge.
+- **An attempt's model.** Usage records carry the start number, not the iteration, so the k-th evidence bundle cannot be matched to a call. Caught false-done is keyed by the task's one model, or `escalated` where its calls ran on more than one. First-pass yield is keyed by the model of the task's first start, which is exact.
+- **Cost per merged change counts every run's spend**, merged or not, over the merges. A refused or parked run's spend is what those merges cost.
+- **The report's field is `standingSource`**, beside `standing` rather than inside it, so `RunStanding`'s many readers are unchanged.
+- **The pre-run estimate skips a past task with any lost or unmetered call**, since it has no cost to take a median of. It also does not model escalation.
+- **Reverse:** each is local to `packages/api/src/outcomes.ts` or `report.ts`.
+
 ## R2 amendments to the contracts
 
 ### A-R2-01: the merge record carries GitHub's merge time
