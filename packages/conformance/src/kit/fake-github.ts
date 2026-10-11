@@ -13,6 +13,9 @@ import { lstat, readFile, readdir, readlink } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
+/** The time every merge on the fake is reported at: fixed and in the past, so no runtime clock produces it. */
+export const MERGED_AT = '2001-02-03T04:05:06Z';
+
 interface Blob { readonly type: 'blob'; readonly bytes: Uint8Array }
 interface TreeObject { readonly type: 'tree'; readonly entries: ReadonlyArray<{ name: string; mode: string; sha: string }> }
 interface Commit { readonly type: 'commit'; readonly tree: string; readonly parents: readonly string[]; readonly message: string }
@@ -177,8 +180,8 @@ export class FakeGitHub {
     return this.#object(commit, 'commit').parents;
   }
 
-  pulls(): ReadonlyArray<{ number: number; headRef: string; merged: boolean; mergeCommit: string | null }> {
-    return this.#pulls.map((p) => ({ number: p.number, headRef: p.headRef, merged: p.mergedAt !== null, mergeCommit: p.mergeCommit }));
+  pulls(): ReadonlyArray<{ number: number; headRef: string; merged: boolean; mergeCommit: string | null; mergedAt: string | null }> {
+    return this.#pulls.map((p) => ({ number: p.number, headRef: p.headRef, merged: p.mergedAt !== null, mergeCommit: p.mergeCommit, mergedAt: p.mergedAt }));
   }
 
   #object<K extends GitObject['type']>(sha: string, type: K): Extract<GitObject, { type: K }> {
@@ -256,7 +259,8 @@ export class FakeGitHub {
     const merged = this.#commit(this.#object(head, 'commit').tree, [this.head(pull.base), head], `Merge pull request #${String(pull.number)}`);
     this.#refs.set(pull.base, merged);
     pull.state = 'closed';
-    pull.mergedAt = new Date(0).toISOString();
+    // A time no runtime clock reads, so a record that carries it took it from GitHub (A-R2-01).
+    pull.mergedAt = MERGED_AT;
     pull.mergeCommit = merged;
     return merged;
   }

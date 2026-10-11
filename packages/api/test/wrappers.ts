@@ -78,6 +78,10 @@ export class DelegatingVault implements Vault {
     return this.inner.readIntegration(runId);
   }
 
+  listRuns(): Promise<readonly RunId[]> {
+    return this.inner.listRuns();
+  }
+
   readUsage(runId: RunId): Promise<readonly VaultRef[]> {
     return this.inner.readUsage(runId);
   }

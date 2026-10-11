@@ -29,6 +29,7 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
@@ -277,6 +278,7 @@ function integrationProblem(r: unknown): string | undefined {
   }
   if (typeof r.pullRequest !== 'number' || !Number.isInteger(r.pullRequest) || r.pullRequest < 1) return 'it names no pull request';
   if (r.kind === 'merged' && (!hasString(r, 'mergeCommit') || r.mergeCommit === '')) return 'a merge record carries no merge commit';
+  if (r.kind === 'merged' && (!hasString(r, 'mergedAt') || Number.isNaN(Date.parse(r.mergedAt as string)))) return 'a merge record carries no merge time';
   return undefined;
 }
 
@@ -563,6 +565,21 @@ export class LocalVault implements Vault {
 
   readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
     return this.#objects(runId, 'integration');
+  }
+
+  /** Every run directory under the store, whatever it holds, so a run refused at admission is listed too (A-R2-02). */
+  async listRuns(): Promise<readonly RunId[]> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(join(this.#store, 'runs'), { withFileTypes: true });
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    return entries
+      .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
+      .map((entry) => entry.name as RunId)
+      .sort();
   }
 
   async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {

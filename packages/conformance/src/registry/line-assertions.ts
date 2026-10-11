@@ -59,6 +59,7 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     readUsage: (runId) => inner.readUsage(runId),
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
+    listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
       hooks.beforeCommit?.(s);

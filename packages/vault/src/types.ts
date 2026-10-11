@@ -205,8 +205,8 @@ export interface EnforcementDecision {
 /**
  * What `integrate` did on the git remote, as the runtime did it (A-I1b-01).
  * Write-once and content-addressed under the run, like a decision, and
- * carrying no time, so the same act recorded again by a resume is the same
- * entry. `opened` is written when the pull request exists at `commit`;
+ * carrying no time of the runtime's clock, so the same act recorded again by
+ * a resume is the same entry. `opened` is written when the pull request exists at `commit`;
  * `merged` when it was merged at that commit. I2: every field is the
  * runtime's or GitHub's answer to the runtime, never a model's.
  */
@@ -229,6 +229,12 @@ export interface IntegrationOpened {
 export interface IntegrationMerged extends Omit<IntegrationOpened, 'kind'> {
   readonly kind: 'merged';
   readonly mergeCommit: string;
+  /**
+   * When the pull request merged, as GitHub reports it: the end of a run's
+   * cycle time (A-R2-01). GitHub's time, not the runtime's clock, so the same
+   * merge recorded again by a resume is the same entry.
+   */
+  readonly mergedAt: string;
 }
 
 export type IntegrationRecord = IntegrationOpened | IntegrationMerged;
@@ -303,6 +309,12 @@ export interface Vault {
   recordIntegration(r: IntegrationRecord): Promise<VaultRef>;
   /** Every integration record of a run, in no promised order; empty for a run that never integrated. */
   readIntegration(runId: RunId): Promise<readonly VaultRef[]>;
+  /**
+   * Every run the store holds any record for, admitted or refused at
+   * admission, sorted by id (A-R2-02). The store names the set, never a
+   * caller: a rate over runs a caller picked is a rate over a chosen sample.
+   */
+  listRuns(): Promise<readonly RunId[]>;
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

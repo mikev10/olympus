@@ -3648,3 +3648,22 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Known limit:** `testing.tamper-analysis` cannot be isolated from `testing.adapter`. The adapters build no test adapter without a manifest (`packages/adapters/src/detect.ts`), so a stack lacking either adapter also lacks the test adapter. Its fixture checks the probe's own outcome, and rests only on the install.
 - **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, that capability is its check.
 - **Reverse:** remove the entry and `timeoutMs`; D-R1-19's known limit returns.
+
+## R2: Outcome measurement
+
+### D-R2-01: R2's entry was a claim; the spec is written against the code first
+
+- **Ambiguous:** R2's entry had no spec, no out-of-scope list, no acceptance criteria, and said every input already existed. Four did not: the merge carries no time, the Vault cannot list its runs, no record names a stack, and `review` returning a change is not a distinct outcome.
+- **Chosen:** `docs/plan/R2-outcomes.md`, written and confirmed before any code. Cycle time and the run listing become contract amendments in this unit's pull request (A-R2-01, A-R2-02), following R14's precedent of amendments landing with the unit that needs them. A refused `review` exit is counted as a return, labelled as exactly that. Stack is not keyed, and recording it is a new unit, R17, so the gap has an owner rather than a sentence. The autonomy ratio is per run, since approvals are granted per station exit and not per task. Bounds are one-sided 95% Clopper–Pearson. The pre-run estimate declines below five past tasks per station and model.
+- **Confirmed** by the maintainer, 2026-10-11, all eight recommendations, with stack to be recorded where it will not be forgotten.
+- **Reverse:** drop the amendments; cycle time is `not-established` and the caller names the runs.
+
+## R2 amendments to the contracts
+
+### A-R2-01: the merge record carries GitHub's merge time
+
+`IntegrationMerged` gains `mergedAt`, read from GitHub's pull request after the merge, or from the pull request a resume finds already merged. The integration record was written to carry no time so that a resume recording the same act writes the same entry (A-I1b-01); GitHub's merge time is the same on every read, so that still holds. The runtime's clock is never used. The local Vault refuses a merge record without a parseable time. `I5.integrate-merges-the-verified-tree-after-the-gate` now asserts the recorded time is the one the fake GitHub reports, on a merge and on a resume after a lost record, and the fake reports a fixed time no clock produces.
+
+### A-R2-02: the Vault lists its runs
+
+`Vault.listRuns()` returns every run the store holds any record for, sorted by id. A run refused at admission holds decisions and nothing else, and is listed. The store names the set so a rate over every run is never a rate over a sample a caller chose. `I2.vault-lists-every-run` checks the local and stub Vaults.

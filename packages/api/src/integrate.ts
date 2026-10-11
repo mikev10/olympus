@@ -229,17 +229,22 @@ export class GitHubIntegrator implements Integrator {
     this.#targetsBase(pull);
     if (pull.head.sha !== opened.commit) throw new Error(`integrate: pull request #${String(pull.number)} moved to ${pull.head.sha} from ${opened.commit}`);
     let mergeCommit: string;
+    let mergedAt: string | null;
     if (pull.merged_at !== null) {
       // Merged by an earlier drive whose record was lost to a stop: the same act, recorded now.
       if (pull.merge_commit_sha === null) throw new Error(`integrate: pull request #${String(pull.number)} is merged and names no merge commit`);
       mergeCommit = pull.merge_commit_sha;
+      mergedAt = pull.merged_at;
     } else {
       if (pull.state !== 'open') throw new Error(`integrate: pull request #${String(pull.number)} is closed`);
       await this.#baseUnmoved(opened.baseCommit);
       const merged = await this.#call<{ merged: boolean; sha: string }>('PUT', `/pulls/${String(opened.pullRequest)}/merge`, { sha: opened.commit, merge_method: 'merge' });
       if (!merged.merged) throw new Error(`integrate: GitHub did not merge pull request #${String(opened.pullRequest)}`);
       mergeCommit = merged.sha;
+      // The merge answer carries no time; GitHub's, read back, is what a resume would read too (A-R2-01).
+      mergedAt = (await this.#call<PullRequest>('GET', `/pulls/${String(opened.pullRequest)}`)).merged_at;
     }
+    if (mergedAt === null) throw new Error(`integrate: GitHub reports pull request #${String(pull.number)} merged with no merge time`);
     // Either way, the merge must be over the commit the run was verified over. GitHub's merge pins the
     // head and not the base, so a push between `#baseUnmoved` and the merge is merged in; this refuses
     // to record it, and the run halts (D-I1b-04). The merge itself is not undone (D-I1b-13).
@@ -247,7 +252,7 @@ export class GitHubIntegrator implements Integrator {
     if (parents.length !== 2 || parents[0] !== opened.baseCommit || parents[1] !== opened.commit) {
       throw new Error(`integrate: pull request #${String(pull.number)} merged as ${mergeCommit} over ${parents.join(', ')}, not over ${opened.baseCommit}, the commit the run was verified over (D-I1b-03)`);
     }
-    return { ...opened, kind: 'merged', mergeCommit };
+    return { ...opened, kind: 'merged', mergeCommit, mergedAt };
   }
 
   /** The pull request merges into the base branch, not another a collaborator retargeted it to. */

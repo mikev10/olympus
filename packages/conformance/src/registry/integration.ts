@@ -97,7 +97,7 @@ async function toApproval(it: Integrating): Promise<void> {
 export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
   id: 'I5.integrate-merges-the-verified-tree-after-the-gate',
   title:
-    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault, and a resume after it neither opens nor merges again",
+    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault with the time GitHub reports it merged, and a resume after it neither opens nor merges again",
   run: async () => {
     await withIntegration('i1b-merge-', async (it) => {
       const { runStanding } = await api();
@@ -129,6 +129,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       const records = await integrationOf(it.rig);
       const record = records.find((r) => r.kind === 'merged');
       if (record?.kind !== 'merged' || record.mergeCommit !== merged.mergeCommit || record.commit !== pushed) throw new Error('I5: the Vault does not record the merge GitHub made');
+      if (record.mergedAt !== merged.mergedAt) throw new Error(`I5: the merge record carries ${record.mergedAt}, not the time GitHub merged at (${String(merged.mergedAt)})`);
       const { LocalVault } = await import('@olympus-ai/vault');
       if ((await runStanding(new LocalVault(it.rig.dirs), it.rig.runId)).standing.standing !== 'passed') throw new Error('I5: a merged run does not stand passed');
 
@@ -166,7 +167,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       if (!outcome.ok) throw new Error(`I5: a resume after a merge whose record was lost did not pass: ${JSON.stringify(outcome)}`);
       const merges = it.github.requests.filter((r) => r.method === 'PUT').length;
       const record = (await integrationOf(it.rig)).find((r) => r.kind === 'merged');
-      if (merges !== 1 || record?.kind !== 'merged' || record.mergeCommit !== it.github.pulls()[0]?.mergeCommit) {
+      if (merges !== 1 || record?.kind !== 'merged' || record.mergeCommit !== it.github.pulls()[0]?.mergeCommit || record.mergedAt !== it.github.pulls()[0]?.mergedAt) {
         throw new Error(`I5: the resume made ${String(merges)} merge requests, or recorded a merge other than the one made`);
       }
     });
