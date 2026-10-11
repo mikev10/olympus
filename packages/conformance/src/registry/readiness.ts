@@ -12,7 +12,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AutonomyLevel, Policy, RoleId, StationId } from '@olympus-ai/core';
-import type { ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ScanOptions } from '@olympus-ai/readiness';
+import type { ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ReadinessReport, ScanOptions } from '@olympus-ai/readiness';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import { compileError, runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
@@ -23,6 +23,8 @@ const run = promisify(execFile);
 const readiness = () => import('@olympus-ai/readiness');
 const LEVELS: readonly AutonomyLevel[] = [0, 1, 2, 3];
 const OUTCOMES: readonly ProbeOutcome[] = ['supported', 'absent', 'indeterminate'];
+/** This process's uid where the host has uids: a root-owned file a scan cannot remove fails it (D-P6-10, D-R1-23). */
+const RUNTIME_USER = process.getuid === undefined || process.getgid === undefined ? { uid: 0, gid: 0 } : { uid: process.getuid(), gid: process.getgid() };
 
 /** A result the runtime would have built, with static evidence: derivation reads only the outcome. */
 function result(probe: ProbeId, outcome: ProbeOutcome): ProbeResult {
@@ -163,12 +165,21 @@ export const INDETERMINATE_PROBE_LOWERS: LocalAssertion = runtime({
   },
 });
 
-/** A git repository holding `files` in one commit, under `root`. */
-async function gitRepository(root: string, files: Readonly<Record<string, string>>): Promise<void> {
+async function writeFiles(root: string, files: Readonly<Record<string, string>>): Promise<void> {
   for (const [path, text] of Object.entries(files)) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), text);
   }
+}
+
+/** A git repository holding `files` in one commit, under `root`. */
+async function gitRepository(root: string, files: Readonly<Record<string, string>>): Promise<void> {
+  await writeFiles(root, files);
+  await commitAll(root);
+}
+
+/** Commits everything under `root` as a new repository's first commit. */
+async function commitAll(root: string): Promise<void> {
   const git = (...args: string[]) => run('git', ['-C', root, '-c', 'user.email=conformance@example.invalid', '-c', 'user.name=conformance', ...args]);
   await git('init', '--quiet', '--initial-branch=main');
   await git('add', '--all');
@@ -186,8 +197,7 @@ export async function scanOptions(provider: SandboxProvider, checkout: string): 
     image: EGRESS_PROXY_IMAGE,
     secretScanImage: SECRET_SCAN_IMAGE,
     limits: { cpus: 1, memoryMb: 1024, pids: 256 },
-    // This process's uid where the host has uids: a root-owned file the scan cannot remove fails it (D-P6-10).
-    user: process.getuid === undefined || process.getgid === undefined ? { uid: 0, gid: 0 } : { uid: process.getuid(), gid: process.getgid() },
+    user: RUNTIME_USER,
     timeouts: { installMs: 300_000, probeMs: 120_000, coldProvisionMs: 60_000 },
     registries: NPM_REGISTRY,
     protectedPaths: ['.github/**', 'package.json'],
@@ -323,5 +333,154 @@ export const CEILING_BEARING_PROBE_HAS_AN_ASSERTION: LocalAssertion = runtime({
         );
       }
     }
+  },
+});
+
+/** A manifest for the fixtures below. */
+function manifest(fields: Readonly<Record<string, unknown>>): string {
+  return JSON.stringify({ name: 'fixture', version: '1.0.0', private: true, ...fields }, null, 2);
+}
+
+/** A lockfile for a package with no dependencies: `npm ci` installs it without reaching the registry. */
+const EMPTY_LOCK = JSON.stringify({
+  name: 'fixture', version: '1.0.0', lockfileVersion: 3, requires: true,
+  packages: { '': { name: 'fixture', version: '1.0.0' } },
+});
+
+const VITEST = { vitest: '3.2.4', '@vitest/coverage-v8': '3.2.4' };
+const SUM = 'export const sum = (a, b) => a + b;\n';
+
+/** A repository in which the probes named against it in NEGATIVE do not hold. */
+interface Fixture {
+  readonly files: Readonly<Record<string, string>>;
+  /** Resolve a lockfile in the scan image before committing, for a fixture that installs a real framework. */
+  readonly resolveLock?: true;
+  /** Written after the commit: present in the checkout, absent from the tree. */
+  readonly untracked?: Readonly<Record<string, string>>;
+  readonly options?: Partial<ScanOptions>;
+}
+
+const FIXTURES: Readonly<Record<string, Fixture>> = {
+  'no-framework': {
+    files: { 'package.json': manifest({ scripts: { build: 'node -e "0"' } }), 'package-lock.json': EMPTY_LOCK, 'index.js': 'module.exports = 1;\n' },
+    options: {
+      protectedPaths: ['nothing-matches/**'],
+      branchProtection: { name: 'fixture:unprotected', check: () => Promise.resolve({ protected: false, detail: 'main accepts direct pushes' }) },
+    },
+  },
+  'two-lockfiles': {
+    files: { 'package.json': manifest({}), 'package-lock.json': EMPTY_LOCK, 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" },
+  },
+  'stale-lockfile': {
+    files: { 'package.json': manifest({ dependencies: { 'left-pad': '1.3.0' } }), 'package-lock.json': EMPTY_LOCK },
+  },
+  'incremental-build-with-a-secret': {
+    files: {
+      '.gitignore': 'dist/\n',
+      'package.json': manifest({ scripts: { build: 'node -e "require(\'fs\').accessSync(\'dist/prebuilt.js\')"' } }),
+      'package-lock.json': EMPTY_LOCK,
+      // Assembled at run time so this file is not itself a finding.
+      'config.js': `export const token = '${['ghp', '_', 'k7Qx2Lm9Pz4Rt8Vw1Ny6Bc3Hd5Fg0Js2Ka7E'].join('')}';\n`,
+    },
+    untracked: { 'dist/prebuilt.js': 'module.exports = 1;\n' },
+  },
+  'no-tests': {
+    files: { 'package.json': manifest({ type: 'module', scripts: { build: 'node -e "0"' }, devDependencies: VITEST }), 'sum.js': SUM },
+    resolveLock: true,
+  },
+  'skipped-and-unmeasured': {
+    files: {
+      'package.json': manifest({ type: 'module', scripts: { build: 'node -e "0"' }, devDependencies: VITEST }),
+      'sum.js': SUM,
+      'sum.test.js': "import { expect, test } from 'vitest';\nimport { sum } from './sum.js';\ntest.skip('adds', () => expect(sum(1, 2)).toBe(3));\n",
+      'vitest.config.js': "export default { test: { coverage: { include: ['nothing-matches/**'] } } };\n",
+    },
+    resolveLock: true,
+  },
+};
+
+/**
+ * For each ceiling-bearing probe, the fixture in which its property does not
+ * hold, and the probes it rests on, which must hold there so that the probe's
+ * own check is what decides. `testing.tamper-analysis` cannot be isolated from
+ * `testing.adapter`: the adapters build no test adapter without a manifest, so
+ * a stack lacking either lacks the test adapter (D-R1-24).
+ */
+const NEGATIVE: Readonly<Record<string, { readonly fixture: string; readonly rests: readonly ProbeId[] }>> = {
+  'build.pinned-manifest': { fixture: 'two-lockfiles', rests: [] },
+  'build.install': { fixture: 'stale-lockfile', rests: ['build.pinned-manifest'] },
+  'build.clean': { fixture: 'incremental-build-with-a-secret', rests: ['build.install'] },
+  'testing.adapter': { fixture: 'no-framework', rests: ['build.install'] },
+  'testing.enumerate': { fixture: 'no-tests', rests: ['build.install', 'testing.adapter'] },
+  'testing.green-at-base': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'] },
+  'testing.coverage': { fixture: 'skipped-and-unmeasured', rests: ['build.install', 'testing.enumerate'] },
+  'testing.tamper-analysis': { fixture: 'no-framework', rests: ['build.install'] },
+  'integrate.protected-paths': { fixture: 'no-framework', rests: [] },
+  'integrate.secret-scan': { fixture: 'incremental-build-with-a-secret', rests: [] },
+  'integrate.branch-protection': { fixture: 'no-framework', rests: [] },
+};
+
+/** Resolves `root`'s lockfile in the scan image, so the install a scan runs reproduces the one resolved here. */
+async function resolveLock(provider: SandboxProvider, root: string): Promise<void> {
+  const { EGRESS_PROXY_IMAGE } = await import('@olympus-ai/sandbox');
+  const { NPM_REGISTRY } = await readiness();
+  const handle = await provider.provision({
+    image: EGRESS_PROXY_IMAGE,
+    mounts: { workspace: { source: root, target: '/workspace', mode: 'rw' }, others: [] },
+    egress: { mode: 'allowlist', allow: [...NPM_REGISTRY] },
+    limits: { cpus: 1, memoryMb: 1024, pids: 256, wallClockMs: 300_000 },
+    user: RUNTIME_USER,
+  });
+  try {
+    const result = await provider.exec(handle, ['npm', 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
+      env: { HOME: '/tmp', npm_config_update_notifier: 'false' },
+    });
+    if (result.exitCode !== 0) throw new Error(`fixture lockfile: npm exited ${String(result.exitCode)}: ${result.stderr}`);
+  } finally {
+    await provider.destroy(handle);
+  }
+}
+
+export const CEILING_BEARING_PROBE_CHECK_IS_EXERCISED: LocalAssertion = runtime({
+  id: 'I8.ceiling-bearing-probe-check-is-exercised',
+  // Six scans, two of which install a real framework from the registry.
+  timeoutMs: 600_000,
+  title:
+    'every probe the readiness package declares ceiling-bearing is scanned over a repository where its property does not hold, while the probes it rests on hold there, and is not reported supported; a probe whose check is replaced by an unconditional supported fails this (needs Docker and the npm registry)',
+  run: async () => {
+    const { CEILING_BEARING, scan } = await readiness();
+    const declared = new Set<string>(CEILING_BEARING);
+    const covered = new Set(Object.keys(NEGATIVE));
+    const uncovered = [...declared].filter((id) => !covered.has(id));
+    const undeclared = [...covered].filter((id) => !declared.has(id));
+    if (uncovered.length > 0) throw new Error(`I8: ceiling-bearing probes with no negative fixture: ${uncovered.join(', ')}`);
+    if (undeclared.length > 0) throw new Error(`I8: negative fixtures for probes no longer declared ceiling-bearing: ${undeclared.join(', ')}`);
+
+    await withProvider('conformance-readiness-negative-', async (provider, _dirs, base) => {
+      const reports = new Map<string, ReadinessReport>();
+      for (const [name, fixture] of Object.entries(FIXTURES)) {
+        const root = join(base, name);
+        await writeFiles(root, fixture.files);
+        if (fixture.resolveLock === true) await resolveLock(provider, root);
+        await commitAll(root);
+        if (fixture.untracked !== undefined) await writeFiles(root, fixture.untracked);
+        reports.set(name, await scan({ ...(await scanOptions(provider, root)), ...fixture.options }));
+      }
+      const failures: string[] = [];
+      for (const [probe, { fixture, rests }] of Object.entries(NEGATIVE)) {
+        const report = reports.get(fixture);
+        if (report === undefined) throw new Error(`I8: fixture ${fixture} was never scanned`);
+        const outcome = (id: string) => report.probes.find((p) => p.probe === id);
+        for (const rest of rests) {
+          if (outcome(rest)?.outcome !== 'supported') {
+            failures.push(`control: in ${fixture}, ${rest} was ${outcome(rest)?.outcome ?? 'missing'} (${outcome(rest)?.detail ?? ''}), so ${probe} is not what decides`);
+          }
+        }
+        if (outcome(probe)?.outcome === 'supported' || outcome(probe) === undefined) {
+          failures.push(`${probe} was ${outcome(probe)?.outcome ?? 'missing'} over ${fixture}, where its property does not hold`);
+        }
+      }
+      if (failures.length > 0) throw new Error(`I8: ${failures.join('; ')}`);
+    });
   },
 });

@@ -242,6 +242,7 @@ invariant, since adding one edits `InvariantId` and the spine.
 | `I5.unsupported-stack-refuses` | runtime | a stack with no `AdapterSet.test` derives `L0` and names the missing adapter |
 | `I5.refusal-names-the-bounding-term` | runtime | a run refused by the readiness ceiling names readiness, and one refused by a policy cap names that cap; neither reports a bare `exceeds-cap` |
 | `I8.ceiling-bearing-probe-has-an-assertion` | runtime | a registry meta-test: every probe declared ceiling-bearing maps to an executable assertion, and deleting the probe fails it |
+| `I8.ceiling-bearing-probe-check-is-exercised` | runtime | added by amendment after review (D-R1-24): every probe declared ceiling-bearing is scanned over a fixture where its property does not hold, with the probes it rests on holding, and is not reported `supported`, so replacing a probe's check with an unconditional `supported` fails it |
 
 The seven land live in the pull request that lands the unit, never as pending
 entries, so `pending-baseline.json` is unchanged by this unit: I2, I4, I5, and

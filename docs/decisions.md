@@ -3608,7 +3608,7 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Found:** by the external review (codex-5), tested by mutation. `I8.ceiling-bearing-probe-has-an-assertion` builds outcomes and calls `deriveCeiling`, and never runs a probe. Making `tamperAnalysis` return `supported` unconditionally left that entry and every package test passing.
 - **Chosen:** the entry meets R1 §6 as written ("deleting the probe fails it": removing it from the declared set). A negative fixture per ceiling-bearing probe is a new deliverable, and most need Docker, so it is left to an amendment, tracked as issue #33. Coverage of the probe checks as of the review fixes: `integrate.secret-scan`, `testing.enumerate`, `build.clean`, `testing.green-at-base` and `testing.coverage` have negative scan tests, and `testing.adapter` has one in `I5.unsupported-stack-refuses`. `build.pinned-manifest`, `build.install`, `testing.tamper-analysis`, `integrate.protected-paths` and `integrate.branch-protection` have none.
 - **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, the capability is its check, not its place in the set.
-- **Reverse:** the amendment lands one negative fixture per probe, and the I8 entry runs them.
+- **Reverse:** the amendment lands one negative fixture per probe, and the I8 entry runs them. **Taken by D-R1-24 below.**
 
 ### D-R1-20: `testing.tamper-analysis` means the analysis is available
 
@@ -3637,3 +3637,14 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Chosen:** the readiness test fixtures and the conformance scan pass this process's uid and gid where the host has them, and uid 0 where it does not, as the line's sandboxes and the CLI tests already do (D-P6-10). `ScanOptions.user` now says it is the runtime's uid. A caller that passes another uid gets a scan that fails at cleanup, which is closed.
 - **Why:** the scan directory is the runtime's. A probe must not leave in it anything the runtime cannot remove.
 - **Reverse:** remove the scan directory from inside a sandbox running as the probes' uid, before the host removes the rest.
+
+## R1 amendment: a negative fixture for every ceiling-bearing probe
+
+### D-R1-24: I8 runs every ceiling-bearing probe over a repository where it does not hold
+
+- **Ambiguous:** D-R1-19 left `I8.ceiling-bearing-probe-has-an-assertion` testing only the derivation, so a probe whose check always answered `supported` passed every gate (issue #33).
+- **Chosen:** a second entry, `I8.ceiling-bearing-probe-check-is-exercised`. It scans six fixture repositories, and maps each ceiling-bearing probe to the fixture where its property fails and to the probes it rests on, which must be `supported` there. The fixtures are: two lockfiles, a stale lockfile, an incremental build carrying a secret, no test framework (with an unmatched protected-path glob and an unprotected branch checker), vitest with no tests, and vitest with every test skipped and a coverage `include` that matches nothing. The probe set and the map are compared both ways, as the derivation entry compares its own. Runtime assertions gain an optional `timeoutMs`, since six scans with two framework installs exceed the suite's 60-second default. The entry allows 10 minutes and ran in about 95 seconds locally; the CI job's timeout rises from 15 to 20 minutes, since the job already took 10.5.
+- **Verified:** with `tamperAnalysis` and `protectedPaths` returning `supported` unconditionally, the new entry failed and named both probes, while `I8.ceiling-bearing-probe-has-an-assertion` still passed.
+- **Known limit:** `testing.tamper-analysis` cannot be isolated from `testing.adapter`. The adapters build no test adapter without a manifest (`packages/adapters/src/detect.ts`), so a stack lacking either adapter also lacks the test adapter. Its fixture checks the probe's own outcome, and rests only on the install.
+- **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, that capability is its check.
+- **Reverse:** remove the entry and `timeoutMs`; D-R1-19's known limit returns.

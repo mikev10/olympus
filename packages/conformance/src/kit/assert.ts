@@ -212,11 +212,12 @@ interface RuntimeSpec {
   readonly id: AssertionId | ClaimId;
   readonly title: string;
   readonly run: () => void | Promise<void>;
+  readonly timeoutMs?: number;
 }
 
 /** An executable check; throw to fail. */
 export function runtime(spec: RuntimeSpec): LocalAssertion {
-  return { kind: 'local', id: spec.id, level: 'runtime', title: spec.title, run: spec.run };
+  return { kind: 'local', id: spec.id, level: 'runtime', title: spec.title, run: spec.run, ...(spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs }) };
 }
 
 interface ExternalSpec {
