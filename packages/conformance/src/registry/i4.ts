@@ -9,11 +9,14 @@ import {
 } from './policy.js';
 import { ESCALATION_ONLY_UNDER_A_GRANT, TIER_PER_STATION_FOLLOWS_POLICY } from './tier.js';
 import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF } from './verification.js';
+import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readiness.js';
 
 /** I4: Default deny. */
 export const I4: InvariantEntry = {
   title: INVARIANTS.I4,
   assertions: [
+    READINESS_NEVER_RAISES_A_CAP,
+    ABSENT_SCAN_IS_NOT_A_PASS,
     MERGE_TOKEN_REACHES_NO_SANDBOX,
     GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
     compileError({

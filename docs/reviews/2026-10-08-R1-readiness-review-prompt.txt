@@ -1,0 +1,140 @@
+The code under review is in the file
+`2026-10-08-R1-readiness-review-bundle.txt` (SHA-256 356f9f3cfff3af288a7addb85116a616410f270518c6fe6355e48552d5a2d81f) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a repository-readiness scanner and the autonomy resolver that
+consumes its result, part of a TypeScript project. You have the source and
+nothing else — no design documents, no author reasoning, no prior version, no
+conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs AI agents that change code in a target repository at one of
+four autonomy levels, L0 (manual) to L3 (autonomous), where a policy engine
+decides the highest level a run may have. The new package
+`packages/readiness` scans one target repository at one commit — copying the
+commit's tree out of git, then running probes over that copy, most of them as
+commands in fresh Docker sandboxes — and derives a ceiling of L0, L1, or L2
+with the probe that holds it there. `resolveWithReadiness` applies that
+ceiling as a fourth term beside the policy's global cap, station cap, and role
+ceiling: it may only lower the level a run gets, and a refusal must name every
+term that bound it. The conformance assertions in
+`packages/conformance/src/registry/readiness.ts` and the two fixtures under
+`packages/conformance/fixtures/types/` are the executable statement of those
+properties.
+
+It must hold against a capable, motivated party trying to obtain a higher
+autonomy ceiling than the repository actually supports, or to make applying a
+readiness result grant a run more than the policy alone would. Assume no
+deceptive intent — only that the easiest path gets taken.
+
+That party controls the content of the target repository at the scanned
+commit: every tracked file, including `package.json` and its scripts, the
+lockfile, test files and test configuration, file names, file modes, symlinks,
+and submodule entries, and therefore whatever code runs when the scan installs,
+builds, or tests that tree inside a sandbox. It does not control the
+components the scan is wired with: the sandbox provider, the policy engine, the
+images named in the scan options, the branch-protection checker, the `git`
+binary on the host, and the scan options themselves are supplied by the
+runtime and trusted, even where a function takes one as an argument. It does
+not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A probe's outcome is
+  computed by the runtime from what it observed, never supplied by a model or a
+  driver.
+- Default deny. A capability not granted in policy is unavailable; a readiness
+  result may lower an autonomy level or leave it alone, and may never raise
+  one or grant what policy withheld. A repository with no scan keeps exactly
+  what policy gives it, and that absence must be an explicit state, never an
+  undefined value that reads as clearance.
+- Fail closed. A probe that could not execute (timeout, provisioning failure,
+  missing tool, missing adapter) derives exactly as a probe that failed, never
+  higher; an unsupported stack is refused rather than reported as an empty but
+  clean suite.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. Every probe declared ceiling-bearing must have such an
+  assertion.
+- No agent writes to the project's own record store, and a scan never writes to
+  the target repository: the repository must be byte-identical after a scan.
+
+The mechanisms that matter most:
+
+- `deriveCeiling` and the probe tiers in `probes.ts`: which outcomes reach L1 and L2.
+- `resolveWithReadiness`: the engine's verdict plus the readiness term, and attribution of each bounding cap.
+- `materialize` in `tree.ts`: copying the commit's tree out of git onto the host without writing to the repository or outside the copy.
+- `scan` in `scan.ts`: which probe is executed, static, or answered by the checker, how each outcome is judged from an exit code or a read, and the order in which probes see the copied tree.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Identifiers such as D24, I3, M2, or P4 below refer to the project's internal
+plan and are not resolvable from the bundle; read them as labels.
+
+- Any portfolio or multi-repository rollup. "Share of repositories at or above a level" aggregates across repositories, which is the hosted control plane's job and a separate product in a separate repository (D24). This package scans one repository and returns one result.
+- Remediation. Scaffolding a repository up to a ceiling is a second unit with a different risk profile: it writes to a repository, and every probe it satisfies is one it also authored (I3). If it is ever built, it must not be built by whoever owns the probes.
+- Any write to the target repository. A scan is read-only and provisions its sandbox with no `rw` mount beyond the checkout it was given.
+- Provisioning from a repository-supplied environment definition (`devcontainer.json`, a Dockerfile). The Dev environment pillar times a cold provision. It does not make the target repository the source of the sandbox image. A definition the Build task can edit decides the environment Verify judges it in, and that is an agent writing its own grader (I3). If it is ever built, the definition is locked with the spec, re-verified at every station transition like the acceptance tests, and outside every role's writable globs.
+- Scheduling, watching, or re-scanning on a timer. Triggers own that (M2).
+- Storing the result. No `Vault` operation for readiness exists, and adding one is an amendment owed to the first unit that stores a result.
+- Wiring the ceiling into run creation. P4 reads a resolved `Policy` and takes no readiness argument. R1 delivers the derivation, the attribution, and the assertions; the call site that applies the fourth term belongs to the unit that owns run creation, and R1 must not reach into it.
+- The pillar-to-score presentation number beyond what the reporting section names.
+- Any edit to a contract file, `packages/core/src/policy/types.ts` included. R1's result types live beside its implementation, as P3's do.
+
+THE QUESTION
+
+Controlling only the repository's content, how would you get a scan to report
+a probe `supported` when the property it names does not hold, raise the
+derived ceiling above what the repository supports, change the repository or
+write outside the scan's copy, or make the resolver grant a level the policy
+engine alone would refuse?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

@@ -7,11 +7,13 @@ import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_
 import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
+import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
   title: INVARIANTS.I2,
   assertions: [
+    READINESS_OUTCOME_IS_RUNTIME_DERIVED,
     RUN_REPORT_READS_ONLY_RECORDS,
     compileError({
       id: 'I2.task-result-has-no-status',

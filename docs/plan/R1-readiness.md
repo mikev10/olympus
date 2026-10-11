@@ -66,9 +66,9 @@ is not higher.
 
 **Settled (D-R1-07): a new `readiness` package.** F1's frozen package list
 carries it as of the same amendment that added the fourth term to the
-effective-level formula, so this unit creates `packages/readiness` and edits
-`pnpm-workspace.yaml` — a protected path, so the pull request carries
-`gate-change`.
+effective-level formula, so this unit creates `packages/readiness`.
+`pnpm-workspace.yaml` already globs `packages/*` and needs no edit; the pull
+request still carries `gate-change` because it edits `packages/conformance/`.
 
 The alternative was extending `packages/adapters`, which avoids the vocabulary
 amendment and costs more than it saves: readiness consumes `AdapterSet`, so
@@ -95,11 +95,21 @@ outside this package.
 
 ## 3. Probes
 
-A probe is a command executed in a sandbox against a checkout, plus a
-predicate over its result. Probes are **binary** — `supported`, `absent`, or
-`indeterminate` — and carry the argv, exit code, duration, and a SHA-256 of
-captured output. There is no partial credit and no probe whose outcome depends
-on a model reading a file.
+A probe is an observation of one repository at one commit, plus a predicate
+over its result. Probes are **binary** — `supported`, `absent`, or
+`indeterminate` — and there is no partial credit and no probe whose outcome
+depends on a model reading a file. A probe observes in one of three ways, and
+its evidence says which (D-R1-09):
+
+- **executed** — a command run in a sandbox against a copy of the commit's
+  tree, carrying the argv, image, exit code, duration, and a SHA-256 of
+  captured output. Most probes are this.
+- **static** — a read the runtime makes itself over the same copy, through the
+  same code the line uses: the `AdapterSet` P8 builds, or a file listing. An
+  adapter's existence is decided by P8's static discovery on the host, so a
+  probe of it that claimed an argv would be faking one.
+- **checker** — an answer from a port the caller supplies, for a fact that
+  lives outside the repository: branch protection on the integration branch.
 
 `indeterminate` is not a third grade between the other two. It means the probe
 could not be executed (no adapter for the stack, a timeout, a provisioning
@@ -108,19 +118,23 @@ applied to measurement. It is distinguished from `absent` only so a report can
 say "not established" rather than "not present", which is a different thing to
 tell a human and the same thing to tell the policy engine.
 
-The eight pillars group the probes. They carry no weight of their own, and
+The pillars — seven of the competing model's eight, for the reason below — group the probes. They carry no weight of their own, and
 three of them are load-bearing for autonomy while the rest are advisory:
 
 | Pillar | Probes | Bears on |
 |---|---|---|
-| Build system | clean checkout builds in a fresh container; pinned dependency manifest | **Load-bearing.** P6 verifies at base+diff in a *fresh* sandbox; a repo that only builds incrementally cannot be verified at all |
+| Build system | pinned dependency manifest; dependencies install from it with egress to the registry only; clean checkout builds in a fresh container with no network | **Load-bearing.** P6 verifies at base+diff in a *fresh* sandbox; a repo that only builds incrementally cannot be verified at all |
 | Testing | an `AdapterSet.test` exists for the stack; suites enumerate; the suite runs green at base | **Load-bearing.** I2 derives status from a suite; no enumerable suite means no derivable status |
 | Security & governance | protected paths declarable; branch protection on the integration branch; secret scan clean | **Load-bearing at `integrate`.** Autonomous merge without branch protection has no backstop |
 | Style & validation | linter, formatter, type checker present and runnable non-interactively | Advisory. Feeds `verify` checks; their absence narrows evidence without preventing it |
 | Dev environment | cold container provision under the spec's wall clock | Advisory; a hard failure here already surfaces as a build probe failure |
 | Documentation | agent instructions discoverable at a conventional path | Advisory. Affects `spec` and `plan` quality, which this unit cannot measure |
-| Observability | structured log output on a known channel | Advisory until `observe` exists (M2+) |
-| Code quality | file and function size distribution | **Advisory, and the weakest of the eight.** Recorded, never ceiling-bearing: no threshold on file length survives contact with a generated file, and a probe that cannot be defended is a probe that gets argued with instead of fixed |
+| Code quality | file and function size distribution | **Advisory, and the weakest of the seven.** Recorded, never ceiling-bearing: no threshold on file length survives contact with a generated file, and a probe that cannot be defended is a probe that gets argued with instead of fixed |
+
+Observability ("structured log output on a known channel") was an eighth row.
+It has no definition a probe could execute and nothing reads it until
+`observe` exists, so it left this unit as an issue rather than shipping as a
+probe that never runs (D-R1-09).
 
 Adding a probe requires naming its pillar and whether it is ceiling-bearing.
 A ceiling-bearing probe requires a registry assertion (§6).
@@ -229,10 +243,10 @@ invariant, since adding one edits `InvariantId` and the spine.
 | `I5.refusal-names-the-bounding-term` | runtime | a run refused by the readiness ceiling names readiness, and one refused by a policy cap names that cap; neither reports a bare `exceeds-cap` |
 | `I8.ceiling-bearing-probe-has-an-assertion` | runtime | a registry meta-test: every probe declared ceiling-bearing maps to an executable assertion, and deleting the probe fails it |
 
-`pending-baseline.json` rises by one for each of I2, I4, and I8, and by two for
-I5, when the pending entries are added, and each is paid down in the pull request that lands
-the unit. Raising a baseline number is a deliberate edit a reviewer sees; it is
-called out here so it is expected in the diff rather than argued about in it.
+The seven land live in the pull request that lands the unit, never as pending
+entries, so `pending-baseline.json` is unchanged by this unit: I2, I4, I5, and
+I8 stay at zero. (An earlier draft counted five pending entries raised and four
+paid down against this table of seven; the table is authoritative.)
 
 **The probe suite needs a Docker daemon and fails closed without one**, for the
 reason P2 already establishes: a probe that skips itself reports green having
@@ -267,14 +281,15 @@ Verifiable by someone who has read the README, CONTRIBUTING.md, and this file.
   rather than reporting an empty suite as a clean one
 - a probe that times out and a probe that fails derive the same ceiling; the
   report distinguishes them in prose and the derivation does not
-- every `ProbeResult` carries argv, exit code, duration, and an output hash,
-  and a second scan at the same commit produces the same ceiling
-- a readiness ceiling above the policy's existing cap cannot be constructed;
-  the `I4` assertions fail if the derivation is edited to permit one
+- every executed `ProbeResult` carries argv, exit code, duration, and an
+  output hash, and a second scan at the same commit produces the same ceiling
+- applying a readiness ceiling never produces an effective level the policy
+  engine alone would refuse; the `I4` assertions fail if the derivation or the
+  resolver is edited to permit one
 - scanning a repository leaves it byte-identical: no file created, modified, or
   deleted, verified against a hash of the tree taken before the scan
-- the six registry assertions in §6 are live and `pending-baseline.json` is
-  lowered by the four entries this unit paid down
+- the seven registry assertions in §6 are live and `pending-baseline.json` is
+  unchanged
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` all pass
 - `git ls-files -- .plan/` prints nothing
 
@@ -289,6 +304,6 @@ Verifiable by someone who has read the README, CONTRIBUTING.md, and this file.
    Neither is reopened by the implementing session.
 3. Conformance suite first (§6); watch it fail.
 4. Probes, then derivation, then reporting.
-5. Run the acceptance criteria (§8). The unit touches `pnpm-workspace.yaml`
-   and `packages/conformance/`, so the pull request carries `gate-change`.
+5. Run the acceptance criteria (§8). The unit touches `packages/conformance/`,
+   so the pull request carries `gate-change`.
 6. **Stop.** Human review before anything consumes the ceiling.
