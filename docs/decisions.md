@@ -3676,7 +3676,7 @@ checkable from this repository.
 - **Why:** the claim is that a false-done is caught at the gate. A change that passes its tests while committing a credential is done by every measure the line has today, and wrong.
 - **Why M2:** it needs R15's base run, and M1's scope is closed.
 - **Reverse:** drop the spec part and the denial checks, and keep the two check kinds; they stand alone.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-11.
 
 ### D-A-SC-02: only findings absent from the base fail a change
 
@@ -3695,14 +3695,14 @@ checkable from this repository.
 - **Chosen:** R13's third job. An audit reads an advisory database over the network, and `verify` runs with `deny-all` egress. Granting `verify` egress for one check widens every check's sandbox. A vulnerability published after merge is also a property of the date, not of the change, so a nightly job over the default branch finds it where a gate would not.
 - **Must hold:** the audit runs in its own sandbox, whose egress allowlist names the advisory host alone; R17's checks in the same job keep `deny-all`. No run locks the job's images and configuration, so policy pins them. Findings become `intake` candidates as typed fields (I7), and a human admits them. The job never opens a change.
 - **Reverse:** an audit check at `verify` against an advisory snapshot pinned into the image, at the cost of the snapshot going stale.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-11.
 
 ### D-A-DD-01: the Codex constraint stands against the Agents API, and notes the open harness
 
 - **Found:** OpenAI's Agents API now exposes computer use and Codex's multi-agent coordination, run on OpenAI's infrastructure. Coverage of DevDay 2026 also reports that the Codex harness is open source.
 - **Chosen:** no change to the constraint. A hosted harness is outside the mount layer, the egress allowlist, and the egress-held credential, and is refused above L1. A dated note records both facts, and that the second, unverified here, would make the in-sandbox driver cheaper. The driver's author checks the licence and source first.
 - **Why:** a second family is what R9 and real I6 independence wait on, so a cheaper route to the Codex driver is worth recording where its author will read it.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-11.
 
 ### D-A-DD-02: event subscriptions are granted capabilities, whatever their transport
 
@@ -3710,4 +3710,4 @@ checkable from this repository.
 - **Chosen:** a recorded constraint, not a unit and not a dependency. The M2 trigger framework may use either webhooks or MCP Events. Either way the payload is untrusted (I7), the subscription is granted in policy (I4), and the delivery-verification secret is held where P12 holds credentials.
 - **Why:** a subscription that delivers into the line is a standing capability. Treating it as configuration would let a trigger widen what reaches the line without a versioned policy edit.
 - **Reverse:** drop the note; it binds nothing yet.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-11.
