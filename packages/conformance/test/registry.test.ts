@@ -63,7 +63,7 @@ for (const report of [...evaluation.invariants, ...evaluation.claims]) {
       if (assertion.kind === 'local') {
         test(`[${assertion.id}] ${assertion.title}`, async () => {
           await assertion.run();
-        });
+        }, assertion.timeoutMs);
       } else {
         test(`[${assertion.id}] ${assertion.title} (external: ${assertion.package} ${assertion.file})`, () => {
           const verdict = evaluation.external.get(assertion.id);

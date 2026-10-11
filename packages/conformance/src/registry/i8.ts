@@ -7,7 +7,7 @@ import { INVARIANTS, type InvariantEntry, type Registry } from '../kit/types.js'
 import { conformanceRoot, entryDivergence, toPosix, walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { claimKeys } from './claims.js';
 import { assertReconciliationRefuses } from './reconciliation.js';
-import { CEILING_BEARING_PROBE_HAS_AN_ASSERTION } from './readiness.js';
+import { CEILING_BEARING_PROBE_CHECK_IS_EXERCISED, CEILING_BEARING_PROBE_HAS_AN_ASSERTION } from './readiness.js';
 
 const CONFORMANCE = '@olympus-ai/conformance';
 
@@ -16,6 +16,7 @@ export const I8: InvariantEntry = {
   title: INVARIANTS.I8,
   assertions: [
     CEILING_BEARING_PROBE_HAS_AN_ASSERTION,
+    CEILING_BEARING_PROBE_CHECK_IS_EXERCISED,
     runtime({
       id: 'I8.registry-complete',
       title: 'every invariant and capability claim is asserted, or pending with a named owner and reason; no record is malformed',

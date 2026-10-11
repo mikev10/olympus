@@ -81,6 +81,8 @@ export interface LocalAssertion {
   readonly run: () => void | Promise<void>;
   /** The fixture file this assertion reads, relative to the conformance package, if any. */
   readonly fixture?: string;
+  /** How long the assertion may run before it fails, where the suite default is too short for what it executes. */
+  readonly timeoutMs?: number;
 }
 
 /**
