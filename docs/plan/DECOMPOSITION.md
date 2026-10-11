@@ -610,6 +610,7 @@ order between them is settled before any of them is picked up.
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
 | R16 | Bug-fix intake | M2 | R15, P14, M2 triggers | — |
+| R17 | Security at the gate | M2 | P6, P7, P8, P14, R15 | — |
 
 ### R1 — Readiness
 
@@ -761,8 +762,9 @@ waiting on a driver per vendor. Binding:
 The measurement the claim needs. A fixed corpus of tasks, each seeded with one
 known false-done — a skipped test, a weakened assertion, an edited acceptance
 test, a suite that was never run under a claim that it passed, a hard-coded
-expected output, a change outside the granted globs — beside clean controls
-that should pass. Each is run through the line and through the same driver
+expected output, a change outside the granted globs, a committed credential, an
+added scanner suppression, an authorization rule with no denial check (R17) —
+beside clean controls that should pass. Each is run through the line and through the same driver
 alone, and the unit reports the detection rate per item of P7's taxonomy and
 the false-refusal rate on the controls, each with its sample size and bound
 (R2). Without it, "measurably reduces false-done failures" is asserted and not
@@ -817,7 +819,10 @@ where identity is role, driver, and model, not family alone; a review seat
 never writes (P6); an approval never comes from the run's agent (P9); the merge
 credential never enters a sandbox (I1). Each row is a registry assertion that
 fails when its check is deleted, and each seat's identity is recorded in run
-state. It needs a second driver, because one family can only ever record
+state. The matrix also seats a security reviewer, seated as the review seat
+is: read-only, of a family that is none of the authors', and granted the
+locked spec with its security part (R17), the diff, and the runtime's security
+check results, never the author's narrative. It needs a second driver, because one family can only ever record
 reduced independence. A review whose verdict gates the line is the M3 panel's,
 not this unit's: until then a verdict is recorded and not interpreted
 (D-P4-07), and the human at `integrate` reads it.
@@ -870,7 +875,7 @@ the control plane's.
 
 ### R13 — Nightly review
 
-Two jobs on the `scheduled` trigger. The first involves no model: it re-hashes
+Three jobs on the `scheduled` trigger. The first involves no model: it re-hashes
 every evidence bundle, lock, and record in the Vault, recomputes R2's published
 rates from raw records, and records a violation for any mismatch, so a record
 that has drifted is found within a day rather than at audit. The second seats
@@ -880,6 +885,13 @@ The reviewer's family differs from every author family whose work it reviews
 (I6). Its review is recorded as a claim and becomes R11 proposals or `intake`
 candidates, which a human admits. It never changes a run, a grant, or a status
 (D-A-LC-10).
+
+The third involves no model either. It runs R17's security checks and a
+dependency audit over the head of the target's default branch, in a sandbox
+whose egress allows the advisory database the audit reads and nothing else.
+A finding becomes an `intake` candidate carrying its scanner, rule, and
+location as typed fields, which a human admits like any other; the job never
+opens a change or drafts a fix (D-A-SC-03).
 
 ### R14 — Model tier per station and escalation
 
@@ -1044,6 +1056,90 @@ declared `'fails'` is refused.
 enabled, `I7.extracted-field-schemas` and `I7.untrusted-sink-lint-rule`,
 through M2 triggers.
 
+### R17 — Security at the gate
+
+Today nothing in the line looks at a change for security. R1's secret scan
+runs once per repository, at one commit, and caps a level; it never sees a
+diff. `verify` runs what the manifest pins, and `CheckKind` has no security
+kind, so a change that commits a credential or adds an injection sink passes
+every gate the line has, as long as its tests pass. The `review` seat may
+notice, and its verdict is recorded and not interpreted (D-P4-07). This unit
+puts security where the line already holds things it trusts: in checks the
+runtime runs, in what the spec must say, and in tamper detection (D-A-SC-01).
+
+It is not a security agent. A model reading a diff for vulnerabilities is a
+reviewer, and reviewers are R9's and the M3 panel's. What this unit adds is
+deterministic and runs with no model call.
+
+Binding:
+
+- **Two check kinds.** `CheckKind` gains `'secret-scan'` and
+  `'static-analysis'`. They run at `verify` over base plus the diff exactly as
+  every other check does: a fresh read-only directory, a fresh sandbox,
+  `deny-all` egress, an image pinned by digest. The secret scan is
+  stack-neutral and reuses the scanner R1 already pins
+  (`SECRET_SCAN_IMAGE`). Static analysis is per stack, so it is a new nullable
+  slot on `AdapterSet`, and a set without one names `static-analysis` among
+  its missing controls, which refuses L3 as every other missing control does
+  (I5)
+- **The rules are locked, not read from the workspace.** Each check's
+  configuration is pinned with the manifest at `test-design` and passed to the
+  scanner explicitly. Configuration and ignore files in the repository are
+  never read by the check, and the unit proves this with a fixture whose
+  workspace carries an ignore file that would hide a seeded finding (I3)
+- **Only new findings fail the change.** The base run R15 adds also runs the
+  security checks, and the runtime records their findings as the base set. At
+  `verify` a finding whose fingerprint is not in the base set fails the check;
+  one that is in the base set is recorded and does not. A scanner that does not
+  report fingerprints cannot be pinned (D-A-SC-02). A secret already on the
+  base stays R1's concern: `integrate.secret-scan` is ceiling-bearing
+- **A suppression added by the diff is a violation.** An inline marker that
+  tells a scanner to skip a line, such as `gitleaks:allow` or `nosemgrep`,
+  added by the diff, is recorded as a `suppression-marker` violation, the way
+  P7 records a `skip-marker`. The adapter that pins a scanner names its
+  markers. A marker already on the base is not the change's
+- **The spec states its security surface.** Every spec carries a security
+  part: the trust boundaries the change crosses, the data it reads or writes
+  that policy classifies, each authorization rule it adds or relies on, and any
+  secret it needs. "None", with one line of reason, is a valid answer and the
+  person at the `spec` exit reads it. An absent part is refused at `spec`,
+  naming it (I5). This uses the spec shape R16 introduces; whichever of R16
+  and R17 lands first builds the shape check, and the other adds its parts
+- **Each authorization rule has a denial check.** For each rule the security
+  part names, `test-design` must lock at least one acceptance check whose
+  manifest entry names the rule and exercises a caller the rule refuses. A rule
+  with no such check refuses the `test-design` exit, naming it. The check gets
+  R15's base run like any other acceptance check
+- **Recorded, and countable.** A failed security check, a suppression
+  violation, and a refusal for a missing security part or a missing denial
+  check each reach P14's record with their own cause, so R2 counts them by
+  cause like any other refusal
+
+**Not in this unit:** dependency vulnerability audits, which need the
+registry's advisory database and so cannot run under `verify`'s `deny-all`
+egress (R13 runs them; D-A-SC-03); a model reviewing for security (R9 seats
+it, the M3 panel interprets it); fixing a finding (it fails the change, and
+the next iteration is the fix); and any scanner on a host other than the
+sandbox.
+
+**Known limit, stated now:** a scanner finds what its rules describe.
+Deterministic checks lower the rate of known classes of defect and say
+nothing about a class no rule names. The denial checks are the part that
+follows the spec rather than a rule set, and they are only as complete as the
+security part the person approved.
+
+**Conformance:** a diff that adds a seeded secret fails `verify`; the same
+secret on the base does not fail the change; a workspace ignore file does not
+hide a seeded finding; a diff that adds a suppression marker records a
+`suppression-marker` violation; a spec with no security part is refused at
+`spec`; an authorization rule with no denial check refuses the `test-design`
+exit; an adapter set with no static-analysis slot is refused at L3; each
+refusal leaves one P14 decision with its cause.
+
+**Why M2:** it needs R15's base run for the base set, and both check kinds
+are new manifest entries that M1's closed scope cannot take. No model call is
+added; the cost is two sandbox runs per `verify` and one per base run.
+
 ### Recorded constraint: the Codex driver (M2)
 
 Not specified, and not a unit here. It is recorded so the choice is settled
@@ -1055,6 +1151,26 @@ container Olympus provisions. A harness running on the vendor's infrastructure
 is outside every one of them. A driver built that way anyway declares those
 controls unavailable, and `unavailableControls()` refuses it above L1. It never
 runs with weaker guarantees than its level claims.
+
+Added 2026-10-11: OpenAI's Agents API now offers computer use and Codex's
+multi-agent machinery on infrastructure OpenAI operates, and the Codex harness
+is reported to be open source. The first is the vendor-hosted harness this
+constraint excludes, and it is excluded for the same reasons. The second, if
+it holds, makes the in-sandbox driver this constraint asks for cheaper to
+build. Whoever picks up the driver verifies the harness's licence and source
+before relying on it (D-A-DD-01).
+
+### Recorded constraint: event subscriptions (M2 triggers)
+
+Not specified, and not a unit here. The M2 trigger framework may receive
+events through webhooks or through MCP Events, a proposed extension to MCP
+that ChatGPT implements as webhook delivery. As of 2026-10-11 it is a draft,
+not part of the MCP specification, so no unit depends on it. Whichever
+transport carries an event, three things hold: its payload is an
+`UntrustedPayload` and only the extracted fields reach a template (I7); a
+subscription is a capability granted in policy, not configuration a trigger
+carries (I4); and the secret that verifies a delivery is held where P12 holds
+credentials, never inside a sandbox (D-A-DD-02).
 
 ---
 

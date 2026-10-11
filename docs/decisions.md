@@ -3648,3 +3648,59 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Known limit:** `testing.tamper-analysis` cannot be isolated from `testing.adapter`. The adapters build no test adapter without a manifest (`packages/adapters/src/detect.ts`), so a stack lacking either adapter also lacks the test adapter. Its fixture checks the probe's own outcome, and rests only on the install.
 - **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, that capability is its check.
 - **Reverse:** remove the entry and `timeoutMs`; D-R1-19's known limit returns.
+
+## Amendment: security at the gate, and two recorded constraints
+
+Gaps found on 2026-10-11 by checking the line against the week's announcements
+of hosted security agents (OpenAI's Codex Security Cloud, after Cursor's
+Security Review): two vendors had split security review from general code
+review, and the line has no security control on a change at all. R1's secret
+scan reads one commit and caps a level; `CheckKind` has no security kind; the
+spec has no security content; P7's taxonomy has no suppression marker. Each row
+was checked against the code on `v2` at 62147bc. No package changes; the
+amendment adds R17, extends R7, R9, and R13, and records two constraints.
+
+### D-A-SC-01: security is checks, spec content, and tamper detection, as R17 in M2
+
+- **Ambiguous:** the announcements frame security as an agent: a model that scans, triages, deduplicates, and drafts fixes. The line could take that as a new role at `review`, or as a station.
+- **Chosen:** a unit with no model in it. Two check kinds, `'secret-scan'` and `'static-analysis'`, run by the runtime at `verify` with configuration locked at `test-design`; a required security part in every spec; a denial check locked for each authorization rule the spec names; and a `suppression-marker` violation for an inline scanner suppression the diff adds. A model reviewing for security is a seat in R9's matrix, recorded and not interpreted until the M3 panel.
+- **Must hold:** findings are the runtime's (I2). The scanner reads its configuration from the manifest, never from the workspace (I3). An adapter set without static analysis names the missing control and is refused at L3 (I5). Each refusal reaches P14's record with its own cause.
+- **Rejected:** a security agent that triages or fixes. A finding a model triages away is a status a model reported (I2), and a fix it drafts outside a run is a change with no spec. A finding fails the change, and the next iteration is the fix.
+- **Contract amendments, owed by the unit's pull request:** `CheckKind` gains two members; `AdapterSet` gains a nullable static-analysis slot and `Control` its name; `IntegrityViolation.kind` gains `'suppression-marker'`; P14's cause union gains the refusals named in R17.
+- **Why:** the claim is that a false-done is caught at the gate. A change that passes its tests while committing a credential is done by every measure the line has today, and wrong.
+- **Why M2:** it needs R15's base run, and M1's scope is closed.
+- **Reverse:** drop the spec part and the denial checks, and keep the two check kinds; they stand alone.
+- **Proposed;** not yet confirmed by the maintainer.
+
+### D-A-SC-02: only findings absent from the base fail a change
+
+- **Ambiguous:** a target with existing findings would fail every change if `verify` counted all of them, and a target with none would be indistinguishable from one whose scanner never ran.
+- **Option A:** require a clean base. The security checks are declared `'passes'` on the base under R15, and a base with findings refuses at the `test-design` exit. Simple, and unusable on most real repositories until someone clears their backlog.
+- **Option B (recommended):** R15's base run also runs the security checks, and the runtime records their findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner that does not report a stable fingerprint cannot be pinned.
+- **Must hold:** the base set is written by the runtime to the Vault beside R15's base results, and a resume reads it rather than running it again. A check that does not start is a refusal, never an empty set.
+- **Known limit:** a change that moves a line carrying an existing finding can change its fingerprint and fail. That is a false refusal, which costs throughput and is never a safety failure.
+- **Reverse:** Option A.
+- **Proposed;** the choice is the maintainer's.
+
+### D-A-SC-03: dependency audits run nightly, not at `verify`
+
+- **Ambiguous:** a dependency audit is the most common security check and the one most targets already run, so it looks like a third check kind.
+- **Chosen:** R13's third job. An audit reads an advisory database over the network, and `verify` runs with `deny-all` egress. Granting `verify` egress for one check widens every check's sandbox. A vulnerability published after merge is also a property of the date, not of the change, so a nightly job over the default branch finds it where a gate would not.
+- **Must hold:** the job's egress allowlist names the advisory host alone. Findings become `intake` candidates as typed fields (I7), and a human admits them. The job never opens a change.
+- **Reverse:** an audit check at `verify` against an advisory snapshot pinned into the image, at the cost of the snapshot going stale.
+- **Proposed;** not yet confirmed by the maintainer.
+
+### D-A-DD-01: the Codex constraint stands against the Agents API, and notes the open harness
+
+- **Found:** OpenAI's Agents API now exposes computer use and Codex's multi-agent coordination, run on OpenAI's infrastructure. Coverage of DevDay 2026 also reports that the Codex harness is open source.
+- **Chosen:** no change to the constraint. A hosted harness is outside the mount layer, the egress allowlist, and the egress-held credential, and is refused above L1. A dated note records both facts, and that the second, unverified here, would make the in-sandbox driver cheaper. The driver's author checks the licence and source first.
+- **Why:** a second family is what R9 and real I6 independence wait on, so a cheaper route to the Codex driver is worth recording where its author will read it.
+- **Proposed;** not yet confirmed by the maintainer.
+
+### D-A-DD-02: event subscriptions are granted capabilities, whatever their transport
+
+- **Found:** OpenAI supports the proposed MCP Events specification for automations in ChatGPT, as webhook delivery. The specification is a draft with no accepted proposal in MCP.
+- **Chosen:** a recorded constraint, not a unit and not a dependency. The M2 trigger framework may use either webhooks or MCP Events. Either way the payload is untrusted (I7), the subscription is granted in policy (I4), and the delivery-verification secret is held where P12 holds credentials.
+- **Why:** a subscription that delivers into the line is a standing capability. Treating it as configuration would let a trigger widen what reaches the line without a versioned policy edit.
+- **Reverse:** drop the note; it binds nothing yet.
+- **Proposed;** not yet confirmed by the maintainer.
