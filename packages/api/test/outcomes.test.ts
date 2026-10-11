@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelFamily, ModelIdentity, RunId, RunState, StationId, TaskId } from '@olympus-ai/core';
-import { StubVault, type AdmissionRecord, type EnforcementDecision, type UsageRecord } from '@olympus-ai/vault';
-import { deriveOutcomes, distribution, estimateCost, MIN_ESTIMATE_SAMPLE, failureRate, successRate, type RunRecords, type TaskRecord } from '../src/index.js';
+import { StubVault, type AdmissionRecord, type EnforcementDecision, type IntegrationMerged, type UsageRecord } from '@olympus-ai/vault';
+import { deriveOutcomes, distribution, estimateCost, MIN_ESTIMATE_SAMPLE, failureRate, readRunRecords, successRate, type RunRecords, type TaskRecord } from '../src/index.js';
 
 const MODEL: ModelIdentity = { provider: 'anthropic', family: 'claude' as ModelFamily, model: 'm-standard', version: '1' };
 
@@ -164,6 +164,16 @@ describe('deriveOutcomes', () => {
     expect(o.throughput.reviewExitRefused).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
   });
 
+  it('leaves a review on an unfinished run out of the review refusal rate', () => {
+    const gate = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'gate-failed', failed: [], message: '' } } as unknown as EnforcementDecision['decision'];
+    const seatedOnly = (id: string): RunRecords => run(id, { ending: 'unfinished', mergedAt: null, usage: [usage(id, 'r', 'review', 1)] });
+    const o = deriveOutcomes([
+      run('a', { ending: 'halted', mergedAt: null, usage: [usage('a', 'r', 'review', 1)], decisions: [decision('a', '2026-10-01T00:00:00.000Z', 'review', gate)] }),
+      seatedOnly('u1'), seatedOnly('u2'), seatedOnly('u3'),
+    ]);
+    expect(o.throughput.reviewExitRefused).toMatchObject({ kind: 'rate', count: 1, sample: 1 });
+  });
+
   it('measures first-pass yield per station and per first model, and rolls it across stations', () => {
     const o = deriveOutcomes([run('a', { tasks: [task('a', ['passed']), task('b', ['failed', 'passed']), task('r', ['passed'], { station: 'review' })] })]);
     expect(o.throughput.firstPassYieldByStation.build).toMatchObject({ count: 1, sample: 2 });
@@ -184,7 +194,7 @@ describe('deriveOutcomes', () => {
 
 describe('estimateCost', () => {
   /** One past run per cost, each with one build task whose single call read that cost. */
-  async function history(costs: readonly number[], lost = false): Promise<StubVault> {
+  async function history(costs: readonly number[], lost = false, status = 'passed'): Promise<StubVault> {
     const vault = new StubVault(process.cwd());
     for (const [i, usd] of costs.entries()) {
       const runId = `past-${String(i)}` as RunId;
@@ -192,7 +202,7 @@ describe('estimateCost', () => {
       const record = usage(runId, 't', 'build', 1, MODEL, usd);
       const ref = await vault.recordUsage(lost && i === 0 ? { ...record, reading: { kind: 'lost', detail: 'gone' } } : record);
       const state = {
-        runId, admission, station: 'build', phase: 'working', tasks: { t: 'passed' }, attempts: {}, results: {}, evidenceRefs: [],
+        runId, admission, station: 'build', phase: 'working', tasks: { t: status }, attempts: {}, results: {}, evidenceRefs: [],
         violations: [], approvals: [], reviews: [], usage: [ref], cancelled: null, halted: null, version: '0',
       } as unknown as RunState;
       await vault.commitRunState(state, '0');
@@ -208,5 +218,47 @@ describe('estimateCost', () => {
   it('declines below five past tasks, and does not count a task whose cost was lost', async () => {
     expect(await estimateCost(await history([1, 2, 3, 4]), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', needed: MIN_ESTIMATE_SAMPLE, short: [{ station: 'build', sample: 4 }] });
     expect(await estimateCost(await history([1, 2, 3, 4, 5], true), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', short: [{ sample: 4 }] });
+  });
+
+  it('does not count a task that has not finished as a past task, a failed one awaiting its next build included', async () => {
+    for (const status of ['running', 'failed']) {
+      expect(await estimateCost(await history([1, 1, 1, 1, 1], false, status), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', short: [{ sample: 0 }] });
+    }
+    expect(await estimateCost(await history([1, 1, 1, 1, 1], false, 'parked'), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'likely' });
+  });
+});
+
+describe('readRunRecords', () => {
+  const runId = 'r' as RunId;
+  async function admitted(vault: StubVault, approvals: RunState['approvals']): Promise<void> {
+    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' } } as unknown as AdmissionRecord);
+    await vault.commitRunState({
+      runId, admission, station: 'integrate', phase: 'awaiting-approval', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
+      violations: [], approvals, reviews: [], usage: [], cancelled: null, halted: null, version: '0',
+    } as unknown as RunState, '0');
+  }
+
+  it('does not read a merge whose integrate grant is not yet spent as autonomous', async () => {
+    const vault = new StubVault(process.cwd());
+    await admitted(vault, [{ key: 'integrate:2', approvedBy: 'maintainer', approvedAt: '2026-10-01T00:30:00.000Z', usedAt: null }] as unknown as RunState['approvals']);
+    await vault.recordIntegration({ runId, kind: 'merged', mergedAt: '2026-10-01T01:00:00.000Z', collectedBy: 'runtime' } as unknown as IntegrationMerged);
+    const records = await readRunRecords(vault, runId);
+    expect(records).toMatchObject({ ending: 'merged', approvalsSpent: 1 });
+    expect(deriveOutcomes([records]).throughput.autonomyRatio).toMatchObject({ count: 0, sample: 1 });
+  });
+
+  it('refuses a run whose state cannot be read, never reading it as a run with no state', async () => {
+    class Torn extends StubVault {
+      override readRunState(): Promise<RunState> {
+        return Promise.reject(new SyntaxError('Unexpected end of JSON input'));
+      }
+    }
+    const vault = new Torn(process.cwd());
+    await admitted(vault, []);
+    await expect(readRunRecords(vault, runId)).rejects.toThrow(/JSON/);
+  });
+
+  it('reads a run with no state yet as unfinished', async () => {
+    await expect(readRunRecords(new StubVault(process.cwd()), runId)).resolves.toMatchObject({ ending: 'unfinished', tasks: [], usage: [] });
   });
 });

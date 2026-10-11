@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { LocalVault, type AdmissionRecord, type EvidenceBundle } from '../src/index.js';
+import { isNoRunState, LocalVault, StubVault, type AdmissionRecord, type EvidenceBundle } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -389,8 +389,13 @@ describe('run state', () => {
     }
   });
 
-  test('an unknown run has no state', async () => {
+  test('an unknown run has no state, said as absence and not as a fault, in both stores', async () => {
     await expect(vault.readRunState(runId)).rejects.toThrow(/no run state/);
+    for (const store of [vault, new StubVault(process.cwd())]) {
+      const error: unknown = await store.readRunState(runId).then(() => null, (e: unknown) => e);
+      expect(isNoRunState(error)).toBe(true);
+    }
+    expect(isNoRunState(new SyntaxError('Unexpected end of JSON input'))).toBe(false);
   });
 });
 

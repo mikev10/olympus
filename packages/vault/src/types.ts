@@ -275,6 +275,17 @@ export interface AdmissionRecord {
 }
 
 /**
+ * The store holds no state for this run: refused at admission, or admitted and
+ * not yet committed. A code, not a class, so a store module carries no value
+ * import and still loads where its types are only stripped; `isNoRunState`
+ * tells it from a fault.
+ */
+export interface NoRunState extends Error {
+  readonly code: 'no-run-state';
+  readonly runId: RunId;
+}
+
+/**
  * I1: no generic write(). Every mutator is a named, audited operation the runtime
  * calls. No method on this interface is reachable from inside a Workspace.
  */
@@ -315,6 +326,7 @@ export interface Vault {
    * caller: a rate over runs a caller picked is a rate over a chosen sample.
    */
   listRuns(): Promise<readonly RunId[]>;
+  /** Rejects with a `NoRunState` where the store holds no state for the run, and with anything else only on a fault. */
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;
 }

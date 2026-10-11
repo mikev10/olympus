@@ -33,7 +33,7 @@ import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -601,7 +601,7 @@ export class LocalVault implements Vault {
   async readRunState(runId: RunId): Promise<RunState> {
     const states = join(runDir(this.#store, runId), 'state');
     const version = await highestIn(states);
-    if (version === null) throw new Error(`LocalVault: no run state for ${runId}`);
+    if (version === null) throw Object.assign(new Error(`LocalVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState;
     const file = join(states, `${String(version)}.json`);
     return requireRunState(await readJson(file), file);
   }

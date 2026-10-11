@@ -393,13 +393,20 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   };
 }
 
+/**
+ * An ISO 8601 date-time with `Z` or an offset. Without a zone `Date.parse`
+ * reads a time in the server's own, so one request would name a different
+ * window on every host.
+ */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /** `from` and `to`, each an ISO time if given; anything else is refused, never read as no bound. */
 function outcomeWindow(params: URLSearchParams): OutcomeWindow {
   const window: { from?: string; to?: string } = {};
   for (const key of ['from', 'to'] as const) {
     const value = params.get(key);
     if (value === null) continue;
-    if (Number.isNaN(Date.parse(value))) throw new HttpError(400, 'bad-request', `${key} is not a time: ${value}`);
+    if (!ISO_TIME.test(value) || Number.isNaN(Date.parse(value))) throw new HttpError(400, 'bad-request', `${key} is not an ISO time with a zone: ${value}`);
     window[key] = value;
   }
   return window;

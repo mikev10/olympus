@@ -11,7 +11,7 @@
  */
 import { approvalKey } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
-import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, UsageRecord, Vault } from '@olympus-ai/vault';
+import { isNoRunState, type AdmissionRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type UsageRecord, type Vault } from '@olympus-ai/vault';
 import { distribution, failureRate, successRate, type Distribution, type Proportion } from './bounds.js';
 import { costTotals, readUsage, type UsageTotal } from './cost.js';
 import { readIntegration } from './line.js';
@@ -140,10 +140,16 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
   for (const ref of await vault.readDecisions(runId)) decisions.push(decode(await vault.read(ref)) as EnforcementDecision);
   decisions.sort((a, b) => a.decidedAt.localeCompare(b.decidedAt));
 
+  // Integration before state: a merge happens only after its grant is committed, so a state read
+  // after a merge was seen holds that grant, and a merge is never paired with an older state.
+  const integration: IntegrationRecord[] = await readIntegration(vault, runId);
+
   let state: RunState;
   try {
     state = await vault.readRunState(runId);
-  } catch {
+  } catch (error) {
+    // Only absence is absence; a state that cannot be read is a fault, never a run with no evidence (I5).
+    if (!isNoRunState(error)) throw error;
     const refusal = decisions.find((d) => d.decision.cause === 'admission-refused');
     return {
       runId,
@@ -160,7 +166,6 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
   }
 
   const admission = decode(await vault.read(state.admission)) as AdmissionRecord;
-  const integration: IntegrationRecord[] = await readIntegration(vault, runId);
   const merged = integration.find((r) => r.kind === 'merged');
   const usage = await readUsage(vault, state);
 
@@ -208,7 +213,9 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     requestedLevel: admission.run.requestedLevel,
     startedAt: admission.run.createdAt,
     mergedAt: merged?.kind === 'merged' ? merged.mergedAt : null,
-    approvalsSpent: state.approvals.filter((g) => g.usedAt !== null).length,
+    // The drive merges before it spends the integrate grant (D-I1b-01), so on a merged run that grant
+    // was consumed by the merge, spent in state or not yet.
+    approvalsSpent: state.approvals.filter((g) => g.usedAt !== null || (merged !== undefined && g.key === approvalKey('integrate', admission.run.requestedLevel))).length,
     tasks,
     decisions,
     usage,
@@ -309,7 +316,8 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const waits = new Map<string, number[]>();
   const open: Record<string, number> = {};
   for (const run of runs) {
-    if (run.usage.some((u) => u.station === 'review')) {
+    // A run-level rate, so over finished runs: a review that has not returned is not a sample.
+    if (finished.includes(run) && run.usage.some((u) => u.station === 'review')) {
       seated += 1;
       if (run.decisions.some((d) => d.station === 'review' && d.decision.cause === 'station-refused' && d.decision.refusal.reason !== 'approval-required')) returned += 1;
     }
@@ -390,10 +398,18 @@ export type CostEstimate =
   | { readonly kind: 'insufficient-sample'; readonly short: ReadonlyArray<{ readonly station: StationId; readonly model: string; readonly sample: number }>; readonly needed: number };
 
 /**
+ * Task statuses after which a task makes no more calls. Not `failed`: the line
+ * builds a failed task again while it has iterations left, and parks it when it
+ * has none.
+ */
+const ENDED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['passed', 'parked', 'cancelled']);
+
+/**
  * The likely cost of a run, from past runs' usage: for each task it would
  * schedule, the median cost of a past task at the same station on the same
- * model. A past task counts only where every call it made was metered, since
- * a lost or unmetered call has no cost to take a median of. Escalation is not
+ * model. A past task counts only where it has ended and every call it made
+ * was metered: a task still running has spent only part of its cost, and a
+ * lost or unmetered call has no cost to take a median of. Escalation is not
  * modelled: each task is priced at its starting tier.
  */
 export async function estimateCost(vault: Vault, tasks: readonly EstimateCell[]): Promise<CostEstimate> {
@@ -402,9 +418,12 @@ export async function estimateCost(vault: Vault, tasks: readonly EstimateCell[])
     const run = await readRunRecords(vault, runId);
     const byTask = new Map<TaskId, UsageRecord[]>();
     for (const r of run.usage) byTask.set(r.taskId, [...(byTask.get(r.taskId) ?? []), r]);
-    for (const calls of byTask.values()) {
+    for (const [taskId, calls] of byTask) {
       const first = calls[0];
-      if (first === undefined || calls.some((c) => c.reading.kind !== 'metered')) continue;
+      const status = run.tasks.find((t) => t.taskId === taskId)?.status;
+      // A task on a run that has ended makes no more calls, whatever its status.
+      const ended = run.ending !== 'unfinished' || (status !== undefined && ENDED.has(status));
+      if (first === undefined || !ended || calls.some((c) => c.reading.kind !== 'metered')) continue;
       const usd = calls.reduce((sum, c) => sum + (c.reading.kind === 'metered' ? c.reading.costUsd : 0), 0);
       const key = `${first.station} ${modelKey(first.model)}`;
       past.set(key, [...(past.get(key) ?? []), usd]);
