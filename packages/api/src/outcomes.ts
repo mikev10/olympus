@@ -123,7 +123,7 @@ export type CostPerMerge =
 export const NOT_MEASURED: readonly string[] = [
   'escaped false-done: needs post-merge observation (R8)',
   "the team's own baseline: attributed by R8",
-  'stack: no run record names one (R17)',
+  'stack: no run record names one (R18)',
   'role per call: read from the station, review being the reviewer',
 ];
 

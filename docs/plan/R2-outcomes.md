@@ -36,7 +36,7 @@ shows can be recomputed from these records alone).
 ## Not recorded, and therefore not measured
 
 - **Stack.** No run record names the target's stack, so no rate is kept per
-  stack. The report says so in one line. Recording it is R17.
+  stack. The report says so in one line. Recording it is R18.
 - **Escaped false-done.** A change that passed every gate and failed later
   needs `observe` (R8). The report says the escaped rate is not established,
   and never implies zero.
@@ -125,7 +125,7 @@ Anything further found in the work stops the unit for confirmation.
 ## Out of scope
 
 - a baseline from the target's own history, R7's corpus, and the escaped rate (R8, R7)
-- recording stack per run (R17)
+- recording stack per run (R18)
 - telemetry export (R12)
 - any dashboard or UI; the control plane displays these numbers and never computes its own (D-A-BR-05)
 - changing the README or spine wording about a reduction: one proof run is not a window

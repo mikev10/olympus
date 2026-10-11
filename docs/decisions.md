@@ -3654,7 +3654,7 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 ### D-R2-01: R2's entry was a claim; the spec is written against the code first
 
 - **Ambiguous:** R2's entry had no spec, no out-of-scope list, no acceptance criteria, and said every input already existed. Four did not: the merge carries no time, the Vault cannot list its runs, no record names a stack, and `review` returning a change is not a distinct outcome.
-- **Chosen:** `docs/plan/R2-outcomes.md`, written and confirmed before any code. Cycle time and the run listing become contract amendments in this unit's pull request (A-R2-01, A-R2-02), following R14's precedent of amendments landing with the unit that needs them. A refused `review` exit is counted as a return, labelled as exactly that. Stack is not keyed, and recording it is a new unit, R17, so the gap has an owner rather than a sentence. The autonomy ratio is per run, since approvals are granted per station exit and not per task. Bounds are one-sided 95% Clopper–Pearson. The pre-run estimate declines below five past tasks per station and model.
+- **Chosen:** `docs/plan/R2-outcomes.md`, written and confirmed before any code. Cycle time and the run listing become contract amendments in this unit's pull request (A-R2-01, A-R2-02), following R14's precedent of amendments landing with the unit that needs them. A refused `review` exit is counted as a return, labelled as exactly that. Stack is not keyed, and recording it is a new unit, R18 (numbered R17 when written; see D-R2-12), so the gap has an owner rather than a sentence. The autonomy ratio is per run, since approvals are granted per station exit and not per task. Bounds are one-sided 95% Clopper–Pearson. The pre-run estimate declines below five past tasks per station and model.
 - **Confirmed** by the maintainer, 2026-10-11, all eight recommendations, with stack to be recorded where it will not be forgotten.
 - **Reverse:** drop the amendments; cycle time is `not-established` and the caller names the runs.
 
@@ -3727,6 +3727,12 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Chosen:** no change to R2, which computes the bounds the spec names. Whether a bound supports a general safety claim is a question for the first unit that publishes one as such.
 - **Owner:** R8.
 
+### D-R2-12: the stack unit is R18
+
+- **Found:** merging `v2` into R2's branch. #35 numbered "Security at the gate" R17 while R2 was in review, and R2 had already numbered "Stack recorded per run" R17 (D-R2-01).
+- **Chosen:** the stack unit is R18. #35 merged first, and other units already depend on its R17 (R7, R9, R13). The review prompt and bundle are left as sent, and they still say R17: they record what the reviewers saw.
+- **Confirmed** by the maintainer, 2026-10-12.
+
 ## R2 amendments to the contracts
 
 ### A-R2-01: the merge record carries GitHub's merge time
@@ -3736,3 +3742,66 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 ### A-R2-02: the Vault lists its runs
 
 `Vault.listRuns()` returns every run the store holds any record for, sorted by id. A run refused at admission holds decisions and nothing else, and is listed. The store names the set so a rate over every run is never a rate over a sample a caller chose. `I2.vault-lists-every-run` checks the local and stub Vaults.
+
+## Amendment: security at the gate, and two recorded constraints
+
+Gaps found on 2026-10-11 by checking the line against the week's announcements
+of hosted security agents (OpenAI's Codex Security Cloud, after Cursor's
+Security Review): two vendors had split security review from general code
+review, and the line has no security control on a change at all. R1's secret
+scan reads one commit and caps a level; `CheckKind` has no security kind; the
+spec has no security content; P7's taxonomy has no suppression marker. Each row
+was checked against the code on `v2` at 62147bc. No package changes; the
+amendment adds R17, extends R7, R9, and R13, and records two constraints.
+
+The two constraints come from the same week's announcements: a hosted agent
+API with computer use, and a proposed event extension to MCP. Neither changes
+a unit; each is recorded where the unit that meets it will read it. The vendor
+facts they cite come from public coverage of the announcements and are not
+checkable from this repository.
+
+### D-A-SC-01: security is checks, spec content, and tamper detection, as R17 in M2
+
+- **Ambiguous:** the announcements frame security as an agent: a model that scans, triages, deduplicates, and drafts fixes. The line could take that as a new role at `review`, or as a station.
+- **Chosen:** a unit with no model in it. Two check kinds, `'secret-scan'` and `'static-analysis'`, each in an image its `CheckSpec` pins and with configuration locked at `test-design`, run by the runtime at `verify` and required by admission; typed findings the runtime judges; a required security part in every spec; a denial check locked for each authorization rule the spec names; and an inline scanner suppression the diff adds failing the check and recording a `suppression-marker` violation. A model reviewing for security is a seat in R9's matrix, recorded and not interpreted until the M3 panel.
+- **Must hold:** findings are the runtime's (I2). The scanner reads its configuration from the runtime's mount, never from the workspace (I3). A manifest without the security checks is refused, and an adapter set without static analysis names the missing control and is refused at L3 (I5). Each refusal reaches P14's record naming its cause.
+- **Rejected:** a security agent that triages or fixes. A finding a model triages away is a status a model reported (I2), and a fix it drafts outside a run is a change with no spec. A finding fails the change, and the next iteration is the fix.
+- **Contract amendments, owed by the unit's pull request:** listed in R17. The largest is that a check gains an image and a mounted configuration of its own: today every check runs in the host's one `checkImage` with the workspace as its only mount (`packages/api/src/line.ts`, `workspaceOnly`).
+- **Why:** the claim is that a false-done is caught at the gate. A change that passes its tests while committing a credential is done by every measure the line has today, and wrong.
+- **Why M2:** it needs R15's base run, and M1's scope is closed.
+- **Reverse:** drop the spec part and the denial checks, and keep the two check kinds; they stand alone.
+- **Confirmed** by the maintainer, 2026-10-11.
+
+### D-A-SC-02: only findings absent from the base fail a change
+
+- **Ambiguous:** a target with existing findings would fail every change if `verify` counted all of them, and a target with none would be indistinguishable from one whose scanner never ran.
+- **Both options extend R15.** R15's base run and its `'fails'`/`'passes'` declaration cover acceptance checks only. Either option extends the base run to the two security kinds, and R15's text gains that sentence.
+- **Option A:** require a clean base. The security checks run on the base and must find nothing; a base with findings refuses at the `test-design` exit. Every finding at `verify` fails. Simple, and unusable on most real repositories until someone clears their backlog.
+- **Option B:** the runtime records the base run's findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner whose fingerprint depends on line position cannot be pinned, or must be pinned with a fingerprint the runtime derives from rule, file, and a hash of the match.
+- **Must hold:** the base set is written by the runtime to the Vault beside R15's base results, and a resume reads it rather than running it again. A check that does not start is a refusal, never an empty set.
+- **Known limit:** under B, a change that moves a finding to another file, or changes the matched text, gives it a new fingerprint and fails. That is a false refusal, which costs throughput and is never a safety failure. A fingerprint that included the line number would fail on any line inserted above an existing finding, which is why one is refused.
+- **Chosen: B**, with the maintainer. A gate that only a clean repository can pass would keep R17 off the repositories that most need it, and a finding already on the base is not one the change made.
+- **Reverse:** Option A.
+
+### D-A-SC-03: dependency audits run nightly, not at `verify`
+
+- **Ambiguous:** a dependency audit is the most common security check and the one most targets already run, so it looks like a third check kind.
+- **Chosen:** R13's third job. An audit reads an advisory database over the network, and `verify` runs with `deny-all` egress. Granting `verify` egress for one check widens every check's sandbox. A vulnerability published after merge is also a property of the date, not of the change, so a nightly job over the default branch finds it where a gate would not.
+- **Must hold:** the audit runs in its own sandbox, whose egress allowlist names the advisory host alone; R17's checks in the same job keep `deny-all`. No run locks the job's images and configuration, so policy pins them. Findings become `intake` candidates as typed fields (I7), and a human admits them. The job never opens a change.
+- **Reverse:** an audit check at `verify` against an advisory snapshot pinned into the image, at the cost of the snapshot going stale.
+- **Confirmed** by the maintainer, 2026-10-11.
+
+### D-A-DD-01: the Codex constraint stands against the Agents API, and notes the open harness
+
+- **Found:** OpenAI's Agents API now exposes computer use and Codex's multi-agent coordination, run on OpenAI's infrastructure. Coverage of DevDay 2026 also reports that the Codex harness is open source.
+- **Chosen:** no change to the constraint. A hosted harness is outside the mount layer, the egress allowlist, and the egress-held credential, and is refused above L1. A dated note records both facts, and that the second, unverified here, would make the in-sandbox driver cheaper. The driver's author checks the licence and source first.
+- **Why:** a second family is what R9 and real I6 independence wait on, so a cheaper route to the Codex driver is worth recording where its author will read it.
+- **Confirmed** by the maintainer, 2026-10-11.
+
+### D-A-DD-02: event subscriptions are granted capabilities, whatever their transport
+
+- **Found:** OpenAI supports the proposed MCP Events specification for automations in ChatGPT, as webhook delivery. The specification is a draft with no accepted proposal in MCP.
+- **Chosen:** a recorded constraint, not a unit and not a dependency. The M2 trigger framework may use either webhooks or MCP Events. Either way the payload is untrusted (I7), the subscription is granted in policy (I4), and the delivery-verification secret is held where P12 holds credentials.
+- **Why:** a subscription that delivers into the line is a standing capability. Treating it as configuration would let a trigger widen what reaches the line without a versioned policy edit.
+- **Reverse:** drop the note; it binds nothing yet.
+- **Confirmed** by the maintainer, 2026-10-11.
