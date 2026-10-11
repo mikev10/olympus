@@ -3630,3 +3630,10 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Chosen:** known limit, no change. A huge blob makes the scan fail, which is closed: it never yields a wrong ceiling.
 - **Why:** this costs only resources, and the scan's caller owns its process limits.
 - **Reverse:** stream each blob to disk, and refuse blobs over a size read from `ls-tree -l`.
+
+### D-R1-23: scan fixtures run their sandboxes as the runtime's uid
+
+- **Found:** by CI on the R1 pull request, before and after the review fixes. `scan()` ends by removing its scan directory, and on a Linux runner that failed with `EACCES` on `scan/home/.npm/_logs`: the fixtures ran every sandbox as uid 0, so the npm cache an install wrote was root's, and the runner's user could not remove it. Windows hosts have no uids, so local runs passed.
+- **Chosen:** the readiness test fixtures and the conformance scan pass this process's uid and gid where the host has them, and uid 0 where it does not, as the line's sandboxes and the CLI tests already do (D-P6-10). `ScanOptions.user` now says it is the runtime's uid. A caller that passes another uid gets a scan that fails at cleanup, which is closed.
+- **Why:** the scan directory is the runtime's. A probe must not leave in it anything the runtime cannot remove.
+- **Reverse:** remove the scan directory from inside a sandbox running as the probes' uid, before the host removes the rest.

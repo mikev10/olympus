@@ -16,6 +16,9 @@ const run = promisify(execFile);
 
 export const IMAGE = EGRESS_PROXY_IMAGE;
 
+/** This process's uid where the host has uids, so what a sandbox writes stays removable here (D-P6-10). */
+export const RUNTIME_USER = process.getuid === undefined || process.getgid === undefined ? { uid: 0, gid: 0 } : { uid: process.getuid(), gid: process.getgid() };
+
 export interface Workbench {
   readonly provider: LocalDockerProvider;
   readonly base: string;
@@ -69,7 +72,7 @@ export async function lockfileFor(bench: Workbench, dir: string): Promise<void> 
     mounts: { workspace: { source: dir, target: '/workspace', mode: 'rw' }, others: [] },
     egress: { mode: 'allowlist', allow: [...NPM_REGISTRY] },
     limits: { cpus: 1, memoryMb: 1024, pids: 256, wallClockMs: 300_000 },
-    user: { uid: 0, gid: 0 },
+    user: RUNTIME_USER,
   });
   try {
     const result = await bench.provider.exec(handle, ['npm', 'install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], {
@@ -89,7 +92,7 @@ export function options(bench: Workbench, checkout: string, overrides: Partial<S
     image: IMAGE,
     secretScanImage: SECRET_SCAN_IMAGE,
     limits: { cpus: 2, memoryMb: 2048, pids: 512 },
-    user: { uid: 0, gid: 0 },
+    user: RUNTIME_USER,
     timeouts: { installMs: 300_000, probeMs: 180_000, coldProvisionMs: 60_000 },
     registries: NPM_REGISTRY,
     protectedPaths: ['package.json', '.github/**'],

@@ -56,6 +56,10 @@ export interface ScanOptions {
   readonly image: string;
   readonly secretScanImage: string;
   readonly limits: { readonly cpus: number; readonly memoryMb: number; readonly pids: number };
+  /**
+   * The uid the sandboxes run as: the runtime's own, as the line's sandboxes take it (D-P6-10). The scan directory is
+   * the runtime's, and what a probe writes into it must stay removable by the runtime once the scan ends.
+   */
   readonly user: { readonly uid: number; readonly gid: number };
   readonly timeouts: {
     /** The install's wall clock. */

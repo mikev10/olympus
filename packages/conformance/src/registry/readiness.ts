@@ -186,7 +186,8 @@ export async function scanOptions(provider: SandboxProvider, checkout: string): 
     image: EGRESS_PROXY_IMAGE,
     secretScanImage: SECRET_SCAN_IMAGE,
     limits: { cpus: 1, memoryMb: 1024, pids: 256 },
-    user: { uid: 0, gid: 0 },
+    // This process's uid where the host has uids: a root-owned file the scan cannot remove fails it (D-P6-10).
+    user: process.getuid === undefined || process.getgid === undefined ? { uid: 0, gid: 0 } : { uid: process.getuid(), gid: process.getgid() },
     timeouts: { installMs: 300_000, probeMs: 120_000, coldProvisionMs: 60_000 },
     registries: NPM_REGISTRY,
     protectedPaths: ['.github/**', 'package.json'],
