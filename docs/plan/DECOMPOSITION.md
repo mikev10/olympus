@@ -1209,6 +1209,15 @@ subscription is a capability granted in policy, not configuration a trigger
 carries (I4); and the secret that verifies a delivery is held where P12 holds
 credentials, never inside a sandbox (D-A-DD-02).
 
+### Recorded gap: the M2 trigger framework has no spec
+
+R8, R10, R13, and R16 each depend on "M2 triggers", and R16 depends on the two
+I7 controls the framework owes (`I7.extracted-field-schemas` and
+`I7.untrusted-sink-lint-rule`). No unit in this document specifies that
+framework. It needs a spec before the second half of M2 can start, so it is
+written while R15 is being built, and it lands as a unit with an ID, a row in
+the table above, and a section here, in the shape of the units it unblocks.
+
 ---
 
 ## Working Rules
