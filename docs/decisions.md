@@ -3660,13 +3660,19 @@ spec has no security content; P7's taxonomy has no suppression marker. Each row
 was checked against the code on `v2` at 62147bc. No package changes; the
 amendment adds R17, extends R7, R9, and R13, and records two constraints.
 
+The two constraints come from the same week's announcements: a hosted agent
+API with computer use, and a proposed event extension to MCP. Neither changes
+a unit; each is recorded where the unit that meets it will read it. The vendor
+facts they cite come from public coverage of the announcements and are not
+checkable from this repository.
+
 ### D-A-SC-01: security is checks, spec content, and tamper detection, as R17 in M2
 
 - **Ambiguous:** the announcements frame security as an agent: a model that scans, triages, deduplicates, and drafts fixes. The line could take that as a new role at `review`, or as a station.
-- **Chosen:** a unit with no model in it. Two check kinds, `'secret-scan'` and `'static-analysis'`, run by the runtime at `verify` with configuration locked at `test-design`; a required security part in every spec; a denial check locked for each authorization rule the spec names; and a `suppression-marker` violation for an inline scanner suppression the diff adds. A model reviewing for security is a seat in R9's matrix, recorded and not interpreted until the M3 panel.
-- **Must hold:** findings are the runtime's (I2). The scanner reads its configuration from the manifest, never from the workspace (I3). An adapter set without static analysis names the missing control and is refused at L3 (I5). Each refusal reaches P14's record with its own cause.
+- **Chosen:** a unit with no model in it. Two check kinds, `'secret-scan'` and `'static-analysis'`, each in an image its `CheckSpec` pins and with configuration locked at `test-design`, run by the runtime at `verify` and required by admission; typed findings the runtime judges; a required security part in every spec; a denial check locked for each authorization rule the spec names; and an inline scanner suppression the diff adds failing the check and recording a `suppression-marker` violation. A model reviewing for security is a seat in R9's matrix, recorded and not interpreted until the M3 panel.
+- **Must hold:** findings are the runtime's (I2). The scanner reads its configuration from the runtime's mount, never from the workspace (I3). A manifest without the security checks is refused, and an adapter set without static analysis names the missing control and is refused at L3 (I5). Each refusal reaches P14's record naming its cause.
 - **Rejected:** a security agent that triages or fixes. A finding a model triages away is a status a model reported (I2), and a fix it drafts outside a run is a change with no spec. A finding fails the change, and the next iteration is the fix.
-- **Contract amendments, owed by the unit's pull request:** `CheckKind` gains two members; `AdapterSet` gains a nullable static-analysis slot and `Control` its name; `IntegrityViolation.kind` gains `'suppression-marker'`; P14's cause union gains the refusals named in R17.
+- **Contract amendments, owed by the unit's pull request:** listed in R17. The largest is that a check gains an image and a mounted configuration of its own: today every check runs in the host's one `checkImage` with the workspace as its only mount (`packages/api/src/line.ts`, `workspaceOnly`).
 - **Why:** the claim is that a false-done is caught at the gate. A change that passes its tests while committing a credential is done by every measure the line has today, and wrong.
 - **Why M2:** it needs R15's base run, and M1's scope is closed.
 - **Reverse:** drop the spec part and the denial checks, and keep the two check kinds; they stand alone.
@@ -3675,10 +3681,11 @@ amendment adds R17, extends R7, R9, and R13, and records two constraints.
 ### D-A-SC-02: only findings absent from the base fail a change
 
 - **Ambiguous:** a target with existing findings would fail every change if `verify` counted all of them, and a target with none would be indistinguishable from one whose scanner never ran.
-- **Option A:** require a clean base. The security checks are declared `'passes'` on the base under R15, and a base with findings refuses at the `test-design` exit. Simple, and unusable on most real repositories until someone clears their backlog.
-- **Option B (recommended):** R15's base run also runs the security checks, and the runtime records their findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner that does not report a stable fingerprint cannot be pinned.
+- **Both options extend R15.** R15's base run and its `'fails'`/`'passes'` declaration cover acceptance checks only. Either option extends the base run to the two security kinds, and R15's text gains that sentence.
+- **Option A:** require a clean base. The security checks run on the base and must find nothing; a base with findings refuses at the `test-design` exit. Every finding at `verify` fails. Simple, and unusable on most real repositories until someone clears their backlog.
+- **Option B (recommended):** the runtime records the base run's findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner whose fingerprint depends on line position cannot be pinned, or must be pinned with a fingerprint the runtime derives from rule, file, and a hash of the match.
 - **Must hold:** the base set is written by the runtime to the Vault beside R15's base results, and a resume reads it rather than running it again. A check that does not start is a refusal, never an empty set.
-- **Known limit:** a change that moves a line carrying an existing finding can change its fingerprint and fail. That is a false refusal, which costs throughput and is never a safety failure.
+- **Known limit:** under B, a change that moves a finding to another file, or changes the matched text, gives it a new fingerprint and fails. That is a false refusal, which costs throughput and is never a safety failure. A fingerprint that included the line number would fail on any line inserted above an existing finding, which is why one is refused.
 - **Reverse:** Option A.
 - **Proposed;** the choice is the maintainer's.
 
@@ -3686,7 +3693,7 @@ amendment adds R17, extends R7, R9, and R13, and records two constraints.
 
 - **Ambiguous:** a dependency audit is the most common security check and the one most targets already run, so it looks like a third check kind.
 - **Chosen:** R13's third job. An audit reads an advisory database over the network, and `verify` runs with `deny-all` egress. Granting `verify` egress for one check widens every check's sandbox. A vulnerability published after merge is also a property of the date, not of the change, so a nightly job over the default branch finds it where a gate would not.
-- **Must hold:** the job's egress allowlist names the advisory host alone. Findings become `intake` candidates as typed fields (I7), and a human admits them. The job never opens a change.
+- **Must hold:** the audit runs in its own sandbox, whose egress allowlist names the advisory host alone; R17's checks in the same job keep `deny-all`. No run locks the job's images and configuration, so policy pins them. Findings become `intake` candidates as typed fields (I7), and a human admits them. The job never opens a change.
 - **Reverse:** an audit check at `verify` against an advisory snapshot pinned into the image, at the cost of the snapshot going stale.
 - **Proposed;** not yet confirmed by the maintainer.
 
