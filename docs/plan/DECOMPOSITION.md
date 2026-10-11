@@ -1105,10 +1105,12 @@ Binding:
   `CheckResult` gains typed findings, each a rule, a location, and a
   fingerprint the runtime reads from the scanner's report, and a scanner that
   does not report a fingerprint independent of line position cannot be
-  pinned. Which findings fail the change is D-A-SC-02, pending the
-  maintainer: every finding (Option A), or only those absent from a base set
-  (Option B). Either way R15's base run is extended to the two security
-  kinds, and R15's text gains that sentence when it is specified. A secret
+  pinned. Only a finding absent from the base fails the change (D-A-SC-02):
+  R15's base run is extended to the two security kinds, and R15's text gains
+  that sentence when it is specified. The runtime records the base run's
+  fingerprints as the base set, beside R15's base results in the Vault, and
+  at `verify` a finding outside the set fails the check while one inside it is
+  recorded and does not. A secret
   already on the base is also R1's concern: `integrate.secret-scan` is
   ceiling-bearing
 - **A suppression added by the diff fails the check.** Each check runs with
@@ -1142,8 +1144,7 @@ Binding:
 **Contract amendments, owed by the unit's pull request:** `CheckKind` gains
 two members; `CheckSpec` gains an image, a configuration, and the rule a
 denial check names; `CheckResult` gains typed findings; `FailedCheck.cause`
-gains `'new-finding'` and `'suppression-added'` (the first named for
-Option B; Option A names it `'finding'`); `AdapterSet` gains a nullable
+gains `'new-finding'` and `'suppression-added'`; `AdapterSet` gains a nullable
 static-analysis slot and `Control` its name; `TamperReport` gains
 `suppressionMarkersAdded`; `IntegrityViolation.kind` gains
 `'suppression-marker'`; and the refusal reasons for a missing security part
@@ -1169,8 +1170,8 @@ inline suppression fails the check and records a `suppression-marker`
 violation; a spec with no security part is refused at `spec`; an
 authorization rule with no denial check refuses the `test-design` exit; an
 adapter set with no static-analysis slot is refused at L3; each refusal
-leaves one P14 decision naming its cause. Under Option B, also: the same
-secret on the base does not fail the change.
+leaves one P14 decision naming its cause; the same secret on the base does
+not fail the change.
 
 **Why M2:** it needs R15's base run, and both check kinds are new manifest
 entries that M1's closed scope cannot take. No model call is added; the cost

@@ -3683,11 +3683,11 @@ checkable from this repository.
 - **Ambiguous:** a target with existing findings would fail every change if `verify` counted all of them, and a target with none would be indistinguishable from one whose scanner never ran.
 - **Both options extend R15.** R15's base run and its `'fails'`/`'passes'` declaration cover acceptance checks only. Either option extends the base run to the two security kinds, and R15's text gains that sentence.
 - **Option A:** require a clean base. The security checks run on the base and must find nothing; a base with findings refuses at the `test-design` exit. Every finding at `verify` fails. Simple, and unusable on most real repositories until someone clears their backlog.
-- **Option B (recommended):** the runtime records the base run's findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner whose fingerprint depends on line position cannot be pinned, or must be pinned with a fingerprint the runtime derives from rule, file, and a hash of the match.
+- **Option B:** the runtime records the base run's findings' fingerprints as the base set. At `verify` a finding whose fingerprint is not in the set fails; one in it is recorded and does not. A scanner whose fingerprint depends on line position cannot be pinned, or must be pinned with a fingerprint the runtime derives from rule, file, and a hash of the match.
 - **Must hold:** the base set is written by the runtime to the Vault beside R15's base results, and a resume reads it rather than running it again. A check that does not start is a refusal, never an empty set.
 - **Known limit:** under B, a change that moves a finding to another file, or changes the matched text, gives it a new fingerprint and fails. That is a false refusal, which costs throughput and is never a safety failure. A fingerprint that included the line number would fail on any line inserted above an existing finding, which is why one is refused.
+- **Chosen: B**, with the maintainer. A gate that only a clean repository can pass would keep R17 off the repositories that most need it, and a finding already on the base is not one the change made.
 - **Reverse:** Option A.
-- **Proposed;** the choice is the maintainer's.
 
 ### D-A-SC-03: dependency audits run nightly, not at `verify`
 
