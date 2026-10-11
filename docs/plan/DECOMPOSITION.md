@@ -600,16 +600,17 @@ order between them is settled before any of them is picked up.
 | R4 | Parallel task execution | M2 | P4, P6, I1 | — |
 | R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
-| R7 | False-done benchmark | M2 | P6, P7, I1 | — |
+| R7 | False-done benchmark | M2 | P6, P7, I1, R17 | — |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
-| R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver | — |
+| R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
 | R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
 | R11 | Learning loop | M3 | R2, R7, R8, P14, R13 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
-| R13 | Nightly review | M2 | P14, R2, R9, M2 triggers | — |
+| R13 | Nightly review | M2 | P14, R2, R9, R17, M2 triggers | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
 | R16 | Bug-fix intake | M2 | R15, P14, M2 triggers | — |
+| R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
 
 ### R1 — Readiness
 
@@ -761,9 +762,11 @@ waiting on a driver per vendor. Binding:
 The measurement the claim needs. A fixed corpus of tasks, each seeded with one
 known false-done — a skipped test, a weakened assertion, an edited acceptance
 test, a suite that was never run under a claim that it passed, a hard-coded
-expected output, a change outside the granted globs — beside clean controls
-that should pass. Each is run through the line and through the same driver
-alone, and the unit reports the detection rate per item of P7's taxonomy and
+expected output, a change outside the granted globs, a committed credential,
+a credential committed under an added scanner suppression (R17) — beside clean
+controls that should pass. Each is run through the line and through the same driver
+alone, and the unit reports the detection rate per item of P7's taxonomy, or
+per refusal cause for an item P7 does not detect, and
 the false-refusal rate on the controls, each with its sample size and bound
 (R2). Without it, "measurably reduces false-done failures" is asserted and not
 measured. The corpus lives in the Vault, is hidden from every driver and from
@@ -817,7 +820,12 @@ where identity is role, driver, and model, not family alone; a review seat
 never writes (P6); an approval never comes from the run's agent (P9); the merge
 credential never enters a sandbox (I1). Each row is a registry assertion that
 fails when its check is deleted, and each seat's identity is recorded in run
-state. It needs a second driver, because one family can only ever record
+state. The matrix also seats a security reviewer under the review seat's
+rules: read-only, its family checked against every author as `seatReviewer`
+checks it (refused at L3, reduced independence recorded below), and granted
+what the review contract grants, `locked-spec` (with R17's security part),
+`diff`, and `evidence-bundle`, where R17's findings arrive, never the author's
+narrative. It needs a second driver, because one family can only ever record
 reduced independence. A review whose verdict gates the line is the M3 panel's,
 not this unit's: until then a verdict is recorded and not interpreted
 (D-P4-07), and the human at `integrate` reads it.
@@ -870,7 +878,7 @@ the control plane's.
 
 ### R13 — Nightly review
 
-Two jobs on the `scheduled` trigger. The first involves no model: it re-hashes
+Three jobs on the `scheduled` trigger. The first involves no model: it re-hashes
 every evidence bundle, lock, and record in the Vault, recomputes R2's published
 rates from raw records, and records a violation for any mismatch, so a record
 that has drifted is found within a day rather than at audit. The second seats
@@ -880,6 +888,15 @@ The reviewer's family differs from every author family whose work it reviews
 (I6). Its review is recorded as a claim and becomes R11 proposals or `intake`
 candidates, which a human admits. It never changes a run, a grant, or a status
 (D-A-LC-10).
+
+The third involves no model either. Over the head of the target's default
+branch it runs R17's security checks under `deny-all`, as `verify` does, and a
+dependency audit in a separate sandbox whose egress allows the advisory host
+alone. No run locks them, so their images and configuration are pinned in
+policy.
+A finding becomes an `intake` candidate carrying its scanner, rule, and
+location as typed fields, which a human admits like any other; the job never
+opens a change or drafts a fix (D-A-SC-03).
 
 ### R14 — Model tier per station and escalation
 
@@ -1044,6 +1061,122 @@ declared `'fails'` is refused.
 enabled, `I7.extracted-field-schemas` and `I7.untrusted-sink-lint-rule`,
 through M2 triggers.
 
+### R17 — Security at the gate
+
+Today nothing in the line looks at a change for security. R1's secret scan
+runs once per repository, at one commit, and caps a level; it never sees a
+diff. `verify` runs what the manifest pins, and `CheckKind` has no security
+kind, so a change that commits a credential or adds an injection sink passes
+every gate the line has, as long as its tests pass. The `review` seat may
+notice, and its verdict is recorded and not interpreted (D-P4-07). This unit
+puts security where the line already holds things it trusts: in checks the
+runtime runs, in what the spec must say, and in tamper detection (D-A-SC-01).
+
+It is not a security agent. A model reading a diff for vulnerabilities is a
+reviewer, and reviewers are R9's and the M3 panel's. What this unit adds is
+deterministic and runs with no model call.
+
+Binding:
+
+- **Two check kinds, each in its own pinned image.** `CheckKind` gains
+  `'secret-scan'` and `'static-analysis'`. Today every check runs in the
+  host's one `checkImage` with the workspace as its only mount, so a scanner
+  has no image of its own and its configuration no way in. `CheckSpec` gains
+  an image pinned by digest and a configuration, both locked with the
+  manifest at `test-design`; the configuration reaches the sandbox as a
+  second read-only mount the runtime owns. Otherwise the checks run at
+  `verify` as every other check does: a fresh sandbox, the tree read-only,
+  `deny-all` egress. The secret scan is stack-neutral, and its image and its
+  suppression markers are declared once beside the scanner R1 pins
+  (`SECRET_SCAN_IMAGE`), moved where both packages can import it. Static
+  analysis is per stack, so it is a new nullable slot on `AdapterSet` that
+  names its image and its markers; a set without one names
+  `static-analysis` among its missing controls, which refuses L3 as every
+  other missing control does (I5)
+- **The manifest must pin them.** A manifest that pins no `secret-scan`
+  check, or, where the adapter set has a static-analysis slot, no
+  `static-analysis` check, is refused at admission, naming the kind (I5)
+- **The rules are locked, not read from the workspace.** The scanner reads
+  its configuration from the runtime's mount, never from the repository. The
+  unit proves this with a fixture whose workspace carries an ignore file that
+  would hide a seeded finding (I3)
+- **Findings are typed and judged by the runtime.** A scanner exits non-zero
+  on any finding, old or new, so its exit code cannot be the verdict.
+  `CheckResult` gains typed findings, each a rule, a location, and a
+  fingerprint the runtime reads from the scanner's report, and a scanner that
+  does not report a fingerprint independent of line position cannot be
+  pinned. Only a finding absent from the base fails the change (D-A-SC-02):
+  R15's base run is extended to the two security kinds, and R15's text gains
+  that sentence when it is specified. The runtime records the base run's
+  fingerprints as the base set, beside R15's base results in the Vault, and
+  at `verify` a finding outside the set fails the check while one inside it is
+  recorded and does not. A secret
+  already on the base is also R1's concern: `integrate.secret-scan` is
+  ceiling-bearing
+- **A suppression added by the diff fails the check.** Each check runs with
+  inline suppressions disabled where its scanner allows it. Where a scanner
+  cannot, as gitleaks cannot ignore `gitleaks:allow`, the runtime reads the
+  diff itself: a declared marker added by the diff fails the check with its
+  own cause, so a suppressed credential is never a passing one. The same
+  marker is also recorded as a `suppression-marker` violation, which, like
+  every P7 finding, raises the `integrate` exit to `human-required`
+  (D-P7-01). A marker already on the base is not the change's
+- **The spec states its security surface.** Every spec carries a security
+  part: the trust boundaries the change crosses, the credentials or personal
+  data it reads or writes, each authorization rule it adds or relies on, and
+  any secret it needs. "None", with one line of reason, is a valid answer and
+  the person at the `spec` exit reads it. An absent part is refused at
+  `spec`, naming it (I5). R16 introduces required parts for one template;
+  R17 makes the security part required in every template's spec. Whichever
+  lands first builds a spec-part check that is not tied to one template, and
+  R16's bug-fix template carries the security part as well
+- **Each authorization rule has a denial check.** For each rule the security
+  part names, `test-design` must lock at least one acceptance check whose
+  `CheckSpec` names the rule and exercises a caller the rule refuses. A rule
+  with no such check refuses the `test-design` exit, naming it. The check gets
+  R15's base run like any other acceptance check
+- **Recorded, and countable.** A failed security check reaches P14's record
+  as `station-refused` with a `FailedCheck` whose cause says why: a finding
+  or an added marker. A missing security part and a missing denial check
+  each refuse with their own reason. The L3 refusal is the existing
+  `controls-unavailable`. R2 counts each by cause like any other refusal
+
+**Contract amendments, owed by the unit's pull request:** `CheckKind` gains
+two members; `CheckSpec` gains an image, a configuration, and the rule a
+denial check names; `CheckResult` gains typed findings; `FailedCheck.cause`
+gains `'new-finding'` and `'suppression-added'`; `AdapterSet` gains a nullable
+static-analysis slot and `Control` its name; `TamperReport` gains
+`suppressionMarkersAdded`; `IntegrityViolation.kind` gains
+`'suppression-marker'`; and the refusal reasons for a missing security part
+and a missing denial check.
+
+**Not in this unit:** dependency vulnerability audits, which need the
+registry's advisory database and so cannot run under `verify`'s `deny-all`
+egress (R13 runs them; D-A-SC-03); a model reviewing for security (R9 seats
+it once this unit lands, the M3 panel interprets it); fixing a finding (it
+fails the change, and the next iteration is the fix); and any scanner on a
+host other than the sandbox.
+
+**Known limit, stated now:** a scanner finds what its rules describe.
+Deterministic checks lower the rate of known classes of defect and say
+nothing about a class no rule names. The denial checks are the part that
+follows the spec rather than a rule set, and they are only as complete as the
+security part the person approved.
+
+**Conformance:** a diff that adds a seeded secret fails `verify`; a manifest
+that pins no `secret-scan` check is refused at admission; a workspace ignore
+file does not hide a seeded finding; a diff that adds a seeded secret with an
+inline suppression fails the check and records a `suppression-marker`
+violation; a spec with no security part is refused at `spec`; an
+authorization rule with no denial check refuses the `test-design` exit; an
+adapter set with no static-analysis slot is refused at L3; each refusal
+leaves one P14 decision naming its cause; the same secret on the base does
+not fail the change.
+
+**Why M2:** it needs R15's base run, and both check kinds are new manifest
+entries that M1's closed scope cannot take. No model call is added; the cost
+is two sandbox runs per `verify` and two per base run.
+
 ### Recorded constraint: the Codex driver (M2)
 
 Not specified, and not a unit here. It is recorded so the choice is settled
@@ -1055,6 +1188,26 @@ container Olympus provisions. A harness running on the vendor's infrastructure
 is outside every one of them. A driver built that way anyway declares those
 controls unavailable, and `unavailableControls()` refuses it above L1. It never
 runs with weaker guarantees than its level claims.
+
+Added 2026-10-11: OpenAI's Agents API now offers computer use and Codex's
+multi-agent machinery on infrastructure OpenAI operates, and the Codex harness
+is reported to be open source. The first is the vendor-hosted harness this
+constraint excludes, and it is excluded for the same reasons. The second, if
+it holds, makes the in-sandbox driver this constraint asks for cheaper to
+build. Whoever picks up the driver verifies the harness's licence and source
+before relying on it (D-A-DD-01).
+
+### Recorded constraint: event subscriptions (M2 triggers)
+
+Not specified, and not a unit here. The M2 trigger framework may receive
+events through webhooks or through MCP Events, a proposed extension to MCP
+that ChatGPT implements as webhook delivery. As of 2026-10-11 it is a draft,
+not part of the MCP specification, so no unit depends on it. Whichever
+transport carries an event, three things hold: its payload is an
+`UntrustedPayload` and only the extracted fields reach a template (I7); a
+subscription is a capability granted in policy, not configuration a trigger
+carries (I4); and the secret that verifies a delivery is held where P12 holds
+credentials, never inside a sandbox (D-A-DD-02).
 
 ---
 
