@@ -29,10 +29,11 @@
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -277,6 +278,7 @@ function integrationProblem(r: unknown): string | undefined {
   }
   if (typeof r.pullRequest !== 'number' || !Number.isInteger(r.pullRequest) || r.pullRequest < 1) return 'it names no pull request';
   if (r.kind === 'merged' && (!hasString(r, 'mergeCommit') || r.mergeCommit === '')) return 'a merge record carries no merge commit';
+  if (r.kind === 'merged' && (!hasString(r, 'mergedAt') || Number.isNaN(Date.parse(r.mergedAt as string)))) return 'a merge record carries no merge time';
   return undefined;
 }
 
@@ -565,6 +567,21 @@ export class LocalVault implements Vault {
     return this.#objects(runId, 'integration');
   }
 
+  /** Every run directory under the store, whatever it holds, so a run refused at admission is listed too (A-R2-02). */
+  async listRuns(): Promise<readonly RunId[]> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(join(this.#store, 'runs'), { withFileTypes: true });
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    return entries
+      .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
+      .map((entry) => entry.name as RunId)
+      .sort();
+  }
+
   async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {
     const dir = join(runDir(this.#store, runId), 'objects', kind);
     let names: string[];
@@ -584,7 +601,7 @@ export class LocalVault implements Vault {
   async readRunState(runId: RunId): Promise<RunState> {
     const states = join(runDir(this.#store, runId), 'state');
     const version = await highestIn(states);
-    if (version === null) throw new Error(`LocalVault: no run state for ${runId}`);
+    if (version === null) throw Object.assign(new Error(`LocalVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState;
     const file = join(states, `${String(version)}.json`);
     return requireRunState(await readJson(file), file);
   }

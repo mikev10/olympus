@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { buildGraph, createApiServer, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
+import { buildGraph, createApiServer, outcomes, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
 import { StubDriver } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
@@ -51,6 +51,7 @@ const POLICY = {
 let root: string;
 let workspace: string;
 let server: ApiServer;
+let vault: StubVault;
 let url: string;
 
 beforeEach(async () => {
@@ -69,9 +70,10 @@ beforeEach(async () => {
   const driver = new StubDriver();
   const user = process.getuid === undefined ? { uid: 0, gid: 0 } : undefined;
   const store = join(root, 'store');
+  vault = new StubVault(workspace);
   server = createApiServer({
     components: buildGraph({
-      vault: new StubVault(workspace),
+      vault,
       sandbox: new StubSandboxProvider(),
       driver,
       reviewer: driver,
@@ -127,11 +129,13 @@ describe('the CLI is a client of a remote API URL', () => {
     const shown = await cli(remote(...createArgs()));
     expect(shown.code).toBe(1);
     expect(shown.err[0]).toBe('the worst-case cost of this run is $3, over at most 12 driver calls');
-    expect(shown.err[1]).toContain('--approve-cost 3');
+    // No past run has priced a task here, so the likely figure declines rather than guess (R2).
+    expect(shown.err[1]).toMatch(/^no likely cost: fewer than 5 past tasks at build on .+ \(0\), review on .+ \(0\)$/);
+    expect(shown.err[2]).toContain('--approve-cost 3');
 
     const wrong = await cli(remote(...createArgs('--approve-cost', '2.99')));
     expect(wrong).toMatchObject({ code: 1 });
-    expect(wrong.err[1]).toContain('is not that figure');
+    expect(wrong.err[2]).toContain('is not that figure');
 
     const created = await cli(remote(...createArgs('--approve-cost', '3')));
     expect(created.code).toBe(0);
@@ -157,6 +161,14 @@ describe('the CLI is a client of a remote API URL', () => {
     expect(body).toMatchObject({ runId: run.runId, standing: { standing: 'passed' } });
     expect(body.decisions['approval-granted']).toBe(1);
     expect((await cli(remote('report', 'no-such-run'))).code).toBe(1);
+
+    // Outcomes are the server's, derived from the same Vault the library reads (R2).
+    const measured = await cli(remote('outcomes'));
+    expect(measured.code).toBe(0);
+    const served = JSON.parse(measured.out.join('\n')) as unknown;
+    expect(served).toEqual(JSON.parse(JSON.stringify(await outcomes(vault))));
+    expect(served).toMatchObject({ population: { refused: 2, passed: 1, total: 3 } });
+    expect((await cli(remote('outcomes', '--from', 'yesterday'))).code).toBe(1);
   });
 
   test('cancel stops a run; cancelling it again is refused with the runtime\'s reason', async () => {

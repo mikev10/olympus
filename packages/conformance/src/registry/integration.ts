@@ -15,7 +15,7 @@ import type { Policy, RoleId, VaultRef } from '@olympus-ai/core';
 import type { MeterReading, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { IntegrationRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
-import { withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
+import { MERGED_AT, withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
 import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, type LineRig } from './line.js';
 import { specFor, throughProxy, withProvider, withSandbox } from './local-sandbox.js';
 import { inTask, writes } from './verification.js';
@@ -97,7 +97,7 @@ async function toApproval(it: Integrating): Promise<void> {
 export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
   id: 'I5.integrate-merges-the-verified-tree-after-the-gate',
   title:
-    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault, and a resume after it neither opens nor merges again",
+    "integrate pushes the run's accepted change and opens its pull request before the exit, merges only after a human approved the exit, and what merges is the base commit with exactly the verified diff; the merge is recorded in the Vault with the time GitHub reports it merged, and a resume after it neither opens nor merges again",
   run: async () => {
     await withIntegration('i1b-merge-', async (it) => {
       const { runStanding } = await api();
@@ -129,6 +129,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       const records = await integrationOf(it.rig);
       const record = records.find((r) => r.kind === 'merged');
       if (record?.kind !== 'merged' || record.mergeCommit !== merged.mergeCommit || record.commit !== pushed) throw new Error('I5: the Vault does not record the merge GitHub made');
+      if (record.mergedAt !== merged.mergedAt) throw new Error(`I5: the merge record carries ${record.mergedAt}, not the time GitHub merged at (${String(merged.mergedAt)})`);
       const { LocalVault } = await import('@olympus-ai/vault');
       if ((await runStanding(new LocalVault(it.rig.dirs), it.rig.runId)).standing.standing !== 'passed') throw new Error('I5: a merged run does not stand passed');
 
@@ -166,7 +167,7 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       if (!outcome.ok) throw new Error(`I5: a resume after a merge whose record was lost did not pass: ${JSON.stringify(outcome)}`);
       const merges = it.github.requests.filter((r) => r.method === 'PUT').length;
       const record = (await integrationOf(it.rig)).find((r) => r.kind === 'merged');
-      if (merges !== 1 || record?.kind !== 'merged' || record.mergeCommit !== it.github.pulls()[0]?.mergeCommit) {
+      if (merges !== 1 || record?.kind !== 'merged' || record.mergeCommit !== it.github.pulls()[0]?.mergeCommit || record.mergedAt !== it.github.pulls()[0]?.mergedAt) {
         throw new Error(`I5: the resume made ${String(merges)} merge requests, or recorded a merge other than the one made`);
       }
     });
@@ -372,5 +373,65 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
       if (report.cost.run.unmetered === 0) throw new Error('I2 control: the unmetered run recorded a metered call');
       if (report.cacheHitRate !== null) throw new Error(`I2: an unmetered run's cache-hit rate is ${String(report.cacheHitRate)}, not null`);
     });
+  },
+});
+
+/**
+ * R2: the rates over a real run are the ones its records give. Each figure is
+ * checked against a number computed here from the records directly, not by
+ * the code under test, and the merge time is the fake GitHub's, which no clock
+ * produces.
+ */
+export const OUTCOMES_DERIVED_FROM_RUN_RECORDS = runtime({
+  id: 'I2.outcomes-derived-from-run-records',
+  title:
+    "outcome rates are derived from the Vault's records alone: a run waiting on approval is unfinished and its request open, a merged run counts once, every evidence bundle is an attempt and a mismatched claim a caught false-done, an approval spent is not autonomy, cycle time ends at GitHub's merge time, cost per merge is the metered spend; the report says its standing came from the workspace while unfinished and from records once merged; the API serves the same figures",
+  run: async () => {
+    await withIntegration('r2-outcomes-', async (it) => {
+      const { outcomes, runReport } = await api();
+      const { LocalVault } = await import('@olympus-ai/vault');
+      const vault = new LocalVault(it.rig.dirs);
+      await toApproval(it);
+      if ((await runReport(vault, it.rig.runId)).standingSource !== 'workspace') throw new Error('I2: a run awaiting approval reports a standing read from records alone, though it re-hashed the workspace');
+      const waiting = await outcomes(vault);
+      if (waiting.population.unfinished !== 1 || waiting.throughput.autonomyRatio.kind !== 'no-sample' || waiting.throughput.approvalsOpen['integrate:1'] !== 1) {
+        throw new Error(`I2: a run awaiting approval is not counted unfinished with its request open: ${JSON.stringify({ population: waiting.population, open: waiting.throughput.approvalsOpen })}`);
+      }
+
+      if (!(await approveAndResume(it)).ok) throw new Error('I2 control: the run did not pass');
+      if ((await runReport(vault, it.rig.runId)).standingSource !== 'records') throw new Error("I2: a merged run's report does not say its standing came from records");
+      const o = await outcomes(vault);
+      const state = await vault.readRunState(it.rig.runId);
+      const admission = JSON.parse(new TextDecoder().decode(await vault.read(state.admission))) as { run: { createdAt: string } };
+      let mismatched = 0;
+      for (const ref of state.evidenceRefs) if ((JSON.parse(new TextDecoder().decode(await vault.read(ref))) as { claimEvidenceDiff: string[] }).claimEvidenceDiff.length > 0) mismatched += 1;
+      if (mismatched === 0 || Object.values(state.tasks).some((s) => s !== 'passed')) throw new Error('I2 control: the scenario needs every task passed and a claim the evidence contradicts');
+
+      if (o.population.merged !== 1 || o.population.total !== 1) throw new Error(`I2: the population is ${JSON.stringify(o.population)}, not one merged run`);
+      const fd = o.safety.caughtFalseDone;
+      if (fd.kind !== 'rate' || fd.sample !== state.evidenceRefs.length || fd.count !== mismatched) throw new Error(`I2: caught false-done is ${JSON.stringify(fd)}, not ${String(mismatched)} of ${String(state.evidenceRefs.length)} bundles`);
+      const ratio = o.throughput.autonomyRatio;
+      if (ratio.kind !== 'rate' || ratio.count !== 0 || ratio.sample !== 1) throw new Error(`I2: a merge that spent an approval counts as autonomous: ${JSON.stringify(ratio)}`);
+      const cycle = o.throughput.cycleTime;
+      if (cycle.kind !== 'distribution' || cycle.median !== Date.parse(MERGED_AT) - Date.parse(admission.run.createdAt)) throw new Error(`I2: cycle time ${JSON.stringify(cycle)} does not end at GitHub's merge time`);
+      const wait = o.throughput.approvalWait['integrate:1'];
+      if (wait?.kind !== 'distribution' || wait.sample !== 1 || Object.keys(o.throughput.approvalsOpen).length !== 0) throw new Error(`I2: the integrate approval is not one wait, cleared: ${JSON.stringify(o.throughput.approvalWait)}`);
+      const read = (await (await api()).readUsage(vault, state)).filter((r) => r.reading.kind === 'metered').length;
+      const cost = o.throughput.costPerMergedChange;
+      if (cost.kind !== 'cost' || cost.bound !== 'exact' || Math.abs(cost.usd - 0.002 * read) > 1e-12) throw new Error(`I2: cost per merged change is ${JSON.stringify(cost)}, not ${String(read)} calls at $0.002`);
+
+      const { createApiServer } = await api();
+      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml') });
+      const address = await server.listen(0, '127.0.0.1');
+      try {
+        const headers = { authorization: `Bearer ${REPORT_TOKEN}` };
+        const res = await fetch(`${address}/outcomes`, { headers });
+        if (res.status !== 200 || JSON.stringify(await res.json()) !== JSON.stringify(o)) throw new Error('I2: GET /outcomes does not serve the figures derived from the Vault');
+        const bad = await fetch(`${address}/outcomes?from=yesterday`, { headers });
+        if (bad.status !== 400) throw new Error(`I2: an unreadable window answered ${String(bad.status)}, not 400`);
+      } finally {
+        await server.close();
+      }
+    }, REPORT_METER);
   },
 });

@@ -27,6 +27,7 @@ import {
   STATION_CONTRACTS,
   stationCapRefusal,
   StrictPolicyEngine,
+  tierFor,
   transition,
   validatePolicyDocument,
 } from '@olympus-ai/core';
@@ -51,6 +52,7 @@ import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
+import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
 import { integrateEscalations, readIntegration, runLine, type LineContext } from './line.js';
 import type { BuiltGraph } from './graph.js';
@@ -158,6 +160,8 @@ export type RunOutcome =
       readonly requestedLevel: AutonomyLevel;
       /** The figure to approve, and what makes it up. */
       readonly worstCase: WorstCaseCost;
+      /** What past runs say this one will likely cost, beside the bound and never in its place (R2). */
+      readonly likely: CostEstimate;
       readonly approvedCostUsd: number | null;
     }
   | {
@@ -341,6 +345,24 @@ function driverAt(station: 'build' | 'review', components: ComponentGraph): Driv
   return station === 'build' ? components.driver : components.reviewer;
 }
 
+/**
+ * The likely figure beside the worst case (R2): each task the worst case
+ * counts, priced at the model its station's driver resolves the task's
+ * starting tier to, from past runs' usage. Escalation is not modelled.
+ */
+async function likelyCost(components: ComponentGraph, worstCase: WorstCaseCost, policy: Policy): Promise<CostEstimate> {
+  const cells: EstimateCell[] = [];
+  for (const task of worstCase.tasks) {
+    if (!isAgentStation(task.station)) continue;
+    const resolved = engine.resolveCapabilities(task.role, task.station, policy);
+    // `worstCaseCost` resolved every one of these scopes, and throws where one does not.
+    if (!resolved.ok) throw new Error(`likely cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
+    const tier = tierFor(resolved.scope, task.station, { iterations: 0, retries: 0, starts: 0 });
+    cells.push({ station: task.station, model: driverAt(task.station, components).resolveModel(tier) });
+  }
+  return estimateCost(components.vault, cells);
+}
+
 /** A capability refusal at either agent station, checked before anything is admitted, locked, or run (I5). */
 function capabilityRefusalFor(components: ComponentGraph): { at: StationId; refusal: StationRefusal } | undefined {
   for (const station of ['build', 'review'] as const) {
@@ -478,7 +500,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (refused !== undefined) return refused;
   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
   if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
-    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, approvedCostUsd: req.approvedCostUsd };
+    const likely = await likelyCost(req.components, worstCase, policy.policy);
+    return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
   }
 
   const { vault } = req.components;
@@ -752,10 +775,18 @@ export type RunStanding =
   | { readonly standing: 'awaiting-approval'; readonly key: ApprovalKey; readonly escalations: readonly string[] }
   | { readonly standing: 'open' };
 
+/**
+ * Whether a standing was read from the Vault alone, or after re-hashing the
+ * admitted artifacts in the working copy. A cancelled, halted, or passed run
+ * reads `records`; every other run's standing includes a live lock check
+ * (D-I1b-15), which a reader must not take for a recorded fact.
+ */
+export type StandingSource = 'records' | 'workspace';
+
 /** The station whose exit ends an M1 run. */
 const LAST_STATION: StationId = M1_STATIONS[M1_STATIONS.length - 1] ?? 'integrate';
 
-export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding }> {
+export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: RunState; standing: RunStanding; source: StandingSource }> {
   const state = await vault.readRunState(runId);
   const { record, policy } = await readAdmission(vault, state);
   // What was committed is read before what the workspace holds now. A cancellation, a halt, and the grant
@@ -764,21 +795,21 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   if (state.cancelled !== null || state.halted !== null) {
     // `nextStep` refuses a cancelled or halted run before any other check, so no graph is needed to read why (A-P9-01, A-P9-02).
     const ended = nextStep(state, { tasks: [], edges: [] });
-    if (ended.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: ended.refusal } };
+    if (ended.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: ended.refusal }, source: 'records' };
   }
   // The last exit is crossed only by a run that passed, and when it needs an approval the line
   // spends the grant in the commit that ends the run. A spent grant for it is that record; the
   // gate re-evaluated would ask for a second approval of an exit already crossed (D-P9-08).
   const last = approvalKey(LAST_STATION, record.run.requestedLevel);
-  if (state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) return { state, standing: { standing: 'passed' } };
+  if (state.approvals.some((grant) => grant.key === last && grant.usedAt !== null)) return { state, standing: { standing: 'passed' }, source: 'records' };
   const { graph, changed } = await reloadExecuted(record);
   if (changed.length > 0) {
     const paths = changed.map((c) => c.path).join(', ');
-    return { state, standing: { standing: 'stopped', refusal: { ok: false, reason: 'lock-tamper', tampered: changed, message: `an admitted artifact changed: ${paths}` } } };
+    return { state, standing: { standing: 'stopped', refusal: { ok: false, reason: 'lock-tamper', tampered: changed, message: `an admitted artifact changed: ${paths}` } }, source: 'workspace' };
   }
   const step = nextStep(state, graph);
-  if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal } };
-  if (step.kind !== 'exit') return { state, standing: { standing: 'open' } };
+  if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal }, source: 'workspace' };
+  if (step.kind !== 'exit') return { state, standing: { standing: 'open' }, source: 'workspace' };
   const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };
   // The same escalation the line applies, from the same bundles, so the standing and a drive agree.
   const escalations = step.from === 'integrate'
@@ -795,13 +826,13 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
     tamperFindings: escalations.tamperFindings,
   });
   if (!next.ok) {
-    return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key, escalations: next.escalations } : { standing: 'stopped', refusal: next } };
+    return { state, standing: next.reason === 'approval-required' ? { standing: 'awaiting-approval', key: next.key, escalations: next.escalations } : { standing: 'stopped', refusal: next }, source: 'workspace' };
   }
-  if (M1_STATIONS.includes(next.next)) return { state, standing: { standing: 'open' } };
+  if (M1_STATIONS.includes(next.next)) return { state, standing: { standing: 'open' }, source: 'workspace' };
   // Approved, and a pull request opened that is not yet merged: a drive merges it before the run is done (D-I1b-01).
   const integration = await readIntegration(vault, runId);
-  if (integration.some((r) => r.kind === 'opened') && !integration.some((r) => r.kind === 'merged')) return { state, standing: { standing: 'open' } };
-  return { state, standing: { standing: 'passed' } };
+  if (integration.some((r) => r.kind === 'opened') && !integration.some((r) => r.kind === 'merged')) return { state, standing: { standing: 'open' }, source: 'workspace' };
+  return { state, standing: { standing: 'passed' }, source: 'workspace' };
 }
 
 export interface CancelRequest {

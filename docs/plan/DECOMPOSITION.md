@@ -595,7 +595,7 @@ order between them is settled before any of them is picked up.
 | ID | Unit | Milestone | Depends on | Spec |
 |---|---|---|---|---|
 | R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
-| R2 | Outcome measurement | M2 | P4, P6, P9, P14 | — |
+| R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | — |
 | R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
@@ -611,6 +611,7 @@ order between them is settled before any of them is picked up.
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
 | R16 | Bug-fix intake | M2 | R15, P14, M2 triggers | — |
 | R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
+| R18 | Stack recorded per run | M2 | R2, P8 | — |
 
 ### R1 — Readiness
 
@@ -622,6 +623,8 @@ what policy withheld. Spec is complete and both of its open decisions are taken
 effective-level formula. Still blocked on P8, whose `AdapterSet` it consumes.
 
 ### R2 — Outcome measurement
+
+**Spec:** `docs/plan/R2-outcomes.md`, written when the unit started (D-R2-01). Where this entry and the spec differ, the spec is the one verified against the code: cycle time and the run listing needed contract amendments (A-R2-01, A-R2-02), and stack is not recorded (R17).
 
 Autonomy ratio (the share of tasks completed at their requested level with no
 approval consumed), cycle time from `intake` to `integrate`, and cost per
@@ -1176,6 +1179,17 @@ not fail the change.
 **Why M2:** it needs R15's base run, and both check kinds are new manifest
 entries that M1's closed scope cannot take. No model call is added; the cost
 is two sandbox runs per `verify` and two per base run.
+
+### R18 — Stack recorded per run
+
+R2 keeps every rate per model, station, and level, and not per stack, because
+no run record names the target's stack (`docs/plan/R2-outcomes.md`, "Not
+recorded"). A rate that cannot be split by stack cannot gate L3 per stack,
+which the spine's reliability target requires (D-A-LC-04). This unit records
+the stack the adapter set detected (P8's detection) in the admission record,
+written by the runtime and never a model's account, and R2 adds it as a key.
+A run admitted before it lands has no stack and is reported under `unrecorded`,
+never guessed. Found by R2 (D-R2-01).
 
 ### Recorded constraint: the Codex driver (M2)
 

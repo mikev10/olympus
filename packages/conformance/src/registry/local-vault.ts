@@ -17,7 +17,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { LocalVault } from '@olympus-ai/vault';
+import type { RunId } from '@olympus-ai/core';
+import type { AdmissionRecord, LocalVault } from '@olympus-ai/vault';
+import { runtime } from '../kit/assert.js';
 import { workspaceRoot } from '../kit/workspace.js';
 
 export interface VaultDirs {
@@ -179,3 +181,38 @@ export async function contendOnCommit(
   );
   return runs.map(parseOutcome);
 }
+
+/**
+ * A-R2-02: the store names every run it holds a record for, whichever record
+ * it is, so a rate over "every run" cannot be a rate over a sample a caller
+ * chose. A run refused at admission holds a decision and nothing else, and is
+ * listed; an empty store lists nothing rather than failing.
+ */
+export const VAULT_LISTS_EVERY_RUN = runtime({
+  id: 'I2.vault-lists-every-run',
+  title:
+    'the Vault lists every run it holds any record for, a run refused at admission included, sorted by id, and an empty store lists none; the local and stub Vaults agree',
+  run: async () => {
+    const { StubVault } = await import('@olympus-ai/vault');
+    await withVault('r2-list-', async (local, _dirs, base) => {
+      for (const vault of [local, new StubVault(base)]) {
+        const name = vault === local ? 'LocalVault' : 'StubVault';
+        if ((await vault.listRuns()).length !== 0) throw new Error(`I2: an empty ${name} lists runs`);
+        const refused = 'run-a-refused' as RunId;
+        const admitted = 'run-b-admitted' as RunId;
+        await vault.recordAdmission({ run: { id: admitted } } as unknown as AdmissionRecord);
+        await vault.recordDecision({
+          runId: refused,
+          taskId: null,
+          station: null,
+          decidedAt: new Date(0).toISOString(),
+          occurrence: 'r2-list',
+          decision: { cause: 'admission-refused', decidedBy: 'admission', refusal: { reason: 'invalid-request', problems: [] } },
+          collectedBy: 'runtime',
+        });
+        const listed = await vault.listRuns();
+        if (listed.join() !== [refused, admitted].join()) throw new Error(`I2: ${name} lists ${JSON.stringify(listed)}, not the refused and the admitted run in order`);
+      }
+    });
+  },
+});

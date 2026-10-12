@@ -1,6 +1,6 @@
 import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
-import { RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
+import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
@@ -8,6 +8,7 @@ import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVE
 import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
+import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -64,6 +65,9 @@ export const I2: InvariantEntry = {
     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
     ESCALATION_DECIDED_FROM_FAILED_GATES,
     RELAY_BOUND_TO_TIER_MODEL,
+    // R2: a rate over every run reads the set the store names, never one a caller chose.
+    VAULT_LISTS_EVERY_RUN,
+    OUTCOMES_DERIVED_FROM_RUN_RECORDS,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',

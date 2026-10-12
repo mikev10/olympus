@@ -331,3 +331,12 @@ describe('egress follows the grant (D-P9-05)', () => {
   });
 });
 
+
+describe('GET /outcomes', () => {
+  test('refuses a window time that is not ISO 8601 with a zone, and serves one that is', async () => {
+    await serve();
+    expect((await call('GET', '/outcomes?from=10/11/2026')).status).toBe(400);
+    expect((await call('GET', '/outcomes?to=2026-10-11T00:00:00')).status).toBe(400);
+    expect((await call('GET', '/outcomes?from=2026-10-11T00:00:00Z&to=2026-10-12T00:00:00%2B02:00')).status).toBe(200);
+  });
+});

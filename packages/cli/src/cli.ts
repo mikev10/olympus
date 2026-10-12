@@ -33,6 +33,7 @@ const USAGE = [
   '  cancel   <run id>',
   '  events   <run id>',
   '  report   <run id>      cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault',
+  '  outcomes [--from <time>] [--to <time>]   safety and throughput rates over every run, each with its sample and bound',
   '',
   'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
 ].join('\n');
@@ -109,6 +110,18 @@ function report(io: CliIo, res: { status: number; body: unknown }): ExitCode {
 interface CostRefusal {
   readonly reason: 'cost-unapproved';
   readonly worstCase: { readonly usd: number; readonly calls: number };
+  /** Absent from a service that predates R2; the line is then not printed. */
+  readonly likely?:
+    | { readonly kind: 'likely'; readonly usd: number }
+    | { readonly kind: 'insufficient-sample'; readonly short: ReadonlyArray<{ readonly station: string; readonly model: string; readonly sample: number }>; readonly needed: number };
+}
+
+/** The likely figure, said beside the bound and never as the figure approved. */
+function likelyLine(likely: CostRefusal['likely']): string | undefined {
+  if (likely === undefined) return undefined;
+  if (likely.kind === 'likely') return `past runs put its likely cost at $${String(Number(likely.usd.toFixed(6)))}; the worst case is what is approved`;
+  const cells = likely.short.map((c) => `${c.station} on ${c.model} (${String(c.sample)})`).join(', ');
+  return `no likely cost: fewer than ${String(likely.needed)} past tasks at ${cells}`;
 }
 
 function costRefusal(value: unknown): CostRefusal | undefined {
@@ -168,6 +181,8 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
   if (unapproved !== undefined) {
     const { usd, calls } = unapproved.worstCase;
     io.err(`the worst-case cost of this run is $${String(usd)}, over at most ${String(calls)} driver calls`);
+    const likely = likelyLine(unapproved.likely);
+    if (likely !== undefined) io.err(likely);
     io.err(body.approvedCostUsd === null
       ? `nothing was started; to approve it, run the same command with --approve-cost ${String(usd)}`
       : `nothing was started; --approve-cost ${String(body.approvedCostUsd)} is not that figure`);
@@ -204,6 +219,17 @@ async function events(io: CliIo, t: Target, runId: string): Promise<ExitCode> {
     }
     if (done) return 0;
   }
+}
+
+/** Outcomes over every run the Vault holds, optionally those admitted in a window; the service refuses a time it cannot read. */
+async function outcomes(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
+  const { values, positionals } = parseArgs({ args, strict: true, allowPositionals: true, options: { from: { type: 'string' }, to: { type: 'string' } } });
+  if (positionals.length > 0) throw new UsageError(`outcomes takes no positional arguments: ${positionals.join(' ')}`);
+  const query = new URLSearchParams();
+  if (values.from !== undefined) query.set('from', values.from);
+  if (values.to !== undefined) query.set('to', values.to);
+  const search = query.toString();
+  return report(io, await call(io, t, 'GET', search === '' ? 'outcomes' : `outcomes?${search}`));
 }
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCode> {
@@ -246,6 +272,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
         const [runId = ''] = one(rest, ['<run id>']);
         return report(io, await call(io, t, 'GET', runPath(runId, 'report')));
       }
+      case 'outcomes':
+        return await outcomes(io, t, own);
       default:
         throw new UsageError(`unknown command '${command}'`);
     }

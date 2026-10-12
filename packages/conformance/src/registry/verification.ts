@@ -61,6 +61,7 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
     readUsage: (runId) => inner.readUsage(runId),
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
+    listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: (s, ifVersion) => inner.commitRunState(s, ifVersion),
   };

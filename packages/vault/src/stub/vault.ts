@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -50,6 +50,8 @@ export class StubVault implements Vault {
   private readonly integration = new Map<RunId, VaultRef[]>();
   private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
+  /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
+  private readonly runs = new Set<RunId>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -87,6 +89,7 @@ export class StubVault implements Vault {
     }
     const manifest: LockManifest = { runId, entries };
     this.locks.set(runId, manifest);
+    this.runs.add(runId);
     return structuredClone(manifest);
   }
 
@@ -161,9 +164,13 @@ export class StubVault implements Vault {
     return Promise.resolve([...(this.integration.get(runId) ?? [])]);
   }
 
+  listRuns(): Promise<readonly RunId[]> {
+    return Promise.resolve([...this.runs].sort());
+  }
+
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
-    if (state === undefined) return Promise.reject(new Error(`StubVault: no run state for ${runId}`));
+    if (state === undefined) return Promise.reject(Object.assign(new Error(`StubVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState);
     return Promise.resolve(structuredClone(state));
   }
 
@@ -178,6 +185,7 @@ export class StubVault implements Vault {
     }
     const stored = structuredClone({ ...s, version: String(Number(current) + 1) });
     this.states.set(s.runId, stored);
+    this.runs.add(s.runId);
     return Promise.resolve(structuredClone(stored));
   }
 
@@ -189,6 +197,7 @@ export class StubVault implements Vault {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };
     this.blobs.set(refKey(ref), bytes);
+    this.runs.add(runId);
     return ref;
   }
 

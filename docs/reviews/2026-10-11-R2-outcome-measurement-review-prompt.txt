@@ -1,0 +1,146 @@
+The code under review is in the file
+`2026-10-11-R2-outcome-measurement-review-bundle.txt` (SHA-256 3a2cb047dfb3610f00af4b03f23f181a488776c6eec803890a098880df57cf34) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the outcome-measurement layer of a TypeScript project: the
+code that derives published safety and throughput rates from stored run
+records. You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs AI coding agents through a fixed line of stations (build,
+verify, review, integrate, and others) and records what happened in a
+write-once store called the Vault: an admission record per run, versioned run
+state, one evidence bundle per verified attempt, one usage (cost) record per
+model call, one enforcement decision per refusal, approval, or park, and an
+integration record when the change is pushed and merged on GitHub. This change
+adds `outcomes()`, which reads every run the Vault lists and derives rates —
+a caught false-done rate (attempts the agent ended that the runtime did not
+pass, or whose claim contradicted the evidence), autonomy ratio, first-pass
+yield, approval wait, cycle time, cost per merged change — each with its
+sample size and a one-sided 95% Clopper–Pearson bound. It also adds two
+fields to the store's contract (a merge time taken from GitHub, and a way to
+list every run), a likely-cost estimate shown beside a run's worst-case cost,
+an HTTP route and CLI command that serve the rates, and a field on the per-run
+report saying whether its standing was read from records or from a live check
+of the working copy. The range also contains one earlier commit that adds
+conformance fixtures for a repository-readiness scanner; review it with the
+same rigor.
+
+It must hold against a capable, motivated party trying to make the line look
+safer, more autonomous, faster, or cheaper than its records show — or to make a
+rate appear where there is no data behind it. Assume no deceptive intent —
+only that the easiest path gets taken.
+
+That party controls what the model returns (its claims, its narrative, the
+files it writes in its workspace), the files in the target repository, when
+the process stops and is resumed (so records may be written twice, or a write
+may be lost mid-call), and the query parameters an authenticated caller sends
+to the HTTP route. It does not control the components the runtime is wired
+with — the Vault, the sandbox provider, the drivers, and the GitHub integrator
+are runtime-selected and trusted, even where a function takes one as an
+argument — and it does not control code running inside the runtime's own
+process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. An agent's account
+  is a claim, stored apart from evidence, and every published figure must come
+  from records the runtime wrote, never from anything a model returned.
+- Fail closed. A missing input, an empty sample, an unknown cost, or an
+  unsupported case is reported as such — never as a zero, a pass, or a
+  silently narrower figure.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+- Any rate the system shows can be recomputed from the stored records alone;
+  nothing in a published figure depends on what a workspace holds at read time.
+
+The mechanisms that matter most:
+
+- Attempt outcome: each evidence bundle is one attempt; it counts as passed
+  only if it is the last bundle for its task and the task's recorded status is
+  passed; a passed attempt whose claim differed from the evidence is still a
+  caught false-done.
+- Population: the Vault, not the caller, names the runs; each run's ending
+  (refused, merged, passed, cancelled, halted, parked, unfinished) is read from
+  records alone, and unfinished runs are counted but kept out of run-level
+  rates.
+- Bounds and absence: Clopper–Pearson bounds on the side that matters,
+  `no-sample` for an empty sample, cost marked a lower bound when any call's
+  cost is unknown, and a cost estimate that declines below five past tasks per
+  station and model.
+- The merge time: taken from GitHub's pull request on the merge and on a
+  resume that finds it already merged, never from the runtime's clock.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- a baseline from the target's own history, R7's corpus, and the escaped rate (R8, R7)
+- recording stack per run (R17)
+- telemetry export (R12)
+- any dashboard or UI; the control plane displays these numbers and never computes its own (D-A-BR-05)
+- changing the README or spine wording about a reduction: one proof run is not a window
+- recording anything new about a run beyond A-R2-01 and A-R2-02
+- an escalation-aware cost estimate; the likely figure uses each task's starting tier
+
+The identifiers in that list (R7, R8, R12, R17, D-A-BR-05, A-R2-01, A-R2-02)
+name other planned work and recorded decisions you do not have; read each line
+by its words. A-R2-01 and A-R2-02 are the merge time and the run listing
+described above. Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would the published rates be made to look better than the records
+support — a lower caught false-done rate, a higher autonomy ratio or yield, a
+shorter wait or cycle time, a cheaper cost per merge, a tighter bound — or be
+made to show a figure where no measured sample exists?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

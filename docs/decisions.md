@@ -3649,6 +3649,100 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 - **Why:** I8 asks that an assertion fail when the capability is deleted. For a probe, that capability is its check.
 - **Reverse:** remove the entry and `timeoutMs`; D-R1-19's known limit returns.
 
+## R2: Outcome measurement
+
+### D-R2-01: R2's entry was a claim; the spec is written against the code first
+
+- **Ambiguous:** R2's entry had no spec, no out-of-scope list, no acceptance criteria, and said every input already existed. Four did not: the merge carries no time, the Vault cannot list its runs, no record names a stack, and `review` returning a change is not a distinct outcome.
+- **Chosen:** `docs/plan/R2-outcomes.md`, written and confirmed before any code. Cycle time and the run listing become contract amendments in this unit's pull request (A-R2-01, A-R2-02), following R14's precedent of amendments landing with the unit that needs them. A refused `review` exit is counted as a return, labelled as exactly that. Stack is not keyed, and recording it is a new unit, R18 (numbered R17 when written; see D-R2-12), so the gap has an owner rather than a sentence. The autonomy ratio is per run, since approvals are granted per station exit and not per task. Bounds are one-sided 95% Clopper–Pearson. The pre-run estimate declines below five past tasks per station and model.
+- **Confirmed** by the maintainer, 2026-10-11, all eight recommendations, with stack to be recorded where it will not be forgotten.
+- **Reverse:** drop the amendments; cycle time is `not-established` and the caller names the runs.
+
+### D-R2-02: the CLI acceptance check runs over a Vault the test builds, not the M1 proof run
+
+- **Found:** the spec asked for `olympus outcomes` over the M1 proof run's records. Only that run's report is committed (`docs/proof/m1/report-904f6dab.json`); its Vault is not, so it cannot be read.
+- **Chosen:** the CLI test drives three runs through the served API, two refused at admission and one passed, and requires `olympus outcomes` to print exactly what `outcomes()` returns over the same Vault. The end-to-end conformance entry does the same over a merged run.
+- **Reverse:** commit a proof run's Vault and point the check at it.
+
+### D-R2-03: choices inside the confirmed spec
+
+- **A run that passed with no merge recorded is `passed`.** At L1 with no integrator, a human merges, so no merge record exists. Without this, the CLI test showed such a run as `unfinished`. It is read the way `runStanding` reads it: the grant for the `integrate` exit was spent (D-P9-08). It counts as finished and never as a merge.
+- **An attempt's model.** Usage records carry the start number, not the iteration, so the k-th evidence bundle cannot be matched to a call. Caught false-done is keyed by the task's one model, or `escalated` where its calls ran on more than one. First-pass yield is keyed by the model of the task's first start, which is exact.
+- **Cost per merged change counts every run's spend**, merged or not, over the merges. A refused or parked run's spend is what those merges cost.
+- **The report's field is `standingSource`**, beside `standing` rather than inside it, so `RunStanding`'s many readers are unchanged.
+- **The pre-run estimate skips a past task with any lost or unmetered call**, since it has no cost to take a median of. It also does not model escalation.
+- **Reverse:** each is local to `packages/api/src/outcomes.ts` or `report.ts`.
+
+### D-R2-04: a merged run's integrate grant counts as spent (review fix)
+
+- **Found:** the external review (`docs/reviews/2026-10-11-R2-outcome-measurement-triage.md`, codex-2, gemini-1). The drive merges before it spends the integrate grant (D-I1b-01), and `readRunRecords` read state before integration records, so a run read in that gap, or stopped in it, read as merged with no approval spent and counted as autonomous. `integrate` is `human-required` at every level (D-P4-03), so that gap was the only way a run could count as autonomous.
+- **Chosen:** integration records are read before state, so a merge is never paired with a state older than its grant. On a merged run, the grant for `integrate` at the run's level counts as spent whether or not `usedAt` is set yet. The source stays `ApprovalGrant`, as the spec's table names it. gemini-1's alternative, counting `approval-granted` decisions, over-counts: a decision stands where the commit that would have granted it failed.
+- **Verified:** `does not read a merge whose integrate grant is not yet spent as autonomous` failed against the earlier code (`approvalsSpent` 0) and passes.
+- **Reverse:** restore the order and the `usedAt`-only count; the autonomy ratio is inflated by any read inside the gap.
+
+### D-R2-05: run-state absence is a named failure; any other one propagates (review fix)
+
+- **Found:** the external review (triage, codex-1). `readRunRecords` caught every `readRunState` failure as absence. A torn state version, which `flag: 'wx'` without a rename can leave, or any I/O fault, dropped the run's tasks, usage and spend, and its `null` cost summed as $0 in a cost figure still marked `exact`.
+- **Chosen:** the vault types gain `NoRunState`, an `Error` with `code: 'no-run-state'` and the `runId`, and the package exports `isNoRunState`. Both vaults reject with it for absence. `readRunRecords` treats only that as absence and lets every other failure propagate, so `outcomes()` refuses rather than publish a figure without the run. It is a code and not a class because `I5.stale-commit-is-refused-under-contention` loads `local/vault.ts` under Node's type stripping, where a relative value import does not resolve. The confirmed line named a class, and the contract is unchanged.
+- **Verified:** `refuses a run whose state cannot be read` failed against the earlier code (it resolved as `unfinished`) and passes. `reads a run with no state yet as unfinished` passes before and after. The vault's own test checks that both stores report absence with the code.
+- **Reverse:** catch every failure again; a fault reads as a run with no evidence.
+
+### D-R2-06: the review refusal rate is over finished runs (review fix)
+
+- **Found:** the external review (triage, codex-4). `reviewExitRefused` counted every run that seated a reviewer, unfinished ones included, against the spec's rule that unfinished runs stay out of run-level rates. One refusal beside 99 reviews still running read as 1 in 100.
+- **Chosen:** the rate is taken over finished runs, as the autonomy ratio is.
+- **Known limit:** a refusal on a run that has not yet ended is counted once the run ends.
+- **Verified:** `leaves a review on an unfinished run out of the review refusal rate` failed against the earlier code (sample 4) and passes.
+- **Reverse:** iterate every run; reviews in flight dilute the rate.
+
+### D-R2-07: a past task for the estimate is one that has ended (review fix)
+
+- **Found:** the external review (triage, codex-5). `estimateCost` took any fully metered task, so tasks stopped after one cheap attempt could set the median. The spec says "past task" without defining it.
+- **Chosen:** a task counts where its status is `passed`, `parked` or `cancelled`, or where its run has ended. Not `failed`: the line builds a failed task again while iterations remain (`line.ts`, the verdict's status), so `failed` is not final. The triage's line listed `failed` among the final statuses, and the code showed that was wrong. The confirmed intent, a task that has ended, is unchanged.
+- **Verified:** `does not count a task that has not finished as a past task` failed against the earlier code (a `likely` estimate from five running tasks) and passes, for `running` and `failed`, while five `parked` tasks still form a sample.
+- **Reverse:** drop the status check; truncated histories lower the likely figure.
+
+### D-R2-08: the outcome window takes ISO times with a zone (review fix)
+
+- **Found:** the external review (triage, gemini-4). `GET /outcomes` checked `from` and `to` only with `Date.parse`, which reads `10/11/2026` or a time with no zone in the server's local time, so one request named a different window on each host. Nothing failed open: an unreadable value was refused.
+- **Chosen:** an ISO 8601 date-time with `Z` or an offset; anything else is refused with the existing 400.
+- **Verified:** the new `GET /outcomes` test failed against the earlier code (200 for `10/11/2026`) and passes.
+- **Reverse:** return to `Date.parse` alone.
+
+### D-R2-09: rolled yield covers the stations that write evidence (known limit)
+
+- **Found:** the external review (triage, codex-3). Rolled yield is the product over stations that have attempts, and only `build` writes evidence bundles, so at M1 it equals build's first-pass yield. Its `no-sample` guard cannot fire, because a `Tally` cell exists only once it has a sample.
+- **Chosen:** recorded, not changed. The spec defines rolled yield as the product of the per-station yields and names no required set of stations, so choosing one is a spec decision, not a review fix. It becomes a line-wide figure when `review` records attempts.
+- **Owner:** issue #37.
+
+### D-R2-10: the R1 negative fixtures accept an `indeterminate` probe (owned by R1)
+
+- **Found:** the external review (triage, codex-6), in `I8.ceiling-bearing-probe-check-is-exercised` (D-R1-24). That entry fails only on `supported` or a missing result, so a check that never ran, such as a gitleaks start-up failure, satisfies the secret fixture.
+- **Chosen:** not changed on R2's branch. D-R1-24's stated claim, that a check replaced by an unconditional `supported` is caught, still holds. Asserting `absent` with the evidence naming the intended failure is a strengthening of R1's entry.
+- **Owner:** R1, as an amendment; issue #38.
+
+### D-R2-11: the bounds assume independent trials (owned by R8)
+
+- **Found:** the external review (triage, codex's answer to item 7). Clopper–Pearson assumes independent trials. Attempts within a run are correlated, and a caller chooses the window.
+- **Chosen:** no change to R2, which computes the bounds the spec names. Whether a bound supports a general safety claim is a question for the first unit that publishes one as such.
+- **Owner:** R8.
+
+### D-R2-12: the stack unit is R18
+
+- **Found:** merging `v2` into R2's branch. #35 numbered "Security at the gate" R17 while R2 was in review, and R2 had already numbered "Stack recorded per run" R17 (D-R2-01).
+- **Chosen:** the stack unit is R18. #35 merged first, and other units already depend on its R17 (R7, R9, R13). The review prompt and bundle are left as sent, and they still say R17: they record what the reviewers saw.
+- **Confirmed** by the maintainer, 2026-10-12.
+
+## R2 amendments to the contracts
+
+### A-R2-01: the merge record carries GitHub's merge time
+
+`IntegrationMerged` gains `mergedAt`, read from GitHub's pull request after the merge, or from the pull request a resume finds already merged. The integration record was written to carry no time so that a resume recording the same act writes the same entry (A-I1b-01); GitHub's merge time is the same on every read, so that still holds. The runtime's clock is never used. The local Vault refuses a merge record without a parseable time. `I5.integrate-merges-the-verified-tree-after-the-gate` now asserts the recorded time is the one the fake GitHub reports, on a merge and on a resume after a lost record, and the fake reports a fixed time no clock produces.
+
+### A-R2-02: the Vault lists its runs
+
+`Vault.listRuns()` returns every run the store holds any record for, sorted by id. A run refused at admission holds decisions and nothing else, and is listed. The store names the set so a rate over every run is never a rate over a sample a caller chose. `I2.vault-lists-every-run` checks the local and stub Vaults.
+
 ## Amendment: security at the gate, and two recorded constraints
 
 Gaps found on 2026-10-11 by checking the line against the week's announcements

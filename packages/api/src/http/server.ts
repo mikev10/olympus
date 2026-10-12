@@ -17,6 +17,7 @@ import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import type { BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
+import { outcomes, type OutcomeWindow } from '../outcomes.js';
 import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
@@ -319,6 +320,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const url = new URL(req.url ?? '/', 'http://server.invalid');
     const parts = url.pathname.split('/').filter((p) => p !== '');
     const method = req.method ?? 'GET';
+    if (parts[0] === 'outcomes' && parts.length === 1) {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await outcomes(components.vault, outcomeWindow(url.searchParams)));
+      return;
+    }
     if (parts[0] !== 'runs' || parts.length > 3) throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
     if (parts.length === 1) {
       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
@@ -385,4 +391,23 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
       await Promise.all([...runs.values()].flatMap((entry) => (entry.drive === null ? [] : [entry.drive])));
     },
   };
+}
+
+/**
+ * An ISO 8601 date-time with `Z` or an offset. Without a zone `Date.parse`
+ * reads a time in the server's own, so one request would name a different
+ * window on every host.
+ */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/** `from` and `to`, each an ISO time if given; anything else is refused, never read as no bound. */
+function outcomeWindow(params: URLSearchParams): OutcomeWindow {
+  const window: { from?: string; to?: string } = {};
+  for (const key of ['from', 'to'] as const) {
+    const value = params.get(key);
+    if (value === null) continue;
+    if (!ISO_TIME.test(value) || Number.isNaN(Date.parse(value))) throw new HttpError(400, 'bad-request', `${key} is not an ISO time with a zone: ${value}`);
+    window[key] = value;
+  }
+  return window;
 }
