@@ -1,0 +1,3387 @@
+BASE: 2dcd5d2
+HEAD: 94fe9c3
+
+=== COMMITS ===
+94fe9c3 R15: name the dependency-install issue (#40)
+1035991 R15: review fixes: suite checks run the base framework, node_modules is not carried
+
+=== CHANGED ===
+ .changeset/r15-review-fixes.md                     |  19 ++
+ docs/decisions.md                                  |  45 ++++
+ docs/plan/DECOMPOSITION.md                         |  32 ++-
+ docs/reviews/2026-10-11-R15-base-run-triage.md     |   3 +-
+ packages/adapters/src/discovery.ts                 |  31 ++-
+ packages/adapters/src/framework.ts                 |  42 +++-
+ packages/adapters/src/types.ts                     |  21 ++
+ packages/adapters/test/runner.test.ts              |  67 ++++++
+ packages/api/src/base.ts                           |  13 +-
+ packages/api/src/gate.ts                           |  10 +-
+ packages/api/src/line.ts                           |  44 ++--
+ packages/api/src/run.ts                            |   6 +
+ packages/api/src/tamper.ts                         |   7 +-
+ packages/api/src/validate.ts                       |  69 +++++-
+ packages/api/src/verification.ts                   | 119 +++++++++-
+ packages/api/src/workspace.ts                      |  26 +++
+ packages/api/test/admission.test.ts                |  50 +++-
+ packages/api/test/harness.ts                       |   4 +-
+ packages/api/test/line.test.ts                     |  68 +++++-
+ packages/api/test/runner-agreement.test.ts         |  72 ++++++
+ packages/api/test/verification.test.ts             |  76 +++++-
+ packages/conformance/src/registry/base-run.ts      | 254 +++++++++++++++++++--
+ packages/conformance/src/registry/decisions.ts     |   2 +-
+ packages/conformance/src/registry/i3.ts            |   3 +-
+ packages/conformance/src/registry/i5.ts            |   3 +-
+ .../conformance/src/registry/line-assertions.ts    |   2 +-
+ packages/conformance/src/registry/tier.ts          |   2 +-
+ packages/integrity/src/types.ts                    |  49 +++-
+ packages/vault/src/local/vault.ts                  |  14 +-
+ packages/vault/src/types.ts                        |   7 +
+ packages/vault/test/local.test.ts                  |  16 ++
+ packages/vault/test/stub.test.ts                   |   1 +
+ 32 files changed, 1083 insertions(+), 94 deletions(-)
+
+
+===== .changeset/r15-review-fixes.md =====
+---
+"@olympus-ai/integrity": minor
+"@olympus-ai/adapters": minor
+"@olympus-ai/vault": minor
+"@olympus-ai/api": minor
+---
+
+R15 review fixes. A `unit` or `acceptance` check pins no command: the
+runtime starts the base's installed test framework through the new
+`TestFrameworkAdapter.runner`, `invocation`, and `selectSuites`, over exactly
+the locked tests an acceptance check names (`AcceptanceCheckSpec.tests`) or
+every configured suite for a `UnitCheckSpec`, and records as the suite count
+what that runner was made to load. Admission refuses a suite check that pins
+a command, an unknown kind, and named tests the base's framework would not run
+exactly (`not-applicable`, `not-a-kind`, `not-runnable`, `unbound`). What a
+task writes under `node_modules` is not carried into the tree the checks run
+over; `EvidenceBundle.notCarried` records it by package and it escalates
+`integrate`. `LocalVault` refuses a base record whose result lacks a suite
+count or carries a non-integer exit code.
+
+===== packages/adapters/src/discovery.ts =====
+diff --git a/packages/adapters/src/discovery.ts b/packages/adapters/src/discovery.ts
+index 534db92..fc1dfce 100644
+--- a/packages/adapters/src/discovery.ts
++++ b/packages/adapters/src/discovery.ts
+@@ -1,22 +1,22 @@
+ /**
+  * Which files a framework would run as test suites, derived the way that
+  * framework derives it and without running anything the repository contains.
+  *
+  * vitest globs `include` under `test.dir` (or the project root) with
+  * `exclude` as the ignore list, through tinyglobby, which is what vitest
+  * itself calls (`globFiles`, `dot: true`, `expandDirectories: false`). jest
+  * crawls each of `roots`, keeps files whose extension is in
+  * `moduleFileExtensions` or is `snap`, drops `node_modules` and
+  * `modulePathIgnorePatterns`, and then requires a match against `testMatch`
+  * (jest-util's `globsToMatcher`) or `testRegex`, and no match against
+  * `testPathIgnorePatterns` (@jest/core `SearchSource`).
+  *
+  * Two deliberate departures, each safer than the framework and recorded in
+  * docs/decisions.md: symbolic links are never followed, and every directory
+  * a config names must sit inside the repository, because the host is
+  * enumerating a tree an agent wrote.
+  */
+-import { extname, isAbsolute, join, relative, resolve } from 'node:path';
++import { extname, isAbsolute, join, posix, relative, resolve } from 'node:path';
+ import picomatch from 'picomatch';
+ import { glob } from 'tinyglobby';
+ import ts from 'typescript';
+@@ -266,25 +266,54 @@ export async function vitestDiscovery(root: string): Promise<VitestDiscovery> {
+ export async function vitestSuites(root: string): Promise<string[]> {
+   const discovery = await vitestDiscovery(root);
+   const found = await glob([...discovery.include], {
+     cwd: discovery.cwd,
+     ignore: [...discovery.exclude],
+     dot: true,
+     expandDirectories: false,
+     followSymbolicLinks: false,
+     absolute: true,
+   });
+   // Containment is asserted again on what came back: the patterns were checked, and this is the
+   // answer, which is what the rest of the runtime acts on.
+   const label = `${discovery.configFile ?? 'the vitest defaults'} test.include`;
+   return found.map((file) => inside(root, resolve(file), label)).sort();
+ }
+ 
++/**
++ * The suites `vitest run <filters…>` runs from the repository root, by the
++ * rule both supported majors apply (`filterFiles`, vitest 3.2.4 and 4.1.11
++ * `dist/chunks/cli-api.*.js`): a suite is kept when its path relative to
++ * `test.dir`, lower-cased, contains a filter as given or the filter's own
++ * path relative to `test.dir`, lower-cased. A substring, not a path, so
++ * `a.test.ts` also selects `data.test.ts`; the caller compares what is
++ * selected with what it named. Paths are modelled under a fixed root, as
++ * the runner sees them under the sandbox's: posix, whatever the host.
++ */
++export async function vitestSelection(root: string, filters: readonly string[]): Promise<string[]> {
++  const { cwd } = await vitestDiscovery(root);
++  const base = '/workspace';
++  const dir = posix.join(base, toPosix(relative(resolve(root), cwd)));
++  const wanted = filters.map((f) => {
++    const own = f.endsWith('/') ? `${posix.relative(dir, posix.resolve(base, f))}/` : posix.relative(dir, posix.resolve(base, f));
++    return [f.toLocaleLowerCase(), own.toLocaleLowerCase()] as const;
++  });
++  return treeRelative(root, await vitestSuites(root)).filter((suite) => {
++    const testFile = posix.relative(dir, posix.join(base, suite)).toLocaleLowerCase();
++    return wanted.some(([given, own]) => testFile.includes(given) || testFile.includes(own));
++  });
++}
++
++/** Enumerated suites, which are absolute, as tree-relative posix paths: the form a manifest names a test in. */
++export function treeRelative(root: string, suites: readonly string[]): string[] {
++  return suites.map((suite) => toPosix(relative(resolve(root), suite)));
++}
++
+ // ---------------------------------------------------------------------------
+ // jest
+ 
+ /**
+  * The ts-jest presets, each of which sets `transform` and at most
+  * `extensionsToTreatAsEsm` and nothing that decides discovery (ts-jest 29,
+  * dist/presets/all-presets.js and create-jest-preset.js). Any other preset
+  * is a module that can set `testMatch` or `roots`, and is refused.
+  */
+
+===== packages/adapters/src/framework.ts =====
+diff --git a/packages/adapters/src/framework.ts b/packages/adapters/src/framework.ts
+index 4ef3ee9..73be0c7 100644
+--- a/packages/adapters/src/framework.ts
++++ b/packages/adapters/src/framework.ts
+@@ -5,7 +5,7 @@
+  * markers are detected in either — so the two differ only in enumeration.
+  */
+ import { compareAssertions, extractAssertions } from './assertions.js';
+-import { jestSuites, vitestSuites } from './discovery.js';
++import { jestSuites, treeRelative, vitestSelection, vitestSuites } from './discovery.js';
+ import { readRegularFile, SOURCE_FILE_CAP } from './files.js';
+ import { extractCases, extractSkipMarkers } from './markers.js';
+ import { refuse } from './refusal.js';
+@@ -21,56 +21,96 @@ async function parseTestFile(file: string): Promise<ReturnType<typeof parseModul
+   return sf;
+ }
+ 
++/**
++ * A named test as a runner argument: `./`-led, so a file whose name begins
++ * with `-` is never read as an option, and resolved against the root the
++ * runner starts in.
++ */
++function asArgument(test: string): string {
++  return `./${test}`;
++}
++
+ abstract class ExpectFrameworkAdapter implements TestFrameworkAdapter {
+   abstract readonly stack: string;
++  abstract readonly runner: string;
++  abstract invocation(tests: readonly string[] | null): readonly [string, ...string[]];
++  abstract selectSuites(dir: string, tests: readonly string[]): Promise<string[]>;
+   /** Whether a test's first parameter is the framework's test context, which can skip it: vitest's, not jest's `done`. */
+   protected abstract readonly testContext: boolean;
+   abstract enumerateSuites(dir: string): Promise<string[]>;
+ 
+   async parseAssertions(file: string): Promise<Assertion[]> {
+     return extractAssertions(await parseTestFile(file), file);
+   }
+ 
+   compareAssertions(before: Assertion[], after: Assertion[]): AssertionDelta {
+     return compareAssertions(before, after);
+   }
+ 
+   async detectSkipMarkers(file: string): Promise<string[]> {
+     return extractSkipMarkers(await parseTestFile(file), this.testContext);
+   }
+ 
+   async enumerateCases(file: string): Promise<string[]> {
+     return extractCases(await parseTestFile(file), file);
+   }
+ }
+ 
+ /**
+  * Enumerates each tree with the rules of the vitest major that tree
+  * declares, so a base on vitest 3 and a head on vitest 4 are each counted
+  * the way their own runner would count them.
+  */
+ export class VitestAdapter extends ExpectFrameworkAdapter {
+   readonly stack: string;
++  /** The package's own launcher in both supported majors, run by node so no shell shim is between. */
++  readonly runner = 'node_modules/vitest/vitest.mjs';
+   protected readonly testContext = true;
+   constructor(major: VitestMajor) {
+     super();
+     this.stack = `vitest@${String(major)}`;
+   }
+ 
++  /** `run`, never watch. A file is a filter to vitest, so `selectSuites` says what it selects. */
++  invocation(tests: readonly string[] | null): readonly [string, ...string[]] {
++    return ['node', this.runner, 'run', ...(tests ?? []).map(asArgument)];
++  }
++
++  selectSuites(dir: string, tests: readonly string[]): Promise<string[]> {
++    return vitestSelection(dir, tests.map(asArgument));
++  }
++
+   enumerateSuites(dir: string): Promise<string[]> {
+     return vitestSuites(dir);
+   }
+ }
+ 
+ export class JestAdapter extends ExpectFrameworkAdapter {
+   readonly stack: string;
++  /** The `jest` package's `bin` in both supported majors. */
++  readonly runner = 'node_modules/jest/bin/jest.js';
+   protected readonly testContext = false;
+   constructor(major: JestMajor) {
+     super();
+     this.stack = `jest@${String(major)}`;
+   }
+ 
++  /**
++   * `--ci`, so a snapshot the suite lacks fails rather than being written.
++   * `--runTestsByPath` takes each file as a path rather than a pattern: jest
++   * resolves it and keeps it only if it is a test file (`findTestsByPaths`,
++   * jest-core 29.7.0 and 30.2.0 `SearchSource`).
++   */
++  invocation(tests: readonly string[] | null): readonly [string, ...string[]] {
++    return tests === null ? ['node', this.runner, '--ci'] : ['node', this.runner, '--ci', '--runTestsByPath', ...tests.map(asArgument)];
++  }
++
++  async selectSuites(dir: string, tests: readonly string[]): Promise<string[]> {
++    const named = new Set(tests);
++    return treeRelative(dir, await jestSuites(dir)).filter((suite) => named.has(suite));
++  }
++
+   enumerateSuites(dir: string): Promise<string[]> {
+     return jestSuites(dir);
+   }
+ }
+
+===== packages/adapters/src/types.ts =====
+diff --git a/packages/adapters/src/types.ts b/packages/adapters/src/types.ts
+index 9f334f4..f6140c5 100644
+--- a/packages/adapters/src/types.ts
++++ b/packages/adapters/src/types.ts
+@@ -8,14 +8,35 @@ import type { SandboxHandle } from '@olympus-ai/sandbox';
+ 
+ export interface TestFrameworkAdapter {
+   readonly stack: string;
++  /**
++   * The runner's entry point, relative to the repository root: the copy the
++   * repository installed of the framework it declares. A suite check runs
++   * this file and no command a manifest pinned (D-R15-04).
++   */
++  readonly runner: string;
++  /**
++   * The argument vector that runs the framework from the repository root:
++   * over every configured suite when `tests` is null, else over exactly the
++   * named files, each tree-relative. Nothing in it comes from the
++   * repository's configuration but the configuration the runner itself reads.
++   */
++  invocation(tests: readonly string[] | null): readonly [string, ...string[]];
++  /**
++   * The suites of `dir`, tree-relative and sorted, that `invocation(tests)`
++   * runs there, by the runner's own selection rule. A caller that named
++   * `tests` compares the two: a rule that selects more than was named runs
++   * suites nobody locked, and one that selects less leaves a named test
++   * unrun.
++   */
++  selectSuites(dir: string, tests: readonly string[]): Promise<string[]>;
+   enumerateSuites(dir: string): Promise<string[]>;
+   parseAssertions(file: string): Promise<Assertion[]>;
+   compareAssertions(before: Assertion[], after: Assertion[]): AssertionDelta;
+   detectSkipMarkers(file: string): Promise<string[]>;
+   /**
+    * The test cases a file declares, each by its describe-qualified title, e.g.
+    * `math > adds`. A title the parser cannot resolve to a literal refuses,
+    * naming the file and line, rather than dropping the case (A-P7-01).
+    */
+   enumerateCases(file: string): Promise<string[]>;
+ }
+
+===== packages/adapters/test/runner.test.ts =====
+/**
+ * The runner a suite check runs (D-R15-04): the argument vector each
+ * framework is invoked with, and which suites that invocation selects, by
+ * each runner's own rule. The vitest rule is also held to vitest itself, in
+ * `@olympus-ai/api`'s tests, since nothing in this package may start a
+ * process (I1.adapters-execute-nothing-on-the-host).
+ */
+import { afterEach, describe, expect, test } from 'vitest';
+import { JestAdapter, VitestAdapter } from '../src/index.js';
+import { cleanup, pkg, repo } from './repo.js';
+
+afterEach(cleanup);
+
+const vitest = new VitestAdapter(4);
+const jest = new JestAdapter(30);
+
+describe('vitest', () => {
+  test('runs the installed launcher, never watch, each named file ./-led so none reads as an option', () => {
+    expect(vitest.runner).toBe('node_modules/vitest/vitest.mjs');
+    expect(vitest.invocation(null)).toEqual(['node', 'node_modules/vitest/vitest.mjs', 'run']);
+    expect(vitest.invocation(['src/a.test.ts', '-b.test.ts'])).toEqual(['node', 'node_modules/vitest/vitest.mjs', 'run', './src/a.test.ts', './-b.test.ts']);
+  });
+
+  test('a file is a filter: it selects every suite whose path contains it, in any case', async () => {
+    const root = await repo({
+      'package.json': pkg({ vitest: '^4.1.0' }),
+      'src/a.test.ts': '',
+      'src/data.test.ts': '',
+      'other/src/a.test.ts': '',
+      'test/a.test.ts': '',
+    });
+    expect(await vitest.selectSuites(root, ['src/a.test.ts'])).toEqual(['other/src/a.test.ts', 'src/a.test.ts']);
+    expect(await vitest.selectSuites(root, ['test/a.test.ts'])).toEqual(['test/a.test.ts']);
+    expect(await vitest.selectSuites(root, ['SRC/DATA.test.ts'])).toEqual(['src/data.test.ts']);
+  });
+
+  test('matched relative to test.dir, as the runner matches it', async () => {
+    const root = await repo({
+      'package.json': pkg({ vitest: '^4.1.0' }),
+      'vitest.config.ts': "export default { test: { dir: 'pkg' } };\n",
+      'pkg/a.test.ts': '',
+      'pkg/deep/a.test.ts': '',
+    });
+    expect(await vitest.selectSuites(root, ['pkg/a.test.ts'])).toEqual(['pkg/a.test.ts', 'pkg/deep/a.test.ts']);
+    expect(await vitest.selectSuites(root, ['pkg/deep/a.test.ts'])).toEqual(['pkg/deep/a.test.ts']);
+  });
+});
+
+describe('jest', () => {
+  test('runs the package bin with --ci, and named files by path rather than as patterns', () => {
+    expect(jest.runner).toBe('node_modules/jest/bin/jest.js');
+    expect(jest.invocation(null)).toEqual(['node', 'node_modules/jest/bin/jest.js', '--ci']);
+    expect(jest.invocation(['src/a.test.ts'])).toEqual(['node', 'node_modules/jest/bin/jest.js', '--ci', '--runTestsByPath', './src/a.test.ts']);
+  });
+
+  test('a path selects that file alone, and only if it is a suite', async () => {
+    const root = await repo({
+      'package.json': pkg({ jest: '^30.0.0' }),
+      'src/a.test.ts': '',
+      'src/data.test.ts': '',
+      'other/src/a.test.ts': '',
+      'src/notes.ts': '',
+    });
+    expect(await jest.selectSuites(root, ['src/a.test.ts'])).toEqual(['src/a.test.ts']);
+    expect(await jest.selectSuites(root, ['src/notes.ts'])).toEqual([]);
+  });
+});
+
+===== packages/api/src/base.ts =====
+diff --git a/packages/api/src/base.ts b/packages/api/src/base.ts
+index cacf348..7cdc427 100644
+--- a/packages/api/src/base.ts
++++ b/packages/api/src/base.ts
+@@ -8,44 +8,47 @@
+ import type { BaseMismatch, StationRefusal, VaultRef } from '@olympus-ai/core';
+ import type { CheckSpec, DeclaredCheckSpec } from '@olympus-ai/integrity';
+ import type { BaseRunRecord } from '@olympus-ai/vault';
+-import { SUITE_KINDS } from './gate.js';
++import { requiredSuites, SUITE_KINDS } from './gate.js';
+ 
+ /** The checks the base run runs: every check that declares what it does there, in the manifest's order (D-R15-02). */
+ export function declaredChecks(checks: readonly CheckSpec[]): DeclaredCheckSpec[] {
+   return checks.filter((check): check is DeclaredCheckSpec => check.onBase !== undefined);
+ }
+ 
+ /**
+  * Each declared check that did not do on the base what it declared. A check
+  * with no result is `no-result`, never a failure: a test that never ran did
+  * not fail (I5). One that ran and did the opposite of its declaration is
+  * `contrary`. A suite check, or one that pins `expectedSuiteCount`, that did
+  * what it declared over suites that could not be counted, or counted below
+- * that number, is `suite-count`: the runner may never have loaded the test,
+- * so its failure reproduces nothing. This is `verify`'s gate rule. A
++ * what it requires, is `suite-count`. An acceptance check's count is how many
++ * of its named tests the runner it was run with selects, so one below the
++ * number named is a test the runner never loaded, and its failure
++ * reproduces nothing (D-R15-04). This is `verify`'s gate rule. A
+  * behavioral check that pins no count runs the product rather than a runner,
+  * so its exit code alone decides.
+  */
+ export function baseMismatches(checks: readonly CheckSpec[], record: BaseRunRecord): BaseMismatch[] {
+   const mismatched: BaseMismatch[] = [];
+   for (const check of declaredChecks(checks)) {
+     const result = record.checks.find((r) => r.checkId === check.id);
+     if (result === undefined) {
+       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: null, cause: 'no-result' });
+       continue;
+     }
+     const failed = result.exitCode !== 0;
+     if (failed !== (check.onBase === 'fails')) {
+       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: 'contrary' });
+       continue;
+     }
+     const counted = result.suiteCount;
+-    const unknown = counted === null && (SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined);
+-    if (unknown || (counted !== null && check.expectedSuiteCount !== undefined && counted < check.expectedSuiteCount)) {
++    const required = requiredSuites(check);
++    const unknown = counted === null && (SUITE_KINDS.has(check.kind) || required !== undefined);
++    if (unknown || (counted !== null && required !== undefined && counted < required)) {
+       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: 'suite-count' });
+     }
+   }
+   return mismatched;
+ }
+ 
+ /** The refusal of the `test-design` exit for a base record, or undefined when every declared check did what it declared. */
+
+===== packages/api/src/gate.ts =====
+diff --git a/packages/api/src/gate.ts b/packages/api/src/gate.ts
+index 5235718..b8bde75 100644
+--- a/packages/api/src/gate.ts
++++ b/packages/api/src/gate.ts
+@@ -9,29 +9,35 @@ import type { CheckResult, CheckSpec } from '@olympus-ai/integrity';
+ /**
+  * Why a required check fails the gate, or undefined when it does not.
+  *
+  * A result that carries an expectation is judged by it and not by its exit
+  * code: that exit code is the product's, a scenario may expect it to be
+  * non-zero, and 0 says nothing about whether the output was right
+  * (A-P8-01). A result without one is judged by its exit code, as every check
+  * was before behavioral checks existed.
+  */
+ export function requiredShortfall(check: CheckSpec, result: CheckResult | undefined): FailedCheck | undefined {
+   if (!check.required) return undefined;
+   if (result === undefined) return { checkId: check.id, exitCode: null, cause: 'no-result' };
+   if (result.expectation !== null) {
+     if (!result.expectation.held) return { checkId: check.id, exitCode: result.exitCode, cause: 'expectation' };
+   } else if (result.exitCode !== 0) {
+     return { checkId: check.id, exitCode: result.exitCode, cause: 'exit-code' };
+   }
+   // A suite check whose suites could not be counted has not shown that any ran, pinned count or
+   // not: an unsupported stack or an enumeration that threw is a refusal, never a pass (I5, codex-4).
+   const counted = result.suiteCount;
+-  const unknown = counted === null && (SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined);
+-  if (unknown || (counted !== null && check.expectedSuiteCount !== undefined && counted < check.expectedSuiteCount)) {
++  const required = requiredSuites(check);
++  const unknown = counted === null && (SUITE_KINDS.has(check.kind) || required !== undefined);
++  if (unknown || (counted !== null && required !== undefined && counted < required)) {
+     return { checkId: check.id, exitCode: result.exitCode, cause: 'suite-count' };
+   }
+   return undefined;
+ }
+ 
+ /** The kinds whose result is a suite run, and so the ones a suite count is recorded for and required of. */
+ export const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance']);
++
++/** How many suites a check's result must show ran: every test an acceptance check names, or the count a check pins. */
++export function requiredSuites(check: CheckSpec): number | undefined {
++  return check.kind === 'acceptance' ? check.tests.length : check.expectedSuiteCount;
++}
+
+===== packages/api/src/line.ts =====
+diff --git a/packages/api/src/line.ts b/packages/api/src/line.ts
+index f85107c..d87387a 100644
+--- a/packages/api/src/line.ts
++++ b/packages/api/src/line.ts
+@@ -91,19 +91,21 @@ import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } f
+ import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+ import type { BuiltGraph } from './graph.js';
+ import type { RunOutcome } from './run.js';
+-import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
+-import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
++import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
++import { claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
+ import {
+   attemptPaths,
+   basePath,
+   baseRunPath,
+   composeDiff,
+   copyOnly,
+   copyTree,
++  dependencyEntry,
+   diffDigest,
+   hashAt,
++  inDependencyTree,
+   materialize,
+   ownDiff,
+   reviewPath,
+   treePath,
+ } from './workspace.js';
+@@ -352,54 +354,59 @@ async function lockAdmitted(ctx: LineContext, station: StationId, admitted: read
+ /**
+  * Runs every check that declares what it does on the base over a fresh copy of it, each in a fresh
+  * sandbox, read-only and with no egress, exactly as `verify` runs a check over
+  * base and the diff, and writes what they did to the Vault once (D-A-BF-01).
+  * No driver is invoked. A check that does not start is recorded as unstarted
+  * with its reason, and no exit code is invented for it (A-P6-02).
+  */
+ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
+   const { sandbox, vault, workspaces } = ctx.components;
+   const tree = baseRunPath(workspaces, ctx.run.id);
+   await copyTree(basePath(workspaces, ctx.run.id), tree);
+   const before = await tamperedIn(ctx, tree);
+   if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
+-  const counted = await countSuites(tree);
++  const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+ 
+   const checks: CheckResult[] = [];
+   const unstarted: UnstartedCheck[] = [];
+   for (const check of declaredChecks(ctx.checks)) {
++    const missing = await runnerMissing(check, runner, tree);
++    if (missing !== undefined) {
++      unstarted.push({ checkId: check.id, reason: missing });
++      continue;
++    }
+     let handle: SandboxHandle;
+     try {
+       handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+     } catch (error) {
+       unstarted.push({ checkId: check.id, reason: `its sandbox could not be provisioned: ${describe(error)}` });
+       continue;
+     }
+     try {
+       const startedAt = new Date().toISOString();
+       try {
+-        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
+-        const exec = await sandbox.exec(handle, [...check.command]);
++        // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
++        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+         checks.push({
+           checkId: check.id,
+           exitCode: exec.exitCode,
+           stdout: exec.stdout,
+           stderr: exec.stderr,
+-          suiteCount: suiteCountFor(check, counted),
++          suiteCount: await suitesRun(check, runner, tree),
+           expectation: null,
+           durationMs: exec.durationMs,
+           startedAt,
+         });
+       } catch (error) {
+         unstarted.push({ checkId: check.id, reason: describe(error) });
+       }
+     } finally {
+       const { egress } = await sandbox.destroy(handle);
+       await recordEgress({ vault, runId: ctx.run.id, taskId: null, station: 'test-design' }, egress);
+     }
+   }
+ 
+   // Results collected over a changed artifact are not results, whatever the provider claims about ro.
+   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+   if (after.length > 0) return recordTamper(ctx, 'test-design', null, after, { phase: 'after-base', checks });
+   return vault.recordBaseRun({ runId: ctx.run.id, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
+ }
+@@ -986,143 +993,154 @@ async function recordFindings(ctx: LineContext, task: Task, report: TamperReport
+ /**
+  * `verify`: the task's own diff, held to the locks and the grant; then the
+  * checks, run over a tree built from base and the cumulative diff, where the
+  * agent never ran, mounted read-only with no egress. The verdict follows the
+  * check results and nothing else (I2).
+  */
+ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { sandbox, vault, driver, workspaces } = ctx.components;
+   const before = await tamperedPaths(ctx);
+   if (before.length > 0) return recordTamper(ctx, 'verify', task, before, { phase: 'before-checks' });
+   const result = await readResult(ctx, task);
+ 
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+-  const own = await ownDiff(start, work);
++  const written = await ownDiff(start, work);
++  // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
++  // check, and the runner a suite check starts, runs over the base's dependency trees.
++  const own = written.filter((entry) => !inDependencyTree(entry.path));
++  const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
+ 
+   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
+   // A locked path in it is the tamper the Vault's own check can no longer see.
+   const admitted = new Map(admittedArtifacts(ctx).map((a) => [a.path, a.sha256]));
+   const locked = own.filter((entry) => admitted.has(entry.path));
+   if (locked.length > 0) {
+     const tampered = locked.map((entry) => ({ path: entry.path, expected: admitted.get(entry.path) ?? 'missing', actual: entry.sha256 ?? 'missing' }));
+     return recordTamper(ctx, 'verify', task, tampered, { phase: 'diff' });
+   }
+   const scope = scopeFor(ctx, task);
+   const outside = writesOutsideGrant(own, scope.writableGlobs, STATION_CONTRACTS.build.writeBoundary.workspaceGlobs);
+   if (outside.length > 0) return recordEscape(ctx, task, outside);
+ 
+   const prior = await accepted(ctx);
+   const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
+   const diffSha256 = diffDigest(diff);
+   const tree = treePath(workspaces, ctx.run.id, diffSha256);
+   const fromTask = new Set(own.map((entry) => entry.path));
+   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
+   const built = await tamperedIn(ctx, tree);
+   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+-  const counted = await countSuites(tree);
+-  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => c.command) });
++  const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
++  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => commandOf(c, runner)) });
+ 
+   // Results stay aligned with the specs by position, never matched up by id afterwards.
+   const specs = ctx.checks;
+   const results: Array<CheckResult | undefined> = [];
+   const unstarted: UnstartedCheck[] = [];
+   // Each check gets a sandbox of its own, whose wall clock is the check's pinned timeout. A check
+   // shares no container with the one before it, so nothing an earlier check did to the container
+   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
+   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
+   for (const check of specs) {
++    const missing = await runnerMissing(check, runner, tree);
++    if (missing !== undefined) {
++      results.push(undefined);
++      unstarted.push({ checkId: check.id, reason: missing });
++      continue;
++    }
+     let handle: SandboxHandle;
+     try {
+       handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+     } catch {
+       return spendRetry(ctx, task);
+     }
+     try {
+       const startedAt = new Date().toISOString();
+       try {
+-        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
+-        const exec = await sandbox.exec(handle, [...check.command]);
++        // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
++        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+         results.push({
+           checkId: check.id,
+           exitCode: exec.exitCode,
+           stdout: exec.stdout,
+           stderr: exec.stderr,
+-          suiteCount: suiteCountFor(check, counted),
++          suiteCount: await suitesRun(check, runner, tree),
+           expectation: null,
+           durationMs: exec.durationMs,
+           startedAt,
+         });
+       } catch (error) {
+         // There is no exit code to record and none is invented; the bundle says why (A-P6-02).
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: describe(error) });
+       }
+     } finally {
+       // A check's sandbox has no route out today, and whatever its proxy decided is recorded all the same (D-P14-04).
+       const { egress } = await sandbox.destroy(handle);
+       await recordEgress({ vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station }, egress);
+     }
+   }
+   const checks = results.filter((r): r is CheckResult => r !== undefined);
+ 
+   // Evidence collected over a changed artifact is not evidence, whatever the provider claims about ro.
+   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
+ 
+   const failed: FailedCheck[] = [];
+   specs.forEach((check, i) => {
+     const shortfall = requiredShortfall(check, results[i]);
+     if (shortfall !== undefined) failed.push(shortfall);
+   });
+   const differences = claimEvidenceDiff(result.claim, own);
+   if (differences.length > 0) {
+     // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
+     // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
+     await recordViolation(ctx, {
+       runId: ctx.run.id,
+       taskId: task.id,
+       kind: 'claim-mismatch',
+       role: task.role,
+       driverProvenanceId: driver.provenanceId(),
+       contractVersion: driver.contractVersion,
+       detectedAt: new Date().toISOString(),
+       detail: { station: 'verify', claimEvidenceDiff: differences },
+     });
+   }
+   await recordFindings(ctx, task, tamper);
+   // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+   const baseRun = await vault.readBaseRun(ctx.run.id);
+   if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
+   const evidence: EvidenceBundle = {
+     runId: ctx.run.id,
+     taskId: task.id,
+     baseCommit: ctx.run.baseCommit,
+     baseTreeSha256: ctx.baseTreeSha256,
+     baseRun,
+     diff,
+     diffSha256,
+     checks,
+     unstarted,
+     claim: result.claim,
+     claimEvidenceDiff: differences,
+     tamper,
++    notCarried,
+     collectedBy: 'runtime',
+     driverProvenanceId: driver.provenanceId(),
+     contractVersion: driver.contractVersion,
+   };
+   const ref = await vault.writeEvidence(evidence);
+   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task.
+   const spent = attemptsOf(ctx.state, task).iterations;
+   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
+   // The station machine returns this park to the line on its next step; it is recorded here, first.
+   if (status === 'parked') await park(ctx, task, { evidence: ref });
+   else await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: status }, evidence: ref });
+   return undefined;
+ }
+ 
+ /**
+  * The review seat's tree: the files its grants cover and nothing else. The
+  * contract grants the locked spec, the acceptance tests, and the diff, so the
+  * view holds those files as the accepted tree has them; the task graph, the
+  * manifest, and every file the diff does not carry are absent, so a reviewer
+  * with a read tool cannot open what its contract denies it (I6).
+  */
+@@ -1142,35 +1160,35 @@ async function reviewView(ctx: LineContext, task: Task): Promise<string> {
+ /**
+  * The latest evidence bundle per reviewed task, as the runtime's facts only:
+  * check ids, exit codes, whether an expectation held, the checks that never
+  * started, and how many ways the claim and the diff disagree — never the
+  * claim itself. A reviewer shown a behavioral check's exit code alone would
+  * read the product's 0 as a pass the gate did not give (A-P8-01).
+  */
+ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promise<string> {
+   const latest = new Map<TaskId, EvidenceBundle>();
+   for (const ref of ctx.state.evidenceRefs) {
+     const bundle = JSON.parse(decode(await ctx.components.vault.read(ref))) as EvidenceBundle;
+     if (tasks.includes(bundle.taskId)) latest.set(bundle.taskId, bundle);
+   }
+   return JSON.stringify(
+     [...latest.values()].map((b) => ({
+       taskId: b.taskId,
+       checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })),
+       unstarted: b.unstarted.map((u) => u.checkId),
+       // How many ways the claim and the diff disagree, and not the paths: a claimed path is a
+       // string the author wrote, and the seat is given no author material (D-P6-03).
+       claimMismatches: b.claimEvidenceDiff.length,
+       // The runtime's reading of the diff: paths it collected and assertions it parsed, not author text.
+       protectedPathsTouched: b.tamper.protectedPathsTouched,
+-      tamperFindings: tamperFindings(b.tamper),
++      tamperFindings: [...tamperFindings(b.tamper), ...notCarriedFindings(b)],
+     })),
+   );
+ }
+ 
+ /**
+  * `review`: one seat. The authors' families come from their recorded results;
+  * the seat is checked before the reviewer runs, from the model it resolves, and
+  * again after, from the model its result reports, so a driver that runs another
+  * model than it resolved is held to the one that ran (I6). The stricter seat is
+  * the one committed.
+  */
+
+===== packages/api/src/run.ts =====
+diff --git a/packages/api/src/run.ts b/packages/api/src/run.ts
+index 9327212..1665c42 100644
+--- a/packages/api/src/run.ts
++++ b/packages/api/src/run.ts
+@@ -59,6 +59,7 @@ import type { BuiltGraph } from './graph.js';
+ import { reachesRemote, type Integrator } from './integrate.js';
+ import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
+ import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
++import { suiteBindingProblems } from './verification.js';
+ import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
+ 
+ export interface ComponentGraph {
+@@ -481,109 +482,114 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
+ /** Every check admission makes, in order; `admitRun` records whichever refuses. */
+ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
+   const problems = [...requestProblems(req), ...storeProblems(req)];
+   if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
+ 
+   const unsafe = unsafeComponents(req.components);
+   if (unsafe.length > 0 && req.requestedLevel > 1) {
+     return { ok: false, reason: 'unsafe-above-l1', requestedLevel: req.requestedLevel, unsafe };
+   }
+   const policy = checkedPolicy(req.policy);
+   if (!policy.ok) return { ok: false, reason: 'invalid-request', problems: [{ path: 'policy', code: 'invalid-policy', message: policy.message }] };
+   const admitted = await admitArtifacts(req);
+   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
+ 
+   const capability = capabilityRefusalFor(req.components);
+   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
+   const remote = remoteEgress(policy.policy, req.components.integrator ?? null);
+   if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
+   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy);
+   if (refused !== undefined) return refused;
+   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
+   if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
+     const likely = await likelyCost(req.components, worstCase, policy.policy);
+     return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
+   }
+ 
+   const { vault } = req.components;
+   if (await hasState(vault, req.runId)) {
+     return {
+       ok: false,
+       reason: 'invalid-request',
+       problems: [{ path: 'runId', code: 'already-admitted', message: `run ${req.runId} was admitted before; resume it, do not start it again` }],
+     };
+   }
+ 
+   // The base is what every workspace is built from, so it is taken before anything is recorded,
+   // and discarded if admission refuses after it: a refusal leaves nothing behind.
+   const { workspaces } = req.components;
+   const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
++  const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), req.artifacts.acceptanceTests);
++  if (unbound.length > 0) {
++    await discardRun(workspaces, req.runId);
++    return { ok: false, reason: 'invalid-request', problems: unbound };
++  }
+   const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel);
+ 
+   const now = new Date().toISOString();
+   const run: Run = {
+     id: req.runId,
+     repo: req.workspace,
+     baseCommit: req.baseCommit,
+     trigger: { kind: 'human', eventId: req.runId, lineage: { depth: 0, chain: [], windowStart: now } },
+     requestedLevel: req.requestedLevel,
+     station: 'intake',
+     graph: null,
+     createdAt: now,
+   };
+   const record: AdmissionRecord = {
+     run,
+     policy: policy.policy,
+     artifacts: admitted.admitted.artifacts,
+     baseTreeSha256,
+     unavailableControls: controls,
+   };
+   const refusedControls = admissionRefusal(record);
+   if (refusedControls !== undefined) {
+     await discardRun(workspaces, req.runId);
+     return refusedControls;
+   }
+   const admission = await vault.recordAdmission(record);
+   const state = await vault.commitRunState(
+     {
+       runId: req.runId,
+       admission,
+       station: 'intake',
+       phase: 'working',
+       tasks: {},
+       attempts: {},
+       results: {},
+       evidenceRefs: [],
+       violations: [],
+       approvals: [],
+       reviews: [],
+       usage: [],
+       cancelled: null,
+       halted: null,
+       version: '0',
+     },
+     '0',
+   );
+   return {
+     ok: true,
+     admitted: {
+       state,
+       worstCase,
+       drive: (hooks: DriveHooks = {}) => runLine({
+         run,
+         policy: policy.policy,
+         artifacts: record.artifacts,
+         graph: admitted.admitted.graph,
+         checks: admitted.admitted.checks,
+         components: req.components,
+         baseTreeSha256,
+         state,
+         ...hooks,
+       }),
+     },
+   };
+ }
+ 
+ /**
+  * The admission record, read back and checked in full: a record that does not
+  * hold what the line reads is refused, not trusted (D-P1-12).
+  */
+
+===== packages/api/src/tamper.ts =====
+diff --git a/packages/api/src/tamper.ts b/packages/api/src/tamper.ts
+index 24579cf..6afba1b 100644
+--- a/packages/api/src/tamper.ts
++++ b/packages/api/src/tamper.ts
+@@ -189,6 +189,11 @@ export function tamperFindings(report: TamperReport): string[] {
+   ];
+ }
+ 
++/** One line per dependency-tree entry the task wrote and the runtime did not carry (D-R15-05). */
++export function notCarriedFindings(bundle: Pick<EvidenceBundle, 'notCarried'>): string[] {
++  return bundle.notCarried.map((entry) => `written but not carried, since checks run over the base's dependencies: ${entry}`);
++}
++
+ export interface Escalations {
+   readonly protectedPathsTouched: readonly string[];
+   readonly tamperFindings: readonly string[];
+@@ -197,20 +202,20 @@ export interface Escalations {
+ /**
+  * What the accepted work escalates: the reports of the latest bundle of each
+  * task run state records as passed. Derived from the Vault alone, so a
+  * resumed run escalates exactly as one that never stopped.
+  */
+ export async function acceptedEscalations(state: RunState, bundleAt: (ref: VaultRef) => Promise<EvidenceBundle>): Promise<Escalations> {
+   const latest = new Map<TaskId, EvidenceBundle>();
+   for (const ref of state.evidenceRefs) {
+     const bundle = await bundleAt(ref);
+     latest.set(bundle.taskId, bundle);
+   }
+   const touched = new Set<string>();
+   const findings: string[] = [];
+   for (const [taskId, bundle] of latest) {
+     if (!Object.hasOwn(state.tasks, taskId) || state.tasks[taskId] !== 'passed') continue;
+     for (const path of bundle.tamper.protectedPathsTouched) touched.add(path);
+-    findings.push(...tamperFindings(bundle.tamper));
++    findings.push(...tamperFindings(bundle.tamper), ...notCarriedFindings(bundle));
+   }
+   return { protectedPathsTouched: [...touched].sort(), tamperFindings: findings };
+ }
+
+===== packages/api/src/validate.ts =====
+diff --git a/packages/api/src/validate.ts b/packages/api/src/validate.ts
+index 4737253..639785e 100644
+--- a/packages/api/src/validate.ts
++++ b/packages/api/src/validate.ts
+@@ -15,59 +15,67 @@
+ import { isAbsolute, posix, win32 } from 'node:path';
+ import { isAutonomyLevel } from '@olympus-ai/core';
+ import type { RoleId, RunId, Task, TaskGraph, TaskId } from '@olympus-ai/core';
+-import type { CheckSpec } from '@olympus-ai/integrity';
++import type { CheckKind, CheckSpec } from '@olympus-ai/integrity';
+ import type { RequestedArtifacts } from './run.js';
+ 
+ export type RequestProblemCode =
+   /** A required list has no entries. */
+   | 'missing'
+   /** A string that must have content is blank, or is not a string. */
+   | 'empty'
+   /** A run id that is not one directory name, so neither the Vault nor the workspace store can hold it (D-P14-14). */
+   | 'unusable'
+   /** An id or a path is listed twice. */
+   | 'duplicate'
+   /** `workspace` must be an absolute path. */
+   | 'not-absolute'
+   /** An artifact path must be workspace-relative, not absolute. */
+   | 'absolute'
+   /** An artifact path contains a `..` segment and could leave the workspace. */
+   | 'escapes'
+   /** `CheckSpec.required` must be a boolean. */
+   | 'not-boolean'
+   /** `CheckSpec.command` must be an argument vector: an array of strings whose first names a program (A-P6-01). */
+   | 'not-argv'
+   /** `CheckSpec.expectedSuiteCount` must be a non-negative integer when present. */
+   | 'not-integer'
+   /** No check is required, so no check could fail the gate. */
+   | 'none-required'
+   /** An acceptance check does not declare `onBase` as `'fails'` or `'passes'`; there is no default (D-A-BF-01). */
+   | 'undeclared'
+   /** A check of a kind that does not run over the base declares `onBase`, which nothing would act on. */
+   | 'not-declarable'
+   /** No required acceptance or behavioral check is declared `'fails'`, so the run has nothing to show the change did. */
+   | 'none-fails-on-base'
++  /** `CheckSpec.kind` is not one of the kinds a check can be. */
++  | 'not-a-kind'
++  /** A field the check's kind does not take: a command on a suite check, tests on any other, a count an acceptance check's tests already fix (D-R15-04). */
++  | 'not-applicable'
++  /** A named test the runner would not read as one file: a `:` vitest takes for a line filter. */
++  | 'not-runnable'
++  /** A named test the base's test framework does not run as one exact suite, or a suite check over a base with no test framework (D-R15-04). */
++  | 'unbound'
+   /** `requestedLevel` is not one of 0, 1, 2, 3. */
+   | 'not-a-level'
+   /** `approvedCostUsd` is neither a finite number nor null. */
+   | 'not-a-cost'
+   /** An artifact could not be read from the workspace. */
+   | 'unreadable'
+   /** An artifact that must be JSON is not. */
+   | 'not-json'
+   /** A task names a station no task may be scheduled at. */
+   | 'bad-station'
+   /** A task depends on a task the graph does not hold, or on one it may not depend on. */
+   | 'bad-dependency'
+   /** The graph's dependencies form a cycle, so it cannot finish. */
+   | 'cycle'
+   /** A build task no review task covers, so its work would reach integrate unreviewed. */
+   | 'unreviewed'
+   /** The policy does not validate. */
+   | 'invalid-policy'
+   /** The run already has state: it was admitted once, and is resumed, not started again. */
+   | 'already-admitted'
+   /** The workspace store and the workspace lie one inside the other. */
+   | 'overlaps'
+   /** A role's egress allowlist names a host the git remote is reached on (D-I1b-05). */
+   | 'reaches-git-remote';
+@@ -169,92 +177,141 @@ function artifactProblems(artifacts: unknown, report: Report): void {
+ /** The manifest's checks, or the problems that keep it from being one. */
+ export function parseManifest(value: unknown): { ok: true; checks: CheckSpec[] } | { ok: false; problems: RequestProblem[] } {
+   const { problems, report } = collector();
+   const checks = typeof value === 'object' && value !== null && 'checks' in value ? value.checks : undefined;
+   checkProblems(checks, report);
+   if (problems.length > 0) return { ok: false, problems };
+   return {
+     ok: true,
+-    checks: (checks as CheckSpec[]).map((check) => {
++    checks: (checks as CheckSpec[]).map((check): CheckSpec => {
++      if (check.kind === 'acceptance') {
++        const [first, ...rest] = check.tests;
++        const tests: readonly [string, ...string[]] = [first, ...rest];
++        return { ...check, tests };
++      }
++      if (check.kind === 'unit') return { ...check };
+       const [program, ...args] = check.command;
+       return { ...check, command: [program, ...args] };
+     }),
+   };
+ }
+ 
++const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation']);
++
++/**
++ * The files an acceptance check runs: workspace-relative, inside it, each
++ * once, and each a single file to the runner. That each is an admitted
++ * acceptance test the base's framework runs as one suite is admission's,
++ * which reads the base (D-R15-04).
++ */
++function testsProblems(tests: unknown, at: string, report: Report): void {
++  if (!Array.isArray(tests) || tests.length === 0) {
++    report(at, 'missing', `${at} must name at least one locked acceptance test; a check that runs no test shows nothing`);
++    return;
++  }
++  const list: readonly unknown[] = tests;
++  const seen = new Set<string>();
++  list.forEach((test, i) => {
++    const one = `${at}[${String(i)}]`;
++    if (!isNonEmptyString(test)) report(one, 'empty', `${one} must be a non-empty workspace-relative path`);
++    else if (posix.isAbsolute(test) || win32.isAbsolute(test)) report(one, 'absolute', `${one}: '${test}' must be relative to the workspace`);
++    else if (test.split(/[\\/]/).includes('..')) report(one, 'escapes', `${one}: '${test}' contains a '..' segment and could leave the workspace`);
++    else if (test.includes('\\')) report(one, 'not-runnable', `${one}: '${test}' must use '/' separators, as the runner's sandbox does`);
++    else if (test.includes(':')) report(one, 'not-runnable', `${one}: '${test}' contains ':', which vitest reads as a line filter rather than part of a file`);
++    else if (seen.has(test)) report(one, 'duplicate', `${one}: '${test}' is listed twice`);
++    else seen.add(test);
++  });
++}
++
+ /**
+  * I5: a command is run exactly as pinned or not at all. A string would need a
+  * grammar the runtime invents, and a vector with a non-string in it has no
+  * exact form to run, so both are refused rather than approximated (A-P6-01).
+  */
+ function commandProblems(command: unknown, at: string, report: Report): void {
+   if (!Array.isArray(command)) {
+     report(at, 'not-argv', `${at} must be an argument vector, an array of strings; a string would need a grammar the runtime would have to invent`);
+     return;
+   }
+   const argv: readonly unknown[] = command;
+   if (argv.length === 0) {
+     report(at, 'empty', `${at} is an empty argument vector; there is no program to run`);
+     return;
+   }
+   const bad = argv.findIndex((arg) => typeof arg !== 'string');
+   if (bad !== -1) report(`${at}[${String(bad)}]`, 'not-argv', `${at}[${String(bad)}] is not a string; an argument vector has no other element`);
+   else if (!isNonEmptyString(argv[0])) report(`${at}[0]`, 'empty', `${at}[0] must name the program to run`);
+ }
+ 
+ /**
+- * The fields the verdict reads: id (unique), command, required (a boolean),
+- * expectedSuiteCount (an integer when present), and what each acceptance
++ * The fields the verdict reads: id (unique), kind (a known one), command
++ * (every kind but a suite kind), tests (an acceptance check's), required (a
++ * boolean), expectedSuiteCount (an integer when present, never on an
++ * acceptance check), and what each acceptance
+  * check, and any behavioral check that declares one, does on the base
+  * (D-A-BF-01, D-R15-02).
+  */
+ function checkProblems(checks: unknown, report: Report): void {
+   if (!Array.isArray(checks) || checks.length === 0) {
+     report('manifest.checks', 'missing', 'manifest.checks must name at least one check; no check is not a verification');
+     return;
+   }
+   const list: readonly unknown[] = checks;
+   const seen = new Set<string>();
+   let required = 0;
+   let reproduces = 0;
+   list.forEach((check, i) => {
+     const at = `manifest.checks[${String(i)}]`;
+     if (typeof check !== 'object' || check === null) {
+       report(at, 'empty', `${at} must be a CheckSpec`);
+       return;
+     }
+     const c = check as Partial<Record<keyof CheckSpec, unknown>>;
+     if (!isNonEmptyString(c.id)) report(`${at}.id`, 'empty', `${at}.id must be a non-empty string`);
+     else if (seen.has(c.id)) {
+       report(`${at}.id`, 'duplicate', `${at}.id '${c.id}' is listed twice; a duplicate id lets one result stand in for another`);
+     } else seen.add(c.id);
+-    commandProblems(c.command, `${at}.command`, report);
++    if (typeof c.kind !== 'string' || !CHECK_KINDS.has(c.kind)) {
++      report(`${at}.kind`, 'not-a-kind', `${at}.kind must be one of ${[...CHECK_KINDS].join(', ')}`);
++    }
++    // A suite check's result is a test runner's, and the runner is the runtime's to start: a pinned
++    // command could be anything, and the suites counted would then be an inventory of the tree (D-R15-04).
++    const suite = c.kind === 'unit' || c.kind === 'acceptance';
++    if (suite && c.command !== undefined) {
++      report(`${at}.command`, 'not-applicable', `${at} is a ${String(c.kind)} check, which pins no command: the runtime runs the base's test framework itself`);
++    } else if (!suite) commandProblems(c.command, `${at}.command`, report);
++    if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
++    else if (c.tests !== undefined) {
++      report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is not an acceptance check; no other kind runs named tests`);
++    }
+     if (typeof c.required !== 'boolean') {
+       report(`${at}.required`, 'not-boolean', `${at}.required must be a boolean, not ${typeof c.required}`);
+     } else if (c.required) required += 1;
+     const count = c.expectedSuiteCount;
+-    if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
++    if (c.kind === 'acceptance' && count !== undefined) {
++      report(`${at}.expectedSuiteCount`, 'not-applicable', `${at}.expectedSuiteCount restates its tests: an acceptance check's runner must load every test it names`);
++    } else if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
+       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
+     }
+     // I5: no default. A check that may pass on the base is a guard and says so; silence is not a declaration.
+     const declarable = c.kind === 'acceptance' || c.kind === 'behavioral';
+     if (!declarable && c.onBase !== undefined) {
+       report(`${at}.onBase`, 'not-declarable', `${at}.onBase is declared on a check that is neither an acceptance nor a behavioral check; no other kind runs on the base`);
+     } else if (c.kind === 'acceptance' || c.onBase !== undefined) {
+       if (c.onBase !== 'fails' && c.onBase !== 'passes') {
+         report(`${at}.onBase`, 'undeclared', `${at} must declare onBase as 'fails' or 'passes'; there is no default`);
+       } else if (c.onBase === 'fails' && c.required === true) reproduces += 1;
+     }
+     // The timeout is the wall clock of the sandbox the check runs in, so it must be one (codex-7).
+     const timeout = c.timeoutMs;
+     if (!(typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0)) {
+       report(`${at}.timeoutMs`, 'not-integer', `${at}.timeoutMs must be a positive integer of milliseconds`);
+     }
+   });
+   if (required === 0) {
+     report('manifest.checks', 'none-required', 'manifest.checks: at least one check must be required; a gate no check can fail is not a gate');
+   }
+   // An optional check does not hold verify's gate, so it cannot show what the change did (D-R15-01).
+   if (reproduces === 0) {
+     report('manifest.checks', 'none-fails-on-base', "manifest.checks: at least one required acceptance or behavioral check must declare onBase 'fails'; a run with nothing failing before the change has nothing to show the change did");
+   }
+ }
+
+===== packages/api/src/verification.ts =====
+diff --git a/packages/api/src/verification.ts b/packages/api/src/verification.ts
+index e512e75..ac26cc6 100644
+--- a/packages/api/src/verification.ts
++++ b/packages/api/src/verification.ts
+@@ -1,18 +1,20 @@
+ /**
+  * The pure parts of verification, each over facts the runtime collected: the
+  * task's own diff, the tree the checks ran over, and the result the driver
+  * returned. The line (`line.ts`) sequences them; nothing here reads a claim
+  * as anything but a claim (I2).
+  */
++import { stat } from 'node:fs/promises';
++import { join } from 'node:path';
+ import picomatch from 'picomatch';
+-import { buildAdapterSet } from '@olympus-ai/adapters';
++import { buildAdapterSet, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+ import type { AgentClaim } from '@olympus-ai/core';
+ import type { CheckSpec } from '@olympus-ai/integrity';
+ import type { DiffEntry } from '@olympus-ai/vault';
+-import { SUITE_KINDS } from './gate.js';
++import type { RequestProblem } from './validate.js';
+ 
+ /**
+  * Where the claim and the evidence differ. Only the claim's file list is
+  * compared: it is the one part of a claim with a fact to compare against, and
+  * the narrative is model text that is never parsed.
+  */
+@@ -53,26 +55,129 @@ export function writesOutsideGrant(own: readonly DiffEntry[], roleGlobs: readonl
+ /**
+  * The number of suites in the verified tree, counted on the host by the
+  * adapters from files alone, or null when the tree's stack has no test
+  * adapter or its suites cannot be enumerated. Never read from a test runner's
+  * output: that is written by the code under test (I5).
+  */
+ export async function countSuites(tree: string): Promise<number | null> {
+   try {
+     const set = await buildAdapterSet(tree, { provider: null, coverage: null });
+     if (set.test === null) return null;
+     return (await set.test.enumerateSuites(tree)).length;
+   } catch {
+     return null;
+   }
+ }
+ 
+ /**
+- * The suite count a check's result records. A null here fails a suite check,
+- * and any check that pins `expectedSuiteCount`: a tree whose suites cannot be
+- * enumerated is not a tree whose suites passed (`gate.ts`).
++ * The base's test framework: the one every suite check runs, from the
++ * base's own install, at the base run and at `verify` alike. The change
++ * cannot replace it, since nothing a task writes under `node_modules` is
++ * carried (D-R15-05). Null when the base declares no framework this runtime
++ * supports, which admission refuses for any suite check (D-R15-04).
+  */
+-export function suiteCountFor(check: CheckSpec, counted: number | null): number | null {
+-  return SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined ? counted : null;
++export async function suiteRunner(base: string): Promise<TestFrameworkAdapter | null> {
++  try {
++    return (await buildAdapterSet(base, { provider: null, coverage: null })).test;
++  } catch {
++    return null;
++  }
++}
++
++/**
++ * The argument vector a check runs: the pinned one, or for a suite check the
++ * base framework's own invocation over the check's tests, or over every
++ * configured suite for a unit check. Admission refused a suite check with no
++ * runner, so a null here is a run admitted on a base that has since changed.
++ */
++export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null): readonly [string, ...string[]] {
++  if (check.kind !== 'acceptance' && check.kind !== 'unit') return check.command;
++  if (runner === null) throw new Error(`the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner to start`);
++  return runner.invocation(check.kind === 'acceptance' ? check.tests : null);
++}
++
++/**
++ * Why a suite check cannot start in `tree`, or undefined when it can. The
++ * runner is the base's install; with none there, `node` exits 1 for a module
++ * it cannot find, which a check declared `'fails'` would read as a
++ * reproduction. A test that never ran did not fail (I5).
++ */
++export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<string | undefined> {
++  if (check.kind !== 'acceptance' && check.kind !== 'unit') return undefined;
++  if (runner === null) return `the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner`;
++  const facts = await stat(join(tree, ...runner.runner.split('/'))).catch(() => null);
++  return facts?.isFile() === true ? undefined : `${runner.stack}'s runner is not installed at ${runner.runner}, so the check cannot start`;
++}
++
++/**
++ * Why the suite checks cannot be bound to the base, as admission refuses
++ * them (D-R15-04): a suite check over a base with no supported test
++ * framework, or one whose runner is not installed there; a named test that
++ * is not an admitted acceptance test, so nothing locks it; or a set of named
++ * tests the runner would not run exactly, because one is not a suite it
++ * loads or because its selection rule takes in a suite nobody named. Read
++ * from the snapshot, which is the tree every check runs over.
++ */
++export async function suiteBindingProblems(checks: readonly CheckSpec[], base: string, admittedTests: readonly string[]): Promise<RequestProblem[]> {
++  const problems: RequestProblem[] = [];
++  const suiteChecks = checks.filter((c) => c.kind === 'acceptance' || c.kind === 'unit');
++  if (suiteChecks.length === 0) return problems;
++  const runner = await suiteRunner(base);
++  const admitted = new Set(admittedTests);
++  for (const [i, check] of checks.entries()) {
++    if (check.kind !== 'acceptance' && check.kind !== 'unit') continue;
++    const at = `manifest.checks[${String(i)}]`;
++    const missing = await runnerMissing(check, runner, base);
++    if (missing !== undefined) {
++      problems.push({ path: at, code: 'unbound', message: `${at}: ${missing}; a suite check runs the base's own test framework or nothing` });
++      continue;
++    }
++    if (check.kind !== 'acceptance' || runner === null) continue;
++    check.tests.forEach((test, j) => {
++      if (!admitted.has(test)) {
++        problems.push({ path: `${at}.tests[${String(j)}]`, code: 'unbound', message: `${at}.tests[${String(j)}]: '${test}' is not an admitted acceptance test, so nothing locks what the check runs` });
++      }
++    });
++    let selected: string[];
++    try {
++      selected = await runner.selectSuites(base, check.tests);
++    } catch (error) {
++      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} cannot say which suites it would run: ${error instanceof Error ? error.message : String(error)}` });
++      continue;
++    }
++    const chosen = new Set(selected);
++    const unloaded = check.tests.filter((test) => !chosen.has(test));
++    const extra = selected.filter((suite) => !check.tests.includes(suite));
++    if (unloaded.length > 0) {
++      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} does not run ${unloaded.join(', ')} as a suite here, so its failure would reproduce nothing` });
++    }
++    if (extra.length > 0) {
++      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} would also run ${extra.join(', ')}, which the check does not name; a check runs exactly the tests it names` });
++    }
++  }
++  return problems;
++}
++
++/**
++ * The suite count a check's result records. For a suite check it is what the
++ * runner was made to load, by its own selection rule over the tree it ran
++ * in: an acceptance check's named tests that the runner selects, or every
++ * suite a unit check's runner is configured to run (D-R15-04). A behavioral
++ * check that pins `expectedSuiteCount` records the tree's count; any other
++ * check, none. A null fails a check that requires a count: a tree whose
++ * suites cannot be enumerated is not a tree whose suites passed (`gate.ts`).
++ */
++export async function suitesRun(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<number | null> {
++  try {
++    if (check.kind === 'acceptance') {
++      if (runner === null) return null;
++      const named = new Set<string>(check.tests);
++      return (await runner.selectSuites(tree, check.tests)).filter((suite) => named.has(suite)).length;
++    }
++    if (check.kind === 'unit') return runner === null ? null : (await runner.enumerateSuites(tree)).length;
++  } catch {
++    return null;
++  }
++  return check.expectedSuiteCount !== undefined ? countSuites(tree) : null;
+ }
+ 
+ const RESULT_KEYS = ['claim', 'contractVersion', 'events', 'model', 'taskId', 'usage'] as const;
+
+===== packages/api/src/workspace.ts =====
+diff --git a/packages/api/src/workspace.ts b/packages/api/src/workspace.ts
+index 88079ad..2c4b804 100644
+--- a/packages/api/src/workspace.ts
++++ b/packages/api/src/workspace.ts
+@@ -198,8 +198,34 @@ export async function snapshotBase(store: WorkspaceStore, runId: RunId, source:
+ /** Removes everything the store holds for a run. For a run refused after its base was taken, so a refusal leaves nothing behind. */
+ export async function discardRun(store: WorkspaceStore, runId: RunId): Promise<void> {
+   await rm(runDir(store, runId), { recursive: true, force: true });
+ }
+ 
++/**
++ * Whether a path lies in a dependency tree: under a `node_modules` directory
++ * at any depth. Every check runs over the base's dependency trees, so the
++ * runner a suite check starts is the one the base installed; a task's
++ * writes there are recorded and escalated, and never carried into the tree
++ * the checks judge, or the change could replace its own judge (D-R15-05).
++ */
++export function inDependencyTree(path: string): boolean {
++  return path.split('/').includes('node_modules');
++}
++
++/**
++ * The entry a dependency-tree path is recorded under: the package directory
++ * it belongs to, `node_modules/vitest` or `node_modules/@scope/pkg`, or the
++ * file itself when it sits directly in `node_modules`. One install writes
++ * thousands of files; the package is what a person reading the escalation
++ * can act on.
++ */
++export function dependencyEntry(path: string): string {
++  const parts = path.split('/');
++  const at = parts.indexOf('node_modules');
++  const name = parts[at + 1];
++  const scoped = name?.startsWith('@') === true && parts.length > at + 3;
++  return parts.slice(0, Math.min(parts.length, at + (scoped ? 3 : 2))).join('/');
++}
++
+ /** A task's own diff: every path outside `.git` whose content differs between the tree it was handed and the tree it left. */
+ export async function ownDiff(start: string, work: string): Promise<DiffEntry[]> {
+   const changes = await diffTrees(start, work, (path) => !excluded(path), DIFF_WALK);
+
+===== packages/api/test/admission.test.ts =====
+diff --git a/packages/api/test/admission.test.ts b/packages/api/test/admission.test.ts
+index 2d4f559..b347e2a 100644
+--- a/packages/api/test/admission.test.ts
++++ b/packages/api/test/admission.test.ts
+@@ -1,12 +1,12 @@
+ /**
+  * Admission: every refusal that happens before a run's first state, and the
+  * regression tests from the external review of S1
+  * (docs/reviews/2026-09-09-S1-walking-skeleton-adversarial-triage.md), carried
+  * over to a manifest and a graph read from the workspace. Every refusal is read
+  * by field: a path and a code for a request problem, a payload for a transition.
+  * And every one leaves nothing behind: no admission, no state, no lock.
+  */
+-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import type { RunId, TaskId } from '@olympus-ai/core';
+@@ -86,35 +86,83 @@ describe('S1 finding 1: duplicate check ids', () => {
+ describe('S1 finding 3: the verification manifest', () => {
+   test('3a: a manifest with no checks, or only optional ones, is refused', async () => {
+     await writeChecks(workspace, [], { asWritten: true });
+     await expectInvalid(await start(), 'manifest.checks', 'missing');
+     await writeChecks(workspace, [{ ...ok, required: false }], { asWritten: true });
+     await expectInvalid(await start(), 'manifest.checks', 'none-required');
+   });
+ 
+   test('3c: a check whose required flag is not a boolean, or with an empty command, id, or bad suite count, is refused', async () => {
+     await writeChecks(workspace, [{ ...bad, required: 'yes' }]);
+     await expectInvalid(await start(), 'manifest.checks[0].required', 'not-boolean');
+     await writeChecks(workspace, [{ ...ok, command: [] }]);
+     await expectInvalid(await start(), 'manifest.checks[0].command', 'empty');
+     await writeChecks(workspace, [{ ...ok, command: ['  '] }]);
+     await expectInvalid(await start(), 'manifest.checks[0].command[0]', 'empty');
+     await writeChecks(workspace, [{ ...ok, command: 'node -e process.exit(0)' }]);
+     await expectInvalid(await start(), 'manifest.checks[0].command', 'not-argv');
+     await writeChecks(workspace, [{ ...ok, command: ['node', 7] }]);
+     await expectInvalid(await start(), 'manifest.checks[0].command[1]', 'not-argv');
+     await writeChecks(workspace, [{ ...ok, id: '' }]);
+     await expectInvalid(await start(), 'manifest.checks[0].id', 'empty');
+     await writeChecks(workspace, [{ ...ok, expectedSuiteCount: -1 }]);
+     await expectInvalid(await start(), 'manifest.checks[0].expectedSuiteCount', 'not-integer');
+     // codex-7: the timeout becomes the check's sandbox wall clock, so it must be one.
+     for (const timeoutMs of [0, 1.5, -1, '10000', undefined]) {
+       await writeChecks(workspace, [{ ...ok, timeoutMs }]);
+       await expectInvalid(await start(), 'manifest.checks[0].timeoutMs', 'not-integer');
+     }
+   });
+ 
++  test('a check of no known kind is refused', async () => {
++    await writeChecks(workspace, [{ ...ok, kind: 'smoke' }]);
++    await expectInvalid(await start(), 'manifest.checks[0].kind', 'not-a-kind');
++  });
++
++  test('D-R15-04: a suite check pins no command, an acceptance check names its tests, and no other check names any', async () => {
++    const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', tests: ['a.test.ts'], required: true, timeoutMs: 10_000 };
++    await writeChecks(workspace, [{ id: 'u', kind: 'unit', command: ['vitest', 'run'], required: true, timeoutMs: 10_000 }]);
++    await expectInvalid(await start(), 'manifest.checks[0].command', 'not-applicable');
++    await writeChecks(workspace, [{ ...acceptance, command: ['node', '-e', 'process.exit(1)'] }]);
++    await expectInvalid(await start(), 'manifest.checks[0].command', 'not-applicable');
++    await writeChecks(workspace, [{ ...acceptance, tests: undefined }]);
++    await expectInvalid(await start(), 'manifest.checks[0].tests', 'missing');
++    await writeChecks(workspace, [{ ...acceptance, expectedSuiteCount: 1 }]);
++    await expectInvalid(await start(), 'manifest.checks[0].expectedSuiteCount', 'not-applicable');
++    await writeChecks(workspace, [{ ...ok, tests: ['a.test.ts'] }]);
++    await expectInvalid(await start(), 'manifest.checks[0].tests', 'not-applicable');
++    const named: Array<[unknown, string, RequestProblemCode]> = [
++      ['a.test.ts:12', 'manifest.checks[0].tests[0]', 'not-runnable'],
++      ['src\\a.test.ts', 'manifest.checks[0].tests[0]', 'not-runnable'],
++      ['../a.test.ts', 'manifest.checks[0].tests[0]', 'escapes'],
++      ['/a.test.ts', 'manifest.checks[0].tests[0]', 'absolute'],
++      ['', 'manifest.checks[0].tests[0]', 'empty'],
++    ];
++    for (const [test, path, code] of named) {
++      await writeChecks(workspace, [{ ...acceptance, tests: [test] }]);
++      await expectInvalid(await start(), path, code);
++    }
++    await writeChecks(workspace, [{ ...acceptance, tests: ['a.test.ts', 'a.test.ts'] }]);
++    await expectInvalid(await start(), 'manifest.checks[0].tests[1]', 'duplicate');
++  });
++
++  test('D-R15-04: an acceptance check whose tests the base framework would not run exactly is refused, and nothing is kept', async () => {
++    await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'r15', devDependencies: { vitest: '4.1.11' } }));
++    await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
++    await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(1)\n');
++    await mkdir(join(workspace, 'sub'), { recursive: true });
++    await writeFile(join(workspace, 'a.test.ts'), '');
++    await writeFile(join(workspace, 'sub', 'a.test.ts'), '');
++    const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', required: true, timeoutMs: 10_000 };
++    // Not admitted as an acceptance test: nothing locks it.
++    await writeChecks(workspace, [{ ...acceptance, tests: ['sub/a.test.ts'] }]);
++    await expectInvalid(await start(), 'manifest.checks[0].tests[0]', 'unbound');
++    // Admitted, but `a.test.ts` is a filter to vitest that selects sub/a.test.ts as well.
++    await writeChecks(workspace, [{ ...acceptance, tests: ['a.test.ts'] }]);
++    await expectInvalid(await start({ artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, 'a.test.ts'] } }), 'manifest.checks[0].tests', 'unbound');
++  });
++
+   test('a manifest or a graph that is not JSON is refused', async () => {
+     await writeFile(join(workspace, 'verify.json'), '{ checks: [');
+     await expectInvalid(await start(), 'artifacts.verificationManifest', 'not-json');
+   });
+ });
+
+===== packages/api/test/harness.ts =====
+diff --git a/packages/api/test/harness.ts b/packages/api/test/harness.ts
+index b176574..7b6c4dc 100644
+--- a/packages/api/test/harness.ts
++++ b/packages/api/test/harness.ts
+@@ -12,22 +12,22 @@ import {
+   StrictPolicyEngine,
+   StubDriver,
+   type ApprovalKey,
+   type ApprovalOutcome,
+   type CapabilityScope,
+   type Driver,
+   type DriverCapabilities,
+   type ModelFamily,
+   type ModelIdentity,
+   type ModelTier,
+   type Policy,
+   type PolicyDocument,
+   type RoleId,
+   type RunId,
+   type TaskGraph,
+   type TaskRequest,
+   type TaskResult,
+ } from '@olympus-ai/core';
+-import type { CheckSpec } from '@olympus-ai/integrity';
++import type { OtherCheckSpec } from '@olympus-ai/integrity';
+ import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
+ import { StubVault } from '@olympus-ai/vault';
+ import { buildGraph, isBuilt, localWorkspaceStore, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
+@@ -38,10 +38,10 @@ export const BASE_COMMIT = '0'.repeat(40);
+ export const BUILDER = 'builder' as RoleId;
+ export const REVIEWER = 'reviewer' as RoleId;
+ 
+-export const HELLO_CHECK: CheckSpec = {
++export const HELLO_CHECK: OtherCheckSpec = {
+   id: 'hello-exit-zero',
+   kind: 'compile',
+   command: ['node', '-e', 'process.exit(0)'],
+   required: true,
+   timeoutMs: 10_000,
+ };
+
+===== packages/api/test/line.test.ts =====
+diff --git a/packages/api/test/line.test.ts b/packages/api/test/line.test.ts
+index 0744a6d..9ab0a9f 100644
+--- a/packages/api/test/line.test.ts
++++ b/packages/api/test/line.test.ts
+@@ -1,10 +1,10 @@
+ /**
+  * The line end to end over the stubs: the hello fixture through stations 1-8.
+  * Each test copies the fixture to a fresh temporary directory, which is the
+  * Workspace. The invariant assertions themselves are the registry's; what is
+  * here is the rest of the behaviour, read by field.
+  */
+-import { stat, writeFile } from 'node:fs/promises';
++import { mkdir, stat, writeFile } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
+ import type { IntegrityViolation } from '@olympus-ai/integrity';
+@@ -48,6 +48,9 @@ async function read<T>(vault: Vault, ref: Parameters<Vault['read']>[0]): Promise
+   return JSON.parse(new TextDecoder().decode(await vault.read(ref))) as T;
+ }
+ 
++/** A unit check: no command, since its runner is the base framework's (D-R15-04). */
++const UNIT_CHECK = { id: 'unit', kind: 'unit', required: true, timeoutMs: 10_000 } as const;
++
+ function refusedState(outcome: RunOutcome): RunState {
+   if (outcome.ok || outcome.reason !== 'refused' || outcome.state === null) throw new Error(`expected a refusal on the line, got ${JSON.stringify(outcome)}`);
+   return outcome.state;
+@@ -243,79 +246,81 @@ describe('hello at L1', () => {
+ describe('the verdict follows the checks and nothing else (I2)', () => {
+   test('a failing check fails the gate whatever the driver claimed; the task is rebuilt, then parks after maxIterations', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
+     const driver = new ChosenDriver({ narrative: 'all tests pass' });
+     const outcome = await startRun(runRequest(runId, workspace, { ...components, driver, reviewer: driver }));
+     expect(outcome).toMatchObject({
+       ok: false,
+       reason: 'refused',
+       at: 'verify',
+       transition: { ok: false, reason: 'parked', task: hello, cause: 'iterations-exhausted', limit: 3 },
+     });
+     const state = refusedState(outcome);
+     expect(driver.requests).toHaveLength(3);
+     expect(state.tasks[hello]).toBe('parked');
+     expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3 });
+     expect(state.evidenceRefs).toHaveLength(3);
+     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
+     for (const ref of state.evidenceRefs) {
+       const bundle = await read<EvidenceBundle>(components.vault, ref);
+       expect(bundle.checks[0]?.exitCode).toBe(3);
+       expect(bundle.claim.narrative).toBe('all tests pass');
+     }
+   });
+ 
+   test('a required check with an expected suite count fails while the count is unknown (I5)', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, expectedSuiteCount: 1 }]);
+     const outcome = await startRun(runRequest(runId, workspace, components));
+     expect(outcome).toMatchObject({ transition: { reason: 'parked', cause: 'iterations-exhausted' } });
+   });
+ 
+   test('a required check that cannot be started has no result and fails the gate', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: ['no-such-program-p4', '--version'] }]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('parked');
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) return;
+     expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written']);
+   });
+ 
+   test('a failing check that is not required does not fail the gate', async () => {
+     await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: ['node', '-e', 'process.exit(1)'], required: false }]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('passed');
+   });
+ 
+-  // codex-4: a unit or acceptance check is a suite run by its kind, so a tree whose suites
+-  // cannot be enumerated has not shown one ran, whether or not the manifest pinned a count.
+-  test('a unit check over a tree whose suites cannot be enumerated fails the gate, with no count pinned (I5)', async () => {
+-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
+-    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+-    expect(state.tasks[hello]).toBe('parked');
++  // codex-4, D-R15-04: a unit or acceptance check is a suite run by its kind, and its runner is the
++  // base framework's; a base with none has no runner, so the check is refused before anything runs.
++  test('a unit check over a base with no test framework is refused at admission, with no count pinned (I5)', async () => {
++    await writeChecks(workspace, [UNIT_CHECK]);
++    const outcome = await startRun(runRequest(runId, workspace, components));
++    expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'manifest.checks[0]', code: 'unbound' }] });
+   });
+ 
+-  test('a unit check over a tree whose suites are enumerated passes, and records the count', async () => {
++  test('a unit check runs the base framework\'s installed runner over every suite, passes, and records the count', async () => {
+     await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'p6', devDependencies: { vitest: '4.1.11' } }));
+     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
+-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
++    await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
++    await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
++    await writeChecks(workspace, [UNIT_CHECK]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('passed');
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) return;
+     expect((await read<EvidenceBundle>(components.vault, ref)).checks[0]?.suiteCount).toBe(1);
+   });
+ 
+   // D-P7-05: a check over a read-only tree has nowhere to write a report the host can read.
+   test('a pinned coverage check is refused rather than read as covering nothing, and no evidence is written', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cov', kind: 'coverage' }]);
+     await expect(startRun(runRequest(runId, workspace, components))).rejects.toThrow(/coverage check/);
+   });
+ 
+   test('every bundle carries a tamper report, empty for a task that touched no test', async () => {
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) throw new Error('no evidence written');
+     expect((await read<EvidenceBundle>(components.vault, ref)).tamper).toEqual({
+       assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [],
+     });
+   });
+ });
+@@ -888,3 +893,48 @@ describe('integrate escalates a run whose tests were never analysed (D-A-I1-06)'
+     expect(escalations.tamperFindings).toContain(UNANALYSED_TESTS);
+   });
+ });
++
++/** A builder that writes one file under node_modules, through the sandbox it was given, besides the fixture's work. */
++class DependencyWriter extends DelegatingDriver {
++  constructor(private readonly sandbox: StubSandboxProvider, private readonly path: string, private readonly text: string) {
++    super(new ChosenDriver());
++  }
++
++  override async runTask(req: TaskRequest): Promise<TaskResult> {
++    const script = `const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(${JSON.stringify(this.path)}), { recursive: true }); fs.writeFileSync(${JSON.stringify(this.path)}, ${JSON.stringify(this.text)})`;
++    const wrote = await this.sandbox.exec(req.sandbox, ['node', '-e', script]);
++    if (wrote.exitCode !== 0) throw new Error(`the write failed: ${wrote.stderr}`);
++    return this.inner.runTask(req);
++  }
++}
++
++describe('the change cannot replace its judge (D-R15-05)', () => {
++  // Found in the R15 triage: the diff carried node_modules into the verified tree, and tamper analysis skips it,
++  // so a builder that rewrote the script a check runs turned a failing check green with nothing escalated.
++  test('a check runs the base\'s node_modules: a builder that rewrites the script it runs is recorded, and not carried', async () => {
++    await mkdir(join(workspace, 'node_modules', 'judge'), { recursive: true });
++    await writeFile(join(workspace, 'node_modules', 'judge', 'index.js'), 'process.exit(1)\n');
++    await writeChecks(workspace, [{ id: 'judge', kind: 'behavioral', onBase: 'fails', command: ['node', 'node_modules/judge/index.js'], required: true, timeoutMs: 10_000 }]);
++    const sandbox = new StubSandboxProvider();
++    const driver = new DependencyWriter(sandbox, 'node_modules/judge/index.js', 'process.exit(0)\n');
++    const parts = stubComponents(workspace, { sandbox, driver });
++    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
++    expect(state.tasks[hello]).toBe('parked');
++    const [ref] = state.evidenceRefs;
++    if (ref === undefined) throw new Error('no evidence');
++    const bundle = await read<EvidenceBundle>(parts.vault, ref);
++    expect(bundle.checks.find((c) => c.checkId === 'judge')?.exitCode).toBe(1);
++    expect(bundle.notCarried).toEqual(['node_modules/judge']);
++    expect(bundle.diff.map((e) => e.path)).toEqual(['hello.txt']);
++  });
++
++  test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
++    const sandbox = new StubSandboxProvider();
++    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
++    const parts = stubComponents(workspace, { sandbox, driver });
++    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
++    expect(state.tasks[hello]).toBe('passed');
++    const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
++    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
++  });
++});
+
+===== packages/api/test/runner-agreement.test.ts =====
+/**
+ * The selection rule admission relies on, held to the runner it models
+ * (D-R15-04). Admission refuses an acceptance check whose named tests the
+ * base's vitest would not run exactly, and it decides that from the
+ * adapter's model of vitest's filter rule rather than by starting vitest. So
+ * the model is checked here against vitest itself: the workspace's own
+ * vitest lists the files each filter selects, and the model must name the
+ * same ones. Here rather than in `@olympus-ai/adapters`, where nothing may
+ * start a process (I1.adapters-execute-nothing-on-the-host).
+ */
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import { VitestAdapter } from '@olympus-ai/adapters';
+
+const run = promisify(execFile);
+/** The workspace's own vitest: the major the adapter below models. */
+const WORKSPACE_VITEST = resolve(import.meta.dirname, '../../../node_modules/vitest/vitest.mjs');
+const vitest = new VitestAdapter(4);
+
+let root: string;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'r15-selection-'));
+});
+
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+async function write(files: Readonly<Record<string, string>>): Promise<void> {
+  for (const [path, text] of Object.entries(files)) {
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), text);
+  }
+}
+
+/** What vitest itself lists for the arguments the adapter would start it with. */
+async function listed(named: readonly string[]): Promise<string[]> {
+  const out = await run(process.execPath, [WORKSPACE_VITEST, 'list', '--filesOnly', ...vitest.invocation(named).slice(3)], { cwd: root });
+  return out.stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '').sort();
+}
+
+test('the files vitest lists for each set of named tests are the ones the adapter says it selects', async () => {
+  await write({
+    'package.json': JSON.stringify({ name: 'fixture', devDependencies: { vitest: '^4.1.0' } }),
+    'src/a.test.ts': '',
+    'src/data.test.ts': '',
+    'sub/src/a.test.ts': '',
+    'test/a.test.ts': '',
+    'test/b.spec.ts': '',
+  });
+  for (const named of [['src/a.test.ts'], ['test/a.test.ts'], ['src/data.test.ts', 'test/b.spec.ts'], ['sub/src/a.test.ts']]) {
+    expect(await vitest.selectSuites(root, named)).toEqual(await listed(named));
+  }
+});
+
+test('under test.dir, too', async () => {
+  await write({
+    'package.json': JSON.stringify({ name: 'fixture', devDependencies: { vitest: '^4.1.0' } }),
+    'vitest.config.mjs': "export default { test: { dir: 'pkg' } };\n",
+    'pkg/a.test.ts': '',
+    'pkg/deep/a.test.ts': '',
+    'other/a.test.ts': '',
+  });
+  for (const named of [['pkg/a.test.ts'], ['pkg/deep/a.test.ts']]) {
+    expect(await vitest.selectSuites(root, named)).toEqual(await listed(named));
+  }
+});
+
+===== packages/api/test/verification.test.ts =====
+diff --git a/packages/api/test/verification.test.ts b/packages/api/test/verification.test.ts
+index bd9a8ee..52d3e20 100644
+--- a/packages/api/test/verification.test.ts
++++ b/packages/api/test/verification.test.ts
+@@ -12,11 +12,16 @@ import type { CheckSpec } from '@olympus-ai/integrity';
+ import {
+   claimEvidenceDiff,
+   composeDiff,
+   countSuites,
+   diffDigest,
+   ownDiff,
+-  suiteCountFor,
++  commandOf,
++  requiredSuites,
++  runnerMissing,
++  suiteBindingProblems,
++  suiteRunner,
++  suitesRun,
+   taskResultProblems,
+   treeDigest,
+   writesOutsideGrant,
+ } from '../src/index.js';
+@@ -192,24 +197,83 @@ describe('a write is inside the grant only when both the role and the station gr
+ describe('suites are counted on the host, from files', () => {
+   test('a vitest tree counts its test files, and one fewer when one is deleted', async () => {
+     const root = await tree('suites', {
+       'package.json': JSON.stringify({ name: 'x', devDependencies: { vitest: '4.1.11' } }),
+       'src/a.test.ts': "test('a', () => {})",
+       'src/b.test.ts': "test('b', () => {})",
+     });
+     expect(await countSuites(root)).toBe(2);
+     await rm(join(root, 'src', 'b.test.ts'));
+     expect(await countSuites(root)).toBe(1);
+   });
+ 
+   test('a tree with no test framework has no count, never zero', async () => {
+     expect(await countSuites(await tree('none', { 'readme.md': 'x' }))).toBeNull();
+   });
+ 
+-  test('the count is recorded for a suite check, and for any check that pins one', () => {
+-    const check: CheckSpec = { id: 'c', kind: 'lint', command: ['x'], required: true, timeoutMs: 1 };
+-    expect(suiteCountFor(check, 3)).toBeNull();
+-    expect(suiteCountFor({ ...check, kind: 'unit' }, 3)).toBe(3);
+-    expect(suiteCountFor({ ...check, expectedSuiteCount: 3 }, null)).toBeNull();
++});
++
++describe('a suite check runs the base framework, over what it names (D-R15-04)', () => {
++  const VITEST = JSON.stringify({ name: 'x', devDependencies: { vitest: '4.1.11' } });
++  const RUNNER = 'node_modules/vitest/vitest.mjs';
++  const lint: CheckSpec = { id: 'l', kind: 'lint', command: ['x'], required: true, timeoutMs: 1 };
++  const unit: CheckSpec = { id: 'u', kind: 'unit', required: true, timeoutMs: 1 };
++  const acceptance = (tests: [string, ...string[]]): CheckSpec => ({ id: 'a', kind: 'acceptance', onBase: 'fails', tests, required: true, timeoutMs: 1 });
++
++  test('a pinned command is run as pinned; a suite check runs the runner over its tests, or over every suite', async () => {
++    const runner = await suiteRunner(await tree('vitest', { 'package.json': VITEST }));
++    expect(commandOf(lint, runner)).toEqual(['x']);
++    expect(commandOf(acceptance(['src/a.test.ts']), runner)).toEqual(['node', RUNNER, 'run', './src/a.test.ts']);
++    expect(commandOf(unit, runner)).toEqual(['node', RUNNER, 'run']);
++    expect(() => commandOf(unit, null)).toThrow(/no supported test framework/);
++  });
++
++  test('a suite check whose runner is not installed has not started, so no exit code can stand in for one', async () => {
++    const root = await tree('uninstalled', { 'package.json': VITEST });
++    const runner = await suiteRunner(root);
++    expect(await runnerMissing(unit, runner, root)).toMatch(/not installed at node_modules\/vitest\/vitest\.mjs/);
++    expect(await runnerMissing(lint, runner, root)).toBeUndefined();
++    await tree('uninstalled', { [RUNNER]: '' });
++    expect(await runnerMissing(unit, runner, root)).toBeUndefined();
++  });
++
++  test('the count is what the runner was made to load: the named tests it selects, every suite, or the tree\'s for a pinned count', async () => {
++    const root = await tree('counted', { 'package.json': VITEST, 'src/a.test.ts': '', 'src/b.test.ts': '', 'src/c.ts': '' });
++    const runner = await suiteRunner(root);
++    expect(await suitesRun(acceptance(['src/a.test.ts']), runner, root)).toBe(1);
++    expect(await suitesRun(acceptance(['src/a.test.ts', 'src/c.ts']), runner, root)).toBe(1);
++    expect(await suitesRun(unit, runner, root)).toBe(2);
++    expect(await suitesRun(lint, runner, root)).toBeNull();
++    expect(await suitesRun({ ...lint, kind: 'behavioral', expectedSuiteCount: 2 }, runner, root)).toBe(2);
++    expect(await suitesRun(unit, null, root)).toBeNull();
++  });
++
++  test('admission binds each suite check to the base, or says why it cannot', async () => {
++    const root = await tree('bound', {
++      'package.json': VITEST,
++      [RUNNER]: '',
++      'src/a.test.ts': '',
++      'other/src/a.test.ts': '',
++      'src/b.test.ts': '',
++      'src/notes.md': '',
++    });
++    const admitted = ['src/a.test.ts', 'other/src/a.test.ts', 'src/b.test.ts', 'src/notes.md'];
++    expect(await suiteBindingProblems([lint, acceptance(['src/b.test.ts']), unit], root, admitted)).toEqual([]);
++    const messages = async (checks: CheckSpec[], tests = admitted): Promise<string> =>
++      (await suiteBindingProblems(checks, root, tests)).map((p) => `${p.code} ${p.message}`).join('\n');
++    expect(await messages([acceptance(['src/a.test.ts'])])).toMatch(/unbound .*would also run other\/src\/a\.test\.ts/);
++    expect(await messages([acceptance(['src/notes.md'])])).toMatch(/unbound .*does not run src\/notes\.md as a suite/);
++    expect(await messages([acceptance(['src/b.test.ts'])], ['src/a.test.ts'])).toMatch(/unbound .*not an admitted acceptance test/);
++    const bare = await tree('bare', { 'readme.md': '' });
++    expect((await suiteBindingProblems([unit], bare, [])).map((p) => p.code)).toEqual(['unbound']);
++    const uninstalled = await tree('uninstalled-base', { 'package.json': VITEST, 'src/a.test.ts': '' });
++    expect((await suiteBindingProblems([acceptance(['src/a.test.ts'])], uninstalled, ['src/a.test.ts'])).map((p) => p.message).join()).toMatch(/not installed/);
++    expect(await suiteBindingProblems([lint], bare, [])).toEqual([]);
++  });
++
++  test('a suite check requires every test it names; any other check, the count it pins', () => {
++    expect(requiredSuites(acceptance(['a.test.ts', 'b.test.ts']))).toBe(2);
++    expect(requiredSuites(unit)).toBeUndefined();
++    expect(requiredSuites({ id: 'u', kind: 'unit', required: true, timeoutMs: 1, expectedSuiteCount: 4 })).toBe(4);
+   });
+ });
+ 
+
+===== packages/conformance/src/registry/base-run.ts =====
+diff --git a/packages/conformance/src/registry/base-run.ts b/packages/conformance/src/registry/base-run.ts
+index ffab145..9ffb831 100644
+--- a/packages/conformance/src/registry/base-run.ts
++++ b/packages/conformance/src/registry/base-run.ts
+@@ -1,29 +1,51 @@
+ /**
+  * R15: every check that declares what it does on the base runs over it at
+  * the `test-design` exit, before any driver is invoked, and the exit is
+  * refused unless each does there what the locked manifest declares
+  * (D-A-BF-01, D-R15-01, D-R15-02).
+  *
+  * The hello fixture's `hello-written` check is a behavioral check declared
+  * `'fails'`: the base has no `hello.txt`, and the rig's builder writes one
+  * (`doingTheWork`). The assertions here make it an acceptance check, the
+- * kind that must declare, over a workspace given a suite (`withSuite`).
++ * kind that must declare, over a workspace given a suite and a runner
++ * (`withSuite`), and admit its test file as a locked acceptance test.
+  */
+-import { writeFile } from 'node:fs/promises';
++import { mkdir, writeFile } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import type { EnforcementDecision, Vault, BaseRunRecord, EvidenceBundle } from '@olympus-ai/vault';
+ import type { SandboxProvider } from '@olympus-ai/sandbox';
++import type { Driver, TaskRequest, TaskResult } from '@olympus-ai/core';
+ import { runtime } from '../kit/assert.js';
+ import type { LocalAssertion } from '../kit/types.js';
+-import { readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
++import { ARTIFACTS, HELLO_TASK, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+ 
+ const COMPILES = { id: 'hello-exit-zero', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+-/** Builds the name rather than spelling it, which would make the file a protected path (D-R15-03). */
+-const READS_HELLO = "process.exit(require('node:fs').existsSync(['hello', 'txt'].join('.')) ? 0 : 1)";
+-/** The fixture's reproduction as an acceptance check: absent on the base, written by the build. */
+-const REPRODUCES = { id: 'hello-written', kind: 'acceptance', onBase: 'fails', command: ['node', '-e', READS_HELLO], required: true, timeoutMs: 10_000 };
++/** The locked acceptance test: it throws until `hello.txt` exists. It builds the name rather than spelling it (D-R15-03). */
++const HELLO_TEST = 'hello.test.mjs';
++/** A locked acceptance test that passes whatever the tree holds, and one that never does. */
++const PASSING_TEST = 'passes.test.mjs';
++const FAILING_TEST = 'fails.test.mjs';
++/** The fixture's reproduction as an acceptance check: it runs the locked test, which fails on the base and passes once the build writes the file. */
++export const REPRODUCES = { id: 'hello-written', kind: 'acceptance', onBase: 'fails', tests: [HELLO_TEST], required: true, timeoutMs: 10_000 };
++
++/**
++ * A stand-in for vitest at the path the adapter starts it from, as the base
++ * installed it: it imports each test file it is given after `run` and exits 1
++ * if any throws, or if it was given none. The stub sandbox runs it on the
++ * host, so the runner the line starts is this file, from the base.
++ */
++const RUNNER = [
++  "import { pathToFileURL } from 'node:url';",
++  "const files = process.argv.slice(process.argv.indexOf('run') + 1);",
++  'if (files.length === 0) process.exit(1);',
++  'for (const file of files) {',
++  '  try { await import(pathToFileURL(file).href); } catch { process.exit(1); }',
++  '}',
++  'process.exit(0);',
++  '',
++].join('\n');
+ 
+ /** A provider that counts what it provisions, so an assertion can see whether a check ran again. */
+ async function counting(): Promise<{ provider: SandboxProvider; provisioned: () => number }> {
+@@ -47,29 +69,38 @@ async function counting(): Promise<{ provider: SandboxProvider; provisioned: ()
+ async function decisionsOf(vault: Vault, rig: LineRig): Promise<EnforcementDecision[]> {
+   return Promise.all((await vault.readDecisions(rig.runId)).map((ref) => readRecord<EnforcementDecision>(vault, ref)));
+ }
+ 
+ /**
+  * The fixture declares no test framework, so its reproduction is behavioral
+- * (D-R15-02). An acceptance check is a suite check and needs suites the
+- * adapters can count, so an assertion about one gives the workspace a vitest
+- * manifest and one test file.
++ * (D-R15-02). An acceptance check is a suite check: it runs the base's
++ * installed framework over locked tests the framework enumerates, so an
++ * assertion about one gives the workspace a vitest manifest, the runner, and
++ * the test files, and admits the tests as acceptance tests (D-R15-04).
+  */
+-async function withSuite(rig: LineRig): Promise<void> {
+-  await writeFile(join(rig.dirs.artifacts, 'package.json'), JSON.stringify({ name: 'hello', private: true, devDependencies: { vitest: '4.1.11' } }));
+-  await writeFile(join(rig.dirs.artifacts, 'hello.test.mjs'), "import { test } from 'vitest';\ntest('hello', () => {});\n");
++export async function withSuite(rig: LineRig): Promise<void> {
++  const root = rig.dirs.artifacts;
++  await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'hello', private: true, devDependencies: { vitest: '4.1.11' } }));
++  await mkdir(join(root, 'node_modules', 'vitest'), { recursive: true });
++  await writeFile(join(root, 'node_modules', 'vitest', 'vitest.mjs'), RUNNER);
++  await writeFile(join(root, HELLO_TEST), "import { existsSync } from 'node:fs';\nif (!existsSync(['hello', 'txt'].join('.'))) throw new Error('hello.txt is not written');\n");
++  await writeFile(join(root, PASSING_TEST), '');
++  await writeFile(join(root, FAILING_TEST), "throw new Error('fails on every tree');\n");
+ }
+ 
++/** The rig's artifacts, with every test `withSuite` writes admitted as an acceptance test. */
++export const SUITE_ARTIFACTS = { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, HELLO_TEST, PASSING_TEST, FAILING_TEST] };
++
+ /** Runs the fixture with `checks` as its manifest and returns the refusal, the driver's requests, and the components. */
+-async function refusedAtTestDesign(rig: LineRig, checks: readonly unknown[], context: string) {
++async function refusedAtTestDesign(rig: LineRig, checks: readonly unknown[], context: string, sandbox?: SandboxProvider) {
+   const { startRun } = await api();
+   await withSuite(rig);
+   await writeManifest(rig.dirs, checks);
+   const driver = await stubDriver();
+-  const components = await rig.components({ driver, reviewer: driver });
+-  const refusal = refusalOf(await startRun(await rig.request(components)), context);
++  const components = await rig.components({ driver, reviewer: driver, ...(sandbox === undefined ? {} : { sandbox }) });
++  const refusal = refusalOf(await startRun(await rig.request(components, { artifacts: SUITE_ARTIFACTS })), context);
+   if (refusal.at !== 'test-design' || refusal.transition.reason !== 'base-mismatch') {
+     throw new Error(`${context}: the run stopped at ${refusal.at} as '${refusal.transition.reason}', not at the test-design exit as base-mismatch`);
+   }
+   if (driver.requests.length !== 0) throw new Error(`${context}: the driver was invoked ${String(driver.requests.length)} times before the base was judged`);
+   return { refusal: refusal.transition, components };
+ }
+@@ -77,32 +108,32 @@ async function refusedAtTestDesign(rig: LineRig, checks: readonly unknown[], con
+ export const PASSING_ON_THE_BASE_REFUSES: LocalAssertion = runtime({
+   id: 'I3.acceptance-check-must-fail-on-the-base',
+   title:
+     "an acceptance check declared 'fails' that exits 0 over the base refuses the test-design exit as base-mismatch before any driver is invoked, naming the check, its declaration, and its exit code, and the line records the refusal; so does one declared 'passes' that does not, while the fixture's own manifest crosses the exit: a gate the change could not fail proves nothing about the change",
+   run: async () => {
+     await withLine('r15-i3-passes-', async (rig) => {
+-      const vacuous = { ...REPRODUCES, command: ['node', '-e', 'process.exit(0)'] };
++      const vacuous = { ...REPRODUCES, tests: [PASSING_TEST] };
+       const { refusal, components } = await refusedAtTestDesign(rig, [COMPILES, vacuous], 'I3 vacuous');
+       const named = refusal.mismatched.map((m) => `${m.checkId}:${m.declared}:${String(m.exitCode)}:${m.cause}`);
+       if (JSON.stringify(named) !== '["hello-written:fails:0:contrary"]') throw new Error(`I3: the refusal named ${JSON.stringify(named)}`);
+       const recorded = (await decisionsOf(components.vault, rig)).filter(
+         (d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'base-mismatch',
+       );
+       if (recorded.length !== 1 || recorded[0]?.decision.decidedBy !== 'line' || recorded[0].station !== 'test-design' || recorded[0].taskId !== null) {
+         throw new Error(`I3: the base-mismatch refusal was recorded as ${JSON.stringify(recorded)}`);
+       }
+     });
+     await withLine('r15-i3-guard-', async (rig) => {
+-      const guard = { ...REPRODUCES, id: 'guard', onBase: 'passes', command: ['node', '-e', 'process.exit(3)'] };
++      const guard = { ...REPRODUCES, id: 'guard', onBase: 'passes', tests: [FAILING_TEST] };
+       const { refusal } = await refusedAtTestDesign(rig, [COMPILES, REPRODUCES, guard], 'I3 guard');
+       const named = refusal.mismatched.map((m) => `${m.checkId}:${m.declared}:${String(m.exitCode)}:${m.cause}`);
+-      if (JSON.stringify(named) !== '["guard:passes:3:contrary"]') throw new Error(`I3: a guard that failed on the base was refused as ${JSON.stringify(named)}`);
++      if (JSON.stringify(named) !== '["guard:passes:1:contrary"]') throw new Error(`I3: a guard that failed on the base was refused as ${JSON.stringify(named)}`);
+     });
+     await withLine('r15-i3-control-', async (rig) => {
+       const { startRun } = await api();
+       const outcome = await startRun(await rig.request(await rig.components()));
+       if (!outcome.ok && outcome.reason === 'refused' && outcome.at === 'test-design') {
+         throw new Error(`I3: the fixture's own manifest was refused at the test-design exit as '${outcome.transition.reason}'`);
+       }
+     });
+   },
+ });
+@@ -162,25 +193,38 @@ async function refusedAtAdmission(rig: LineRig, checks: readonly unknown[], path
+ export const UNSTARTED_BASE_CHECK_REFUSES: LocalAssertion = runtime({
+   id: 'I5.unstarted-base-check-refuses',
+   title:
+     "an acceptance check that does not start over the base refuses the test-design exit as no-result with no exit code, and is recorded as unstarted with its reason, never as a failure that reproduces the defect; one whose suites count below its expectedSuiteCount refuses as suite-count",
+   run: async () => {
+     await withLine('r15-i5-unstarted-', async (rig) => {
+-      const absent = { ...REPRODUCES, command: ['r15-no-such-program'] };
+-      const { refusal, components } = await refusedAtTestDesign(rig, [COMPILES, absent], 'I5 unstarted');
++      // The runner cannot be started: the provider's exec of it throws, so there is no exit code to record.
++      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
++      const inner = new StubSandboxProvider();
++      const unstartable: SandboxProvider = new Proxy(inner, {
++        get(target, key, receiver) {
++          if (key !== 'exec') return Reflect.get(target, key, receiver) as unknown;
++          return async (...args: Parameters<SandboxProvider['exec']>) => {
++            if (args[1].includes('node_modules/vitest/vitest.mjs')) throw new Error('the runner could not be spawned');
++            return target.exec(...args);
++          };
++        },
++      });
++      const { refusal, components } = await refusedAtTestDesign(rig, [COMPILES, REPRODUCES], 'I5 unstarted', unstartable);
+       const [m] = refusal.mismatched;
+       if (refusal.mismatched.length !== 1 || m.cause !== 'no-result' || m.exitCode !== null) {
+         throw new Error(`I5: a check that did not start was refused as ${JSON.stringify(refusal.mismatched)}`);
+       }
+       const record = await readRecord<BaseRunRecord>(components.vault, refusal.baseRun);
+       if (record.checks.length !== 0 || record.unstarted.length !== 1 || record.unstarted[0]?.checkId !== 'hello-written' || record.unstarted[0].reason === '') {
+         throw new Error(`I5: the base record holds ${JSON.stringify(record)}; a check that did not start is unstarted, with its reason`);
+       }
+     });
+     await withLine('r15-i5-shrunk-', async (rig) => {
+-      const { refusal } = await refusedAtTestDesign(rig, [COMPILES, { ...REPRODUCES, expectedSuiteCount: 5 }], 'I5 suite count');
++      // A behavioral check that pins a count is held to it over the base, as at verify: the tree holds three suites.
++      const pinned = { id: 'scenario', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', 'process.exit(1)'], expectedSuiteCount: 5, required: true, timeoutMs: 10_000 };
++      const { refusal } = await refusedAtTestDesign(rig, [COMPILES, REPRODUCES, pinned], 'I5 suite count');
+       if (refusal.mismatched.length !== 1 || refusal.mismatched[0].cause !== 'suite-count') {
+         throw new Error(`I5: a base whose suites count below what was expected was refused as ${JSON.stringify(refusal.mismatched)}`);
+       }
+     });
+   },
+ });
+@@ -218,22 +262,22 @@ export const BASE_RESULTS_ARE_THE_RUNTIMES: LocalAssertion = runtime({
+ export const RESUME_READS_THE_BASE_RECORD: LocalAssertion = runtime({
+   id: 'I2.resume-reads-the-base-record',
+   title:
+     'a resume of a run refused at the test-design exit reads the base record and is refused again as base-mismatch without running any check over the base again',
+   run: async () => {
+     await withLine('r15-i2-resume-', async (rig) => {
+       const { resumeRun } = await api();
+-      const vacuous = { ...REPRODUCES, command: ['node', '-e', 'process.exit(0)'] };
++      const vacuous = { ...REPRODUCES, tests: [PASSING_TEST] };
+       const { refusal } = await refusedAtTestDesign(rig, [COMPILES, vacuous], 'I2 first drive');
+       const { provider, provisioned } = await counting();
+       const driver = await stubDriver();
+       const again = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components({ sandbox: provider, driver, reviewer: driver }) }), 'I2 resume');
+       if (again.at !== 'test-design' || again.transition.reason !== 'base-mismatch') {
+         throw new Error(`I2: the resumed run stopped at ${again.at} as '${again.transition.reason}'`);
+       }
+       if (JSON.stringify(again.transition.baseRun) !== JSON.stringify(refusal.baseRun)) throw new Error('I2: the resume judged a base record other than the first');
+       if (provisioned() !== 0 || driver.requests.length !== 0) {
+         throw new Error(`I2: the resume provisioned ${String(provisioned())} sandboxes and invoked the driver ${String(driver.requests.length)} times`);
+       }
+     });
+   },
+ });
+@@ -246,3 +290,167 @@ async function expectRefused(write: Promise<unknown>, what: string): Promise<voi
+   }
+   throw new Error(`I2: ${what} was stored`);
+ }
++
++const VITEST_RUNNER = 'node_modules/vitest/vitest.mjs';
++
++/** A provider that records every argument vector it runs, so an assertion can see what the line started. */
++async function recording(): Promise<{ provider: SandboxProvider; ran: () => ReadonlyArray<readonly string[]> }> {
++  const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
++  const inner = new StubSandboxProvider();
++  const ran: Array<readonly string[]> = [];
++  const provider = new Proxy(inner, {
++    get(target, key, receiver) {
++      if (key !== 'exec') return Reflect.get(target, key, receiver) as unknown;
++      return async (...args: Parameters<SandboxProvider['exec']>) => {
++        ran.push([...args[1]]);
++        return target.exec(...args);
++      };
++    },
++  });
++  return { provider, ran: () => ran };
++}
++
++/** Admission over a workspace `setup` prepared, with the suite's tests admitted: refused, naming `path` and `code`, with no sandbox provisioned. */
++async function refusedAtBinding(rig: LineRig, checks: readonly unknown[], path: string, code: string, setup: (rig: LineRig) => Promise<void>): Promise<void> {
++  const { startRun } = await api();
++  await setup(rig);
++  await writeManifest(rig.dirs, checks, { asWritten: true });
++  const { provider, provisioned } = await counting();
++  const outcome = await startRun(await rig.request(await rig.components({ sandbox: provider }), { artifacts: SUITE_ARTIFACTS }));
++  if (outcome.ok || outcome.reason !== 'invalid-request') {
++    throw new Error(`D-R15-04: ${JSON.stringify(checks)} was ${outcome.ok ? 'admitted and finished' : `refused as '${outcome.reason}'`}, not refused at admission`);
++  }
++  if (!outcome.problems.some((p) => p.path === path && p.code === code)) {
++    throw new Error(`D-R15-04: admission named ${JSON.stringify(outcome.problems.map((p) => `${p.path}:${p.code}`))}, not ${path}:${code}`);
++  }
++  if (provisioned() !== 0) throw new Error(`D-R15-04: a refused admission provisioned ${String(provisioned())} sandboxes`);
++}
++
++export const SUITE_CHECK_RUNS_WHAT_IT_NAMES: LocalAssertion = runtime({
++  id: 'I5.suite-check-runs-what-it-names',
++  title:
++    "a unit or acceptance check pins no command: the line starts the base's installed test framework over exactly the locked tests an acceptance check names, over the base and at verify, and records as its suite count the named tests that runner selects; admission refuses a suite check that pins a command, a named test that is not an admitted acceptance test or that the framework does not run as a suite, a set the framework's own selection rule would widen, and a suite check over a base with no test framework, so a count of the tree's test files never stands in for tests nothing ran (D-R15-04)",
++  run: async () => {
++    await withLine('r15-i5-bound-', async (rig) => {
++      const { startRun } = await api();
++      await withSuite(rig);
++      await writeManifest(rig.dirs, [COMPILES, REPRODUCES]);
++      const { provider, ran } = await recording();
++      const components = await rig.components({ sandbox: provider });
++      await startRun(await rig.request(components, { artifacts: SUITE_ARTIFACTS }));
++      const started = ran().filter((argv) => argv.includes(VITEST_RUNNER)).map((argv) => argv.join(' '));
++      const expected = `node ${VITEST_RUNNER} run ./${HELLO_TEST}`;
++      if (started.length !== 2 || started.some((argv) => argv !== expected)) {
++        throw new Error(`D-R15-04: the line started ${JSON.stringify(started)}; once over the base and once at verify, each exactly ${expected}`);
++      }
++      const vault = components.vault;
++      const ref = await vault.readBaseRun(rig.runId);
++      if (ref === null) throw new Error('D-R15-04: no base record');
++      const before = (await readRecord<BaseRunRecord>(vault, ref)).checks.find((c) => c.checkId === REPRODUCES.id);
++      const state = await vault.readRunState(rig.runId);
++      const bundles = await Promise.all(state.evidenceRefs.map((r) => readRecord<EvidenceBundle>(vault, r)));
++      const after = bundles.at(-1)?.checks.find((c) => c.checkId === REPRODUCES.id);
++      if (before?.exitCode !== 1 || before.suiteCount !== 1 || after?.exitCode !== 0 || after.suiteCount !== 1) {
++        throw new Error(`D-R15-04: the reproduction was recorded as ${JSON.stringify(before)} over the base and ${JSON.stringify(after)} at verify`);
++      }
++    });
++    // The external review's construction (R15 codex-1): a probe that reads a file the build writes, given a suite count the
++    // tree's test files would have met although the probe loads none of them.
++    const probe = { ...REPRODUCES, tests: undefined, command: ['node', '-e', "process.exit(require('node:fs').existsSync(['hello', 'txt'].join('.')) ? 0 : 1)"], expectedSuiteCount: 1 };
++    const cases: ReadonlyArray<{ checks: unknown[]; path: string; code: string; setup?: (rig: LineRig) => Promise<void> }> = [
++      { checks: [COMPILES, probe], path: 'manifest.checks[1].command', code: 'not-applicable' },
++      { checks: [COMPILES, REPRODUCES, { id: 'unit', kind: 'unit', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 }], path: 'manifest.checks[2].command', code: 'not-applicable' },
++      {
++        checks: [COMPILES, { ...REPRODUCES, tests: ['unlocked.test.mjs'] }],
++        path: 'manifest.checks[1].tests[0]',
++        code: 'unbound',
++        setup: async (rig) => {
++          await withSuite(rig);
++          await writeFile(join(rig.dirs.artifacts, 'unlocked.test.mjs'), '');
++        },
++      },
++      { checks: [COMPILES, { ...REPRODUCES, tests: ['acceptance.md'] }], path: 'manifest.checks[1].tests', code: 'unbound' },
++      {
++        checks: [COMPILES, REPRODUCES],
++        path: 'manifest.checks[1].tests',
++        code: 'unbound',
++        setup: async (rig) => {
++          await withSuite(rig);
++          // `./hello.test.mjs` is a filter to vitest, and this path contains it.
++          await mkdir(join(rig.dirs.artifacts, 'deep'), { recursive: true });
++          await writeFile(join(rig.dirs.artifacts, 'deep', HELLO_TEST), '');
++        },
++      },
++      {
++        checks: [COMPILES, REPRODUCES, { id: 'unit', kind: 'unit', required: true, timeoutMs: 10_000 }],
++        path: 'manifest.checks[2]',
++        code: 'unbound',
++        // The tests, and no framework to run them.
++        setup: async (rig) => {
++          for (const test of [HELLO_TEST, PASSING_TEST, FAILING_TEST]) await writeFile(join(rig.dirs.artifacts, test), '');
++        },
++      },
++    ];
++    for (const [i, c] of cases.entries()) {
++      await withLine(`r15-i5-unbound-${String(i)}-`, async (rig) => {
++        await refusedAtBinding(rig, c.checks, c.path, c.code, c.setup ?? withSuite);
++      });
++    }
++  },
++});
++
++/** The rig's stub builder, made to write one file under node_modules besides whatever the rig has it do. */
++async function writingDependency(path: string, text: string, sandbox: SandboxProvider): Promise<Driver> {
++  const driver = await stubDriver();
++  return new Proxy(driver, {
++    get(target, key, receiver) {
++      if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
++      return async (req: TaskRequest): Promise<TaskResult> => {
++        if ((req.role as string) === 'builder') {
++          const script = `const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(${JSON.stringify(path)}), { recursive: true }); fs.writeFileSync(${JSON.stringify(path)}, ${JSON.stringify(text)})`;
++          const wrote = await sandbox.exec(req.sandbox, ['node', '-e', script]);
++          if (wrote.exitCode !== 0) throw new Error(`the write under node_modules did not land: ${wrote.stderr}`);
++        }
++        return target.runTask(req);
++      };
++    },
++  });
++}
++
++export const DEPENDENCY_TREES_ARE_THE_BASES: LocalAssertion = runtime({
++  id: 'I3.dependency-trees-are-the-bases',
++  title:
++    "every check runs over the base's dependency trees, so the change cannot replace the runner that judges it: what a task writes under node_modules is never carried into the tree the checks run over, is recorded in its evidence by package, and escalates the integrate exit; a builder that rewrites the test runner an acceptance check starts, and does nothing else, is judged by the base's runner and parks (D-R15-05)",
++  run: async () => {
++    await withLine('r15-i3-judge-', async (rig) => {
++      const { startRun } = await api();
++      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
++      await withSuite(rig);
++      await writeManifest(rig.dirs, [COMPILES, REPRODUCES]);
++      const sandbox = new StubSandboxProvider();
++      const driver = await writingDependency(VITEST_RUNNER, 'process.exit(0)\n', sandbox);
++      const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
++      const refusal = refusalOf(await startRun(await rig.request(components, { artifacts: SUITE_ARTIFACTS })), 'I3 judge');
++      const state = refusal.state;
++      if (state?.tasks[HELLO_TASK] !== 'parked') throw new Error(`I3: a builder that only rewrote the runner left the task ${String(state?.tasks[HELLO_TASK])}, not parked`);
++      const bundles = await Promise.all(state.evidenceRefs.map((r) => readRecord<EvidenceBundle>(components.vault, r)));
++      const bundle = bundles.at(-1);
++      const judged = bundle?.checks.find((c) => c.checkId === REPRODUCES.id);
++      if (judged?.exitCode !== 1 || JSON.stringify(bundle?.notCarried) !== '["node_modules/vitest"]' || bundle?.diff.length !== 0) {
++        throw new Error(`I3: the rewritten runner's evidence was ${JSON.stringify({ judged, notCarried: bundle?.notCarried, diff: bundle?.diff })}`);
++      }
++    });
++    await withLine('r15-i3-cache-', async (rig) => {
++      const { startRun } = await api();
++      const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
++      const sandbox = new StubSandboxProvider();
++      const driver = await writingDependency('node_modules/.vite/vitest/results.json', '{}', sandbox);
++      const components = await rig.components({ sandbox, driver });
++      const refusal = refusalOf(await startRun(await rig.request(components)), 'I3 cache');
++      const escalations = refusal.transition.reason === 'approval-required' ? refusal.transition.escalations : [];
++      if (refusal.at !== 'integrate' || !escalations.some((e) => e.endsWith(': node_modules/.vite'))) {
++        throw new Error(`I3: a passing task's write under node_modules stopped the run at ${refusal.at} escalated by ${JSON.stringify(escalations)}`);
++      }
++    });
++  },
++});
+
+===== packages/conformance/src/registry/decisions.ts =====
+diff --git a/packages/conformance/src/registry/decisions.ts b/packages/conformance/src/registry/decisions.ts
+index 925b8a8..57fe7cd 100644
+--- a/packages/conformance/src/registry/decisions.ts
++++ b/packages/conformance/src/registry/decisions.ts
+@@ -249,48 +249,48 @@ async function claimMismatchScenario(): Promise<void> {
+ async function parkScenario(cause: ParkCause): Promise<void> {
+   const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+   const { maxIterations, retry } = STATION_CONTRACTS.build;
+   await withLine(`p14-park-${cause}-`, async (rig) => {
+     const { startRun, resumeRun } = await api();
+     let vault: Vault;
+     if (cause === 'iterations-exhausted') {
+-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
++      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+       const driver = await stubDriver();
+       const components = await rig.components({ driver, reviewer: driver });
+       vault = components.vault;
+       refusalOf(await startRun(await rig.request(components)), 'P14 iterations');
+     } else if (cause === 'retries-exhausted') {
+       const components = await rig.components({ driver: await stubDriver({ failing: true }) });
+       vault = components.vault;
+       refusalOf(await startRun(await rig.request(components)), 'P14 retries');
+     } else {
+       // Killed inside every attempt until the invocation bound, then resumed once more (A-P4-06).
+       const driver = await stubDriver();
+       const bound = maxIterations * (retry.max + 1);
+       for (let spent = 0; spent < bound; spent += 1) {
+         const base = await rig.components({ driver, reviewer: driver });
+         const killed = around(base.vault, {
+           beforeCommit: (s) => {
+             if (s.tasks[HELLO_TASK] === 'verifying') throw new Error('killed in flight');
+           },
+         });
+         const components = { ...base, vault: killed };
+         try {
+           await (spent === 0 ? startRun(await rig.request(components)) : resumeRun({ runId: rig.runId, components }));
+         } catch (error) {
+           if ((error as Error).message !== 'killed in flight') throw error;
+         }
+       }
+       const components = await rig.components({ driver, reviewer: driver });
+       vault = components.vault;
+       refusalOf(await resumeRun({ runId: rig.runId, components }), 'P14 starts');
+     }
+     // A gate that fails its last iteration parks the task at verify, where the run then is (D-P14-13).
+     const station = cause === 'iterations-exhausted' ? 'verify' : 'build';
+     const d = await expectDecision(rig, vault, `station:parked:${cause}`, { decidedBy: 'line', taskId: HELLO_TASK, station });
+     if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'parked' || d.decision.refusal.task !== HELLO_TASK) {
+       throw new Error(`P14: a ${cause} park was recorded as ${JSON.stringify(d.decision)}`);
+     }
+   });
+ }
+ 
+ /** An admission refused for `key`, found recorded with nothing else left behind. */
+
+===== packages/conformance/src/registry/i3.ts =====
+diff --git a/packages/conformance/src/registry/i3.ts b/packages/conformance/src/registry/i3.ts
+index 82cd2b1..7605594 100644
+--- a/packages/conformance/src/registry/i3.ts
++++ b/packages/conformance/src/registry/i3.ts
+@@ -14,7 +14,7 @@ import {
+ } from './tamper.js';
+ import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
+ import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
+-import { PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
++import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
+ 
+ /** The entry for `path`, or a failure naming what the manifest holds instead. */
+ function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
+@@ -39,218 +39,219 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
+ /** I3: An agent may not be judged by an artifact it can write. */
+ export const I3: InvariantEntry = {
+   title: INVARIANTS.I3,
+   assertions: [
+     compileError({
+       id: 'I3.context-grants-name-locked-artifacts',
+       title: 'ContextGrant names the locked spec and acceptance tests; there is no grant for a mutable spec',
+       fixture: 'i3/context-grants-name-locked-artifacts.ts',
+     }),
+     compileError({
+       id: 'I3.test-design-context-is-the-locked-spec',
+       title: 'the station contract table grants test-design exactly the locked spec: adding acceptance tests, the plan, or the repository, or granting nothing, does not compile',
+       fixture: 'i3/test-design-context-is-the-locked-spec.ts',
+     }),
+     compileError({
+       id: 'I3.lock-verdict-names-tampered-paths',
+       title: 'a failed LockVerdict must list the tampered paths, and a passing one cannot carry a warning',
+       fixture: 'i3/lock-verdict-names-tampered-paths.ts',
+     }),
+     runtime({
+       id: 'I3.lock-verification-detects-change',
+       title:
+         'a locked artifact whose bytes change verifies as tampered, naming the path with the hash the manifest holds and the hash on disk; a deleted one is reported the same way rather than throwing; an untouched one verifies clean',
+       run: async () => {
+         await withVault('p1-i3-change-', async (vault, dirs) => {
+           const runId = 'i3-change' as RunId;
+           const spec = join(dirs.artifacts, 'spec.md');
+           await writeFile(spec, '# hello\n\nThe capability, as locked.\n');
+ 
+           const manifest = await vault.lock(runId, ['spec.md'], 'spec');
+           const locked = entryFor(manifest.entries, 'spec.md');
+ 
+           const intact = await vault.verifyLocks(runId);
+           if (!intact.ok) {
+             throw new Error(`I3: an untouched locked artifact verified as tampered (${JSON.stringify(intact.tampered)})`);
+           }
+ 
+           // The failure this invariant exists for: the artifact an agent is
+           // judged by is edited after it was locked.
+           await writeFile(spec, '# hello\n\nThe capability, quietly widened.\n');
+           const changed = soleTampered(await vault.verifyLocks(runId), 'a rewritten locked artifact');
+           if (changed.path !== 'spec.md') throw new Error(`I3: the tampered record named ${changed.path}, expected spec.md`);
+           if (changed.expected !== locked.sha256) {
+             throw new Error(`I3: the tampered record's expected hash is ${changed.expected}, not the ${locked.sha256} the manifest locked`);
+           }
+           if (changed.actual === changed.expected) {
+             throw new Error('I3: the tampered record reports the same hash for expected and actual, so nothing was re-read from disk');
+           }
+ 
+           // A deleted artifact is a mismatch, not an exception: the line must
+           // record the violation and refuse, exactly as it does for an edit.
+           await rm(spec);
+           const deleted = soleTampered(await vault.verifyLocks(runId), 'a deleted locked artifact');
+           if (deleted.actual === changed.actual) {
+             throw new Error('I3: a deleted locked artifact reports the same actual hash as an edited one; a deletion must be distinguishable');
+           }
+           if (deleted.expected !== locked.sha256) {
+             throw new Error(`I3: the deleted artifact's expected hash is ${deleted.expected}, not the ${locked.sha256} the manifest locked`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I3.lock-preserves-earlier-entries',
+       title:
+         'a later lock preserves every earlier entry, so a spec locked at `spec` is still verified after `test-design` locks the acceptance tests, and a re-lock cannot rebase an already-locked artifact\'s hash',
+       run: async () => {
+         await withVault('p1-i3-preserve-', async (vault, dirs) => {
+           const runId = 'i3-preserve' as RunId;
+           const spec = join(dirs.artifacts, 'spec.md');
+           await writeFile(spec, '# hello\n\nThe capability, as locked.\n');
+           await writeFile(join(dirs.artifacts, 'acceptance.test.ts'), "test('hello', () => { expect(run()).toBe(0); });\n");
+ 
+           const first = await vault.lock(runId, ['spec.md'], 'spec');
+           const lockedSpec = entryFor(first.entries, 'spec.md');
+ 
+           // The second station locks its own artifact. Replace semantics would
+           // drop the spec here, and I3 requires both locked and re-verified at
+           // every transition.
+           const second = await vault.lock(runId, ['acceptance.test.ts'], 'test-design');
+           const preserved = entryFor(second.entries, 'spec.md');
+           entryFor(second.entries, 'acceptance.test.ts');
+           if (preserved.sha256 !== lockedSpec.sha256) {
+             throw new Error(`I3: the second lock changed the spec's hash from ${lockedSpec.sha256} to ${preserved.sha256}`);
+           }
+           if (preserved.lockedBy !== 'spec') {
+             throw new Error(`I3: the second lock rewrote the spec's station to ${preserved.lockedBy}; the station that locked an artifact is the audit record`);
+           }
+ 
+           // Verification after the second lock must still cover the first's entries.
+           await writeFile(spec, '# hello\n\nThe capability, quietly widened.\n');
+           const tampered = soleTampered(await vault.verifyLocks(runId), 'a spec edited after a later station locked its own artifact');
+           if (tampered.path !== 'spec.md') {
+             throw new Error(`I3: after the second lock, verification named ${tampered.path}; the spec locked at \`spec\` is no longer covered`);
+           }
+ 
+           // Re-locking is how a tamper would launder itself: lock the edited
+           // file again and the manifest agrees with the disk.
+           let rebased = true;
+           try {
+             await vault.lock(runId, ['spec.md'], 'test-design');
+           } catch {
+             rebased = false;
+           }
+           if (rebased) throw new Error('I3: an already-locked artifact was locked again, which rebases its hash onto the edited bytes');
+           const after = soleTampered(await vault.verifyLocks(runId), 'a locked artifact after a refused re-lock');
+           if (after.expected !== lockedSpec.sha256) {
+             throw new Error(`I3: the refused re-lock still moved the manifest's hash to ${after.expected}`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I3.locked-artifact-cannot-be-substituted',
+       title:
+         `a locked artifact replaced by a ${ESCAPE_MECHANISM} to identical bytes outside the artifact root verifies as tampered ` +
+         `rather than being followed and hashed clean (exercised on ${process.platform} via ${ESCAPE_MECHANISM})`,
+       run: async () => {
+         await withVault('p1-i3-escape-', async (vault, dirs, base) => {
+           const runId = 'i3-escape' as RunId;
+           const inside = join(dirs.artifacts, 'sub');
+           const locked = join('sub', 'spec.md');
+           await mkdir(inside, { recursive: true });
+           await writeFile(join(inside, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+ 
+           const manifest = await vault.lock(runId, [locked], 'spec');
+           const entry = entryFor(manifest.entries, locked);
+           const before = await vault.verifyLocks(runId);
+           if (!before.ok) throw new Error(`I3: the artifact verified as tampered before anything was substituted (${JSON.stringify(before.tampered)})`);
+ 
+           // Identical bytes at the far end. Nothing but the escape
+           // distinguishes this from an intact file, which is the whole point:
+           // a check that compares content alone cannot see this.
+           const elsewhere = join(base, 'elsewhere');
+           await mkdir(elsewhere, { recursive: true });
+           await writeFile(join(elsewhere, 'spec.md'), '# hello\n\nThe capability, as locked.\n');
+ 
+           // No try/catch: a platform whose mechanism will not build fails here.
+           if (ESCAPE_MECHANISM === 'junction') {
+             await rm(inside, { recursive: true });
+             await symlink(elsewhere, inside, 'junction');
+           } else {
+             await rm(join(inside, 'spec.md'));
+             await symlink(join(elsewhere, 'spec.md'), join(inside, 'spec.md'));
+           }
+ 
+           // The escape is real before the Vault is asked about it, so the
+           // verdict below cannot pass for the wrong reason.
+           const reached = await realpath(join(dirs.artifacts, locked));
+           const target = await realpath(join(elsewhere, 'spec.md'));
+           if (reached !== target) {
+             throw new Error(`I3: the ${ESCAPE_MECHANISM} did not take effect on ${process.platform}: ${locked} still resolves to ${reached}`);
+           }
+ 
+           const escaped = soleTampered(await vault.verifyLocks(runId), `a locked artifact substituted via a ${ESCAPE_MECHANISM}`);
+           if (escaped.path !== entry.path) throw new Error(`I3: the tampered record named ${escaped.path}, expected ${entry.path}`);
+           if (escaped.expected !== entry.sha256) {
+             throw new Error(`I3: the tampered record's expected hash is ${escaped.expected}, not the ${entry.sha256} the manifest locked`);
+           }
+           if (escaped.actual !== 'escaped') {
+             throw new Error(
+               `I3: a locked artifact that resolves outside the artifact root reported actual '${escaped.actual}'. ` +
+                 "The bytes are identical, so anything but 'escaped' means the link was followed and the substitution was hashed clean.",
+             );
+           }
+         });
+       },
+     }),
+     TRANSITION_REVERIFIES_LOCKS,
+     STATION_LOCKS_THE_ADMITTED_ARTIFACT,
+     LOCKED_PATH_IN_DIFF_IS_TAMPER,
+     // P7: tamper analysis over the trees a task was handed and verified in.
+     CASE_SET_REDUCTION_IS_A_DELETION,
+     TAMPER_FINDING_ESCALATES_INTEGRATE,
+     SKIP_MARKER_IS_A_FINDING,
+     CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK,
+     // I1a: on the composed line, a task that rewrites a locked test fails the run.
+     COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS,
+     // R15: an acceptance check that passes on the base is a gate the change could not fail.
+     PASSING_ON_THE_BASE_REFUSES,
++    DEPENDENCY_TREES_ARE_THE_BASES,
+   ],
+   pending: [
+     pending({
+       id: 'I3.coverage-report-is-not-writable-by-the-suite',
+       owner: 'M3',
+       reason:
+         'Changed-line coverage is read from the istanbul report a check run writes, and that run executes the '
+         + "repository's own code: its tests, and whatever its package scripts do around them. So the artifact the "
+         + 'coverage number is derived from is one the agent being judged can write. P8 closed the half of this that '
+         + 'parsing can close — the report can no longer decide which lines count, only which of them ran, because '
+         + "the denominator is now the union of the report's statements and the executable lines read from the head "
+         + 'tree on the host (external review, codex-2 and gemini-2). The other half cannot be closed by reading the '
+         + 'report more carefully: a hit count claiming a line ran cannot be told apart from one that did, by anyone '
+         + 'who was not there when it ran. Closing it means the run that produces the report: coverage '
+         + 'collected where the suite cannot rewrite it afterwards, or counted from an instrumentation the repository '
+         + 'does not supply, with an assertion that a forged report does not raise the number. Until then a coverage '
+         + 'figure is evidence about a suite that cooperated, not proof against one that did not. Recorded by P8 as '
+         + 'D-P8-14. Owned by M3, beside mutation testing: the suite and the coverage writer share a process, so no '
+         + 'location for the report decides whether its hit counts are true (D-P6-05).',
+     }),
+     pending({
+       id: 'I3.unchanged-assertion-still-judges',
+       owner: 'M3',
+       reason:
+         'Tamper analysis reads the test files that changed and compares what they say. An assertion it reads as '
+         + 'unchanged can stop judging without its file changing, or while the change reads as nothing: a helper, fixture, '
+         + 'custom matcher, setup file, or type the test imports is rewritten to pass everything; the assertion is moved '
+         + 'into a branch that never runs or a function never called; a script the pinned command runs imports a module '
+         + 'that now does nothing. None of those is a test file, and reachability is not decidable by parsing. The '
+         + "policy's protected paths can name the files a repository knows to be load-bearing, and a pinned command's "
+         + 'own script is protected (D-P7-10), but no reading of the diff decides what an unchanged assertion now '
+         + 'executes. Closing it means running the suite against mutants of the code under test and requiring the '
+         + 'suite that passed at the base to kill the ones it killed there, with an assertion that a helper rewritten to '
+         + 'return early, and an assertion made unreachable, each lower the kill rate and escalate. Raised by the P7 '
+         + 'external review (codex-1, gemini-4, gemini-5) and recorded as D-P7-11. Owned by M3, beside mutation testing.',
+     }),
+   ],
+ };
+
+===== packages/conformance/src/registry/i5.ts =====
+diff --git a/packages/conformance/src/registry/i5.ts b/packages/conformance/src/registry/i5.ts
+index 052e31e..992a8a9 100644
+--- a/packages/conformance/src/registry/i5.ts
++++ b/packages/conformance/src/registry/i5.ts
+@@ -23,7 +23,7 @@ import {
+   withSandbox,
+ } from './local-sandbox.js';
+ import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
+-import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
++import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
+ import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
+ import { contendOnCommit, withVaultDirs } from './local-vault.js';
+ import { assertPolicyLoadIsHardened } from './policy-file.js';
+@@ -40,434 +40,435 @@ const CONTENDERS = 8;
+ /** I5: Fail closed. */
+ export const I5: InvariantEntry = {
+   title: INVARIANTS.I5,
+   assertions: [
+     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
+     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
+     INDETERMINATE_PROBE_LOWERS,
+     UNSUPPORTED_STACK_REFUSES,
+     REFUSAL_NAMES_THE_BOUNDING_TERM,
+     INTEGRATE_MERGES_THE_VERIFIED_TREE,
+     FAILED_INTEGRATION_NEVER_REPORTS_DONE,
+     runtime({
+       id: 'I5.policy-document-load-is-hardened',
+       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+       run: assertPolicyLoadIsHardened,
+     }),
+     compileError({
+       id: 'I5.transition-has-no-warn-and-continue',
+       title:
+         'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+       fixture: 'i5/transition-has-no-warn-and-continue.ts',
+     }),
+     compileError({
+       id: 'I5.policy-refusal-is-explicit',
+       title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+       fixture: 'i5/policy-refusal-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I5.station-requires-declared-capabilities',
+       title: 'StationContract.requires accepts only keys of DriverCapabilities',
+       fixture: 'i5/station-requires-declared-capabilities.ts',
+     }),
+     compileError({
+       id: 'I5.adapter-set-declares-absent-controls',
+       title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+       fixture: 'i5/adapter-set-declares-absent-controls.ts',
+     }),
+     compileError({
+       id: 'I5.check-result-declares-suite-count',
+       title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+       fixture: 'i5/check-result-declares-suite-count.ts',
+     }),
+     compileOk({
+       id: 'I5.stubs-declare-unsafe',
+       title:
+         'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+       fixture: 'i5/stubs-declare-unsafe.ts',
+     }),
+     runtime({
+       id: 'I5.unsafe-component-refused-above-l1',
+       title:
+         'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and its missing integrator in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+       run: async () => {
+         await withLine('s1-hello-', async (rig) => {
+           const [api, core, sandbox, vault] = await Promise.all([
+             import('@olympus-ai/api'),
+             import('@olympus-ai/core'),
+             import('@olympus-ai/sandbox'),
+             import('@olympus-ai/vault'),
+           ]);
+           const stub = new core.StubDriver();
+           const stubSandbox = new sandbox.StubSandboxProvider();
+           const builder = doingTheWork(stub, stubSandbox);
+           const components = api.buildGraph({
+             vault: new vault.StubVault(rig.dirs.artifacts),
+             sandbox: stubSandbox,
+             driver: builder,
+             reviewer: builder,
+             workspaces: rig.workspaces,
+           });
+ 
+           for (const level of [2, 3] as const) {
+             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+               const got = outcome.ok ? 'ok' : outcome.reason;
+               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+             }
+             const names = outcome.unsafe.map((u) => u.component);
+             if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+               throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+             }
+             for (const u of outcome.unsafe) {
+               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+             }
+             let recorded = true;
+             try {
+               await components.vault.readRunState(rig.runId);
+             } catch {
+               recorded = false;
+             }
+             if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+           }
+ 
+           const l1 = await api.startRun(await rig.request(components));
+           if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+             const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+             throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.stale-commit-is-refused-under-contention',
+       title:
+         'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+       run: async () => {
+         await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+           const runId = 'i5-contend';
+           const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+ 
+           const winners = outcomes.filter((o) => o.ok);
+           if (winners.length !== 1) {
+             const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+             throw new Error(
+               `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                 'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                 `\n  ${detail.join('\n  ')}`,
+             );
+           }
+           const [winner] = winners;
+           if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+           if (winner.version !== '1') {
+             throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+           }
+           for (const loser of outcomes.filter((o) => !o.ok)) {
+             if (loser.message === '') {
+               throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+             }
+           }
+ 
+           // The record that landed must be one writer's whole state, not a
+           // blend: each child tags its own `tasks`, so the stored state names
+           // exactly one of them.
+           const { LocalVault } = await import('@olympus-ai/vault');
+           const vault = new LocalVault(dirs);
+           const stored = await vault.readRunState(runId as RunId);
+           if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+           const tags = Object.keys(stored.tasks);
+           if (tags.length !== 1 || tags[0] !== winner.tag) {
+             throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+           }
+ 
+           // The same refusal, uncontended: a commit from a version that has
+           // already been superseded stores nothing at all.
+           let stale = true;
+           try {
+             await vault.commitRunState({ ...stored, version: '0' }, '0');
+           } catch {
+             stale = false;
+           }
+           if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+           const after = await vault.readRunState(runId as RunId);
+           if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+             throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.over-request-refused',
+       title:
+         'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         // Three bounds, three different values, so each refusal names the one
+         // that actually bit. `build` is capped below the role ceiling, which is
+         // itself below the global cap.
+         const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+           { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+           { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+         ];
+         for (const { level, station, bound } of overRequests) {
+           const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                 'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                 'agree to, while reporting success.',
+             );
+           }
+           if (outcome.reason !== 'exceeds-cap') {
+             throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+           }
+           if (Object.hasOwn(outcome, 'level')) {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+           }
+           if (outcome.detail === '') {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+           }
+         }
+ 
+         // The global cap, which the fixture document sets to the maximum and
+         // so can never bite on its own. Lowered here, it must refuse a request
+         // the station cap and role ceiling would both have allowed.
+         const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+         const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+         if (global.ok) {
+           throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+         }
+         if (global.reason !== 'exceeds-cap') {
+           throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+         }
+         if (!global.detail.includes('global L0')) {
+           throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+         }
+         if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+           throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+         }
+ 
+         // The control: a request within every bound is granted, and granted at
+         // the level requested rather than raised or lowered to a cap. An engine
+         // that refused everything would satisfy the loop above.
+         for (const level of [0, 1] as const) {
+           const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+           if (!outcome.ok) {
+             throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+           }
+           if (outcome.level !== level) {
+             throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-document-refused-at-resolve',
+       title:
+         'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+ 
+         // Each of these is what a caller produces by writing `value as
+         // PolicyDocument`. Without the guard, the first resolves a global cap
+         // of 99 and grants every level; the rest widen a scope the document
+         // never authorised.
+         const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+           { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+           { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+           { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+           { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+         ];
+         for (const { what, value } of rogues) {
+           let refused = false;
+           try {
+             engine.resolvePolicy(value as never);
+           } catch {
+             refused = true;
+           }
+           if (!refused) {
+             throw new Error(
+               `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                 'only while every caller remembers to validate first is not closed.',
+             );
+           }
+         }
+ 
+         // The control: a genuine document resolves. A guard that threw on
+         // everything would satisfy the loop above and break the engine.
+         const policy = engine.resolvePolicy(document);
+         if (policy.globalCap !== document.globalCap) {
+           throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-autonomy-level-refused',
+       title:
+         'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+       run: async () => {
+         const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         for (const [label, level] of [
+           ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+         ] as const) {
+           let refused = false;
+           try {
+             const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+             if (outcome.ok) {
+               throw new Error(
+                 `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                   'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                   'level nobody can honour.',
+               );
+             }
+           } catch (error) {
+             if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+             refused = true;
+           }
+           if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+         }
+ 
+         // The control: every real level is still answered normally.
+         for (const level of AUTONOMY_LEVELS) {
+           const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+           const allowed = level <= ROLE_CEILING;
+           if (outcome.ok !== allowed) {
+             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.sandbox-egress-allowlist-enforced',
+       title:
+         'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+         'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+         'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+       run: async () => {
+         await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+           // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+           // name, and it is not permission to reach everything; either reading would be the
+           // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+           const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+           if (empty.layer !== 'egress') {
+             throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+           }
+ 
+           // deny-all is untouched by the allowlist existing: no proxy is started beside a
+           // sandbox entitled to no egress, and no network is created for it.
+           await withSandbox(provider, specFor(dirs), async (handle) => {
+             const controls = provider.appliedControls(handle);
+             if (controls.egress.mode !== 'deny-all') {
+               throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+             }
+             // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+             // read here is what Docker was actually told and what the container actually got.
+             if (!controls.runArgs.join(' ').includes('--network none')) {
+               throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+             }
+             const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+             if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+               throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+             }
+           });
+ 
+           const name = originName();
+           const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+           const { egress } = allowlistControls(provider, handle);
+           try {
+             await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+               // The grant. The body proves the origin answered, not the proxy on its behalf.
+               const reached = await provider.exec(handle, [
+                 'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (!reached.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+               }
+ 
+               // Refused by name, and by address. The second is the one that matters: a refusal
+               // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+               for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                 const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                 if (!answer.includes('403') || !answer.includes(host)) {
+                   throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                 }
+               }
+ 
+               // The strongest form: the origin's own address, which the proxy demonstrably
+               // reaches, refused for the one reason under test — the address is not on the list.
+               const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+               if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+               }
+ 
+               // There is nothing to bypass. The internal network carries no default route, so a
+               // process that unsets every proxy variable is left with no second path to take.
+               const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+               if (routes.stdout.includes('default')) {
+                 throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+               }
+               const bypass = await provider.exec(handle, [
+                 'sh', '-c',
+                 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                   `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+               }
+             });
+           } finally {
+             await provider.destroy(handle);
+           }
+ 
+           // The proxy is the sandbox's, and goes with it. One left running is a route off the
+           // host with no workload behind it and nobody watching it.
+           for (const [kind, leaked] of [
+             ['container', egress.proxy.name],
+             ['network', egress.proxy.internalNetwork],
+             ['network', egress.proxy.outboundNetwork],
+           ] as const) {
+             if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+           }
+         });
+       },
+     }),
+     STATION_MISSING_CAPABILITY_REFUSED,
+     TASK_ATTEMPTS_ARE_BOUNDED,
+     OVER_REQUEST_REFUSED_AT_ADMISSION,
+     UNSUPPORTED_STACK_IS_LOUD,
+     // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+     HTTP_PROBE_ABSENT_IS_NAMED,
+     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+     CHECK_COMMAND_HAS_A_GRAMMAR,
+     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+     UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+     external({
+       id: 'I5.unanalysed-tests-are-not-reported-clean',
+       title:
+         'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
+     BASE_DECLARATION_HAS_NO_DEFAULT,
+     NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
+     UNSTARTED_BASE_CHECK_REFUSES,
++    SUITE_CHECK_RUNS_WHAT_IT_NAMES,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/line-assertions.ts =====
+diff --git a/packages/conformance/src/registry/line-assertions.ts b/packages/conformance/src/registry/line-assertions.ts
+index 2696f4c..ae395fd 100644
+--- a/packages/conformance/src/registry/line-assertions.ts
++++ b/packages/conformance/src/registry/line-assertions.ts
+@@ -275,77 +275,77 @@ export const STATION_MISSING_CAPABILITY_REFUSED: LocalAssertion = runtime({
+ export const TASK_ATTEMPTS_ARE_BOUNDED: LocalAssertion = runtime({
+   id: 'I5.task-attempts-are-bounded',
+   title:
+     'a task whose gate keeps failing parks with iterations-exhausted after the build contract\'s maxIterations, and one whose driver keeps failing parks with retries-exhausted after retry.max; both counts are committed run state, and a resume with a working driver refuses the parked run rather than resetting them; a run killed inside an attempt and resumed invokes the driver again, spends a start for it, and parks with starts-exhausted rather than replaying one attempt without bound',
+   run: async () => {
+     const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+     const { maxIterations, retry } = STATION_CONTRACTS.build;
+     await withLine('p4-i5-iter-', async (rig) => {
+       const { startRun } = await api();
+-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
++      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+       const driver = await stubDriver({ narrative: 'all tests pass' });
+       const refusal = refusalOf(await startRun(await rig.request(await rig.components({ driver, reviewer: driver }))), 'I5 iterations');
+       const t = refusal.transition;
+       if (t.reason !== 'parked' || t.cause !== 'iterations-exhausted' || t.limit !== maxIterations || t.task !== HELLO_TASK) {
+         throw new Error(`I5: a gate that always fails ended as ${JSON.stringify(t)}`);
+       }
+       if (driver.requests.length !== maxIterations) throw new Error(`I5: the task was built ${String(driver.requests.length)} times, not ${String(maxIterations)}`);
+       const attempts = (await rig.state()).attempts[HELLO_TASK];
+       if (attempts?.iterations !== maxIterations) throw new Error(`I5: run state records ${JSON.stringify(attempts)} for the parked task`);
+     });
+ 
+     await withLine('p4-i5-retry-', async (rig) => {
+       const { startRun, resumeRun } = await api();
+       const failing = await stubDriver({ failing: true });
+       const refusal = refusalOf(await startRun(await rig.request(await rig.components({ driver: failing }))), 'I5 retries');
+       const t = refusal.transition;
+       if (t.reason !== 'parked' || t.cause !== 'retries-exhausted' || t.limit !== retry.max) {
+         throw new Error(`I5: a driver that always fails ended as ${JSON.stringify(t)}`);
+       }
+       if (failing.requests.length !== retry.max + 1) throw new Error(`I5: the failing driver was called ${String(failing.requests.length)} times`);
+       const before = await rig.state();
+       const resumed = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components() }), 'I5 resume');
+       if (resumed.transition.reason !== 'parked') throw new Error(`I5: a resume with a working driver unparked the task ('${resumed.transition.reason}')`);
+       if (JSON.stringify((await rig.state()).attempts) !== JSON.stringify(before.attempts)) throw new Error('I5: a resume changed the spent attempt counts');
+     });
+ 
+     // The window neither half above can see: a kill *inside* an attempt, after
+     // the task is committed `running` and before its result is recorded. The
+     // resume invokes the driver again; that invocation is spent, and enough of
+     // them park the task rather than replaying one attempt forever (A-P4-06).
+     await withLine('p4-i5-replay-', async (rig) => {
+       const { startRun, resumeRun } = await api();
+       const driver = await stubDriver();
+       const bound = maxIterations * (retry.max + 1);
+       const invocations = (): number => driver.requests.filter((r) => r.taskId === HELLO_TASK).length;
+ 
+       for (let spent = 0; spent < bound; spent += 1) {
+         const base = await rig.components({ driver, reviewer: driver });
+         const killed = around(base.vault, {
+           beforeCommit: (s) => {
+             if (s.tasks[HELLO_TASK] === 'verifying') throw new Error('killed in flight');
+           },
+         });
+         const components = { ...base, vault: killed };
+         let stopped = false;
+         try {
+           await (spent === 0 ? startRun(await rig.request(components)) : resumeRun({ runId: rig.runId, components }));
+         } catch (error) {
+           stopped = (error as Error).message === 'killed in flight';
+           if (!stopped) throw error;
+         }
+         if (!stopped) throw new Error(`I5: replay ${String(spent)} was not killed inside the attempt`);
+         const attempts = (await rig.state()).attempts[HELLO_TASK];
+         if (attempts?.starts !== spent + 1) throw new Error(`I5: after replay ${String(spent)} run state records ${JSON.stringify(attempts)}`);
+         if (attempts.iterations !== 1) throw new Error(`I5: a replay spent an iteration; run state records ${JSON.stringify(attempts)}`);
+         if (invocations() !== spent + 1) throw new Error(`I5: replay ${String(spent)} invoked the driver ${String(invocations())} times in total`);
+       }
+ 
+       const parked = refusalOf(await resumeRun({ runId: rig.runId, components: await rig.components({ driver, reviewer: driver }) }), 'I5 replay bound');
+       const t = parked.transition;
+       if (t.reason !== 'parked' || t.cause !== 'starts-exhausted' || t.limit !== bound) {
+         throw new Error(`I5: replaying past the invocation bound ended as ${JSON.stringify(t)}`);
+       }
+       if (invocations() !== bound) throw new Error(`I5: the parking resume invoked the driver again (${String(invocations())} total)`);
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/tier.ts =====
+diff --git a/packages/conformance/src/registry/tier.ts b/packages/conformance/src/registry/tier.ts
+index 6d06e9d..8e26464 100644
+--- a/packages/conformance/src/registry/tier.ts
++++ b/packages/conformance/src/registry/tier.ts
+@@ -20,7 +20,7 @@ const api = async () => import('@olympus-ai/api');
+ const BUILDER = 'builder' as RoleId;
+ const REVIEWER = 'reviewer' as RoleId;
+ 
+-const ALWAYS_FAILS = [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }];
++const ALWAYS_FAILS = [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }];
+ /** Passes once the task has written `pass.txt`, which the drivers below do on their second build. */
+ const PASSES_ONCE_WRITTEN = [
+   { id: 'passes-once-written', kind: 'compile', command: ['node', '-e', "process.exit(require('node:fs').existsSync('pass.txt') ? 0 : 1)"], required: true, timeoutMs: 10_000 },
+
+===== packages/integrity/src/types.ts =====
+diff --git a/packages/integrity/src/types.ts b/packages/integrity/src/types.ts
+index b65029b..93702eb 100644
+--- a/packages/integrity/src/types.ts
++++ b/packages/integrity/src/types.ts
+@@ -15,27 +15,53 @@ export type BaseDeclaration = 'fails' | 'passes';
+ /**
+  * A check as `test-design` locked it. An acceptance check declares what it
+  * does on the base, with no default; a behavioral check may, since it runs
+  * the product rather than a test runner and so reproduces a defect in a
+  * repository with no test framework. The runtime runs every declared check
+  * over the base before any driver is invoked and refuses the `test-design`
+  * exit if one does otherwise (D-A-BF-01, D-R15-02). No other kind carries a
+  * declaration: one that did nothing would be a claim with no effect.
+  */
+-export type CheckSpec = AcceptanceCheckSpec | BehavioralCheckSpec | OtherCheckSpec;
++export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | BehavioralCheckSpec | OtherCheckSpec;
+ 
+-export interface AcceptanceCheckSpec extends CheckSpecFields {
++/**
++ * A check whose result is a test runner's: `unit` and `acceptance`. It pins
++ * no command. The runtime runs the test framework the base declares, from
++ * the base's own install, over the suites the check names, so a suite count
++ * is a count of what the runner was made to load rather than an inventory
++ * of the tree, and nothing the change writes can stand in for the runner
++ * (D-R15-04).
++ */
++export type SuiteCheckSpec = AcceptanceCheckSpec | UnitCheckSpec;
++
++/**
++ * An acceptance check runs exactly the locked acceptance tests it names, and
++ * its suite count is the number of those the runner was made to load: every
++ * one, or the gate refuses. A pinned `expectedSuiteCount` would restate it.
++ */
++export interface AcceptanceCheckSpec extends SuiteCheckFields {
+   kind: 'acceptance';
+   onBase: BaseDeclaration;
++  /** Tree-relative paths, each an admitted acceptance test the base's framework enumerates as a suite. */
++  tests: readonly [string, ...string[]];
++  expectedSuiteCount?: never;
++}
++
++/** A unit check runs every suite the tree's test framework is configured to run. */
++export interface UnitCheckSpec extends SuiteCheckFields {
++  kind: 'unit';
++  onBase?: never;
++  tests?: never;
++  expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
+ }
+ 
+-export interface BehavioralCheckSpec extends CheckSpecFields {
++export interface BehavioralCheckSpec extends CommandCheckFields {
+   kind: 'behavioral';
+   onBase?: BaseDeclaration;
+ }
+ 
+-export interface OtherCheckSpec extends CheckSpecFields {
+-  kind: Exclude<CheckKind, 'acceptance' | 'behavioral'>;
++export interface OtherCheckSpec extends CommandCheckFields {
++  kind: Exclude<CheckKind, SuiteCheckSpec['kind'] | 'behavioral'>;
+   onBase?: never;
+ }
+ 
+ /** A check that carries a declaration, and so runs over the base. */
+@@ -43,16 +69,25 @@ export type DeclaredCheckSpec = (AcceptanceCheckSpec | BehavioralCheckSpec) & {
+ 
+ interface CheckSpecFields {
+   id: string;
++  required: boolean;
++  timeoutMs: number;
++}
++
++interface SuiteCheckFields extends CheckSpecFields {
++  /** The runtime's, never the manifest's: see `SuiteCheckSpec`. */
++  command?: never;
++}
++
++interface CommandCheckFields extends CheckSpecFields {
+   /**
+    * Pinned at test-design; lives in the Vault. An argument vector, run exactly
+    * as given with no shell: a check that needs one names it, `['sh', '-c', …]`,
+    * so the shell is part of what was pinned rather than something the runtime
+    * added. A string with a grammar the runtime would have to invent is not
+    * representable (A-P6-01).
+    */
+   command: readonly [string, ...string[]];
+-  required: boolean;
+-  timeoutMs: number;
++  tests?: never;
+   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
+ }
+ 
+
+===== packages/vault/src/local/vault.ts =====
+diff --git a/packages/vault/src/local/vault.ts b/packages/vault/src/local/vault.ts
+index d0ad33d..31e6570 100644
+--- a/packages/vault/src/local/vault.ts
++++ b/packages/vault/src/local/vault.ts
+@@ -259,30 +259,42 @@ function isNullableString(r: Record<string, unknown>, key: string): boolean {
+ function decisionProblem(d: unknown): string | undefined {
+   if (!isRecord(d) || !hasString(d, 'runId')) return 'it names no run';
+   if (d.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+   if (!isNullableString(d, 'taskId') || !isNullableString(d, 'station')) return 'its task and station are neither strings nor null';
+   if (!hasString(d, 'decidedAt')) return 'it carries no time';
+   if (!hasString(d, 'occurrence')) return 'it carries no occurrence id, so it could be one entry with a decision alike in every other field';
+   const decision = d.decision;
+   if (!isRecord(decision) || typeof decision.cause !== 'string' || !Object.hasOwn(DECIDERS, decision.cause)) return 'its cause is not a known cause';
+   const deciders = DECIDERS[decision.cause as DecisionCause['cause']];
+   if (typeof decision.decidedBy !== 'string' || !deciders.includes(decision.decidedBy)) {
+     return `a ${decision.cause} decision is not made by ${String(decision.decidedBy)}`;
+   }
+   return undefined;
+ }
+ 
++/**
++ * One result of the base run, whole. The suite count is required, a count or
++ * null: an absent one reads as neither, and the suite-count rule would pass it
++ * (codex-obs). An exit code is an integer: NaN is written as null and read
++ * back as a failure, which a check declared `'fails'` would count as a
++ * reproduction.
++ */
++function isBaseResult(c: unknown): boolean {
++  return isRecord(c) && hasString(c, 'checkId') && Number.isInteger(c.exitCode) &&
++    (c.suiteCount === null || (Number.isInteger(c.suiteCount) && (c.suiteCount as number) >= 0));
++}
++
+ /** D-A-BF-01: the runtime's record of the acceptance checks over the base, whole, or refused. */
+ function baseRunProblem(r: unknown): string | undefined {
+   if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+   if (!hasString(r, 'baseTreeSha256') || !/^[0-9a-f]{64}$/.test(r.baseTreeSha256 as string)) return 'it names no base tree digest';
+-  if (!Array.isArray(r.checks) || !r.checks.every((c) => isRecord(c) && hasString(c, 'checkId') && typeof c.exitCode === 'number')) {
++  if (!Array.isArray(r.checks) || !r.checks.every(isBaseResult)) {
+     return 'its checks are not results';
+   }
+   if (!Array.isArray(r.unstarted) || !r.unstarted.every((u) => isRecord(u) && hasString(u, 'checkId') && hasString(u, 'reason'))) {
+     return 'its unstarted checks do not each say why';
+   }
+   return undefined;
+ }
+ 
+ /** A-I1b-01: the runtime's record of what it did on the remote, whole, or refused. */
+
+===== packages/vault/src/types.ts =====
+diff --git a/packages/vault/src/types.ts b/packages/vault/src/types.ts
+index 210ea2e..fe4f66c 100644
+--- a/packages/vault/src/types.ts
++++ b/packages/vault/src/types.ts
+@@ -70,38 +70,45 @@ export interface BaseRunRecord {
+ export interface EvidenceBundle {
+   runId: RunId;
+   taskId: TaskId;
+   baseCommit: string;                 // evidence is void if the base moves
+   /** The digest of the tree admitted as base. `baseCommit` alone does not name it: a working copy can differ from its commit (A-P6-03). */
+   baseTreeSha256: string;
+   /** The declared checks as they ran over the base before build, so review sees each fail before the change and pass after it. */
+   baseRun: VaultRef;
+   /** What the checks ran over: base, every diff accepted before this task, and this one. */
+   diff: readonly DiffEntry[];
+   diffSha256: string;
+   checks: CheckResult[];
+   /** Every check that produced no result. A required one here has failed the gate. */
+   unstarted: readonly UnstartedCheck[];
+   claim: AgentClaim;                  // stored beside evidence, never merged into it
+   claimEvidenceDiff: string[];        // I2: where the model's story and the facts differ
+   /**
+    * The runtime's reading of this task's diff, over the tree it was handed and
+    * the tree it was verified in. Every finding escalates the `integrate` exit;
+    * none decides the task's status (A-P7-03).
+    */
+   tamper: TamperReport;
++  /**
++   * What the task wrote under `node_modules`, by package directory, none of
++   * it carried into the tree the checks ran over: they ran over the base's
++   * dependency trees, so the change could not replace the runner judging it
++   * (D-R15-05). Every entry escalates the `integrate` exit.
++   */
++  notCarried: readonly string[];
+   collectedBy: 'runtime';             // literal type: no other value is representable
+   driverProvenanceId: string;
+   contractVersion: string;
+ }
+ 
+ /**
+  * What one driver call cost, as the runtime collected it: the reading the
+  * sandbox's relay took after the sandbox stopped (A-P13-03). One per call —
+  * every build attempt, a failed one included, and every review seat — so a
+  * call that spent money and produced nothing still appears.
+  *
+  * I2: never taken from the driver's `TaskResult.usage`, which is the CLI's own
+  * account from inside the sandbox. `collectedBy` is a literal for the reason
+  * `EvidenceBundle`'s is. A call whose sandbox had no relay is `unmetered`, and
+  * a total over it says so rather than counting it as free.
+  */
+
+===== packages/vault/test/local.test.ts =====
+diff --git a/packages/vault/test/local.test.ts b/packages/vault/test/local.test.ts
+index d0366fc..c848e37 100644
+--- a/packages/vault/test/local.test.ts
++++ b/packages/vault/test/local.test.ts
+@@ -46,19 +46,20 @@ afterEach(async () => {
+ function bundle(): EvidenceBundle {
+   return {
+     runId,
+     taskId,
+     baseCommit: 'a'.repeat(40),
+     baseTreeSha256: 'b'.repeat(64),
+     baseRun: { runId, kind: 'base-run', hash: 'b'.repeat(64) },
+     diff: [],
+     diffSha256: 'c'.repeat(64),
+     checks: [],
+     unstarted: [],
+     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
+     claimEvidenceDiff: [],
+   tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
++  notCarried: [],
+     collectedBy: 'runtime',
+     driverProvenanceId: 'local-vault-test@1.0.0',
+     contractVersion: '1.0.0',
+   };
+ }
+@@ -301,33 +302,48 @@ describe('enforcement decisions (A-P14-01)', () => {
+ describe('the base record (D-A-BF-01)', () => {
+   const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
+   const record = {
+     runId,
+     baseTreeSha256: 'c'.repeat(64),
+     checks: [reproduced],
+     unstarted: [],
+     collectedBy: 'runtime' as const,
+   };
+ 
+   test('is absent until written, then read back by the reference it was written under', async () => {
+     expect(await vault.readBaseRun(runId)).toBeNull();
+     const ref = await vault.recordBaseRun(record);
+     expect(await vault.readBaseRun(runId)).toEqual(ref);
+     expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(record);
+   });
+ 
+   test('is written once: a second base for the run is refused and the first stands', async () => {
+     const ref = await vault.recordBaseRun(record);
+     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode: 0 }] })).rejects.toThrow(/already has a base record/);
+     expect(await vault.readBaseRun(runId)).toEqual(ref);
+   });
+ 
+   test('refuses a record the runtime did not collect, and stores nothing', async () => {
+     await expect(vault.recordBaseRun({ ...record, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
+     expect(await vault.readBaseRun(runId)).toBeNull();
+   });
+ 
++  test('refuses a result whose suite count is absent, since the suite-count rule would read it as met (codex-obs), and stores nothing', async () => {
++    const { suiteCount: _omitted, ...uncounted } = reproduced;
++    await expect(vault.recordBaseRun({ ...record, checks: [uncounted] } as never)).rejects.toThrow(/not results/);
++    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: -1 }] })).rejects.toThrow(/not results/);
++    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: 1.5 }] })).rejects.toThrow(/not results/);
++    expect(await vault.readBaseRun(runId)).toBeNull();
++  });
++
++  test('refuses an exit code that is not an integer: NaN is written as null and read back as a failure', async () => {
++    for (const exitCode of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
++      await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode }] })).rejects.toThrow(/not results/);
++    }
++    expect(await vault.readBaseRun(runId)).toBeNull();
++  });
++
+   test('a reference whose hash is not the record\'s reads nothing', async () => {
+     await vault.recordBaseRun(record);
+     await expect(vault.read({ runId, kind: 'base-run', hash: 'd'.repeat(64) })).rejects.toThrow(/hashes to/);
+   });
+ });
+
+===== packages/vault/test/stub.test.ts =====
+diff --git a/packages/vault/test/stub.test.ts b/packages/vault/test/stub.test.ts
+index b66c609..9c37049 100644
+--- a/packages/vault/test/stub.test.ts
++++ b/packages/vault/test/stub.test.ts
+@@ -24,19 +24,20 @@ function sha256(text: string): string {
+ function bundle(): EvidenceBundle {
+   return {
+     runId,
+     taskId,
+     baseCommit: 'abc',
+     baseTreeSha256: 'b'.repeat(64),
+     baseRun: { runId, kind: 'base-run', hash: 'b'.repeat(64) },
+     diff: [],
+     diffSha256: 'c'.repeat(64),
+     checks: [],
+     unstarted: [],
+     claim: { narrative: 'stub', filesChanged: [] },
+     claimEvidenceDiff: [],
+   tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
++  notCarried: [],
+     collectedBy: 'runtime',
+     driverProvenanceId: 'stub-driver@1.0.0',
+     contractVersion: '1.0.0',
+   };
+ }
+
+=== BUNDLE END === 7b87d325a1f3b0b1d319880a7755e912
