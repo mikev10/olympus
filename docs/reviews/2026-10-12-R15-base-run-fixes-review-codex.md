@@ -1,3 +1,57 @@
+# External review of R15's review fixes, codex, 2026-10-12
+
+An adversarial review of the R15 review fixes: suite checks that run the base's
+own test framework over the tests they name (D-R15-04), the `node_modules`
+filter on what a task's diff carries into `verify` (D-R15-05), and the stricter
+base-record reader (D-R15-06). One of two reviews run from the same prompt and
+bundle; the other is `2026-10-12-R15-base-run-fixes-review-gemini.md`. Both are
+triaged in `2026-10-12-R15-base-run-fixes-triage.md`, which cites this review's
+numbered findings as `codex-1` and `codex-2`, and its closing remark on
+`test-design` crash safety as `codex-obs`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 58.5 s. Ingestion `complete`: 64,276
+  input tokens against a floor of 39,430. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `60aa761b132c711cb993f037422366d7fa31a60f5e02a0b0129aab97799aaf9b`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** none. codex-2 and gemini-2 both defeat the
+  `node_modules` carry filter, by different mechanisms (a runner dependency
+  outside `node_modules`; a case-variant directory name). codex-1 and gemini-1
+  both concern a suite count that does not evidence execution, by different
+  mechanisms (a static count beside an unauthenticated runner; extra selected
+  suites dropped from the count). Neither pair is the same defect.
+- **Date:** 2026-10-12 (run started 2026-10-12T22:21Z).
+- **Bundle:** `2026-10-12-R15-base-run-fixes-review-bundle.txt`, SHA-256
+  `31e6c759093ed7fc652f6acafdf4d5f7b134a8f17d09f766334c7ecde01370d5`, base
+  `2dcd5d2` ("R15: triage of the external reviews", untagged), head `94fe9c3`
+  ("R15: name the dependency-install issue (#40)"). The range is two commits.
+  It held 29 of the 32 changed paths in full or as whole-function diffs; the
+  three documentation paths (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`,
+  and the earlier triage) were excluded, and so was every unchanged file.
+  Prompt: `2026-10-12-R15-base-run-fixes-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no lookups, and that its constructions were derived
+  from source, not executed. A self-report; not independently verifiable.
+- **Coverage, and any gap:** items 1 (codex-1, codex-2), 2 (the suite count
+  as tautological within codex-1), 4 and 6 (a "sound within narrower
+  boundaries" list naming no language escape hatch), and 7 (two framing
+  distinctions, and that crash safety through `test-design` cannot be
+  established from the range) were answered. Items 3 and 5 got no finding of
+  their own; item 3 is touched only by the sound-list remark that unstarted
+  checks are recorded as unstarted.
+- **Citations:** line numbers are positions on the new side of the bundle's
+  diffs, not repository lines. Treat them as hints; the triage locates each
+  construct by name.
+
+---
+
 BASE: 2dcd5d2  
 HEAD: 94fe9c3  
 packages/vault/test/stub.test.ts  
