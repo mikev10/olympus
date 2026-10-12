@@ -170,8 +170,7 @@ record them, over refusing the task and over a read-only mount.
   Each failed with the old carry rule restored: the builder that rewrote the
   runner left its task `passed`.
 - **Known limit:** a change that needs a dependency the base lacks fails
-  `verify` until the runtime installs from the lockfile, which is to be filed as an
-  issue.
+  `verify` until the runtime installs from the lockfile, filed as issue #40.
 
 ## gemini-1: the framing
 
