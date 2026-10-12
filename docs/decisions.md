@@ -3832,7 +3832,7 @@ for the role compiler.
 - **Why:** writing the spec and tests by hand is the step most likely to be skipped or done badly. A drafted, recorded, approved artifact is better evidence than a hand-written one nobody recorded.
 - **Why M2:** it needs R15, R17, and the role compiler.
 - **Reverse:** drop the drafting seats; runs keep being admitted with their artifacts.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-12.
 
 ### D-A-DS-02: what a rejected draft carries back
 
@@ -3840,7 +3840,7 @@ for the role compiler.
 - **Chosen:** at `spec`, a person's notes reach the next attempt, in the request's variable suffix and never in the stable prefix or a role. I7 is about event payloads, and the approver is the principal whose approval the gate already trusts. P9 has one principal, a shared local token with no per-user identity, so "the approver" means whoever holds it. At `test-design`, a person's rejection carries only a reason from a fixed set, such as not black-box, not following the spec, or not runnable. A critic's findings reach the next attempt as text, since the critic is granted no more than the drafter. Each station allows three attempts. When they run out on critic findings or base-run refusals, the latest draft goes to a person; when a person rejects the third, the run parks, terminally, recorded in P14's record.
 - **Must hold:** notes come only from the approval call, never from a trigger or a tracker comment.
 - **Reverse:** a rejection carries no text at either station.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-12.
 
 ### D-A-DS-03: the role compiler is recorded as a gap to specify, not a unit yet
 
@@ -3848,7 +3848,7 @@ for the role compiler.
 - **Chosen:** a recorded gap in `DECOMPOSITION.md` naming what its spec must settle: roles in the Vault and edited only as a versioned, approved change, which adds an artifact to F1's table; instructions only, with grants staying in policy; one driver-neutral `CompiledRole` that each driver's `emitArtifacts` renders; the role version's hash recorded per run; and nothing untrusted or judging inside a role. R5's dependency on "M2 role prompts" is renamed to the role compiler.
 - **Why:** R19, R5, and R11 all assume roles with content. A unit started on that assumption would invent the format inside its own scope.
 - **Reverse:** drop the note; the gap is then found by the first unit that needs a role.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-12.
 
 ### D-A-DS-04: policy decides who approves a draft, under the line's floors
 
@@ -3859,7 +3859,7 @@ for the role compiler.
 - **Known limit:** a critic that finds too little lets drafts through at L2. R7's corpus measures its miss rate, and each draft approved without a person is recorded, so later failures are attributable.
 - **Consequence:** with one driver no critic is independent, so every draft goes to a person until a second driver exists. R6 with a local open-weight model is the expected way there.
 - **Reverse:** a person approves every drafted artifact at every level.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-12.
 
 ### D-A-DS-05: a bug report reaches the line as a person's three-part intent, and R19 drafts the rest
 
@@ -3867,7 +3867,7 @@ for the role compiler.
 - **Chosen:** the person who read the report writes a structured intent with three required parts, the steps, what happens, and what should happen, through the human principal's channel. A tracker event contributes only its reference. R19's drafter writes the rest of the spec from that intent and the repository, never seeing the report. This amends D-A-BF-02: its `spec` exit at `human-required` on every level is replaced by D-A-DS-04's floors. Admission refuses a bug-fix intent missing a part.
 - **Must hold:** I7, unchanged: no driver request in a bug-fix run contains report text. Whether a report was workable stays a person's call, made when they write the intent.
 - **Reverse:** D-A-BF-02 as written: a person writes the whole spec, and it is approved by a person at every level.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-12.
 
 ### D-A-DS-06: independence is graded and recorded; only a different family counts
 
