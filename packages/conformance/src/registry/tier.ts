@@ -20,7 +20,7 @@ const api = async () => import('@olympus-ai/api');
 const BUILDER = 'builder' as RoleId;
 const REVIEWER = 'reviewer' as RoleId;
 
-const ALWAYS_FAILS = [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }];
+const ALWAYS_FAILS = [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }];
 /** Passes once the task has written `pass.txt`, which the drivers below do on their second build. */
 const PASSES_ONCE_WRITTEN = [
   { id: 'passes-once-written', kind: 'compile', command: ['node', '-e', "process.exit(require('node:fs').existsSync('pass.txt') ? 0 : 1)"], required: true, timeoutMs: 10_000 },

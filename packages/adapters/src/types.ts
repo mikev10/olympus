@@ -8,6 +8,27 @@ import type { SandboxHandle } from '@olympus-ai/sandbox';
 
 export interface TestFrameworkAdapter {
   readonly stack: string;
+  /**
+   * The runner's entry point, relative to the repository root: the copy the
+   * repository installed of the framework it declares. A suite check runs
+   * this file and no command a manifest pinned (D-R15-04).
+   */
+  readonly runner: string;
+  /**
+   * The argument vector that runs the framework from the repository root:
+   * over every configured suite when `tests` is null, else over exactly the
+   * named files, each tree-relative. Nothing in it comes from the
+   * repository's configuration but the configuration the runner itself reads.
+   */
+  invocation(tests: readonly string[] | null): readonly [string, ...string[]];
+  /**
+   * The suites of `dir`, tree-relative and sorted, that `invocation(tests)`
+   * runs there, by the runner's own selection rule. A caller that named
+   * `tests` compares the two: a rule that selects more than was named runs
+   * suites nobody locked, and one that selects less leaves a named test
+   * unrun.
+   */
+  selectSuites(dir: string, tests: readonly string[]): Promise<string[]>;
   enumerateSuites(dir: string): Promise<string[]>;
   parseAssertions(file: string): Promise<Assertion[]>;
   compareAssertions(before: Assertion[], after: Assertion[]): AssertionDelta;

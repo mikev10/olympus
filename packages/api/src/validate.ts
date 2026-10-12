@@ -15,7 +15,7 @@
 import { isAbsolute, posix, win32 } from 'node:path';
 import { isAutonomyLevel } from '@olympus-ai/core';
 import type { RoleId, RunId, Task, TaskGraph, TaskId } from '@olympus-ai/core';
-import type { CheckSpec } from '@olympus-ai/integrity';
+import type { CheckKind, CheckSpec } from '@olympus-ai/integrity';
 import type { RequestedArtifacts } from './run.js';
 
 export type RequestProblemCode =
@@ -47,6 +47,14 @@ export type RequestProblemCode =
   | 'not-declarable'
   /** No required acceptance or behavioral check is declared `'fails'`, so the run has nothing to show the change did. */
   | 'none-fails-on-base'
+  /** `CheckSpec.kind` is not one of the kinds a check can be. */
+  | 'not-a-kind'
+  /** A field the check's kind does not take: a command on a suite check, tests on any other, a count an acceptance check's tests already fix (D-R15-04). */
+  | 'not-applicable'
+  /** A named test the runner would not read as one file: a `:` vitest takes for a line filter. */
+  | 'not-runnable'
+  /** A named test the base's test framework does not run as one exact suite, or a suite check over a base with no test framework (D-R15-04). */
+  | 'unbound'
   /** `requestedLevel` is not one of 0, 1, 2, 3. */
   | 'not-a-level'
   /** `approvedCostUsd` is neither a finite number nor null. */
@@ -174,11 +182,44 @@ export function parseManifest(value: unknown): { ok: true; checks: CheckSpec[] }
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
-    checks: (checks as CheckSpec[]).map((check) => {
+    checks: (checks as CheckSpec[]).map((check): CheckSpec => {
+      if (check.kind === 'acceptance') {
+        const [first, ...rest] = check.tests;
+        const tests: readonly [string, ...string[]] = [first, ...rest];
+        return { ...check, tests };
+      }
+      if (check.kind === 'unit') return { ...check };
       const [program, ...args] = check.command;
       return { ...check, command: [program, ...args] };
     }),
   };
+}
+
+const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation']);
+
+/**
+ * The files an acceptance check runs: workspace-relative, inside it, each
+ * once, and each a single file to the runner. That each is an admitted
+ * acceptance test the base's framework runs as one suite is admission's,
+ * which reads the base (D-R15-04).
+ */
+function testsProblems(tests: unknown, at: string, report: Report): void {
+  if (!Array.isArray(tests) || tests.length === 0) {
+    report(at, 'missing', `${at} must name at least one locked acceptance test; a check that runs no test shows nothing`);
+    return;
+  }
+  const list: readonly unknown[] = tests;
+  const seen = new Set<string>();
+  list.forEach((test, i) => {
+    const one = `${at}[${String(i)}]`;
+    if (!isNonEmptyString(test)) report(one, 'empty', `${one} must be a non-empty workspace-relative path`);
+    else if (posix.isAbsolute(test) || win32.isAbsolute(test)) report(one, 'absolute', `${one}: '${test}' must be relative to the workspace`);
+    else if (test.split(/[\\/]/).includes('..')) report(one, 'escapes', `${one}: '${test}' contains a '..' segment and could leave the workspace`);
+    else if (test.includes('\\')) report(one, 'not-runnable', `${one}: '${test}' must use '/' separators, as the runner's sandbox does`);
+    else if (test.includes(':')) report(one, 'not-runnable', `${one}: '${test}' contains ':', which vitest reads as a line filter rather than part of a file`);
+    else if (seen.has(test)) report(one, 'duplicate', `${one}: '${test}' is listed twice`);
+    else seen.add(test);
+  });
 }
 
 /**
@@ -202,8 +243,10 @@ function commandProblems(command: unknown, at: string, report: Report): void {
 }
 
 /**
- * The fields the verdict reads: id (unique), command, required (a boolean),
- * expectedSuiteCount (an integer when present), and what each acceptance
+ * The fields the verdict reads: id (unique), kind (a known one), command
+ * (every kind but a suite kind), tests (an acceptance check's), required (a
+ * boolean), expectedSuiteCount (an integer when present, never on an
+ * acceptance check), and what each acceptance
  * check, and any behavioral check that declares one, does on the base
  * (D-A-BF-01, D-R15-02).
  */
@@ -227,12 +270,26 @@ function checkProblems(checks: unknown, report: Report): void {
     else if (seen.has(c.id)) {
       report(`${at}.id`, 'duplicate', `${at}.id '${c.id}' is listed twice; a duplicate id lets one result stand in for another`);
     } else seen.add(c.id);
-    commandProblems(c.command, `${at}.command`, report);
+    if (typeof c.kind !== 'string' || !CHECK_KINDS.has(c.kind)) {
+      report(`${at}.kind`, 'not-a-kind', `${at}.kind must be one of ${[...CHECK_KINDS].join(', ')}`);
+    }
+    // A suite check's result is a test runner's, and the runner is the runtime's to start: a pinned
+    // command could be anything, and the suites counted would then be an inventory of the tree (D-R15-04).
+    const suite = c.kind === 'unit' || c.kind === 'acceptance';
+    if (suite && c.command !== undefined) {
+      report(`${at}.command`, 'not-applicable', `${at} is a ${String(c.kind)} check, which pins no command: the runtime runs the base's test framework itself`);
+    } else if (!suite) commandProblems(c.command, `${at}.command`, report);
+    if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
+    else if (c.tests !== undefined) {
+      report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is not an acceptance check; no other kind runs named tests`);
+    }
     if (typeof c.required !== 'boolean') {
       report(`${at}.required`, 'not-boolean', `${at}.required must be a boolean, not ${typeof c.required}`);
     } else if (c.required) required += 1;
     const count = c.expectedSuiteCount;
-    if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
+    if (c.kind === 'acceptance' && count !== undefined) {
+      report(`${at}.expectedSuiteCount`, 'not-applicable', `${at}.expectedSuiteCount restates its tests: an acceptance check's runner must load every test it names`);
+    } else if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
     }
     // I5: no default. A check that may pass on the base is a guard and says so; silence is not a declaration.

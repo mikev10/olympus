@@ -271,12 +271,24 @@ function decisionProblem(d: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * One result of the base run, whole. The suite count is required, a count or
+ * null: an absent one reads as neither, and the suite-count rule would pass it
+ * (codex-obs). An exit code is an integer: NaN is written as null and read
+ * back as a failure, which a check declared `'fails'` would count as a
+ * reproduction.
+ */
+function isBaseResult(c: unknown): boolean {
+  return isRecord(c) && hasString(c, 'checkId') && Number.isInteger(c.exitCode) &&
+    (c.suiteCount === null || (Number.isInteger(c.suiteCount) && (c.suiteCount as number) >= 0));
+}
+
 /** D-A-BF-01: the runtime's record of the acceptance checks over the base, whole, or refused. */
 function baseRunProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
   if (!hasString(r, 'baseTreeSha256') || !/^[0-9a-f]{64}$/.test(r.baseTreeSha256 as string)) return 'it names no base tree digest';
-  if (!Array.isArray(r.checks) || !r.checks.every((c) => isRecord(c) && hasString(c, 'checkId') && typeof c.exitCode === 'number')) {
+  if (!Array.isArray(r.checks) || !r.checks.every(isBaseResult)) {
     return 'its checks are not results';
   }
   if (!Array.isArray(r.unstarted) || !r.unstarted.every((u) => isRecord(u) && hasString(u, 'checkId') && hasString(u, 'reason'))) {

@@ -253,7 +253,7 @@ async function parkScenario(cause: ParkCause): Promise<void> {
     const { startRun, resumeRun } = await api();
     let vault: Vault;
     if (cause === 'iterations-exhausted') {
-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
       const driver = await stubDriver();
       const components = await rig.components({ driver, reviewer: driver });
       vault = components.vault;

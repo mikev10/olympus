@@ -8,7 +8,7 @@
 import type { BaseMismatch, StationRefusal, VaultRef } from '@olympus-ai/core';
 import type { CheckSpec, DeclaredCheckSpec } from '@olympus-ai/integrity';
 import type { BaseRunRecord } from '@olympus-ai/vault';
-import { SUITE_KINDS } from './gate.js';
+import { requiredSuites, SUITE_KINDS } from './gate.js';
 
 /** The checks the base run runs: every check that declares what it does there, in the manifest's order (D-R15-02). */
 export function declaredChecks(checks: readonly CheckSpec[]): DeclaredCheckSpec[] {
@@ -21,8 +21,10 @@ export function declaredChecks(checks: readonly CheckSpec[]): DeclaredCheckSpec[
  * not fail (I5). One that ran and did the opposite of its declaration is
  * `contrary`. A suite check, or one that pins `expectedSuiteCount`, that did
  * what it declared over suites that could not be counted, or counted below
- * that number, is `suite-count`: the runner may never have loaded the test,
- * so its failure reproduces nothing. This is `verify`'s gate rule. A
+ * what it requires, is `suite-count`. An acceptance check's count is how many
+ * of its named tests the runner it was run with selects, so one below the
+ * number named is a test the runner never loaded, and its failure
+ * reproduces nothing (D-R15-04). This is `verify`'s gate rule. A
  * behavioral check that pins no count runs the product rather than a runner,
  * so its exit code alone decides.
  */
@@ -40,8 +42,9 @@ export function baseMismatches(checks: readonly CheckSpec[], record: BaseRunReco
       continue;
     }
     const counted = result.suiteCount;
-    const unknown = counted === null && (SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined);
-    if (unknown || (counted !== null && check.expectedSuiteCount !== undefined && counted < check.expectedSuiteCount)) {
+    const required = requiredSuites(check);
+    const unknown = counted === null && (SUITE_KINDS.has(check.kind) || required !== undefined);
+    if (unknown || (counted !== null && required !== undefined && counted < required)) {
       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: 'suite-count' });
     }
   }

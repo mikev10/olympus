@@ -189,6 +189,11 @@ export function tamperFindings(report: TamperReport): string[] {
   ];
 }
 
+/** One line per dependency-tree entry the task wrote and the runtime did not carry (D-R15-05). */
+export function notCarriedFindings(bundle: Pick<EvidenceBundle, 'notCarried'>): string[] {
+  return bundle.notCarried.map((entry) => `written but not carried, since checks run over the base's dependencies: ${entry}`);
+}
+
 export interface Escalations {
   readonly protectedPathsTouched: readonly string[];
   readonly tamperFindings: readonly string[];
@@ -210,7 +215,7 @@ export async function acceptedEscalations(state: RunState, bundleAt: (ref: Vault
   for (const [taskId, bundle] of latest) {
     if (!Object.hasOwn(state.tasks, taskId) || state.tasks[taskId] !== 'passed') continue;
     for (const path of bundle.tamper.protectedPathsTouched) touched.add(path);
-    findings.push(...tamperFindings(bundle.tamper));
+    findings.push(...tamperFindings(bundle.tamper), ...notCarriedFindings(bundle));
   }
   return { protectedPathsTouched: [...touched].sort(), tamperFindings: findings };
 }

@@ -35,6 +35,7 @@ function bundle(): EvidenceBundle {
     claim: { narrative: 'stub', filesChanged: [] },
     claimEvidenceDiff: [],
   tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
+  notCarried: [],
     collectedBy: 'runtime',
     driverProvenanceId: 'stub-driver@1.0.0',
     contractVersion: '1.0.0',

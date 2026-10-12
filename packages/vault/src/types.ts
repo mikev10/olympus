@@ -89,6 +89,13 @@ export interface EvidenceBundle {
    * none decides the task's status (A-P7-03).
    */
   tamper: TamperReport;
+  /**
+   * What the task wrote under `node_modules`, by package directory, none of
+   * it carried into the tree the checks ran over: they ran over the base's
+   * dependency trees, so the change could not replace the runner judging it
+   * (D-R15-05). Every entry escalates the `integrate` exit.
+   */
+  notCarried: readonly string[];
   collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
   contractVersion: string;

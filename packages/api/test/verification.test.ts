@@ -15,7 +15,12 @@ import {
   countSuites,
   diffDigest,
   ownDiff,
-  suiteCountFor,
+  commandOf,
+  requiredSuites,
+  runnerMissing,
+  suiteBindingProblems,
+  suiteRunner,
+  suitesRun,
   taskResultProblems,
   treeDigest,
   writesOutsideGrant,
@@ -205,11 +210,70 @@ describe('suites are counted on the host, from files', () => {
     expect(await countSuites(await tree('none', { 'readme.md': 'x' }))).toBeNull();
   });
 
-  test('the count is recorded for a suite check, and for any check that pins one', () => {
-    const check: CheckSpec = { id: 'c', kind: 'lint', command: ['x'], required: true, timeoutMs: 1 };
-    expect(suiteCountFor(check, 3)).toBeNull();
-    expect(suiteCountFor({ ...check, kind: 'unit' }, 3)).toBe(3);
-    expect(suiteCountFor({ ...check, expectedSuiteCount: 3 }, null)).toBeNull();
+});
+
+describe('a suite check runs the base framework, over what it names (D-R15-04)', () => {
+  const VITEST = JSON.stringify({ name: 'x', devDependencies: { vitest: '4.1.11' } });
+  const RUNNER = 'node_modules/vitest/vitest.mjs';
+  const lint: CheckSpec = { id: 'l', kind: 'lint', command: ['x'], required: true, timeoutMs: 1 };
+  const unit: CheckSpec = { id: 'u', kind: 'unit', required: true, timeoutMs: 1 };
+  const acceptance = (tests: [string, ...string[]]): CheckSpec => ({ id: 'a', kind: 'acceptance', onBase: 'fails', tests, required: true, timeoutMs: 1 });
+
+  test('a pinned command is run as pinned; a suite check runs the runner over its tests, or over every suite', async () => {
+    const runner = await suiteRunner(await tree('vitest', { 'package.json': VITEST }));
+    expect(commandOf(lint, runner)).toEqual(['x']);
+    expect(commandOf(acceptance(['src/a.test.ts']), runner)).toEqual(['node', RUNNER, 'run', './src/a.test.ts']);
+    expect(commandOf(unit, runner)).toEqual(['node', RUNNER, 'run']);
+    expect(() => commandOf(unit, null)).toThrow(/no supported test framework/);
+  });
+
+  test('a suite check whose runner is not installed has not started, so no exit code can stand in for one', async () => {
+    const root = await tree('uninstalled', { 'package.json': VITEST });
+    const runner = await suiteRunner(root);
+    expect(await runnerMissing(unit, runner, root)).toMatch(/not installed at node_modules\/vitest\/vitest\.mjs/);
+    expect(await runnerMissing(lint, runner, root)).toBeUndefined();
+    await tree('uninstalled', { [RUNNER]: '' });
+    expect(await runnerMissing(unit, runner, root)).toBeUndefined();
+  });
+
+  test('the count is what the runner was made to load: the named tests it selects, every suite, or the tree\'s for a pinned count', async () => {
+    const root = await tree('counted', { 'package.json': VITEST, 'src/a.test.ts': '', 'src/b.test.ts': '', 'src/c.ts': '' });
+    const runner = await suiteRunner(root);
+    expect(await suitesRun(acceptance(['src/a.test.ts']), runner, root)).toBe(1);
+    expect(await suitesRun(acceptance(['src/a.test.ts', 'src/c.ts']), runner, root)).toBe(1);
+    expect(await suitesRun(unit, runner, root)).toBe(2);
+    expect(await suitesRun(lint, runner, root)).toBeNull();
+    expect(await suitesRun({ ...lint, kind: 'behavioral', expectedSuiteCount: 2 }, runner, root)).toBe(2);
+    expect(await suitesRun(unit, null, root)).toBeNull();
+  });
+
+  test('admission binds each suite check to the base, or says why it cannot', async () => {
+    const root = await tree('bound', {
+      'package.json': VITEST,
+      [RUNNER]: '',
+      'src/a.test.ts': '',
+      'other/src/a.test.ts': '',
+      'src/b.test.ts': '',
+      'src/notes.md': '',
+    });
+    const admitted = ['src/a.test.ts', 'other/src/a.test.ts', 'src/b.test.ts', 'src/notes.md'];
+    expect(await suiteBindingProblems([lint, acceptance(['src/b.test.ts']), unit], root, admitted)).toEqual([]);
+    const messages = async (checks: CheckSpec[], tests = admitted): Promise<string> =>
+      (await suiteBindingProblems(checks, root, tests)).map((p) => `${p.code} ${p.message}`).join('\n');
+    expect(await messages([acceptance(['src/a.test.ts'])])).toMatch(/unbound .*would also run other\/src\/a\.test\.ts/);
+    expect(await messages([acceptance(['src/notes.md'])])).toMatch(/unbound .*does not run src\/notes\.md as a suite/);
+    expect(await messages([acceptance(['src/b.test.ts'])], ['src/a.test.ts'])).toMatch(/unbound .*not an admitted acceptance test/);
+    const bare = await tree('bare', { 'readme.md': '' });
+    expect((await suiteBindingProblems([unit], bare, [])).map((p) => p.code)).toEqual(['unbound']);
+    const uninstalled = await tree('uninstalled-base', { 'package.json': VITEST, 'src/a.test.ts': '' });
+    expect((await suiteBindingProblems([acceptance(['src/a.test.ts'])], uninstalled, ['src/a.test.ts'])).map((p) => p.message).join()).toMatch(/not installed/);
+    expect(await suiteBindingProblems([lint], bare, [])).toEqual([]);
+  });
+
+  test('a suite check requires every test it names; any other check, the count it pins', () => {
+    expect(requiredSuites(acceptance(['a.test.ts', 'b.test.ts']))).toBe(2);
+    expect(requiredSuites(unit)).toBeUndefined();
+    expect(requiredSuites({ id: 'u', kind: 'unit', required: true, timeoutMs: 1, expectedSuiteCount: 4 })).toBe(4);
   });
 });
 

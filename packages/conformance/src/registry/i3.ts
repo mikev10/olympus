@@ -14,7 +14,7 @@ import {
 } from './tamper.js';
 import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
-import { PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
+import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -216,6 +216,7 @@ export const I3: InvariantEntry = {
     COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS,
     // R15: an acceptance check that passes on the base is a gate the change could not fail.
     PASSING_ON_THE_BASE_REFUSES,
+    DEPENDENCY_TREES_ARE_THE_BASES,
   ],
   pending: [
     pending({

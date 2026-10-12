@@ -91,8 +91,8 @@ import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } f
 import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import type { BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
-import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
-import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writesOutsideGrant } from './verification.js';
+import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
+import { claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
 import {
   attemptPaths,
   basePath,
@@ -100,8 +100,10 @@ import {
   composeDiff,
   copyOnly,
   copyTree,
+  dependencyEntry,
   diffDigest,
   hashAt,
+  inDependencyTree,
   materialize,
   ownDiff,
   reviewPath,
@@ -362,11 +364,16 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
   await copyTree(basePath(workspaces, ctx.run.id), tree);
   const before = await tamperedIn(ctx, tree);
   if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
-  const counted = await countSuites(tree);
+  const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
 
   const checks: CheckResult[] = [];
   const unstarted: UnstartedCheck[] = [];
   for (const check of declaredChecks(ctx.checks)) {
+    const missing = await runnerMissing(check, runner, tree);
+    if (missing !== undefined) {
+      unstarted.push({ checkId: check.id, reason: missing });
+      continue;
+    }
     let handle: SandboxHandle;
     try {
       handle = await sandbox.provision(checkSandbox(ctx, tree, check));
@@ -377,14 +384,14 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
     try {
       const startedAt = new Date().toISOString();
       try {
-        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
-        const exec = await sandbox.exec(handle, [...check.command]);
+        // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
+        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
         checks.push({
           checkId: check.id,
           exitCode: exec.exitCode,
           stdout: exec.stdout,
           stderr: exec.stderr,
-          suiteCount: suiteCountFor(check, counted),
+          suiteCount: await suitesRun(check, runner, tree),
           expectation: null,
           durationMs: exec.durationMs,
           startedAt,
@@ -996,7 +1003,11 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const result = await readResult(ctx, task);
 
   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
-  const own = await ownDiff(start, work);
+  const written = await ownDiff(start, work);
+  // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
+  // check, and the runner a suite check starts, runs over the base's dependency trees.
+  const own = written.filter((entry) => !inDependencyTree(entry.path));
+  const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
 
   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
   // A locked path in it is the tamper the Vault's own check can no longer see.
@@ -1018,8 +1029,8 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
   const built = await tamperedIn(ctx, tree);
   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
-  const counted = await countSuites(tree);
-  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => c.command) });
+  const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => commandOf(c, runner)) });
 
   // Results stay aligned with the specs by position, never matched up by id afterwards.
   const specs = ctx.checks;
@@ -1030,6 +1041,12 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
   for (const check of specs) {
+    const missing = await runnerMissing(check, runner, tree);
+    if (missing !== undefined) {
+      results.push(undefined);
+      unstarted.push({ checkId: check.id, reason: missing });
+      continue;
+    }
     let handle: SandboxHandle;
     try {
       handle = await sandbox.provision(checkSandbox(ctx, tree, check));
@@ -1039,14 +1056,14 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     try {
       const startedAt = new Date().toISOString();
       try {
-        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
-        const exec = await sandbox.exec(handle, [...check.command]);
+        // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
+        const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
         results.push({
           checkId: check.id,
           exitCode: exec.exitCode,
           stdout: exec.stdout,
           stderr: exec.stderr,
-          suiteCount: suiteCountFor(check, counted),
+          suiteCount: await suitesRun(check, runner, tree),
           expectation: null,
           durationMs: exec.durationMs,
           startedAt,
@@ -1105,6 +1122,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     claim: result.claim,
     claimEvidenceDiff: differences,
     tamper,
+    notCarried,
     collectedBy: 'runtime',
     driverProvenanceId: driver.provenanceId(),
     contractVersion: driver.contractVersion,
@@ -1162,7 +1180,7 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
       claimMismatches: b.claimEvidenceDiff.length,
       // The runtime's reading of the diff: paths it collected and assertions it parsed, not author text.
       protectedPathsTouched: b.tamper.protectedPathsTouched,
-      tamperFindings: tamperFindings(b.tamper),
+      tamperFindings: [...tamperFindings(b.tamper), ...notCarriedFindings(b)],
     })),
   );
 }

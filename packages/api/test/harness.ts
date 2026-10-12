@@ -27,7 +27,7 @@ import {
   type TaskRequest,
   type TaskResult,
 } from '@olympus-ai/core';
-import type { CheckSpec } from '@olympus-ai/integrity';
+import type { OtherCheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { buildGraph, isBuilt, localWorkspaceStore, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
@@ -38,7 +38,7 @@ export const BASE_COMMIT = '0'.repeat(40);
 export const BUILDER = 'builder' as RoleId;
 export const REVIEWER = 'reviewer' as RoleId;
 
-export const HELLO_CHECK: CheckSpec = {
+export const HELLO_CHECK: OtherCheckSpec = {
   id: 'hello-exit-zero',
   kind: 'compile',
   command: ['node', '-e', 'process.exit(0)'],

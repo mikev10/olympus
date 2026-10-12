@@ -57,6 +57,7 @@ function bundle(): EvidenceBundle {
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
   tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
+  notCarried: [],
     collectedBy: 'runtime',
     driverProvenanceId: 'local-vault-test@1.0.0',
     contractVersion: '1.0.0',
@@ -323,6 +324,21 @@ describe('the base record (D-A-BF-01)', () => {
 
   test('refuses a record the runtime did not collect, and stores nothing', async () => {
     await expect(vault.recordBaseRun({ ...record, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
+    expect(await vault.readBaseRun(runId)).toBeNull();
+  });
+
+  test('refuses a result whose suite count is absent, since the suite-count rule would read it as met (codex-obs), and stores nothing', async () => {
+    const { suiteCount: _omitted, ...uncounted } = reproduced;
+    await expect(vault.recordBaseRun({ ...record, checks: [uncounted] } as never)).rejects.toThrow(/not results/);
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: -1 }] })).rejects.toThrow(/not results/);
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: 1.5 }] })).rejects.toThrow(/not results/);
+    expect(await vault.readBaseRun(runId)).toBeNull();
+  });
+
+  test('refuses an exit code that is not an integer: NaN is written as null and read back as a failure', async () => {
+    for (const exitCode of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode }] })).rejects.toThrow(/not results/);
+    }
     expect(await vault.readBaseRun(runId)).toBeNull();
   });
 

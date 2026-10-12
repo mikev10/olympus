@@ -4,7 +4,7 @@
  * Workspace. The invariant assertions themselves are the registry's; what is
  * here is the rest of the behaviour, read by field.
  */
-import { stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
@@ -47,6 +47,9 @@ afterEach(async () => {
 async function read<T>(vault: Vault, ref: Parameters<Vault['read']>[0]): Promise<T> {
   return JSON.parse(new TextDecoder().decode(await vault.read(ref))) as T;
 }
+
+/** A unit check: no command, since its runner is the base framework's (D-R15-04). */
+const UNIT_CHECK = { id: 'unit', kind: 'unit', required: true, timeoutMs: 10_000 } as const;
 
 function refusedState(outcome: RunOutcome): RunState {
   if (outcome.ok || outcome.reason !== 'refused' || outcome.state === null) throw new Error(`expected a refusal on the line, got ${JSON.stringify(outcome)}`);
@@ -285,18 +288,20 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     expect(state.tasks[hello]).toBe('passed');
   });
 
-  // codex-4: a unit or acceptance check is a suite run by its kind, so a tree whose suites
-  // cannot be enumerated has not shown one ran, whether or not the manifest pinned a count.
-  test('a unit check over a tree whose suites cannot be enumerated fails the gate, with no count pinned (I5)', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
-    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
-    expect(state.tasks[hello]).toBe('parked');
+  // codex-4, D-R15-04: a unit or acceptance check is a suite run by its kind, and its runner is the
+  // base framework's; a base with none has no runner, so the check is refused before anything runs.
+  test('a unit check over a base with no test framework is refused at admission, with no count pinned (I5)', async () => {
+    await writeChecks(workspace, [UNIT_CHECK]);
+    const outcome = await startRun(runRequest(runId, workspace, components));
+    expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'manifest.checks[0]', code: 'unbound' }] });
   });
 
-  test('a unit check over a tree whose suites are enumerated passes, and records the count', async () => {
+  test('a unit check runs the base framework\'s installed runner over every suite, passes, and records the count', async () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'p6', devDependencies: { vitest: '4.1.11' } }));
     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
+    await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
+    await writeChecks(workspace, [UNIT_CHECK]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('passed');
     const [ref] = state.evidenceRefs;
@@ -886,5 +891,50 @@ describe('integrate escalates a run whose tests were never analysed (D-A-I1-06)'
     expect(record.unavailableControls).toContain('test');
     const escalations = await integrateEscalations(components.vault, state, (ref) => read<EvidenceBundle>(components.vault, ref));
     expect(escalations.tamperFindings).toContain(UNANALYSED_TESTS);
+  });
+});
+
+/** A builder that writes one file under node_modules, through the sandbox it was given, besides the fixture's work. */
+class DependencyWriter extends DelegatingDriver {
+  constructor(private readonly sandbox: StubSandboxProvider, private readonly path: string, private readonly text: string) {
+    super(new ChosenDriver());
+  }
+
+  override async runTask(req: TaskRequest): Promise<TaskResult> {
+    const script = `const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(${JSON.stringify(this.path)}), { recursive: true }); fs.writeFileSync(${JSON.stringify(this.path)}, ${JSON.stringify(this.text)})`;
+    const wrote = await this.sandbox.exec(req.sandbox, ['node', '-e', script]);
+    if (wrote.exitCode !== 0) throw new Error(`the write failed: ${wrote.stderr}`);
+    return this.inner.runTask(req);
+  }
+}
+
+describe('the change cannot replace its judge (D-R15-05)', () => {
+  // Found in the R15 triage: the diff carried node_modules into the verified tree, and tamper analysis skips it,
+  // so a builder that rewrote the script a check runs turned a failing check green with nothing escalated.
+  test('a check runs the base\'s node_modules: a builder that rewrites the script it runs is recorded, and not carried', async () => {
+    await mkdir(join(workspace, 'node_modules', 'judge'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'judge', 'index.js'), 'process.exit(1)\n');
+    await writeChecks(workspace, [{ id: 'judge', kind: 'behavioral', onBase: 'fails', command: ['node', 'node_modules/judge/index.js'], required: true, timeoutMs: 10_000 }]);
+    const sandbox = new StubSandboxProvider();
+    const driver = new DependencyWriter(sandbox, 'node_modules/judge/index.js', 'process.exit(0)\n');
+    const parts = stubComponents(workspace, { sandbox, driver });
+    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+    expect(state.tasks[hello]).toBe('parked');
+    const [ref] = state.evidenceRefs;
+    if (ref === undefined) throw new Error('no evidence');
+    const bundle = await read<EvidenceBundle>(parts.vault, ref);
+    expect(bundle.checks.find((c) => c.checkId === 'judge')?.exitCode).toBe(1);
+    expect(bundle.notCarried).toEqual(['node_modules/judge']);
+    expect(bundle.diff.map((e) => e.path)).toEqual(['hello.txt']);
+  });
+
+  test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
+    const sandbox = new StubSandboxProvider();
+    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
+    const parts = stubComponents(workspace, { sandbox, driver });
+    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+    expect(state.tasks[hello]).toBe('passed');
+    const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
+    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
   });
 });
