@@ -33,7 +33,7 @@ import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, BaseRunRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -75,11 +75,14 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
-  'admission', 'task-result', 'usage', 'decision', 'integration',
+  'admission', 'task-result', 'usage', 'decision', 'integration', 'base-run',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
 const ADMISSION_FILE = 'admission.json';
+
+/** The one base record a run may have (D-A-BF-01), named for the same reason as the admission record. */
+const BASE_RUN_FILE = 'base-run.json';
 
 export interface VaultRoots {
   /** What the Vault owns. Never inside `artifacts`, and never the same directory. */
@@ -268,6 +271,20 @@ function decisionProblem(d: unknown): string | undefined {
   return undefined;
 }
 
+/** D-A-BF-01: the runtime's record of the acceptance checks over the base, whole, or refused. */
+function baseRunProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (!hasString(r, 'baseTreeSha256') || !/^[0-9a-f]{64}$/.test(r.baseTreeSha256 as string)) return 'it names no base tree digest';
+  if (!Array.isArray(r.checks) || !r.checks.every((c) => isRecord(c) && hasString(c, 'checkId') && typeof c.exitCode === 'number')) {
+    return 'its checks are not results';
+  }
+  if (!Array.isArray(r.unstarted) || !r.unstarted.every((u) => isRecord(u) && hasString(u, 'checkId') && hasString(u, 'reason'))) {
+    return 'its unstarted checks do not each say why';
+  }
+  return undefined;
+}
+
 /** A-I1b-01: the runtime's record of what it did on the remote, whole, or refused. */
 function integrationProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
@@ -370,6 +387,7 @@ function objectFile(store: string, ref: VaultRef): string {
   if (!KINDS.includes(ref.kind)) throw new Error(`LocalVault: '${ref.kind}' is not a Vault reference kind`);
   if (!/^[0-9a-f]{64}$/.test(ref.hash)) throw new Error(`LocalVault: '${ref.hash}' is not a SHA-256 digest`);
   if (ref.kind === 'admission') return join(runDir(store, ref.runId), ADMISSION_FILE);
+  if (ref.kind === 'base-run') return join(runDir(store, ref.runId), BASE_RUN_FILE);
   return join(runDir(store, ref.runId), 'objects', ref.kind, `${ref.hash}.json`);
 }
 
@@ -414,8 +432,8 @@ export class LocalVault implements Vault {
     // Every other kind is named by its hash, so the file a ref names holds that
     // content. The admission record is named by its run, so a ref carrying some
     // other hash must not read it back as if it matched.
-    if (ref.kind === 'admission' && sha256(bytes) !== ref.hash) {
-      throw new Error(`LocalVault: no admission ${ref.hash} for run ${ref.runId}; the run's admission record hashes to ${sha256(bytes)}`);
+    if ((ref.kind === 'admission' || ref.kind === 'base-run') && sha256(bytes) !== ref.hash) {
+      throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}; the run's ${ref.kind} record hashes to ${sha256(bytes)}`);
     }
     return bytes;
   }
@@ -554,6 +572,32 @@ export class LocalVault implements Vault {
   /** Every usage file under the run, referenced from run state or not (A-I1a-05). */
   readUsage(runId: RunId): Promise<readonly VaultRef[]> {
     return this.#objects(runId, 'usage');
+  }
+
+  /**
+   * I2: only the runtime's record, whole. Once per run, by an exclusive
+   * create: a second base run would let a run be judged against whichever
+   * base suited it, so it is refused and nothing is stored.
+   */
+  async recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
+    const problem = baseRunProblem(r);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing a base record: ${problem}`);
+    const bytes = encode(r);
+    if (!(await createExclusive(join(runDir(this.#store, r.runId), BASE_RUN_FILE), bytes))) {
+      throw new Error(`LocalVault: run ${r.runId} already has a base record; the checks run over a base once, and nothing was stored`);
+    }
+    return { runId: r.runId, kind: 'base-run', hash: sha256(bytes) };
+  }
+
+  async readBaseRun(runId: RunId): Promise<VaultRef | null> {
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(join(runDir(this.#store, runId), BASE_RUN_FILE));
+    } catch (error) {
+      if (isAbsent(error)) return null;
+      throw error;
+    }
+    return { runId, kind: 'base-run', hash: sha256(bytes) };
   }
 
   /** I2: only what the runtime did, whole. The same act recorded twice is one entry, since the record carries no time. */

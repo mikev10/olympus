@@ -1005,6 +1005,38 @@ is refused at admission; a manifest with no `'fails'` check is refused; a
 check that does not start on the base refuses rather than counting as a
 failure; `verify`'s evidence names the base results the runtime recorded.
 
+**Further binding, confirmed when the unit started (D-R15-01):**
+
+- the check declared `'fails'` must also be `required`: an optional check
+  does not hold `verify`'s gate, so it shows nothing about the change
+- a check of kind `behavioral` may also declare `'fails'` or `'passes'`, and
+  then runs over the base like an acceptance check; a required behavioral
+  check declared `'fails'` satisfies the rule above, so a repository with no
+  test framework can still reproduce its defect (D-R15-02). A declaration on
+  any other kind is refused at admission: a declaration that does nothing is
+  a claim with no effect
+- a base whose suites cannot be counted refuses an acceptance check, as
+  `verify`'s gate does (I5)
+- a run admitted before this unit, whose manifest carries no declaration,
+  does not resume; there is no migration
+
+**Contract amendments, owed by the unit's pull request:** `CheckSpec` splits
+by kind, an acceptance check carrying `onBase: 'fails' | 'passes'`, a
+behavioral check carrying it optionally, and every other kind
+`onBase?: never`; `StationRefusal` gains `'base-mismatch'`, naming
+each check that did not do what it declared and the base record; `Vault` gains
+`recordBaseRun`, write-once per run, and `readBaseRun`; `VaultRefKind` gains
+`'base-run'`; `EvidenceBundle` gains a required `baseRun` reference.
+
+**Out of scope:** judging why a check failed on the base (mutation testing,
+M3); R7's corpus item; the security check kinds and their base fingerprints
+(R17); bug-fix intake (R16); the M2 trigger framework's spec, which is a
+separate amendment.
+
+**Acceptance criteria:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+`pnpm conformance`, and `pnpm typecheck:tooling` pass, and the registry holds
+an assertion for each sentence of the conformance paragraph above.
+
 **Why M2:** M1's scope is closed and I1 proves it. The unit adds one sandbox run
 per admitted run and no model call, so it is cheap to take early in M2, and
 R16 depends on it.

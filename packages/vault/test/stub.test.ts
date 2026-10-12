@@ -27,6 +27,7 @@ function bundle(): EvidenceBundle {
     taskId,
     baseCommit: 'abc',
     baseTreeSha256: 'b'.repeat(64),
+    baseRun: { runId, kind: 'base-run', hash: 'b'.repeat(64) },
     diff: [],
     diffSha256: 'c'.repeat(64),
     checks: [],

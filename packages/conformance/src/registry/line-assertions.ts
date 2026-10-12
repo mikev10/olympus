@@ -59,6 +59,8 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     readUsage: (runId) => inner.readUsage(runId),
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
+    recordBaseRun: (r) => inner.recordBaseRun(r),
+    readBaseRun: (runId) => inner.readBaseRun(runId),
     listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
@@ -434,8 +436,10 @@ async function failsFirstCheck(): Promise<SandboxProvider> {
     provision: (spec) => inner.provision(spec),
     destroy: (handle) => inner.destroy(handle),
     exec: async (handle, cmd) => {
-      checks += 1;
+      // The fixture's compile check, counted alone: the base run's reproduction and the builder's write are execs too (D-A-BF-01).
       const result = await inner.exec(handle, cmd);
+      if (cmd.join(' ') !== 'node -e process.exit(0)') return result;
+      checks += 1;
       return checks === 1 ? { ...result, exitCode: 1 } : result;
     },
   };

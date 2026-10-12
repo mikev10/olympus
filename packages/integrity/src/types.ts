@@ -9,9 +9,40 @@ export type CheckKind =
   | 'compile' | 'typecheck' | 'lint' | 'unit'
   | 'acceptance' | 'behavioral' | 'coverage' | 'mutation';
 
-export interface CheckSpec {
+/** What a check declares it does over the base: `'fails'` reproduces what the change must fix, `'passes'` guards behaviour that must survive it. */
+export type BaseDeclaration = 'fails' | 'passes';
+
+/**
+ * A check as `test-design` locked it. An acceptance check declares what it
+ * does on the base, with no default; a behavioral check may, since it runs
+ * the product rather than a test runner and so reproduces a defect in a
+ * repository with no test framework. The runtime runs every declared check
+ * over the base before any driver is invoked and refuses the `test-design`
+ * exit if one does otherwise (D-A-BF-01, D-R15-02). No other kind carries a
+ * declaration: one that did nothing would be a claim with no effect.
+ */
+export type CheckSpec = AcceptanceCheckSpec | BehavioralCheckSpec | OtherCheckSpec;
+
+export interface AcceptanceCheckSpec extends CheckSpecFields {
+  kind: 'acceptance';
+  onBase: BaseDeclaration;
+}
+
+export interface BehavioralCheckSpec extends CheckSpecFields {
+  kind: 'behavioral';
+  onBase?: BaseDeclaration;
+}
+
+export interface OtherCheckSpec extends CheckSpecFields {
+  kind: Exclude<CheckKind, 'acceptance' | 'behavioral'>;
+  onBase?: never;
+}
+
+/** A check that carries a declaration, and so runs over the base. */
+export type DeclaredCheckSpec = (AcceptanceCheckSpec | BehavioralCheckSpec) & { onBase: BaseDeclaration };
+
+interface CheckSpecFields {
   id: string;
-  kind: CheckKind;
   /**
    * Pinned at test-design; lives in the Vault. An argument vector, run exactly
    * as given with no shell: a check that needs one names it, `['sh', '-c', …]`,

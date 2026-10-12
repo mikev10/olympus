@@ -88,6 +88,11 @@ export function basePath(store: WorkspaceStore, runId: RunId): string {
   return join(runDir(store, runId), 'base');
 }
 
+/** Where the acceptance checks run over the base: a copy of it, so a check never runs over the snapshot every later tree is built from (D-A-BF-01). */
+export function baseRunPath(store: WorkspaceStore, runId: RunId): string {
+  return join(runDir(store, runId), 'base-run');
+}
+
 export function attemptPaths(store: WorkspaceStore, runId: RunId, task: TaskId, iteration: number): { start: string; work: string } {
   const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
   return { start: join(dir, 'start'), work: join(dir, 'work') };

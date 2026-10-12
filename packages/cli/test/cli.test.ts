@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { buildGraph, createApiServer, outcomes, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
-import { StubDriver } from '@olympus-ai/core';
+import { StubDriver, type Driver, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { runCli, type CliIo } from '../src/cli.js';
@@ -60,21 +60,35 @@ beforeEach(async () => {
   await mkdir(workspace);
   await writeFile(join(workspace, 'spec.md'), '# spec\n');
   await writeFile(join(workspace, 'acceptance.md'), '# acceptance\n');
-  await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks: [{ id: 'ok', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 }] }));
+  await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks: [
+    { id: 'ok', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 },
+    // The reproduction: fails over the base, passes once the builder has written `done` (D-A-BF-01). The name is built, since one spelt is protected (D-R15-03).
+    { id: 'done', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "process.exit(require('node:fs').existsSync(['do', 'ne'].join('')) ? 0 : 1)"], required: true, timeoutMs: 10_000 },
+  ] }));
   await writeFile(join(workspace, 'graph.json'), JSON.stringify({ tasks: [
     { id: 'hello', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['**'] },
     { id: 'hello-review', station: 'review', role: 'reviewer', dependsOn: ['hello'], dependencySet: ['**'] },
   ] }));
   const policyFile = join(root, 'policy.yaml');
   await writeFile(policyFile, JSON.stringify(POLICY));
-  const driver = new StubDriver();
+  const sandbox = new StubSandboxProvider();
+  const stub = new StubDriver();
+  // The builder makes the change the reproduction asks for, through its own sandbox, and claims it.
+  const driver: Driver = Object.assign(Object.create(stub) as Driver, {
+    runTask: async (req: TaskRequest): Promise<TaskResult> => {
+      if (req.role !== 'builder') return stub.runTask(req);
+      await sandbox.exec(req.sandbox, ['node', '-e', "require('node:fs').writeFileSync('done', 'done')"]);
+      const result = await stub.runTask(req);
+      return { ...result, claim: { ...result.claim, filesChanged: ['done'] } };
+    },
+  });
   const user = process.getuid === undefined ? { uid: 0, gid: 0 } : undefined;
   const store = join(root, 'store');
   vault = new StubVault(workspace);
   server = createApiServer({
     components: buildGraph({
       vault,
-      sandbox: new StubSandboxProvider(),
+      sandbox,
       driver,
       reviewer: driver,
       workspaces: localWorkspaceStore(user === undefined ? { root: store } : { root: store, user }),

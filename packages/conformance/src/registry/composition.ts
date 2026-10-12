@@ -14,7 +14,7 @@ import type { Driver, TaskRequest } from '@olympus-ai/core';
 import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { HELLO_TASK, stubDriver, withLine, type LineRig } from './line.js';
+import { doingTheWork, HELLO_TASK, stubDriver, withLine, type LineRig } from './line.js';
 import { refusalFrom } from './local-sandbox.js';
 import { realComponents, realPolicy } from './real-line.js';
 
@@ -140,7 +140,8 @@ async function composedAtL1(rig: LineRig, during: (sandbox: SandboxProvider, req
     exec: (h, cmd, options) => real.sandbox.exec(h, cmd, options),
     destroy: (h) => real.sandbox.destroy(h),
   };
-  const driver = await stubDriver({ during: (req) => (req.taskId === HELLO_TASK ? during(real.sandbox, req) : Promise.resolve()) });
+  // The builder also does the fixture's work, so the reproduction that failed over the base passes (D-A-BF-01).
+  const driver = doingTheWork(await stubDriver({ during: (req) => (req.taskId === HELLO_TASK ? during(real.sandbox, req) : Promise.resolve()) }), recording);
   // Below L2, where a scripted driver and a recording wrapper are named and not refused; the Vault and the containers are real.
   // No integrator: at L1 a human merges (D-I1b-05), and a task that writes nothing halts at an integrator's open (D-I1b-04).
   return { components: buildGraph({ ...real, sandbox: recording, driver, reviewer: driver, integrator: null }), real, specs };

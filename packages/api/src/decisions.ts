@@ -35,10 +35,11 @@ export function problemCodes(problems: readonly RequestProblem[]): AdmissionRefu
   return { reason: 'invalid-request', problems: problems.map((p) => ({ path: p.path, code: p.code })) };
 }
 
-/** Who made a station refusal: the line for what it found itself — a park, a tamper, a violation — and the station machine for the rest. */
+/** Who made a station refusal: the line for what it found itself — a park, a base that did not do what was declared, a tamper, a violation — and the station machine for the rest. */
 export function stationDecider(refusal: StationRefusal): 'station-machine' | 'line' {
   switch (refusal.reason) {
     case 'parked':
+    case 'base-mismatch':
     case 'lock-tamper':
     case 'violation':
       return 'line';

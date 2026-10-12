@@ -9,6 +9,7 @@ import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from 
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
+import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
@@ -85,6 +86,9 @@ export const I2: InvariantEntry = {
       package: '@olympus-ai/api',
       file: 'test/paid/line.paid.test.ts',
     }),
+    // R15: the base run's results are the runtime's, and a resume reads them rather than running them again.
+    BASE_RESULTS_ARE_THE_RUNTIMES,
+    RESUME_READS_THE_BASE_RECORD,
   ],
   pending: [],
 };

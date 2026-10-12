@@ -9,7 +9,11 @@
  *   the station. `integrate`'s merge is I1's.
  * - `spec`, `test-design`, `plan`: lock the artifacts the run was admitted
  *   with, and refuse a lock whose hash differs from the admission hash (I3).
- *   `plan` also enters the graph's tasks into run state.
+ *   `plan` also enters the graph's tasks into run state. `test-design`
+ *   then runs every declared check over a fresh copy of the base, read-only
+ *   and with no egress, records what each did, and refuses its exit unless
+ *   each did what the manifest declares, before any driver is invoked
+ *   (D-A-BF-01).
  * - `build`: runs each task through the driver over a fresh copy of the base
  *   and the diff accepted so far, never over the author's working copy, and
  *   records the result in the Vault before anything reads it (D-P6-02).
@@ -79,11 +83,12 @@ import type {
   VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
+import { baseRefusal, declaredChecks } from './base.js';
 import { readUsage } from './cost.js';
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmittedArtifact, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import type { BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, tamperFindings } from './tamper.js';
@@ -91,6 +96,7 @@ import { claimEvidenceDiff, countSuites, suiteCountFor, taskResultProblems, writ
 import {
   attemptPaths,
   basePath,
+  baseRunPath,
   composeDiff,
   copyOnly,
   copyTree,
@@ -283,7 +289,17 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       break;
     }
     case 'test-design': {
-      const refusal = await lockAdmitted(ctx, 'test-design', [...ctx.artifacts.acceptanceTests, ctx.artifacts.verificationManifest]);
+      // A base record means this station locked and ran its checks before a stop: the locks are
+      // held, and the base is judged by the record rather than run again (D-A-BF-01).
+      let baseRun = await ctx.components.vault.readBaseRun(ctx.run.id);
+      if (baseRun === null) {
+        const refusal = await lockAdmitted(ctx, 'test-design', [...ctx.artifacts.acceptanceTests, ctx.artifacts.verificationManifest]);
+        if (refusal !== undefined) return refusal;
+        const ran = await runOnBase(ctx);
+        if (!('hash' in ran)) return ran;
+        baseRun = ran;
+      }
+      const refusal = baseRefusal(ctx.checks, await readRecord<BaseRunRecord>(ctx, baseRun), baseRun);
       if (refusal !== undefined) return refusal;
       break;
     }
@@ -331,6 +347,65 @@ async function lockAdmitted(ctx: LineContext, station: StationId, admitted: read
   }
   if (tampered.length === 0) return undefined;
   return recordTamper(ctx, station, null, tampered, { phase: 'lock' });
+}
+
+/**
+ * Runs every check that declares what it does on the base over a fresh copy of it, each in a fresh
+ * sandbox, read-only and with no egress, exactly as `verify` runs a check over
+ * base and the diff, and writes what they did to the Vault once (D-A-BF-01).
+ * No driver is invoked. A check that does not start is recorded as unstarted
+ * with its reason, and no exit code is invented for it (A-P6-02).
+ */
+async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
+  const { sandbox, vault, workspaces } = ctx.components;
+  const tree = baseRunPath(workspaces, ctx.run.id);
+  await copyTree(basePath(workspaces, ctx.run.id), tree);
+  const before = await tamperedIn(ctx, tree);
+  if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
+  const counted = await countSuites(tree);
+
+  const checks: CheckResult[] = [];
+  const unstarted: UnstartedCheck[] = [];
+  for (const check of declaredChecks(ctx.checks)) {
+    let handle: SandboxHandle;
+    try {
+      handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+    } catch (error) {
+      unstarted.push({ checkId: check.id, reason: `its sandbox could not be provisioned: ${describe(error)}` });
+      continue;
+    }
+    try {
+      const startedAt = new Date().toISOString();
+      try {
+        // The pinned argument vector, exactly: no shell, no splitting (A-P6-01).
+        const exec = await sandbox.exec(handle, [...check.command]);
+        checks.push({
+          checkId: check.id,
+          exitCode: exec.exitCode,
+          stdout: exec.stdout,
+          stderr: exec.stderr,
+          suiteCount: suiteCountFor(check, counted),
+          expectation: null,
+          durationMs: exec.durationMs,
+          startedAt,
+        });
+      } catch (error) {
+        unstarted.push({ checkId: check.id, reason: describe(error) });
+      }
+    } finally {
+      const { egress } = await sandbox.destroy(handle);
+      await recordEgress({ vault, runId: ctx.run.id, taskId: null, station: 'test-design' }, egress);
+    }
+  }
+
+  // Results collected over a changed artifact are not results, whatever the provider claims about ro.
+  const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+  if (after.length > 0) return recordTamper(ctx, 'test-design', null, after, { phase: 'after-base', checks });
+  return vault.recordBaseRun({ runId: ctx.run.id, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
+}
+
+async function readRecord<T>(ctx: LineContext, ref: VaultRef): Promise<T> {
+  return JSON.parse(decode(await ctx.components.vault.read(ref))) as T;
 }
 
 async function tamperedPaths(ctx: LineContext): Promise<TamperedPath[]> {
@@ -1014,11 +1089,15 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     });
   }
   await recordFindings(ctx, task, tamper);
+  // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+  const baseRun = await vault.readBaseRun(ctx.run.id);
+  if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
   const evidence: EvidenceBundle = {
     runId: ctx.run.id,
     taskId: task.id,
     baseCommit: ctx.run.baseCommit,
     baseTreeSha256: ctx.baseTreeSha256,
+    baseRun,
     diff,
     diffSha256,
     checks,

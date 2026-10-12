@@ -14,6 +14,7 @@ import {
   type ApprovalKey,
   type ApprovalOutcome,
   type CapabilityScope,
+  type Driver,
   type DriverCapabilities,
   type ModelFamily,
   type ModelIdentity,
@@ -27,7 +28,7 @@ import {
   type TaskResult,
 } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
-import { StubSandboxProvider } from '@olympus-ai/sandbox';
+import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
 import { buildGraph, isBuilt, localWorkspaceStore, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { DelegatingDriver } from './wrappers.js';
@@ -73,8 +74,32 @@ export async function removeWorkspace(workspace: string): Promise<void> {
   await rm(workspace, { recursive: true, force: true });
 }
 
-export async function writeChecks(workspace: string, checks: readonly unknown[]): Promise<void> {
-  await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks }));
+/**
+ * The hello fixture's reproduction (D-A-BF-01): a behavioral check declared
+ * `'fails'`, since the base has no `hello.txt` and the rig's builder writes
+ * one. Its script builds the file's name rather than spelling it: a path a
+ * pinned command names is protected (D-P7-10), so spelling it would make
+ * every run's change a protected-path touch (D-R15-03). A manifest an assertion writes carries it unless the assertion
+ * declares a check of its own, so an assertion about something else is not
+ * refused at admission for having nothing to reproduce.
+ */
+export const HELLO_REPRODUCTION = {
+  id: 'hello-written',
+  kind: 'behavioral',
+  onBase: 'fails',
+  command: ['node', '-e', "const fs = require('node:fs'); const file = ['hello', 'txt'].join('.'); process.exit(fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim() === 'hello' ? 0 : 1)"],
+  required: true,
+  timeoutMs: 10_000,
+} as const;
+
+function declaresOne(checks: readonly unknown[]): boolean {
+  return checks.some((c) => typeof c === 'object' && c !== null && (c as { onBase?: unknown }).onBase !== undefined);
+}
+
+/** `asWritten` writes `checks` alone, for a test of what admission makes of a manifest. */
+export async function writeChecks(workspace: string, checks: readonly unknown[], options: { asWritten?: boolean } = {}): Promise<void> {
+  const written = options.asWritten === true || declaresOne(checks) ? checks : [...checks, HELLO_REPRODUCTION];
+  await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks: written }));
 }
 
 export async function writeGraph(workspace: string, tasks: readonly unknown[]): Promise<void> {
@@ -173,10 +198,46 @@ export function built(parts: GraphParts): BuiltGraph {
   return isBuilt(parts) ? parts : buildGraph(parts);
 }
 
-/** The stub graph, built: every run on it is refused above L1 for the stubs' own declarations. */
+/** What the hello fixture's reproduction reads: the change its spec asks for, absent from the base (D-A-BF-01). */
+export const HELLO_FILE = 'hello.txt';
+
+/**
+ * `driver` doing the hello fixture's work: each builder task writes
+ * `hello.txt` through the sandbox it was handed, as an agent would, and
+ * claims it, so the fixture's reproduction passes over the change after
+ * failing over the base. Every other call goes to `driver` unchanged.
+ * Wrapping a wrapped driver replaces its sandbox rather than adding a second
+ * write, so a test that swaps the graph's sandbox writes through the new one.
+ */
+export function doingTheWork<D extends Driver>(driver: D, sandbox: SandboxProvider): D {
+  const inner = (UNWRAPPED.get(driver) ?? driver) as D;
+  const wrapped = new Proxy(inner, {
+    get(target, key, receiver) {
+      if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
+      return async (req: TaskRequest): Promise<TaskResult> => {
+        if (req.role !== BUILDER) return target.runTask(req);
+        const wrote = await sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').writeFileSync(${JSON.stringify(HELLO_FILE)}, 'hello')`]);
+        if (wrote.exitCode !== 0) throw new Error(`the hello fixture's work did not land in task ${req.taskId}: ${wrote.stderr}`);
+        const result = await target.runTask(req);
+        if (result.claim.filesChanged.includes(HELLO_FILE)) return result;
+        return { ...result, claim: { ...result.claim, filesChanged: [...result.claim.filesChanged, HELLO_FILE] } };
+      };
+    },
+  });
+  UNWRAPPED.set(wrapped, inner);
+  return wrapped;
+}
+
+const UNWRAPPED = new WeakMap<Driver, Driver>();
+
+/** The stub graph, built: every run on it is refused above L1 for the stubs' own declarations. Its builder does the fixture's work. */
 export function stubComponents(workspace: string, overrides: Partial<GraphParts> = {}): BuiltGraph {
-  const driver = new StubDriver();
-  return buildGraph({ vault: new StubVault(workspace), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces: storeFor(workspace), ...overrides });
+  const sandbox = overrides.sandbox ?? new StubSandboxProvider();
+  const stub = new StubDriver();
+  const driver = doingTheWork(overrides.driver ?? stub, sandbox);
+  // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
+  const reviewer = overrides.driver === undefined ? driver : stub;
+  return buildGraph({ vault: new StubVault(workspace), sandbox, reviewer, workspaces: storeFor(workspace), ...overrides, driver });
 }
 
 /**
@@ -194,11 +255,17 @@ export function runRequest(runId: RunId, workspace: string, parts: GraphParts, o
     workspace,
     artifacts: ARTIFACTS,
     policy: policy(),
-    components: built(parts),
+    components: working(built(parts)),
     approvedCostUsd: null,
     ...overrides,
   };
   return Object.hasOwn(overrides, 'approvedCostUsd') ? req : { ...req, approvedCostUsd: approvedFigure(req) };
+}
+
+/** `graph` with its builder doing the fixture's work through the graph's own sandbox, whichever the test put there. */
+function working(graph: BuiltGraph): BuiltGraph {
+  const driver = doingTheWork(graph.driver, graph.sandbox);
+  return { ...graph, driver, reviewer: UNWRAPPED.get(graph.reviewer) === UNWRAPPED.get(graph.driver) && UNWRAPPED.has(graph.reviewer) ? driver : graph.reviewer };
 }
 
 function approvedFigure(req: RunRequest): number | null {

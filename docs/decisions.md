@@ -3189,7 +3189,7 @@ report that someone outside wrote. Each row was checked against the code on
 - **Why M2:** M1's scope is closed. The unit costs one sandbox run per admitted run and no model call.
 - **Known limit:** the runtime does not judge why a check failed on the base. Mutation testing (M3) is the control for that.
 - **Reverse:** drop the run on the base. The `'fails'`/`'passes'` declaration can stay as documentation for the reviewer.
-- **Proposed;** not yet confirmed by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-11, when R15 started (D-R15-01).
 
 ### D-A-BF-02: bug reports enter as a template whose spec a person writes, as R16 in M2
 
@@ -3805,3 +3805,23 @@ checkable from this repository.
 - **Why:** a subscription that delivers into the line is a standing capability. Treating it as configuration would let a trigger widen what reaches the line without a versioned policy edit.
 - **Reverse:** drop the note; it binds nothing yet.
 - **Confirmed** by the maintainer, 2026-10-11.
+
+### D-R15-01: the boundary R15 was confirmed on
+
+- **Ambiguous:** the R15 entry had no out-of-scope list, no runnable acceptance criteria, and no contract amendments, though it cannot be built without four. It did not say whether the check declared `'fails'` must be `required`, what a declaration on another kind means, or what happens to a run admitted before it.
+- **Chosen:** the entry gains all three, in the same shape as R17's (`DECOMPOSITION.md`, R15). The check declared `'fails'` must be `required`, since an optional check does not hold `verify`'s gate. A declaration on a check of another kind is refused at admission. An acceptance check over a base whose suites cannot be counted refuses, as `verify`'s gate does. A run admitted before R15 does not resume, with no migration. The M2 trigger framework's spec is a separate amendment, not this unit's. Contract amendments land with the unit, following R14 and R2.
+- **Confirmed** by the maintainer, 2026-10-11.
+- **Reverse:** each binding is one rule in `parseManifest` or the base run, removable alone.
+
+### D-R15-02: a behavioral check may declare what it does on the base
+
+- **Found:** an acceptance check is a suite check, so `verify`'s gate refuses one whose suites cannot be counted (`packages/api/src/gate.ts`), and suites are counted only where vitest or jest is declared. With D-R15-01 requiring a required acceptance check declared `'fails'`, a repository with no test framework could never cross `test-design`, which retired the unanalysed-suite path (D-I1a) and the M1 proof's manifest shape, whose reproduction is a behavioral check.
+- **Chosen:** a behavioral check may also declare `onBase`, and a required acceptance or behavioral check declared `'fails'` satisfies the rule. Every declared check runs over the base. An acceptance check still needs a countable suite there, as at `verify`; a behavioral check runs the product rather than a runner, so its exit code alone decides unless it pins `expectedSuiteCount`. A declaration on any other kind is still refused. The hello fixture's reproduction is behavioral, so it keeps no test framework.
+- **Confirmed** by the maintainer, 2026-10-11, over the alternative of refusing every repository without vitest or jest at `test-design`.
+- **Reverse:** narrow `DeclaredCheckSpec` to acceptance alone, and rewrite the unanalysed-suite assertions to expect the `suite-count` refusal.
+
+### D-R15-03: a reproduction that names the file the change writes escalates `integrate`
+
+- **Found:** a path a pinned command names is protected (D-P7-10), and `commandPaths` splits every argument on whitespace and quotes (`packages/api/src/tamper.ts`). A check declared `'fails'` usually reads the file the change must write, so naming it makes every run's change a protected-path touch, which raises the `integrate` exit to a human. The hello fixture's reproduction did exactly this.
+- **Chosen:** no runtime change in R15. The fixture's script builds the file's name rather than spelling it, and the interaction is recorded here. Whether a file named only by a declared check's reading of it should count as a dispatch is D-P7-10's question, and R16, whose reproductions will name their files, is where it bites.
+- **Reverse:** spell the name in the fixture; every fixture run then stops at the `integrate` approval with the path named.

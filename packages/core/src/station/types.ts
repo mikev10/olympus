@@ -61,6 +61,22 @@ export interface ReviewSeat {
   readonly independence: 'independent' | 'reduced';
 }
 
+/**
+ * One declared check that did not do on the base what the locked manifest
+ * declared (D-A-BF-01). `contrary`: it exited 0 where it was declared to
+ * fail, or non-zero where it was declared to pass. `no-result`: it did not
+ * start, which is never counted as a failure. `suite-count`: the base's
+ * suites could not be counted, or counted below `expectedSuiteCount`, so the
+ * runner may never have loaded the test (I5).
+ */
+export interface BaseMismatch {
+  checkId: string;
+  declared: 'fails' | 'passes';
+  /** The check's own exit code on the base, or null when it produced no result. */
+  exitCode: number | null;
+  cause: 'contrary' | 'no-result' | 'suite-count';
+}
+
 /** A locked artifact whose bytes no longer match the lock manifest (I3). */
 export interface TamperedPath { path: string; expected: string; actual: string; }
 
@@ -90,6 +106,12 @@ export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-e
 export type StationRefusal =
   | { ok: false; reason: 'gate-failed'; failed: FailedCheck[]; message: string }
   | { ok: false; reason: 'lock-tamper'; tampered: TamperedPath[]; message: string }
+  /**
+   * The declared checks run over the base at the `test-design` exit did not
+   * do what the manifest declared (D-A-BF-01). `baseRun` is the record the
+   * runtime wrote of that run; `mismatched` is never empty.
+   */
+  | { ok: false; reason: 'base-mismatch'; mismatched: [BaseMismatch, ...BaseMismatch[]]; baseRun: VaultRef; message: string }
   | { ok: false; reason: 'violation'; violations: VaultRef[]; message: string }
   | { ok: false; reason: 'unsafe-above-l1'; components: string[]; message: string }
   | { ok: false; reason: 'capability-missing'; station: StationId; capability: DriverCapability; message: string }

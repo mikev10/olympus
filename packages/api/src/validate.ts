@@ -41,6 +41,12 @@ export type RequestProblemCode =
   | 'not-integer'
   /** No check is required, so no check could fail the gate. */
   | 'none-required'
+  /** An acceptance check does not declare `onBase` as `'fails'` or `'passes'`; there is no default (D-A-BF-01). */
+  | 'undeclared'
+  /** A check of a kind that does not run over the base declares `onBase`, which nothing would act on. */
+  | 'not-declarable'
+  /** No required acceptance or behavioral check is declared `'fails'`, so the run has nothing to show the change did. */
+  | 'none-fails-on-base'
   /** `requestedLevel` is not one of 0, 1, 2, 3. */
   | 'not-a-level'
   /** `approvedCostUsd` is neither a finite number nor null. */
@@ -195,7 +201,12 @@ function commandProblems(command: unknown, at: string, report: Report): void {
   else if (!isNonEmptyString(argv[0])) report(`${at}[0]`, 'empty', `${at}[0] must name the program to run`);
 }
 
-/** The fields the verdict reads: id (unique), command, required (a boolean), expectedSuiteCount (an integer when present). */
+/**
+ * The fields the verdict reads: id (unique), command, required (a boolean),
+ * expectedSuiteCount (an integer when present), and what each acceptance
+ * check, and any behavioral check that declares one, does on the base
+ * (D-A-BF-01, D-R15-02).
+ */
 function checkProblems(checks: unknown, report: Report): void {
   if (!Array.isArray(checks) || checks.length === 0) {
     report('manifest.checks', 'missing', 'manifest.checks must name at least one check; no check is not a verification');
@@ -204,6 +215,7 @@ function checkProblems(checks: unknown, report: Report): void {
   const list: readonly unknown[] = checks;
   const seen = new Set<string>();
   let required = 0;
+  let reproduces = 0;
   list.forEach((check, i) => {
     const at = `manifest.checks[${String(i)}]`;
     if (typeof check !== 'object' || check === null) {
@@ -223,6 +235,15 @@ function checkProblems(checks: unknown, report: Report): void {
     if (count !== undefined && !(typeof count === 'number' && Number.isInteger(count) && count >= 0)) {
       report(`${at}.expectedSuiteCount`, 'not-integer', `${at}.expectedSuiteCount must be a non-negative integer when present`);
     }
+    // I5: no default. A check that may pass on the base is a guard and says so; silence is not a declaration.
+    const declarable = c.kind === 'acceptance' || c.kind === 'behavioral';
+    if (!declarable && c.onBase !== undefined) {
+      report(`${at}.onBase`, 'not-declarable', `${at}.onBase is declared on a check that is neither an acceptance nor a behavioral check; no other kind runs on the base`);
+    } else if (c.kind === 'acceptance' || c.onBase !== undefined) {
+      if (c.onBase !== 'fails' && c.onBase !== 'passes') {
+        report(`${at}.onBase`, 'undeclared', `${at} must declare onBase as 'fails' or 'passes'; there is no default`);
+      } else if (c.onBase === 'fails' && c.required === true) reproduces += 1;
+    }
     // The timeout is the wall clock of the sandbox the check runs in, so it must be one (codex-7).
     const timeout = c.timeoutMs;
     if (!(typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0)) {
@@ -231,6 +252,10 @@ function checkProblems(checks: unknown, report: Report): void {
   });
   if (required === 0) {
     report('manifest.checks', 'none-required', 'manifest.checks: at least one check must be required; a gate no check can fail is not a gate');
+  }
+  // An optional check does not hold verify's gate, so it cannot show what the change did (D-R15-01).
+  if (reproduces === 0) {
+    report('manifest.checks', 'none-fails-on-base', "manifest.checks: at least one required acceptance or behavioral check must declare onBase 'fails'; a run with nothing failing before the change has nothing to show the change did");
   }
 }
 

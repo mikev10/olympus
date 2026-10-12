@@ -77,6 +77,7 @@ describe('S1 finding 1: duplicate check ids', () => {
     expect(bundle.checks.map((c) => [c.checkId, c.exitCode])).toEqual([
       ['x', 0],
       ['y', 3],
+      ['hello-written', 0],
     ]);
     expect(outcome.state.tasks['hello' as TaskId]).toBe('parked');
   });
@@ -84,9 +85,9 @@ describe('S1 finding 1: duplicate check ids', () => {
 
 describe('S1 finding 3: the verification manifest', () => {
   test('3a: a manifest with no checks, or only optional ones, is refused', async () => {
-    await writeChecks(workspace, []);
+    await writeChecks(workspace, [], { asWritten: true });
     await expectInvalid(await start(), 'manifest.checks', 'missing');
-    await writeChecks(workspace, [{ ...ok, required: false }]);
+    await writeChecks(workspace, [{ ...ok, required: false }], { asWritten: true });
     await expectInvalid(await start(), 'manifest.checks', 'none-required');
   });
 
