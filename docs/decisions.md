@@ -3815,16 +3815,18 @@ acceptance tests, and verification manifest already written
 a model do it unrecorded, as the M1 proof did (D-I1b-08). And no seated agent
 runs under instructions Olympus wrote: `CompiledRole.instructions` has a
 renderer in the Claude Code driver and no producer. Each row was checked against
-the code on `v2` at 2dc1f11. No package changes. The amendment adds R19; amends
-R16, R9, and R7 to match, R6 with a note on local models, and R5's dependency
-name; adds R19 to F1's out-of-scope list; and records a gap for the role
-compiler.
+the code on `v2` at 2dc1f11. No package changes. The amendment adds R19 and its
+row; amends R15 (base results per draft hash, and a drafted manifest's
+refusals at the `test-design` exit), R16 and D-A-BF-02, R9, and R7 to match,
+with R7's and R16's dependency rows; adds a note on local models to R6 and
+renames R5's dependency; adds R19 to F1's out-of-scope list; and records a gap
+for the role compiler.
 
 ### D-A-DS-01: agents draft the spec and the acceptance tests, and policy decides who approves, as R19 in M2
 
 - **Ambiguous:** F1 says `test-design` is black-box and the spec is locked, and D-A-I1-03 had a human write both. It could be read as requiring a person to author them.
 - **Chosen:** a unit that seats a drafter at `spec` and at `test-design` when the run is admitted without that artifact. One hash binds a draft: the critic reads the recorded bytes, the base run runs over them, and the critic's result, the base record, and any approval name that hash; the approved bytes are written into the artifacts tree and locked against it. The test drafter's sandbox holds only the locked spec, with no tool that reads outside it and no egress beyond the model API, and after a base-run refusal it learns only the check's id, declaration, and exit code. Who approves is the person's policy under the line's floors (D-A-DS-04). Admitting the artifacts directly stays valid. The contract amendments are listed in R19.
-- **Must hold:** I3, because the drafter is never the builder's seat, everything about a draft binds to its hash, and the lock is taken before `build`. I1, because a drafter writes only to its workspace. I7, because a trigger's payload reaches the spec drafter only as extracted fields, and no base output reaches the black-box seats. I2, because a draft is a claim until approved and locked.
+- **Must hold:** the intent comes only through the human principal's channel, never from a trigger's payload, as D-A-DS-02 holds for notes. I3, because the drafter is never the builder's seat, everything about a draft binds to its hash, and the lock is taken before `build`. I1, because a drafter writes only to its workspace. I7, because a trigger's payload reaches the spec drafter only as extracted fields, and no base output reaches the black-box seats. I2, because a draft is a claim until approved and locked.
 - **Accepted:** the spec drafter has no family constraint against the builder. D-A-I1-03's concern was a model judging itself through tests it wrote. For the spec, the independent critic and, whenever a floor requires one, the person who approves it are the control.
 - **Rejected:** a drafter at `plan` in the same unit. The task graph is R5's question, and R5 is M3.
 - **Why:** writing the spec and tests by hand is the step most likely to be skipped or done badly. A drafted, recorded, approved artifact is better evidence than a hand-written one nobody recorded.
@@ -3880,8 +3882,8 @@ compiler.
 ### D-A-DS-07: a scoped exception to D-P4-07 for R19's critics
 
 - **Ambiguous:** D-P4-07 and R9 keep any model verdict from gating the line until the M3 panel. Under D-A-DS-04, a clean critic result is one condition for `auto` at L2, so its absence of findings takes part in the decision.
-- **Option A, chosen with the maintainer:** a written exception, scoped to R19's two drafting gates. The critic's result is a list of findings with no severity, so no model grades its own finding. Any finding sends the draft back; a missing, malformed, or unreadable result counts as a finding (I5). A clean result approves nothing by itself: it is one condition among others the runtime checks itself, under a policy a person wrote, at L2 only. R9's text names the exception.
+- **Option A, chosen with the maintainer:** a written exception, scoped to R19's two drafting gates. The critic's result is a list of findings with no severity, so no model grades its own finding. Any finding sends the draft back; a missing, malformed, or unreadable result counts as a finding (I5). A clean result approves nothing by itself: it is a necessary condition among others the runtime checks itself, under a policy a person wrote, at L2 only, never a sufficient one. R9's text names the exception.
 - **Option B, rejected:** keep every drafted artifact `human-required` until the M3 panel, with the critic advisory.
-- **Must hold:** the exception does not extend to `review`, `integrate`, or any later station. The critic is always a different family from the drafter when its result counts (D-A-DS-06).
+- **Must hold:** I2, which D-P4-07 rests on. Status stays the runtime's: the draft's approval is derived from the policy cell, the level, and conditions the runtime evaluated, and the critic's clean result is necessary for `auto`, never sufficient. The exception does not extend to `review`, `integrate`, or any later station. A critic that is not a different family from the drafter is advisory at every level: its findings are shown to the person and change nothing else (D-A-DS-06).
 - **Reverse:** Option B.
 - **Confirmed** by the maintainer, 2026-10-12.

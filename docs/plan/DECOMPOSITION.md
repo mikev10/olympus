@@ -825,8 +825,10 @@ Today independence is checked at one seat and by model family alone:
 records reduced independence at L0–L2, and the review seat sees only its
 grants, read-only, with none of the author's narrative (P6). Nothing checks
 any other pair. This unit writes the matrix and enforces every row:
-`test-design` and `build` in different families, which is the green-on-green
-defense F1 defers to M2; an identity that authored a change never reviews it,
+`test-design` and `build` independent, which is the green-on-green defense F1
+defers to M2, delivered by R19 under its rule (a test drafter that is not a
+different family from the builder forces a person at L2 and is refused at
+L3); an identity that authored a change never reviews it,
 where identity is role, driver, and model, not family alone; a review seat
 never writes (P6); an approval never comes from the run's agent (P9); the merge
 credential never enters a sandbox (I1). Each row is a registry assertion that
@@ -836,13 +838,12 @@ rules: read-only, its family checked against every author as `seatReviewer`
 checks it (refused at L3, reduced independence recorded below), and granted
 what the review contract grants, `locked-spec` (with R17's security part),
 `diff`, and `evidence-bundle`, where R17's findings arrive, never the author's
-narrative. The `test-design` and `build` row is delivered by R19, with the
-independence grades it records; this unit's matrix lists it. It needs a second
-driver, because one family can only ever record reduced independence. A review
-whose verdict gates the line is the M3 panel's, not this unit's: until then a
-verdict is recorded and not interpreted (D-P4-07), and the human at
-`integrate` reads it. R19's critics are the one scoped exception, and their
-result can only withhold (D-A-DS-07).
+narrative. This unit needs a second driver, because one family can only ever
+record reduced independence. A review whose verdict gates the line is the M3
+panel's, not this unit's: until then a verdict is recorded and not interpreted
+(D-P4-07), and the human at `integrate` reads it. R19's critics are the one
+scoped exception: a clean result from one is a necessary condition for `auto`
+at L2, never a sufficient one (D-A-DS-07).
 
 ### R10 — Trust ratchet
 
@@ -1231,9 +1232,11 @@ is a separate seat from the builder, and what it drafts is locked before
 Binding:
 
 - **Two drafting seats, chosen at admission.** A run is admitted with its spec,
-  or with an intent and no spec. The intent is free text from the principal
-  starting the run, held in the Vault and granted to the spec drafter. A run
-  with neither is refused at admission. A run admitted without a spec seats
+  or with an intent and no spec. The intent is free text that only the human
+  principal's channel supplies (P9), never a trigger's payload; a trigger can
+  start a spec-less run only once a person supplies its intent. It is held in
+  the Vault and granted to the spec drafter. A run with neither is refused at
+  admission. A run admitted without a spec seats
   the spec drafter; one admitted without acceptance tests seats the test
   drafter. Absence is an explicit state of the admission record, never an
   omitted field. A run admitted with every artifact seats no drafter and runs
@@ -1248,9 +1251,9 @@ Binding:
   run's artifacts tree, records a new base digest beside the admitted one, and
   locks against the approved hash. Every later station re-verifies that lock
   as it re-verifies an admitted one today (I3)
-- **The spec drafter.** Granted the intent and `base-repo-readonly`. Under a
-  trigger other than the human one, a trigger's own payload reaches it only as
-  extracted fields (I7). It drafts every part the spec shape requires, R17's
+- **The spec drafter.** Granted the intent and `base-repo-readonly`. A
+  trigger's own payload reaches it only as extracted fields, beside the
+  person's intent (I7). It drafts every part the spec shape requires, R17's
   security part included, and two more. What the acceptance checks need to
   run: the test command, framework, and the public interface a check calls,
   which is the test drafter's only view of the repository. And its assumptions
@@ -1266,12 +1269,14 @@ Binding:
   verification manifest is admitted as today, and `verify` runs both
 - **The base run comes before approval.** R15's base run runs each test draft
   over the base before anyone is asked to approve it. A check that does not do
-  what it declared refuses that draft and counts as a failed attempt. The next
-  attempt learns only the check's id, its declaration, and its exit code;
-  neither the drafter nor the critic is ever granted base output, which carries
-  the repository. This amends R15: base results are written once per draft
-  hash rather than once per run, and for a drafted manifest R15's declaration
-  refusals happen at the `test-design` exit, not at admission
+  what it declared, does not start, or enumerates short of its suite count
+  refuses that draft and ends the attempt. The next attempt learns only the
+  check's id, its declaration, and either its exit code or a cause from a fixed
+  set (did not start, suite short); neither the drafter nor the critic is ever
+  granted base output, which carries the repository. This amends R15: base
+  results are written once per draft hash rather than once per run, and for a
+  drafted manifest every refusal R15 makes of a manifest at admission happens
+  at the `test-design` exit instead
 - **A critic reads every draft.** Each drafting station seats a critic: a
   separate seat, never the drafter's model, granted what the drafter was
   granted plus the recorded draft, and nothing writable. At `test-design` it
@@ -1282,22 +1287,29 @@ Binding:
   questions are honest; for tests, whether each follows the spec, stays
   black-box, and covers the spec's cases. Its result is a list of findings with
   no severity: any finding at all sends the draft back to the drafter as text,
-  and a missing, empty-of-structure, or unreadable result counts as a finding
-  (I5). The rubric judges, so R11 never proposes changes to it
-- **The critic can only withhold.** A finding sends a draft back or to a person.
-  A clean result approves nothing by itself: it is one of several conditions,
-  every other one the runtime's own, under a policy a person wrote. This is a
-  scoped exception to D-P4-07, for these two gates only (D-A-DS-07)
+  and a missing, malformed, or unreadable result counts as a finding (I5). The
+  rubric judges, so R11 never proposes changes to it. A critic that is not a
+  different family from the drafter is advisory at every level: its findings
+  are recorded and shown to the person the draft goes to, and they neither send
+  the draft back nor end an attempt. Where no model other than the drafter's is
+  available, no critic is seated, the condition is recorded as failed, and the
+  draft goes to a person
+- **The critic's result is necessary, never sufficient.** A finding sends a
+  draft back or to a person. A clean result approves nothing by itself: it is
+  one of several conditions, every other one the runtime's own, under a policy
+  a person wrote. This is a scoped exception to D-P4-07, for these two gates
+  only (D-A-DS-07)
 - **Independence is graded and recorded.** Two seats compare at one of three
   grades, from the models the runtime resolved: a *different family*, a
   *different model* in the same family, or the *same model*. Every compared
   pair records its grade, the review seat's included. Only a different family
   is independent, and only a different family satisfies any condition below;
-  the other grades are recorded so R2 can report outcomes per grade
-  (D-A-DS-06)
+  the other grades are recorded, and this unit adds the grade as a key to R2's
+  rates so outcomes are reported per grade (D-A-DS-06)
 - **Policy decides who approves, under the line's floors.** The person writes
   policy, and its cell for each station and level stands as today. When the
-  admission record marks an artifact drafted, the line applies a floor in the
+  admission record marks that station's artifact drafted, the line applies a
+  floor in the
   effective approval, as it applies `integrate`'s: the exit is
   `human-required` unless the level is L2, the cell is `auto`, and every
   condition for that station holds. At `spec`: the shape check passes, the
@@ -1312,16 +1324,21 @@ Binding:
   amendment (M3). A test drafter that is not a different family from the
   builder is refused at L3, as `seatReviewer` refuses a same-family reviewer.
   This is R9's `test-design` and `build` row, delivered by this unit with the
-  grades
+  grades. A critic that is not a different family is advisory at L3 as at
+  every other level, and refuses nothing, since the exit already goes to a
+  person
 - **Rejection.** The critic or a person may send a draft back. A person's
   rejection at `spec` may carry notes, which reach the next attempt as the
   approver's words in the request's variable suffix, never in the stable
   prefix or a role. At `test-design`, a person's rejection carries only a
   reason from a fixed set, because an approver who has seen the repository
   would otherwise be a channel around the black-box (D-A-DS-02). Each station
-  allows three attempts. When they run out on critic findings or base-run
-  refusals, the latest draft goes to a person. When a person rejects the
-  third, the run parks, terminally, recorded in P14's record with its cause
+  allows three attempts, one counter for all of them: an attempt ends when its
+  draft is sent back, by an independent critic's finding, a base-run refusal,
+  or a person's rejection. If the third attempt's draft has a finding or a
+  refusal, it goes to a person rather than back. If a person rejects the third
+  attempt's draft, the run parks, terminally, recorded in P14's record with its
+  cause
 - **Recorded and costed.** For each draft: its bytes and hash, the role and its
   version, the model, the rubric's hash, the critic's findings, the grade of
   each compared pair, the base results, the approver, and any notes or reason,
@@ -1333,8 +1350,9 @@ Binding:
 
 **Contract amendments, owed by the unit's pull request:**
 - `RequestedArtifacts` and `AdmissionRecord.artifacts`: the spec and the
-  acceptance tests become each either supplied or explicitly drafted; both
-  gain an acceptance manifest, and `RunRequest` gains the intent
+  acceptance tests become each either supplied or explicitly drafted; the
+  admission record gains an acceptance manifest, also supplied or drafted; and
+  `RunRequest` gains the intent
 - `AgentStation` gains `spec` and `test-design`; their contracts gain the
   capability a drafter requires, a write boundary of the draft's paths,
   `maxIterations: 3`, and a tier. `contractTableProblems` accepts them as agent
@@ -1342,13 +1360,19 @@ Binding:
 - a critic seat at each, with its own contract shape: at `test-design` it is
   granted the locked spec and the draft tests, which the locked-spec-alone rule
   refuses for any other seat. `ContextGrant` gains grants for the intent, a
-  recorded draft, and the rubric. `ComponentGraph` names the driver that seats
-  each drafter and each critic
+  recorded draft, and the rubric. A retry's inputs are typed parts of the
+  request's variable suffix: critic findings, a base refusal (check id,
+  declaration, exit code or cause), a rejection reason at `test-design`, and
+  notes at `spec`; the locked-spec-alone rule admits those parts and nothing
+  else. `ComponentGraph` names the driver that seats each drafter and each
+  critic
 - `effectiveApproval` gains the drafted-artifact floor; policy is unchanged
 - `ApprovalRequest` and `ApprovalGrant` carry the draft hash, and `transition`
   matches a grant by key and hash. A rejection carries notes at `spec` or a
   reason at `test-design`. The enforcement record gains `approval-rejected`,
-  and `approval-granted` carries the hash
+  `draft-sent-back` (with the critic's findings or the base refusal), and
+  `draft-floor-applied` (naming each failed condition); `approval-granted`
+  carries the hash
 - `ParkCause` gains `drafts-rejected`, and the `parked` refusal carries the
   station when it parks a draft, which has no task
 - run state records drafter and critic attempts before `plan`, whose tasks
@@ -1356,11 +1380,13 @@ Binding:
 - `Vault` gains operations for intents, drafts, critic results, and the rubric;
   I1's registry entry, which asserts the closed operation set, is updated in
   the same pull request
-- `recordBaseRun` becomes write-once per draft hash
+- `recordBaseRun` becomes write-once per draft hash, and the base record
+  carries the draft hash
 - `ReviewSeat.independence` becomes the grade, `seatReviewer` returns it, and
   the line's choice of seat reads it; L3's refusal of a same-family reviewer is
   unchanged
 - `worstCaseCost` includes the drafter and critic seats
+- R2's rates gain the independence grade as a key
 - the spec shape gains the run-requirements part and the
   assumptions-and-open-questions part
 
@@ -1397,8 +1423,11 @@ result with a failed base run does not approve; the test drafter's sandbox has
 no repository and no egress beyond the model API; after a base-run refusal the
 next attempt sees only the check id, declaration, and exit code; a test
 drafter of a builder's family forces `human-required` at L2 and is refused at
-L3; notes reach the next spec attempt, and a `test-design` rejection carries no
-free text; three person rejections park the run; a run admitted with all its
+L3; a critic of the drafter's family neither sends a draft back nor ends an
+attempt; notes reach the next spec attempt, and a `test-design` rejection
+carries no free text; a third attempt sent back by a critic goes to a person,
+and a third attempt a person rejects parks the run; a trigger cannot supply an
+intent; a run admitted with all its
 artifacts seats no drafter.
 
 **Why M2:** it needs R15's base run, R17's security part, and the role compiler
