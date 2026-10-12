@@ -1,3 +1,58 @@
+# External review of R15, codex, 2026-10-11
+
+An adversarial pre-merge review of R15 (acceptance checks run on the base
+before build): the base run and the `test-design` exit in `line.ts`, the
+refusal rule in `base.ts`, the `onBase` declarations in `parseManifest`, the
+write-once base record in both vaults, the fixtures, and the conformance
+entries that state those properties. One of two reviews run from the same
+prompt and bundle; the other is `2026-10-11-R15-base-run-review-gemini.md`.
+Both are triaged in `2026-10-11-R15-base-run-triage.md`, which cites this
+review's single numbered finding as `codex-1`, and its unnumbered remark on
+base-record shape validation as `codex-obs`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 95.3 s. Ingestion `complete`: 80,478
+  input tokens against a floor of 52,399. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `051231ba3c2b370e95a5d460bb4d17f112c4a7e6dee6b4c2c54e517673cd17ae`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-1 (a suite count taken from the tree's
+  inventory stands in for tests the command never ran) was not raised by gemini
+  as such. It shares with gemini-4 the built-up file name that keeps a command's
+  target out of protected-path analysis, and with gemini-1 the point that a
+  recorded exit code is not an executed test. `codex-obs` (the base record's
+  reader does not check `suiteCount` or a finite exit code) has no gemini
+  counterpart; gemini-5 is about a different cast.
+- **Date:** 2026-10-11 (run started 2026-10-12T11:29Z).
+- **Bundle:** `2026-10-11-R15-base-run-review-bundle.txt`, SHA-256
+  `12ac8e51720e701a0f2d53b4b83faf953ac013ee7deff49d7bb2a5b9ad48e248`, base
+  `2dc1f11` (`reviewed/R2`), head `3f61372` ("R15: Acceptance checks run on the
+  base before build"). The range is that one commit. It held the full contents
+  or whole-function diffs of 33 of the 35 changed paths; the two documentation
+  paths (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`) were excluded, and
+  so was every unchanged file. Prompt: `2026-10-11-R15-base-run-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior project
+  context and performed no lookups, and that it neither executed tests nor
+  checked the bundle's hash. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 (codex-1), 2 (the `hello-exit-zero`
+  fixture check), 3 (missing results fail closed), 4 (the unvalidated base
+  record shape and casts), 6 (sound mechanisms) and 7 (the closing paragraph:
+  recorded exit codes, executed tests and a fixed defect are different
+  properties) were answered. Item 5, configuration satisfied without doing what
+  it appears to do, was not answered under its own heading; codex-1 bears on it.
+- **Citations:** line numbers are positions in the bundle's new-side hunks,
+  not in the repository, and are treated as hints. Each was re-located at the
+  cited construct during triage.
+
+---
+
 BASE: 2dc1f11  
 HEAD: 3f61372  
 packages/vault/test/stub.test.ts  

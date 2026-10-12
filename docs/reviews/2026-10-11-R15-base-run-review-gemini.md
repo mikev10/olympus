@@ -1,3 +1,50 @@
+# External review of R15, gemini, 2026-10-11
+
+An adversarial pre-merge review of R15 (acceptance checks run on the base
+before build): the base run and the `test-design` exit in `line.ts`, the
+refusal rule in `base.ts`, the `onBase` declarations in `parseManifest`, the
+write-once base record in both vaults, the fixtures, and the conformance
+entries that state those properties. One of two reviews run from the same
+prompt and bundle; the other is `2026-10-11-R15-base-run-review-codex.md`.
+Both are triaged in `2026-10-11-R15-base-run-triage.md`, which cites this
+review's findings as `gemini-1` to `gemini-6`, as the reply numbers them; its
+seventh section lists sound mechanisms and is not a finding.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools; `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 577.0 s. Ingestion `complete`: 75,264
+  prompt tokens against a floor of 52,399. Integrity `verified`: the reply
+  echoes every required bundle marker. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `fb322887da5da147d62a887e9081ef62c94632a12611462148d11508ecfd5c7b`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-4 (a built-up file name escapes
+  protected-path analysis) uses the same construction as codex-1, which codex
+  raised for a different consequence. gemini-1 (an exit code is not proof a test
+  ran for the right reason) is close to codex's closing remark on item 7.
+  gemini-2, gemini-3, gemini-5 and gemini-6 were raised by gemini alone.
+- **Date:** 2026-10-11 (run started 2026-10-12T11:30Z).
+- **Bundle:** `2026-10-11-R15-base-run-review-bundle.txt`, SHA-256
+  `12ac8e51720e701a0f2d53b4b83faf953ac013ee7deff49d7bb2a5b9ad48e248`, base
+  `2dc1f11` (`reviewed/R2`), head `3f61372` ("R15: Acceptance checks run on the
+  base before build"). The range is that one commit. It held the full contents
+  or whole-function diffs of 33 of the 35 changed paths; the two documentation
+  paths (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`) were excluded, and
+  so was every unchanged file. Prompt: `2026-10-11-R15-base-run-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context and
+  performed no lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** every numbered item was answered: 7 (gemini-1),
+  3 (gemini-2), 5 (gemini-3), 2 (gemini-4), 4 (gemini-5, gemini-6), 6 (its
+  seventh section), and 1 through gemini-2 to gemini-4.
+- **Citations:** line numbers are positions in the bundle's new-side hunks,
+  not in the repository, and are treated as hints. Each was re-located at the
+  cited construct during triage.
+
+---
+
 BASE: 2dc1f11
 HEAD: 3f61372
 packages/vault/test/stub.test.ts
