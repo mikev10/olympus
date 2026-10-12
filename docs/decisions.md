@@ -3713,13 +3713,13 @@ D-R1-09 to D-R1-15 record the seven questions the maintainer confirmed at the st
 
 - **Found:** the external review (triage, codex-3). Rolled yield is the product over stations that have attempts, and only `build` writes evidence bundles, so at M1 it equals build's first-pass yield. Its `no-sample` guard cannot fire, because a `Tally` cell exists only once it has a sample.
 - **Chosen:** recorded, not changed. The spec defines rolled yield as the product of the per-station yields and names no required set of stations, so choosing one is a spec decision, not a review fix. It becomes a line-wide figure when `review` records attempts.
-- **Owner:** an issue to be opened with this pull request.
+- **Owner:** issue #37.
 
 ### D-R2-10: the R1 negative fixtures accept an `indeterminate` probe (owned by R1)
 
 - **Found:** the external review (triage, codex-6), in `I8.ceiling-bearing-probe-check-is-exercised` (D-R1-24). That entry fails only on `supported` or a missing result, so a check that never ran, such as a gitleaks start-up failure, satisfies the secret fixture.
 - **Chosen:** not changed on R2's branch. D-R1-24's stated claim, that a check replaced by an unconditional `supported` is caught, still holds. Asserting `absent` with the evidence naming the intended failure is a strengthening of R1's entry.
-- **Owner:** R1, as an amendment; an issue to be opened with this pull request.
+- **Owner:** R1, as an amendment; issue #38.
 
 ### D-R2-11: the bounds assume independent trials (owned by R8)
 
