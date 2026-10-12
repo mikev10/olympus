@@ -598,9 +598,9 @@ order between them is settled before any of them is picked up.
 | R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | — |
-| R5 | Goal decomposition | M3 | R4, M2 role prompts | — |
+| R5 | Goal decomposition | M3 | R4, role compiler | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
-| R7 | False-done benchmark | M2 | P6, P7, I1, R17 | — |
+| R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | — |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
 | R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
@@ -609,9 +609,10 @@ order between them is settled before any of them is picked up.
 | R13 | Nightly review | M2 | P14, R2, R9, R17, M2 triggers | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
-| R16 | Bug-fix intake | M2 | R15, P14, M2 triggers | — |
+| R16 | Bug-fix intake | M2 | R15, R19, P14, M2 triggers | — |
 | R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
+| R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, role compiler | — |
 
 ### R1 — Readiness
 
@@ -760,14 +761,21 @@ waiting on a driver per vendor. Binding:
   endpoint without tool calling, or without usage figures, declares the gap,
   and `unavailableControls()` refuses the levels that need it
 
+A local open-weight model behind such an endpoint is the expected way for a
+user on one provider to seat a different-family critic or reviewer at no cost
+per token (R19, D-A-DS-06). Its family is the operator's declaration like any
+other, and a local endpoint's usage figures are its own, so cost recorded for
+it is zero only where the endpoint declares none.
+
 ### R7 — False-done benchmark
 
 The measurement the claim needs. A fixed corpus of tasks, each seeded with one
 known false-done — a skipped test, a weakened assertion, an edited acceptance
 test, a suite that was never run under a claim that it passed, a hard-coded
 expected output, a change outside the granted globs, a committed credential,
-a credential committed under an added scanner suppression (R17) — beside clean
-controls that should pass. Each is run through the line and through the same driver
+a credential committed under an added scanner suppression (R17), a vague or
+untestable spec, a spec that reaches beyond its intent, and tests that do not
+follow their spec (R19's critic) — beside clean controls that should pass. Each is run through the line and through the same driver
 alone, and the unit reports the detection rate per item of P7's taxonomy, or
 per refusal cause for an item P7 does not detect, and
 the false-refusal rate on the controls, each with its sample size and bound
@@ -828,10 +836,13 @@ rules: read-only, its family checked against every author as `seatReviewer`
 checks it (refused at L3, reduced independence recorded below), and granted
 what the review contract grants, `locked-spec` (with R17's security part),
 `diff`, and `evidence-bundle`, where R17's findings arrive, never the author's
-narrative. It needs a second driver, because one family can only ever record
-reduced independence. A review whose verdict gates the line is the M3 panel's,
-not this unit's: until then a verdict is recorded and not interpreted
-(D-P4-07), and the human at `integrate` reads it.
+narrative. The `test-design` and `build` row is delivered by R19, with the
+independence grades it records; this unit's matrix lists it. It needs a second
+driver, because one family can only ever record reduced independence. A review
+whose verdict gates the line is the M3 panel's, not this unit's: until then a
+verdict is recorded and not interpreted (D-P4-07), and the human at
+`integrate` reads it. R19's critics are the one scoped exception, and their
+result can only withhold (D-A-DS-07).
 
 ### R10 — Trust ratchet
 
@@ -1016,8 +1027,9 @@ report is free text written by whoever filed it, so it is the payload I7 exists
 for. Its steps to reproduce cannot pass through the extractor either: the
 field schemas the trigger framework owes (`I7.extracted-field-schemas`) cap
 length and character class, which is the point of them. So no model reads a
-report. A person turns it into a spec, and the line runs from there
-(D-A-BF-02). Binding:
+report. A person reads it and writes what only the report holds; R19's
+drafter turns that into a spec, and the line runs from there (D-A-BF-02,
+D-A-DS-05). Binding:
 
 - bug fix is a task template the policy pre-declares, entered at `spec`. A
   report may arrive through the human trigger, which exists today, or through
@@ -1025,23 +1037,29 @@ report. A person turns it into a spec, and the line runs from there
   extracted fields are the issue's reference, labels from an allowlist the
   policy names, and the author's trust. No field carries the title, body, or
   comments
-- the `spec` exit for this template is `human-required` at every level, and
-  admission refuses a policy that sets it otherwise (I4). The spec is written
-  by a person who read the report. Whether the report was workable is that
-  person's call, never a model's
-- the spec has a fixed shape with required parts: the steps that show the
-  defect, what happens, what should happen, where in the product it shows,
-  and what the check needs to run it, such as data, an account, or a service.
-  A spec missing any part is refused at `spec`, naming the part. This is where
-  a vague report stops: it cannot become a spec, so nothing is built from it
+- the person who read the report writes the run's intent, with three required
+  parts: the steps that show the defect, what happens, and what should happen.
+  These are the facts only the report holds, and a person carries them across,
+  through the human principal's channel. A tracker event contributes only its
+  reference, joined to that intent; the parts are the principal's text, never a
+  field the extractor carries.
+  Whether the report was workable is that person's call, never a model's: a
+  report no one can write those parts for stops here, and nothing is built
+  from it. Admission refuses a bug-fix intent missing any part, naming it
+- R19's spec drafter writes the rest from the intent and the repository:
+  where in the product the defect shows, what the check needs to run it, such
+  as data, an account, or a service, and R17's security part. It never sees
+  the report. The spec has a fixed shape with every part above required, and a
+  spec missing any part is refused at `spec`, naming the part. Who approves
+  the spec is R19's rule: the policy a person wrote, under R19's floors
 - `test-design` for this template requires at least one acceptance check that
   follows the spec's steps and is declared `'fails'` on the base (R15). The
   runtime running that check over the unchanged tree is the reproduction. A
   defect the check cannot show is refused at the `test-design` exit rather
   than fixed on a guess
-- a model may draft the acceptance check at `test-design`. It is granted the
-  locked spec only, as today, so it never sees the report. Under R9 it is a
-  different family from the model that builds the fix
+- R19's test drafter writes the acceptance check. It is granted the locked
+  spec only, so it never sees the report, and it is compared with the model
+  that builds the fix at R19's grades
 - a report that never becomes a spec, and a spec refused at `spec` or at the
   `test-design` exit, is recorded in P14's record with its cause, so R2 can
   count reports that went nowhere and why
@@ -1056,7 +1074,7 @@ output is untrusted too, and it reaches a person, never a prompt.
 
 **Conformance:** a tracker event whose extractor would carry body text is
 refused; no driver request in a bug-fix run contains any of the report's text;
-the `spec` exit refuses without a human grant at every level; a spec missing a
+a bug-fix intent missing a part is refused at admission; a spec missing a
 required part is refused, naming it; `test-design` with no acceptance check
 declared `'fails'` is refused.
 
@@ -1191,6 +1209,204 @@ written by the runtime and never a model's account, and R2 adds it as a key.
 A run admitted before it lands has no stack and is reported under `unrecorded`,
 never guessed. Found by R2 (D-R2-01).
 
+### R19 — Drafting at `spec` and `test-design`
+
+Today the spec, the acceptance tests, the verification manifest, and the task
+graph are supplied at admission (`RequestedArtifacts`, every field required),
+and `spec` and `test-design` are runtime stations that lock what was admitted.
+Whoever starts a run has to write them first, outside the line. For the M1
+proof Claude drafted them in a session and the maintainer approved them
+unchanged (D-I1b-08): the drafting happened, but nothing in the line recorded
+who drafted what, under which instructions, or what was approved. This unit
+moves the drafting into the line. An agent drafts, an independent critic reads
+the draft, the policy a person wrote decides whether a person must also approve
+it under floors the runtime applies, and the runtime locks the exact bytes
+approved (D-A-DS-01, D-A-DS-04).
+
+Nothing in the invariants requires a person to write either artifact. I3 asks
+only that an agent never be judged by an artifact it can write, so the drafter
+is a separate seat from the builder, and what it drafts is locked before
+`build` starts.
+
+Binding:
+
+- **Two drafting seats, chosen at admission.** A run is admitted with its spec,
+  or with an intent and no spec. The intent is free text from the principal
+  starting the run, held in the Vault and granted to the spec drafter. A run
+  with neither is refused at admission. A run admitted without a spec seats
+  the spec drafter; one admitted without acceptance tests seats the test
+  drafter. Absence is an explicit state of the admission record, never an
+  omitted field. A run admitted with every artifact seats no drafter and runs
+  as today
+- **One hash binds everything about a draft.** The runtime reads the draft from
+  the drafter's workspace, hashes the bytes it read, and records them in the
+  Vault. The critic reads those recorded bytes; the base run runs over the
+  admitted base plus those recorded bytes; and the critic's result, the base
+  record, and any approval each name that hash. A grant whose hash differs
+  from the draft being locked is refused, so an approval of one draft never
+  clears another. On approval the runtime writes the approved bytes into the
+  run's artifacts tree, records a new base digest beside the admitted one, and
+  locks against the approved hash. Every later station re-verifies that lock
+  as it re-verifies an admitted one today (I3)
+- **The spec drafter.** Granted the intent and `base-repo-readonly`. Under a
+  trigger other than the human one, a trigger's own payload reaches it only as
+  extracted fields (I7). It drafts every part the spec shape requires, R17's
+  security part included, and two more. What the acceptance checks need to
+  run: the test command, framework, and the public interface a check calls,
+  which is the test drafter's only view of the repository. And its assumptions
+  and open questions: each point the intent left undecided, and what it chose.
+  A drafter never settles an open question itself
+- **The test drafter is black-box in fact, not only in its prompt.** It is
+  granted the locked spec alone. Its workspace starts empty except for the
+  locked spec, it is granted no tool that reads outside the workspace, and its
+  egress is the model API alone. It writes the acceptance tests and an
+  acceptance manifest: one `CheckSpec` per test, each declaring what it does on
+  the base (R15), behavioral checks included, and one denial check for each
+  authorization rule the spec's security part names (R17). The rest of the
+  verification manifest is admitted as today, and `verify` runs both
+- **The base run comes before approval.** R15's base run runs each test draft
+  over the base before anyone is asked to approve it. A check that does not do
+  what it declared refuses that draft and counts as a failed attempt. The next
+  attempt learns only the check's id, its declaration, and its exit code;
+  neither the drafter nor the critic is ever granted base output, which carries
+  the repository. This amends R15: base results are written once per draft
+  hash rather than once per run, and for a drafted manifest R15's declaration
+  refusals happen at the `test-design` exit, not at admission
+- **A critic reads every draft.** Each drafting station seats a critic: a
+  separate seat, never the drafter's model, granted what the drafter was
+  granted plus the recorded draft, and nothing writable. At `test-design` it
+  is as black-box as the drafter. It checks the draft against a rubric a person
+  writes, held in the Vault beside policy, read at admission and kept for the
+  run: for a spec, whether each statement is testable, whether the intent is
+  covered and nothing beyond it, and whether the security part and the open
+  questions are honest; for tests, whether each follows the spec, stays
+  black-box, and covers the spec's cases. Its result is a list of findings with
+  no severity: any finding at all sends the draft back to the drafter as text,
+  and a missing, empty-of-structure, or unreadable result counts as a finding
+  (I5). The rubric judges, so R11 never proposes changes to it
+- **The critic can only withhold.** A finding sends a draft back or to a person.
+  A clean result approves nothing by itself: it is one of several conditions,
+  every other one the runtime's own, under a policy a person wrote. This is a
+  scoped exception to D-P4-07, for these two gates only (D-A-DS-07)
+- **Independence is graded and recorded.** Two seats compare at one of three
+  grades, from the models the runtime resolved: a *different family*, a
+  *different model* in the same family, or the *same model*. Every compared
+  pair records its grade, the review seat's included. Only a different family
+  is independent, and only a different family satisfies any condition below;
+  the other grades are recorded so R2 can report outcomes per grade
+  (D-A-DS-06)
+- **Policy decides who approves, under the line's floors.** The person writes
+  policy, and its cell for each station and level stands as today. When the
+  admission record marks an artifact drafted, the line applies a floor in the
+  effective approval, as it applies `integrate`'s: the exit is
+  `human-required` unless the level is L2, the cell is `auto`, and every
+  condition for that station holds. At `spec`: the shape check passes, the
+  spec carries no open question, and an independent critic returned no
+  finding for this hash. At `test-design`: the base run passed for this hash,
+  an independent critic returned no finding for it, and the test drafter is a
+  different family from every model the build driver can resolve for the run's
+  tiers, escalation included (R14). Each failed condition is recorded by name.
+  An open question routes to a person and its absence approves nothing: the
+  drafter can only lower its own draft's path. Policy validation is unchanged
+- **At L3.** A drafted artifact's exit is `human-required` until L3's own
+  amendment (M3). A test drafter that is not a different family from the
+  builder is refused at L3, as `seatReviewer` refuses a same-family reviewer.
+  This is R9's `test-design` and `build` row, delivered by this unit with the
+  grades
+- **Rejection.** The critic or a person may send a draft back. A person's
+  rejection at `spec` may carry notes, which reach the next attempt as the
+  approver's words in the request's variable suffix, never in the stable
+  prefix or a role. At `test-design`, a person's rejection carries only a
+  reason from a fixed set, because an approver who has seen the repository
+  would otherwise be a channel around the black-box (D-A-DS-02). Each station
+  allows three attempts. When they run out on critic findings or base-run
+  refusals, the latest draft goes to a person. When a person rejects the
+  third, the run parks, terminally, recorded in P14's record with its cause
+- **Recorded and costed.** For each draft: its bytes and hash, the role and its
+  version, the model, the rubric's hash, the critic's findings, the grade of
+  each compared pair, the base results, the approver, and any notes or reason,
+  all in the Vault. A draft is a claim until it is approved and locked (I2).
+  Drafter and critic calls count in the run's worst-case cost, so the figure
+  shown at admission covers them (P13, D-P9-03). A draft approved without a
+  person is recorded as such, so a later refusal or revert of its change is
+  attributable to it (R2, R8)
+
+**Contract amendments, owed by the unit's pull request:**
+- `RequestedArtifacts` and `AdmissionRecord.artifacts`: the spec and the
+  acceptance tests become each either supplied or explicitly drafted; both
+  gain an acceptance manifest, and `RunRequest` gains the intent
+- `AgentStation` gains `spec` and `test-design`; their contracts gain the
+  capability a drafter requires, a write boundary of the draft's paths,
+  `maxIterations: 3`, and a tier. `contractTableProblems` accepts them as agent
+  stations and keeps `test-design`'s locked-spec-alone rule for the drafter
+- a critic seat at each, with its own contract shape: at `test-design` it is
+  granted the locked spec and the draft tests, which the locked-spec-alone rule
+  refuses for any other seat. `ContextGrant` gains grants for the intent, a
+  recorded draft, and the rubric. `ComponentGraph` names the driver that seats
+  each drafter and each critic
+- `effectiveApproval` gains the drafted-artifact floor; policy is unchanged
+- `ApprovalRequest` and `ApprovalGrant` carry the draft hash, and `transition`
+  matches a grant by key and hash. A rejection carries notes at `spec` or a
+  reason at `test-design`. The enforcement record gains `approval-rejected`,
+  and `approval-granted` carries the hash
+- `ParkCause` gains `drafts-rejected`, and the `parked` refusal carries the
+  station when it parks a draft, which has no task
+- run state records drafter and critic attempts before `plan`, whose tasks
+  today are the first the state holds
+- `Vault` gains operations for intents, drafts, critic results, and the rubric;
+  I1's registry entry, which asserts the closed operation set, is updated in
+  the same pull request
+- `recordBaseRun` becomes write-once per draft hash
+- `ReviewSeat.independence` becomes the grade, `seatReviewer` returns it, and
+  the line's choice of seat reads it; L3's refusal of a same-family reviewer is
+  unchanged
+- `worstCaseCost` includes the drafter and critic seats
+- the spec shape gains the run-requirements part and the
+  assumptions-and-open-questions part
+
+**Not in this unit:** drafting at `plan`. A run that drafts its spec is admitted
+with a task graph that does not depend on the spec's content, the single build
+task M1 runs; a graph derived from the spec is R5's. Also out: the instructions
+each drafter and critic runs under, which are the role compiler's; `auto` on a
+drafted artifact at L3; reviving a parked run; a drafter for the rest of the
+verification manifest; and R16's bug-fix intent, which is R16's.
+
+**Known limits, stated now:** a test drafter that sees only the spec can write
+a test that fails on the base for a reason that is not the behaviour, such as an
+import the spec described wrongly. R15's base run shows that it fails, not why;
+the spec's run-requirements part is the control, and a person who approves the
+tests reads the base output.
+
+A critic that finds too little lets drafts through at L2. Its miss rate is
+measured, not assumed: R7's corpus carries vague, untestable, and over-reaching
+specs and tests that do not follow their spec.
+
+**Conformance:** a run admitted with an intent and no spec seats the spec
+drafter and locks nothing until it is approved; a run with neither an intent
+nor a spec is refused; an approval whose hash differs from the draft is
+refused, and a grant for one attempt is not spent on the next; bytes changed in
+the drafter's workspace after the read are not what is locked; a drafted
+artifact's exit is `human-required` at L0, L1, and L3 under a cell of `auto`,
+and a run admitted with its artifacts under the same cell is unaffected; at L2
+under `auto`, a draft is approved without a person only when every condition
+for its station holds, and each failed condition alone sends it to a person; a
+spec with an open question goes to a person; any critic finding sends the draft
+back, and an unreadable critic result counts as one; a critic of the drafter's
+family, or of another model in it, never satisfies a condition; a clean critic
+result with a failed base run does not approve; the test drafter's sandbox has
+no repository and no egress beyond the model API; after a base-run refusal the
+next attempt sees only the check id, declaration, and exit code; a test
+drafter of a builder's family forces `human-required` at L2 and is refused at
+L3; notes reach the next spec attempt, and a `test-design` rejection carries no
+free text; three person rejections park the run; a run admitted with all its
+artifacts seats no drafter.
+
+**Why M2:** it needs R15's base run, R17's security part, and the role compiler
+for the drafters' and critics' instructions. A second driver (R6 or Codex) is
+what lets a critic be a different family; R6 with a local open-weight model
+makes that cost nothing per token. Without one, every draft goes to a person,
+and the record says why.
+
 ### Recorded constraint: the Codex driver (M2)
 
 Not specified, and not a unit here. It is recorded so the choice is settled
@@ -1231,6 +1447,40 @@ I7 controls the framework owes (`I7.extracted-field-schemas` and
 framework. It needs a spec before the second half of M2 can start, so it is
 written while R15 is being built, and it lands as a unit with an ID, a row in
 the table above, and a section here, in the shape of the units it unblocks.
+
+### Recorded gap: the role compiler has no spec
+
+The line seats agents at `build` and `review` today, and R19 adds drafters at
+`spec` and `test-design`. Nothing tells any of them how to work. The driver
+contract carries `CompiledRole.instructions`, and the Claude Code driver renders
+it verbatim as a native agent definition, but nothing produces it: F1 lists a
+`compiler` package for M2, P3 and P5 leave role content to it, and no unit
+specifies it. Today a seated agent runs under its CLI's own system prompt, with
+the granted context the line appends: the locked spec, the acceptance tests, and
+the task graph at `build` (`packages/api/src/line.ts`).
+
+R19 and R5 depend on it, and R11 writes its
+proposals against roles. It needs a spec before those units start, so it is
+written alongside the trigger framework's, while R15 is being built. That spec
+settles at least these (D-A-DS-03):
+
+- **Where roles live.** In the Vault, so no agent edits its own instructions or
+  another's (I1). A change is a versioned edit a person approves, as a policy
+  change is, and a live run keeps the version it was admitted with
+- **What a role is.** Instructions only, in one neutral format. What a role may
+  do stays in policy, which the contract comment on `CompiledRole` already
+  requires: one source of truth for grants (I4)
+- **How a driver renders one.** The compiler emits one driver-neutral
+  `CompiledRole`, and each driver's `emitArtifacts` renders it, so one role runs
+  as a Claude Code agent definition or as Codex's instruction file, and the same
+  role can be seated on another family
+- **The vocabulary.** A role held in the Vault is a new artifact. Adding it to
+  F1's artifact table is a deliberate amendment the spec takes first, as R5 does
+  with "goal".
+- **What a run records.** The hash of every role version it ran, beside the
+  model, so R2's rates and R11's proposals can be compared per role version
+- **What never enters a role.** Untrusted text of any kind (I7), and anything
+  that judges: a role never carries acceptance criteria, rubrics, or R7's corpus
 
 ---
 
