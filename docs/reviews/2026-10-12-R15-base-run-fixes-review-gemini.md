@@ -1,0 +1,12 @@
+BASE: 2dcd5d2
+HEAD: 94fe9c3
+packages/vault/test/stub.test.ts
+7b87d325a1f3b0b1d319880a7755e912
+
+I have no prior context about this project other than the prompt, and I performed no external lookups. 
+
+### Findings
+
+packages/api/src/verification.ts:161 — factually wrong — high — At verify time, `suitesRun` silently drops any extra suites selected by the test runner instead of failing the check. Because Vitest treats test paths as substring filters rather than exact paths, an agent can add a malicious file matching the required test's substring (e.g., adding `src/a.test.ts.malicious.ts` when a check requires `src/a.test.ts`). At verify time, Vitest will load and run both files, allowing the malicious test to dictate the runner's exit code (e.g., by intercepting test results or forcefully calling `process.exit(0)` to report a pass). `suitesRun` filters the test runner's selected suites down to just the named tests (`.filter((suite) => named.has(suite)).length`), successfully returning the required count and causing the gate to pass. This fails open and violates the property that the runtime records exactly what the runner was made to load. — Resolve this by verifying that the `selected` suites list contains exactly the `named` tests and no more (e.g., failing if `extra.length > 0`), enforcing the strict exact-match validation at verify time just as `suiteBindingProblems` does during admission.
+
+packages/api/src/workspace.ts:209 — factually wrong — high — The `inDependencyTree` function uses an exact case-sensitive string match for the `node_modules` directory (`path.split('/').includes('node_modules')`). On a case-insensitive file system (such as Windows or macOS default), an agent can rename `node_modules` to `Node_Modules` and modify the installed test framework's runner within it. The `ownDiff` function will record the tampered files under `Node_Modules/`, which circumvents the `inDependencyTree` filter and carries them into the verified tree. When the runner command is executed targeting `node_modules/vitest/vitest.mjs`, the host file system natively resolves it to the tampered files residing in `Node_Modules`. This completely bypasses the protections introduced in D-R15-05, allowing the change to overwrite and replace its own judge. — Resolve this by normalizing the path segments to lower case before checking for the dependency tree (e.g., `path.toLowerCase().split('/').includes('node_modules')`).
