@@ -160,7 +160,8 @@ export async function suiteBindingProblems(checks: readonly CheckSpec[], base: s
 /**
  * The suite count a check's result records. For a suite check it is what the
  * runner was made to load, by its own selection rule over the tree it ran
- * in: an acceptance check's named tests that the runner selects, or every
+ * in: an acceptance check's named tests that the runner selects, and none
+ * when it selects a suite the check does not name, or every
  * suite a unit check's runner is configured to run (D-R15-04). A behavioral
  * check that pins `expectedSuiteCount` records the tree's count; any other
  * check, none. A null fails a check that requires a count: a tree whose
@@ -170,8 +171,12 @@ export async function suitesRun(check: CheckSpec, runner: TestFrameworkAdapter |
   try {
     if (check.kind === 'acceptance') {
       if (runner === null) return null;
+      // A suite the runner would also load, which the check does not name, ran uncounted; admission
+      // refused one on the base, and the change can add one at `verify` (D-R15-07).
       const named = new Set<string>(check.tests);
-      return (await runner.selectSuites(tree, check.tests)).filter((suite) => named.has(suite)).length;
+      const selected = await runner.selectSuites(tree, check.tests);
+      if (selected.some((suite) => !named.has(suite))) return null;
+      return selected.length;
     }
     if (check.kind === 'unit') return runner === null ? null : (await runner.enumerateSuites(tree)).length;
   } catch {

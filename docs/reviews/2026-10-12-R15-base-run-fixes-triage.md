@@ -36,10 +36,10 @@ stop one.
 
 | Finding | Claim | Raised by | Verdict | Outcome |
 |---|---|---|---|---|
-| gemini-2 | A case-variant `Node_Modules` directory escapes the carry filter and overwrites the base's runner on a case-insensitive filesystem | gemini | holds (executed) | fix now |
-| codex-2 | The runner loads change-writable code outside `node_modules`, so the change can set the judge's exit code | codex | holds in part: the fabricated-launcher form needs codex-1's premise; an honest vitest `globalSetup` file does the same (executed) | maintainer decision: known limit, recommended |
-| codex-1 | The base's installed runner is not authenticated, so a fabricated launcher passes with a statically derived suite count | codex | holds | maintainer decision: known limit, recommended |
-| gemini-1 | At `verify`, `suitesRun` drops suites the runner selects but the check does not name | gemini | holds in part: the drop is real; an extra file cannot turn the named failure into a pass (executed) | fix now |
+| gemini-2 | A case-variant `Node_Modules` directory escapes the carry filter and overwrites the base's runner on a case-insensitive filesystem | gemini | holds (executed) | fixed (D-R15-07) |
+| codex-2 | The runner loads change-writable code outside `node_modules`, so the change can set the judge's exit code | codex | holds in part: the fabricated-launcher form needs codex-1's premise; an honest vitest `globalSetup` file does the same (executed) | known limit: D-R15-08, pending `I3.runner-process-loads-only-base-code` (M3), issue #42 |
+| codex-1 | The base's installed runner is not authenticated, so a fabricated launcher passes with a statically derived suite count | codex | holds | known limit, with codex-2 (D-R15-08, #42) |
+| gemini-1 | At `verify`, `suitesRun` drops suites the runner selects but the check does not name | gemini | holds in part: the drop is real; an extra file cannot turn the named failure into a pass (executed) | fixed (D-R15-07) |
 | codex-obs | Crash safety through `test-design` cannot be established from the range | codex | not a finding: the range does not change transition ordering, and the reviewer claims no defect | no change |
 
 ## gemini-2: a case-variant `node_modules` is carried
@@ -239,3 +239,19 @@ exit, because the transition code is not in the range. It claims no defect.
 The range does not change transition ordering. The resume behaviour of the
 base run, a recorded result reused and never re-run, is R15's original scope,
 and the earlier triage covered it. No change.
+
+## Decided and applied
+
+On 2026-10-13 the maintainer confirmed the recommendations: fix gemini-2 and
+gemini-1, take route (B) for codex-1 and codex-2, and file the issue.
+
+- **gemini-2:** `inDependencyTree` and `dependencyEntry`
+  (`packages/api/src/workspace.ts`) now match `node_modules` in any case.
+- **gemini-1:** `suitesRun` (`packages/api/src/verification.ts`) records no
+  suite count when the runner would load a suite the check does not name.
+- Both new tests in `packages/api/test/verification.test.ts` were run against
+  the old code first and failed there (`expected false to be true`; `expected
+  1 to be null`). Recorded as D-R15-07.
+- **codex-1 and codex-2:** recorded as D-R15-08, with the pending conformance
+  entry `I3.runner-process-loads-only-base-code` (owner M3). The I3 pending
+  baseline goes from 2 to 3. Tracked as issue #42.

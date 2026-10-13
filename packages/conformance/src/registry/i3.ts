@@ -253,5 +253,22 @@ export const I3: InvariantEntry = {
         + 'return early, and an assertion made unreachable, each lower the kill rate and escalate. Raised by the P7 '
         + 'external review (codex-1, gemini-4, gemini-5) and recorded as D-P7-11. Owned by M3, beside mutation testing.',
     }),
+    pending({
+      id: 'I3.runner-process-loads-only-base-code',
+      owner: 'M3',
+      reason:
+        "A suite check runs the base's installed test framework, and nothing a task writes under node_modules is "
+        + "carried (D-R15-05), but the runner's own process can still run code the change can reach. The installed "
+        + 'runner is not authenticated: admission checks only that its file exists, and the suite count comes from '
+        + "the adapter's static selection model, not from the process that exited, so a fabricated launcher that "
+        + 'exits on a flag file fails on the base and passes at verify with no test run (codex-1). And an honest '
+        + "vitest loads files outside node_modules into its own process: a globalSetup file the base's config "
+        + 'already names, rewritten to call process.exit(0), makes vitest 4.1.11 exit 0 with no test run, and it is '
+        + 'carried unflagged unless policy protects it (codex-2). Both were raised by the external review of the R15 '
+        + 'fixes and recorded as D-R15-08. Closing it means a runner, and every input its process loads, that the '
+        + 'change cannot write: provisioned by the runtime outside the tree, or authenticated and held to the base. '
+        + 'That needs an assertion that each route fails the check. Tracked as issue #42. Owned by M3, beside the '
+        + 'L3 canary, which needs the same trusted runner.',
+    }),
   ],
 };

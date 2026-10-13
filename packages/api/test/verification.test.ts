@@ -25,7 +25,7 @@ import {
   treeDigest,
   writesOutsideGrant,
 } from '../src/index.js';
-import { basePath, copyOnly, hashAt, localWorkspaceStore, materialize, snapshotBase, treePath } from '../src/workspace.js';
+import { basePath, copyOnly, dependencyEntry, hashAt, inDependencyTree, localWorkspaceStore, materialize, snapshotBase, treePath } from '../src/workspace.js';
 
 let base: string;
 
@@ -247,6 +247,15 @@ describe('a suite check runs the base framework, over what it names (D-R15-04)',
     expect(await suitesRun(unit, null, root)).toBeNull();
   });
 
+  // External review of the R15 fixes, gemini-1: the tree at verify is the base plus the change, and admission
+  // only refused extras on the base. A suite the change adds that the selection rule also takes in ran uncounted.
+  test('a suite the runner would also load, which the check does not name, leaves the check with no count', async () => {
+    const root = await tree('extra', { 'package.json': VITEST, 'src/a.test.ts': '', 'src/a.test.tsx': '' });
+    const runner = await suiteRunner(root);
+    expect(await suitesRun(acceptance(['src/a.test.ts']), runner, root)).toBeNull();
+    expect(await suitesRun(acceptance(['src/a.test.ts', 'src/a.test.tsx']), runner, root)).toBe(2);
+  });
+
   test('admission binds each suite check to the base, or says why it cannot', async () => {
     const root = await tree('bound', {
       'package.json': VITEST,
@@ -274,6 +283,18 @@ describe('a suite check runs the base framework, over what it names (D-R15-04)',
     expect(requiredSuites(acceptance(['a.test.ts', 'b.test.ts']))).toBe(2);
     expect(requiredSuites(unit)).toBeUndefined();
     expect(requiredSuites({ id: 'u', kind: 'unit', required: true, timeoutMs: 1, expectedSuiteCount: 4 })).toBe(4);
+  });
+});
+
+// External review of the R15 fixes, gemini-2: on a case-insensitive filesystem a task that renames
+// node_modules to Node_Modules writes through to the base's runner, so the spelling decides nothing.
+describe('a dependency tree is one whatever its spelling (D-R15-05)', () => {
+  test('a node_modules directory in any case is a dependency tree, recorded by package', () => {
+    expect(inDependencyTree('Node_Modules/vitest/vitest.mjs')).toBe(true);
+    expect(inDependencyTree('pkg/NODE_MODULES/@scope/x/index.js')).toBe(true);
+    expect(inDependencyTree('src/node_modules.ts')).toBe(false);
+    expect(dependencyEntry('Node_Modules/vitest/vitest.mjs')).toBe('Node_Modules/vitest');
+    expect(dependencyEntry('pkg/NODE_MODULES/@scope/x/index.js')).toBe('pkg/NODE_MODULES/@scope/x');
   });
 });
 

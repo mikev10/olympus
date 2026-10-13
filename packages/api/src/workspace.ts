@@ -206,9 +206,15 @@ export async function discardRun(store: WorkspaceStore, runId: RunId): Promise<v
  * runner a suite check starts is the one the base installed; a task's
  * writes there are recorded and escalated, and never carried into the tree
  * the checks judge, or the change could replace its own judge (D-R15-05).
+ * Matched in any case: on a case-insensitive filesystem `Node_Modules`
+ * written over the base's tree lands in its `node_modules` (D-R15-07).
  */
 export function inDependencyTree(path: string): boolean {
-  return path.split('/').includes('node_modules');
+  return dependencyIndex(path.split('/')) !== -1;
+}
+
+function dependencyIndex(parts: readonly string[]): number {
+  return parts.findIndex((part) => part.toLowerCase() === 'node_modules');
 }
 
 /**
@@ -220,7 +226,7 @@ export function inDependencyTree(path: string): boolean {
  */
 export function dependencyEntry(path: string): string {
   const parts = path.split('/');
-  const at = parts.indexOf('node_modules');
+  const at = dependencyIndex(parts);
   const name = parts[at + 1];
   const scoped = name?.startsWith('@') === true && parts.length > at + 3;
   return parts.slice(0, Math.min(parts.length, at + (scoped ? 3 : 2))).join('/');
