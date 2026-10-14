@@ -33,6 +33,7 @@ import type {
   TaskRequest,
   TaskResult,
 } from '@olympus-ai/core';
+import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { Vault } from '@olympus-ai/vault';
 import { workspaceRoot } from '../kit/workspace.js';
 import { withVaultDirs, type VaultDirs } from './local-vault.js';
@@ -151,13 +152,50 @@ export async function stubDriver(options: DriverOptions = {}): Promise<ObservedD
   };
 }
 
+/** What the hello fixture's acceptance check reads: the change its spec asks for, and absent from the base (D-A-BF-01). */
+export const HELLO_FILE = 'hello.txt';
+
+/**
+ * `driver` doing the hello fixture's work: each builder task writes
+ * `hello.txt` through the sandbox it was handed, as an agent would, and
+ * claims it. The fixture's acceptance check fails on the base and passes over
+ * this change, so a run whose builder changed nothing parks at `verify`
+ * rather than passing a gate the change never had to meet. Every other call
+ * goes to `driver` unchanged, so what an assertion observes of it holds.
+ */
+export function doingTheWork<D extends Driver>(driver: D, sandbox: SandboxProvider): D {
+  return new Proxy(driver, {
+    get(target, key, receiver) {
+      if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
+      return async (req: TaskRequest): Promise<TaskResult> => {
+        if (req.role === ('builder' as RoleId)) {
+          const wrote = await sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').writeFileSync(${JSON.stringify(HELLO_FILE)}, 'hello')`]);
+          if (wrote.exitCode !== 0) throw new Error(`the hello fixture's work did not land in task ${req.taskId}: ${wrote.stderr}`);
+        }
+        const result = await target.runTask(req);
+        if (req.role !== ('builder' as RoleId) || result.claim.filesChanged.includes(HELLO_FILE)) return result;
+        return { ...result, claim: { ...result.claim, filesChanged: [...result.claim.filesChanged, HELLO_FILE] } };
+      };
+    },
+  });
+}
+
+export interface RigOptions {
+  /**
+   * `false` leaves the builder as given, for an assertion whose builder makes
+   * a change of its own and whose manifest declares a reproduction for it:
+   * one whose grant does not cover `hello.txt`, or whose image has no node.
+   */
+  readonly work?: boolean;
+}
+
 export interface LineRig {
   readonly dirs: VaultDirs;
   readonly runId: RunId;
   /** The runtime's trees for the run: beside the Vault and the workspace, inside neither. */
   readonly workspaces: WorkspaceStore;
   /** A fresh component graph over the same store, as a new process would open it, built through `buildGraph`. */
-  components(overrides?: Partial<GraphParts>): Promise<BuiltGraph>;
+  components(overrides?: Partial<GraphParts>, options?: RigOptions): Promise<BuiltGraph>;
   /** `components` is built here when it is not already, so an assertion can override one slot of a built graph by spreading it. */
   request(components: GraphParts, overrides?: Partial<RunRequest>): Promise<RunRequest>;
   /** A run state, read back from the store. */
@@ -189,10 +227,15 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
       dirs,
       runId,
       workspaces,
-      components: async (overrides = {}) => {
+      components: async (overrides = {}, options = {}) => {
         const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
-        const driver = await stubDriver();
-        return built({ vault: await open(), sandbox: new StubSandboxProvider(), driver, reviewer: driver, workspaces, ...overrides });
+        const sandbox = overrides.sandbox ?? new StubSandboxProvider();
+        const stub = await stubDriver();
+        const given = overrides.driver ?? stub;
+        const driver = options.work === false ? given : doingTheWork(given, sandbox);
+        // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
+        const reviewer = overrides.driver === undefined ? driver : stub;
+        return built({ vault: await open(), sandbox, reviewer, workspaces, ...overrides, driver });
       },
       request: async (parts, overrides = {}) => {
         const components = await built(parts);
@@ -226,8 +269,32 @@ export async function storeAt(root: string): Promise<WorkspaceStore> {
   return process.getuid === undefined ? localWorkspaceStore({ root, user: { uid: 0, gid: 0 } }) : localWorkspaceStore({ root });
 }
 
-export async function writeManifest(dirs: VaultDirs, checks: readonly unknown[]): Promise<void> {
-  await writeFile(join(dirs.artifacts, 'verify.json'), JSON.stringify({ checks }));
+/**
+ * The hello fixture's reproduction (D-A-BF-01): a behavioral check declared
+ * `'fails'`, since the base has no `hello.txt` and the rig's builder writes
+ * one. Its script builds the file's name rather than spelling it: a path a
+ * pinned command names is protected (D-P7-10), so spelling it would make
+ * every run's change a protected-path touch (D-R15-03). A manifest an assertion writes carries it unless the assertion
+ * declares a check of its own, so an assertion about something else is not
+ * refused at admission for having nothing to reproduce.
+ */
+export const HELLO_REPRODUCTION = {
+  id: 'hello-written',
+  kind: 'behavioral',
+  onBase: 'fails',
+  command: ['node', '-e', "const fs = require('node:fs'); const file = ['hello', 'txt'].join('.'); process.exit(fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim() === 'hello' ? 0 : 1)"],
+  required: true,
+  timeoutMs: 10_000,
+} as const;
+
+function declaresOne(checks: readonly unknown[]): boolean {
+  return checks.some((c) => typeof c === 'object' && c !== null && (c as { onBase?: unknown }).onBase !== undefined);
+}
+
+/** `asWritten` writes `checks` alone, for an assertion about what admission makes of a manifest. */
+export async function writeManifest(dirs: VaultDirs, checks: readonly unknown[], options: { asWritten?: boolean } = {}): Promise<void> {
+  const written = options.asWritten === true || declaresOne(checks) ? checks : [...checks, HELLO_REPRODUCTION];
+  await writeFile(join(dirs.artifacts, 'verify.json'), JSON.stringify({ checks: written }));
 }
 
 export async function readRecord<T>(vault: Vault, ref: Parameters<Vault['read']>[0]): Promise<T> {

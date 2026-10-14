@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
+import type { AdmissionRecord, BaseRunRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -50,6 +50,7 @@ export class StubVault implements Vault {
   private readonly integration = new Map<RunId, VaultRef[]>();
   private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
+  private readonly baseRuns = new Map<RunId, VaultRef>();
   /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
   private readonly runs = new Set<RunId>();
 
@@ -164,6 +165,18 @@ export class StubVault implements Vault {
     return Promise.resolve([...(this.integration.get(runId) ?? [])]);
   }
 
+  recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a base record is collected by the runtime, or it is not recorded'));
+    if (this.baseRuns.has(r.runId)) return Promise.reject(new Error(`StubVault: run ${r.runId} already has a base record; nothing was stored`));
+    const ref = this.store(r.runId, 'base-run', r);
+    this.baseRuns.set(r.runId, ref);
+    return Promise.resolve(ref);
+  }
+
+  readBaseRun(runId: RunId): Promise<VaultRef | null> {
+    return Promise.resolve(this.baseRuns.get(runId) ?? null);
+  }
+
   listRuns(): Promise<readonly RunId[]> {
     return Promise.resolve([...this.runs].sort());
   }
@@ -191,8 +204,8 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration',
-    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord | BaseRunRecord,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

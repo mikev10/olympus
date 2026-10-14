@@ -24,6 +24,8 @@ import { TEST_IMAGE, withProvider } from './local-sandbox.js';
 const api = async () => import('@olympus-ai/api');
 
 const PASSING = { id: 'passes', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+/** A reproduction of the write the globs assertions grant: absent on the base (D-A-BF-01). It builds the name, which spelt would be protected (D-R15-03). */
+const OK_WRITTEN = { id: 'ok-written', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "process.exit(require('node:fs').existsSync(['src', 'ok.ts'].join('/')) ? 0 : 1)"], required: true, timeoutMs: 10_000 };
 const FAILING = { ...PASSING, id: 'fails', command: ['node', '-e', 'process.exit(1)'] };
 
 /** Runs a Node script in the task's own workspace, through the sandbox the line provisioned for it. */
@@ -61,6 +63,8 @@ function recording(inner: Vault, violations: IntegrityViolation[]): Vault {
     readUsage: (runId) => inner.readUsage(runId),
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
+    recordBaseRun: (r) => inner.recordBaseRun(r),
+    readBaseRun: (runId) => inner.readBaseRun(runId),
     listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: (s, ifVersion) => inner.commitRunState(s, ifVersion),
@@ -249,7 +253,8 @@ export const WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF: LocalAssertion = runtime({
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const sandbox = new StubSandboxProvider();
       const driver = await stubDriver({ during: (req) => inTask(sandbox, req, writes({ 'src/ok.ts': 'ok', 'notes.md': 'outside' })).then(() => undefined) });
-      const components = await rig.components({ sandbox, driver, reviewer: driver });
+      await writeManifest(rig.dirs, [PASSING, OK_WRITTEN]);
+      const components = await rig.components({ sandbox, driver, reviewer: driver }, { work: false });
       const outcome = await startRun(await rig.request(components, { policy: await narrowed() }));
       const refusal = refusalOf(outcome, 'I4');
       if (refusal.transition.reason !== 'violation') throw new Error(`I4: a write outside the grant was refused as ${refusal.transition.reason}, not as a violation`);
@@ -268,7 +273,8 @@ export const WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF: LocalAssertion = runtime({
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const sandbox = new StubSandboxProvider();
       const driver = await stubDriver({ during: (req) => inTask(sandbox, req, writes({ 'src/ok.ts': 'ok' })).then(() => undefined) });
-      await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver }), { policy: await narrowed() }));
+      await writeManifest(rig.dirs, [PASSING, OK_WRITTEN]);
+      await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver }, { work: false }), { policy: await narrowed() }));
       if (statusOf(await rig.state(), HELLO_TASK) !== 'passed') throw new Error('I4 control: a write inside the grant did not pass');
     });
   },
@@ -436,7 +442,11 @@ export const TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK: LocalAssertion = runtime
             ],
           }),
         );
-        await writeManifest(rig.dirs, [{ ...PASSING, command: ['sh', '-c', 'exit 0'] }]);
+        // The image has a shell and no node, so the reproduction is a shell test of the first task's write (D-A-BF-01).
+        await writeManifest(rig.dirs, [
+          { ...PASSING, command: ['sh', '-c', 'exit 0'] },
+          { id: 'leak-written', kind: 'behavioral', onBase: 'fails', command: ['sh', '-c', 'test -f /workspace/leak.txt'], required: true, timeoutMs: 10_000 },
+        ]);
         const observed: { process?: string; sizes?: [string, string] } = {};
         const sh = (req: TaskRequest, script: string) => docker.exec(req.sandbox, ['sh', '-c', script]);
         const driver = await stubDriver({
@@ -453,7 +463,7 @@ export const TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK: LocalAssertion = runtime
             }
           },
         });
-        await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver })));
+        await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver }, { work: false })));
         const state = await rig.state();
         if (!Object.hasOwn(state.results, second)) throw new Error('I4: the second task never ran');
         if (observed.process === undefined || observed.sizes === undefined) throw new Error('I4: the second task did not observe its workspace');

@@ -6,10 +6,10 @@ import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { COMPOSED_HOST_MOUNTS_NO_VAULT } from './composition.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
 
-/** The sixteen named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02). Nothing else may be reachable on an instance. */
+/** The eighteen named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01). Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
   'read', 'lock', 'verifyLocks', 'writeEvidence', 'recordViolation', 'recordAdmission', 'recordTaskResult', 'recordUsage',
-  'recordDecision', 'readDecisions', 'readUsage', 'recordIntegration', 'readIntegration', 'listRuns', 'readRunState', 'commitRunState',
+  'recordDecision', 'readDecisions', 'readUsage', 'recordIntegration', 'readIntegration', 'recordBaseRun', 'readBaseRun', 'listRuns', 'readRunState', 'commitRunState',
 ];
 
 /** I1: No agent writes to the Vault. */

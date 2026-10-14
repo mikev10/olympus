@@ -21,7 +21,7 @@ import type {
 } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockManifest, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, BaseRunRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockManifest, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
   protected readonly inner: Vault;
@@ -76,6 +76,14 @@ export class DelegatingVault implements Vault {
 
   readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
     return this.inner.readIntegration(runId);
+  }
+
+  recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
+    return this.inner.recordBaseRun(r);
+  }
+
+  readBaseRun(runId: RunId): Promise<VaultRef | null> {
+    return this.inner.readBaseRun(runId);
   }
 
   listRuns(): Promise<readonly RunId[]> {

@@ -49,6 +49,7 @@ function bundle(): EvidenceBundle {
     taskId,
     baseCommit: 'a'.repeat(40),
     baseTreeSha256: 'b'.repeat(64),
+    baseRun: { runId, kind: 'base-run', hash: 'b'.repeat(64) },
     diff: [],
     diffSha256: 'c'.repeat(64),
     checks: [],
@@ -56,6 +57,7 @@ function bundle(): EvidenceBundle {
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
   tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
+  notCarried: [],
     collectedBy: 'runtime',
     driverProvenanceId: 'local-vault-test@1.0.0',
     contractVersion: '1.0.0',
@@ -294,6 +296,55 @@ describe('enforcement decisions (A-P14-01)', () => {
     await vault.recordDecision({ ...decision, decision: escalated });
     await expect(vault.recordDecision({ ...decision, occurrence: 'second', decision: { ...escalated, decidedBy: 'model-relay' } } as never)).rejects.toThrow(/not made by model-relay/);
     expect(await vault.readDecisions(runId)).toHaveLength(1);
+  });
+});
+
+describe('the base record (D-A-BF-01)', () => {
+  const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
+  const record = {
+    runId,
+    baseTreeSha256: 'c'.repeat(64),
+    checks: [reproduced],
+    unstarted: [],
+    collectedBy: 'runtime' as const,
+  };
+
+  test('is absent until written, then read back by the reference it was written under', async () => {
+    expect(await vault.readBaseRun(runId)).toBeNull();
+    const ref = await vault.recordBaseRun(record);
+    expect(await vault.readBaseRun(runId)).toEqual(ref);
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(record);
+  });
+
+  test('is written once: a second base for the run is refused and the first stands', async () => {
+    const ref = await vault.recordBaseRun(record);
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode: 0 }] })).rejects.toThrow(/already has a base record/);
+    expect(await vault.readBaseRun(runId)).toEqual(ref);
+  });
+
+  test('refuses a record the runtime did not collect, and stores nothing', async () => {
+    await expect(vault.recordBaseRun({ ...record, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
+    expect(await vault.readBaseRun(runId)).toBeNull();
+  });
+
+  test('refuses a result whose suite count is absent, since the suite-count rule would read it as met (codex-obs), and stores nothing', async () => {
+    const { suiteCount: _omitted, ...uncounted } = reproduced;
+    await expect(vault.recordBaseRun({ ...record, checks: [uncounted] } as never)).rejects.toThrow(/not results/);
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: -1 }] })).rejects.toThrow(/not results/);
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: 1.5 }] })).rejects.toThrow(/not results/);
+    expect(await vault.readBaseRun(runId)).toBeNull();
+  });
+
+  test('refuses an exit code that is not an integer: NaN is written as null and read back as a failure', async () => {
+    for (const exitCode of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode }] })).rejects.toThrow(/not results/);
+    }
+    expect(await vault.readBaseRun(runId)).toBeNull();
+  });
+
+  test('a reference whose hash is not the record\'s reads nothing', async () => {
+    await vault.recordBaseRun(record);
+    await expect(vault.read({ runId, kind: 'base-run', hash: 'd'.repeat(64) })).rejects.toThrow(/hashes to/);
   });
 });
 

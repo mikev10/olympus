@@ -4,12 +4,12 @@
  * Workspace. The invariant assertions themselves are the registry's; what is
  * here is the rest of the behaviour, read by field.
  */
-import { stat, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
-import type { EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { BaseRunRecord, EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { approveStation, costTotals, readUsage, resumeRun, runStanding, startRun, type ComponentGraph, type RunOutcome } from '../src/index.js';
 import { integrateEscalations, UNANALYSED_TESTS } from '../src/line.js';
@@ -47,6 +47,9 @@ afterEach(async () => {
 async function read<T>(vault: Vault, ref: Parameters<Vault['read']>[0]): Promise<T> {
   return JSON.parse(new TextDecoder().decode(await vault.read(ref))) as T;
 }
+
+/** A unit check: no command, since its runner is the base framework's (D-R15-04). */
+const UNIT_CHECK = { id: 'unit', kind: 'unit', required: true, timeoutMs: 10_000 } as const;
 
 function refusedState(outcome: RunOutcome): RunState {
   if (outcome.ok || outcome.reason !== 'refused' || outcome.state === null) throw new Error(`expected a refusal on the line, got ${JSON.stringify(outcome)}`);
@@ -91,12 +94,14 @@ class TamperingVault extends DelegatingVault {
 }
 
 /** Fails the first check it runs and passes afterwards, so one verify sends the task back to `build`. */
+/** Fails the first run of the fixture's compile check, counted alone: the base run and the builder's write are execs too (D-A-BF-01). */
 class FailsFirstCheck extends DelegatingSandbox {
   private calls = 0;
 
   override async exec(handle: SandboxHandle, argv: string[]): Promise<ExecResult> {
-    this.calls += 1;
     const result = await this.inner.exec(handle, argv);
+    if (argv.join(' ') !== HELLO_CHECK.command.join(' ')) return result;
+    this.calls += 1;
     return this.calls === 1 ? { ...result, exitCode: 1 } : result;
   }
 }
@@ -174,7 +179,14 @@ describe('hello at L1', () => {
     if (ref === undefined) return;
     const bundle = await read<EvidenceBundle>(components.vault, ref);
     expect(bundle).toMatchObject({ runId, taskId: hello, collectedBy: 'runtime', claimEvidenceDiff: [] });
-    expect(bundle.checks).toEqual([expect.objectContaining({ checkId: 'hello-exit-zero', exitCode: 0, suiteCount: null })]);
+    expect(bundle.checks).toEqual([
+      expect.objectContaining({ checkId: 'hello-exit-zero', exitCode: 0, suiteCount: null }),
+      expect.objectContaining({ checkId: 'hello-written', exitCode: 0 }),
+    ]);
+    // The same reproduction, failing over the base before build, from the record the bundle names (D-A-BF-01).
+    expect(bundle.baseRun).toEqual(await components.vault.readBaseRun(runId));
+    const base = await read<BaseRunRecord>(components.vault, bundle.baseRun);
+    expect(base.checks.map((c) => [c.checkId, c.exitCode])).toEqual([['hello-written', 1]]);
   });
 
   test('an approval of the integrate exit, then a resume, completes the run', async () => {
@@ -198,7 +210,8 @@ describe('hello at L1', () => {
     expect(req).toMatchObject({ taskId: hello, role: 'builder', variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
-    expect(req.sandbox).toBe(sandbox.provisioned[0]);
+    // The first sandbox runs the reproduction over the base (D-A-BF-01); the build's is the second.
+    expect(req.sandbox).toBe(sandbox.provisioned[1]);
   });
 
   test('a build runs in a rw sandbox, its checks and the review seat in ro ones, and every sandbox is destroyed; egress is denied', async () => {
@@ -207,7 +220,8 @@ describe('hello at L1', () => {
     // The mount follows the station contract's write boundary: `build` grants
     // `**` and gets rw; `review` grants nothing and gets a tree it cannot write.
     expect(STATION_CONTRACTS.review.writeBoundary.workspaceGlobs).toEqual([]);
-    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['rw', 'ro', 'ro']);
+    // The base run's check, the build, its two checks, and the review seat.
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'rw', 'ro', 'ro', 'ro']);
     expect(sandbox.destroyed).toEqual(sandbox.provisioned);
     for (const spec of sandbox.specs) expect(spec.egress).toEqual({ mode: 'deny-all', allow: [] });
   });
@@ -265,7 +279,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     expect(state.tasks[hello]).toBe('parked');
     const [ref] = state.evidenceRefs;
     if (ref === undefined) return;
-    expect((await read<EvidenceBundle>(components.vault, ref)).checks).toEqual([]);
+    expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written']);
   });
 
   test('a failing check that is not required does not fail the gate', async () => {
@@ -274,18 +288,20 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     expect(state.tasks[hello]).toBe('passed');
   });
 
-  // codex-4: a unit or acceptance check is a suite run by its kind, so a tree whose suites
-  // cannot be enumerated has not shown one ran, whether or not the manifest pinned a count.
-  test('a unit check over a tree whose suites cannot be enumerated fails the gate, with no count pinned (I5)', async () => {
-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
-    const state = refusedState(await startRun(runRequest(runId, workspace, components)));
-    expect(state.tasks[hello]).toBe('parked');
+  // codex-4, D-R15-04: a unit or acceptance check is a suite run by its kind, and its runner is the
+  // base framework's; a base with none has no runner, so the check is refused before anything runs.
+  test('a unit check over a base with no test framework is refused at admission, with no count pinned (I5)', async () => {
+    await writeChecks(workspace, [UNIT_CHECK]);
+    const outcome = await startRun(runRequest(runId, workspace, components));
+    expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'manifest.checks[0]', code: 'unbound' }] });
   });
 
-  test('a unit check over a tree whose suites are enumerated passes, and records the count', async () => {
+  test('a unit check runs the base framework\'s installed runner over every suite, passes, and records the count', async () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'p6', devDependencies: { vitest: '4.1.11' } }));
     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
-    await writeChecks(workspace, [{ ...HELLO_CHECK, kind: 'unit' }]);
+    await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
+    await writeChecks(workspace, [UNIT_CHECK]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('passed');
     const [ref] = state.evidenceRefs;
@@ -314,10 +330,10 @@ describe('each check runs alone (codex-2, codex-7)', () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'second', timeoutMs: 2_500 }]);
     await startRun(runRequest(runId, workspace, { ...components, sandbox }));
-    // build, then one per check, then review.
-    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['rw', 'ro', 'ro', 'ro']);
-    expect(sandbox.specs.slice(1, 3).map((s) => s.limits.wallClockMs)).toEqual([10_000, 2_500]);
-    expect(new Set(sandbox.provisioned.slice(1, 3)).size).toBe(2);
+    // The base run's check, build, then one per check, then review.
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'rw', 'ro', 'ro', 'ro', 'ro']);
+    expect(sandbox.specs.slice(2, 4).map((s) => s.limits.wallClockMs)).toEqual([10_000, 2_500]);
+    expect(new Set(sandbox.provisioned.slice(2, 4)).size).toBe(2);
     expect(sandbox.destroyed).toEqual(sandbox.provisioned);
   });
 });
@@ -399,8 +415,8 @@ describe('a park is recorded before it is committed (D-P14-07)', () => {
 
 describe('locks are re-verified at every transition (I3)', () => {
   test('a locked artifact changed while build runs is refused with a violation, and a resume refuses the run', async () => {
-    // Verification 1 is the exit from spec; 2 the exit from test-design; 3 the exit from plan; 4 before the build.
-    const vault = new TamperingVault(components.vault, workspace, 4);
+    // Verification 1 is the exit from spec; 2 after the base run; 3 the exit from test-design; 4 the exit from plan; 5 before the build.
+    const vault = new TamperingVault(components.vault, workspace, 5);
     const outcome = await startRun(runRequest(runId, workspace, { ...components, vault }));
     expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'lock-tamper', tampered: [{ path: 'spec.md' }] } });
     const state = refusedState(outcome);
@@ -673,7 +689,8 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     const builds = vault.usage.filter((r) => r.station === 'build' && r.reading.kind !== 'pending');
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(2);
     expect(builds).toHaveLength(2);
-    expect(builds[0]?.reading).toMatchObject({ kind: 'metered', calls: 1 });
+    // The base run's check sandbox is torn down first, so the first build's is the second.
+    expect(builds[0]?.reading).toMatchObject({ kind: 'metered', calls: 2 });
   });
 
   test('calls whose sandbox had no relay are counted as unmetered, never as zero cost', async () => {
@@ -704,9 +721,19 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
   });
 
   test('a sandbox whose cost cannot be read after the driver ran records the call as lost and stops the run, and a resume over it is refused and recorded', async () => {
+    // A driver call's sandbox, the one writable sandbox, is the one whose meter is lost; the base run's check sandbox is read (D-A-BF-01).
     class UnreadableMeter extends DelegatingSandbox {
+      private readonly writable = new Set<SandboxHandle>();
+
+      override async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+        const handle = await this.inner.provision(spec);
+        if (spec.mounts.workspace.mode === 'rw') this.writable.add(handle);
+        return handle;
+      }
+
       override async destroy(h: SandboxHandle): Promise<Teardown> {
-        await this.inner.destroy(h);
+        const teardown = await this.inner.destroy(h);
+        if (!this.writable.has(h)) return teardown;
         throw new Error("the model relay's meter could not be read");
       }
     }
@@ -864,5 +891,50 @@ describe('integrate escalates a run whose tests were never analysed (D-A-I1-06)'
     expect(record.unavailableControls).toContain('test');
     const escalations = await integrateEscalations(components.vault, state, (ref) => read<EvidenceBundle>(components.vault, ref));
     expect(escalations.tamperFindings).toContain(UNANALYSED_TESTS);
+  });
+});
+
+/** A builder that writes one file under node_modules, through the sandbox it was given, besides the fixture's work. */
+class DependencyWriter extends DelegatingDriver {
+  constructor(private readonly sandbox: StubSandboxProvider, private readonly path: string, private readonly text: string) {
+    super(new ChosenDriver());
+  }
+
+  override async runTask(req: TaskRequest): Promise<TaskResult> {
+    const script = `const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(${JSON.stringify(this.path)}), { recursive: true }); fs.writeFileSync(${JSON.stringify(this.path)}, ${JSON.stringify(this.text)})`;
+    const wrote = await this.sandbox.exec(req.sandbox, ['node', '-e', script]);
+    if (wrote.exitCode !== 0) throw new Error(`the write failed: ${wrote.stderr}`);
+    return this.inner.runTask(req);
+  }
+}
+
+describe('the change cannot replace its judge (D-R15-05)', () => {
+  // Found in the R15 triage: the diff carried node_modules into the verified tree, and tamper analysis skips it,
+  // so a builder that rewrote the script a check runs turned a failing check green with nothing escalated.
+  test('a check runs the base\'s node_modules: a builder that rewrites the script it runs is recorded, and not carried', async () => {
+    await mkdir(join(workspace, 'node_modules', 'judge'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'judge', 'index.js'), 'process.exit(1)\n');
+    await writeChecks(workspace, [{ id: 'judge', kind: 'behavioral', onBase: 'fails', command: ['node', 'node_modules/judge/index.js'], required: true, timeoutMs: 10_000 }]);
+    const sandbox = new StubSandboxProvider();
+    const driver = new DependencyWriter(sandbox, 'node_modules/judge/index.js', 'process.exit(0)\n');
+    const parts = stubComponents(workspace, { sandbox, driver });
+    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+    expect(state.tasks[hello]).toBe('parked');
+    const [ref] = state.evidenceRefs;
+    if (ref === undefined) throw new Error('no evidence');
+    const bundle = await read<EvidenceBundle>(parts.vault, ref);
+    expect(bundle.checks.find((c) => c.checkId === 'judge')?.exitCode).toBe(1);
+    expect(bundle.notCarried).toEqual(['node_modules/judge']);
+    expect(bundle.diff.map((e) => e.path)).toEqual(['hello.txt']);
+  });
+
+  test('what a passing task wrote under node_modules escalates the integrate exit, by package', async () => {
+    const sandbox = new StubSandboxProvider();
+    const driver = new DependencyWriter(sandbox, 'node_modules/.vite/vitest/results.json', '{}');
+    const parts = stubComponents(workspace, { sandbox, driver });
+    const state = refusedState(await startRun(runRequest(runId, workspace, parts)));
+    expect(state.tasks[hello]).toBe('passed');
+    const escalations = await integrateEscalations(parts.vault, state, (r) => read<EvidenceBundle>(parts.vault, r));
+    expect(escalations.tamperFindings).toContain("written but not carried, since checks run over the base's dependencies: node_modules/.vite");
   });
 });

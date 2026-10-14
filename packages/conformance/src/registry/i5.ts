@@ -4,7 +4,7 @@ import { ADAPTER_REFUSAL_REFUSES_L3_END_TO_END, UNANALYSED_TESTS_ESCALATE_THE_AP
 import { FAILED_INTEGRATION_NEVER_REPORTS_DONE, INTEGRATE_MERGES_THE_VERIFIED_TREE } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
-import { withLine } from './line.js';
+import { doingTheWork, withLine } from './line.js';
 import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
 import { HTTP_PROBE_ABSENT_IS_NAMED } from './http.js';
 import {
@@ -23,6 +23,7 @@ import {
   withSandbox,
 } from './local-sandbox.js';
 import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
+import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
 import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { assertPolicyLoadIsHardened } from './policy-file.js';
@@ -96,12 +97,14 @@ export const I5: InvariantEntry = {
             import('@olympus-ai/sandbox'),
             import('@olympus-ai/vault'),
           ]);
-          const driver = new core.StubDriver();
+          const stub = new core.StubDriver();
+          const stubSandbox = new sandbox.StubSandboxProvider();
+          const builder = doingTheWork(stub, stubSandbox);
           const components = api.buildGraph({
             vault: new vault.StubVault(rig.dirs.artifacts),
-            sandbox: new sandbox.StubSandboxProvider(),
-            driver,
-            reviewer: driver,
+            sandbox: stubSandbox,
+            driver: builder,
+            reviewer: builder,
             workspaces: rig.workspaces,
           });
 
@@ -461,6 +464,11 @@ export const I5: InvariantEntry = {
       package: '@olympus-ai/api',
       file: 'test/paid/line.paid.test.ts',
     }),
+    // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
+    BASE_DECLARATION_HAS_NO_DEFAULT,
+    NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
+    UNSTARTED_BASE_CHECK_REFUSES,
+    SUITE_CHECK_RUNS_WHAT_IT_NAMES,
   ],
   pending: [],
 };

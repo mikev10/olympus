@@ -16,7 +16,7 @@ import type { MeterReading, SandboxProvider, SandboxSpec } from '@olympus-ai/san
 import type { IntegrationRecord } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import { MERGED_AT, withFakeGitHub, type FakeGitHub } from '../kit/fake-github.js';
-import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, type LineRig } from './line.js';
+import { HELLO_TASK, linePolicy, refusalOf, stubDriver, withLine, writeManifest, type LineRig, type RigOptions } from './line.js';
 import { specFor, throughProxy, withProvider, withSandbox } from './local-sandbox.js';
 import { inTask, writes } from './verification.js';
 
@@ -38,7 +38,7 @@ interface Integrating {
   /** Every spec the stub sandbox was asked to provision. */
   readonly specs: SandboxSpec[];
   /** A fresh graph over the same store, with an integrator against `github`, as a new process would open it. */
-  components(overrides?: Partial<GraphParts>): ReturnType<LineRig['components']>;
+  components(overrides?: Partial<GraphParts>, options?: RigOptions): ReturnType<LineRig['components']>;
 }
 
 /** The hello fixture, seeded as the remote's base commit, with a build task that adds `FEATURE`. */
@@ -49,7 +49,7 @@ async function withIntegration<T>(prefix: string, body: (it: Integrating) => Pro
       const { GitHubIntegrator } = await api();
       const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
       const specs: SandboxSpec[] = [];
-      const components: Integrating['components'] = async (overrides = {}) => {
+      const components: Integrating['components'] = async (overrides = {}, options = {}) => {
         const inner = new StubSandboxProvider();
         const sandbox: SandboxProvider = Object.assign(Object.create(inner) as SandboxProvider, {
           ...(meter === undefined ? {} : { destroy: async (handle: Parameters<SandboxProvider['destroy']>[0]) => ({ ...(await inner.destroy(handle)), meter }) }),
@@ -64,7 +64,7 @@ async function withIntegration<T>(prefix: string, body: (it: Integrating) => Pro
           },
         });
         const integrator = new GitHubIntegrator({ repository: github.repository, baseBranch: github.baseBranch, token: TOKEN, apiBase: github.apiBase });
-        return rig.components({ sandbox, driver, reviewer: driver, integrator, ...overrides });
+        return rig.components({ sandbox, driver, reviewer: driver, integrator, ...overrides }, options);
       };
       return body({ rig, github, baseCommit, specs, components });
     }),
@@ -123,7 +123,8 @@ export const INTEGRATE_MERGES_THE_VERIFIED_TREE = runtime({
       const after = it.github.files(merged.mergeCommit);
       const added = [...after.keys()].filter((p) => !before.has(p));
       const changed = [...before.keys()].filter((p) => Buffer.compare(Buffer.from(before.get(p)?.bytes ?? []), Buffer.from(after.get(p)?.bytes ?? [])) !== 0);
-      if (added.join() !== 'src/feature.ts' || changed.length !== 0) throw new Error(`I5: the merge added ${added.join(', ')} and changed ${changed.join(', ')}, not exactly the verified diff`);
+      // The rig's builder writes the fixture's hello.txt beside the feature (D-A-BF-01).
+      if (added.sort().join() !== 'hello.txt,src/feature.ts' || changed.length !== 0) throw new Error(`I5: the merge added ${added.join(', ')} and changed ${changed.join(', ')}, not exactly the verified diff`);
       if (new TextDecoder().decode(after.get('src/feature.ts')?.bytes) !== FEATURE['src/feature.ts']) throw new Error('I5: the merged file is not the bytes the checks ran over');
 
       const records = await integrationOf(it.rig);
@@ -212,10 +213,26 @@ export const FAILED_INTEGRATION_NEVER_REPORTS_DONE = runtime({
 
     await withIntegration('i1b-empty-', async (it) => {
       // A build that writes nothing: no pull request to open, so the run halts at integrate's work, before a human is asked to approve a merge of nothing.
+      // Since R15 an empty change crosses verify only when its reproduction is flaky, failing over the base and passing over the same tree, so the
+      // sandbox here fails the reproduction's first run, over the base, and nothing else (D-A-BF-01).
       const { startRun } = await api();
+      const flaky = { id: 'flaky', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', 'process.exit(0) // flaky'], required: true, timeoutMs: 10_000 };
+      await writeManifest(it.rig.dirs, [flaky]);
       const idle = await stubDriver();
+      const base = await it.components({ driver: idle, reviewer: idle }, { work: false });
+      let first = true;
+      const sandbox: SandboxProvider = Object.assign(Object.create(base.sandbox) as SandboxProvider, {
+        exec: async (...args: Parameters<SandboxProvider['exec']>) => {
+          const result = await base.sandbox.exec(...args);
+          if (first && args[1].join(' ') === flaky.command.join(' ')) {
+            first = false;
+            return { ...result, exitCode: 1 };
+          }
+          return result;
+        },
+      });
       await rejects(
-        (async () => startRun(await it.rig.request(await it.components({ driver: idle, reviewer: idle }), { baseCommit: it.baseCommit })))(),
+        (async () => startRun(await it.rig.request({ ...base, sandbox }, { baseCommit: it.baseCommit })))(),
         /accepted no change/u,
         'an accepted empty change',
       );

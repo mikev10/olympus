@@ -26,8 +26,9 @@ export function requiredShortfall(check: CheckSpec, result: CheckResult | undefi
   // A suite check whose suites could not be counted has not shown that any ran, pinned count or
   // not: an unsupported stack or an enumeration that threw is a refusal, never a pass (I5, codex-4).
   const counted = result.suiteCount;
-  const unknown = counted === null && (SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined);
-  if (unknown || (counted !== null && check.expectedSuiteCount !== undefined && counted < check.expectedSuiteCount)) {
+  const required = requiredSuites(check);
+  const unknown = counted === null && (SUITE_KINDS.has(check.kind) || required !== undefined);
+  if (unknown || (counted !== null && required !== undefined && counted < required)) {
     return { checkId: check.id, exitCode: result.exitCode, cause: 'suite-count' };
   }
   return undefined;
@@ -35,3 +36,8 @@ export function requiredShortfall(check: CheckSpec, result: CheckResult | undefi
 
 /** The kinds whose result is a suite run, and so the ones a suite count is recorded for and required of. */
 export const SUITE_KINDS: ReadonlySet<CheckSpec['kind']> = new Set(['unit', 'acceptance']);
+
+/** How many suites a check's result must show ran: every test an acceptance check names, or the count a check pins. */
+export function requiredSuites(check: CheckSpec): number | undefined {
+  return check.kind === 'acceptance' ? check.tests.length : check.expectedSuiteCount;
+}

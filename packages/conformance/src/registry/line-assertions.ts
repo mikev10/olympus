@@ -59,6 +59,8 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     readUsage: (runId) => inner.readUsage(runId),
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
+    recordBaseRun: (r) => inner.recordBaseRun(r),
+    readBaseRun: (runId) => inner.readBaseRun(runId),
     listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
@@ -279,7 +281,7 @@ export const TASK_ATTEMPTS_ARE_BOUNDED: LocalAssertion = runtime({
     const { maxIterations, retry } = STATION_CONTRACTS.build;
     await withLine('p4-i5-iter-', async (rig) => {
       const { startRun } = await api();
-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
       const driver = await stubDriver({ narrative: 'all tests pass' });
       const refusal = refusalOf(await startRun(await rig.request(await rig.components({ driver, reviewer: driver }))), 'I5 iterations');
       const t = refusal.transition;
@@ -434,8 +436,10 @@ async function failsFirstCheck(): Promise<SandboxProvider> {
     provision: (spec) => inner.provision(spec),
     destroy: (handle) => inner.destroy(handle),
     exec: async (handle, cmd) => {
-      checks += 1;
+      // The fixture's compile check, counted alone: the base run's reproduction and the builder's write are execs too (D-A-BF-01).
       const result = await inner.exec(handle, cmd);
+      if (cmd.join(' ') !== 'node -e process.exit(0)') return result;
+      checks += 1;
       return checks === 1 ? { ...result, exitCode: 1 } : result;
     },
   };

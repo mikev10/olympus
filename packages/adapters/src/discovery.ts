@@ -16,7 +16,7 @@
  * a config names must sit inside the repository, because the host is
  * enumerating a tree an agent wrote.
  */
-import { extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { extname, isAbsolute, join, posix, relative, resolve } from 'node:path';
 import picomatch from 'picomatch';
 import { glob } from 'tinyglobby';
 import ts from 'typescript';
@@ -277,6 +277,35 @@ export async function vitestSuites(root: string): Promise<string[]> {
   // answer, which is what the rest of the runtime acts on.
   const label = `${discovery.configFile ?? 'the vitest defaults'} test.include`;
   return found.map((file) => inside(root, resolve(file), label)).sort();
+}
+
+/**
+ * The suites `vitest run <filters…>` runs from the repository root, by the
+ * rule both supported majors apply (`filterFiles`, vitest 3.2.4 and 4.1.11
+ * `dist/chunks/cli-api.*.js`): a suite is kept when its path relative to
+ * `test.dir`, lower-cased, contains a filter as given or the filter's own
+ * path relative to `test.dir`, lower-cased. A substring, not a path, so
+ * `a.test.ts` also selects `data.test.ts`; the caller compares what is
+ * selected with what it named. Paths are modelled under a fixed root, as
+ * the runner sees them under the sandbox's: posix, whatever the host.
+ */
+export async function vitestSelection(root: string, filters: readonly string[]): Promise<string[]> {
+  const { cwd } = await vitestDiscovery(root);
+  const base = '/workspace';
+  const dir = posix.join(base, toPosix(relative(resolve(root), cwd)));
+  const wanted = filters.map((f) => {
+    const own = f.endsWith('/') ? `${posix.relative(dir, posix.resolve(base, f))}/` : posix.relative(dir, posix.resolve(base, f));
+    return [f.toLocaleLowerCase(), own.toLocaleLowerCase()] as const;
+  });
+  return treeRelative(root, await vitestSuites(root)).filter((suite) => {
+    const testFile = posix.relative(dir, posix.join(base, suite)).toLocaleLowerCase();
+    return wanted.some(([given, own]) => testFile.includes(given) || testFile.includes(own));
+  });
+}
+
+/** Enumerated suites, which are absolute, as tree-relative posix paths: the form a manifest names a test in. */
+export function treeRelative(root: string, suites: readonly string[]): string[] {
+  return suites.map((suite) => toPosix(relative(resolve(root), suite)));
 }
 
 // ---------------------------------------------------------------------------

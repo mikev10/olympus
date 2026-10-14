@@ -4,12 +4,14 @@
  * returned. The line (`line.ts`) sequences them; nothing here reads a claim
  * as anything but a claim (I2).
  */
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet } from '@olympus-ai/adapters';
+import { buildAdapterSet, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { AgentClaim } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { DiffEntry } from '@olympus-ai/vault';
-import { SUITE_KINDS } from './gate.js';
+import type { RequestProblem } from './validate.js';
 
 /**
  * Where the claim and the evidence differ. Only the claim's file list is
@@ -67,12 +69,120 @@ export async function countSuites(tree: string): Promise<number | null> {
 }
 
 /**
- * The suite count a check's result records. A null here fails a suite check,
- * and any check that pins `expectedSuiteCount`: a tree whose suites cannot be
- * enumerated is not a tree whose suites passed (`gate.ts`).
+ * The base's test framework: the one every suite check runs, from the
+ * base's own install, at the base run and at `verify` alike. The change
+ * cannot replace it, since nothing a task writes under `node_modules` is
+ * carried (D-R15-05). Null when the base declares no framework this runtime
+ * supports, which admission refuses for any suite check (D-R15-04).
  */
-export function suiteCountFor(check: CheckSpec, counted: number | null): number | null {
-  return SUITE_KINDS.has(check.kind) || check.expectedSuiteCount !== undefined ? counted : null;
+export async function suiteRunner(base: string): Promise<TestFrameworkAdapter | null> {
+  try {
+    return (await buildAdapterSet(base, { provider: null, coverage: null })).test;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The argument vector a check runs: the pinned one, or for a suite check the
+ * base framework's own invocation over the check's tests, or over every
+ * configured suite for a unit check. Admission refused a suite check with no
+ * runner, so a null here is a run admitted on a base that has since changed.
+ */
+export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null): readonly [string, ...string[]] {
+  if (check.kind !== 'acceptance' && check.kind !== 'unit') return check.command;
+  if (runner === null) throw new Error(`the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner to start`);
+  return runner.invocation(check.kind === 'acceptance' ? check.tests : null);
+}
+
+/**
+ * Why a suite check cannot start in `tree`, or undefined when it can. The
+ * runner is the base's install; with none there, `node` exits 1 for a module
+ * it cannot find, which a check declared `'fails'` would read as a
+ * reproduction. A test that never ran did not fail (I5).
+ */
+export async function runnerMissing(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<string | undefined> {
+  if (check.kind !== 'acceptance' && check.kind !== 'unit') return undefined;
+  if (runner === null) return `the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner`;
+  const facts = await stat(join(tree, ...runner.runner.split('/'))).catch(() => null);
+  return facts?.isFile() === true ? undefined : `${runner.stack}'s runner is not installed at ${runner.runner}, so the check cannot start`;
+}
+
+/**
+ * Why the suite checks cannot be bound to the base, as admission refuses
+ * them (D-R15-04): a suite check over a base with no supported test
+ * framework, or one whose runner is not installed there; a named test that
+ * is not an admitted acceptance test, so nothing locks it; or a set of named
+ * tests the runner would not run exactly, because one is not a suite it
+ * loads or because its selection rule takes in a suite nobody named. Read
+ * from the snapshot, which is the tree every check runs over.
+ */
+export async function suiteBindingProblems(checks: readonly CheckSpec[], base: string, admittedTests: readonly string[]): Promise<RequestProblem[]> {
+  const problems: RequestProblem[] = [];
+  const suiteChecks = checks.filter((c) => c.kind === 'acceptance' || c.kind === 'unit');
+  if (suiteChecks.length === 0) return problems;
+  const runner = await suiteRunner(base);
+  const admitted = new Set(admittedTests);
+  for (const [i, check] of checks.entries()) {
+    if (check.kind !== 'acceptance' && check.kind !== 'unit') continue;
+    const at = `manifest.checks[${String(i)}]`;
+    const missing = await runnerMissing(check, runner, base);
+    if (missing !== undefined) {
+      problems.push({ path: at, code: 'unbound', message: `${at}: ${missing}; a suite check runs the base's own test framework or nothing` });
+      continue;
+    }
+    if (check.kind !== 'acceptance' || runner === null) continue;
+    check.tests.forEach((test, j) => {
+      if (!admitted.has(test)) {
+        problems.push({ path: `${at}.tests[${String(j)}]`, code: 'unbound', message: `${at}.tests[${String(j)}]: '${test}' is not an admitted acceptance test, so nothing locks what the check runs` });
+      }
+    });
+    let selected: string[];
+    try {
+      selected = await runner.selectSuites(base, check.tests);
+    } catch (error) {
+      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} cannot say which suites it would run: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    const chosen = new Set(selected);
+    const unloaded = check.tests.filter((test) => !chosen.has(test));
+    const extra = selected.filter((suite) => !check.tests.includes(suite));
+    if (unloaded.length > 0) {
+      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} does not run ${unloaded.join(', ')} as a suite here, so its failure would reproduce nothing` });
+    }
+    if (extra.length > 0) {
+      problems.push({ path: `${at}.tests`, code: 'unbound', message: `${at}.tests: ${runner.stack} would also run ${extra.join(', ')}, which the check does not name; a check runs exactly the tests it names` });
+    }
+  }
+  return problems;
+}
+
+/**
+ * The suite count a check's result records. For a suite check it is what the
+ * runner was made to load, by its own selection rule over the tree it ran
+ * in: an acceptance check's named tests that the runner selects, and none
+ * when it selects a suite the check does not name, or every
+ * suite a unit check's runner is configured to run (D-R15-04). A behavioral
+ * check that pins `expectedSuiteCount` records the tree's count; any other
+ * check, none. A null fails a check that requires a count: a tree whose
+ * suites cannot be enumerated is not a tree whose suites passed (`gate.ts`).
+ */
+export async function suitesRun(check: CheckSpec, runner: TestFrameworkAdapter | null, tree: string): Promise<number | null> {
+  try {
+    if (check.kind === 'acceptance') {
+      if (runner === null) return null;
+      // A suite the runner would also load, which the check does not name, ran uncounted; admission
+      // refused one on the base, and the change can add one at `verify` (D-R15-07).
+      const named = new Set<string>(check.tests);
+      const selected = await runner.selectSuites(tree, check.tests);
+      if (selected.some((suite) => !named.has(suite))) return null;
+      return selected.length;
+    }
+    if (check.kind === 'unit') return runner === null ? null : (await runner.enumerateSuites(tree)).length;
+  } catch {
+    return null;
+  }
+  return check.expectedSuiteCount !== undefined ? countSuites(tree) : null;
 }
 
 const RESULT_KEYS = ['claim', 'contractVersion', 'events', 'model', 'taskId', 'usage'] as const;

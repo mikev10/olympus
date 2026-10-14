@@ -186,10 +186,16 @@ const PROXIED: EgressLog = {
   ],
 };
 
-/** The driver's call reports three connections; the verify checks' sandboxes report none. */
+/**
+ * The second sandbox is the driver's call: the first runs the fixture's
+ * reproduction over the base at `test-design` (D-A-BF-01).
+ */
+const DRIVER_CALL = 2;
+
+/** The driver's call reports three connections; the check sandboxes report none. */
 async function egressScenario(verdict: EgressConnection['verdict']): Promise<void> {
   await withLine(`p14-egress-${verdict}-`, async (rig) => {
-    const sandbox = await reportingProvider((n) => (n === 1 ? { egress: PROXIED } : {}));
+    const sandbox = await reportingProvider((n) => (n === DRIVER_CALL ? { egress: PROXIED } : {}));
     const components = await rig.components({ sandbox });
     await stoppedForApproval(rig, components);
     const d = await expectDecision(rig, components.vault, `egress:${verdict}`, { decidedBy: 'egress-proxy', taskId: HELLO_TASK, station: 'build' });
@@ -247,7 +253,7 @@ async function parkScenario(cause: ParkCause): Promise<void> {
     const { startRun, resumeRun } = await api();
     let vault: Vault;
     if (cause === 'iterations-exhausted') {
-      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'unit', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+      await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
       const driver = await stubDriver();
       const components = await rig.components({ driver, reviewer: driver });
       vault = components.vault;
@@ -368,11 +374,15 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
       await withLine('p14-meter-lost-', async (rig) => {
         const { resumeRun, startRun } = await api();
         const base = await rig.components();
+        let destroyed = 0;
         const unreadable: SandboxProvider = {
           ...forwarding(base.sandbox),
           destroy: async (h) => {
-            await base.sandbox.destroy(h);
-            throw new Error("the relay's meter could not be read");
+            const teardown = await base.sandbox.destroy(h);
+            destroyed += 1;
+            // The base run's check sandbox is torn down first; the driver's call is the one whose meter is lost.
+            if (destroyed === DRIVER_CALL) throw new Error("the relay's meter could not be read");
+            return teardown;
           },
         };
         await startRun(await rig.request({ ...base, sandbox: unreadable })).then(
@@ -406,6 +416,20 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     },
   },
   'station:gate-failed': { kind: 'unconstructed' },
+  'station:base-mismatch': {
+    kind: 'scenario',
+    run: async () => {
+      await withLine('p14-base-', async (rig) => {
+        const { startRun } = await api();
+        // The fixture's reproduction made vacuous: it passes over the base, so the test-design exit is refused (D-A-BF-01).
+        const manifest = JSON.parse(await readFile(join(rig.dirs.artifacts, 'verify.json'), 'utf8')) as { checks: Array<{ onBase?: string; command: string[] }> };
+        await writeManifest(rig.dirs, manifest.checks.map((c) => (c.onBase === 'fails' ? { ...c, command: ['node', '-e', 'process.exit(0)'] } : c)));
+        const components = await rig.components();
+        refusalOf(await startRun(await rig.request(components)), 'P14 base');
+        await expectDecision(rig, components.vault, 'station:base-mismatch', { decidedBy: 'line', taskId: null, station: 'test-design' });
+      });
+    },
+  },
   'station:lock-tamper': {
     kind: 'scenario',
     run: async () => {
@@ -580,7 +604,7 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     run: async () => {
       await withLine('p14-relay-', async (rig) => {
         const refusing: MeterReading = { kind: 'metered', calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 1, exhausted: 'cost', refused: 2 };
-        const sandbox = await reportingProvider((n) => (n === 1 ? { meter: refusing } : {}));
+        const sandbox = await reportingProvider((n) => (n === DRIVER_CALL ? { meter: refusing } : {}));
         const components = await rig.components({ sandbox });
         await stoppedForApproval(rig, components);
         const [usage] = (await rig.state()).usage;

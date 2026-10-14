@@ -88,6 +88,11 @@ export function basePath(store: WorkspaceStore, runId: RunId): string {
   return join(runDir(store, runId), 'base');
 }
 
+/** Where the acceptance checks run over the base: a copy of it, so a check never runs over the snapshot every later tree is built from (D-A-BF-01). */
+export function baseRunPath(store: WorkspaceStore, runId: RunId): string {
+  return join(runDir(store, runId), 'base-run');
+}
+
 export function attemptPaths(store: WorkspaceStore, runId: RunId, task: TaskId, iteration: number): { start: string; work: string } {
   const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
   return { start: join(dir, 'start'), work: join(dir, 'work') };
@@ -193,6 +198,38 @@ export async function snapshotBase(store: WorkspaceStore, runId: RunId, source: 
 /** Removes everything the store holds for a run. For a run refused after its base was taken, so a refusal leaves nothing behind. */
 export async function discardRun(store: WorkspaceStore, runId: RunId): Promise<void> {
   await rm(runDir(store, runId), { recursive: true, force: true });
+}
+
+/**
+ * Whether a path lies in a dependency tree: under a `node_modules` directory
+ * at any depth. Every check runs over the base's dependency trees, so the
+ * runner a suite check starts is the one the base installed; a task's
+ * writes there are recorded and escalated, and never carried into the tree
+ * the checks judge, or the change could replace its own judge (D-R15-05).
+ * Matched in any case: on a case-insensitive filesystem `Node_Modules`
+ * written over the base's tree lands in its `node_modules` (D-R15-07).
+ */
+export function inDependencyTree(path: string): boolean {
+  return dependencyIndex(path.split('/')) !== -1;
+}
+
+function dependencyIndex(parts: readonly string[]): number {
+  return parts.findIndex((part) => part.toLowerCase() === 'node_modules');
+}
+
+/**
+ * The entry a dependency-tree path is recorded under: the package directory
+ * it belongs to, `node_modules/vitest` or `node_modules/@scope/pkg`, or the
+ * file itself when it sits directly in `node_modules`. One install writes
+ * thousands of files; the package is what a person reading the escalation
+ * can act on.
+ */
+export function dependencyEntry(path: string): string {
+  const parts = path.split('/');
+  const at = dependencyIndex(parts);
+  const name = parts[at + 1];
+  const scoped = name?.startsWith('@') === true && parts.length > at + 3;
+  return parts.slice(0, Math.min(parts.length, at + (scoped ? 3 : 2))).join('/');
 }
 
 /** A task's own diff: every path outside `.git` whose content differs between the tree it was handed and the tree it left. */

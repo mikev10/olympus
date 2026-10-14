@@ -6,7 +6,7 @@
  * by field: a path and a code for a request problem, a payload for a transition.
  * And every one leaves nothing behind: no admission, no state, no lock.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RunId, TaskId } from '@olympus-ai/core';
@@ -77,6 +77,7 @@ describe('S1 finding 1: duplicate check ids', () => {
     expect(bundle.checks.map((c) => [c.checkId, c.exitCode])).toEqual([
       ['x', 0],
       ['y', 3],
+      ['hello-written', 0],
     ]);
     expect(outcome.state.tasks['hello' as TaskId]).toBe('parked');
   });
@@ -84,9 +85,9 @@ describe('S1 finding 1: duplicate check ids', () => {
 
 describe('S1 finding 3: the verification manifest', () => {
   test('3a: a manifest with no checks, or only optional ones, is refused', async () => {
-    await writeChecks(workspace, []);
+    await writeChecks(workspace, [], { asWritten: true });
     await expectInvalid(await start(), 'manifest.checks', 'missing');
-    await writeChecks(workspace, [{ ...ok, required: false }]);
+    await writeChecks(workspace, [{ ...ok, required: false }], { asWritten: true });
     await expectInvalid(await start(), 'manifest.checks', 'none-required');
   });
 
@@ -110,6 +111,54 @@ describe('S1 finding 3: the verification manifest', () => {
       await writeChecks(workspace, [{ ...ok, timeoutMs }]);
       await expectInvalid(await start(), 'manifest.checks[0].timeoutMs', 'not-integer');
     }
+  });
+
+  test('a check of no known kind is refused', async () => {
+    await writeChecks(workspace, [{ ...ok, kind: 'smoke' }]);
+    await expectInvalid(await start(), 'manifest.checks[0].kind', 'not-a-kind');
+  });
+
+  test('D-R15-04: a suite check pins no command, an acceptance check names its tests, and no other check names any', async () => {
+    const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', tests: ['a.test.ts'], required: true, timeoutMs: 10_000 };
+    await writeChecks(workspace, [{ id: 'u', kind: 'unit', command: ['vitest', 'run'], required: true, timeoutMs: 10_000 }]);
+    await expectInvalid(await start(), 'manifest.checks[0].command', 'not-applicable');
+    await writeChecks(workspace, [{ ...acceptance, command: ['node', '-e', 'process.exit(1)'] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].command', 'not-applicable');
+    await writeChecks(workspace, [{ ...acceptance, tests: undefined }]);
+    await expectInvalid(await start(), 'manifest.checks[0].tests', 'missing');
+    await writeChecks(workspace, [{ ...acceptance, expectedSuiteCount: 1 }]);
+    await expectInvalid(await start(), 'manifest.checks[0].expectedSuiteCount', 'not-applicable');
+    await writeChecks(workspace, [{ ...ok, tests: ['a.test.ts'] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].tests', 'not-applicable');
+    const named: Array<[unknown, string, RequestProblemCode]> = [
+      ['a.test.ts:12', 'manifest.checks[0].tests[0]', 'not-runnable'],
+      ['src\\a.test.ts', 'manifest.checks[0].tests[0]', 'not-runnable'],
+      ['../a.test.ts', 'manifest.checks[0].tests[0]', 'escapes'],
+      ['/a.test.ts', 'manifest.checks[0].tests[0]', 'absolute'],
+      ['', 'manifest.checks[0].tests[0]', 'empty'],
+    ];
+    for (const [test, path, code] of named) {
+      await writeChecks(workspace, [{ ...acceptance, tests: [test] }]);
+      await expectInvalid(await start(), path, code);
+    }
+    await writeChecks(workspace, [{ ...acceptance, tests: ['a.test.ts', 'a.test.ts'] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].tests[1]', 'duplicate');
+  });
+
+  test('D-R15-04: an acceptance check whose tests the base framework would not run exactly is refused, and nothing is kept', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'r15', devDependencies: { vitest: '4.1.11' } }));
+    await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
+    await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(1)\n');
+    await mkdir(join(workspace, 'sub'), { recursive: true });
+    await writeFile(join(workspace, 'a.test.ts'), '');
+    await writeFile(join(workspace, 'sub', 'a.test.ts'), '');
+    const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', required: true, timeoutMs: 10_000 };
+    // Not admitted as an acceptance test: nothing locks it.
+    await writeChecks(workspace, [{ ...acceptance, tests: ['sub/a.test.ts'] }]);
+    await expectInvalid(await start(), 'manifest.checks[0].tests[0]', 'unbound');
+    // Admitted, but `a.test.ts` is a filter to vitest that selects sub/a.test.ts as well.
+    await writeChecks(workspace, [{ ...acceptance, tests: ['a.test.ts'] }]);
+    await expectInvalid(await start({ artifacts: { ...ARTIFACTS, acceptanceTests: [...ARTIFACTS.acceptanceTests, 'a.test.ts'] } }), 'manifest.checks[0].tests', 'unbound');
   });
 
   test('a manifest or a graph that is not JSON is refused', async () => {

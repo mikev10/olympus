@@ -49,12 +49,32 @@ export interface DiffEntry {
   readonly sha256: string | null;
 }
 
+/**
+ * The declared checks (D-R15-02) as the runtime ran them over the base, at the
+ * `test-design` exit and before any driver was invoked (D-A-BF-01). Written
+ * once per run: a resume reads this rather than running them again, so the
+ * base a run was judged against is the one it was first judged against. I2:
+ * every field is the runtime's.
+ */
+export interface BaseRunRecord {
+  readonly runId: RunId;
+  /** The digest of the tree the checks ran over: the base the runtime snapshotted at admission. */
+  readonly baseTreeSha256: string;
+  /** One result per declared check that produced one, in the manifest's order. */
+  readonly checks: readonly CheckResult[];
+  /** Every declared check that produced no result, and why; never counted as a failure. */
+  readonly unstarted: readonly UnstartedCheck[];
+  readonly collectedBy: 'runtime';
+}
+
 export interface EvidenceBundle {
   runId: RunId;
   taskId: TaskId;
   baseCommit: string;                 // evidence is void if the base moves
   /** The digest of the tree admitted as base. `baseCommit` alone does not name it: a working copy can differ from its commit (A-P6-03). */
   baseTreeSha256: string;
+  /** The declared checks as they ran over the base before build, so review sees each fail before the change and pass after it. */
+  baseRun: VaultRef;
   /** What the checks ran over: base, every diff accepted before this task, and this one. */
   diff: readonly DiffEntry[];
   diffSha256: string;
@@ -69,6 +89,13 @@ export interface EvidenceBundle {
    * none decides the task's status (A-P7-03).
    */
   tamper: TamperReport;
+  /**
+   * What the task wrote under `node_modules`, by package directory, none of
+   * it carried into the tree the checks ran over: they ran over the base's
+   * dependency trees, so the change could not replace the runner judging it
+   * (D-R15-05). Every entry escalates the `integrate` exit.
+   */
+  notCarried: readonly string[];
   collectedBy: 'runtime';             // literal type: no other value is representable
   driverProvenanceId: string;
   contractVersion: string;
@@ -316,6 +343,14 @@ export interface Vault {
    * that would have referenced it is still found (A-I1a-05).
    */
   readUsage(runId: RunId): Promise<readonly VaultRef[]>;
+  /**
+   * The run's base record (D-A-BF-01). Refused unless `collectedBy` is
+   * `'runtime'`, and refused for a run that already has one: the base a run
+   * is judged against is fixed by its first run, as its admission is.
+   */
+  recordBaseRun(r: BaseRunRecord): Promise<VaultRef>;
+  /** The run's base record, or null when the checks have not run over its base. */
+  readBaseRun(runId: RunId): Promise<VaultRef | null>;
   /** What `integrate` did on the remote. Refused unless `collectedBy` is `'runtime'` (A-I1b-01). */
   recordIntegration(r: IntegrationRecord): Promise<VaultRef>;
   /** Every integration record of a run, in no promised order; empty for a run that never integrated. */

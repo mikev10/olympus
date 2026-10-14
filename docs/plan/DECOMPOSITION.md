@@ -1015,7 +1015,67 @@ acceptance check that passes on the base.
 `test-design` exit before any driver is invoked; a check with no declaration
 is refused at admission; a manifest with no `'fails'` check is refused; a
 check that does not start on the base refuses rather than counting as a
-failure; `verify`'s evidence names the base results the runtime recorded.
+failure; `verify`'s evidence names the base results the runtime recorded; a
+suite check runs the base's framework over exactly what it names, and one
+that cannot is refused at admission; a builder that rewrites the runner a
+check starts is judged by the base's runner, and what it wrote is recorded
+and escalated.
+
+**Further binding, confirmed when the unit started (D-R15-01):**
+
+- the check declared `'fails'` must also be `required`: an optional check
+  does not hold `verify`'s gate, so it shows nothing about the change
+- a check of kind `behavioral` may also declare `'fails'` or `'passes'`, and
+  then runs over the base like an acceptance check; a required behavioral
+  check declared `'fails'` satisfies the rule above, so a repository with no
+  test framework can still reproduce its defect (D-R15-02). A declaration on
+  any other kind is refused at admission: a declaration that does nothing is
+  a claim with no effect
+- a base whose suites cannot be counted refuses an acceptance check, as
+  `verify`'s gate does (I5)
+- a run admitted before this unit, whose manifest carries no declaration,
+  does not resume; there is no migration
+
+**Further binding, from the review (D-R15-04, D-R15-05, D-R15-06), confirmed
+by the maintainer before merge:**
+
+- a `unit` or `acceptance` check pins no command. The runtime starts the
+  test framework the base declares, from the base's own install, over
+  exactly the locked tests an acceptance check names, or every configured
+  suite for a unit check, and records as the suite count what that runner
+  was made to load. Admission refuses a suite check that pins a command, a
+  named test that is not an admitted acceptance test or that the framework
+  does not run as a suite, a set the framework's own selection rule would
+  widen, and a suite check over a base with no supported framework or no
+  installed runner. A count of the tree's test files never stands in for
+  tests nothing ran
+- every check runs over the base's dependency trees. What a task writes
+  under `node_modules` is never carried into the tree the checks run over;
+  it is recorded in the evidence by package and escalates `integrate`. The
+  change cannot replace the runner that judges it (I3)
+- the Vault refuses a base record whose result has no suite count, or an exit
+  code that is not an integer
+
+**Contract amendments, owed by the unit's pull request:** `CheckSpec` splits
+by kind, an acceptance check carrying `onBase: 'fails' | 'passes'`, a
+behavioral check carrying it optionally, and every other kind
+`onBase?: never`; `StationRefusal` gains `'base-mismatch'`, naming
+each check that did not do what it declared and the base record; `Vault` gains
+`recordBaseRun`, write-once per run, and `readBaseRun`; `VaultRefKind` gains
+`'base-run'`; `EvidenceBundle` gains a required `baseRun` reference. From the
+review: `CheckSpec` gains `UnitCheckSpec` and `SuiteCheckSpec`, an acceptance
+check carrying `tests` and no `command` or `expectedSuiteCount`;
+`TestFrameworkAdapter` gains `runner`, `invocation`, and `selectSuites`;
+`EvidenceBundle` gains a required `notCarried`.
+
+**Out of scope:** judging why a check failed on the base (mutation testing,
+M3); R7's corpus item; the security check kinds and their base fingerprints
+(R17); bug-fix intake (R16); the M2 trigger framework's spec, which is a
+separate amendment.
+
+**Acceptance criteria:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+`pnpm conformance`, and `pnpm typecheck:tooling` pass, and the registry holds
+an assertion for each sentence of the conformance paragraph above.
 
 **Why M2:** M1's scope is closed and I1 proves it. The unit adds one sandbox run
 per admitted run and no model call, so it is cheap to take early in M2, and

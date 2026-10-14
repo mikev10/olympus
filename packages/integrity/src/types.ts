@@ -9,9 +9,76 @@ export type CheckKind =
   | 'compile' | 'typecheck' | 'lint' | 'unit'
   | 'acceptance' | 'behavioral' | 'coverage' | 'mutation';
 
-export interface CheckSpec {
+/** What a check declares it does over the base: `'fails'` reproduces what the change must fix, `'passes'` guards behaviour that must survive it. */
+export type BaseDeclaration = 'fails' | 'passes';
+
+/**
+ * A check as `test-design` locked it. An acceptance check declares what it
+ * does on the base, with no default; a behavioral check may, since it runs
+ * the product rather than a test runner and so reproduces a defect in a
+ * repository with no test framework. The runtime runs every declared check
+ * over the base before any driver is invoked and refuses the `test-design`
+ * exit if one does otherwise (D-A-BF-01, D-R15-02). No other kind carries a
+ * declaration: one that did nothing would be a claim with no effect.
+ */
+export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | BehavioralCheckSpec | OtherCheckSpec;
+
+/**
+ * A check whose result is a test runner's: `unit` and `acceptance`. It pins
+ * no command. The runtime runs the test framework the base declares, from
+ * the base's own install, over the suites the check names, so a suite count
+ * is a count of what the runner was made to load rather than an inventory
+ * of the tree, and nothing the change writes can stand in for the runner
+ * (D-R15-04).
+ */
+export type SuiteCheckSpec = AcceptanceCheckSpec | UnitCheckSpec;
+
+/**
+ * An acceptance check runs exactly the locked acceptance tests it names, and
+ * its suite count is the number of those the runner was made to load: every
+ * one, or the gate refuses. A pinned `expectedSuiteCount` would restate it.
+ */
+export interface AcceptanceCheckSpec extends SuiteCheckFields {
+  kind: 'acceptance';
+  onBase: BaseDeclaration;
+  /** Tree-relative paths, each an admitted acceptance test the base's framework enumerates as a suite. */
+  tests: readonly [string, ...string[]];
+  expectedSuiteCount?: never;
+}
+
+/** A unit check runs every suite the tree's test framework is configured to run. */
+export interface UnitCheckSpec extends SuiteCheckFields {
+  kind: 'unit';
+  onBase?: never;
+  tests?: never;
+  expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
+}
+
+export interface BehavioralCheckSpec extends CommandCheckFields {
+  kind: 'behavioral';
+  onBase?: BaseDeclaration;
+}
+
+export interface OtherCheckSpec extends CommandCheckFields {
+  kind: Exclude<CheckKind, SuiteCheckSpec['kind'] | 'behavioral'>;
+  onBase?: never;
+}
+
+/** A check that carries a declaration, and so runs over the base. */
+export type DeclaredCheckSpec = (AcceptanceCheckSpec | BehavioralCheckSpec) & { onBase: BaseDeclaration };
+
+interface CheckSpecFields {
   id: string;
-  kind: CheckKind;
+  required: boolean;
+  timeoutMs: number;
+}
+
+interface SuiteCheckFields extends CheckSpecFields {
+  /** The runtime's, never the manifest's: see `SuiteCheckSpec`. */
+  command?: never;
+}
+
+interface CommandCheckFields extends CheckSpecFields {
   /**
    * Pinned at test-design; lives in the Vault. An argument vector, run exactly
    * as given with no shell: a check that needs one names it, `['sh', '-c', …]`,
@@ -20,8 +87,7 @@ export interface CheckSpec {
    * representable (A-P6-01).
    */
   command: readonly [string, ...string[]];
-  required: boolean;
-  timeoutMs: number;
+  tests?: never;
   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
 }
 

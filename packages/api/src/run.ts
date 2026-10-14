@@ -59,6 +59,7 @@ import type { BuiltGraph } from './graph.js';
 import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
 import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
+import { suiteBindingProblems } from './verification.js';
 import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
 export interface ComponentGraph {
@@ -517,6 +518,11 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   // and discarded if admission refuses after it: a refusal leaves nothing behind.
   const { workspaces } = req.components;
   const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
+  const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), req.artifacts.acceptanceTests);
+  if (unbound.length > 0) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: unbound };
+  }
   const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel);
 
   const now = new Date().toISOString();

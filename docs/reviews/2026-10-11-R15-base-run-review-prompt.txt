@@ -1,0 +1,89 @@
+The code under review is in the file
+`2026-10-11-R15-base-run-review-bundle.txt` (SHA-256 12ac8e51720e701a0f2d53b4b83faf953ac013ee7deff49d7bb2a5b9ad48e248) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a gate that runs a software factory's acceptance checks over the unchanged code before any change is made, in a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change through fixed stations. At `test-design` it locks the acceptance tests and a verification manifest (a list of checks, each a pinned argument vector); at `verify` it runs those checks over the base plus the change, and a task passes only if its required checks pass. A check that already passes on the unchanged base would pass whatever the change did, so this unit makes each acceptance check, and optionally each behavioral check, declare whether it 'fails' or 'passes' on the base, refuses at admission a manifest with no required check declared 'fails', runs every declared check over a fresh read-only copy of the base at the `test-design` exit before any model is invoked, records the results once in a runtime-only store (the Vault), and refuses the exit when a check does not do what it declared. The evidence written at `verify` points to that record.
+
+It must hold against a capable, motivated party trying to get a change accepted by a gate that never required the change: a manifest whose 'fails' check does not actually fail on the base, a reproduction that 'fails' only because it never ran, or a run that crosses `test-design` without its base being judged. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the verification manifest and the acceptance test files submitted with a run (their content, kinds, declarations, and commands), the repository contents that make up the base, what the model writes during `build`, and when the runtime process stops (a run may be resumed from any committed state). It does not control the components the runtime is wired with — the Vault, the sandbox provider, the workspace store, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. Results are collected by the runtime from processes it ran; nothing a model returned decides an outcome.
+- An agent may not be judged by an artifact it can write. Specs and acceptance tests are hashed before build and re-verified at every station transition.
+- Fail closed. A missing check, a check that did not start, an unsupported stack, or a test suite that enumerates below what was expected is a refusal — never a silent degrade or a warning that lets the run continue.
+- Default deny. A check sandbox has no network unless policy grants it.
+- No agent writes to the Vault.
+
+The mechanisms that matter most:
+
+- `parseManifest` in packages/api/src/validate.ts: which declarations are required, allowed, and refused, and what counts as the reproduction
+- `runOnBase` and the `test-design` case of `work` in packages/api/src/line.ts: what the checks run over, in what sandbox, what is recorded, and how a resume and a refusal behave
+- `baseMismatches` / `baseRefusal` in packages/api/src/base.ts: how a record becomes a refusal, including the suite-count rule
+- `recordBaseRun` / `readBaseRun` in the two Vault implementations: write-once, shape checks, and reading by reference
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Judging why a check failed on the base (mutation testing, M3); R7's corpus item; the security check kinds and their base fingerprints (R17); bug-fix intake (R16); the M2 trigger framework's spec, which is a separate amendment.
+
+The identifiers in that list (M3, R7, R16, R17) name later units of the project; you have nothing that defines them, and they only mark work that is deliberately absent. In particular, a check that fails on the base for a reason other than the defect it claims to reproduce (a missing module, an error in the test itself) is a known limit this unit does not address.
+
+THE QUESTION
+
+How would I get a change accepted at `verify` while the run never showed, from records the runtime made, that a required check failed on the base and passes after the change?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
