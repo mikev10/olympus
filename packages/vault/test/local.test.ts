@@ -56,7 +56,7 @@ function bundle(): EvidenceBundle {
     unstarted: [],
     claim: { narrative: 'the task, as the model tells it', filesChanged: [] },
     claimEvidenceDiff: [],
-  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] },
+  tamper: { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [] },
   notCarried: [],
     collectedBy: 'runtime',
     driverProvenanceId: 'local-vault-test@1.0.0',
@@ -117,6 +117,7 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
       acceptanceTests: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }],
       verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
       taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
+      specParts: { security: null },
     },
     baseTreeSha256: '1'.repeat(64),
     unavailableControls: ['mutation'],
@@ -300,7 +301,7 @@ describe('enforcement decisions (A-P14-01)', () => {
 });
 
 describe('the base record (D-A-BF-01)', () => {
-  const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
+  const reproduced = { checkId: 'reproduces', exitCode: 1, stdout: '', stderr: '', suiteCount: 1, expectation: null, findings: null, durationMs: 1, startedAt: '2026-10-11T00:00:00.000Z' };
   const record = {
     runId,
     baseTreeSha256: 'c'.repeat(64),
@@ -332,6 +333,8 @@ describe('the base record (D-A-BF-01)', () => {
     await expect(vault.recordBaseRun({ ...record, checks: [uncounted] } as never)).rejects.toThrow(/not results/);
     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: -1 }] })).rejects.toThrow(/not results/);
     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: 1.5 }] })).rejects.toThrow(/not results/);
+    // R17: a security check's findings are the base set, so one the runtime could not have written is refused.
+    await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, findings: [{ rule: 'r', location: { path: 'a', line: 1 }, fingerprint: 'not-a-digest' }] }] })).rejects.toThrow(/not results/);
     expect(await vault.readBaseRun(runId)).toBeNull();
   });
 

@@ -77,6 +77,7 @@ describe('adapterAdmission', () => {
       mutation: null,
       behavioral: [],
       manifest: null,
+      staticAnalysis: null,
       unavailableControls: () => [],
     };
     const admission = adapterAdmission(lying, 3);

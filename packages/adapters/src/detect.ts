@@ -14,18 +14,21 @@ import { JestAdapter, VitestAdapter } from './framework.js';
 import { ConfigManifestAdapter } from './manifest.js';
 import { declaredRange, readPackageManifest, type PackageManifest } from './manifest-file.js';
 import { AdapterRefusal } from './refusal.js';
+import { STATIC_ANALYSIS_SCANNER, type SecurityScanner } from './security.js';
 import type { AdapterSet, BehavioralAdapter, CoverageAdapter, ManifestAdapter, MutationAdapter, TestFrameworkAdapter } from './types.js';
 
 /** Every kind `BehavioralAdapter.kind` admits. A set missing one names it. */
 export const BEHAVIORAL_KINDS: ReadonlyArray<BehavioralAdapter['kind']> = ['cli', 'http', 'browser'];
 
-export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | `behavioral:${BehavioralAdapter['kind']}`;
+export type Control = 'test' | 'coverage' | 'mutation' | 'manifest' | 'static-analysis' | `behavioral:${BehavioralAdapter['kind']}`;
 
 export interface AdapterSetOptions {
   /** The provider behavioral scenarios run through, or null to build a set with no behavioral adapter. HTTP needs one with a probe. */
   readonly provider: SandboxProvider | null;
   /** Where the coverage check's report is, or null when no coverage check has run. */
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
+  /** The static-analysis scanner a Node.js repository is given; `STATIC_ANALYSIS_SCANNER` when omitted. A test rig names a stand-in. */
+  readonly staticAnalysis?: SecurityScanner;
 }
 
 /**
@@ -38,6 +41,7 @@ export function missingControls(set: AdapterSet): Control[] {
   if (set.coverage === null) missing.push('coverage');
   if (set.mutation === null) missing.push('mutation');
   if (set.manifest === null) missing.push('manifest');
+  if (set.staticAnalysis === null) missing.push('static-analysis');
   const kinds = new Set(set.behavioral.map((b) => b.kind));
   for (const kind of BEHAVIORAL_KINDS) if (!kinds.has(kind)) missing.push(`behavioral:${kind}`);
   return missing;
@@ -51,6 +55,7 @@ export class TypeScriptAdapterSet implements AdapterSet {
   readonly mutation: MutationAdapter | null = null;
   readonly behavioral: BehavioralAdapter[];
   readonly manifest: ManifestAdapter | null;
+  readonly staticAnalysis: SecurityScanner | null;
   /** Why each unavailable control is unavailable, in words a maintainer can act on. */
   readonly reasons: ReadonlyMap<Control, string>;
 
@@ -59,8 +64,10 @@ export class TypeScriptAdapterSet implements AdapterSet {
     coverage: CoverageAdapter | null;
     behavioral: BehavioralAdapter[];
     manifest: ManifestAdapter | null;
+    staticAnalysis: SecurityScanner | null;
     reasons: ReadonlyMap<Control, string>;
   }) {
+    this.staticAnalysis = parts.staticAnalysis;
     this.stack = parts.test?.stack ?? 'unsupported';
     this.test = parts.test;
     this.coverage = parts.coverage;
@@ -138,12 +145,15 @@ export async function buildAdapterSet(root: string, options: AdapterSetOptions):
     reasons.set('behavioral:http', `sandbox provider ${options.provider.id} has no probe, so an HTTP client would run where the product can replace it`);
   } else behavioral.push(new HttpBehavioralAdapter(options.provider));
   reasons.set('behavioral:browser', 'browser scenarios are R3');
+  // The scanner's rules are TypeScript and JavaScript rules, and the repository is a Node.js one only with a package.json.
+  if (!hasManifest) reasons.set('static-analysis', 'the repository has no package.json, and the static-analysis scanner this package carries reads TypeScript and JavaScript');
 
   return new TypeScriptAdapterSet({
     test,
     coverage,
     behavioral,
     manifest: hasManifest ? new ConfigManifestAdapter() : null,
+    staticAnalysis: hasManifest ? (options.staticAnalysis ?? STATIC_ANALYSIS_SCANNER) : null,
     reasons,
   });
 }

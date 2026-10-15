@@ -25,7 +25,7 @@ import { around } from './line-assertions.js';
 import { realComponents, realPolicy } from './real-line.js';
 import { failingRun } from './tier.js';
 import { inTask, runHello, writes } from './verification.js';
-import { HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
+import { ARTIFACTS, HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
 
@@ -187,10 +187,11 @@ const PROXIED: EgressLog = {
 };
 
 /**
- * The second sandbox is the driver's call: the first runs the fixture's
- * reproduction over the base at `test-design` (D-A-BF-01).
+ * The third sandbox is the driver's call: the first two run the fixture's
+ * reproduction and its secret scan over the base at `test-design`
+ * (D-A-BF-01, R17).
  */
-const DRIVER_CALL = 2;
+const DRIVER_CALL = 3;
 
 /** The driver's call reports three connections; the check sandboxes report none. */
 async function egressScenario(verdict: EgressConnection['verdict']): Promise<void> {
@@ -415,7 +416,29 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
       });
     },
   },
-  'station:gate-failed': { kind: 'unconstructed' },
+  'station:gate-failed': {
+    kind: 'scenario',
+    run: async () => {
+      const { STATION_CONTRACTS } = await import('@olympus-ai/core');
+      await withLine('p14-gate-', async (rig) => {
+        const { startRun } = await api();
+        await writeManifest(rig.dirs, [{ id: 'always-fails', kind: 'compile', command: ['node', '-e', 'process.exit(1)'], required: true, timeoutMs: 10_000 }]);
+        const driver = await stubDriver();
+        const components = await rig.components({ driver, reviewer: driver });
+        refusalOf(await startRun(await rig.request(components)), 'P14 gate');
+        await expectDecision(rig, components.vault, 'station:gate-failed', { decidedBy: 'line', taskId: HELLO_TASK, station: 'verify' });
+        // One decision per failed iteration, the last one's included, each naming the check and why it failed (R17, D-R17-06).
+        const gates = (await decisionsOf(rig, components.vault)).filter((d) => keyOf(d.decision) === 'station:gate-failed');
+        const { maxIterations } = STATION_CONTRACTS.build;
+        for (const d of gates) {
+          if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'gate-failed' || d.decision.refusal.failed.length !== 1 || d.decision.refusal.failed[0]?.checkId !== 'always-fails' || d.decision.refusal.failed[0].cause !== 'exit-code') {
+            throw new Error(`P14: a failed gate was recorded as ${JSON.stringify(d.decision)}`);
+          }
+        }
+        if (gates.length !== maxIterations) throw new Error(`P14: ${String(maxIterations)} failed iterations recorded ${String(gates.length)} gate-failed decisions`);
+      });
+    },
+  },
   'station:base-mismatch': {
     kind: 'scenario',
     run: async () => {
@@ -427,6 +450,37 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         const components = await rig.components();
         refusalOf(await startRun(await rig.request(components)), 'P14 base');
         await expectDecision(rig, components.vault, 'station:base-mismatch', { decidedBy: 'line', taskId: null, station: 'test-design' });
+      });
+    },
+  },
+  'station:spec-part-missing': {
+    kind: 'scenario',
+    run: async () => {
+      await withLine('p14-part-', async (rig) => {
+        const { startRun } = await api();
+        const components = await rig.components();
+        // The spec admitted with no security part: admitted, and refused at the spec exit naming the part (R17).
+        const { specParts: _omitted, ...artifacts } = ARTIFACTS;
+        refusalOf(await startRun(await rig.request(components, { artifacts })), 'P14 spec part');
+        const d = await expectDecision(rig, components.vault, 'station:spec-part-missing', { decidedBy: 'line', taskId: null, station: 'spec' });
+        if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'spec-part-missing') {
+          throw new Error(`P14: a spec with no security part was recorded as ${JSON.stringify(d.decision)}`);
+        }
+      });
+    },
+  },
+  'station:denial-check-missing': {
+    kind: 'scenario',
+    run: async () => {
+      await withLine('p14-denial-', async (rig) => {
+        const { startRun } = await api();
+        await writeFile(join(rig.dirs.artifacts, 'security.json'), JSON.stringify(ONE_RULE));
+        const components = await rig.components();
+        refusalOf(await startRun(await rig.request(components)), 'P14 denial');
+        const d = await expectDecision(rig, components.vault, 'station:denial-check-missing', { decidedBy: 'line', taskId: null, station: 'test-design' });
+        if (d.decision.cause !== 'station-refused' || d.decision.refusal.reason !== 'denial-check-missing' || d.decision.refusal.rules.join() !== 'owner-only') {
+          throw new Error(`P14: a rule with no denial check was recorded as ${JSON.stringify(d.decision)}`);
+        }
       });
     },
   },
@@ -787,3 +841,11 @@ async function failsClosed(): Promise<void> {
     if ((await rig.state()).approvals.length !== 0) throw new Error('an approval whose decision could not be written reached run state');
   });
 }
+
+/** A security part naming one authorization rule, which the fixture's manifest has no check denying (R17). */
+export const ONE_RULE = {
+  trustBoundaries: ['the HTTP handler reads a caller-supplied id'],
+  sensitiveData: [],
+  authorizationRules: [{ id: 'owner-only', rule: 'only the owner of a record may read it' }],
+  secrets: [],
+};

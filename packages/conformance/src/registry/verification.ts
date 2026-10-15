@@ -416,7 +416,8 @@ function onImage(provider: SandboxProvider): SandboxProvider {
   return {
     id: provider.id,
     capabilities: () => provider.capabilities(),
-    provision: (spec: SandboxSpec) => provider.provision({ ...spec, image: TEST_IMAGE, limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 120_000 } }),
+    // A security check's sandbox mounts its rules beside the tree and keeps the scanner image it pinned (R17).
+    provision: (spec: SandboxSpec) => provider.provision({ ...spec, image: spec.mounts.others.length > 0 ? spec.image : TEST_IMAGE, limits: { cpus: 0.5, memoryMb: 256, pids: 64, wallClockMs: 120_000 } }),
     exec: (h, cmd, options) => provider.exec(h, cmd, options),
     destroy: (h) => provider.destroy(h),
   };
@@ -463,7 +464,9 @@ export const TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK: LocalAssertion = runtime
             }
           },
         });
-        await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver }, { work: false })));
+        // The sandbox is a wrapper over a real daemon, so its graph runs the declared scanners' images (R17).
+        const { SCANNERS } = await api();
+        await startRun(await rig.request(await rig.components({ sandbox, driver, reviewer: driver, scanners: SCANNERS }, { work: false })));
         const state = await rig.state();
         if (!Object.hasOwn(state.results, second)) throw new Error('I4: the second task never ran');
         if (observed.process === undefined || observed.sizes === undefined) throw new Error('I4: the second task did not observe its workspace');

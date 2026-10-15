@@ -27,6 +27,7 @@ import {
   type TaskRequest,
   type TaskResult,
 } from '@olympus-ai/core';
+import { STAND_IN_SECRET_SCAN_IMAGE, STAND_IN_SECRET_SCANNER, STAND_IN_STATIC_ANALYSIS_IMAGE, STAND_IN_STATIC_ANALYSIS_SCANNER } from '@olympus-ai/adapters';
 import type { OtherCheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
@@ -51,6 +52,7 @@ export const ARTIFACTS = {
   acceptanceTests: ['acceptance.md'],
   verificationManifest: 'verify.json',
   taskGraph: 'graph.json',
+  specParts: { security: 'security.json' },
 } as const;
 
 export async function makeWorkspace(prefix: string): Promise<string> {
@@ -98,9 +100,20 @@ function declaresOne(checks: readonly unknown[]): boolean {
 
 /** `asWritten` writes `checks` alone, for a test of what admission makes of a manifest. */
 export async function writeChecks(workspace: string, checks: readonly unknown[], options: { asWritten?: boolean } = {}): Promise<void> {
-  const written = options.asWritten === true || declaresOne(checks) ? checks : [...checks, HELLO_REPRODUCTION];
+  const reproduced = options.asWritten === true || declaresOne(checks) ? checks : [...checks, HELLO_REPRODUCTION];
+  const scanned = (c: unknown): boolean => typeof c === 'object' && c !== null && (c as { kind?: unknown }).kind === 'secret-scan';
+  const written = options.asWritten === true || reproduced.some(scanned) ? reproduced : [...reproduced, SECRET_SCAN_CHECK];
   await writeFile(join(workspace, 'verify.json'), JSON.stringify({ checks: written }));
 }
+
+/** The stand-in scanners every test graph runs, over a stub sandbox that runs no image (R17). */
+export const STAND_IN_SCANNERS = { secretScan: STAND_IN_SECRET_SCANNER, staticAnalysis: STAND_IN_STATIC_ANALYSIS_SCANNER } as const;
+
+/** The stand-in secret scan a manifest a test writes carries unless it pins one, as the fixture's does. */
+export const SECRET_SCAN_CHECK = { id: 'secret-scan', kind: 'secret-scan', image: STAND_IN_SECRET_SCAN_IMAGE, config: null, required: true, timeoutMs: 30_000 } as const;
+
+/** The stand-in static analysis a manifest pins over a workspace with a package.json, whose stack has the slot. */
+export const STATIC_ANALYSIS_CHECK = { id: 'static-analysis', kind: 'static-analysis', image: STAND_IN_STATIC_ANALYSIS_IMAGE, config: 'rules: []', required: true, timeoutMs: 30_000 } as const;
 
 export async function writeGraph(workspace: string, tasks: readonly unknown[]): Promise<void> {
   await writeFile(join(workspace, 'graph.json'), JSON.stringify({ tasks }));
@@ -195,7 +208,7 @@ export class ChosenDriver extends DelegatingDriver {
 
 /** `parts` as a built graph: itself when it already is one, else built now. */
 export function built(parts: GraphParts): BuiltGraph {
-  return isBuilt(parts) ? parts : buildGraph(parts);
+  return isBuilt(parts) ? parts : buildGraph({ scanners: STAND_IN_SCANNERS, ...parts });
 }
 
 /** What the hello fixture's reproduction reads: the change its spec asks for, absent from the base (D-A-BF-01). */
@@ -237,7 +250,7 @@ export function stubComponents(workspace: string, overrides: Partial<GraphParts>
   const driver = doingTheWork(overrides.driver ?? stub, sandbox);
   // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
   const reviewer = overrides.driver === undefined ? driver : stub;
-  return buildGraph({ vault: new StubVault(workspace), sandbox, reviewer, workspaces: storeFor(workspace), ...overrides, driver });
+  return buildGraph({ vault: new StubVault(workspace), sandbox, reviewer, workspaces: storeFor(workspace), scanners: STAND_IN_SCANNERS, ...overrides, driver });
 }
 
 /**

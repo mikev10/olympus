@@ -93,6 +93,18 @@ export function baseRunPath(store: WorkspaceStore, runId: RunId): string {
   return join(runDir(store, runId), 'base-run');
 }
 
+/**
+ * Where one security check scans: a copy of the tree it judges, from which
+ * the runtime removes the scanner's in-tree ignore files, and its rules,
+ * which the sandbox mounts read-only beside the copy (D-R17-03). `label` is
+ * the tree's: `base`, or the digest of the diff the tree was built from;
+ * `index` the check's place in the manifest, since an id may hold any character.
+ */
+export function scanPaths(store: WorkspaceStore, runId: RunId, label: string, index: number): { dir: string; tree: string; config: string } {
+  const dir = join(runDir(store, runId), 'scans', label, String(index));
+  return { dir, tree: join(dir, 'tree'), config: join(dir, 'config') };
+}
+
 export function attemptPaths(store: WorkspaceStore, runId: RunId, task: TaskId, iteration: number): { start: string; work: string } {
   const dir = join(runDir(store, runId), 'tasks', `${task}.${String(iteration)}`);
   return { start: join(dir, 'start'), work: join(dir, 'work') };

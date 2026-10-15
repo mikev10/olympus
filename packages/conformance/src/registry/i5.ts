@@ -3,6 +3,7 @@ import { compileError, compileOk, external, runtime } from '../kit/assert.js';
 import { ADAPTER_REFUSAL_REFUSES_L3_END_TO_END, UNANALYSED_TESTS_ESCALATE_THE_APPROVAL, UNSAFE_DECLARATION_SURVIVES_COMPOSITION } from './composition.js';
 import { FAILED_INTEGRATION_NEVER_REPORTS_DONE, INTEGRATE_MERGES_THE_VERIFIED_TREE } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { R17_I5 } from './security.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
 import { doingTheWork, withLine } from './line.js';
 import { UNSUPPORTED_STACK_IS_LOUD } from './adapters.js';
@@ -32,7 +33,7 @@ import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MIS
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
-const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator'];
+const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator', 'unattested scanners'];
 
 /** Processes contending on one run's state. More than a pair, so a primitive that happens to serialise two writers is still exposed. */
 const CONTENDERS = 8;
@@ -41,6 +42,8 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    // R17: security at the gate.
+    ...R17_I5,
     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
     INDETERMINATE_PROBE_LOWERS,
@@ -88,7 +91,7 @@ export const I5: InvariantEntry = {
     runtime({
       id: 'I5.unsafe-component-refused-above-l1',
       title:
-        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, and its missing integrator in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+        'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, its missing integrator, and its stand-in scanners in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
       run: async () => {
         await withLine('s1-hello-', async (rig) => {
           const [api, core, sandbox, vault] = await Promise.all([
@@ -106,6 +109,7 @@ export const I5: InvariantEntry = {
             driver: builder,
             reviewer: builder,
             workspaces: rig.workspaces,
+            scanners: api.STAND_IN_SCANNERS,
           });
 
           for (const level of [2, 3] as const) {

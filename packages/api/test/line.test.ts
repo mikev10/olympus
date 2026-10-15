@@ -23,6 +23,7 @@ import {
   readSpec,
   removeWorkspace,
   runRequest,
+  STATIC_ANALYSIS_CHECK,
   stubComponents,
   writeChecks,
 } from './harness.js';
@@ -182,11 +183,12 @@ describe('hello at L1', () => {
     expect(bundle.checks).toEqual([
       expect.objectContaining({ checkId: 'hello-exit-zero', exitCode: 0, suiteCount: null }),
       expect.objectContaining({ checkId: 'hello-written', exitCode: 0 }),
+      expect.objectContaining({ checkId: 'secret-scan', exitCode: 0, findings: [] }),
     ]);
     // The same reproduction, failing over the base before build, from the record the bundle names (D-A-BF-01).
     expect(bundle.baseRun).toEqual(await components.vault.readBaseRun(runId));
     const base = await read<BaseRunRecord>(components.vault, bundle.baseRun);
-    expect(base.checks.map((c) => [c.checkId, c.exitCode])).toEqual([['hello-written', 1]]);
+    expect(base.checks.map((c) => [c.checkId, c.exitCode])).toEqual([['hello-written', 1], ['secret-scan', 0]]);
   });
 
   test('an approval of the integrate exit, then a resume, completes the run', async () => {
@@ -210,8 +212,8 @@ describe('hello at L1', () => {
     expect(req).toMatchObject({ taskId: hello, role: 'builder', variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
-    // The first sandbox runs the reproduction over the base (D-A-BF-01); the build's is the second.
-    expect(req.sandbox).toBe(sandbox.provisioned[1]);
+    // The first two run the reproduction and the secret scan over the base (D-A-BF-01, R17); the build's is the third.
+    expect(req.sandbox).toBe(sandbox.provisioned[2]);
   });
 
   test('a build runs in a rw sandbox, its checks and the review seat in ro ones, and every sandbox is destroyed; egress is denied', async () => {
@@ -220,8 +222,8 @@ describe('hello at L1', () => {
     // The mount follows the station contract's write boundary: `build` grants
     // `**` and gets rw; `review` grants nothing and gets a tree it cannot write.
     expect(STATION_CONTRACTS.review.writeBoundary.workspaceGlobs).toEqual([]);
-    // The base run's check, the build, its two checks, and the review seat.
-    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'rw', 'ro', 'ro', 'ro']);
+    // The base run's check and secret scan, the build, its three checks, and the review seat.
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'ro', 'rw', 'ro', 'ro', 'ro', 'ro']);
     expect(sandbox.destroyed).toEqual(sandbox.provisioned);
     for (const spec of sandbox.specs) expect(spec.egress).toEqual({ mode: 'deny-all', allow: [] });
   });
@@ -279,7 +281,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     expect(state.tasks[hello]).toBe('parked');
     const [ref] = state.evidenceRefs;
     if (ref === undefined) return;
-    expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written']);
+    expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written', 'secret-scan']);
   });
 
   test('a failing check that is not required does not fail the gate', async () => {
@@ -301,7 +303,8 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
     await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
     await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
-    await writeChecks(workspace, [UNIT_CHECK]);
+    // A package.json gives the stack its static-analysis slot, so the manifest pins its check (R17).
+    await writeChecks(workspace, [UNIT_CHECK, STATIC_ANALYSIS_CHECK]);
     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
     expect(state.tasks[hello]).toBe('passed');
     const [ref] = state.evidenceRefs;
@@ -320,7 +323,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const [ref] = state.evidenceRefs;
     if (ref === undefined) throw new Error('no evidence written');
     expect((await read<EvidenceBundle>(components.vault, ref)).tamper).toEqual({
-      assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [],
+      assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [],
     });
   });
 });
@@ -330,10 +333,10 @@ describe('each check runs alone (codex-2, codex-7)', () => {
     const sandbox = new RecordingSandbox(new StubSandboxProvider());
     await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'second', timeoutMs: 2_500 }]);
     await startRun(runRequest(runId, workspace, { ...components, sandbox }));
-    // The base run's check, build, then one per check, then review.
-    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'rw', 'ro', 'ro', 'ro', 'ro']);
-    expect(sandbox.specs.slice(2, 4).map((s) => s.limits.wallClockMs)).toEqual([10_000, 2_500]);
-    expect(new Set(sandbox.provisioned.slice(2, 4)).size).toBe(2);
+    // The base run's check and secret scan, build, then one per check, then review.
+    expect(sandbox.specs.map((s) => s.mounts.workspace.mode)).toEqual(['ro', 'ro', 'rw', 'ro', 'ro', 'ro', 'ro', 'ro']);
+    expect(sandbox.specs.slice(3, 5).map((s) => s.limits.wallClockMs)).toEqual([10_000, 2_500]);
+    expect(new Set(sandbox.provisioned.slice(3, 5)).size).toBe(2);
     expect(sandbox.destroyed).toEqual(sandbox.provisioned);
   });
 });
@@ -689,8 +692,8 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     const builds = vault.usage.filter((r) => r.station === 'build' && r.reading.kind !== 'pending');
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(2);
     expect(builds).toHaveLength(2);
-    // The base run's check sandbox is torn down first, so the first build's is the second.
-    expect(builds[0]?.reading).toMatchObject({ kind: 'metered', calls: 2 });
+    // The base run's two sandboxes, its check's and its secret scan's, are torn down first, so the first build's is the third.
+    expect(builds[0]?.reading).toMatchObject({ kind: 'metered', calls: 3 });
   });
 
   test('calls whose sandbox had no relay are counted as unmetered, never as zero cost', async () => {

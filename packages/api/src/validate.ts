@@ -15,7 +15,8 @@
 import { isAbsolute, posix, win32 } from 'node:path';
 import { isAutonomyLevel } from '@olympus-ai/core';
 import type { RoleId, RunId, Task, TaskGraph, TaskId } from '@olympus-ai/core';
-import type { CheckKind, CheckSpec } from '@olympus-ai/integrity';
+import type { SecurityScanner } from '@olympus-ai/adapters';
+import type { CheckKind, CheckSpec, SecurityCheckKind, SecurityCheckSpec } from '@olympus-ai/integrity';
 import type { RequestedArtifacts } from './run.js';
 
 export type RequestProblemCode =
@@ -78,7 +79,15 @@ export type RequestProblemCode =
   /** The workspace store and the workspace lie one inside the other. */
   | 'overlaps'
   /** A role's egress allowlist names a host the git remote is reached on (D-I1b-05). */
-  | 'reaches-git-remote';
+  | 'reaches-git-remote'
+  /** A security check's image is not pinned by digest, or is not the image declared for its kind (R17). */
+  | 'not-pinned'
+  /** A security check's `config` is neither text nor null, or is null for a scanner with no rules of its own. */
+  | 'not-config'
+  /** A security check is optional; a scanner nothing holds the gate to is not a control (I5). */
+  | 'not-required'
+  /** A security part that is not one: neither `none` with its reason nor every field the part requires (R17). */
+  | 'not-a-security-part';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */
@@ -172,6 +181,18 @@ function artifactProblems(artifacts: unknown, report: Report): void {
   }
   one('artifacts.verificationManifest', a.verificationManifest);
   one('artifacts.taskGraph', a.taskGraph);
+  const parts = a.specParts;
+  if (parts !== undefined) {
+    if (typeof parts !== 'object' || parts === null || Array.isArray(parts)) {
+      report('artifacts.specParts', 'empty', 'artifacts.specParts must be an object naming each part\'s file');
+    } else {
+      const p = parts as Record<string, unknown>;
+      for (const key of Object.keys(p)) {
+        if (key !== 'security') report(`artifacts.specParts.${key}`, 'not-applicable', `artifacts.specParts.${key} is not a part a spec carries; the security part is the only one`);
+      }
+      if (p.security !== undefined) one('artifacts.specParts.security', p.security);
+    }
+  }
 }
 
 /** The manifest's checks, or the problems that keep it from being one. */
@@ -188,14 +209,83 @@ export function parseManifest(value: unknown): { ok: true; checks: CheckSpec[] }
         const tests: readonly [string, ...string[]] = [first, ...rest];
         return { ...check, tests };
       }
-      if (check.kind === 'unit') return { ...check };
+      if (check.kind === 'unit' || isSecuritySpec(check)) return { ...check };
       const [program, ...args] = check.command;
       return { ...check, command: [program, ...args] };
     }),
   };
 }
 
-const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation']);
+const CHECK_KINDS: ReadonlySet<string> = new Set<CheckKind>(['compile', 'typecheck', 'lint', 'unit', 'acceptance', 'behavioral', 'coverage', 'mutation', 'secret-scan', 'static-analysis']);
+
+/** The kinds a scanner runs, whose invocation is the runtime's and whose image and rules the manifest pins (D-R17-01). */
+const SECURITY_KINDS: ReadonlySet<string> = new Set<SecurityCheckKind>(['secret-scan', 'static-analysis']);
+
+function isSecuritySpec(check: CheckSpec): check is SecurityCheckSpec {
+  return SECURITY_KINDS.has(check.kind);
+}
+
+/** An image pinned by digest: a name, `@sha256:`, and 64 lowercase hex digits. A tag can be moved; a digest cannot. */
+const PINNED_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
+
+/**
+ * A security check's own fields: an image pinned by digest, rules as text or
+ * null, required, and no command, since the scanner's arguments are the
+ * runtime's (D-R17-01). Whether the image is the one declared for the kind
+ * is admission's, which knows the stack's scanners.
+ */
+function securityFieldProblems(c: Partial<Record<keyof SecurityCheckSpec, unknown>>, at: string, report: Report): void {
+  if (typeof c.image !== 'string' || !PINNED_IMAGE.test(c.image)) {
+    report(`${at}.image`, 'not-pinned', `${at}.image must be an image pinned by digest, name@sha256:<64 hex>; a tag is not a pin`);
+  }
+  if (c.config !== null && typeof c.config !== 'string') {
+    report(`${at}.config`, 'not-config', `${at}.config must be the scanner's rules as text, or null for the image's own`);
+  }
+  if (c.required === false) {
+    report(`${at}.required`, 'not-required', `${at} is a ${String(c.kind)} check, and must be required: a scanner whose findings hold nothing is not a control`);
+  }
+}
+
+/**
+ * Every security check the manifest must pin and every image it may: a
+ * `secret-scan` check of the secret scanner's image, and, where the stack
+ * has a static-analysis scanner, a `static-analysis` check of its image,
+ * each refused naming the kind (I5). A check pins no rules only where its
+ * scanner has rules of its own.
+ */
+export function securityProblems(
+  checks: readonly CheckSpec[],
+  scanners: { readonly secretScan: SecurityScanner; readonly staticAnalysis: SecurityScanner | null },
+): RequestProblem[] {
+  const { problems, report } = collector();
+  const declared: Readonly<Record<SecurityCheckKind, SecurityScanner | null>> = {
+    'secret-scan': scanners.secretScan,
+    'static-analysis': scanners.staticAnalysis,
+  };
+  const pinned = new Set<SecurityCheckKind>();
+  checks.forEach((check, i) => {
+    if (check.kind !== 'secret-scan' && check.kind !== 'static-analysis') return;
+    const at = `manifest.checks[${String(i)}]`;
+    pinned.add(check.kind);
+    const scanner = declared[check.kind];
+    if (scanner === null) {
+      report(`${at}.kind`, 'unbound', `${at} is a static-analysis check, and the base's stack has no static-analysis scanner to run it`);
+      return;
+    }
+    if (check.image !== scanner.image) {
+      report(`${at}.image`, 'not-pinned', `${at}.image is ${check.image}; a ${check.kind} check runs ${scanner.image}, the image declared for its kind`);
+    }
+    if (check.config === null && scanner.defaultConfig === null) {
+      report(`${at}.config`, 'not-config', `${at}.config is null, and the ${check.kind} scanner has no rules of its own; the check must pin them`);
+    }
+  });
+  for (const kind of ['secret-scan', 'static-analysis'] as const) {
+    if (declared[kind] !== null && !pinned.has(kind)) {
+      report('manifest.checks', 'missing', `manifest.checks pins no ${kind} check; every run is scanned for it (R17)`);
+    }
+  }
+  return problems;
+}
 
 /**
  * The files an acceptance check runs: workspace-relative, inside it, each
@@ -276,9 +366,25 @@ function checkProblems(checks: unknown, report: Report): void {
     // A suite check's result is a test runner's, and the runner is the runtime's to start: a pinned
     // command could be anything, and the suites counted would then be an inventory of the tree (D-R15-04).
     const suite = c.kind === 'unit' || c.kind === 'acceptance';
+    const security = typeof c.kind === 'string' && SECURITY_KINDS.has(c.kind);
     if (suite && c.command !== undefined) {
       report(`${at}.command`, 'not-applicable', `${at} is a ${String(c.kind)} check, which pins no command: the runtime runs the base's test framework itself`);
-    } else if (!suite) commandProblems(c.command, `${at}.command`, report);
+    } else if (security && c.command !== undefined) {
+      report(`${at}.command`, 'not-applicable', `${at} is a ${String(c.kind)} check, which pins no command: the runtime runs the scanner its image is declared for`);
+    } else if (!suite && !security) commandProblems(c.command, `${at}.command`, report);
+    const s = check as Partial<Record<keyof SecurityCheckSpec, unknown>>;
+    if (security) securityFieldProblems(s, at, report);
+    else {
+      for (const field of ['image', 'config'] as const) {
+        if (s[field] !== undefined) report(`${at}.${field}`, 'not-applicable', `${at}.${field} is named on a check that is not a security check`);
+      }
+    }
+    const denies = (check as { deniesRule?: unknown }).deniesRule;
+    if (denies !== undefined) {
+      if (c.kind !== 'acceptance' && c.kind !== 'behavioral') {
+        report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is neither an acceptance nor a behavioral check; a denial is exercised by a locked acceptance check`);
+      } else if (!isNonEmptyString(denies)) report(`${at}.deniesRule`, 'empty', `${at}.deniesRule must name an authorization rule of the spec's security part`);
+    }
     if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
     else if (c.tests !== undefined) {
       report(`${at}.tests`, 'not-applicable', `${at}.tests is named on a check that is not an acceptance check; no other kind runs named tests`);

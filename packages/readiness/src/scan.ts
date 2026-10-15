@@ -22,8 +22,8 @@ import { PROBES } from './probes.js';
 import { materialize, resolveCommit } from './tree.js';
 import type { ProbeEvidence, ProbeId, ProbeOutcome, ProbeResult, ReadinessCeiling, ReadinessReport } from './types.js';
 
-/** gitleaks 8.21.2, pinned by digest so a scan's secret probe is the one its report names. */
-export const SECRET_SCAN_IMAGE = 'zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46';
+/** gitleaks, pinned by digest and declared once beside the scanner `verify` runs, so a scan's secret probe is the one its report names (R17). */
+export { SECRET_SCAN_IMAGE } from '@olympus-ai/adapters';
 
 /** The public npm registry, the one host an install reaches unless the caller names others. */
 export const NPM_REGISTRY: readonly string[] = ['registry.npmjs.org'];
