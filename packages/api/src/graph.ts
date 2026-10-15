@@ -24,6 +24,7 @@ import type { ComponentGraph } from './run.js';
 
 import { GitHubIntegrator, type Integrator } from './integrate.js';
 import { declarationOf, type UnsafeDeclaration } from './safety.js';
+import { SCANNERS, type SecurityScanners } from './security.js';
 
 /**
  * What every sandbox the line provisions runs on and within (D-I1a-01). The
@@ -41,6 +42,8 @@ export interface SandboxProfile {
 export interface GraphParts extends ComponentGraph {
   /** Required with `LocalDockerProvider`, which refuses a sandbox with no image or limits. */
   readonly profile?: SandboxProfile | null;
+  /** The scanners security checks run; `SCANNERS` when omitted. Any other is a stand-in, and no run on it goes above L1. */
+  readonly scanners?: SecurityScanners;
 }
 
 declare const BUILT: unique symbol;
@@ -49,6 +52,7 @@ declare const BUILT: unique symbol;
 export type BuiltGraph = ComponentGraph & {
   readonly profile: SandboxProfile | null;
   readonly integrator: Integrator | null;
+  readonly scanners: SecurityScanners;
   readonly [BUILT]: true;
 };
 
@@ -106,12 +110,26 @@ function unmerged(integrator: object | null): UnsafeDeclaration | undefined {
 }
 
 /**
+ * Scanners other than the ones this package declares are stand-ins: a check
+ * of them shows what the stand-in does, not what the pinned image would
+ * (R17). A test rig uses one on a sandbox that runs no images.
+ */
+function unattestedScanners(scanners: SecurityScanners): UnsafeDeclaration | undefined {
+  const stand = [scanners.secretScan === SCANNERS.secretScan ? [] : ['secret-scan'], scanners.staticAnalysis === SCANNERS.staticAnalysis ? [] : ['static-analysis']].flat();
+  if (stand.length === 0) return undefined;
+  return {
+    component: 'unattested scanners',
+    cannotEnforce: stand.map((kind) => `the ${kind} scanner is not the one the runtime declares for its kind, so its findings are not the pinned image's (R17)`),
+  };
+}
+
+/**
  * Builds the graph, reading every component's provenance as it does. Order of
  * the declarations: vault, sandbox, driver, reviewer. A reviewer that is the
  * driver itself is read once.
  */
 export function buildGraph(parts: GraphParts): BuiltGraph {
-  const { profile, ...components } = parts;
+  const { profile, scanners, ...components } = parts;
   if ((profile ?? null) === null && components.sandbox instanceof LocalDockerProvider) {
     throw new Error('buildGraph: a LocalDockerProvider needs a sandbox profile; it refuses a sandbox with no image or limits (D-I1a-01)');
   }
@@ -131,7 +149,9 @@ export function buildGraph(parts: GraphParts): BuiltGraph {
   }
   const merger = unmerged(components.integrator ?? null);
   if (merger !== undefined) declarations.push(merger);
-  const graph = Object.freeze({ ...components, integrator: components.integrator ?? null, profile: profile ?? null }) as BuiltGraph;
+  const scanning = unattestedScanners(scanners ?? SCANNERS);
+  if (scanning !== undefined) declarations.push(scanning);
+  const graph = Object.freeze({ ...components, integrator: components.integrator ?? null, profile: profile ?? null, scanners: scanners ?? SCANNERS }) as BuiltGraph;
   provenance.set(graph, Object.freeze(declarations));
   return graph;
 }

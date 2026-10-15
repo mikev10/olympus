@@ -78,6 +78,7 @@ describe('S1 finding 1: duplicate check ids', () => {
       ['x', 0],
       ['y', 3],
       ['hello-written', 0],
+      ['secret-scan', 0],
     ]);
     expect(outcome.state.tasks['hello' as TaskId]).toBe('parked');
   });

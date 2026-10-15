@@ -290,6 +290,8 @@ export interface AdmissionRecord {
     readonly acceptanceTests: readonly AdmittedArtifact[];
     readonly verificationManifest: AdmittedArtifact;
     readonly taskGraph: AdmittedArtifact;
+    /** Each part every spec carries, locked with the spec at `spec`, or `null` where it was not admitted and `spec` refuses (R17). */
+    readonly specParts: { readonly security: AdmittedArtifact | null };
   };
   /** The digest of the base tree the runtime snapshotted at admission; every workspace is built from it (A-P6-03). */
   readonly baseTreeSha256: string;

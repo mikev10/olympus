@@ -36,3 +36,25 @@ export {
 } from './files.js';
 export { AdapterRefusal, type AdapterRefusalReason } from './refusal.js';
 export { JEST, VITEST, majorOf, type JestMajor, type VitestMajor } from './versions.js';
+export {
+  markersIn,
+  newFindings,
+  parseGitleaksReport,
+  parseSemgrepReport,
+  SECRET_SCAN_IMAGE,
+  SECRET_SCANNER,
+  secretFingerprint,
+  STATIC_ANALYSIS_IMAGE,
+  STATIC_ANALYSIS_SCANNER,
+  staticFingerprint,
+  treeRelative,
+  type SecurityScanner,
+} from './security.js';
+export {
+  SEEDED_SECRET,
+  SEEDED_SINK,
+  STAND_IN_SECRET_SCAN_IMAGE,
+  STAND_IN_SECRET_SCANNER,
+  STAND_IN_STATIC_ANALYSIS_IMAGE,
+  STAND_IN_STATIC_ANALYSIS_SCANNER,
+} from './stand-in.js';

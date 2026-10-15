@@ -5,6 +5,7 @@
  */
 import type { CheckResult } from '@olympus-ai/integrity';
 import type { SandboxHandle } from '@olympus-ai/sandbox';
+import type { SecurityScanner } from './security.js';
 
 export interface TestFrameworkAdapter {
   readonly stack: string;
@@ -71,5 +72,12 @@ export interface AdapterSet {
   mutation: MutationAdapter | null;
   behavioral: BehavioralAdapter[];
   manifest: ManifestAdapter | null;
+  /**
+   * The stack's static-analysis scanner, or null where it has none, which
+   * names `static-analysis` among the missing controls and so refuses L3 (I5).
+   * Where it is present, admission refuses a manifest that pins no check of it
+   * (R17).
+   */
+  staticAnalysis: SecurityScanner | null;
   unavailableControls(): string[];
 }

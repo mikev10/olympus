@@ -7,7 +7,11 @@ import type { RoleId, RunId, TaskId } from '@olympus-ai/core';
 
 export type CheckKind =
   | 'compile' | 'typecheck' | 'lint' | 'unit'
-  | 'acceptance' | 'behavioral' | 'coverage' | 'mutation';
+  | 'acceptance' | 'behavioral' | 'coverage' | 'mutation'
+  | SecurityCheckKind;
+
+/** The kinds a scanner runs: deterministic, no model call, judged by their findings against the base (D-A-SC-01). */
+export type SecurityCheckKind = 'secret-scan' | 'static-analysis';
 
 /** What a check declares it does over the base: `'fails'` reproduces what the change must fix, `'passes'` guards behaviour that must survive it. */
 export type BaseDeclaration = 'fails' | 'passes';
@@ -21,7 +25,28 @@ export type BaseDeclaration = 'fails' | 'passes';
  * exit if one does otherwise (D-A-BF-01, D-R15-02). No other kind carries a
  * declaration: one that did nothing would be a claim with no effect.
  */
-export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | BehavioralCheckSpec | OtherCheckSpec;
+export type CheckSpec = AcceptanceCheckSpec | UnitCheckSpec | BehavioralCheckSpec | SecurityCheckSpec | OtherCheckSpec;
+
+/**
+ * A scanner's check. It pins no command: the runtime runs the scanner its
+ * image is declared for, with the arguments that scanner's declaration
+ * names, over a copy of the tree with the scanner's in-tree ignore files
+ * removed, and its rules mounted read-only from `config` (D-R17-01,
+ * D-R17-03). Nothing the repository holds configures it (I3). Its exit code
+ * is not its verdict: its findings are, judged against the base's (D-A-SC-02).
+ */
+export interface SecurityCheckSpec extends CheckSpecFields {
+  kind: SecurityCheckKind;
+  /** `name@sha256:<64 hex>`, and the image admission declares for this kind; a tag is not a pin. */
+  image: string;
+  /** The scanner's rules, as text locked with the manifest; `null` for the image's built-in rules where its scanner has them. */
+  config: string | null;
+  command?: never;
+  tests?: never;
+  onBase?: never;
+  expectedSuiteCount?: never;
+  deniesRule?: never;
+}
 
 /**
  * A check whose result is a test runner's: `unit` and `acceptance`. It pins
@@ -38,12 +63,21 @@ export type SuiteCheckSpec = AcceptanceCheckSpec | UnitCheckSpec;
  * its suite count is the number of those the runner was made to load: every
  * one, or the gate refuses. A pinned `expectedSuiteCount` would restate it.
  */
-export interface AcceptanceCheckSpec extends SuiteCheckFields {
+export interface AcceptanceCheckSpec extends SuiteCheckFields, DenialFields {
   kind: 'acceptance';
   onBase: BaseDeclaration;
   /** Tree-relative paths, each an admitted acceptance test the base's framework enumerates as a suite. */
   tests: readonly [string, ...string[]];
   expectedSuiteCount?: never;
+}
+
+/**
+ * What an acceptance or behavioral check carries when it exercises a caller
+ * an authorization rule refuses: the rule's id, as the spec's security part
+ * names it. Every rule needs one, or the `test-design` exit is refused.
+ */
+interface DenialFields {
+  deniesRule?: string;
 }
 
 /** A unit check runs every suite the tree's test framework is configured to run. */
@@ -52,16 +86,18 @@ export interface UnitCheckSpec extends SuiteCheckFields {
   onBase?: never;
   tests?: never;
   expectedSuiteCount?: number;        // I5: a shrunken enumeration is a failure
+  deniesRule?: never;
 }
 
-export interface BehavioralCheckSpec extends CommandCheckFields {
+export interface BehavioralCheckSpec extends CommandCheckFields, DenialFields {
   kind: 'behavioral';
   onBase?: BaseDeclaration;
 }
 
 export interface OtherCheckSpec extends CommandCheckFields {
-  kind: Exclude<CheckKind, SuiteCheckSpec['kind'] | 'behavioral'>;
+  kind: Exclude<CheckKind, SuiteCheckSpec['kind'] | 'behavioral' | SecurityCheckKind>;
   onBase?: never;
+  deniesRule?: never;
 }
 
 /** A check that carries a declaration, and so runs over the base. */
@@ -122,6 +158,18 @@ export type ExpectationOutcome =
   | { readonly held: true; readonly mismatches?: never }
   | { readonly held: false; readonly mismatches: readonly [ExpectationMismatch, ...ExpectationMismatch[]] };
 
+/**
+ * One thing a scanner reported, in the runtime's terms. `fingerprint` is the
+ * runtime's, derived from the report and independent of line position, so
+ * the same finding on the base and after the change is the same string
+ * (D-R17-02). A secret's value is never here: its fingerprint is a hash.
+ */
+export interface Finding {
+  readonly rule: string;
+  readonly location: { readonly path: string; readonly line: number };
+  readonly fingerprint: string;
+}
+
 /** Produced by the runtime executing CheckSpec in a fresh sandbox. Never by an agent. */
 export interface CheckResult {
   checkId: string;
@@ -137,6 +185,14 @@ export interface CheckResult {
    * omission is not representable.
    */
   expectation: ExpectationOutcome | null;
+  /**
+   * A security check's findings as the runtime parsed them from its
+   * scanner's report, or `null` for every other kind and for a security check
+   * whose report could not be read, which is never an empty list: a scanner
+   * that reported nothing readable has not shown the tree is clean (I5).
+   * Required, so omission is not representable.
+   */
+  findings: readonly Finding[] | null;
   durationMs: number;
   startedAt: string;
 }
@@ -144,6 +200,8 @@ export interface CheckResult {
 export interface TamperReport {
   assertionsWeakened: Array<{ file: string; before: string; after: string }>;
   skipMarkersAdded: Array<{ file: string; marker: string }>;
+  /** Each declared scanner suppression marker on a line the diff added, by the scanner it suppresses (D-R17-04). */
+  suppressionMarkersAdded: Array<{ file: string; marker: string; kind: SecurityCheckKind }>;
   testsDeleted: string[];             // renames, moves, case-set reduction all count
   snapshotsRegenerated: string[];
   /**
@@ -160,7 +218,8 @@ export interface IntegrityViolation {
   runId: RunId; taskId: TaskId | null;
   kind: 'lock-tamper' | 'vault-write-attempt' | 'protected-path'
       | 'claim-mismatch' | 'suite-shrink' | 'skip-marker'
-      | 'assertion-weakened' | 'prompt-injection' | 'capability-escape';
+      | 'assertion-weakened' | 'prompt-injection' | 'capability-escape'
+      | 'suppression-marker';
   role: RoleId; driverProvenanceId: string; contractVersion: string;
   detectedAt: string; detail: Record<string, unknown>;
 }

@@ -12,11 +12,12 @@
  * Lives in `api` for P6's reason: `adapters` depends on `integrity`, so an
  * analysis in `integrity` that reads through the adapters would close a cycle.
  */
-import { relative } from 'node:path';
+import { lstat, readFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import picomatch from 'picomatch';
-import { buildAdapterSet, diffTrees, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
+import { buildAdapterSet, diffTrees, markersIn, VCS_DIRECTORIES, type Assertion, type TestFrameworkAdapter } from '@olympus-ai/adapters';
 import type { RunState, TaskId, VaultRef } from '@olympus-ai/core';
-import type { TamperReport } from '@olympus-ai/integrity';
+import type { SecurityCheckKind, TamperReport } from '@olympus-ai/integrity';
 import type { EvidenceBundle } from '@olympus-ai/vault';
 
 export interface TamperOptions {
@@ -26,6 +27,8 @@ export interface TamperOptions {
   readonly coverage: { readonly report: string; readonly sourceRoot: string } | null;
   /** The pinned checks' argument vectors: a file one names is what that check runs, and a change to it a touch. */
   readonly commands: ReadonlyArray<readonly string[]>;
+  /** The suppression markers of each scanner the manifest pins a check of, by kind (R17). */
+  readonly markers: ReadonlyArray<{ readonly kind: SecurityCheckKind; readonly markers: readonly string[] }>;
 }
 
 const SNAPSHOT = /(?:^|\/)__snapshots__\/|\.snap$/;
@@ -176,6 +179,7 @@ export async function analyzeTamper(base: string, head: string, options: TamperO
     snapshotsRegenerated: changes.map((c) => c.path).filter((p) => SNAPSHOT.test(p)),
     coverageDelta: set.coverage === null ? null : await set.coverage.changedLineCoverage(base, head),
     protectedPathsTouched: [...touched].sort(),
+    suppressionMarkersAdded: await markersAdded(base, head, changes, options.markers),
   };
 }
 
@@ -186,6 +190,7 @@ export function tamperFindings(report: TamperReport): string[] {
     ...report.skipMarkersAdded.map((m) => `skip marker added in ${m.file}: ${m.marker}`),
     ...report.testsDeleted.map((t) => `test deleted: ${t}`),
     ...report.snapshotsRegenerated.map((s) => `snapshot regenerated: ${s}`),
+    ...report.suppressionMarkersAdded.map((m) => `${m.kind} suppression marker added in ${m.file}: ${m.marker}`),
   ];
 }
 
@@ -218,4 +223,51 @@ export async function acceptedEscalations(state: RunState, bundleAt: (ref: Vault
     findings.push(...tamperFindings(bundle.tamper), ...notCarriedFindings(bundle));
   }
   return { protectedPathsTouched: [...touched].sort(), tamperFindings: findings };
+}
+
+/** A regular file's text, or the empty string where the tree has none at `path`: a link or a special file holds no line a scanner reads. */
+async function textAt(root: string, path: string): Promise<string> {
+  const abs = join(root, ...path.split('/'));
+  try {
+    if (!(await lstat(abs)).isFile()) return '';
+  } catch {
+    return '';
+  }
+  return readFile(abs, 'latin1');
+}
+
+/** How many times each marker occurs in `text`, one count per line it is on. */
+function markerCounts(text: string, markers: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const line of text.split(/\r?\n/)) for (const marker of markersIn(line, markers)) counts.set(marker, (counts.get(marker) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * Each declared suppression marker a changed file holds on more lines than
+ * the base's copy of it does: the diff added it. Counted per file, so a
+ * marker already on the base is not the change's, and one moved into a file
+ * that did not have it is (D-R17-04). Every changed file is read whatever
+ * its extension, since a marker suppresses a finding in any file a scanner
+ * reads.
+ */
+async function markersAdded(
+  base: string,
+  head: string,
+  changes: ReadonlyArray<{ readonly path: string; readonly change: string }>,
+  scanners: TamperOptions['markers'],
+): Promise<TamperReport['suppressionMarkersAdded']> {
+  const added: TamperReport['suppressionMarkersAdded'] = [];
+  if (scanners.length === 0) return added;
+  for (const { path, change } of changes) {
+    if (change === 'removed') continue;
+    const [before, after] = await Promise.all([change === 'added' ? '' : textAt(base, path), textAt(head, path)]);
+    for (const { kind, markers } of scanners) {
+      const was = markerCounts(before, markers);
+      for (const [marker, count] of markerCounts(after, markers)) {
+        if (count > (was.get(marker) ?? 0)) added.push({ file: path, marker, kind });
+      }
+    }
+  }
+  return added;
 }

@@ -34,3 +34,18 @@ export { egressFor, integrateEscalations, readIntegration, UNANALYSED_TESTS } fr
 export * from './http/server.js';
 export * from './host/compose.js';
 export type * from './http/wire.js';
+export { SCAN_CONFIG, scanTree, type ScanOptions, type ScanOutcome } from './scan.js';
+export {
+  denialRefusal,
+  isSecurityCheck,
+  parseSecurityPart,
+  renderFindings,
+  SCANNERS,
+  STAND_IN_SCANNERS,
+  scannerFor,
+  securityShortfall,
+  specPartRefusal,
+  type AuthorizationRule,
+  type SecurityPart,
+  type SecurityScanners,
+} from './security.js';

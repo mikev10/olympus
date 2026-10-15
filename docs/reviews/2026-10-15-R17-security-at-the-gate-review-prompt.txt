@@ -1,0 +1,147 @@
+The code under review is in the file
+`2026-10-15-R17-security-at-the-gate-review-bundle.txt` (SHA-256 43a91606360262b20accc1b50a066e01e134096bcc3b06cc9d804be07bbb91b5) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the security checks at the verification gate of a software
+factory runtime of a TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a code change, written by a model agent, through a fixed
+line of stations (intake, spec, test-design, plan, build, verify, review,
+integrate, ...); the runtime, not the model, decides whether the change
+advances. This change adds two deterministic security check kinds,
+`secret-scan` (gitleaks) and `static-analysis` (Semgrep), each run by the
+runtime in its own image pinned by digest, over a runtime-made copy of the
+tree with no network, first over the base commit and then at `verify`. A
+check fails only on a finding whose fingerprint (derived by the runtime, not
+read from the scanner) the base's findings do not account for, or when the
+diff adds a suppression marker. It also requires every spec to carry a
+"security part" naming its authorization rules, refuses the test-design
+station when a named rule has no check that exercises a denied caller, and
+records each failed verify iteration in the enforcement record.
+
+It must hold against a capable, motivated party trying to get a change that
+commits a credential or adds a flagged code pattern through `verify` without
+the check failing, or to keep the record from showing why it failed. Assume no
+deceptive intent — only that the easiest path gets taken.
+
+That party controls the agent's writes to the workspace during build: every
+file in the tree, including scanner ignore and configuration files
+(`.gitleaksignore`, `.gitleaks.toml`, `.semgrepignore`), file names, symlinks,
+file contents and inline comments, and what the model's result claims it did.
+Separately, the person or client submitting a run controls the request: the
+check manifest, the spec and its security part, the task graph. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, the drivers, and the scanner set — which are runtime-selected and
+trusted, even where a function takes one as an argument, and it does not
+control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. A check passes or
+  fails on what the runtime itself ran and read, never on the model's account.
+- An agent may not be judged by an artifact it can write. The spec, the
+  acceptance tests, and the check manifest are hashed and locked before build;
+  nothing the agent writes may change how its change is judged.
+- Default deny. A capability not granted in policy is unavailable; a security
+  check's sandbox has no network.
+- Fail closed. A missing check, missing capability, unsupported stack, an
+  unreadable report, or a shrunken suite refuses; it never degrades silently
+  or warns and continues.
+- No agent writes to the Vault (the runtime's evidence store), and secrets
+  found by a scan must not be stored in it.
+
+The mechanisms that matter most:
+
+- `scanTree` (packages/api/src/scan.ts): the copy of the tree with in-tree
+  scanner files removed, the read-only rules mount, the pinned image, the
+  invocation, and the parse of the report.
+- Fingerprinting and the base comparison: `secretFingerprint`,
+  `staticFingerprint`, `newFindings` (packages/adapters/src/security.ts) and
+  `securityShortfall` (packages/api/src/security.ts), with the base findings
+  read from the base run's record.
+- Suppression-marker detection over the diff (`markersAdded` in
+  packages/api/src/tamper.ts) and its effect on the gate.
+- Admission and station refusals: manifest validation of security checks
+  (packages/api/src/validate.ts), the security part parse, and the spec /
+  test-design exits in packages/api/src/line.ts.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Not in this unit: dependency vulnerability audits, which need the registry's
+advisory database and so cannot run under verify's deny-all egress (R13 runs
+them; D-A-SC-03); a model reviewing for security (R9 seats it once this unit
+lands, the M3 panel interprets it); fixing a finding (it fails the change, and
+the next iteration is the fix); and any scanner on a host other than the
+sandbox.
+
+Known limit, stated now: a scanner finds what its rules describe.
+Deterministic checks lower the rate of known classes of defect and say
+nothing about a class no rule names. The denial checks are the part that
+follows the spec rather than a rule set, and they are only as complete as the
+security part the person approved.
+
+The identifiers above such as R13, R9, M3 and D-A-SC-03 name other planned
+units and recorded design decisions you have not been given; they mean only
+that the work named is deliberately elsewhere. Absent work listed here is not a
+defect.
+
+THE QUESTION
+
+How would a change that commits a secret or adds a pattern the pinned rules
+flag pass `verify` anyway: by making the scanner not see it, not report it, or
+report it in a way the runtime reads as absent, as already on the base, or as a
+clean scan — or by making the run reach a later station without the security
+checks, the security part, or a denial check the rules require?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

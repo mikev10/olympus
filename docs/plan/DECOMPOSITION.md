@@ -1068,6 +1068,10 @@ check carrying `tests` and no `command` or `expectedSuiteCount`;
 `TestFrameworkAdapter` gains `runner`, `invocation`, and `selectSuites`;
 `EvidenceBundle` gains a required `notCarried`.
 
+R17 extends the base run to the two security kinds: each runs over the base
+with the declared checks, and its findings are the base set a finding at
+`verify` is judged against.
+
 **Out of scope:** judging why a check failed on the base (mutation testing,
 M3); R7's corpus item; the security check kinds and their base fingerprints
 (R17); bug-fix intake (R16); the M2 trigger framework's spec, which is a
@@ -1179,26 +1183,31 @@ Binding:
   check, or, where the adapter set has a static-analysis slot, no
   `static-analysis` check, is refused at admission, naming the kind (I5)
 - **The rules are locked, not read from the workspace.** The scanner reads
-  its configuration from the runtime's mount, never from the repository. The
+  its configuration from the runtime's mount, never from the repository.
+  Where a scanner reads an in-tree file whatever it is told, as gitleaks
+  reads `.gitleaksignore` and Semgrep `.semgrepignore`, it scans a copy of
+  the tree the runtime made without them (D-R17-03). The
   unit proves this with a fixture whose workspace carries an ignore file that
   would hide a seeded finding (I3)
 - **Findings are typed and judged by the runtime.** A scanner exits non-zero
   on any finding, old or new, so its exit code cannot be the verdict.
   `CheckResult` gains typed findings, each a rule, a location, and a
-  fingerprint the runtime reads from the scanner's report, and a scanner that
-  does not report a fingerprint independent of line position cannot be
-  pinned. Only a finding absent from the base fails the change (D-A-SC-02):
+  fingerprint independent of line position that the runtime reads or derives
+  from the scanner's report; a scanner whose report carries nothing such a
+  fingerprint can be derived from cannot be pinned (D-R17-02). Only a finding
+  absent from the base fails the change (D-A-SC-02):
   R15's base run is extended to the two security kinds, and R15's text gains
-  that sentence when it is specified. The runtime records the base run's
-  fingerprints as the base set, beside R15's base results in the Vault, and
+  that sentence. The runtime records the base run's
+  fingerprints as the base set, in the findings of R15's base results in the
+  Vault, and
   at `verify` a finding outside the set fails the check while one inside it is
   recorded and does not. A secret
   already on the base is also R1's concern: `integrate.secret-scan` is
   ceiling-bearing
 - **A suppression added by the diff fails the check.** Each check runs with
-  inline suppressions disabled where its scanner allows it. Where a scanner
-  cannot, as gitleaks cannot ignore `gitleaks:allow`, the runtime reads the
-  diff itself: a declared marker added by the diff fails the check with its
+  inline suppressions disabled where its scanner allows it, as gitleaks and
+  Semgrep both do. Whether it allows it or not, the runtime also reads the
+  diff itself (D-R17-04): a declared marker added by the diff fails the check with its
   own cause, so a suppressed credential is never a passing one. The same
   marker is also recorded as a `suppression-marker` violation, which, like
   every P7 finding, raises the `integrate` exit to `human-required`
@@ -1230,7 +1239,10 @@ gains `'new-finding'` and `'suppression-added'`; `AdapterSet` gains a nullable
 static-analysis slot and `Control` its name; `TamperReport` gains
 `suppressionMarkersAdded`; `IntegrityViolation.kind` gains
 `'suppression-marker'`; and the refusal reasons for a missing security part
-and a missing denial check.
+and a missing denial check. Found while specifying it (D-R17-01):
+`RequestedArtifacts` gains `specParts`, the security part an admitted file
+locked with the spec; and `BaseMismatch.declared` admits `null`, a security
+check that declares nothing and produced no findings on the base.
 
 **Not in this unit:** dependency vulnerability audits, which need the
 registry's advisory database and so cannot run under `verify`'s `deny-all`
@@ -1254,6 +1266,10 @@ authorization rule with no denial check refuses the `test-design` exit; an
 adapter set with no static-analysis slot is refused at L3; each refusal
 leaves one P14 decision naming its cause; the same secret on the base does
 not fail the change.
+
+**Acceptance criteria:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm conformance`, with a passing assertion for each conformance sentence
+above; those that run a real scanner need Docker, as R1's do (D-R17-01).
 
 **Why M2:** it needs R15's base run, and both check kinds are new manifest
 entries that M1's closed scope cannot take. No model call is added; the cost

@@ -132,6 +132,7 @@ export class CliBehavioralAdapter implements BehavioralAdapter {
     return {
       checkId: scenario.id,
       exitCode: observed.exitCode,
+      findings: null,
       stdout: observed.stdout,
       stderr: observed.stderr,
       suiteCount: null,

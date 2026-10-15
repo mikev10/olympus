@@ -66,7 +66,7 @@ export const UNSUPPORTED_STACK_IS_LOUD: LocalAssertion = runtime({
 
     // The refusal reads the slots, not only the set's own report of itself.
     const underReporting = {
-      stack: 'custom', test: null, coverage: null, mutation: null, behavioral: [], manifest: null, unavailableControls: (): string[] => [],
+      stack: 'custom', test: null, coverage: null, mutation: null, behavioral: [], manifest: null, staticAnalysis: null, unavailableControls: (): string[] => [],
     };
     const lied = adapterAdmission(underReporting, 3);
     if (lied.ok || !lied.unavailable.includes('mutation')) {
@@ -146,7 +146,7 @@ export const UNMET_EXPECTATION_FAILS_THE_GATE: LocalAssertion = runtime({
   run: async () => {
     const [{ compareCli }, { requiredShortfall }] = await Promise.all([import('@olympus-ai/adapters'), import('@olympus-ai/api')]);
     const spec = { id: 'greets', kind: 'behavioral' as const, command: ['greet'] as const, required: true, timeoutMs: 1000 };
-    const base = { checkId: 'greets', stderr: '', suiteCount: null, durationMs: 1, startedAt: new Date(0).toISOString() };
+    const base = { checkId: 'greets', stderr: '', suiteCount: null, findings: null, durationMs: 1, startedAt: new Date(0).toISOString() };
 
     const wrong = compareCli({ exitCode: 0, stdout: 'hello\n' }, { exitCode: 0, stdout: 'goodbye\n', stderr: '' });
     if (wrong.held) throw new Error("I2: the runtime's comparison accepted output that differs from the expectation");

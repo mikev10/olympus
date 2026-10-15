@@ -47,7 +47,7 @@ import type {
   TaskGraph,
   TaskId,
 } from '@olympus-ai/core';
-import { adapterAdmission, buildAdapterSet, missingControls } from '@olympus-ai/adapters';
+import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } from '@olympus-ai/adapters';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
@@ -58,7 +58,8 @@ import { integrateEscalations, readIntegration, runLine, type LineContext } from
 import type { BuiltGraph } from './graph.js';
 import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
-import { parseGraph, parseManifest, requestProblems, type RequestProblem } from './validate.js';
+import { parseSecurityPart, type SecurityPart, type SecurityScanners } from './security.js';
+import { parseGraph, parseManifest, requestProblems, securityProblems, type RequestProblem } from './validate.js';
 import { suiteBindingProblems } from './verification.js';
 import { basePath, discardRun, snapshotBase, treeDigest, within, type WorkspaceStore } from './workspace.js';
 
@@ -85,6 +86,8 @@ export interface ComponentGraph {
    * declares that, so no such run goes above L1 (D-I1b-05).
    */
   readonly integrator?: Integrator | null;
+  /** The scanners security checks run (R17); the graph builder supplies the declared ones when omitted. */
+  readonly scanners?: SecurityScanners;
 }
 
 /** Workspace-relative paths. Each is hashed at admission and locked by its station: `spec`, then `test-design` (tests and manifest), then `plan` (graph). */
@@ -95,6 +98,12 @@ export interface RequestedArtifacts {
   readonly verificationManifest: string;
   /** JSON: `{ "tasks": [{ id, station, role, dependsOn, dependencySet }] }`. */
   readonly taskGraph: string;
+  /**
+   * The parts every spec carries, each a JSON file locked with the spec at
+   * `spec` (R17). Today the security part alone: a `SecurityPart`. A part
+   * left out is admitted, and refused at the `spec` exit, naming it.
+   */
+  readonly specParts?: { readonly security?: string };
 }
 
 export interface RunRequest {
@@ -262,9 +271,10 @@ interface Admitted {
   readonly artifacts: AdmissionRecord['artifacts'];
   readonly graph: TaskGraph;
   readonly checks: CheckSpec[];
+  readonly securityPart: SecurityPart | null;
 }
 
-/** Reads and hashes every artifact, and parses the two the line executes, from the same bytes. */
+/** Reads and hashes every artifact, and parses the three the line reads, from the same bytes. */
 async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Admitted } | { ok: false; problems: RequestProblem[] }> {
   const problems: RequestProblem[] = [];
   const read = async (at: string, path: string): Promise<ReadArtifact | undefined> => {
@@ -276,7 +286,17 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
   const tests = await Promise.all(req.artifacts.acceptanceTests.map((path, i) => read(`artifacts.acceptanceTests[${String(i)}]`, path)));
   const manifestFile = await read('artifacts.verificationManifest', req.artifacts.verificationManifest);
   const graphFile = await read('artifacts.taskGraph', req.artifacts.taskGraph);
+  const securityPath = req.artifacts.specParts?.security;
+  const securityFile = securityPath === undefined ? undefined : await read('artifacts.specParts.security', securityPath);
   if (problems.length > 0 || manifestFile === undefined || graphFile === undefined) return { ok: false, problems };
+  let securityPart: SecurityPart | null = null;
+  if (securityFile !== undefined) {
+    const json = parseJson(securityFile.bytes);
+    const part = parseSecurityPart(json);
+    if (json === undefined) problems.push({ path: 'artifacts.specParts.security', code: 'not-json', message: 'the security part is not JSON' });
+    else if (!part.ok) problems.push(...part.problems);
+    else securityPart = part.part;
+  }
 
   const manifestJson = parseJson(manifestFile.bytes);
   const graphJson = parseJson(graphFile.bytes);
@@ -298,9 +318,11 @@ async function admitArtifacts(req: RunRequest): Promise<{ ok: true; admitted: Ad
         acceptanceTests: admittedOf(tests),
         verificationManifest: manifestFile.admitted,
         taskGraph: graphFile.admitted,
+        specParts: { security: securityFile?.admitted ?? null },
       },
       graph: graph.graph,
       checks: manifest.checks,
+      securityPart,
     },
   };
 }
@@ -323,8 +345,8 @@ export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, {
  * adapters' own refusal takes, so what is recorded is what that refusal
  * would name (D-P8-03).
  */
-async function unavailableControls(base: string, level: AutonomyLevel): Promise<string[]> {
-  const set = await buildAdapterSet(base, { provider: null, coverage: null });
+async function unavailableControls(base: string, level: AutonomyLevel, components: BuiltGraph): Promise<string[]> {
+  const set = await adapterSetOf(base, components);
   const unavailable = [...new Set([...set.unavailableControls(), ...missingControls(set)])].sort();
   const refusal = adapterAdmission(set, level);
   // The two derive from the same set; if they ever disagree the record would misstate the refusal.
@@ -332,6 +354,11 @@ async function unavailableControls(base: string, level: AutonomyLevel): Promise<
     throw new Error('admission: the recorded controls and the adapters\' own refusal disagree');
   }
   return unavailable;
+}
+
+/** The base's adapter set, its static-analysis slot holding the graph's scanner where the stack has one. */
+export async function adapterSetOf(base: string, components: BuiltGraph): Promise<AdapterSet> {
+  return buildAdapterSet(base, { provider: null, coverage: null, staticAnalysis: components.scanners.staticAnalysis });
 }
 
 /** The workspace store's root may not overlap the workspace it snapshots: a task would then be handed a tree that holds its own history. */
@@ -523,7 +550,14 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: unbound };
   }
-  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel);
+  // The security checks the base's stack must be scanned with, read from the base like the suite bindings (R17).
+  const set = await adapterSetOf(basePath(workspaces, req.runId), req.components);
+  const unscanned = securityProblems(admitted.admitted.checks, { secretScan: req.components.scanners.secretScan, staticAnalysis: set.staticAnalysis });
+  if (unscanned.length > 0) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: unscanned };
+  }
+  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel, req.components);
 
   const now = new Date().toISOString();
   const run: Run = {
@@ -580,6 +614,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
         artifacts: record.artifacts,
         graph: admitted.admitted.graph,
         checks: admitted.admitted.checks,
+        securityPart: admitted.admitted.securityPart,
         components: req.components,
         baseTreeSha256,
         state,
@@ -587,6 +622,13 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
       }),
     },
   };
+}
+
+/** A record's `specParts`: an object whose security part is an admitted artifact or null. Read from a record, so its type is not trusted. */
+function specPartsShaped(parts: unknown): boolean {
+  if (typeof parts !== 'object' || parts === null) return false;
+  const { security } = parts as { security?: unknown };
+  return security === null || typeof security === 'object';
 }
 
 /**
@@ -603,6 +645,7 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
     typeof run.requestedLevel === 'number' && typeof artifacts === 'object' &&
     Array.isArray(artifacts.spec) && Array.isArray(artifacts.acceptanceTests) &&
     typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object' &&
+    specPartsShaped(artifacts.specParts) &&
     typeof r.baseTreeSha256 === 'string' && Array.isArray(r.unavailableControls) &&
     r.unavailableControls.every((control) => typeof control === 'string');
   if (!shaped) throw new Error(`run ${state.runId}: the admission record does not hold a run and its artifacts; refusing to resume from it`);
@@ -614,6 +657,7 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
 interface Reloaded {
   readonly graph: TaskGraph;
   readonly checks: CheckSpec[];
+  readonly securityPart: SecurityPart | null;
   /** Artifacts whose bytes no longer hash to what was admitted. */
   readonly changed: Array<{ path: string; expected: string; actual: string }>;
 }
@@ -629,12 +673,16 @@ async function reloadExecuted(record: AdmissionRecord): Promise<Reloaded> {
   };
   const manifestJson = await load(record.artifacts.verificationManifest);
   const graphJson = await load(record.artifacts.taskGraph);
-  if (changed.length > 0) return { graph: { tasks: [], edges: [] }, checks: [], changed };
+  const security = record.artifacts.specParts.security;
+  const securityJson = security === null ? null : await load(security);
+  if (changed.length > 0) return { graph: { tasks: [], edges: [] }, checks: [], securityPart: null, changed };
   const manifest = parseManifest(manifestJson);
   const graph = parseGraph(graphJson, { runId: record.run.id, baseCommit: record.run.baseCommit, workspace: record.run.repo });
   // The bytes hash to what admission validated, so these cannot fail unless the validator itself changed.
   if (!manifest.ok || !graph.ok) throw new Error(`run ${record.run.id}: the admitted manifest or graph no longer validates; refusing to resume`);
-  return { graph: graph.graph, checks: manifest.checks, changed };
+  const part = securityJson === null ? null : parseSecurityPart(securityJson);
+  if (part !== null && !part.ok) throw new Error(`run ${record.run.id}: the admitted security part no longer validates; refusing to resume`);
+  return { graph: graph.graph, checks: manifest.checks, securityPart: part === null ? null : part.part, changed };
 }
 
 /**
@@ -699,6 +747,7 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
     artifacts: record.artifacts,
     graph: reloaded.graph,
     checks: reloaded.checks,
+    securityPart: reloaded.securityPart,
     components: req.components,
     baseTreeSha256: record.baseTreeSha256,
     state,
