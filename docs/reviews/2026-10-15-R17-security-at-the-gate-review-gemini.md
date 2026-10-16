@@ -1,3 +1,50 @@
+# External review of R17, gemini, 2026-10-16
+
+An adversarial review of R17, security at the gate: the `secret-scan` and
+`static-analysis` check kinds, the runtime-made scan copy, fingerprinting and
+the base comparison, suppression-marker detection over the diff, the security
+part, and the `test-design` denial-check refusal. One of two reviews run from
+the same prompt and bundle; the other is
+`2026-10-15-R17-security-at-the-gate-review-codex.md`. Both are triaged in
+`2026-10-15-R17-security-at-the-gate-triage.md`, which cites this review's
+single finding as `gemini-1` and its assessment section as `gemini-obs`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools. `cleanRoom` is `null` because an API call loads no local
+  configuration. 284.0 s. Ingestion `complete`: 108,337 input tokens against a
+  floor of 75,016. Integrity `verified`. Outcome `counted`. Reply SHA-256 as
+  the runner wrote it:
+  `ac8f0d46adcd028895e6f9f55b4b58305ce30f7fb25852df511b6fdd0beccea1`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** gemini-1 was raised by codex too, as codex-2: the
+  same mechanism, an optional check satisfying the denial-check requirement.
+  gemini raised nothing alone. Its assessment that the Vault isolation is sound
+  is contested by codex-4.
+- **Date:** 2026-10-16 (run started 2026-10-16T12:45Z).
+- **Bundle:** `2026-10-15-R17-security-at-the-gate-review-bundle.txt`, SHA-256
+  `43a91606360262b20accc1b50a066e01e134096bcc3b06cc9d804be07bbb91b5`, base
+  `6f1da42` (`reviewed/R15`), head `a1d5b8e` ("R17: Security at the gate"),
+  one commit. It held 52 of the 54 changed paths, new files in full and
+  modified files as whole-function diffs; `docs/decisions.md` and
+  `docs/plan/DECOMPOSITION.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-15-R17-security-at-the-gate-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and performed no external lookups. This is a self-report and is not
+  independently verifiable; the call offered no tools.
+- **Coverage, and any gap:** one finding, gemini-1, which answers items 2 and 5
+  (it calls the check tautological and the configuration satisfiable without
+  effect), and an assessment section answering item 6. Items 1, 3 and 4 came
+  back empty, and so did item 7: the reviewer did not say whether the framing
+  was right. None of that silence is an endorsement.
+- **Citations:** line numbers are positions on the new side of the bundle's
+  diffs, not located repository lines. The triage reopened each cited
+  construct by name.
+
+---
+
 BASE: reviewed/R15
 HEAD: a1d5b8e
 packages/vault/test/stub.test.ts

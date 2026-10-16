@@ -1,3 +1,56 @@
+# External review of R17, codex, 2026-10-16
+
+An adversarial review of R17, security at the gate: the `secret-scan` and
+`static-analysis` check kinds, the runtime-made scan copy, fingerprinting and
+the base comparison, suppression-marker detection over the diff, the security
+part, and the `test-design` denial-check refusal. One of two reviews run from
+the same prompt and bundle; the other is
+`2026-10-15-R17-security-at-the-gate-review-gemini.md`. Both are triaged in
+`2026-10-15-R17-security-at-the-gate-triage.md`, which cites this review's
+numbered findings as `codex-1` to `codex-7`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 111.2 s. Ingestion `complete`: 109,308
+  input tokens against a floor of 75,016. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `0e8b87224d35cd2f6634e47d7df25c1cd73e81cfc1db752ad96036db4a870356`, which
+  matched the manifest's `replySha256` before this header was prepended.
+- **Cross-family agreement:** codex-2 was raised by gemini too, as gemini-1:
+  the same mechanism, an optional check satisfying the denial-check
+  requirement. codex-1, codex-3, codex-4, codex-5, codex-6 and codex-7 were
+  raised by codex alone. gemini's assessment section judged the Vault isolation
+  sound, which codex-4 contests.
+- **Date:** 2026-10-16 (run started 2026-10-16T12:45Z).
+- **Bundle:** `2026-10-15-R17-security-at-the-gate-review-bundle.txt`, SHA-256
+  `43a91606360262b20accc1b50a066e01e134096bcc3b06cc9d804be07bbb91b5`, base
+  `6f1da42` (`reviewed/R15`), head `a1d5b8e` ("R17: Security at the gate"),
+  one commit. It held 52 of the 54 changed paths, new files in full and
+  modified files as whole-function diffs; `docs/decisions.md` and
+  `docs/plan/DECOMPOSITION.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-15-R17-security-at-the-gate-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context, reviewed the bundle supplied in the prompt, performed no external
+  lookups, and had a local file-listing command blocked; it ran no tests and
+  did not verify the bundle's hash. This is a self-report and is not
+  independently verifiable; the blocked command is consistent with the
+  read-only sandbox.
+- **Coverage, and any gap:** all seven numbered items were answered. Item 1 as
+  codex-1, codex-4 and codex-5; item 2 as codex-3; item 3 as codex-7; item 5 as
+  codex-2 and codex-6; item 4 with a stated absence of TypeScript-specific
+  escapes; item 6 with five mechanisms assessed sound; item 7 with a reframing
+  (approved rules versus enforced policy, declared versus exercised denial).
+- **Citations:** line numbers are positions on the new side of the bundle's
+  diffs, not located repository lines. The triage reopened each cited
+  construct by name.
+
+---
+
 BASE: reviewed/R15
 HEAD: a1d5b8e
 packages/vault/test/stub.test.ts
