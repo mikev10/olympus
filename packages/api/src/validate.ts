@@ -84,7 +84,7 @@ export type RequestProblemCode =
   | 'not-pinned'
   /** A security check's `config` is neither text nor null, or is null for a scanner with no rules of its own. */
   | 'not-config'
-  /** A security check is optional; a scanner nothing holds the gate to is not a control (I5). */
+  /** A security check, or a check naming a rule it denies, is optional; a check nothing holds the gate to is not a control (I5). */
   | 'not-required'
   /** A security part that is not one: neither `none` with its reason nor every field the part requires (R17). */
   | 'not-a-security-part';
@@ -384,6 +384,8 @@ function checkProblems(checks: unknown, report: Report): void {
       if (c.kind !== 'acceptance' && c.kind !== 'behavioral') {
         report(`${at}.deniesRule`, 'not-applicable', `${at}.deniesRule is named on a check that is neither an acceptance nor a behavioral check; a denial is exercised by a locked acceptance check`);
       } else if (!isNonEmptyString(denies)) report(`${at}.deniesRule`, 'empty', `${at}.deniesRule must name an authorization rule of the spec's security part`);
+      // An optional denial check can fail every verify and stop nothing, yet still satisfy test-design (codex-2, gemini-1).
+      else if (c.required === false) report(`${at}.required`, 'not-required', `${at} names a rule it denies, so it must be required; an optional check holds the gate to nothing`);
     }
     if (c.kind === 'acceptance') testsProblems(c.tests, `${at}.tests`, report);
     else if (c.tests !== undefined) {
@@ -402,7 +404,8 @@ function checkProblems(checks: unknown, report: Report): void {
     const declarable = c.kind === 'acceptance' || c.kind === 'behavioral';
     if (!declarable && c.onBase !== undefined) {
       report(`${at}.onBase`, 'not-declarable', `${at}.onBase is declared on a check that is neither an acceptance nor a behavioral check; no other kind runs on the base`);
-    } else if (c.kind === 'acceptance' || c.onBase !== undefined) {
+    } else if (c.kind === 'acceptance' || c.onBase !== undefined || denies !== undefined) {
+      // A denial check gets the base run any acceptance check gets, so it declares what the base does (codex-2).
       if (c.onBase !== 'fails' && c.onBase !== 'passes') {
         report(`${at}.onBase`, 'undeclared', `${at} must declare onBase as 'fails' or 'passes'; there is no default`);
       } else if (c.onBase === 'fails' && c.required === true) reproduces += 1;

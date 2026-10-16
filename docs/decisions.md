@@ -4006,3 +4006,29 @@ for the role compiler.
 - **Chosen:** the line records `station-refused` with a `gate-failed` refusal carrying every `FailedCheck`, at each failed `verify` iteration and for every check kind, before the status it sets is committed. A last iteration that fails is recorded as `gate-failed` and then as its park. The line decides it, since the line judges the results, so `stationDecider` moves `gate-failed` from the station machine to the line. The P14 row is now a scenario, and R2's refusals by reason count failed gates.
 - **Confirmed** by the maintainer, 2026-10-15, over amending the entry to make the evidence bundle and the park the record.
 - **Reverse:** record only the park, and mark the row unconstructed again.
+
+### D-R17-07: the scan copy sets the scanner's in-tree files aside, and still scans them (external review, codex-1)
+
+- **Found:** D-R17-03 removed every entry named `.gitleaksignore`, `.gitleaks.toml` or `.semgrepignore` from the scan copy, at any depth, directories included. A credential written into `.gitleaks.toml`, or into any file under a directory with one of those names, was never scanned, and passed `verify`.
+- **Chosen:** each such entry is renamed in the copy with the suffix `.scan-set-aside`, so the scanner never reads it as configuration and still scans its bytes. A tree that already holds the renamed name is refused as the scan's provisioning failure, which retries and then parks: there is no safe name to guess. The base and `verify` copies are renamed alike, so fingerprints stay comparable. A finding inside one reports the renamed path.
+- **Shown** on the pinned Semgrep by `I5.static-analysis-runs-offline-on-pinned-rules`: a sink under `lib/.semgrepignore/` is reported at its set-aside path. The stand-in row `I3.scanner-config-names-are-still-scanned` shows the line failing `verify` for each name.
+- **Reverse:** remove the entries again, with the gate refusing any diff that adds or changes one.
+
+### D-R17-08: a secret in a path (external review, codex-4; known limit for the diff record, issue #44)
+
+- **Found:** a file's name is the agent's to choose. A file named after the credential it holds was reported with the credential in its path, and `renderFindings` stored that path, so "no secret reaches the Vault" (D-R17-02) did not hold. The evidence bundle's diff records every changed path verbatim too, and that channel predates R17.
+- **Chosen:** the gitleaks parser replaces every secret the report holds, in every finding's path, with `[redacted:<fingerprint>]`. The diff record's paths are a known limit, tracked as issue #44. Raw scanner `stderr` is stored as well; it runs under `--log-level error` and `--quiet` and is normally empty, and whether an error line can name a path is unverified.
+- **Until then:** D-R17-02's claim is that a secret a scan finds is never stored as a finding. A credential an agent also uses as a file name reaches the Vault as a path in the diff.
+
+### D-R17-09: what the denial check guarantees (external review, codex-2, gemini-1 and codex-3)
+
+- **Found (codex-2, gemini-1):** a check naming `deniesRule` could be `required: false` and need not declare `onBase`. It satisfied `test-design`, got no base run, and could fail every `verify` without effect.
+- **Chosen:** admission refuses a check naming `deniesRule` unless it is `required: true` (`not-required`) and declares `onBase` (`undeclared`).
+- **Found (codex-3):** the requirement is met by a locked, required check that names the rule. Nothing shows that its command reaches the product or exercises a refused caller; the conformance control's command is `process.exit(0)`.
+- **Known limit:** the requirement is declared coverage, not exercised authorization. The check manifest is the submitting client's, approved with the spec at `test-design` and locked before build, so this rests on that approval and is not a route the build agent can take. The unit's stated limit already says the denial checks are only as complete as the security part the person approved.
+
+### D-R17-10: known limits of the fingerprint, the marker count, and a failed provision (external review, codex-5, codex-6, codex-7)
+
+- **codex-5:** `staticFingerprint` collapses whitespace inside literals too, so `eval("a  b")` and `eval("a b")` share a fingerprint. Occurrences are counted, so an extra copy still fails; only an in-place, whitespace-only rewrite of a finding the base already had passes. Tolerating reformatting is what D-R17-02 chose; language-aware normalization would be the reversal.
+- **codex-6:** `markersAdded` counts marker-bearing lines per file, so a marker moved to another line, or a second marker on a line that has one, is not counted as added. Both scanners run with suppression disabled, so the finding is still reported and fails as new; what escapes is the `suppression-added` violation and its `human-required` escalation. "Added" means a higher count of marker-bearing lines per file, so that moving existing lines does not fail a change (D-R17-04).
+- **codex-7:** a provisioning failure part way through `verify`'s checks returns to retry before the iteration's results or its `gate-failed` decision are written, so that attempt's findings are not recorded. The retry re-runs every check, and an exhausted retry parks the task, so nothing advances. Recording partial results before a retry would change the record of every infrastructure failure, which is outside R17.

@@ -90,20 +90,26 @@ export function staticFingerprint(rule: string, path: string, lines: string): st
   return sha256(`static-analysis\0${rule}\0${path}\0${lines.trim().replace(/\s+/g, ' ')}`);
 }
 
-/** gitleaks' JSON report: an array of findings, each with `RuleID`, `File`, `StartLine`, and the unredacted `Secret`. */
+/**
+ * gitleaks' JSON report: an array of findings, each with `RuleID`, `File`,
+ * `StartLine`, and the unredacted `Secret`. A file's name is the agent's to
+ * choose, so every secret the report holds is replaced in every path by its
+ * fingerprint, and a credential named in a path never leaves with it (codex-4).
+ */
 export function parseGitleaksReport(stdout: string): Finding[] | undefined {
   const report = parseJson(stdout);
   if (!Array.isArray(report)) return undefined;
-  const findings: Finding[] = [];
+  const found: Array<{ rule: string; file: string; line: number; secret: string; fingerprint: string }> = [];
   for (const entry of report) {
     if (!isRecord(entry)) return undefined;
     const { RuleID: rule, File: file, StartLine: line, Secret: secret } = entry;
     if (typeof rule !== 'string' || typeof file !== 'string' || typeof line !== 'number' || typeof secret !== 'string') return undefined;
     // A redacted report has nothing to fingerprint, and every secret in it would collide.
     if (secret === '' || secret === 'REDACTED') return undefined;
-    findings.push({ rule, location: { path: treeRelative(file), line }, fingerprint: secretFingerprint(rule, secret) });
+    found.push({ rule, file, line, secret, fingerprint: secretFingerprint(rule, secret) });
   }
-  return findings;
+  const redact = (path: string): string => found.reduce((p, f) => p.split(f.secret).join(`[redacted:${f.fingerprint}]`), path);
+  return found.map((f) => ({ rule: f.rule, location: { path: redact(treeRelative(f.file)), line: f.line }, fingerprint: f.fingerprint }));
 }
 
 /**

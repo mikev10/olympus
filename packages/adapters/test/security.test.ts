@@ -13,6 +13,19 @@ describe('security scanner reports (R17)', () => {
     expect(parseGitleaksReport('[]')).toEqual([]);
   });
 
+  test('codex-4: a secret a file is named after leaves the report as its fingerprint, in every finding\'s path', () => {
+    const secret = 'ghp_8fK2mQ9xLp4vT7wZr1YbN3cJ6hD0sA5eU2iO';
+    const report = JSON.stringify([
+      { RuleID: 'github-pat', File: `/workspace/${secret}.ts`, StartLine: 1, Secret: secret },
+      { RuleID: 'other', File: `/workspace/notes/${secret}/b.txt`, StartLine: 2, Secret: 'abc-unrelated-value' },
+    ]);
+    const findings = parseGitleaksReport(report) ?? [];
+    expect(findings).toHaveLength(2);
+    expect(JSON.stringify(findings)).not.toContain(secret);
+    expect(findings[0]?.location.path).toBe(`[redacted:${findings[0]?.fingerprint ?? ''}].ts`);
+    expect(findings[1]?.location.path).toBe(`notes/[redacted:${findings[0]?.fingerprint ?? ''}]/b.txt`);
+  });
+
   test('a semgrep report with an error, or with its matched code withheld, is no report', () => {
     const result = { check_id: 'rules.no-eval', path: './x.ts', start: { line: 2 }, extra: { lines: '  eval(x);' } };
     expect(parseSemgrepReport(JSON.stringify({ results: [result], errors: [] }))).toEqual([

@@ -90,10 +90,11 @@ Base and `verify` copies are renamed the same way, so fingerprints stay
 comparable. Stand-in scanner tests cover a secret inside `.gitleaks.toml` and
 a flagged file under a `.semgrepignore` directory.
 
-**Unverified assumption.** Semgrep scans files under a renamed dot-directory.
-This rests on how Semgrep's default ignores treat dot-directories, and only a
-Docker row can show it. Until a row does, a flagged file there may still go
-unscanned by Semgrep.
+**Assumption, since verified.** That Semgrep scans files under a renamed
+dot-directory. After the fix, the Docker row
+`I5.static-analysis-runs-offline-on-pinned-rules` was extended with a sink
+under `lib/.semgrepignore/`, and the pinned image reported it at its set-aside
+path.
 
 ## codex-4: a credential in a file name
 

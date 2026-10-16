@@ -4,8 +4,8 @@
  * The line runs every security check through it, at the base and at
  * `verify`, and records the egress it returns.
  */
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import type { SecurityScanner } from '@olympus-ai/adapters';
 import type { CheckResult, SecurityCheckSpec } from '@olympus-ai/integrity';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
@@ -38,23 +38,43 @@ function describe(error: unknown): string {
   return typeof error === 'string' ? error : 'unknown error';
 }
 
-/** Removes every entry under `root` whose base name is one of `names`, at any depth; a link is removed, never followed. */
-async function removeNamed(root: string, names: readonly string[]): Promise<void> {
-  if (names.length === 0) return;
+/** What an entry the scanner would read as its own configuration is renamed to in the copy. */
+export const SET_ASIDE_SUFFIX = '.scan-set-aside';
+
+/**
+ * Renames every entry under `root` whose base name is one of `names`, at any
+ * depth, to that name with `SET_ASIDE_SUFFIX`, so the scanner never reads it
+ * as configuration and still scans its bytes (codex-1). A link is renamed,
+ * never followed. Returns the first entry whose new name the tree already
+ * holds, which the caller refuses: there is no safe name to guess (I5).
+ */
+async function setAsideNamed(root: string, names: readonly string[]): Promise<string | undefined> {
+  if (names.length === 0) return undefined;
   const wanted = new Set(names);
-  const visit = async (dir: string): Promise<void> => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      if (wanted.has(entry.name)) await rm(path, { recursive: true, force: true });
-      else if (entry.isDirectory()) await visit(path);
+  const visit = async (dir: string): Promise<string | undefined> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const present = new Set(entries.map((e) => e.name));
+    for (const entry of entries) {
+      let path = join(dir, entry.name);
+      if (wanted.has(entry.name)) {
+        if (present.has(`${entry.name}${SET_ASIDE_SUFFIX}`)) return path;
+        await rename(path, `${path}${SET_ASIDE_SUFFIX}`);
+        path = `${path}${SET_ASIDE_SUFFIX}`;
+      }
+      if (entry.isDirectory()) {
+        const clash = await visit(path);
+        if (clash !== undefined) return clash;
+      }
     }
+    return undefined;
   };
-  await visit(root);
+  return visit(root);
 }
 
 /**
  * Runs the check's scanner over a copy of `tree` with every file the scanner
- * reads from a tree whatever it is told removed (D-R17-03), with the locked
+ * reads from a tree whatever it is told set aside under another name, its
+ * bytes still scanned (D-R17-03, D-R17-07), with the locked
  * rules on a second read-only mount, in the image the check pins, with no
  * egress. The arguments are the scanner declaration's, never the
  * manifest's. Its stdout carries what it found, a secret's value included,
@@ -72,7 +92,11 @@ export async function scanTree(options: ScanOptions): Promise<ScanOutcome> {
   await mkdir(scratch.config, { recursive: true });
   try {
     await copyTree(options.tree, scratch.tree);
-    await removeNamed(scratch.tree, scanner.inTreeConfig);
+    const clash = await setAsideNamed(scratch.tree, scanner.inTreeConfig);
+    if (clash !== undefined) {
+      const name = relative(scratch.tree, clash).replace(/\\/g, '/');
+      return { ok: false, at: 'provision', reason: `its copy of the tree could not set ${name} aside: the tree already holds ${name}${SET_ASIDE_SUFFIX}` };
+    }
     await writeFile(join(scratch.config, scanner.configFile), rules);
     const spec: SandboxSpec = {
       // The image is the check's pin, never the host's profile; a sandbox that runs no image ignores it.

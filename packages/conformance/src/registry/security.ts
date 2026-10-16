@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Finding, SecurityCheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { EnforcementDecision, EvidenceBundle } from '@olympus-ai/vault';
+import type { RunId } from '@olympus-ai/core';
+import type { EnforcementDecision, EvidenceBundle, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
 import { ONE_RULE } from './decisions.js';
@@ -309,10 +310,46 @@ export const WORKSPACE_IGNORE_FILE_DOES_NOT_HIDE: LocalAssertion = runtime({
   },
 });
 
+/** The `gate-failed` decisions the run's record holds, each with the checks it failed. */
+async function failedGates(vault: Vault, runId: RunId): Promise<ReadonlyArray<ReadonlyArray<{ readonly checkId: string; readonly cause: string }>>> {
+  const decisions = await Promise.all((await vault.readDecisions(runId)).map((ref) => readRecord<EnforcementDecision>(vault, ref)));
+  return decisions.flatMap((d) => (d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'gate-failed' ? [d.decision.refusal.failed] : []));
+}
+
+export const SCANNER_CONFIG_NAMES_ARE_STILL_SCANNED: LocalAssertion = runtime({
+  id: 'I3.scanner-config-names-are-still-scanned',
+  title:
+    'a secret written into .gitleaks.toml or under a directory named .gitleaksignore, and a flagged call under a directory named .semgrepignore, each fail verify as a new finding: the scan copy sets those names aside without dropping their bytes; a tree that already holds the set-aside name parks its task rather than pass (codex-1)',
+  run: async () => {
+    const cases: ReadonlyArray<readonly [string, Record<string, string>, string]> = [
+      ['toml', { '.gitleaks.toml': `token = '${SEEDED}'\n` }, 'secret-scan'],
+      ['ignore-dir', { '.gitleaksignore/credential.txt': `${SEEDED}\n` }, 'secret-scan'],
+      ['semgrep-dir', { '.semgrepignore/payload.ts': 'export const f = (x: string) => eval(x);\n' }, 'static-analysis'],
+    ];
+    for (const [label, files, checkId] of cases) {
+      await withLine(`r17-set-aside-${label}-`, async (rig) => {
+        // A package.json gives the stack its static-analysis slot, so the rig pins that check too.
+        if (checkId === 'static-analysis') await writeFile(join(rig.dirs.artifacts, 'package.json'), JSON.stringify({ name: 'x', private: true }));
+        const { state, vault } = await runHello(rig, { during: async (sandbox, req) => { await inTask(sandbox, req, writes(files)); } });
+        if (state.tasks[HELLO_TASK] !== 'parked') throw new Error(`R17: ${Object.keys(files).join()} left its task ${String(state.tasks[HELLO_TASK])}, not parked`);
+        const gates = await failedGates(vault, rig.runId);
+        if (gates.length === 0 || !gates.every((failed) => failed.some((f) => f.checkId === checkId && f.cause === 'new-finding'))) {
+          throw new Error(`R17: ${Object.keys(files).join()} did not fail ${checkId} as a new finding: ${JSON.stringify(gates)}`);
+        }
+      });
+    }
+    await withLine('r17-set-aside-clash-', async (rig) => {
+      const files = { '.gitleaks.toml': `token = '${SEEDED}'\n`, '.gitleaks.toml.scan-set-aside': '' };
+      const { state } = await runHello(rig, { during: async (sandbox, req) => { await inTask(sandbox, req, writes(files)); } });
+      if (state.tasks[HELLO_TASK] !== 'parked') throw new Error(`R17: a tree holding the set-aside name left its task ${String(state.tasks[HELLO_TASK])}, not parked`);
+    });
+  },
+});
+
 export const STATIC_ANALYSIS_RUNS_OFFLINE: LocalAssertion = runtime({
   id: 'I5.static-analysis-runs-offline-on-pinned-rules',
   title:
-    'the pinned Semgrep, run by the runtime with no network on the rules the check pins, reports a seeded sink by rule, file, and line, behind a nosemgrep comment and a .semgrepignore that would exclude its file (needs Docker)',
+    'the pinned Semgrep, run by the runtime with no network on the rules the check pins, reports a seeded sink by rule, file, and line, behind a nosemgrep comment and a .semgrepignore that would exclude its file, and one in a file under a directory named .semgrepignore (needs Docker)',
   timeoutMs: 600_000,
   run: async () => {
     const { STATIC_ANALYSIS_IMAGE } = await adapters();
@@ -320,11 +357,19 @@ export const STATIC_ANALYSIS_RUNS_OFFLINE: LocalAssertion = runtime({
       const tree = dirs.workspace;
       await writeFile(join(tree, 'x.ts'), 'export function f(x: string) {\n  return eval(x); // nosemgrep\n}\n');
       await writeFile(join(tree, '.semgrepignore'), 'x.ts\n');
+      // A directory carrying the ignore file's name is set aside, never dropped, so its source is still analysed (D-R17-07).
+      await mkdir(join(tree, 'lib', '.semgrepignore'), { recursive: true });
+      await writeFile(join(tree, 'lib', '.semgrepignore', 'payload.ts'), 'export const g = (y: string) => eval(y);\n');
       const rules = 'rules:\n  - id: no-eval\n    languages: [typescript]\n    severity: ERROR\n    message: eval of a value\n    pattern: eval($X)\n';
       const check: SecurityCheckSpec = { id: 'static-analysis', kind: 'static-analysis', image: STATIC_ANALYSIS_IMAGE, config: rules, required: true, timeoutMs: 300_000 };
       const found = await realScan(provider, base, tree, check);
-      if (found?.length !== 1 || found[0]?.location.path !== 'x.ts' || found[0].location.line !== 2 || !found[0].rule.endsWith('no-eval')) {
+      const sink = found?.find((f) => f.location.path === 'x.ts');
+      if (sink?.location.line !== 2 || !sink.rule.endsWith('no-eval')) {
         throw new Error(`R17: the runtime's static analysis did not report the sink: ${JSON.stringify(found)}`);
+      }
+      const setAside = 'lib/.semgrepignore.scan-set-aside/payload.ts';
+      if (found?.length !== 2 || !found.some((f) => f.location.path === setAside && f.location.line === 1)) {
+        throw new Error(`R17: the runtime's static analysis did not report the sink under a set-aside directory: ${JSON.stringify(found)}`);
       }
     });
   },
@@ -332,7 +377,7 @@ export const STATIC_ANALYSIS_RUNS_OFFLINE: LocalAssertion = runtime({
 
 /** Every R17 assertion, by the invariant it is registered under. */
 export const R17_I2: readonly LocalAssertion[] = [BASE_SECRET_DOES_NOT_FAIL_THE_CHANGE, FINGERPRINT_IGNORES_LINE];
-export const R17_I3: readonly LocalAssertion[] = [SUPPRESSION_ADDED_FAILS, WORKSPACE_IGNORE_FILE_DOES_NOT_HIDE];
+export const R17_I3: readonly LocalAssertion[] = [SUPPRESSION_ADDED_FAILS, WORKSPACE_IGNORE_FILE_DOES_NOT_HIDE, SCANNER_CONFIG_NAMES_ARE_STILL_SCANNED];
 export const R17_I5: readonly LocalAssertion[] = [
   SEEDED_SECRET_FAILS_VERIFY,
   MANIFEST_MUST_PIN_SECURITY_CHECKS,

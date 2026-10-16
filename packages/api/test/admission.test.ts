@@ -119,6 +119,14 @@ describe('S1 finding 3: the verification manifest', () => {
     await expectInvalid(await start(), 'manifest.checks[0].kind', 'not-a-kind');
   });
 
+  test('R17 codex-2, gemini-1: a check naming a rule it denies is required and declares what the base does', async () => {
+    const denies = { id: 'd', kind: 'behavioral', onBase: 'passes', deniesRule: 'owner-only', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+    await writeChecks(workspace, [ok, { ...denies, required: false }]);
+    await expectInvalid(await start(), 'manifest.checks[1].required', 'not-required');
+    await writeChecks(workspace, [ok, { ...denies, onBase: undefined }]);
+    await expectInvalid(await start(), 'manifest.checks[1].onBase', 'undeclared');
+  });
+
   test('D-R15-04: a suite check pins no command, an acceptance check names its tests, and no other check names any', async () => {
     const acceptance = { id: 'a', kind: 'acceptance', onBase: 'fails', tests: ['a.test.ts'], required: true, timeoutMs: 10_000 };
     await writeChecks(workspace, [{ id: 'u', kind: 'unit', command: ['vitest', 'run'], required: true, timeoutMs: 10_000 }]);
