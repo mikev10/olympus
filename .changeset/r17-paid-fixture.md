@@ -3,5 +3,6 @@
 ---
 
 The paid line suite's `hello-change` fixture pins a `secret-scan` check of the
-gitleaks image, which admission requires of every run since R17; without it
-the paid suite's run was refused before it started.
+gitleaks image and carries a security spec part, both of which admission
+requires of every run since R17; without them the paid suite's run was
+refused before it started.
