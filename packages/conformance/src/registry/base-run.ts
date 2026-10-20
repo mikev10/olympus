@@ -113,7 +113,7 @@ export const PASSING_ON_THE_BASE_REFUSES: LocalAssertion = runtime({
     await withLine('r15-i3-passes-', async (rig) => {
       const vacuous = { ...REPRODUCES, tests: [PASSING_TEST] };
       const { refusal, components } = await refusedAtTestDesign(rig, [COMPILES, vacuous], 'I3 vacuous');
-      const named = refusal.mismatched.map((m) => `${m.checkId}:${m.declared}:${String(m.exitCode)}:${m.cause}`);
+      const named = refusal.mismatched.map((m) => `${m.checkId}:${String(m.declared)}:${String(m.exitCode)}:${m.cause}`);
       if (JSON.stringify(named) !== '["hello-written:fails:0:contrary"]') throw new Error(`I3: the refusal named ${JSON.stringify(named)}`);
       const recorded = (await decisionsOf(components.vault, rig)).filter(
         (d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'base-mismatch',
@@ -125,7 +125,7 @@ export const PASSING_ON_THE_BASE_REFUSES: LocalAssertion = runtime({
     await withLine('r15-i3-guard-', async (rig) => {
       const guard = { ...REPRODUCES, id: 'guard', onBase: 'passes', tests: [FAILING_TEST] };
       const { refusal } = await refusedAtTestDesign(rig, [COMPILES, REPRODUCES, guard], 'I3 guard');
-      const named = refusal.mismatched.map((m) => `${m.checkId}:${m.declared}:${String(m.exitCode)}:${m.cause}`);
+      const named = refusal.mismatched.map((m) => `${m.checkId}:${String(m.declared)}:${String(m.exitCode)}:${m.cause}`);
       if (JSON.stringify(named) !== '["guard:passes:1:contrary"]') throw new Error(`I3: a guard that failed on the base was refused as ${JSON.stringify(named)}`);
     });
     await withLine('r15-i3-control-', async (rig) => {
@@ -214,7 +214,7 @@ export const UNSTARTED_BASE_CHECK_REFUSES: LocalAssertion = runtime({
         throw new Error(`I5: a check that did not start was refused as ${JSON.stringify(refusal.mismatched)}`);
       }
       const record = await readRecord<BaseRunRecord>(components.vault, refusal.baseRun);
-      if (record.checks.length !== 0 || record.unstarted.length !== 1 || record.unstarted[0]?.checkId !== 'hello-written' || record.unstarted[0].reason === '') {
+      if (record.checks.some((c) => c.checkId === 'hello-written') || record.unstarted.length !== 1 || record.unstarted[0]?.checkId !== 'hello-written' || record.unstarted[0].reason === '') {
         throw new Error(`I5: the base record holds ${JSON.stringify(record)}; a check that did not start is unstarted, with its reason`);
       }
     });

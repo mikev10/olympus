@@ -27,7 +27,7 @@ const USAGE = [
   '',
   'commands:',
   '  create   --workspace <abs path> --base-commit <sha> --level <0-3> --spec <path>... --tests <path>...',
-  '           --manifest <path> --graph <path> [--approve-cost <usd>]',
+  '           --manifest <path> --graph <path> [--security-part <path>] [--approve-cost <usd>]',
   '  status   <run id>',
   '  approve  <run id> <station:level>',
   '  cancel   <run id>',
@@ -160,6 +160,7 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
       tests: { type: 'string', multiple: true },
       manifest: { type: 'string' },
       graph: { type: 'string' },
+      'security-part': { type: 'string' },
       'approve-cost': { type: 'string' },
     },
   });
@@ -173,6 +174,8 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
       acceptanceTests: values.tests ?? [],
       verificationManifest: required(values.manifest, '--manifest'),
       taskGraph: required(values.graph, '--graph'),
+      // Optional on the wire: a spec created without it is refused at the spec exit, naming the part (R17).
+      ...(values['security-part'] === undefined ? {} : { specParts: { security: values['security-part'] } }),
     },
     approvedCostUsd: cost(values['approve-cost']),
   };

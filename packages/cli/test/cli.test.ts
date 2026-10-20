@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { buildGraph, createApiServer, outcomes, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
+import { buildGraph, createApiServer, outcomes, STAND_IN_SCANNERS, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
 import { StubDriver, type Driver, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
@@ -64,7 +64,10 @@ beforeEach(async () => {
     { id: 'ok', kind: 'compile', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 },
     // The reproduction: fails over the base, passes once the builder has written `done` (D-A-BF-01). The name is built, since one spelt is protected (D-R15-03).
     { id: 'done', kind: 'behavioral', onBase: 'fails', command: ['node', '-e', "process.exit(require('node:fs').existsSync(['do', 'ne'].join('')) ? 0 : 1)"], required: true, timeoutMs: 10_000 },
+    // Every run is scanned for secrets, here by the stand-in the graph runs (R17).
+    { id: 'secret-scan', kind: 'secret-scan', image: STAND_IN_SCANNERS.secretScan.image, config: null, required: true, timeoutMs: 30_000 },
   ] }));
+  await writeFile(join(workspace, 'security.json'), JSON.stringify({ none: 'the change writes one file in the workspace and crosses no trust boundary' }));
   await writeFile(join(workspace, 'graph.json'), JSON.stringify({ tasks: [
     { id: 'hello', station: 'build', role: 'builder', dependsOn: [], dependencySet: ['**'] },
     { id: 'hello-review', station: 'review', role: 'reviewer', dependsOn: ['hello'], dependencySet: ['**'] },
@@ -91,6 +94,7 @@ beforeEach(async () => {
       sandbox,
       driver,
       reviewer: driver,
+      scanners: STAND_IN_SCANNERS,
       workspaces: localWorkspaceStore(user === undefined ? { root: store } : { root: store, user }),
     }),
     token: TOKEN,
@@ -120,7 +124,7 @@ function remote(...args: string[]): string[] {
   return ['--url', url, '--token', TOKEN, ...args];
 }
 
-const CREATE = ['create', '--workspace', '', '--base-commit', '0'.repeat(40), '--level', '1', '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json'];
+const CREATE = ['create', '--workspace', '', '--base-commit', '0'.repeat(40), '--level', '1', '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json', '--security-part', 'security.json'];
 
 function createArgs(...extra: string[]): string[] {
   const args = [...CREATE];

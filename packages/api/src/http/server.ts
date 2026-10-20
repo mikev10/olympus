@@ -131,12 +131,18 @@ function createBody(value: unknown): CreateRunBody {
     throw new HttpError(400, 'bad-request', 'approvedCostUsd must be a number or null');
   }
   if (!isRecord(artifacts)) throw new HttpError(400, 'bad-request', 'artifacts must be an object');
-  exactKeys(artifacts, ['spec', 'acceptanceTests', 'verificationManifest', 'taskGraph'], 'artifacts.');
-  const { spec, acceptanceTests, verificationManifest, taskGraph } = artifacts;
+  // `specParts` is the one optional key: a spec admitted without it is refused at the `spec` exit, naming the part (R17).
+  const { specParts, ...listed } = artifacts;
+  exactKeys(listed, ['spec', 'acceptanceTests', 'verificationManifest', 'taskGraph'], 'artifacts.');
+  const { spec, acceptanceTests, verificationManifest, taskGraph } = listed;
   if (!isStringArray(spec) || !isStringArray(acceptanceTests) || typeof verificationManifest !== 'string' || typeof taskGraph !== 'string') {
     throw new HttpError(400, 'bad-request', 'artifacts: spec and acceptanceTests are string arrays; verificationManifest and taskGraph are strings');
   }
-  return { workspace, baseCommit, requestedLevel, artifacts: { spec, acceptanceTests, verificationManifest, taskGraph }, approvedCostUsd };
+  if (specParts === undefined) return { workspace, baseCommit, requestedLevel, artifacts: { spec, acceptanceTests, verificationManifest, taskGraph }, approvedCostUsd };
+  if (!isRecord(specParts)) throw new HttpError(400, 'bad-request', 'artifacts.specParts must be an object');
+  exactKeys(specParts, ['security'], 'artifacts.specParts.');
+  if (typeof specParts.security !== 'string') throw new HttpError(400, 'bad-request', 'artifacts.specParts.security is a string');
+  return { workspace, baseCommit, requestedLevel, artifacts: { spec, acceptanceTests, verificationManifest, taskGraph, specParts: { security: specParts.security } }, approvedCostUsd };
 }
 
 function approveBody(value: unknown): ApproveBody {

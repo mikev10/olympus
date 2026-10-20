@@ -261,7 +261,7 @@ export class HttpBehavioralAdapter implements BehavioralAdapter {
     // A provider that cannot run the command throws, and there is no result to report: the
     // caller's gate treats a required check with no result as a failure.
     const started = await this.#provider.exec(h, [...input.serve], { detach: true });
-    const base = { checkId: scenario.id, exitCode: started.exitCode, stderr: started.stderr, suiteCount: null, startedAt };
+    const base = { checkId: scenario.id, exitCode: started.exitCode, stderr: started.stderr, suiteCount: null, findings: null, startedAt };
     if (started.exitCode !== 0) {
       return {
         ...base,

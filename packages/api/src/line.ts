@@ -82,7 +82,9 @@ import type {
   TaskStatus,
   VaultRef,
 } from '@olympus-ai/core';
-import type { CheckResult, CheckSpec, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
+import type { CheckResult, CheckSpec, IntegrityViolation, SecurityCheckSpec, TamperReport } from '@olympus-ai/integrity';
+import { scanTree } from './scan.js';
+import { denialRefusal, isSecurityCheck, scannerFor, securityShortfall, specPartRefusal, type SecurityPart } from './security.js';
 import { baseRefusal, declaredChecks } from './base.js';
 import { readUsage } from './cost.js';
 import { recordDecision, recordEgress, stationDecider } from './decisions.js';
@@ -107,6 +109,7 @@ import {
   materialize,
   ownDiff,
   reviewPath,
+  scanPaths,
   treePath,
 } from './workspace.js';
 
@@ -116,6 +119,8 @@ export interface LineContext {
   readonly artifacts: AdmissionRecord['artifacts'];
   readonly graph: TaskGraph;
   readonly checks: readonly CheckSpec[];
+  /** The spec's security part as admitted, or null where none was and `spec` refuses (R17). */
+  readonly securityPart: SecurityPart | null;
   readonly components: BuiltGraph;
   /** The digest of the base the runtime snapshotted at admission. */
   readonly baseTreeSha256: string;
@@ -286,11 +291,17 @@ function spend(grants: readonly ApprovalGrant[], key: ApprovalKey | null): reado
 async function work(ctx: LineContext, station: StationId): Promise<StationRefusal | undefined> {
   switch (station) {
     case 'spec': {
-      const refusal = await lockAdmitted(ctx, 'spec', ctx.artifacts.spec);
+      // A part every spec carries is refused before anything is locked: the run stops here (R17).
+      const missing = specPartRefusal(ctx.securityPart);
+      if (missing !== undefined) return missing;
+      const refusal = await lockAdmitted(ctx, 'spec', specArtifacts(ctx));
       if (refusal !== undefined) return refusal;
       break;
     }
     case 'test-design': {
+      // Read from what was admitted, so it is refused before anything is locked or run (R17).
+      const undenied = denialRefusal(ctx.securityPart, ctx.checks);
+      if (undenied !== undefined) return undenied;
       // A base record means this station locked and ran its checks before a stop: the locks are
       // held, and the base is judged by the record rather than run again (D-A-BF-01).
       let baseRun = await ctx.components.vault.readBaseRun(ctx.run.id);
@@ -393,6 +404,7 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
           stderr: exec.stderr,
           suiteCount: await suitesRun(check, runner, tree),
           expectation: null,
+          findings: null,
           durationMs: exec.durationMs,
           startedAt,
         });
@@ -404,11 +416,42 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
       await recordEgress({ vault, runId: ctx.run.id, taskId: null, station: 'test-design' }, egress);
     }
   }
+  // Each security check runs over the base for its findings, which are the base set every finding at
+  // `verify` is judged against (D-A-SC-02). One that produces none refuses the exit (D-R17-01).
+  for (const [index, check] of ctx.checks.entries()) {
+    if (!isSecurityCheck(check)) continue;
+    const scanned = await runSecurity(ctx, tree, 'base', index, check, null);
+    if (scanned.ok) checks.push(scanned.result);
+    else unstarted.push({ checkId: check.id, reason: scanned.reason });
+  }
 
   // Results collected over a changed artifact are not results, whatever the provider claims about ro.
   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
   if (after.length > 0) return recordTamper(ctx, 'test-design', null, after, { phase: 'after-base', checks });
   return vault.recordBaseRun({ runId: ctx.run.id, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
+}
+
+/**
+ * Runs one security check over `tree` through `scanTree` (R17), and records
+ * what its sandbox's proxy decided, whatever the scan did (D-P14-04).
+ */
+async function runSecurity(
+  ctx: LineContext, tree: string, label: string, index: number, check: SecurityCheckSpec, taskId: TaskId | null,
+): Promise<{ ok: true; result: CheckResult } | { ok: false; at: 'provision' | 'exec'; reason: string }> {
+  const { sandbox, vault, workspaces, profile } = ctx.components;
+  const scanned = await scanTree({
+    sandbox,
+    tree,
+    scratch: scanPaths(workspaces, ctx.run.id, label, index),
+    check,
+    scanner: scannerFor(check.kind, ctx.components.scanners),
+    limits: profile === null ? null : profile.limits,
+    user: workspaces.user,
+  });
+  if (scanned.ok || scanned.at === 'exec') {
+    await recordEgress({ vault, runId: ctx.run.id, taskId, station: ctx.state.station }, scanned.egress);
+  }
+  return scanned.ok ? { ok: true, result: scanned.result } : { ok: false, at: scanned.at, reason: scanned.reason };
 }
 
 async function readRecord<T>(ctx: LineContext, ref: VaultRef): Promise<T> {
@@ -752,8 +795,14 @@ function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>):
 
 /** Every artifact the run was admitted with. Each is locked by its station, and none may appear in a task's diff. */
 function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
-  const { spec, acceptanceTests, verificationManifest, taskGraph } = ctx.artifacts;
-  return [...spec, ...acceptanceTests, verificationManifest, taskGraph];
+  const { acceptanceTests, verificationManifest, taskGraph } = ctx.artifacts;
+  return [...specArtifacts(ctx), ...acceptanceTests, verificationManifest, taskGraph];
+}
+
+/** The spec's files and each part it carries: what `spec` locks, and what a `locked-spec` grant reads (R17). */
+function specArtifacts(ctx: LineContext): AdmittedArtifact[] {
+  const { security } = ctx.artifacts.specParts;
+  return [...ctx.artifacts.spec, ...(security === null ? [] : [security])];
 }
 
 /**
@@ -878,7 +927,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
   // The task has not run, so the mismatch is not its role's doing.
   if (tampered.length > 0) return recordTamper(ctx, 'build', task, tampered, { phase: 'before-build' }, null);
 
-  const spec = await readText(ctx, ctx.artifacts.spec);
+  const spec = await readText(ctx, specArtifacts(ctx));
   const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
   const drifted = [...spec.tampered, ...tests.tampered];
   // Read before the iteration is spent: context that changed under the check costs no budget.
@@ -968,6 +1017,7 @@ const FINDING_KINDS = [
   ['skip-marker', (r: TamperReport) => r.skipMarkersAdded.length > 0 ? { skipMarkersAdded: r.skipMarkersAdded } : undefined],
   ['suite-shrink', (r: TamperReport) => r.testsDeleted.length > 0 ? { testsDeleted: r.testsDeleted } : undefined],
   ['protected-path', (r: TamperReport) => r.protectedPathsTouched.length > 0 ? { protectedPathsTouched: r.protectedPathsTouched } : undefined],
+  ['suppression-marker', (r: TamperReport) => r.suppressionMarkersAdded.length > 0 ? { suppressionMarkersAdded: r.suppressionMarkersAdded } : undefined],
 ] as const satisfies ReadonlyArray<readonly [IntegrityViolation['kind'], (r: TamperReport) => Record<string, unknown> | undefined]>;
 
 async function recordFindings(ctx: LineContext, task: Task, report: TamperReport): Promise<void> {
@@ -1030,7 +1080,14 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const built = await tamperedIn(ctx, tree);
   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
-  const tamper = await analyzeTamper(prior.tree, tree, { protectedPaths: ctx.policy.protectedPaths, coverage: coverageReport(ctx), commands: ctx.checks.map((c) => commandOf(c, runner)) });
+  const security = ctx.checks.filter(isSecurityCheck);
+  const tamper = await analyzeTamper(prior.tree, tree, {
+    protectedPaths: ctx.policy.protectedPaths,
+    coverage: coverageReport(ctx),
+    // A security check pins no command: its scanner's arguments are the runtime's, and name no file in the tree.
+    commands: ctx.checks.filter((c) => !isSecurityCheck(c)).map((c) => commandOf(c, runner)),
+    markers: [...new Set(security.map((c) => c.kind))].map((kind) => ({ kind, markers: scannerFor(kind, ctx.components.scanners).markers })),
+  });
 
   // Results stay aligned with the specs by position, never matched up by id afterwards.
   const specs = ctx.checks;
@@ -1040,7 +1097,17 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // shares no container with the one before it, so nothing an earlier check did to the container
   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
-  for (const check of specs) {
+  for (const [index, check] of specs.entries()) {
+    if (isSecurityCheck(check)) {
+      const scanned = await runSecurity(ctx, tree, diffSha256, index, check, task.id);
+      if (scanned.ok) results.push(scanned.result);
+      else if (scanned.at === 'provision') return spendRetry(ctx, task);
+      else {
+        results.push(undefined);
+        unstarted.push({ checkId: check.id, reason: scanned.reason });
+      }
+      continue;
+    }
     const missing = await runnerMissing(check, runner, tree);
     if (missing !== undefined) {
       results.push(undefined);
@@ -1065,6 +1132,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
           stderr: exec.stderr,
           suiteCount: await suitesRun(check, runner, tree),
           expectation: null,
+          findings: null,
           durationMs: exec.durationMs,
           startedAt,
         });
@@ -1085,9 +1153,16 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
 
+  // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+  const baseRun = await vault.readBaseRun(ctx.run.id);
+  if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
+  const baseRecord = await readRecord<BaseRunRecord>(ctx, baseRun);
   const failed: FailedCheck[] = [];
   specs.forEach((check, i) => {
-    const shortfall = requiredShortfall(check, results[i]);
+    // A security check is judged by its findings against the base's, never by its exit code alone (D-A-SC-02).
+    const shortfall = isSecurityCheck(check)
+      ? securityShortfall(check, results[i], baseRecord.checks.find((r) => r.checkId === check.id)?.findings ?? [], scannerFor(check.kind, ctx.components.scanners), tamper)
+      : requiredShortfall(check, results[i]);
     if (shortfall !== undefined) failed.push(shortfall);
   });
   const differences = claimEvidenceDiff(result.claim, own);
@@ -1106,9 +1181,6 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     });
   }
   await recordFindings(ctx, task, tamper);
-  // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
-  const baseRun = await vault.readBaseRun(ctx.run.id);
-  if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
   const evidence: EvidenceBundle = {
     runId: ctx.run.id,
     taskId: task.id,
@@ -1131,6 +1203,13 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task.
   const spent = attemptsOf(ctx.state, task).iterations;
   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
+  // A failed gate is a decision, recorded before the status it sets is committed, at every iteration, so each failure is counted by its cause (R17, D-R17-06).
+  if (failed.length > 0) {
+    await recordDecision(
+      { vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+      { cause: 'station-refused', decidedBy: 'line', refusal: { ok: false, reason: 'gate-failed', failed, message: `the gate failed on ${failed.map((f) => `${f.checkId} (${f.cause})`).join(', ')}` } },
+    );
+  }
   // The station machine returns this park to the line on its next step; it is recorded here, first.
   if (status === 'parked') await park(ctx, task, { evidence: ref });
   else await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: status }, evidence: ref });
@@ -1148,7 +1227,7 @@ async function reviewView(ctx: LineContext, task: Task): Promise<string> {
   const { workspaces } = ctx.components;
   const grants: readonly ContextGrant[] = STATION_CONTRACTS.review.allowedContext;
   const keep = new Set<string>();
-  if (grants.includes('locked-spec')) for (const a of ctx.artifacts.spec) keep.add(a.path);
+  if (grants.includes('locked-spec')) for (const a of specArtifacts(ctx)) keep.add(a.path);
   if (grants.includes('acceptance-tests')) for (const a of ctx.artifacts.acceptanceTests) keep.add(a.path);
   const current = await accepted(ctx);
   if (grants.includes('diff')) for (const entry of current.diff) if (entry.sha256 !== null) keep.add(entry.path);
@@ -1208,7 +1287,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const planned = seatReviewer(task.id, authors, reviewer.resolveModel(tierFor(scopeFor(ctx, task), 'review', attemptsOf(ctx.state, task))), level);
   if (!planned.ok) return planned;
 
-  const spec = await readText(ctx, ctx.artifacts.spec);
+  const spec = await readText(ctx, specArtifacts(ctx));
   const tests = await readText(ctx, ctx.artifacts.acceptanceTests);
   const drifted = [...spec.tampered, ...tests.tampered];
   if (drifted.length > 0) return recordTamper(ctx, 'review', task, drifted, { phase: 'context' }, null);

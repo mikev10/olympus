@@ -13,6 +13,7 @@ export const omitted: AdapterSet = { // expect-error TS2741: Property 'mutation'
   coverage: set.coverage,
   behavioral: set.behavioral,
   manifest: set.manifest,
+  staticAnalysis: set.staticAnalysis,
   unavailableControls: set.unavailableControls,
 };
 
@@ -23,6 +24,8 @@ export const silent: AdapterSet = { // expect-error TS2741: Property 'unavailabl
   mutation: set.mutation,
   behavioral: set.behavioral,
   manifest: set.manifest,
+  staticAnalysis: set.staticAnalysis,
 };
 
 export const undefinedSlot: AdapterSet = { ...set, coverage: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type 'CoverageAdapter | null'
+export const undefinedScanner: AdapterSet = { ...set, staticAnalysis: undefined }; // expect-error TS2322: Type 'undefined' is not assignable to type 'SecurityScanner | null'

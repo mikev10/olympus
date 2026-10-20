@@ -166,7 +166,7 @@ export async function assertApiRunsHeadless(): Promise<void> {
     });
     const remote = ['--url', ready.url, '--token', token];
     const create = ['create', '--workspace', ready.workspace, '--base-commit', '0'.repeat(40), '--level', '1',
-      '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json'];
+      '--spec', 'spec.md', '--tests', 'acceptance.md', '--manifest', 'verify.json', '--graph', 'graph.json', '--security-part', 'security.json'];
 
     // The figure is shown before anything starts, and nothing starts without it.
     const shown = await cli([...remote, ...create]);

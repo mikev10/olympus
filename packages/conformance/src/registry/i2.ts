@@ -2,6 +2,7 @@ import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
 import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { R17_I2 } from './security.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
 import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
@@ -15,6 +16,8 @@ import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './b
 export const I2: InvariantEntry = {
   title: INVARIANTS.I2,
   assertions: [
+    // R17: security at the gate.
+    ...R17_I2,
     READINESS_OUTCOME_IS_RUNTIME_DERIVED,
     RUN_REPORT_READS_ONLY_RECORDS,
     compileError({

@@ -89,18 +89,18 @@ export const CASE_SET_REDUCTION_IS_A_DELETION: LocalAssertion = runtime({
     const four = ["import { test, expect } from 'vitest';", ...['a', 'b', 'c', 'd'].map((n) => `test('${n}', () => { expect(${n}).toBe(1); });`)].join('\n');
     const one = ["import { test, expect } from 'vitest';", "test('a', () => { expect(a).toBe(1); });"].join('\n');
     await withTrees({ 'package.json': PACKAGE, 'src/old.test.ts': four }, { 'package.json': PACKAGE, 'src/new.test.ts': one }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] });
       const deleted = [...report.testsDeleted].sort();
       if (JSON.stringify(deleted) !== JSON.stringify(['src/old.test.ts: b', 'src/old.test.ts: c', 'src/old.test.ts: d'])) {
         throw new Error(`I3: a rename that dropped three cases reported ${JSON.stringify(deleted)} as deleted, not the three cases by name`);
       }
     });
     await withTrees({ 'package.json': PACKAGE, 'src/old.test.ts': four }, { 'package.json': PACKAGE, 'src/moved/new.test.ts': four }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] });
       if (!isEmpty(report)) throw new Error(`I3 control: a rename that kept every case reported ${JSON.stringify(report)}`);
     });
     await withTrees({ 'package.json': PACKAGE, 'src/x.test.ts': SUM_TEST.replace('1 + 4', 'x') }, { 'package.json': PACKAGE, 'src/x.test.ts': SUM_TEST.replace('1 + 4', 'x').replace('toBe(5)', 'toBeTruthy()') }, async (base, head) => {
-      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
+      const report = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] });
       const [weakened] = report.assertionsWeakened;
       if (weakened?.file !== 'src/x.test.ts' || !weakened.before.includes('.toBe(5)') || !weakened.after.includes('.toBeTruthy()')) {
         throw new Error(`I3: toBe(5) changed to toBeTruthy() was reported as ${JSON.stringify(report.assertionsWeakened)}`);
@@ -177,11 +177,11 @@ export const CHECK_DISPATCH_NOT_WRITABLE_BY_THE_TASK: LocalAssertion = runtime({
     });
     const { analyzeTamper } = await api();
     await withTrees({ 'scripts/check.mjs': 'run()\n' }, { 'scripts/check.mjs': 'process.exit(0)\n' }, async (base, head) => {
-      const named = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [['node', 'scripts/check.mjs']] });
+      const named = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, markers: [], commands: [['node', 'scripts/check.mjs']] });
       if (!named.protectedPathsTouched.includes('scripts/check.mjs')) {
         throw new Error(`I3: a rewritten script the pinned command runs is not a protected-path touch: ${JSON.stringify(named.protectedPathsTouched)}`);
       }
-      const unnamed = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] });
+      const unnamed = await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] });
       if (unnamed.protectedPathsTouched.length > 0) throw new Error(`I3 control: a script no command names touched ${unnamed.protectedPathsTouched.join(', ')}`);
     });
   },

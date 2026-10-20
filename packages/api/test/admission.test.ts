@@ -78,6 +78,7 @@ describe('S1 finding 1: duplicate check ids', () => {
       ['x', 0],
       ['y', 3],
       ['hello-written', 0],
+      ['secret-scan', 0],
     ]);
     expect(outcome.state.tasks['hello' as TaskId]).toBe('parked');
   });
@@ -116,6 +117,14 @@ describe('S1 finding 3: the verification manifest', () => {
   test('a check of no known kind is refused', async () => {
     await writeChecks(workspace, [{ ...ok, kind: 'smoke' }]);
     await expectInvalid(await start(), 'manifest.checks[0].kind', 'not-a-kind');
+  });
+
+  test('R17 codex-2, gemini-1: a check naming a rule it denies is required and declares what the base does', async () => {
+    const denies = { id: 'd', kind: 'behavioral', onBase: 'passes', deniesRule: 'owner-only', command: ['node', '-e', 'process.exit(0)'], required: true, timeoutMs: 10_000 };
+    await writeChecks(workspace, [ok, { ...denies, required: false }]);
+    await expectInvalid(await start(), 'manifest.checks[1].required', 'not-required');
+    await writeChecks(workspace, [ok, { ...denies, onBase: undefined }]);
+    await expectInvalid(await start(), 'manifest.checks[1].onBase', 'undeclared');
   });
 
   test('D-R15-04: a suite check pins no command, an acceptance check names its tests, and no other check names any', async () => {

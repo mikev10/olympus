@@ -42,9 +42,12 @@ export interface FailedCheck {
   /**
    * What fails it: a non-zero exit, no result at all, a suite count that is
    * unknown or below what was expected (I5), or an expectation the runtime's
-   * comparison found did not hold, whatever the exit code (A-P8-01).
+   * comparison found did not hold, whatever the exit code (A-P8-01). A
+   * security check fails on a finding the base did not have, `new-finding`,
+   * or on a suppression marker the diff added, `suppression-added`, whatever
+   * its scanner's exit code (D-A-SC-02, D-R17-04).
    */
-  cause: 'exit-code' | 'no-result' | 'suite-count' | 'expectation';
+  cause: 'exit-code' | 'no-result' | 'suite-count' | 'expectation' | 'new-finding' | 'suppression-added';
 }
 
 /**
@@ -71,11 +74,15 @@ export interface ReviewSeat {
  */
 export interface BaseMismatch {
   checkId: string;
-  declared: 'fails' | 'passes';
+  /** `null` for a security check, which declares nothing: it runs over the base for its findings, and one with none readable there is `no-result` (D-R17-01). */
+  declared: 'fails' | 'passes' | null;
   /** The check's own exit code on the base, or null when it produced no result. */
   exitCode: number | null;
   cause: 'contrary' | 'no-result' | 'suite-count';
 }
+
+/** A part the runtime requires of every spec, whatever its template; the security part is the only one today. */
+export type SpecPart = 'security';
 
 /** A locked artifact whose bytes no longer match the lock manifest (I3). */
 export interface TamperedPath { path: string; expected: string; actual: string; }
@@ -112,6 +119,14 @@ export type StationRefusal =
    * runtime wrote of that run; `mismatched` is never empty.
    */
   | { ok: false; reason: 'base-mismatch'; mismatched: [BaseMismatch, ...BaseMismatch[]]; baseRun: VaultRef; message: string }
+  /** A part every spec must carry was not admitted, refused at the `spec` exit (R17). */
+  | { ok: false; reason: 'spec-part-missing'; part: SpecPart; message: string }
+  /**
+   * Authorization rules the spec's security part names with no locked
+   * acceptance or behavioral check naming them, refused at the `test-design`
+   * exit (R17). Never empty.
+   */
+  | { ok: false; reason: 'denial-check-missing'; rules: [string, ...string[]]; message: string }
   | { ok: false; reason: 'violation'; violations: VaultRef[]; message: string }
   | { ok: false; reason: 'unsafe-above-l1'; components: string[]; message: string }
   | { ok: false; reason: 'capability-missing'; station: StationId; capability: DriverCapability; message: string }

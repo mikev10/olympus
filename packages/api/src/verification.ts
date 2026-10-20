@@ -11,6 +11,7 @@ import { buildAdapterSet, type TestFrameworkAdapter } from '@olympus-ai/adapters
 import type { AgentClaim } from '@olympus-ai/core';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { DiffEntry } from '@olympus-ai/vault';
+import { isSecurityCheck } from './security.js';
 import type { RequestProblem } from './validate.js';
 
 /**
@@ -90,6 +91,9 @@ export async function suiteRunner(base: string): Promise<TestFrameworkAdapter | 
  * runner, so a null here is a run admitted on a base that has since changed.
  */
 export function commandOf(check: CheckSpec, runner: TestFrameworkAdapter | null): readonly [string, ...string[]] {
+  if (isSecurityCheck(check)) {
+    throw new Error(`${check.kind} check ${check.id} pins no command: the runtime runs the scanner its image is declared for`);
+  }
   if (check.kind !== 'acceptance' && check.kind !== 'unit') return check.command;
   if (runner === null) throw new Error(`the base declares no supported test framework, so ${check.kind} check ${check.id} has no runner to start`);
   return runner.invocation(check.kind === 'acceptance' ? check.tests : null);

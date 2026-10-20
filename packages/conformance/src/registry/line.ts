@@ -41,7 +41,7 @@ import { withVaultDirs, type VaultDirs } from './local-vault.js';
 /** `parts` as a built graph: itself when `buildGraph` already made it, else built now. */
 export async function built(parts: GraphParts): Promise<BuiltGraph> {
   const { buildGraph, isBuilt } = await import('@olympus-ai/api');
-  return isBuilt(parts) ? parts : buildGraph(parts);
+  return isBuilt(parts) ? parts : buildGraph({ ...(await scannersFor(parts.sandbox)), ...parts });
 }
 
 /** The fixture the api package's own tests drive: a spec, an acceptance file, a one-check manifest, and a graph of one build task and its review. */
@@ -55,6 +55,7 @@ export const ARTIFACTS: RunRequest['artifacts'] = {
   acceptanceTests: ['acceptance.md'],
   verificationManifest: 'verify.json',
   taskGraph: 'graph.json',
+  specParts: { security: 'security.json' },
 };
 
 const M1: readonly string[] = ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'];
@@ -235,10 +236,11 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
         const driver = options.work === false ? given : doingTheWork(given, sandbox);
         // One stub in both seats, as before the builder did the work: a reviewer it never writes as.
         const reviewer = overrides.driver === undefined ? driver : stub;
-        return built({ vault: await open(), sandbox, reviewer, workspaces, ...overrides, driver });
+        return built({ vault: await open(), sandbox, reviewer, workspaces, ...(await scannersFor(sandbox)), ...overrides, driver });
       },
       request: async (parts, overrides = {}) => {
         const components = await built(parts);
+        await scanned(dirs, components);
         const req: RunRequest = {
           runId,
           baseCommit: '0'.repeat(40),
@@ -294,6 +296,8 @@ function declaresOne(checks: readonly unknown[]): boolean {
 /** `asWritten` writes `checks` alone, for an assertion about what admission makes of a manifest. */
 export async function writeManifest(dirs: VaultDirs, checks: readonly unknown[], options: { asWritten?: boolean } = {}): Promise<void> {
   const written = options.asWritten === true || declaresOne(checks) ? checks : [...checks, HELLO_REPRODUCTION];
+  if (options.asWritten === true) AS_WRITTEN.add(dirs.artifacts);
+  else AS_WRITTEN.delete(dirs.artifacts);
   await writeFile(join(dirs.artifacts, 'verify.json'), JSON.stringify({ checks: written }));
 }
 
@@ -336,4 +340,67 @@ export function comparable(state: RunState): unknown {
     approvals: state.approvals.map((grant) => grant.key),
     reviews: state.reviews,
   };
+}
+
+/** The stand-in scanners a rig's graph runs, over a sandbox that runs no image (R17). */
+export async function standInScanners(): Promise<NonNullable<GraphParts['scanners']>> {
+  const { STAND_IN_SECRET_SCANNER, STAND_IN_STATIC_ANALYSIS_SCANNER } = await import('@olympus-ai/adapters');
+  return { secretScan: STAND_IN_SECRET_SCANNER, staticAnalysis: STAND_IN_STATIC_ANALYSIS_SCANNER };
+}
+
+/** The stand-in secret scan every rig's manifest pins unless it pins one of its own (R17). */
+export async function secretScanCheck(): Promise<Record<string, unknown>> {
+  const { STAND_IN_SECRET_SCAN_IMAGE } = await import('@olympus-ai/adapters');
+  return { id: 'secret-scan', kind: 'secret-scan', image: STAND_IN_SECRET_SCAN_IMAGE, config: null, required: true, timeoutMs: 30_000 };
+}
+
+/** The stand-in static analysis a rig's manifest pins over a workspace with a package.json, whose stack has the slot (R17). */
+export async function staticAnalysisCheck(): Promise<Record<string, unknown>> {
+  const { STAND_IN_STATIC_ANALYSIS_IMAGE } = await import('@olympus-ai/adapters');
+  return { id: 'static-analysis', kind: 'static-analysis', image: STAND_IN_STATIC_ANALYSIS_IMAGE, config: 'rules: []\n', required: true, timeoutMs: 30_000 };
+}
+
+/** Artifact roots whose manifest an assertion wrote as it stands, for what admission makes of it. */
+const AS_WRITTEN = new Set<string>();
+
+/**
+ * The manifest as the rig admits it: with the security checks the workspace's
+ * stack must be scanned with, added when the manifest pins none of a kind.
+ * Read when the request is made rather than when the manifest is written,
+ * since an assertion may give the workspace a package.json, and with it the
+ * static-analysis slot, after writing it (R17). A manifest written as it
+ * stands is left alone.
+ */
+async function scanned(dirs: VaultDirs, components: BuiltGraph): Promise<void> {
+  if (AS_WRITTEN.has(dirs.artifacts)) return;
+  const file = join(dirs.artifacts, 'verify.json');
+  let manifest: { checks?: unknown };
+  try {
+    manifest = JSON.parse(await readFile(file, 'utf8')) as { checks?: unknown };
+  } catch {
+    return;
+  }
+  if (!Array.isArray(manifest.checks)) return;
+  // Each security check pins the image the graph's scanner for its kind runs, so one manifest serves a stand-in graph and a real one.
+  const images: Record<string, string> = { 'secret-scan': components.scanners.secretScan.image, 'static-analysis': components.scanners.staticAnalysis.image };
+  const repinned = (manifest.checks as unknown[]).map((c) => {
+    const kind = typeof c === 'object' && c !== null ? (c as { kind?: unknown }).kind : undefined;
+    return typeof kind === 'string' && Object.hasOwn(images, kind) ? { ...(c as object), image: images[kind] } : c;
+  });
+  const kinds = new Set(repinned.map((c) => (typeof c === 'object' && c !== null ? (c as { kind?: unknown }).kind : undefined)));
+  const added: unknown[] = [];
+  if (!kinds.has('secret-scan')) added.push({ ...(await secretScanCheck()), image: images['secret-scan'] });
+  const node = await readFile(join(dirs.artifacts, 'package.json')).then(() => true, () => false);
+  if (node && !kinds.has('static-analysis')) added.push({ ...(await staticAnalysisCheck()), image: images['static-analysis'] });
+  const checks = [...repinned, ...added];
+  if (JSON.stringify(checks) !== JSON.stringify(manifest.checks)) await writeFile(file, JSON.stringify({ ...manifest, checks }));
+}
+
+/**
+ * The stand-in scanners over a sandbox that runs no image, and none over a
+ * real daemon, whose graph then runs the declared scanners' images (R17).
+ */
+export async function scannersFor(sandbox: SandboxProvider): Promise<Pick<GraphParts, 'scanners'>> {
+  const { LocalDockerProvider } = await import('@olympus-ai/sandbox');
+  return sandbox instanceof LocalDockerProvider ? {} : { scanners: await standInScanners() };
 }

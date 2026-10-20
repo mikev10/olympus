@@ -278,9 +278,16 @@ function decisionProblem(d: unknown): string | undefined {
  * back as a failure, which a check declared `'fails'` would count as a
  * reproduction.
  */
+/** A security check's finding as the runtime fingerprinted it: the base set every later finding is judged against, so a malformed one is refused (R17). */
+function isFinding(f: unknown): boolean {
+  return isRecord(f) && hasString(f, 'rule') && hasString(f, 'fingerprint') && /^[0-9a-f]{64}$/.test(f.fingerprint as string) &&
+    isRecord(f.location) && hasString(f.location, 'path') && Number.isInteger(f.location.line);
+}
+
 function isBaseResult(c: unknown): boolean {
   return isRecord(c) && hasString(c, 'checkId') && Number.isInteger(c.exitCode) &&
-    (c.suiteCount === null || (Number.isInteger(c.suiteCount) && (c.suiteCount as number) >= 0));
+    (c.suiteCount === null || (Number.isInteger(c.suiteCount) && (c.suiteCount as number) >= 0)) &&
+    (c.findings === null || (Array.isArray(c.findings) && c.findings.every(isFinding)));
 }
 
 /** D-A-BF-01: the runtime's record of the acceptance checks over the base, whole, or refused. */

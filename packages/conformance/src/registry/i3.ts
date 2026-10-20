@@ -4,6 +4,7 @@ import type { RunId } from '@olympus-ai/core';
 import type { LockEntry, LockVerdict } from '@olympus-ai/vault';
 import { compileError, pending, runtime } from '../kit/assert.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+import { R17_I3 } from './security.js';
 import { STATION_LOCKS_THE_ADMITTED_ARTIFACT, TRANSITION_REVERIFIES_LOCKS } from './line-assertions.js';
 import { ESCAPE_MECHANISM, withVault } from './local-vault.js';
 import {
@@ -40,6 +41,8 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
 export const I3: InvariantEntry = {
   title: INVARIANTS.I3,
   assertions: [
+    // R17: security at the gate.
+    ...R17_I3,
     compileError({
       id: 'I3.context-grants-name-locked-artifacts',
       title: 'ContextGrant names the locked spec and acceptance tests; there is no grant for a mutable spec',

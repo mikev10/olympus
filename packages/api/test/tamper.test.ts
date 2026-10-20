@@ -26,7 +26,7 @@ async function tree(files: Readonly<Record<string, string>>): Promise<string> {
   return root;
 }
 
-const EMPTY: TamperReport = { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [] };
+const EMPTY: TamperReport = { assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [] };
 
 const frameworks = [
   ['vitest', JSON.stringify({ name: 'f', version: '0.0.0', devDependencies: { vitest: '4.1.11' } })],
@@ -37,7 +37,7 @@ const SUM = "test('adds', () => {\n  expect(add(1, 4)).toBe(5);\n});\ntest('subt
 
 describe.each(frameworks)('%s', (_, pkg) => {
   async function analyze(base: Record<string, string>, head: Record<string, string>, protectedPaths: readonly string[] = []): Promise<TamperReport> {
-    return analyzeTamper(await tree({ 'package.json': pkg, ...base }), await tree({ 'package.json': pkg, ...head }), { protectedPaths, coverage: null, commands: [] });
+    return analyzeTamper(await tree({ 'package.json': pkg, ...base }), await tree({ 'package.json': pkg, ...head }), { protectedPaths, coverage: null, commands: [], markers: [] });
   }
 
   test('an unchanged tree reports empty', async () => {
@@ -125,7 +125,7 @@ describe.each(frameworks)('%s', (_, pkg) => {
   test('a file the pinned command names is a touch; the same change with no command naming it is not', async () => {
     const trees = [await tree({ 'package.json': pkg, 'scripts/check.mjs': 'run()' }), await tree({ 'package.json': pkg, 'scripts/check.mjs': 'process.exit(0)' })] as const;
     const touched = async (commands: ReadonlyArray<readonly string[]>): Promise<readonly string[]> =>
-      (await analyzeTamper(...trees, { protectedPaths: [], coverage: null, commands })).protectedPathsTouched;
+      (await analyzeTamper(...trees, { protectedPaths: [], coverage: null, commands, markers: [] })).protectedPathsTouched;
     expect(await touched([['node', './scripts/check.mjs']])).toEqual(['scripts/check.mjs']);
     expect(await touched([['sh', '-c', 'node scripts/check.mjs --ci']])).toEqual(['scripts/check.mjs']);
     expect(await touched([['node', 'scripts/other.mjs']])).toEqual([]);
@@ -133,7 +133,7 @@ describe.each(frameworks)('%s', (_, pkg) => {
 });
 
 test('a stack with no test adapter reports no test findings, and still reads paths', async () => {
-  const report = await analyzeTamper(await tree({ 'a.test.ts': SUM }), await tree({ 'b.snap': 'x' }), { protectedPaths: [], coverage: null, commands: [] });
+  const report = await analyzeTamper(await tree({ 'a.test.ts': SUM }), await tree({ 'b.snap': 'x' }), { protectedPaths: [], coverage: null, commands: [], markers: [] });
   expect(report).toEqual({ ...EMPTY, snapshotsRegenerated: ['b.snap'] });
 });
 
@@ -141,8 +141,8 @@ test('a pinned coverage check whose report is missing refuses; none pinned is nu
   const pkg = frameworks[0][1];
   const base = await tree({ 'package.json': pkg, 'src/x.ts': 'export const x = 1;\n' });
   const head = await tree({ 'package.json': pkg, 'src/x.ts': 'export const x = 2;\n' });
-  await expect(analyzeTamper(base, head, { protectedPaths: [], coverage: { report: join(head, 'coverage.json'), sourceRoot: '/workspace' }, commands: [] })).rejects.toThrow(AdapterRefusal);
-  expect((await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [] })).coverageDelta).toBeNull();
+  await expect(analyzeTamper(base, head, { protectedPaths: [], coverage: { report: join(head, 'coverage.json'), sourceRoot: '/workspace' }, commands: [], markers: [] })).rejects.toThrow(AdapterRefusal);
+  expect((await analyzeTamper(base, head, { protectedPaths: [], coverage: null, commands: [], markers: [] })).coverageDelta).toBeNull();
 });
 
 test('tamperFindings spells every finding but the protected paths, one line each', () => {

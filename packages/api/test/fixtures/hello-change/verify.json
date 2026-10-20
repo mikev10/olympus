@@ -1,5 +1,6 @@
 {
   "checks": [
-    { "id": "hello-file", "kind": "behavioral", "onBase": "fails", "command": ["node", "-e", "process.exit(require('node:fs').existsSync('hello.txt') && require('node:fs').readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1)"], "required": true, "timeoutMs": 10000 }
+    { "id": "hello-file", "kind": "behavioral", "onBase": "fails", "command": ["node", "-e", "process.exit(require('node:fs').existsSync('hello.txt') && require('node:fs').readFileSync('hello.txt', 'utf8').trim() === 'hello' ? 0 : 1)"], "required": true, "timeoutMs": 10000 },
+    { "id": "secret-scan", "kind": "secret-scan", "image": "zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46", "config": null, "required": true, "timeoutMs": 120000 }
   ]
 }

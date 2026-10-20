@@ -48,6 +48,15 @@ export function baseMismatches(checks: readonly CheckSpec[], record: BaseRunReco
       mismatched.push({ checkId: check.id, declared: check.onBase, exitCode: result.exitCode, cause: 'suite-count' });
     }
   }
+  // A security check declares nothing; it runs over the base for its findings, and one with none
+  // readable there leaves no base set to judge a finding by, so the exit is refused (D-R17-01).
+  for (const check of checks) {
+    if (check.kind !== 'secret-scan' && check.kind !== 'static-analysis') continue;
+    const result = record.checks.find((r) => r.checkId === check.id);
+    if ((result?.findings ?? null) === null) {
+      mismatched.push({ checkId: check.id, declared: null, exitCode: result?.exitCode ?? null, cause: 'no-result' });
+    }
+  }
   return mismatched;
 }
 
@@ -56,7 +65,7 @@ export function baseRefusal(checks: readonly CheckSpec[], record: BaseRunRecord,
   const [first, ...rest] = baseMismatches(checks, record);
   if (first === undefined) return undefined;
   const mismatched: [BaseMismatch, ...BaseMismatch[]] = [first, ...rest];
-  const named = mismatched.map((m) => `${m.checkId} (declared ${m.declared}, ${describe(m)})`).join(', ');
+  const named = mismatched.map((m) => `${m.checkId} (${m.declared === null ? 'a security check' : `declared ${m.declared}`}, ${describe(m)})`).join(', ');
   return {
     ok: false,
     reason: 'base-mismatch',
@@ -71,7 +80,7 @@ function describe(m: BaseMismatch): string {
     case 'contrary':
       return `exited ${String(m.exitCode)}`;
     case 'no-result':
-      return 'did not start';
+      return m.declared === null ? 'wrote no readable report' : 'did not start';
     case 'suite-count':
       return `exited ${String(m.exitCode)} over suites that could not be counted or counted short`;
   }
