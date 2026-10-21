@@ -597,7 +597,7 @@ order between them is settled before any of them is picked up.
 | R1 | Readiness | M2 | P2, P8, P3 | `docs/plan/R1-readiness.md` |
 | R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
-| R4 | Parallel task execution | M2 | P4, P6, I1 | — |
+| R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
 | R5 | Goal decomposition | M3 | R4, role compiler | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | — |
@@ -696,13 +696,19 @@ QA surface.
 
 ### R4 — Parallel task execution
 
+**Spec:** `docs/plan/R4-parallel.md`, written by the amendment that settled its
+open questions (D-A-PT-01 to D-A-PT-05). Where this entry and the spec differ,
+the spec is the one verified against the code.
+
 P4 runs tasks one at a time in dependency order and records that as a known
-limit. This unit removes the limit. Tasks whose dependencies have all passed
-run at the same time, each in its own sandbox. The contract already carries
-what it needs: `concurrency.maxParallelTasks` and `maxConflictRetries` in
-policy, `parallelism` in `DriverCapabilities`, and `commitRunState`, whose
-atomic commit already arbitrates concurrent writers. The unit's work is
-scheduling and conflict handling, not a contract change. Binding:
+limit. This unit removes the limit for `build`: tasks whose dependencies have
+all passed are built at the same time, each in its own sandbox, and `verify`
+stays one task at a time. Policy already carries `concurrency.maxParallelTasks`
+and `maxConflictRetries`, read by nothing yet, and `DriverCapabilities` carries
+`parallelism`, a count with no stated meaning. Conflict handling needs four
+contract amendments, landed in the unit's pull request (A-R4-01 to A-R4-04):
+nothing in run state, a park, or the enforcement record can say a conflict
+happened. Binding:
 
 - effective parallelism never exceeds the policy's `maxParallelTasks` or the
   driver's declared `parallelism`

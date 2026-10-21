@@ -4032,3 +4032,49 @@ for the role compiler.
 - **codex-5:** `staticFingerprint` collapses whitespace inside literals too, so `eval("a  b")` and `eval("a b")` share a fingerprint. Occurrences are counted, so an extra copy still fails; only an in-place, whitespace-only rewrite of a finding the base already had passes. Tolerating reformatting is what D-R17-02 chose; language-aware normalization would be the reversal.
 - **codex-6:** `markersAdded` counts marker-bearing lines per file, so a marker moved to another line, or a second marker on a line that has one, is not counted as added. Both scanners run with suppression disabled, so the finding is still reported and fails as new; what escapes is the `suppression-added` violation and its `human-required` escalation. "Added" means a higher count of marker-bearing lines per file, so that moving existing lines does not fail a change (D-R17-04).
 - **codex-7:** a provisioning failure part way through `verify`'s checks returns to retry before the iteration's results or its `gate-failed` decision are written, so that attempt's findings are not recorded. The retry re-runs every check, and an exhausted retry parks the task, so nothing advances. Recording partial results before a retry would change the record of every infrastructure failure, which is outside R17.
+
+## Amendment: parallel task execution (R4)
+
+`/start-unit R4` found that the entry's claim, "not a contract change", does
+not hold, and that the entry lacked its out-of-scope list, acceptance
+criteria, and invariants. Each row was checked against the code on `v2` at
+be3540f and is listed in `docs/plan/R4-parallel.md`, which this amendment
+adds. No package changes: the contract amendments the spec names land in R4's
+own pull request, where the line that uses them does.
+
+### D-A-PT-01: a conflict parks, and is recorded at each retry
+
+- **Ambiguous:** the entry says a conflict past `maxConflictRetries` "refuses, naming both tasks", and nothing in the contract can carry it: `StationRefusal` has no conflict arm (`core/src/station/types.ts:114-143`), `TaskAttempts` counts no conflicts, and P14's record has no cause for one.
+- **Chosen:** a conflict is counted in `TaskAttempts.conflicts`, recorded at each retry as a `task-conflict` decision, and past its bound parks the task with cause `conflicts-exhausted`, naming the sibling and the paths (A-R4-01 to A-R4-03). A park is what an exhausted iteration or retry already is, so resume, the run report, and P14's scenario table treat it as they treat those.
+- **Why not a new refusal arm:** it would need its own resume and report handling for a stop that behaves exactly as a park does.
+- **Reverse:** a `conflict` refusal arm beside `parked`.
+- **Confirmed** by the maintainer, 2026-10-20.
+
+### D-A-PT-02: `parallelism` is calls at once across sandboxes, and Claude Code declares 4
+
+- **Ambiguous:** `DriverCapabilities.parallelism` has no stated meaning. Claude Code declares `1` and enforces it per sandbox (`drivers/claude-code/src/driver.ts:306`), and every task already gets its own sandbox, so under the entry's rule, `min(maxParallelTasks, parallelism)`, R4 would change nothing on the real line.
+- **Chosen:** `parallelism` is the most `runTask` calls a driver runs at once, each on its own sandbox (A-R4-04). One call per sandbox stays enforced. Claude Code declares `4` and enforces a bound across sandboxes, and its driver-suite assertion shows four calls overlap and a fifth waits.
+- **Cost:** the driver suite spends Anthropic API credit. It runs only when the maintainer applies `run-driver` (D-A-CI-05).
+- **Reverse:** keep Claude Code at `1`; R4 then runs in parallel only under the stub.
+- **Confirmed** by the maintainer, 2026-10-20.
+
+### D-A-PT-03: builds run at once, verifies one at a time
+
+- **Ambiguous:** the run is at one station at a time, and the accepted tree is the latest-passed task's cumulative diff (`api/src/line.ts`, `accepted()`). Two verifies at once would each compose over the same accepted tree, and the later to pass would drop the earlier's change.
+- **Chosen:** `build` runs a batch of ready tasks at once, and `verify` runs one task at a time over the accepted tree as it stands, so each accepted change is composed over the one before. The model call is the long part of a task; the checks are local.
+- **Reverse:** verify in parallel and re-verify any task whose base moved before it was accepted.
+- **Confirmed** by the maintainer, 2026-10-20.
+
+### D-A-PT-04: a conflict is a whole path both tasks changed
+
+- **Ambiguous:** whether two changes to one file conflict when their lines do not overlap.
+- **Chosen:** any path the task changed whose bytes in the accepted tree differ from its start tree is a conflict. Nothing is merged inside a file; the task is rebuilt over the accepted tree instead. It refuses more often than a line merge would, and never accepts a merge no check ran over.
+- **Reverse:** a three-way line merge, with a merge that applies cleanly verified like any other change.
+- **Confirmed** by the maintainer, 2026-10-20.
+
+### D-A-PT-05: the spec is written before the unit starts
+
+- **Ambiguous:** R4 had no spec, and its entry lacked the parts every unit ships with.
+- **Chosen:** `docs/plan/R4-parallel.md`, added by this amendment, as R1's and R2's were added when they started. Review seats in parallel, verifies in parallel, and in-file merging are out of scope.
+- **Reverse:** fold the spec back into the DECOMPOSITION entry.
+- **Confirmed** by the maintainer, 2026-10-20.
