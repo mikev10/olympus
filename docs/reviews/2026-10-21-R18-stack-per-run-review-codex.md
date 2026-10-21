@@ -1,3 +1,58 @@
+# External review of R18, codex, 2026-10-21
+
+An adversarial review of R18, the stack recorded per run: the detected stack
+written into the admission record, both Vaults' refusal of a record that names
+none, `readRunRecords` and `recordedStack` reading it back, the per-stack rates,
+and the conformance assertion `I2.admission-records-the-detected-stack`; with
+the park-cause amendment (A-R4-05), the README update, and the #56 sandbox test
+fix in the same range. One of two reviews run from the same prompt and bundle;
+the other is `2026-10-21-R18-stack-per-run-review-gemini.md`. Both are triaged
+in `2026-10-21-R18-stack-per-run-triage.md`, which cites this review's numbered
+findings as `codex-1` to `codex-3` and its closing paragraph on the framing as
+`codex-7`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 112.5 s. Ingestion `complete`: 54,407
+  input tokens against a floor of 30,831. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `0a7b141887c9e56061a0f98ce8232042f196032f9b174a47e1dc5a4244124f60`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `a5c4b7a`.
+- **Cross-family agreement:** codex-2 and gemini's item 1 describe the same
+  mechanism, a stop between `recordAdmission` and `commitRunState`, and reach
+  opposite assessments: codex a defect, gemini sound. codex-7 and gemini's item
+  7 both address the framing and disagree. codex-1 and codex-3 were raised by
+  codex alone.
+- **Date:** 2026-10-21
+- **Bundle:** `2026-10-21-R18-stack-per-run-review-bundle.txt`, SHA-256
+  `bae66f76ef94fb1e048d9c572a0ff9ac258fda009660a9e6a10364e415b0e9c0`, base
+  `7f3fe7a` (`reviewed/R4`), head `f41f5a5` (R18's implementation commit on
+  `unit/r18`). It held the range's three commits: the R18 change, the
+  park-cause amendment (#57), and the README update (#52), with every new file
+  whole and every modified file as a diff showing each changed function whole.
+  Prompt: `2026-10-21-R18-stack-per-run-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no external lookups, that a workspace-listing attempt
+  was blocked, and that it ran no tests. These are self-reports, not
+  independently verifiable; the blocked listing agrees with the read-only empty
+  scratch directory.
+- **Coverage, and any gap:** items 1 and 3 answered by codex-1 to codex-3;
+  item 2 answered in the assessment (the conformance assertion is not
+  tautological); item 4 answered (no reachable cast or declaration-merging
+  attack found); item 5 not answered separately; item 6 answered at length;
+  item 7 answered (codex-7).
+- **Citations:** line numbers refer to positions in the bundle's diffs, not
+  the repository, and are hints. The triage located each construct in the
+  repository before relying on it.
+
+---
+
 BASE: 7f3fe7a  
 HEAD: f41f5a5  
 packages/vault/test/local.test.ts  

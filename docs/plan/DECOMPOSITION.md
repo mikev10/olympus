@@ -1311,7 +1311,9 @@ recorded as one; `unrecorded` means no record names a stack.
    unit resumes as it did; a `stack` present and not a non-empty string is a
    malformed record and is refused, as any other malformed field is.
 3. **R2 keys by stack.** `RunRecords.stack` is the recorded stack, or `null`
-   for a run with no admission record or one admitted before this unit.
+   for a run with no admission record or one admitted before this unit,
+   and for a run with an admission record but no run state, whose record
+   the reader reaches only through that state (D-R18-07).
    `outcomes` adds `caughtFalseDoneByStack`, `autonomyRatioByStack`, and
    `firstPassYieldByStack`, a `null` stack keyed `unrecorded`. The
    not-measured line for stack is removed.
