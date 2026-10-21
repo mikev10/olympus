@@ -202,6 +202,19 @@ export type DecisionCause =
       readonly from: ModelTier;
       readonly to: ModelTier;
       readonly failedGates: number;
+    }
+  /**
+   * `verify` found that a path `task` changed was also changed by the accepted
+   * work of each task in `with` after `task` started. Decided by the line from
+   * the trees the runtime built, before the conflict is committed, as a park
+   * is; the task is rebuilt, or parks past the policy's bound (A-R4-03, I5).
+   */
+  | {
+      readonly cause: 'task-conflict';
+      readonly decidedBy: 'line';
+      readonly task: TaskId;
+      readonly with: readonly [TaskId, ...TaskId[]];
+      readonly paths: readonly [string, ...string[]];
     };
 
 export type DecidingComponent = DecisionCause['decidedBy'];

@@ -19,12 +19,21 @@ export function stationTier(scope: CapabilityScope, station: StationId): ModelTi
 
 /**
  * The gates a task has failed before its current iteration. `iterations` is
- * committed before the attempt it counts begins, and an iteration ends either
- * in a verdict or in a park, so every iteration before the current one ended
- * in a failed gate.
+ * committed before the attempt it counts begins, and an iteration ends in a
+ * verdict, a conflict, or a park, so every iteration before the current one
+ * that no conflict ended ended in a failed gate (A-R4-01).
  */
 export function failedGates(attempts: TaskAttempts): number {
-  return Math.max(0, attempts.iterations - 1);
+  return Math.max(0, attempts.iterations - 1 - attempts.conflicts.length);
+}
+
+/**
+ * The iterations a gate judged or is judging: every iteration but those a
+ * conflict sent back to `build`. What the build contract's `maxIterations`
+ * bounds, so a conflict spends no gate budget (D-R4-03).
+ */
+export function gatedIterations(attempts: TaskAttempts): number {
+  return Math.max(0, attempts.iterations - attempts.conflicts.length);
 }
 
 /**

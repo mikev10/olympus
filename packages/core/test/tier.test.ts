@@ -4,7 +4,7 @@
  * ceiling, and decided from the attempt counts alone (I2, I4).
  */
 import { describe, expect, test } from 'vitest';
-import { escalationAt, tierFor, type CapabilityScope, type TaskAttempts } from '../src/index.js';
+import { escalationAt, failedGates, gatedIterations, tierFor, type CapabilityScope, type TaskAttempts, type TaskId } from '../src/index.js';
 
 function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
   return {
@@ -23,7 +23,7 @@ function scope(overrides: Partial<CapabilityScope> = {}): CapabilityScope {
 }
 
 function at(iterations: number): TaskAttempts {
-  return { iterations, retries: 0, starts: iterations };
+  return { iterations, retries: 0, starts: iterations, conflicts: [] };
 }
 
 describe('a tier per station', () => {
@@ -63,7 +63,17 @@ describe('escalation', () => {
 
   test('retries and replays are not failed gates: only iterations count', () => {
     const s = scope({ tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'deep' } });
-    expect(tierFor(s, 'build', { iterations: 1, retries: 2, starts: 5 })).toBe('fast');
+    expect(tierFor(s, 'build', { iterations: 1, retries: 2, starts: 5, conflicts: [] })).toBe('fast');
+  });
+
+  test('a conflict is not a failed gate: an iteration a conflict sent back raises no tier (A-R4-01)', () => {
+    const s = scope({ tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'deep' } });
+    const conflict = { with: ['b' as TaskId] as const, paths: ['x.txt'] as const };
+    const attempts: TaskAttempts = { iterations: 2, retries: 0, starts: 2, conflicts: [conflict] };
+    expect(failedGates(attempts)).toBe(0);
+    expect(gatedIterations(attempts)).toBe(1);
+    expect(tierFor(s, 'build', attempts)).toBe('fast');
+    expect(escalationAt(s, 'build', attempts)).toBeNull();
   });
 
   test('each escalation is one step, named with the failures it was decided on', () => {

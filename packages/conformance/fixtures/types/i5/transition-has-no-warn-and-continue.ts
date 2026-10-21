@@ -61,7 +61,9 @@ export const skipped: StationTransition = { ok: false, reason: 'skipped', messag
 export const proseOnly: StationTransition = { ok: false, reason: 'gate-failed', message: 'typecheck failed' }; // expect-error TS2322: Property 'failed' is missing
 export const wrongPayload: StationTransition = { ok: false, reason: 'lock-tamper', failed: [], message: 'spec.md changed' }; // expect-error TS2353: 'failed' does not exist in type
 export const noMessage: StationTransition = { ok: false, reason: 'gate-failed', failed: [] }; // expect-error TS2322: Property 'message' is missing
-export const vagueCause: StationTransition = { ok: false, reason: 'parked', task, cause: 'gave up', limit: 2, message: 'gave up' }; // expect-error TS2322: Type '"gave up"' is not assignable to type 'ParkCause'
+export const vagueCause: StationTransition = { ok: false, reason: 'parked', task, cause: 'gave up', limit: 2, message: 'gave up' }; // expect-error TS2322: Type '"gave up"' is not assignable to type
+// A park for conflicts names the siblings and the paths; one that names neither is not representable (A-R4-02).
+export const anonymousConflict: StationTransition = { ok: false, reason: 'parked', task, cause: 'conflicts-exhausted', limit: 0, message: 'conflicted' }; // expect-error TS2322: missing the following properties from type
 export const approvalAsWarning: StationTransition = { ok: true, next: 'observe', spends: null, approval: 'human-required' }; // expect-error TS2353: 'approval' does not exist in type
 // An advance says which grant it spent, or that it spent none; silence is not representable (A-P4-04).
 export const silentAdvance: StationTransition = { ok: true, next: 'build' }; // expect-error TS2322: Property 'spends' is missing

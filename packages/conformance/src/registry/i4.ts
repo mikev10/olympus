@@ -1,4 +1,5 @@
 import { compileError, external, runtime } from '../kit/assert.js';
+import { R4_I4 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
@@ -15,6 +16,8 @@ import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readi
 export const I4: InvariantEntry = {
   title: INVARIANTS.I4,
   assertions: [
+    // R4: parallel task execution.
+    ...R4_I4,
     READINESS_NEVER_RAISES_A_CAP,
     ABSENT_SCAN_IS_NOT_A_PASS,
     MERGE_TOKEN_REACHES_NO_SANDBOX,

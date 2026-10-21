@@ -298,6 +298,13 @@ describe('enforcement decisions (A-P14-01)', () => {
     await expect(vault.recordDecision({ ...decision, occurrence: 'second', decision: { ...escalated, decidedBy: 'model-relay' } } as never)).rejects.toThrow(/not made by model-relay/);
     expect(await vault.readDecisions(runId)).toHaveLength(1);
   });
+
+  test('a conflict is the line\'s decision and no other component\'s (A-R4-03)', async () => {
+    const conflict = { cause: 'task-conflict' as const, decidedBy: 'line' as const, task: 'a' as TaskId, with: ['b' as TaskId] as const, paths: ['x.txt'] as const };
+    await vault.recordDecision({ ...decision, decision: conflict });
+    await expect(vault.recordDecision({ ...decision, occurrence: 'second', decision: { ...conflict, decidedBy: 'station-machine' } } as never)).rejects.toThrow(/not made by station-machine/);
+    expect(await vault.readDecisions(runId)).toHaveLength(1);
+  });
 });
 
 describe('the base record (D-A-BF-01)', () => {

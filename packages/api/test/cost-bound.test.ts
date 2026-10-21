@@ -68,7 +68,7 @@ test('every task spending every start it may, and passing on its last, makes exa
     { tasks: [{ id: 'hello', station: 'build', role: BUILDER } as never, { id: 'hello-review', station: 'review', role: REVIEWER } as never], edges: [] },
     policy(),
   );
-  expect(figure.calls).toBe(maxStarts(STATION_CONTRACTS.build) + maxStarts(STATION_CONTRACTS.review));
+  expect(figure.calls).toBe(maxStarts(STATION_CONTRACTS.build, 0) + maxStarts(STATION_CONTRACTS.review, 0));
   expect(driver.calls).toBe(figure.calls);
   const state = await components.vault.readRunState(runId);
   expect(state.usage).toHaveLength(figure.calls);
@@ -96,6 +96,17 @@ test('the figure sums each task\'s calls at its own role\'s ceiling, rounded to 
   expect(figure.calls).toBe(9 + 9 + 3);
   expect(figure.usd).toBe(2.91);
   expect(figure.tasks.map((t) => t.usd)).toEqual([0.9, 0.9, 1.11]);
+});
+
+test('a build task\'s share counts every rebuild maxConflictRetries allows, and a review task\'s none (D-R4-01)', () => {
+  const doc = policy({ concurrency: { maxParallelTasks: 2, maxConflictRetries: 2 } });
+  const figure = worstCaseCost(
+    { tasks: [{ id: 'a', station: 'build', role: BUILDER } as never, { id: 'r', station: 'review', role: REVIEWER } as never], edges: [] },
+    doc,
+  );
+  // Build: three iterations and two rebuilds, each with every retry. Review: one iteration with every retry.
+  expect(figure.tasks.map((t) => t.calls)).toEqual([(3 + 2) * 3, 3]);
+  expect(figure.calls).toBe(15 + 3);
 });
 
 test('each task\'s share is rounded up, never to nearest, so the figure is not below the ceiling it stands for', () => {

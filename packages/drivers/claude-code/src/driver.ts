@@ -135,6 +135,14 @@ export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
 const FAMILY = 'claude' as ModelFamily;
 
 /**
+ * The most tasks this driver runs at once, each on its own sandbox: what
+ * `capabilities().parallelism` declares and `#bounded` enforces (A-R4-04,
+ * D-A-PT-02). Each is its own CLI process in its own container, so the number
+ * is a bound on concurrent model sessions, not on anything one sandbox holds.
+ */
+export const PARALLELISM = 4;
+
+/**
  * Tier to model, by the exact id the CLI sends, never an alias (D-R14-01). The
  * line prices a call's relay for the model resolved here and no other, so the
  * relay refuses any request naming another; an alias the CLI resolved for
@@ -303,13 +311,19 @@ export class ClaudeCodeDriver implements Driver {
   readonly #mcpServers: Readonly<Record<string, McpServerConfig>>;
   readonly #settingsPath: string | undefined;
   /**
-   * The one in-flight invocation per sandbox. `capabilities().parallelism` is
-   * 1, and this is what makes that true rather than aspirational: a second
-   * task on the same sandbox waits for the first. A declared number that
-   * nothing enforced would be a capability claim with nothing behind it, which
-   * is the state I8 exists to end.
+   * The one in-flight invocation per sandbox: a second task on the same
+   * sandbox waits for the first, whatever `parallelism` says. A declared number
+   * that nothing enforced would be a capability claim with nothing behind it,
+   * which is the state I8 exists to end.
    */
   readonly #inFlight = new Map<SandboxHandle, Promise<unknown>>();
+  /**
+   * The bound across sandboxes: invocations running now, and those waiting
+   * for one to end, in arrival order. `capabilities().parallelism` is
+   * `PARALLELISM`, and this is what makes it true (A-R4-04).
+   */
+  #running = 0;
+  readonly #waiting: Array<() => void> = [];
   readonly #handlers = new Map<DriverEvent['kind'], Array<(e: DriverEvent) => void>>();
   /**
    * What each task's session reported about itself at startup, kept so a
@@ -370,10 +384,9 @@ export class ClaudeCodeDriver implements Driver {
       subagents: true,
       hooks: true,
       mcp: true,
-      // One CLI process per task, and a sandbox is one container. Concurrency
-      // across tasks is the runtime's to arrange with more sandboxes, not this
-      // driver's to claim.
-      parallelism: 1,
+      // One CLI process per task, and a sandbox is one container: tasks run at
+      // once only on separate sandboxes, at most this many (A-R4-04).
+      parallelism: PARALLELISM,
       computerUse: false,
       steering: false,
       stablePrefixCaching: true,
@@ -418,16 +431,37 @@ export class ClaudeCodeDriver implements Driver {
     return this.#serialized(req.sandbox, () => this.#runTask(req, role));
   }
 
-  /** One invocation per sandbox at a time, which is what `parallelism: 1` means. */
+  /**
+   * One invocation per sandbox at a time, and no more than `PARALLELISM`
+   * across sandboxes. A task waiting for its own sandbox holds no slot of the
+   * bound, so it never keeps a task on another sandbox waiting.
+   */
   async #serialized<T>(handle: SandboxHandle, body: () => Promise<T>): Promise<T> {
-    const previous = this.#inFlight.get(handle);
-    if (previous !== undefined) await previous.catch(() => undefined);
-    const running = body();
+    // Checked again after every wait: the call waited for may have been succeeded by another follower
+    // that woke first, and the handle is claimed with no await between the check and the claim.
+    for (let held = this.#inFlight.get(handle); held !== undefined; held = this.#inFlight.get(handle)) {
+      await held.catch(() => undefined);
+    }
+    const running = this.#bounded(body);
     this.#inFlight.set(handle, running);
     try {
       return await running;
     } finally {
       if (this.#inFlight.get(handle) === running) this.#inFlight.delete(handle);
+    }
+  }
+
+  /** Runs `body` once fewer than `PARALLELISM` invocations are running, in the order callers arrived. */
+  async #bounded<T>(body: () => Promise<T>): Promise<T> {
+    if (this.#running >= PARALLELISM) await new Promise<void>((admit) => this.#waiting.push(admit));
+    else this.#running += 1;
+    try {
+      return await body();
+    } finally {
+      // A slot passes straight to the next caller waiting, so the count never dips to let a newcomer jump the queue.
+      const next = this.#waiting.shift();
+      if (next === undefined) this.#running -= 1;
+      else next();
     }
   }
 

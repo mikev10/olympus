@@ -250,6 +250,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'violation-recorded': ['line'],
   'relay-refused': ['model-relay'],
   'tier-escalated': ['line'],
+  'task-conflict': ['line'],
 };
 
 function isNullableString(r: Record<string, unknown>, key: string): boolean {

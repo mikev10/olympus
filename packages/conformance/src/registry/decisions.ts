@@ -24,6 +24,7 @@ import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { around } from './line-assertions.js';
 import { realComponents, realPolicy } from './real-line.js';
 import { failingRun } from './tier.js';
+import { conflictScenario } from './parallel.js';
 import { inTask, runHello, writes } from './verification.js';
 import { ARTIFACTS, HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
@@ -51,7 +52,8 @@ export type CauseKey =
   | `egress:${EgressConnection['verdict']}`
   | 'violation-recorded'
   | 'relay-refused'
-  | 'tier-escalated';
+  | 'tier-escalated'
+  | 'task-conflict';
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -73,6 +75,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'relay-refused';
     case 'tier-escalated':
       return 'tier-escalated';
+    case 'task-conflict':
+      return 'task-conflict';
   }
 }
 
@@ -559,6 +563,21 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },
+  // R4: a conflict past maxConflictRetries 0 parks the task that met it, recorded by the line over that task at verify.
+  'station:parked:conflicts-exhausted': {
+    kind: 'scenario',
+    run: () => conflictScenario('conflicts-exhausted', (decisions) => {
+      const parks = decisions.filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked');
+      const [park] = parks;
+      if (parks.length !== 1 || park?.decision.decidedBy !== 'line' || park.taskId !== 'b' || park.station !== 'verify'
+        || park.decision.cause !== 'station-refused' || park.decision.refusal.reason !== 'parked' || park.decision.refusal.cause !== 'conflicts-exhausted') {
+        throw new Error(`P14: a conflict park was recorded as ${JSON.stringify(parks)}`);
+      }
+      // The conflict that parked it is recorded too, no later than the park. The Vault lists decisions by hash, so time orders them.
+      const conflict = decisions.find((d) => d.decision.cause === 'task-conflict');
+      if (conflict === undefined || conflict.decidedAt > park.decidedAt) throw new Error('P14: the park was recorded with no conflict before it');
+    }),
+  },
   'station:cancelled': {
     kind: 'scenario',
     run: async () => {
@@ -671,6 +690,18 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
         if (relayed.length !== 1) throw new Error(`P14: ${String(relayed.length)} relay decisions for one refusing call`);
       });
     },
+  },
+  'task-conflict': {
+    kind: 'scenario',
+    run: () => conflictScenario('task-conflict', (decisions) => {
+      const found = decisions.filter((d) => d.decision.cause === 'task-conflict');
+      const [d] = found;
+      // Only the line may record one, which the Vault holds it to (A-R4-03).
+      if (found.length !== 1 || d?.decision.cause !== 'task-conflict' || d.taskId !== 'b' || d.station !== 'verify'
+        || JSON.stringify(d.decision.with) !== '["a"]' || JSON.stringify(d.decision.paths) !== '["parts/shared.txt"]') {
+        throw new Error(`P14: a conflict was recorded as ${JSON.stringify(found)}`);
+      }
+    }),
   },
   'tier-escalated': {
     kind: 'scenario',

@@ -93,9 +93,11 @@ export interface TamperedPath { path: string; expected: string; actual: string; 
  * its driver or sandbox failed more times than the contract's `retry.max`.
  * `starts-exhausted`: the driver was invoked more times than any uninterrupted
  * run of the station could invoke it, which is a run being replayed into the
- * same attempt rather than making progress (A-P4-06).
+ * same attempt rather than making progress (A-P4-06). `conflicts-exhausted`:
+ * a sibling's accepted change collided with the task's own more times than the
+ * policy's `concurrency.maxConflictRetries` allows (A-R4-02).
  */
-export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted';
+export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted';
 
 /**
  * A refusal to advance. `reason` is a closed set and selects the payload a
@@ -138,7 +140,15 @@ export type StationRefusal =
    */
   | { ok: false; reason: 'approval-required'; key: ApprovalKey; escalations: string[]; message: string }
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
-  | { ok: false; reason: 'parked'; task: TaskId; cause: ParkCause; limit: number; message: string }
+  | { ok: false; reason: 'parked'; task: TaskId; cause: Exclude<ParkCause, 'conflicts-exhausted'>; limit: number; message: string }
+  /**
+   * A conflict past the policy's bound: the siblings and the paths of the last
+   * one, read from run state, so the refusal names both sides (A-R4-02).
+   */
+  | {
+    ok: false; reason: 'parked'; task: TaskId; cause: 'conflicts-exhausted'; limit: number;
+    conflictsWith: readonly [TaskId, ...TaskId[]]; paths: readonly [string, ...string[]]; message: string;
+  }
   | { ok: false; reason: 'cancelled'; cancelledBy: string; cancelledAt: string; message: string }
   | { ok: false; reason: 'halted'; haltedAt: string; message: string };
 

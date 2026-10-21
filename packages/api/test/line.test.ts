@@ -259,7 +259,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const state = refusedState(outcome);
     expect(driver.requests).toHaveLength(3);
     expect(state.tasks[hello]).toBe('parked');
-    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3 });
+    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3, conflicts: [] });
     expect(state.evidenceRefs).toHaveLength(3);
     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
     for (const ref of state.evidenceRefs) {
@@ -390,7 +390,7 @@ describe('retries are bounded (I5)', () => {
     expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'retries-exhausted', limit: 2 } });
     expect(driver.calls).toBe(3);
     const state = refusedState(outcome);
-    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3 });
+    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3, conflicts: [] });
 
     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
 

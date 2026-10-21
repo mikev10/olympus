@@ -19,7 +19,8 @@
 import { expect } from 'vitest';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { RoleId, TaskId } from '@olympus-ai/core';
-import { DECLARED_TOOLS, HOOK_SETTINGS, artifactFiles } from '../src/index.js';
+import type { SandboxHandle } from '@olympus-ai/sandbox';
+import { DECLARED_TOOLS, HOOK_SETTINGS, PARALLELISM, artifactFiles } from '../src/index.js';
 import { MCP_SERVER_SOURCE, withDriver } from './harness.js';
 
 invariantTest(
@@ -166,38 +167,45 @@ invariantTest(
 
 invariantTest(
   'driver.parallelism',
-  'the driver runs the declared number of tasks concurrently under one provenance id: one, enforced, so a second task on a sandbox waits for the first',
+  'the driver runs the declared number of tasks concurrently, each on its own sandbox, under one provenance id: four overlap, a fifth waits, and a second task on one sandbox waits for the first',
   async () => {
     await withDriver(async (h) => {
-      expect(h.driver.capabilities().parallelism).toBe(1);
+      expect(h.driver.capabilities().parallelism).toBe(PARALLELISM);
       const provenance = h.driver.provenanceId();
+      const others = await h.provisionMore(PARALLELISM);
 
-      // The window measured is the CLI's, not the caller's: two `runTask`
-      // promises created together both begin at the same instant whatever the
-      // driver does, so timing them would prove nothing. What `parallelism: 1`
-      // claims is that at most one invocation is inside the sandbox at a time.
+      // The window measured is the CLI's, not the caller's: promises created
+      // together all begin at the same instant whatever the driver does, so
+      // timing them would prove nothing. What the declaration claims is how
+      // many invocations are inside sandboxes at once, and that one sandbox
+      // never holds two.
       let inside = 0;
       let mostAtOnce = 0;
-      h.observeExec(() => {
+      const perSandbox = new Map<SandboxHandle, number>();
+      let mostOnOne = 0;
+      h.observeExec((sandbox) => {
         inside += 1;
         mostAtOnce = Math.max(mostAtOnce, inside);
+        perSandbox.set(sandbox, (perSandbox.get(sandbox) ?? 0) + 1);
+        mostOnOne = Math.max(mostOnOne, perSandbox.get(sandbox) ?? 0);
         return () => {
           inside -= 1;
+          perSandbox.set(sandbox, (perSandbox.get(sandbox) ?? 1) - 1);
         };
       });
 
-      await Promise.all([
-        h.driver.runTask(h.request({ taskId: 'par-a' as TaskId, variableSuffix: 'Reply with the single word: one' })),
-        h.driver.runTask(h.request({ taskId: 'par-b' as TaskId, variableSuffix: 'Reply with the single word: two' })),
-      ]);
+      // Five sandboxes with one task each, and a second task on the first: six tasks.
+      const sandboxes = [h.handle, ...others, h.handle];
+      await Promise.all(sandboxes.map((sandbox, i) =>
+        h.driver.runTask(h.request({ sandbox, taskId: `par-${String(i)}` as TaskId, variableSuffix: `Reply with the single word: task${String(i)}` }))));
 
-      // Two tasks ran, and never both at once. A driver that ran them together
-      // would be more concurrent than it declares, which is an undeclared
-      // capability rather than a bonus; one that ran only one would not have
-      // run the second task at all.
-      expect(mostAtOnce).toBe(1);
+      // Four at once and never five: a driver more concurrent than it declares
+      // has an undeclared capability rather than a bonus, and one less
+      // concurrent declares a number nothing exercises. One sandbox never held two.
+      expect(mostAtOnce).toBe(PARALLELISM);
+      expect(mostOnOne).toBe(1);
 
-      // One provenance id across both, because it is the driver's identity and
+      // One provenance id across every task, because it is the driver's identity and
       // not a per-task value.
       expect(h.driver.provenanceId()).toBe(provenance);
     });

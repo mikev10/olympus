@@ -4078,3 +4078,66 @@ own pull request, where the line that uses them does.
 - **Chosen:** `docs/plan/R4-parallel.md`, added by this amendment, as R1's and R2's were added when they started. Review seats in parallel, verifies in parallel, and in-file merging are out of scope.
 - **Reverse:** fold the spec back into the DECOMPOSITION entry.
 - **Confirmed** by the maintainer, 2026-10-20.
+
+## Unit: parallel task execution (R4)
+
+`/start-unit R4` checked `docs/plan/R4-parallel.md` against `v2` at 0dae972
+and found five places it is silent or wrong. Each was confirmed by the
+maintainer on 2026-10-21 as recommended.
+
+### D-R4-01: the worst-case cost counts conflict rebuilds
+
+- **Ambiguous:** `worstCaseCost` bounds a task's calls by `maxStarts(contract)` (`api/src/cost.ts:178`). A-R4-01 lets a conflict add one iteration's starts, so the figure would no longer bound what a run can spend.
+- **Chosen:** a build task's calls are `maxStarts(contract) + maxConflictRetries × (retry.max + 1)`. The pre-run figure stays a bound.
+- **Reverse:** count `maxStarts` alone and state that the figure excludes conflicts.
+
+### D-R4-02: `nextStep` takes the limits, not the driver
+
+- **Ambiguous:** the spec gives `nextStep` the effective parallelism and the policy's conflict bound. Three callers in `api/src/run.ts` (approval and standing) hold the policy but no driver.
+- **Chosen:** `nextStep(state, graph, limits: { maxParallelTasks, maxConflictRetries }, contracts?)`. The line passes `min(policy, driver.parallelism)`; `run.ts` passes the policy's values, since those callers read only whether the step is a refusal or an exit, which the batch size does not change.
+- **Reverse:** pass the policy and a parallelism separately; a placeholder `1` was rejected as a number nothing measured.
+
+### D-R4-03: `iterationsToGreen` counts gated iterations
+
+- **Ambiguous:** R2's `iterationsToGreen` reads raw `iterations` (`api/src/outcomes.ts:303`). A conflict rebuild is an iteration that no gate judged, so the metric would rise with no failure behind it.
+- **Chosen:** it counts `iterations - conflicts.length`. The same subtraction is where the line's park check (`api/src/line.ts:1205`) and `parkRefusal`'s starts bound compare against `maxIterations`, so a conflict spends no gate budget.
+- **Reverse:** count raw iterations and record conflict rebuilds as a known skew owned by R2.
+
+### D-R4-04: a conflict names every sibling it collided with
+
+- **Ambiguous:** A-R4-01's `{ with: TaskId; paths }` names one sibling. With three or more tasks at once, the conflicting paths can come from two siblings, and one entry would name one for the other's paths.
+- **Chosen:** `TaskConflict` is `{ with: [TaskId, ...TaskId[]]; paths: [string, ...string[]] }`, one entry per verify that found a conflict, so `failedGates = iterations - 1 - conflicts.length` is unchanged. The park's `conflictsWith` and the `task-conflict` decision's `with` are lists too.
+- **Reverse:** a single `with`, naming the sibling of the first conflicting path in sorted order.
+
+### D-R4-05: the paid driver assertion runs on the maintainer's label
+
+- **Chosen:** `driver.parallelism` is written in the Claude Code driver suite and exercised locally only through the stub; the paid run waits for the maintainer to apply `run-driver` to the pull request (D-A-CI-05).
+
+### D-R4-06: a conflict returns the task to `pending`
+
+- **Ambiguous:** the spec says the task "returns to `build`" and names no status. `failed` means a gate failed, and a conflict is not one (A-R4-01).
+- **Chosen:** `pending`. `nextStep` builds a `pending` task whose dependencies have passed, and its next start spends an iteration, which `conflicts` accounts for. No status means "conflicted"; the conflict is in `attempts[task].conflicts` and in the `task-conflict` decision.
+- **Reverse:** set `failed`, and have every reader of `failed` tell a conflict from a gate by the counts.
+
+### D-R4-07: a driver declaring less than one task at once is given one, and refused
+
+- **Ambiguous:** effective parallelism is `min(maxParallelTasks, parallelism)`, and a driver declaring `0` makes it `0`. A build step of no tasks would read as a station with nothing left to build.
+- **Chosen:** the line passes `min(maxParallelTasks, 1)` for such a driver, and `build`'s capability check refuses the one task with `capability-missing` naming `parallelism`, as before R4. `nextStep` throws on a limit below one, so no caller can ask it for an empty batch.
+- **Reverse:** have `nextStep` refuse a zero limit itself with a `capability-missing` refusal, which would move the capability check into the machine.
+
+### D-R4-08: a stop inside a sibling's call is refused on resume, as it is for one task
+
+- **Found:** a run stopped while one sibling's driver call is in flight leaves that call's `pending` usage record with no reading, and the resume refuses `meter-lost` (D-I1a-12). That is the sequential rule applied per task, and the cost of the call is unknown, so it holds.
+- **Consequence:** `I5.parallel-resume-matches` stops the run between a call that settled and the commit of its result, the window a resume replays.
+
+### D-R4-09: every follower on a sandbox re-checks the handle after it waits
+
+- **Found:** the external review of R4 (codex-1) showed that `#serialized` checked the handle once, before waiting. Two calls queued behind a third both woke when it settled and both ran, so three calls on one sandbox put two inside it at once. A temporary test reproduced it, with the first call settling and with it rejecting. The construct predates R4 (P5); R4 put `#bounded` behind it and restated the per-sandbox promise in D-A-PT-02.
+- **Decision:** a caller re-checks the handle after every wait and claims it with no await between the check and the claim. The cross-sandbox bound is unchanged.
+- **Consequence:** the line provisions a sandbox per task, so it never reached this; a direct driver caller, or `spawnSubagent` calls sharing their parent's sandbox, could. `driver.test.ts` now runs three tasks on one sandbox, once with the first settling and once with it rejecting, and asserts one call inside at a time; both cases fail against the old function.
+
+### D-R4-10: a park for exhausted starts on the last iteration is recorded as exhausted iterations (known limit)
+
+- **Found:** the external review of R4 (codex-2). `parkRefusal` reads a park as `starts-exhausted` only while `gatedIterations` is under `maxIterations`. `iterations` is committed when an attempt starts and a replay raises only `starts`, so a final iteration replayed to the start bound parks as `iterations-exhausted`, "its gate failed on all 3 iterations". The construct predates R4 (A-P4-06).
+- **Decision:** not fixed in R4. The task parks either way, so behaviour is safe; the enforcement record states the wrong reason. A fix that survives a resume needs the cause recorded in run state, because the counts cannot tell this case from a genuine exhaustion, and that changes the committed run-state shape: an amendment, not a review fix.
+- **Owner:** issue #47.

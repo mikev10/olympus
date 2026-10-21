@@ -17,7 +17,7 @@ export type GateOutcome = 'passed' | 'awaiting-approval' | 'stopped' | 'open' | 
 export interface StationReport {
   readonly station: StationId;
   readonly gate: GateOutcome;
-  /** Iterations, retries, and starts summed over the tasks that ran at this station. */
+  /** Iterations, retries, and starts summed over the tasks that ran at this station, and every conflict among them (R4). */
   readonly attempts: TaskAttempts;
   /** Human approvals granted for this station's exit, from P14's record. */
   readonly approvals: number;
@@ -80,7 +80,7 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
   const stationOf = new Map<TaskId, StationId>(usage.map((r) => [r.taskId, r.station]));
   const tasks = Object.entries(state.tasks).map(([id, status]) => {
     const taskId = id as TaskId;
-    const attempts = state.attempts[taskId] ?? { iterations: 0, retries: 0, starts: 0 };
+    const attempts = state.attempts[taskId] ?? { iterations: 0, retries: 0, starts: 0, conflicts: [] };
     return { taskId, station: stationOf.get(taskId) ?? null, status, attempts };
   });
 
@@ -99,9 +99,14 @@ export async function runReport(vault: Vault, runId: RunId): Promise<RunReport> 
 
   const current = M1_STATIONS.indexOf(state.station);
   const stations = M1_STATIONS.map((station, index): StationReport => {
-    const attempts = tasks.filter((t) => t.station === station).reduce(
-      (sum, t) => ({ iterations: sum.iterations + t.attempts.iterations, retries: sum.retries + t.attempts.retries, starts: sum.starts + t.attempts.starts }),
-      { iterations: 0, retries: 0, starts: 0 },
+    const attempts = tasks.filter((t) => t.station === station).reduce<TaskAttempts>(
+      (sum, t) => ({
+        iterations: sum.iterations + t.attempts.iterations,
+        retries: sum.retries + t.attempts.retries,
+        starts: sum.starts + t.attempts.starts,
+        conflicts: [...sum.conflicts, ...t.attempts.conflicts],
+      }),
+      { iterations: 0, retries: 0, starts: 0, conflicts: [] },
     );
     const at = decisions.filter((d) => d.station === station);
     const stationRefusals: Record<string, number> = {};

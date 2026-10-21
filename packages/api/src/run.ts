@@ -385,7 +385,7 @@ async function likelyCost(components: ComponentGraph, worstCase: WorstCaseCost, 
     const resolved = engine.resolveCapabilities(task.role, task.station, policy);
     // `worstCaseCost` resolved every one of these scopes, and throws where one does not.
     if (!resolved.ok) throw new Error(`likely cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
-    const tier = tierFor(resolved.scope, task.station, { iterations: 0, retries: 0, starts: 0 });
+    const tier = tierFor(resolved.scope, task.station, { iterations: 0, retries: 0, starts: 0, conflicts: [] });
     cells.push({ station: task.station, model: driverAt(task.station, components).resolveModel(tier) });
   }
   return estimateCost(components.vault, cells);
@@ -786,7 +786,8 @@ export async function approveStation(req: ApprovalRequest): Promise<ApprovalOutc
   const { graph, changed } = await reloadExecuted(record);
   if (changed.length > 0) return refuse('not-awaiting', `run ${req.runId} has an admitted artifact that changed; it is not awaiting approval`, state.station);
 
-  const step = nextStep(state, graph);
+  // The policy's own limits: this reads only whether the step is an exit, which the batch size does not change (D-R4-02).
+  const step = nextStep(state, graph, policy.concurrency);
   const expected = approvalKey(state.station, level);
   // A spent grant for the last exit is a run that passed; there is nothing left to approve.
   const passed = step.kind === 'exit' && !M1_STATIONS.includes(step.to) && state.approvals.some((grant) => grant.key === expected && grant.usedAt !== null);
@@ -849,7 +850,7 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
   // undo; re-hashed first, a later edit would report either run as tampered (P9 review, codex-3).
   if (state.cancelled !== null || state.halted !== null) {
     // `nextStep` refuses a cancelled or halted run before any other check, so no graph is needed to read why (A-P9-01, A-P9-02).
-    const ended = nextStep(state, { tasks: [], edges: [] });
+    const ended = nextStep(state, { tasks: [], edges: [] }, policy.concurrency);
     if (ended.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: ended.refusal }, source: 'records' };
   }
   // The last exit is crossed only by a run that passed, and when it needs an approval the line
@@ -862,7 +863,8 @@ export async function runStanding(vault: Vault, runId: RunId): Promise<{ state: 
     const paths = changed.map((c) => c.path).join(', ');
     return { state, standing: { standing: 'stopped', refusal: { ok: false, reason: 'lock-tamper', tampered: changed, message: `an admitted artifact changed: ${paths}` } }, source: 'workspace' };
   }
-  const step = nextStep(state, graph);
+  // The policy's own limits: the standing reads only a refusal or an exit, which the batch size does not change (D-R4-02).
+  const step = nextStep(state, graph, policy.concurrency);
   if (step.kind === 'refuse') return { state, standing: { standing: 'stopped', refusal: step.refusal }, source: 'workspace' };
   if (step.kind !== 'exit') return { state, standing: { standing: 'open' }, source: 'workspace' };
   const verdict = locksHeldLeaving(step.from) ? await vault.verifyLocks(runId) : { ok: true as const };

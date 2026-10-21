@@ -143,7 +143,11 @@ export interface WorstCaseTask {
   readonly task: TaskId;
   readonly station: StationId;
   readonly role: RoleId;
-  /** `maxStarts` for the task's station: the most times the line will invoke a driver for it, replays included. */
+  /**
+   * `maxStarts` for the task's station: the most times the line will invoke a
+   * driver for it, replays included, and at `build` every rebuild the policy's
+   * `maxConflictRetries` allows after a conflict (D-R4-01).
+   */
   readonly calls: number;
   readonly maxCostUsdPerCall: number;
   readonly usd: number;
@@ -175,7 +179,8 @@ export function worstCaseCost(graph: TaskGraph, policy: Policy): WorstCaseCost {
     const resolved = engine.resolveCapabilities(task.role, task.station, policy);
     // Admission resolves every role the graph schedules before it asks for this figure.
     if (!resolved.ok) throw new Error(`worst-case cost: role ${task.role} has no scope at ${task.station}: ${resolved.detail}`);
-    const calls = maxStarts(STATION_CONTRACTS[task.station]);
+    // Only `verify` finds a conflict, and only a build task is sent back by one (A-R4-01).
+    const calls = maxStarts(STATION_CONTRACTS[task.station], task.station === 'build' ? policy.concurrency.maxConflictRetries : 0);
     const perCall = resolved.scope.budget.maxCostUsd;
     tasks.push({ task: task.id, station: task.station, role: task.role, calls, maxCostUsdPerCall: perCall, usd: Number(microsCeiling(perCall, calls)) / MICRO });
   }

@@ -2,6 +2,7 @@ import type { AutonomyLevel, RunId, StationId } from '@olympus-ai/core';
 import { compileError, compileOk, external, runtime } from '../kit/assert.js';
 import { ADAPTER_REFUSAL_REFUSES_L3_END_TO_END, UNANALYSED_TESTS_ESCALATE_THE_APPROVAL, UNSAFE_DECLARATION_SURVIVES_COMPOSITION } from './composition.js';
 import { FAILED_INTEGRATION_NEVER_REPORTS_DONE, INTEGRATE_MERGES_THE_VERIFIED_TREE } from './integration.js';
+import { R4_I5 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I5 } from './security.js';
 import { OVER_REQUEST_REFUSED_AT_ADMISSION, STATION_MISSING_CAPABILITY_REFUSED, TASK_ATTEMPTS_ARE_BOUNDED } from './line-assertions.js';
@@ -44,6 +45,8 @@ export const I5: InvariantEntry = {
   assertions: [
     // R17: security at the gate.
     ...R17_I5,
+    // R4: parallel task execution.
+    ...R4_I5,
     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
     INDETERMINATE_PROBE_LOWERS,
