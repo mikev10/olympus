@@ -1,3 +1,58 @@
+# External review of R4, gemini, 2026-10-21
+
+An adversarial review of R4, parallel task execution: the build batch and
+`stepLimits`, the per-drive commit queue and per-task patch semantics,
+conflict detection over the accepted chain and the iteration/start accounting
+conflicts change, and the Claude Code driver's cross-sandbox bound beside its
+per-sandbox lock. One of two reviews run from the same prompt and bundle; the
+other is `2026-10-21-R4-parallel-tasks-review-codex.md`. Both are triaged in
+`2026-10-21-R4-parallel-tasks-triage.md`. This review raised no numbered
+findings; its numbered list is an assessment of sound mechanisms, cited there
+as `gemini-obs`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools; `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 287.6 s. Ingestion `complete`: 87,899
+  prompt tokens against a floor of 61,700. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `c7eeb341c774ec9eccd811b43f3e5eab22a74d45625e84fbd95da95f6d339dfc`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `8f43b82`. This is the second attempt: the
+  first (2026-10-21T15:55Z, archived beside it as `*.attempt-1.run.json` and
+  `*.attempt-1.session.jsonl`) returned HTTP 402 after 0.4 s with no reply,
+  exit 1, ingestion `unreported`, integrity `failed`, outcome `FAILED`, and was
+  not triaged.
+- **Cross-family agreement:** none. gemini raised no findings, so nothing pairs
+  with codex-1, codex-2 or codex-3. Its assessment contests two of them: it
+  judged `#bounded` sound (codex-1 concerns the per-sandbox lock in front of
+  it) and the replay accounting in `startAttempt` precise (codex-2 concerns the
+  park cause that accounting produces).
+- **Date:** 2026-10-21 (run started 2026-10-21T15:56Z).
+- **Bundle:** `2026-10-21-R4-parallel-tasks-review-bundle.txt`, SHA-256
+  `5cac0a5a6590b0027eb6a2cad9b8e3c5d0782c8016d607fcfb1d1740826863f1`, base
+  `be3540f` (`reviewed/R17`), head `3ce72ad` ("R4: Parallel task execution"),
+  two commits (the R4 spec amendment, #45, and the unit itself). It held 30 of
+  the 33 changed paths, new files in full and modified files as whole-function
+  diffs; `docs/decisions.md`, `docs/plan/DECOMPOSITION.md` and
+  `docs/plan/R4-parallel.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-21-R4-parallel-tasks-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and performed no lookups. This is a self-report and is not independently
+  verifiable.
+- **Coverage, and any gap:** only items 6 and 7 were answered: six sound
+  mechanisms plus the replay accounting, and the framing judged exactly right.
+  Items 1 to 5 — successful bypasses, tautological checks, fail-open paths,
+  language escape hatches, and configuration satisfied in name only — came
+  back empty, with no statement that they were examined and found clear. That
+  silence is recorded here, not read as endorsement; codex-3 is a fail-open
+  test branch (item 3) this review did not mention.
+- **Citations:** the reply cites constructs by name, not by line.
+
+---
+
 BASE: be3540f
 HEAD: 3ce72ad
 packages/vault/test/local.test.ts

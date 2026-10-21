@@ -1,3 +1,60 @@
+# External review of R4, codex, 2026-10-21
+
+An adversarial review of R4, parallel task execution: the build batch and
+`stepLimits`, the per-drive commit queue and per-task patch semantics,
+conflict detection over the accepted chain and the iteration/start accounting
+conflicts change, and the Claude Code driver's cross-sandbox bound beside its
+per-sandbox lock. One of two reviews run from the same prompt and bundle; the
+other is `2026-10-21-R4-parallel-tasks-review-gemini.md`. Both are triaged in
+`2026-10-21-R4-parallel-tasks-triage.md`, which cites this review's numbered
+findings as `codex-1` to `codex-3`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 128.5 s. Ingestion `complete`: 91,875
+  input tokens against a floor of 61,700. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `f7d48a99bf9dc80bd63973bb8c454f35d42ec94917ef3a2e3a98d475070402d3`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `e53d35a`.
+- **Cross-family agreement:** none. codex-1, codex-2 and codex-3 were raised by
+  codex alone; gemini reported no findings. gemini's assessment judged the
+  driver's `#bounded` queue sound and the replay accounting in `startAttempt`
+  precise, which codex-1 (the per-sandbox lock beside `#bounded`) and codex-2
+  (the park cause after replays) contest.
+- **Date:** 2026-10-21 (run started 2026-10-21T15:48Z).
+- **Bundle:** `2026-10-21-R4-parallel-tasks-review-bundle.txt`, SHA-256
+  `5cac0a5a6590b0027eb6a2cad9b8e3c5d0782c8016d607fcfb1d1740826863f1`, base
+  `be3540f` (`reviewed/R17`), head `3ce72ad` ("R4: Parallel task execution"),
+  two commits (the R4 spec amendment, #45, and the unit itself). It held 30 of
+  the 33 changed paths, new files in full and modified files as whole-function
+  diffs; `docs/decisions.md`, `docs/plan/DECOMPOSITION.md` and
+  `docs/plan/R4-parallel.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-21-R4-parallel-tasks-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no external lookups, reviewed the inline bundle, and
+  had local file access blocked, so it neither verified the bundle's hash nor
+  ran tests. This is a self-report and is not independently verifiable.
+- **Coverage, and any gap:** item 1 answered (codex-1, codex-2); item 3
+  answered (codex-3, a fail-open test branch); item 2 answered in prose (the
+  concurrency tests judged behavioural, not tautological, with the three-caller
+  gap named); item 4 answered in prose (no cast or type predicate judged to give
+  an escape); item 6 answered (commit isolation, the concurrency ceiling,
+  conflict refusal, workspace separation); item 7 answered (framing appropriate,
+  with a refinement separating the line's guarantees from the driver's locking
+  contract). Item 5, configuration satisfied without doing what it appears to,
+  came back empty.
+- **Citations:** line numbers refer to positions in the bundle's new-side diff
+  hunks, not to the repository; they are hints, and each was located by
+  construct during triage.
+
+---
+
 BASE: be3540f
 HEAD: 3ce72ad
 packages/vault/test/local.test.ts
