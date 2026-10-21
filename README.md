@@ -17,8 +17,8 @@ autonomous work is real, so that a false-done failure is caught at the gate
 rather than reported as done: the runtime derives what happened from checks it
 ran itself, and a model's own account of its work is stored as a claim beside
 the evidence, never as the verdict. That it *measurably reduces* false-done
-failures is not asserted until outcome measurement (R2) derives the rate from
-finished runs.
+failures is not asserted. Outcome measurement (R2) derives the rate from
+finished runs, and the claim waits for that number from real runs.
 
 The two are kept apart on purpose. The runtime is designed for the mission and
 only the claim is asserted. Olympus does not claim lights-off autonomy. Every
@@ -38,15 +38,16 @@ it.
 
 ## Status
 
-| Unit | What it delivered | State |
-|---|---|---|
-| F2 | The type contracts for every package: runs, tasks, the driver contract, policy, stations, the Vault, integrity checks, the sandbox mount table, the trigger envelope, stack adapters. Types only. | done |
-| F3 | The conformance kit, the invariant registry, this contribution surface, and CI. | done |
-| S1 | A walking skeleton: stub driver, in-memory Vault, three stations, one task reaching a gate verdict. | next |
+**M1 is complete.** The line runs end to end, from `intake` through
+`integrate`: real sandboxes, a locked Vault, the Claude Code driver, verified
+evidence, tamper detection, cost bounds, an enforcement record, and a merge
+that is gated by all of them. `observe` and `learn` are not entered yet.
 
-There is no runtime implementation yet. The contracts and the assertions
-that protect them exist so that the implementation can be built in parallel,
-one package at a time, by people who have not seen the rest.
+**M2 is in progress.** Readiness (R1), outcome measurement (R2), model tier per
+station (R14), acceptance checks on the base before build (R15), and security
+at the gate (R17) have shipped. The current unit and everything after it are
+listed in [docs/plan/DECOMPOSITION.md](docs/plan/DECOMPOSITION.md), which is
+the source of truth for what is done and what is next.
 
 ## How the line works
 
@@ -62,13 +63,13 @@ Work moves through ten stations, in order:
 | 6 | `verify` | The runtime runs the pinned checks in a fresh sandbox and collects evidence. |
 | 7 | `review` | Reviewers that never share the author's model family. |
 | 8 | `integrate` | Merge, gated by evidence and integrity. |
-| 9 | `observe` | Post-merge signals. |
-| 10 | `learn` | What the next run should do differently. |
+| 9 | `observe` | Post-merge signals. Not entered yet (R8). |
+| 10 | `learn` | What the next run should do differently. Not entered yet (R11). |
 
 Four autonomy levels bound how far a run may advance without a person:
 `L0` manual, `L1` supervised, `L2` delegated, `L3` autonomous. The effective
-level is the minimum of what the run asked for, the station's cap, and the
-global cap. Asking for more than policy allows is refused, never quietly
+cap is the tightest of the global cap, the station's cap, and the role's own
+ceiling. Asking for more than policy allows is refused, never quietly
 lowered.
 
 Two places hold state. The **Vault** is the runtime-only store for everything
@@ -112,7 +113,9 @@ packages/
   sandbox/      the mount table and the sandbox provider contract
   triggers/     the untrusted-input envelope
   adapters/     per-stack test, coverage, mutation, behavioral hooks
-  api/          the entry point: startRun, the line, and the unsafe declarations
+  readiness/    the autonomy ceiling a repository supports, from probes that ran
+  api/          the runtime as a service: the line, the HTTP API, factory-host
+  cli/          the command line, a client of the HTTP API and nothing more
   conformance/  the kit that proves invariants, and the registry
   drivers/
     claude-code/  the Claude Code CLI, run inside a provisioned sandbox
@@ -127,8 +130,10 @@ a sibling's `src/`. `core` is the root of the graph.
 
 ## Getting started
 
-Requires Node 22 or later and pnpm 12 (the `packageManager` field pins the
-exact version).
+Requires Node 22 or later, pnpm 12 (the `packageManager` field pins the
+exact version), and a Docker daemon. Without Docker the suites fail rather
+than skip: the Vault boundary is enforced where the sandbox is mounted, and
+there is no way to observe that without a container.
 
 ```
 pnpm install
@@ -138,7 +143,19 @@ pnpm test          # every package's tests
 pnpm conformance   # the invariant registry and its report
 ```
 
-CI runs the same four commands on every push and pull request to `v2`.
+CI runs these four on every push and pull request to `v2`, along with the
+maintainer tooling's own typecheck and tests. On a pull request, the tests
+that call a paid model run only once a maintainer applies the `run-driver`
+label, and the registry fails until they have run for that tree. A push
+reuses the report of an earlier run of the same tree.
+
+The runtime runs as a service. The `factory-host` executable
+(`packages/api/src/host/main.ts`) serves the HTTP API and is configured only
+from its environment; its header lists every variable, and a missing one
+stops it before it listens. The `olympus-ai` command line talks to it with
+`create`, `status`, `approve`, `cancel`, `events`, `report`, and `outcomes`,
+given `--url` and `--token` (or `FACTORY_API_URL` and `FACTORY_API_TOKEN`).
+Neither is published as a package yet.
 
 ## Contributing
 
