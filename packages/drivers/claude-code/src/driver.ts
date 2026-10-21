@@ -437,8 +437,11 @@ export class ClaudeCodeDriver implements Driver {
    * bound, so it never keeps a task on another sandbox waiting.
    */
   async #serialized<T>(handle: SandboxHandle, body: () => Promise<T>): Promise<T> {
-    const previous = this.#inFlight.get(handle);
-    if (previous !== undefined) await previous.catch(() => undefined);
+    // Checked again after every wait: the call waited for may have been succeeded by another follower
+    // that woke first, and the handle is claimed with no await between the check and the claim.
+    for (let held = this.#inFlight.get(handle); held !== undefined; held = this.#inFlight.get(handle)) {
+      await held.catch(() => undefined);
+    }
     const running = this.#bounded(body);
     this.#inFlight.set(handle, running);
     try {

@@ -4129,3 +4129,15 @@ maintainer on 2026-10-21 as recommended.
 
 - **Found:** a run stopped while one sibling's driver call is in flight leaves that call's `pending` usage record with no reading, and the resume refuses `meter-lost` (D-I1a-12). That is the sequential rule applied per task, and the cost of the call is unknown, so it holds.
 - **Consequence:** `I5.parallel-resume-matches` stops the run between a call that settled and the commit of its result, the window a resume replays.
+
+### D-R4-09: every follower on a sandbox re-checks the handle after it waits
+
+- **Found:** the external review of R4 (codex-1) showed that `#serialized` checked the handle once, before waiting. Two calls queued behind a third both woke when it settled and both ran, so three calls on one sandbox put two inside it at once. A temporary test reproduced it, with the first call settling and with it rejecting. The construct predates R4 (P5); R4 put `#bounded` behind it and restated the per-sandbox promise in D-A-PT-02.
+- **Decision:** a caller re-checks the handle after every wait and claims it with no await between the check and the claim. The cross-sandbox bound is unchanged.
+- **Consequence:** the line provisions a sandbox per task, so it never reached this; a direct driver caller, or `spawnSubagent` calls sharing their parent's sandbox, could. `driver.test.ts` now runs three tasks on one sandbox, once with the first settling and once with it rejecting, and asserts one call inside at a time; both cases fail against the old function.
+
+### D-R4-10: a park for exhausted starts on the last iteration is recorded as exhausted iterations (known limit)
+
+- **Found:** the external review of R4 (codex-2). `parkRefusal` reads a park as `starts-exhausted` only while `gatedIterations` is under `maxIterations`. `iterations` is committed when an attempt starts and a replay raises only `starts`, so a final iteration replayed to the start bound parks as `iterations-exhausted`, "its gate failed on all 3 iterations". The construct predates R4 (A-P4-06).
+- **Decision:** not fixed in R4. The task parks either way, so behaviour is safe; the enforcement record states the wrong reason. A fix that survives a resume needs the cause recorded in run state, because the counts cannot tell this case from a genuine exhaustion, and that changes the committed run-state shape: an amendment, not a review fix.
+- **Owner:** issue #47.

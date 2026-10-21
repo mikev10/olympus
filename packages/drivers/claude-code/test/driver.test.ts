@@ -551,6 +551,38 @@ describe('capabilities as declarations', () => {
     expect(mostAtOnce).toBe(PARALLELISM);
     expect(mostOnOne).toBe(1);
   });
+
+  test.each(['settles', 'rejects'])('three tasks on one sandbox run one at a time when the first %s: each follower waits its turn, not only for the first (external review of R4, codex-1)', async (first) => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    let inside = 0;
+    let mostAtOnce = 0;
+    let calls = 0;
+    const wrapped = new Proxy(provider, {
+      get(target, property, receiver: unknown) {
+        if (property !== 'exec') return Reflect.get(target, property, receiver) as unknown;
+        return async (h: SandboxHandle, cmd: string[], options?: { env?: Record<string, string> }) => {
+          calls += 1;
+          const call = calls;
+          inside += 1;
+          mostAtOnce = Math.max(mostAtOnce, inside);
+          try {
+            await new Promise((r) => setTimeout(r, 20));
+            if (first === 'rejects' && call === 1) throw new Error('the sandbox failed under the first task');
+            return await target.exec(h, cmd, options);
+          } finally {
+            inside -= 1;
+          }
+        };
+      },
+    });
+    const driver = new ClaudeCodeDriver({ provider: wrapped });
+    const requests = [0, 1, 2].map((i) => request({ taskId: `task-${String(i)}` as TaskId }));
+    const results = await Promise.allSettled(requests.map((r) => driver.runTask(r)));
+    expect(results.slice(1).map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(results[0]?.status).toBe(first === 'rejects' ? 'rejected' : 'fulfilled');
+    expect(mostAtOnce).toBe(1);
+  });
 });
 
 describe('artifacts', () => {
