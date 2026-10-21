@@ -71,6 +71,7 @@ import type {
   Driver,
   FailedCheck,
   ModelIdentity,
+  ParkCause,
   Policy,
   RoleId,
   Run,
@@ -274,8 +275,13 @@ function parksRecorded(ctx: LineContext): Set<TaskId> {
  * status is committed: committed state never holds a park its record lacks,
  * and a stop between the two leaves a record of a park that did not take
  * effect, never the reverse (D-P14-07; external review of P14, codex-2).
+ * The cause is the caller's, committed with the park, because the counts
+ * cannot always tell one exhaustion from another and a resume reads the park
+ * back from committed state (A-R4-05).
  */
-async function park(ctx: LineContext, task: Task, change: StateChange): Promise<StationRefusal> {
+async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
+  const spent = parking.attempts !== undefined && Object.hasOwn(parking.attempts, task.id) ? parking.attempts[task.id] : undefined;
+  const change: StateChange = { ...parking, attempts: { ...parking.attempts, [task.id]: { ...(spent ?? attemptsOf(ctx.state, task)), parkedFor: cause } } };
   const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
@@ -556,7 +562,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
     ? { ...spent, starts: spent.starts + 1 }
     : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1, conflicts: spent.conflicts };
   if (attempt.starts > maxStarts(contract, spent.conflicts.length)) {
-    return park(ctx, task, { attempts: { [task.id]: spent } });
+    return park(ctx, task, { attempts: { [task.id]: spent } }, 'starts-exhausted');
   }
   // An escalation is a decision, recorded before the attempt that carries it is committed, as a park
   // is: a stop between the two leaves a record of an escalation that did not take effect, and the
@@ -584,7 +590,7 @@ async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal 
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
   if (spent.retries + 1 > contract.retry.max) {
-    return park(ctx, task, { attempts });
+    return park(ctx, task, { attempts }, 'retries-exhausted');
   }
   await commit(ctx, { attempts });
   await new Promise((done) => setTimeout(done, contract.retry.backoffMs));
@@ -1019,7 +1025,7 @@ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConfli
   );
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, conflicts: [...spent.conflicts, conflict] } };
-  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts });
+  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts }, 'conflicts-exhausted');
   await commit(ctx, { tasks: { [task.id]: 'pending' }, attempts });
   return undefined;
 }
@@ -1322,7 +1328,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     );
   }
   // The station machine returns this park to the line on its next step; it is recorded here, first.
-  if (status === 'parked') await park(ctx, task, { evidence: ref });
+  if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');
   else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
   return undefined;
 }

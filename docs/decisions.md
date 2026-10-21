@@ -4141,3 +4141,15 @@ maintainer on 2026-10-21 as recommended.
 - **Found:** the external review of R4 (codex-2). `parkRefusal` reads a park as `starts-exhausted` only while `gatedIterations` is under `maxIterations`. `iterations` is committed when an attempt starts and a replay raises only `starts`, so a final iteration replayed to the start bound parks as `iterations-exhausted`, "its gate failed on all 3 iterations". The construct predates R4 (A-P4-06).
 - **Decision:** not fixed in R4. The task parks either way, so behaviour is safe; the enforcement record states the wrong reason. A fix that survives a resume needs the cause recorded in run state, because the counts cannot tell this case from a genuine exhaustion, and that changes the committed run-state shape: an amendment, not a review fix.
 - **Owner:** issue #47.
+
+## Amendment: a park records its cause (issue #47)
+
+Found by the external review of R4 (codex-2) and recorded there as a known limit, D-R4-10. This amendment closes it.
+
+### A-R4-05: `TaskAttempts` carries the cause its park recorded
+
+`TaskAttempts` gains an optional `parkedFor: ParkCause`. Every park writes it in the commit that parks the task, from the caller that decided to park: `startAttempt` writes `starts-exhausted`, `spendRetry` `retries-exhausted`, a conflict past its bound `conflicts-exhausted`, and a gate that failed on the last iteration `iterations-exhausted`. `parkRefusal` returns the recorded cause, with the limit and message that belong to it. The counts could not always say: the last iteration replayed to the start bound, and three iterations each spending every retry, both leave build at `iterations: 3, starts: 9`, and the first was recorded, and on every resume re-derived, as a gate that failed on all three iterations when its third gate never ran.
+
+- **Optional, not required as every count is:** a park committed before this amendment has no recorded cause. It is read from its counts, as it always was, so a run parked earlier still resumes and reports. A task that is not parked carries none.
+- **Assertions:** `packages/core/test/station-machine.test.ts` shows the same counts read back as each recorded cause, and as the derived one when none is recorded. `packages/api/test/line.test.ts` replays the last iteration to the start bound and requires `starts-exhausted` in the park's decision and in the refusal a later resume derives again; it failed against the line before this change with `iterations-exhausted`, limit 3. The two line tests that compare a parked task's counts exactly now include the recorded cause.
+- **D-R4-10** stays as the record of what the review found; its limit is closed here.

@@ -9,7 +9,7 @@
  * implementation.
  */
 import type { ApprovalKey } from '../policy/types.js';
-import type { ReviewSeat } from '../station/types.js';
+import type { ParkCause, ReviewSeat } from '../station/types.js';
 
 export type RunId = string & { readonly __brand: 'RunId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -130,6 +130,14 @@ export interface TaskAttempts {
    * `concurrency.maxConflictRetries`.
    */
   readonly conflicts: readonly TaskConflict[];
+  /**
+   * Why the task was parked, recorded by the park itself in the commit that
+   * parks it. The counts cannot always say: the last iteration replayed to the
+   * start bound, and every iteration spending every retry, leave the same
+   * numbers (A-R4-05). Absent on a task that is not parked, and on a park
+   * committed before the cause was recorded, which is read from its counts.
+   */
+  readonly parkedFor?: ParkCause;
 }
 
 /**
