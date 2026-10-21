@@ -9,7 +9,7 @@
  * Two kinds of number, never blended: safety (work the line called done that
  * was not) and throughput (how much it finishes without a human).
  */
-import { approvalKey } from '@olympus-ai/core';
+import { approvalKey, gatedIterations } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
 import { isNoRunState, type AdmissionRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type UsageRecord, type Vault } from '@olympus-ai/vault';
 import { distribution, failureRate, successRate, type Distribution, type Proportion } from './bounds.js';
@@ -34,6 +34,7 @@ export interface TaskRecord {
   /** The station its calls were made at, from the usage records; null for a task that made none. */
   readonly station: StationId | null;
   readonly status: TaskStatus;
+  /** Iterations a gate judged: a rebuild a conflict forced is not one (D-R4-03). */
   readonly iterations: number;
   readonly attempts: readonly AttemptRecord[];
   /** The model of the task's first call, from the usage record of its first start. */
@@ -183,11 +184,12 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     }));
     const calls = usage.filter((r) => r.taskId === taskId);
     const first = calls.find((r) => r.attempt === 1) ?? calls[0];
+    const spent = state.attempts[taskId];
     return {
       taskId,
       station: calls[0]?.station ?? null,
       status,
-      iterations: state.attempts[taskId]?.iterations ?? 0,
+      iterations: spent === undefined ? 0 : gatedIterations(spent),
       attempts,
       firstModel: first === undefined ? null : modelKey(first.model),
       models: [...new Set(calls.map((r) => modelKey(r.model)))].sort(),

@@ -16,6 +16,7 @@ import {
   M1_STATIONS,
   missingCapability,
   nextStep,
+  type StepLimits,
   seatReviewer,
   STATION_CONTRACTS,
   stationCapRefusal,
@@ -61,6 +62,8 @@ function task(id: string, station: 'build' | 'review', dependsOn: string[] = [])
     attempt: 1,
   };
 }
+
+const ONE_AT_A_TIME: StepLimits = { maxParallelTasks: 1, maxConflictRetries: 0 };
 
 const GRAPH: TaskGraph = { tasks: [task('a', 'build'), task('b', 'build', ['a']), task('r', 'review', ['a', 'b'])], edges: [] };
 
@@ -238,7 +241,7 @@ describe('nextStep', () => {
   test('refuses every step of a cancelled run, before anything else it holds, naming who and when (A-P9-01)', () => {
     const cancelled = { by: 'local', at: '2026-09-28T00:00:00.000Z' };
     for (const s of [state({ cancelled }), state({ cancelled, station: 'build', tasks: { a: 'running' } as RunState['tasks'] }), state({ cancelled, station: 'integrate', phase: 'exiting' })]) {
-      expect(nextStep(s, GRAPH)).toEqual({
+      expect(nextStep(s, GRAPH, ONE_AT_A_TIME)).toEqual({
         kind: 'refuse',
         refusal: { ok: false, reason: 'cancelled', cancelledBy: 'local', cancelledAt: cancelled.at, message: expect.stringContaining('cancelled by local') as unknown },
       });
@@ -249,58 +252,83 @@ describe('nextStep', () => {
   test('refuses every step of a halted run, after a cancellation and before anything else (A-P9-02)', () => {
     const halted = { at: '2026-09-28T00:00:00.000Z', message: 'the result did not match the contract' };
     for (const s of [state({ halted }), state({ halted, station: 'build', tasks: { a: 'running' } as RunState['tasks'] })]) {
-      expect(nextStep(s, GRAPH)).toEqual({
+      expect(nextStep(s, GRAPH, ONE_AT_A_TIME)).toEqual({
         kind: 'refuse',
         refusal: { ok: false, reason: 'halted', haltedAt: halted.at, message: expect.stringContaining('the result did not match the contract') as unknown },
       });
     }
     const cancelled = { by: 'local', at: '2026-09-28T00:00:01.000Z' };
-    expect(nextStep(state({ halted, cancelled }), GRAPH)).toMatchObject({ kind: 'refuse', refusal: { reason: 'cancelled' } });
+    expect(nextStep(state({ halted, cancelled }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'cancelled' } });
   });
 
   test('the runtime stations work, then exit into their successor', () => {
-    expect(nextStep(state(), GRAPH)).toEqual({ kind: 'work', station: 'intake' });
-    expect(nextStep(state({ station: 'plan', phase: 'exiting' }), GRAPH)).toEqual({ kind: 'exit', from: 'plan', to: 'build' });
+    expect(nextStep(state(), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'work', station: 'intake' });
+    expect(nextStep(state({ station: 'plan', phase: 'exiting' }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'plan', to: 'build' });
   });
 
   test('build takes tasks in graph order once their dependencies pass; verify takes what build left verifying', () => {
     const tasks = { a: 'pending', b: 'pending', r: 'pending' } as RunState['tasks'];
-    expect(nextStep(state({ station: 'build', tasks }), GRAPH)).toMatchObject({ kind: 'build', task: { id: 'a' } });
+    expect(nextStep(state({ station: 'build', tasks }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }] });
     const built = { ...tasks, a: 'verifying' } as RunState['tasks'];
-    expect(nextStep(state({ station: 'build', tasks: built }), GRAPH)).toEqual({ kind: 'finish', station: 'build' });
-    expect(nextStep(state({ station: 'verify', tasks: built }), GRAPH)).toMatchObject({ kind: 'verify', task: { id: 'a' } });
+    expect(nextStep(state({ station: 'build', tasks: built }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'finish', station: 'build' });
+    expect(nextStep(state({ station: 'verify', tasks: built }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'verify', task: { id: 'a' } });
     const passed = { ...tasks, a: 'passed' } as RunState['tasks'];
-    expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: passed }), GRAPH)).toEqual({ kind: 'exit', from: 'verify', to: 'build' });
-    expect(nextStep(state({ station: 'build', tasks: passed }), GRAPH)).toMatchObject({ kind: 'build', task: { id: 'b' } });
+    expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: passed }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'verify', to: 'build' });
+    expect(nextStep(state({ station: 'build', tasks: passed }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'b' }] });
     const all = { a: 'passed', b: 'passed', r: 'pending' } as RunState['tasks'];
-    expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: all }), GRAPH)).toEqual({ kind: 'exit', from: 'verify', to: 'review' });
-    expect(nextStep(state({ station: 'review', tasks: all }), GRAPH)).toMatchObject({ kind: 'review', task: { id: 'r' } });
+    expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: all }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'verify', to: 'review' });
+    expect(nextStep(state({ station: 'review', tasks: all }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'review', task: { id: 'r' } });
   });
 
   test('a task running when the run stopped is run again', () => {
     const tasks = { a: 'running', b: 'pending', r: 'pending' } as RunState['tasks'];
-    expect(nextStep(state({ station: 'build', tasks }), GRAPH)).toMatchObject({ kind: 'build', task: { id: 'a' } });
+    expect(nextStep(state({ station: 'build', tasks }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }] });
   });
 
   test('a recorded violation or a parked task refuses before anything else, naming the cause from the counts', () => {
     const violation = { runId, kind: 'violation' as const, hash: '1'.repeat(64) };
-    expect(nextStep(state({ station: 'build', violations: [violation] }), GRAPH)).toMatchObject({ kind: 'refuse', refusal: { reason: 'violation', violations: [violation] } });
+    expect(nextStep(state({ station: 'build', violations: [violation] }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'violation', violations: [violation] } });
     const parked = state({
       station: 'verify',
       tasks: { a: 'parked' } as RunState['tasks'],
-      attempts: { a: { iterations: 3, retries: 0 } } as RunState['attempts'],
+      attempts: { a: { iterations: 3, retries: 0, starts: 3, conflicts: [] } } as RunState['attempts'],
     });
-    expect(nextStep(parked, GRAPH)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', task: 'a', cause: 'iterations-exhausted', limit: 3 } });
+    expect(nextStep(parked, GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', task: 'a', cause: 'iterations-exhausted', limit: 3 } });
     const retried = state({
       station: 'build',
       tasks: { a: 'parked' } as RunState['tasks'],
-      attempts: { a: { iterations: 1, retries: 3 } } as RunState['attempts'],
+      attempts: { a: { iterations: 1, retries: 3, starts: 1, conflicts: [] } } as RunState['attempts'],
     });
-    expect(nextStep(retried, GRAPH)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'retries-exhausted', limit: 2 } });
+    expect(nextStep(retried, GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'retries-exhausted', limit: 2 } });
+  });
+
+  test('build names every buildable task up to the limit, in graph order, and never zero (R4)', () => {
+    const wide: TaskGraph = { tasks: [task('a', 'build'), task('b', 'build'), task('c', 'build'), task('d', 'build', ['a'])], edges: [] };
+    const tasks = { a: 'pending', b: 'failed', c: 'running', d: 'pending' } as RunState['tasks'];
+    const two = { maxParallelTasks: 2, maxConflictRetries: 0 };
+    expect(nextStep(state({ station: 'build', tasks }), wide, two)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }, { id: 'b' }] });
+    const step = nextStep(state({ station: 'build', tasks }), wide, { ...two, maxParallelTasks: 8 });
+    expect(step.kind === 'build' ? step.tasks.map((t) => t.id) : step).toEqual(['a', 'b', 'c']);
+    expect(() => nextStep(state({ station: 'build', tasks }), wide, { ...two, maxParallelTasks: 0 })).toThrow(/not a positive integer/);
+  });
+
+  test('a task parked past the conflict bound names the siblings and paths of its last conflict (A-R4-02)', () => {
+    const conflicts = [{ with: ['b'], paths: ['x.txt'] }, { with: ['b', 'c'], paths: ['x.txt', 'y.txt'] }];
+    const parked = state({
+      station: 'verify',
+      tasks: { a: 'parked' } as RunState['tasks'],
+      attempts: { a: { iterations: 3, retries: 0, starts: 3, conflicts } } as unknown as RunState['attempts'],
+    });
+    expect(nextStep(parked, GRAPH, { maxParallelTasks: 2, maxConflictRetries: 1 })).toMatchObject({
+      kind: 'refuse',
+      refusal: { reason: 'parked', task: 'a', cause: 'conflicts-exhausted', limit: 1, conflictsWith: ['b', 'c'], paths: ['x.txt', 'y.txt'] },
+    });
+    // Within the bound, the same counts are no conflict park: two of three iterations were conflicts, so one gate was judged.
+    expect(nextStep(parked, GRAPH, { maxParallelTasks: 2, maxConflictRetries: 2 })).toMatchObject({ refusal: { cause: 'iterations-exhausted' } });
   });
 
   test('leaving verify with unpassed tasks none of which can be built is a defect, not a loop', () => {
     const stuck = { a: 'passed', b: 'verifying', r: 'pending' } as RunState['tasks'];
-    expect(() => nextStep(state({ station: 'verify', phase: 'exiting', tasks: stuck }), GRAPH)).toThrow(/cannot finish/);
+    expect(() => nextStep(state({ station: 'verify', phase: 'exiting', tasks: stuck }), GRAPH, ONE_AT_A_TIME)).toThrow(/cannot finish/);
   });
 });

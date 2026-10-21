@@ -14,6 +14,7 @@ import type { DriverCapabilities, DriverCapability, ModelIdentity } from '../dri
 import { isApprovalOutcome, isAutonomyLevel } from '../policy/constants.js';
 import type { ApprovalKey, ApprovalOutcome, Policy, PolicyRefusal } from '../policy/types.js';
 import type { ApprovalGrant, AutonomyLevel, RunState, StationId, Task, TaskGraph, TaskId, TaskStatus } from '../run/types.js';
+import { gatedIterations } from '../policy/tier.js';
 import {
   LOCKING_STATIONS,
   M1_STATIONS,
@@ -248,7 +249,8 @@ export type Step =
   | { readonly kind: 'refuse'; readonly refusal: StationRefusal }
   /** A station that is the runtime's own work: do it, then the station is exiting. */
   | { readonly kind: 'work'; readonly station: StationId }
-  | { readonly kind: 'build'; readonly task: Task }
+  /** Every task in it is built at once, each in its own sandbox (R4). Never empty, never more than the limit allows. */
+  | { readonly kind: 'build'; readonly tasks: readonly [Task, ...Task[]] }
   | { readonly kind: 'verify'; readonly task: Task }
   | { readonly kind: 'review'; readonly task: Task }
   /** A task station with nothing left to do at it: the station is exiting. */
@@ -267,22 +269,49 @@ function depsPassed(state: RunState, task: Task): boolean {
 }
 
 /**
+ * What the policy lets a run do at once, read by `nextStep` (R4). The line
+ * passes `maxParallelTasks` as the lower of the policy's and the driver's
+ * declared `parallelism`; a caller with no driver passes the policy's own,
+ * since the batch size changes no refusal and no exit (D-R4-02).
+ */
+export interface StepLimits {
+  readonly maxParallelTasks: number;
+  readonly maxConflictRetries: number;
+}
+
+/**
  * The most times a station may invoke a driver for one task: every iteration
- * spending every retry. An uninterrupted run cannot exceed it, so a run that
+ * spending every retry, and one more iteration's worth for each of the task's
+ * `conflicts` (A-R4-01). An uninterrupted run cannot exceed it, so a run that
  * does is replaying an attempt a stop left in flight rather than progressing,
  * and the task parks instead of spending without bound (A-P4-06).
  */
-export function maxStarts(contract: StationContract): number {
-  return contract.maxIterations * (contract.retry.max + 1);
+export function maxStarts(contract: StationContract, conflicts: number): number {
+  return (contract.maxIterations + conflicts) * (contract.retry.max + 1);
 }
 
-/** Why a parked task was parked, read back from its attempt counts against the contract of the station it parked at. */
-export function parkRefusal(state: RunState, task: Task, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
+/** Why a parked task was parked, read back from its attempt counts against the contract of the station it parked at and the policy's conflict bound. */
+export function parkRefusal(state: RunState, task: Task, limits: StepLimits, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
   const attempts = Object.hasOwn(state.attempts, task.id) ? state.attempts[task.id] : undefined;
+  const last = attempts?.conflicts.at(-1);
+  if (attempts !== undefined && last !== undefined && attempts.conflicts.length > limits.maxConflictRetries) {
+    const limit = limits.maxConflictRetries;
+    return {
+      ok: false,
+      reason: 'parked',
+      task: task.id,
+      cause: 'conflicts-exhausted',
+      limit,
+      conflictsWith: last.with,
+      paths: last.paths,
+      message: `task ${task.id} parked at ${state.station}: its change collided with ${last.with.join(', ')} on ${last.paths.join(', ')}, `
+        + `past the ${String(limit)} rebuild(s) the policy allows; no side was picked`,
+    };
+  }
   const at = contracts[state.station];
-  const startLimit = maxStarts(at);
+  const startLimit = maxStarts(at, attempts?.conflicts.length ?? 0);
   const retryLimit = at.retry.max;
-  const byStarts = attempts !== undefined && attempts.starts >= startLimit && attempts.iterations < contracts[task.station].maxIterations;
+  const byStarts = attempts !== undefined && attempts.starts >= startLimit && gatedIterations(attempts) < contracts[task.station].maxIterations;
   const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
   const cause: ParkCause = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
   const limit = byStarts ? startLimit : byRetries ? retryLimit : contracts[task.station].maxIterations;
@@ -298,13 +327,17 @@ export function parkRefusal(state: RunState, task: Task, contracts: StationContr
 /**
  * The next thing the line does, from committed state alone.
  *
- * Tasks run one at a time in graph order. `build` builds every task whose
- * dependencies have passed and that has not; `verify` verifies every task
+ * `build` builds every task whose dependencies have passed and that has not,
+ * up to `limits.maxParallelTasks` at once, in graph order (R4); `verify`
+ * verifies one task at a time, every task
  * `build` left verifying; leaving `verify` goes back to `build` while any build
  * task has not passed, and on to `review` once all have. A task whose status is
  * `running` was in flight when the run stopped, and is run again.
  */
-export function nextStep(state: RunState, graph: TaskGraph, contracts: StationContractTable = STATION_CONTRACTS): Step {
+export function nextStep(state: RunState, graph: TaskGraph, limits: StepLimits, contracts: StationContractTable = STATION_CONTRACTS): Step {
+  if (!Number.isInteger(limits.maxParallelTasks) || limits.maxParallelTasks < 1) {
+    throw new Error(`station machine: ${String(limits.maxParallelTasks)} tasks at once is not a positive integer; refused rather than building none`);
+  }
   // A cancelled run does nothing more, whatever else its state holds (A-P9-01).
   if (state.cancelled !== null) {
     const { by, at } = state.cancelled;
@@ -330,7 +363,7 @@ export function nextStep(state: RunState, graph: TaskGraph, contracts: StationCo
     };
   }
   const parked = graph.tasks.find((task) => statusOf(state, task) === 'parked');
-  if (parked !== undefined) return { kind: 'refuse', refusal: parkRefusal(state, parked, contracts) };
+  if (parked !== undefined) return { kind: 'refuse', refusal: parkRefusal(state, parked, limits, contracts) };
 
   const builds = graph.tasks.filter((task) => task.station === 'build');
   const reviews = graph.tasks.filter((task) => task.station === 'review');
@@ -350,8 +383,8 @@ export function nextStep(state: RunState, graph: TaskGraph, contracts: StationCo
 
   switch (state.station) {
     case 'build': {
-      const task = builds.find((t) => BUILDABLE.has(statusOf(state, t) ?? 'pending') && depsPassed(state, t));
-      return task === undefined ? { kind: 'finish', station: 'build' } : { kind: 'build', task };
+      const [first, ...rest] = builds.filter((t) => BUILDABLE.has(statusOf(state, t) ?? 'pending') && depsPassed(state, t)).slice(0, limits.maxParallelTasks);
+      return first === undefined ? { kind: 'finish', station: 'build' } : { kind: 'build', tasks: [first, ...rest] };
     }
     case 'verify': {
       const task = builds.find((t) => statusOf(state, t) === 'verifying');

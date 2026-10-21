@@ -16,9 +16,13 @@
  *   (D-A-BF-01).
  * - `build`: runs each task through the driver over a fresh copy of the base
  *   and the diff accepted so far, never over the author's working copy, and
- *   records the result in the Vault before anything reads it (D-P6-02).
+ *   records the result in the Vault before anything reads it (D-P6-02). Every
+ *   task in the step's batch runs at once, each in its own sandbox, and every
+ *   one is awaited and recorded before the line takes its next step (R4).
  * - `verify`: collects the task's own diff, refuses one that touches a locked
- *   artifact or leaves the task's grant, builds a tree from base and the
+ *   artifact or leaves the task's grant, sends it back to `build` when a path
+ *   in it was also changed by a sibling's work accepted after it started (a
+ *   conflict, never resolved by picking a side), builds a tree from base and the
  *   cumulative diff, and runs every check over it in a fresh sandbox, read-only
  *   and with no egress. The verdict follows the check results alone (I2); the
  *   claim is diffed against the evidence and never decides anything. The
@@ -44,6 +48,7 @@ import { resolve } from 'node:path';
 import {
   capabilityRefusal,
   escalationAt,
+  gatedIterations,
   grantedContext,
   locksHeldLeaving,
   M1_STATIONS,
@@ -55,6 +60,7 @@ import {
   StrictPolicyEngine,
   tierFor,
   transition,
+  type StepLimits,
 } from '@olympus-ai/core';
 import type {
   AgentClaim,
@@ -75,6 +81,7 @@ import type {
   TamperedPath,
   Task,
   TaskAttempts,
+  TaskConflict,
   TaskGraph,
   TaskId,
   TaskRequest,
@@ -159,7 +166,7 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
   for (;;) {
     const cancel = ctx.state.cancelled === null ? (ctx.cancelRequested?.() ?? null) : null;
     if (cancel !== null) await commit(ctx, { cancelled: cancel });
-    const step = nextStep(ctx.state, ctx.graph);
+    const step = nextStep(ctx.state, ctx.graph, stepLimits(ctx));
     let refusal: StationRefusal | undefined;
     // The task a refusal was made over, for its record; null for one made over the station.
     let task: TaskId | null = null;
@@ -169,10 +176,21 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
       case 'work':
         refusal = await work(ctx, step.station);
         break;
-      case 'build':
-        task = step.task.id;
-        refusal = await build(ctx, step.task);
+      case 'build': {
+        // Every task in the batch is awaited, whatever another did: a sibling already building
+        // finishes, and its result and usage are recorded, before a refusal or an error ends the drive (R4).
+        const settled = await Promise.allSettled(step.tasks.map((t) => build(ctx, t)));
+        const thrown = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+        if (thrown !== undefined) throw thrown.reason;
+        for (const [i, s] of settled.entries()) {
+          if (s.status === 'fulfilled' && s.value !== undefined) {
+            task = step.tasks[i]?.id ?? null;
+            refusal = s.value;
+            break;
+          }
+        }
         break;
+      }
       case 'verify':
         task = step.task.id;
         refusal = await verify(ctx, step.task);
@@ -258,13 +276,13 @@ function parksRecorded(ctx: LineContext): Set<TaskId> {
  * effect, never the reverse (D-P14-07; external review of P14, codex-2).
  */
 async function park(ctx: LineContext, task: Task, change: StateChange): Promise<StationRefusal> {
-  const refusal = parkRefusal({ ...ctx.state, attempts: change.attempts ?? ctx.state.attempts }, task);
+  const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
     { cause: 'station-refused', decidedBy: stationDecider(refusal), refusal },
   );
   parksRecorded(ctx).add(task.id);
-  await commit(ctx, { ...change, tasks: { ...ctx.state.tasks, [task.id]: 'parked' } });
+  await commit(ctx, { ...change, tasks: { [task.id]: 'parked' } });
   return refusal;
 }
 
@@ -323,7 +341,7 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       const attempts: Record<TaskId, TaskAttempts> = {};
       for (const task of ctx.graph.tasks) {
         tasks[task.id] = 'pending';
-        attempts[task.id] = { iterations: 0, retries: 0, starts: 0 };
+        attempts[task.id] = { iterations: 0, retries: 0, starts: 0, conflicts: [] };
       }
       await commit(ctx, { phase: 'exiting', tasks, attempts });
       return undefined;
@@ -506,13 +524,13 @@ async function recordTamper(
   const ref = await recordViolation(ctx, violation);
   await commit(ctx, {
     violation: ref,
-    ...(task === null ? {} : { tasks: { ...ctx.state.tasks, [task.id]: 'failed' } }),
+    ...(task === null ? {} : { tasks: { [task.id]: 'failed' } }),
   });
   const paths = tampered.map((t) => `${t.path} (expected ${t.expected}, actual ${t.actual})`).join(', ');
   return { ok: false, reason: 'lock-tamper', tampered, message: `a locked artifact changed at ${station}: ${paths}` };
 }
 
-const EMPTY_ATTEMPTS: TaskAttempts = { iterations: 0, retries: 0, starts: 0 };
+const EMPTY_ATTEMPTS: TaskAttempts = { iterations: 0, retries: 0, starts: 0, conflicts: [] };
 
 function attemptsOf(state: RunState, task: Task): TaskAttempts {
   return Object.hasOwn(state.attempts, task.id) ? (state.attempts[task.id] ?? EMPTY_ATTEMPTS) : EMPTY_ATTEMPTS;
@@ -536,9 +554,9 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
   const replay = statusOf(ctx.state, task) === 'running';
   const attempt: TaskAttempts = replay
     ? { ...spent, starts: spent.starts + 1 }
-    : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1 };
-  if (attempt.starts > maxStarts(contract)) {
-    return park(ctx, task, { attempts: { ...ctx.state.attempts, [task.id]: spent } });
+    : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1, conflicts: spent.conflicts };
+  if (attempt.starts > maxStarts(contract, spent.conflicts.length)) {
+    return park(ctx, task, { attempts: { [task.id]: spent } });
   }
   // An escalation is a decision, recorded before the attempt that carries it is committed, as a park
   // is: a stop between the two leaves a record of an escalation that did not take effect, and the
@@ -551,8 +569,8 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
     );
   }
   await commit(ctx, {
-    tasks: { ...ctx.state.tasks, [task.id]: 'running' },
-    attempts: { ...ctx.state.attempts, [task.id]: attempt },
+    tasks: { [task.id]: 'running' },
+    attempts: { [task.id]: attempt },
   });
   return undefined;
 }
@@ -564,7 +582,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
 async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
-  const attempts = { ...ctx.state.attempts, [task.id]: { ...spent, retries: spent.retries + 1 } };
+  const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
   if (spent.retries + 1 > contract.retry.max) {
     return park(ctx, task, { attempts });
   }
@@ -918,6 +936,94 @@ async function accepted(ctx: LineContext): Promise<Accepted> {
   return { diff: latest.bundle.diff, tree: treePath(workspaces, ctx.run.id, latest.bundle.diffSha256) };
 }
 
+/**
+ * What the line may do at once at this step: the policy's `maxParallelTasks`,
+ * never more than the build driver declares (I4, R4). A driver declaring less
+ * than one is given one task, and `build`'s capability check refuses it there,
+ * naming the capability, rather than the step building nothing.
+ */
+function stepLimits(ctx: LineContext): StepLimits {
+  const { maxParallelTasks, maxConflictRetries } = ctx.policy.concurrency;
+  const declared = ctx.components.driver.capabilities().parallelism;
+  const driverBound = Number.isInteger(declared) && declared >= 1 ? declared : 1;
+  return { maxParallelTasks: Math.min(maxParallelTasks, driverBound), maxConflictRetries };
+}
+
+/**
+ * The paths in the task's own change that the accepted tree no longer holds as
+ * the task's start tree did, and the siblings whose accepted change made them
+ * differ: a change composing would overwrite without a trace (I5, R4). Null
+ * when there is none. A whole path changed by both is a conflict; nothing is
+ * compared inside a file (D-A-PT-04).
+ */
+async function conflictOf(ctx: LineContext, task: Task, start: string, own: readonly DiffEntry[], prior: Accepted): Promise<TaskConflict | null> {
+  const paths: string[] = [];
+  for (const entry of own) {
+    if ((await hashAt(start, entry.path)) !== (await hashAt(prior.tree, entry.path))) paths.push(entry.path);
+  }
+  if (paths.length === 0) return null;
+  const chain = await acceptedChain(ctx);
+  const base = basePath(ctx.components.workspaces, ctx.run.id);
+  const siblings = new Set<TaskId>();
+  for (const path of paths) {
+    const started = await hashAt(start, path);
+    const onBase = await hashAt(base, path);
+    // A cumulative diff that does not name a path leaves it as the base has it.
+    const at = (i: number): string | null => {
+      const link = i < 0 ? undefined : chain[i];
+      const entry = link?.diff.find((e) => e.path === path);
+      return entry === undefined ? onBase : entry.sha256;
+    };
+    // Back from the latest acceptance to the one this task started over: every link that changed the path is a sibling it collided with.
+    for (let i = chain.length - 1; i >= 0 && at(i) !== started; i -= 1) {
+      const link = chain[i];
+      if (link !== undefined && at(i) !== at(i - 1) && link.taskId !== task.id) siblings.add(link.taskId);
+    }
+  }
+  const [first, ...rest] = [...siblings];
+  const [path, ...more] = paths.sort();
+  if (first === undefined || path === undefined) {
+    throw new Error(`line: task ${task.id}'s start tree and the accepted tree differ on ${paths.join(', ')}, and no accepted task changed them; the accepted chain is not what built the tree`);
+  }
+  return { with: [first, ...rest], paths: [path, ...more] };
+}
+
+/**
+ * The accepted chain: the last bundle of each passed task, in the order the
+ * bundles were written. Each was verified over the one before it, so each
+ * link's cumulative diff extends the last, and the final link is `accepted()`.
+ */
+async function acceptedChain(ctx: LineContext): Promise<EvidenceBundle[]> {
+  const last = new Map<TaskId, { bundle: EvidenceBundle; at: number }>();
+  for (const [at, ref] of ctx.state.evidenceRefs.entries()) {
+    const bundle = await readBundle(ctx, ref);
+    last.set(bundle.taskId, { bundle, at });
+  }
+  return [...last.values()]
+    .filter(({ bundle }) => Object.hasOwn(ctx.state.tasks, bundle.taskId) && ctx.state.tasks[bundle.taskId] === 'passed')
+    .sort((a, b) => a.at - b.at)
+    .map(({ bundle }) => bundle);
+}
+
+/**
+ * A conflict: recorded as the line's decision before it is committed, as a
+ * park is (A-R4-03, D-P14-07), then counted on the task, which goes back to
+ * `build` to start again over the accepted tree. It is not a failed gate and
+ * raises no tier (A-R4-01). One past the policy's `maxConflictRetries` parks
+ * the task, naming the siblings and the paths, rather than picking a side (I5).
+ */
+async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConflict): Promise<StationRefusal | undefined> {
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+    { cause: 'task-conflict', decidedBy: 'line', task: task.id, with: conflict.with, paths: conflict.paths },
+  );
+  const spent = attemptsOf(ctx.state, task);
+  const attempts = { [task.id]: { ...spent, conflicts: [...spent.conflicts, conflict] } };
+  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts });
+  await commit(ctx, { tasks: { [task.id]: 'pending' }, attempts });
+  return undefined;
+}
+
 /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
 async function build(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const { driver, vault, workspaces } = ctx.components;
@@ -955,7 +1061,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
     throw new Error(`line: the driver's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
   }
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
-  await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: 'verifying' }, results: { ...ctx.state.results, [task.id]: ref } });
+  await commit(ctx, { tasks: { [task.id]: 'verifying' }, results: { [task.id]: ref } });
   return undefined;
 }
 
@@ -986,7 +1092,7 @@ async function recordEscape(ctx: LineContext, task: Task, outside: string[]): Pr
     detectedAt: new Date().toISOString(),
     detail: { station: 'verify', phase: 'diff', outsideGrant: outside },
   });
-  await commit(ctx, { violation: ref, tasks: { ...ctx.state.tasks, [task.id]: 'failed' } });
+  await commit(ctx, { violation: ref, tasks: { [task.id]: 'failed' } });
   return {
     ok: false,
     reason: 'violation',
@@ -1072,6 +1178,10 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   if (outside.length > 0) return recordEscape(ctx, task, outside);
 
   const prior = await accepted(ctx);
+  // I5: a path a sibling's accepted change touched after this task started would be overwritten by
+  // composing; the task is rebuilt over the accepted tree instead, and no side is picked (R4).
+  const conflict = await conflictOf(ctx, task, start, own, prior);
+  if (conflict !== null) return recordConflict(ctx, task, conflict);
   const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
   const diffSha256 = diffDigest(diff);
   const tree = treePath(workspaces, ctx.run.id, diffSha256);
@@ -1200,8 +1310,9 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     contractVersion: driver.contractVersion,
   };
   const ref = await vault.writeEvidence(evidence);
-  // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task.
-  const spent = attemptsOf(ctx.state, task).iterations;
+  // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task;
+  // an iteration a conflict sent back was judged by no gate and spends none of them (D-R4-03).
+  const spent = gatedIterations(attemptsOf(ctx.state, task));
   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
   // A failed gate is a decision, recorded before the status it sets is committed, at every iteration, so each failure is counted by its cause (R17, D-R17-06).
   if (failed.length > 0) {
@@ -1212,7 +1323,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   }
   // The station machine returns this park to the line on its next step; it is recorded here, first.
   if (status === 'parked') await park(ctx, task, { evidence: ref });
-  else await commit(ctx, { tasks: { ...ctx.state.tasks, [task.id]: status }, evidence: ref });
+  else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
   return undefined;
 }
 
@@ -1320,8 +1431,8 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const seat = planned.seat.independence === 'reduced' ? planned.seat : seated.seat;
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, {
-    tasks: { ...ctx.state.tasks, [task.id]: 'passed' },
-    results: { ...ctx.state.results, [task.id]: ref },
+    tasks: { [task.id]: 'passed' },
+    results: { [task.id]: ref },
     review: seat,
   });
   return undefined;
@@ -1348,6 +1459,12 @@ async function authorsOf(ctx: LineContext, reviewed: readonly Task[], authored: 
   return [...distinct.values()];
 }
 
+/**
+ * What one commit changes. `tasks`, `attempts` and `results` name only the
+ * tasks the change is about, and are laid over the latest committed maps when
+ * the commit is applied, so a task's commit never carries a sibling's entry
+ * as it stood before an await (R4).
+ */
 interface StateChange {
   readonly station?: StationId;
   readonly phase?: RunState['phase'];
@@ -1362,8 +1479,23 @@ interface StateChange {
   readonly cancelled?: RunCancellation;
 }
 
-/** Commits the next state through the Vault's version check and keeps what it stored. */
-async function commit(ctx: LineContext, change: StateChange): Promise<void> {
+/** Each drive's commits, one after another: the tail of its queue. */
+const COMMITS = new WeakMap<LineContext, Promise<void>>();
+
+/**
+ * Commits the next state through the Vault's version check and keeps what it
+ * stored. Commits within one drive are queued, and each is applied to the
+ * state the one before it stored, so tasks building at once never commit
+ * against the same version and lose to each other (R4). A commit the Vault
+ * refuses rejects its own caller and does not stop the queue.
+ */
+function commit(ctx: LineContext, change: StateChange): Promise<void> {
+  const applied = (COMMITS.get(ctx) ?? Promise.resolve()).then(() => apply(ctx, change));
+  COMMITS.set(ctx, applied.catch(() => undefined));
+  return applied;
+}
+
+async function apply(ctx: LineContext, change: StateChange): Promise<void> {
   const { state } = ctx;
   ctx.state = await ctx.components.vault.commitRunState(
     {
@@ -1371,9 +1503,9 @@ async function commit(ctx: LineContext, change: StateChange): Promise<void> {
       station: change.station ?? state.station,
       phase: change.phase ?? state.phase,
       approvals: change.approvals ?? state.approvals,
-      tasks: change.tasks ?? state.tasks,
-      attempts: change.attempts ?? state.attempts,
-      results: change.results ?? state.results,
+      tasks: { ...state.tasks, ...change.tasks },
+      attempts: { ...state.attempts, ...change.attempts },
+      results: { ...state.results, ...change.results },
       evidenceRefs: change.evidence === undefined ? state.evidenceRefs : [...state.evidenceRefs, change.evidence],
       violations: change.violation === undefined ? state.violations : [...state.violations, change.violation],
       reviews: change.review === undefined ? state.reviews : [...state.reviews, change.review],

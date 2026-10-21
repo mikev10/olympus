@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vitest';
 import type { SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
+  PARALLELISM,
   KEY_PLACEHOLDER,
   KEY_VARIABLE,
   MODEL_METER,
@@ -513,27 +514,42 @@ describe('capabilities as declarations', () => {
     expect(DECLARED_TOOLS.some((tool) => /computer|screenshot|display/i.test(tool))).toBe(false);
   });
 
-  test('parallelism is 1 and a second task on the same sandbox waits for the first', async () => {
+  test('parallelism is PARALLELISM: that many tasks on separate sandboxes overlap, one more waits, and a second task on one sandbox waits for the first (A-R4-04)', async () => {
     const provider = new RecordingProvider();
     provider.stdout = stream();
-    const driver = driverWith(provider);
-    expect(driver.capabilities().parallelism).toBe(1);
+    expect(driverWith(provider).capabilities().parallelism).toBe(PARALLELISM);
+    expect(PARALLELISM).toBe(4);
 
-    const order: string[] = [];
+    let inside = 0;
+    let mostAtOnce = 0;
+    const perSandbox = new Map<SandboxHandle, number>();
+    let mostOnOne = 0;
     const wrapped = new Proxy(provider, {
       get(target, property, receiver: unknown) {
         if (property !== 'exec') return Reflect.get(target, property, receiver) as unknown;
         return async (h: SandboxHandle, cmd: string[], options?: { env?: Record<string, string> }) => {
-          order.push('start');
-          await new Promise((r) => setTimeout(r, 20));
-          order.push('end');
-          return target.exec(h, cmd, options);
+          inside += 1;
+          mostAtOnce = Math.max(mostAtOnce, inside);
+          perSandbox.set(h, (perSandbox.get(h) ?? 0) + 1);
+          mostOnOne = Math.max(mostOnOne, perSandbox.get(h) ?? 0);
+          try {
+            await new Promise((r) => setTimeout(r, 20));
+            return await target.exec(h, cmd, options);
+          } finally {
+            inside -= 1;
+            perSandbox.set(h, (perSandbox.get(h) ?? 1) - 1);
+          }
         };
       },
     });
-    const serial = new ClaudeCodeDriver({ provider: wrapped });
-    await Promise.all([serial.runTask(request()), serial.runTask(request({ taskId: 'task-2' as TaskId }))]);
-    expect(order).toEqual(['start', 'end', 'start', 'end']);
+    const driver = new ClaudeCodeDriver({ provider: wrapped });
+    // Five sandboxes, one task each, and a second task on the first: six tasks, at most four at once.
+    const handles = [1, 2, 3, 4, 5].map((n) => `sandbox-${String(n)}` as SandboxHandle);
+    const requests = [...handles, HANDLE].map((sandbox, i) => request({ sandbox, taskId: `task-${String(i)}` as TaskId }));
+    const results = await Promise.all(requests.map((r) => driver.runTask(r)));
+    expect(results.map((r) => r.taskId)).toEqual(requests.map((r) => r.taskId));
+    expect(mostAtOnce).toBe(PARALLELISM);
+    expect(mostOnOne).toBe(1);
   });
 });
 

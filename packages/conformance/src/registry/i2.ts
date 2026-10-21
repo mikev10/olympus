@@ -1,6 +1,7 @@
 import { compileError, external } from '../kit/assert.js';
 import { ENFORCEMENT_DECISIONS_RECORDED } from './decisions.js';
 import { OUTCOMES_DERIVED_FROM_RUN_RECORDS, RUN_REPORT_READS_ONLY_RECORDS } from './integration.js';
+import { R4_I2 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { R17_I2 } from './security.js';
 import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
@@ -18,6 +19,8 @@ export const I2: InvariantEntry = {
   assertions: [
     // R17: security at the gate.
     ...R17_I2,
+    // R4: parallel task execution.
+    ...R4_I2,
     READINESS_OUTCOME_IS_RUNTIME_DERIVED,
     RUN_REPORT_READS_ONLY_RECORDS,
     compileError({

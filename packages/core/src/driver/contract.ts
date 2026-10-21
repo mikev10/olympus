@@ -41,6 +41,13 @@ export type DriverCapabilities = {
   subagents: boolean;
   hooks: boolean;
   mcp: boolean;
+  /**
+   * The most `runTask` calls this driver runs at the same time, each on its own
+   * sandbox. Calls on one sandbox never overlap, whatever the number. The line
+   * builds at most `min(policy.concurrency.maxParallelTasks, parallelism)`
+   * tasks at once, and a driver that declares a number enforces it (A-R4-04).
+   * `0` runs nothing, and `build` refuses it.
+   */
   parallelism: number;
   computerUse: boolean;
   steering: boolean;          // supports steer()

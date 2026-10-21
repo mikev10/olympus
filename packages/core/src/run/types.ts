@@ -121,6 +121,25 @@ export interface TaskAttempts {
    * Bounded by `maxStarts` for the station.
    */
   readonly starts: number;
+  /**
+   * Each time `verify` found that a path this task changed was also changed by
+   * a sibling's accepted work after the task started, in the order found
+   * (A-R4-01). A conflict sends the task back to `build` and spends an
+   * iteration that no gate judged, so the gates failed so far are
+   * `iterations - 1 - conflicts.length`. Bounded by the policy's
+   * `concurrency.maxConflictRetries`.
+   */
+  readonly conflicts: readonly TaskConflict[];
+}
+
+/**
+ * One conflict: the siblings whose accepted change touched a path this task
+ * also changed, and those paths. A conflict is a whole path changed by both;
+ * nothing is merged inside a file, and no side is picked (I5, D-R4-04).
+ */
+export interface TaskConflict {
+  readonly with: readonly [TaskId, ...TaskId[]];
+  readonly paths: readonly [string, ...string[]];
 }
 
 /** A human's approval of one station exit at one level, recorded by the runtime (I4). */

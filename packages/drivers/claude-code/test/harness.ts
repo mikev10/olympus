@@ -147,11 +147,14 @@ export interface Harness {
   readonly workspaceDir: string;
   request(overrides?: Partial<TaskRequest>): TaskRequest;
   /**
-   * Watches the driver's own execs. `enter` runs when one starts and returns
-   * what to run when it ends, so a test can count how many are inside the
-   * sandbox at once. Only one watcher is held; a second replaces the first.
+   * Watches the driver's own execs. `enter` runs when one starts, with the
+   * sandbox it runs in, and returns what to run when it ends, so a test can
+   * count how many are inside sandboxes at once. Only one watcher is held; a
+   * second replaces the first.
    */
-  observeExec(enter: () => () => void): void;
+  observeExec(enter: (sandbox: SandboxHandle) => () => void): void;
+  /** `count` more sandboxes like `handle`, each over a workspace of its own, torn down with the harness. */
+  provisionMore(count: number): Promise<SandboxHandle[]>;
 }
 
 function spec(image: string, workspaceDir: string): SandboxSpec {
@@ -212,8 +215,18 @@ export async function withDriver<T>(
   // The driver is given a provider that reports each exec as it starts and
   // ends. It is the real provider underneath — nothing is stubbed — so an
   // assertion about concurrency reads the same containers everything else does.
-  let watcher: (() => () => void) | undefined;
-  const cli: TokenCounts = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  let watcher: ((sandbox: SandboxHandle) => () => void) | undefined;
+  const extra: SandboxHandle[] = [];
+  // The CLI's own account, per sandbox: each sandbox's relay meters only the sessions run in it.
+  const counts = new Map<SandboxHandle, TokenCounts>();
+  const countsFor = (h: SandboxHandle): TokenCounts => {
+    let c = counts.get(h);
+    if (c === undefined) {
+      c = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+      counts.set(h, c);
+    }
+    return c;
+  };
   const test = expect.getState().currentTestName ?? '(outside a test)';
   const watched: SandboxProvider = {
     id: provider.id,
@@ -221,11 +234,11 @@ export async function withDriver<T>(
     destroy: (h: SandboxHandle) => provider.destroy(h),
     capabilities: () => provider.capabilities(),
     exec: async (h: SandboxHandle, cmd: string[], o?: ExecOptions) => {
-      const leave = watcher?.();
+      const leave = watcher?.(h);
       try {
         const result = await provider.exec(h, cmd, o);
         recordCost(result.stdout);
-        sessionUsage(result.stdout, cli);
+        sessionUsage(result.stdout, countsFor(h));
         return result;
       } finally {
         leave?.();
@@ -257,8 +270,17 @@ export async function withDriver<T>(
       budget: BUDGET,
       ...overrides,
     }),
-    observeExec: (enter: () => () => void): void => {
+    observeExec: (enter: (sandbox: SandboxHandle) => () => void): void => {
       watcher = enter;
+    },
+    provisionMore: async (count: number): Promise<SandboxHandle[]> => {
+      for (let i = 0; i < count; i += 1) {
+        const dir = join(base, `workspace-${String(extra.length)}`);
+        await mkdir(dir, { recursive: true });
+        await chmod(dir, 0o777);
+        extra.push(await provider.provision(spec(image, dir)));
+      }
+      return extra.slice(-count);
     },
   };
 
@@ -267,7 +289,12 @@ export async function withDriver<T>(
   } finally {
     // The reading is kept, or why it could not be taken: the meter control fails on either.
     const reading = await provider.destroy(handle).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
-    meteredSessions.push({ test, reading, cli });
+    meteredSessions.push({ test, reading, cli: countsFor(handle) });
+    // Each extra sandbox's relay metered its own calls, and each reading is kept beside the first's.
+    for (const more of extra) {
+      const read = await provider.destroy(more).then((t) => t.meter).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+      meteredSessions.push({ test, reading: read, cli: countsFor(more) });
+    }
     await rm(base, { recursive: true, force: true });
   }
 }
