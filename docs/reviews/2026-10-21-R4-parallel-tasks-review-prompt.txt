@@ -1,0 +1,141 @@
+The code under review is in the file
+`2026-10-21-R4-parallel-tasks-review-bundle.txt` (SHA-256 5cac0a5a6590b0027eb6a2cad9b8e3c5d0782c8016d607fcfb1d1740826863f1) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the parallel task scheduler of a software-delivery runtime's
+station line: the code that builds several tasks at once, keeps each one's
+working tree isolated from the others, and detects when one task's accepted
+change would be silently overwritten by another's. It is a TypeScript project.
+You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a task graph through fixed stations. At `build`, a model
+driver changes a copy of the repository in a sandbox; at `verify`, the runtime
+collects that task's own diff, composes it over the change accepted so far, and
+runs pinned checks over the result; a task whose checks pass is "accepted", and
+the cumulative accepted diff is what is eventually merged. This change lets
+`build` run every task whose dependencies have passed at the same time, up to a
+limit, while `verify` stays one task at a time. When a path a task changed was
+also changed by a sibling's work accepted after the task started, that is a
+conflict: the task is rebuilt over the accepted tree, up to a policy bound, and
+then parked; no side is ever picked and nothing is merged inside a file. State
+lives in a versioned run-state record committed through a Vault, and every
+refusal, park and conflict is written to an enforcement record.
+
+It must hold against a capable, motivated party trying to get a change accepted
+that silently discards or overwrites another task's accepted work, to run more
+tasks at once than policy and the driver allow, or to make a task's status or
+counts reflect something other than its own evidence. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party controls what the model driver writes into each task's workspace and
+what each driver call returns, how long each call takes, the order in which
+concurrent calls finish, and when the process stops (it can be killed between
+any two commits). It does not control the components the runtime is wired with
+— the Vault, the sandbox provider, and the drivers are runtime-selected and
+trusted, even where a function takes one as an argument — and it does not
+control code running inside the runtime's own process, the policy file, the
+task graph, or the check manifest, all of which were admitted and locked before
+the run started.
+
+The invariants at stake:
+
+- Fail closed. A missing check, an absent capability, an unsupported stack, or
+  a shrunken suite is a refusal — never a silent degrade, never a warning that
+  lets the run continue. Here: a sibling's accepted change is never silently
+  overwritten, and a conflict past its bound parks rather than picking a side.
+- An agent may not be judged by an artifact it can write. Here: a task starts
+  from the base plus accepted changes only, never from a sibling's unverified
+  work.
+- The runtime derives status; the model never reports it. Each task's status is
+  derived from its own evidence, and no task's commit changes another's status
+  or counts.
+- Default deny. A capability not granted in policy is unavailable. Here:
+  concurrency is never more than both the policy's `maxParallelTasks` and the
+  driver's declared `parallelism` allow.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. Here: the driver's declared `parallelism` is a number
+  something enforces and an assertion checks.
+
+The mechanisms that matter most:
+
+- `nextStep`'s build batch and the line's `stepLimits` (packages/core/src/station/machine.ts, packages/api/src/line.ts)
+- the per-drive commit queue and per-task patch semantics of `commit`/`apply` (packages/api/src/line.ts)
+- `conflictOf`, `acceptedChain` and `recordConflict` in `verify`, and the iteration/start accounting that conflicts change (`gatedIterations`, `failedGates`, `maxStarts`, `parkRefusal`)
+- the Claude Code driver's cross-sandbox bound `#bounded` beside its per-sandbox lock (packages/drivers/claude-code/src/driver.ts)
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- Running several runs at once, and distributed execution (M4b).
+- Merging inside a file, and any automatic resolution of a conflict.
+- Verifying tasks in parallel. The accepted tree is a chain; verify stays serial.
+- Review seats in parallel. M1 seats one reviewer; panels are R9 and M3.
+- Goal decomposition (R5).
+- A parallelism value in policy per role or per station.
+- Raising the egress, budget, or wall-clock grants because tasks overlap. Each task keeps its own.
+
+Identifiers such as M4b, M1, M3, R5 and R9 name later work in the project's
+plan, and identifiers of the form D-R4-01 or A-R4-02 in the code name recorded
+decisions and contract amendments; you do not have those documents and do not
+need them. Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would I get a task accepted whose composed change drops or overwrites a
+path a sibling already had accepted, without a conflict being recorded — or
+make the line run more tasks at once than both limits allow, let one task see
+another's unaccepted work, or leave a task's status, attempt counts or recorded
+cost wrong because a sibling committed at the same time or the process stopped
+mid-batch?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
