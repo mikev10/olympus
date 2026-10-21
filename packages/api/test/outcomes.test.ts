@@ -39,6 +39,7 @@ function run(id: string, over: Partial<RunRecords>): RunRecords {
     runId: id as RunId,
     ending: 'merged',
     requestedLevel: 2,
+    stack: 'vitest@4',
     startedAt: '2026-10-01T00:00:00.000Z',
     mergedAt: '2026-10-01T01:00:00.000Z',
     approvalsSpent: 0,
@@ -187,7 +188,31 @@ describe('deriveOutcomes', () => {
     expect(o.throughput.autonomyRatio).toEqual({ kind: 'no-sample' });
     expect(o.throughput.cycleTime).toEqual({ kind: 'no-sample' });
     expect(o.throughput.rolledYield).toBeNull();
-    expect(o.notMeasured.some((n) => n.startsWith('stack'))).toBe(true);
+    expect(o.safety.caughtFalseDoneByStack).toEqual({});
+    expect(o.notMeasured.some((n) => n.startsWith('stack'))).toBe(false);
+  });
+
+  it('keys every per-run and per-attempt rate by the stack admission recorded, and a run that names none as unrecorded (R18)', () => {
+    const o = deriveOutcomes([
+      run('a', { stack: 'vitest@4', tasks: [task('t', ['failed', 'passed'])] }),
+      run('b', { stack: 'jest@29', approvalsSpent: 1, tasks: [task('t', ['passed'])] }),
+      run('c', { stack: null, tasks: [task('t', ['passed'])] }),
+    ]);
+    expect(o.safety.caughtFalseDoneByStack).toEqual({
+      'jest@29': failureRate(0, 1),
+      unrecorded: failureRate(0, 1),
+      'vitest@4': failureRate(1, 2),
+    });
+    expect(o.throughput.autonomyRatioByStack).toEqual({
+      'jest@29': successRate(0, 1),
+      unrecorded: successRate(1, 1),
+      'vitest@4': successRate(1, 1),
+    });
+    expect(o.throughput.firstPassYieldByStack).toEqual({
+      'jest@29': successRate(1, 1),
+      unrecorded: successRate(1, 1),
+      'vitest@4': successRate(0, 1),
+    });
   });
 
 });
@@ -198,7 +223,7 @@ describe('estimateCost', () => {
     const vault = new StubVault(process.cwd());
     for (const [i, usd] of costs.entries()) {
       const runId = `past-${String(i)}` as RunId;
-      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' } } as unknown as AdmissionRecord);
+      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
       const record = usage(runId, 't', 'build', 1, MODEL, usd);
       const ref = await vault.recordUsage(lost && i === 0 ? { ...record, reading: { kind: 'lost', detail: 'gone' } } : record);
       const state = {
@@ -231,7 +256,7 @@ describe('estimateCost', () => {
 describe('readRunRecords', () => {
   const runId = 'r' as RunId;
   async function admitted(vault: StubVault, approvals: RunState['approvals']): Promise<void> {
-    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' } } as unknown as AdmissionRecord);
+    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
     await vault.commitRunState({
       runId, admission, station: 'integrate', phase: 'awaiting-approval', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
       violations: [], approvals, reviews: [], usage: [], cancelled: null, halted: null, version: '0',
@@ -256,6 +281,26 @@ describe('readRunRecords', () => {
     const vault = new Torn(process.cwd());
     await admitted(vault, []);
     await expect(readRunRecords(vault, runId)).rejects.toThrow(/JSON/);
+  });
+
+  it('reads the stack the admission record names, and none from a record written before R18 or a run with no admission', async () => {
+    const vault = new StubVault(process.cwd());
+    await admitted(vault, []);
+    expect((await readRunRecords(vault, runId)).stack).toBe('vitest@4');
+
+    // A record written before R18 carries no stack; the store now refuses one, so the read is what changes.
+    class Unstacked extends StubVault {
+      override async read(ref: Parameters<StubVault['read']>[0]): Promise<Uint8Array> {
+        const bytes = await super.read(ref);
+        if (ref.kind !== 'admission') return bytes;
+        const { stack: _dropped, ...before } = JSON.parse(new TextDecoder().decode(bytes)) as AdmissionRecord;
+        return new TextEncoder().encode(JSON.stringify(before));
+      }
+    }
+    const old = new Unstacked(process.cwd());
+    await admitted(old, []);
+    expect((await readRunRecords(old, runId)).stack).toBeNull();
+    expect((await readRunRecords(new StubVault(process.cwd()), runId)).stack).toBeNull();
   });
 
   it('reads a run with no state yet as unfinished', async () => {

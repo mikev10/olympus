@@ -1292,6 +1292,67 @@ written by the runtime and never a model's account, and R2 adds it as a key.
 A run admitted before it lands has no stack and is reported under `unrecorded`,
 never guessed. Found by R2 (D-R2-01).
 
+Specified when the unit started (D-R18-01), against the code on `v2` at
+141f4b2. The stack is `AdapterSet.stack` as P8 detects it: the test
+framework and its major version (`vitest@4`, `jest@29`), or `unsupported`
+where no framework is detected. `unsupported` is a detected stack and is
+recorded as one; `unrecorded` means no record names a stack.
+
+**Deliverables:**
+
+1. **A-R18-01: `AdmissionRecord` gains `stack`.** Required, a non-empty
+   string, taken from the same adapter set admission already builds for the
+   security checks and the unavailable controls, so the stack, the controls,
+   and the static-analysis slot are read from one detection. The local and
+   stub Vaults refuse an admission record without one: from this unit on, a
+   record that names no stack is a fault, and a stack not written at admission
+   cannot be backfilled.
+2. **Resume reads a record with or without it.** A run admitted before this
+   unit resumes as it did; a `stack` present and not a non-empty string is a
+   malformed record and is refused, as any other malformed field is.
+3. **R2 keys by stack.** `RunRecords.stack` is the recorded stack, or `null`
+   for a run with no admission record or one admitted before this unit.
+   `outcomes` adds `caughtFalseDoneByStack`, `autonomyRatioByStack`, and
+   `firstPassYieldByStack`, a `null` stack keyed `unrecorded`. The
+   not-measured line for stack is removed.
+
+**Out of scope:**
+
+- per-stack refusal counts: a run refused at admission has no admission
+  record, so it carries no stack; its refusal decision is unchanged
+- gating L3 per stack, or any policy reading a per-stack rate (R10, the trust
+  ratchet)
+- changing what P8 detects, or naming a stack for a repository P8 calls
+  `unsupported`
+- backfilling a stack for any run admitted before this unit
+- the CLI: it prints the service's report as it stands, so the new keys reach
+  it with no change
+
+**Conformance:** `I2.admission-records-the-detected-stack`. A run admitted
+over a workspace declaring vitest 4 records `vitest@4`; the same rig with no
+`package.json` records `unsupported`, so the value is read from the base and
+not a constant; `readRunRecords` returns the recorded stack and `outcomes`
+keys the run under it; an admission record with its stack removed is keyed
+`unrecorded`, never under a guessed stack; the local Vault refuses an
+admission record that names no stack.
+
+**Acceptance:**
+
+- `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass
+- `pnpm conformance`: the R18 assertion is registered and passes;
+  `pending-baseline.json` is unchanged
+- changesets for `@olympus-ai/vault`, `@olympus-ai/api`, `@olympus-ai/conformance`
+- `git ls-files -- .plan/` prints nothing
+
+**Gate paths:** `packages/vault/src/types.ts` and `packages/conformance/` are
+protected, so the pull request carries `gate-change` and the squash body
+carries `Gate-Change: acknowledged`.
+
+**Invariants:** I2 is the subject: the stack is what the runtime's adapter
+detection found, never a model's account. I5: a new record without a stack
+is refused, and a run with none is `unrecorded`, never guessed. I8: the
+assertion fails when the recording, the read, or the key is deleted.
+
 ### R19 — Drafting at `spec` and `test-design`
 
 Today the spec, the acceptance tests, the verification manifest, and the task

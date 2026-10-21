@@ -4153,3 +4153,41 @@ Found by the external review of R4 (codex-2) and recorded there as a known limit
 - **Optional, not required as every count is:** a park committed before this amendment has no recorded cause. It is read from its counts, as it always was, so a run parked earlier still resumes and reports. A task that is not parked carries none.
 - **Assertions:** `packages/core/test/station-machine.test.ts` shows the same counts read back as each recorded cause, and as the derived one when none is recorded. `packages/api/test/line.test.ts` replays the last iteration to the start bound and requires `starts-exhausted` in the park's decision and in the refusal a later resume derives again; it failed against the line before this change with `iterations-exhausted`, limit 3. The two line tests that compare a parked task's counts exactly now include the recorded cause.
 - **D-R4-10** stays as the record of what the review found; its limit is closed here.
+
+## R18: Stack recorded per run
+
+### D-R18-01: the entry had no spec; one was written against the code first
+
+- **Ambiguous:** R18's entry had no deliverables, no out-of-scope list, and no acceptance criteria, and did not say what "the stack" is.
+- **Chosen:** the spec is in R18's entry in `DECOMPOSITION.md`, written against `v2` at 141f4b2 before any code. The stack is `AdapterSet.stack` as P8 detects it, the test framework and its major version (`vitest@4`, `jest@29`), or `unsupported`. `unsupported` is a detected stack and is recorded; `unrecorded` is reserved for a run whose record names none. The maintainer delegated every decision in this unit to the session's recommendation (2026-10-21).
+- **Reverse:** amend the entry; the code below follows it.
+
+### D-R18-02: `stack` is required on a record written, and tolerated as absent on a record read
+
+- **Ambiguous:** A-R4-05 made its new field optional so earlier records still read. The same reason applies here, but an optional field would also let a new record omit the stack, and a stack not written at admission cannot be backfilled.
+- **Chosen:** `AdmissionRecord.stack` is required in the type, and the local and stub Vaults refuse an admission record without a non-empty one (I5). Readers do not trust the type: `readRunRecords` reads a missing stack as `null`, keyed `unrecorded`, and resume accepts a record with no stack and refuses one whose stack is present but not a non-empty string. `VAULT_LISTS_EVERY_RUN`'s hand-built record now names a stack.
+- **Reverse:** make the field optional and drop the two Vault checks.
+
+### D-R18-03: one detection per admission
+
+- **Found:** admission built the base's adapter set twice, once for the security checks (R17) and once inside `unavailableControls`. Both read the same base, so they agree today, but the stack recorded beside the controls should come from the same detection by construction, not by coincidence.
+- **Chosen:** `unavailableControls` takes the set admission already built. The stack, the unavailable controls, and the static-analysis slot are read from one `AdapterSet`.
+- **Reverse:** local to `packages/api/src/run.ts`.
+
+### D-R18-04: which rates are keyed by stack
+
+- **Ambiguous:** R2 keeps some rates per model, station, and level, not every rate on every key.
+- **Chosen:** the three rates the reliability target and the trust ratchet will read per stack: the caught false-done rate (`caughtFalseDoneByStack`), the autonomy ratio (`autonomyRatioByStack`), and first-pass yield (`firstPassYieldByStack`). The stack line is dropped from `NOT_MEASURED`. Distributions and refusal counts are not keyed; a run refused at admission has no admission record and so no stack.
+- **Reverse:** local to `packages/api/src/outcomes.ts`.
+
+## R18 amendments to the contracts
+
+### A-R18-01: the admission record names the stack
+
+`AdmissionRecord` gains `stack: string`, the `AdapterSet.stack` admission detected on the base, written by the runtime in the same record as `unavailableControls`. The local and stub Vaults refuse an admission record without a non-empty stack. A record written before this amendment has none: resume accepts it, and `outcomes` keys its run `unrecorded`. `I2.admission-records-the-detected-stack` asserts a base declaring vitest 4 is recorded `vitest@4`, the same rig with no `package.json` `unsupported`, the run's records and the outcome keys read that stack, a record without one is keyed `unrecorded`, and the local Vault stores no record that names no stack.
+
+### D-R18-05: the #56 test fix rides in this pull request
+
+- **Found:** `packages/sandbox/test/local.test.ts`'s deny-all test read every egress network and proxy on the Docker host, so a concurrent suite's allowlisted sandbox could fail it (#56).
+- **Chosen:** by the maintainer's decision recorded on #56 (2026-10-21), the fix lands in R18's pull request although it is outside R18's scope. The test reads its own container's name, derives the sandbox id, and checks that `proxyNames(id)` names no network and no container, as `egress.test.ts` already does for a failed provision (#14).
+- **Reverse:** revert the test hunk; R18 does not depend on it.

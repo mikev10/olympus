@@ -200,7 +200,7 @@ export const VAULT_LISTS_EVERY_RUN = runtime({
         if ((await vault.listRuns()).length !== 0) throw new Error(`I2: an empty ${name} lists runs`);
         const refused = 'run-a-refused' as RunId;
         const admitted = 'run-b-admitted' as RunId;
-        await vault.recordAdmission({ run: { id: admitted } } as unknown as AdmissionRecord);
+        await vault.recordAdmission({ run: { id: admitted }, stack: 'unsupported' } as unknown as AdmissionRecord);
         await vault.recordDecision({
           runId: refused,
           taskId: null,

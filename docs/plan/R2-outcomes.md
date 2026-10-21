@@ -35,8 +35,10 @@ shows can be recomputed from these records alone).
 
 ## Not recorded, and therefore not measured
 
-- **Stack.** No run record names the target's stack, so no rate is kept per
-  stack. The report says so in one line. Recording it is R18.
+- **Stack, before R18.** R18 records the stack admission's adapter detection
+  found (`AdmissionRecord.stack`, A-R18-01), and the false-done rate, the
+  autonomy ratio, and first-pass yield are kept per stack. A run admitted
+  before R18 has none and is keyed `unrecorded`, never guessed.
 - **Escaped false-done.** A change that passed every gate and failed later
   needs `observe` (R8). The report says the escaped rate is not established,
   and never implies zero.

@@ -314,6 +314,13 @@ export interface AdmissionRecord {
    * this is non-empty (I5).
    */
   readonly unavailableControls: readonly string[];
+  /**
+   * The stack the base's adapter set detected (`AdapterSet.stack`), so a rate
+   * can be kept per stack (R18). Written by the runtime from the same
+   * detection as `unavailableControls`, never a model's account (I2). A record
+   * without one was written before R18, and is reported as `unrecorded`.
+   */
+  readonly stack: string;
 }
 
 /**

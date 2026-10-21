@@ -121,6 +121,7 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
     },
     baseTreeSha256: '1'.repeat(64),
     unavailableControls: ['mutation'],
+    stack: 'vitest@4',
   };
 }
 
@@ -190,6 +191,14 @@ describe('admission and task results', () => {
     // Re-admitting at another level is how a resume would raise its own level.
     await expect(vault.recordAdmission(admission(2))).rejects.toThrow(/already has an admission record/);
     expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
+  });
+
+  test('an admission record that names no stack is refused and stores nothing, since a stack cannot be backfilled (R18)', async () => {
+    const { stack: _omitted, ...unstacked } = admission();
+    await expect(vault.recordAdmission(unstacked as AdmissionRecord)).rejects.toThrow(/names no stack/);
+    await expect(vault.recordAdmission({ ...admission(), stack: '' })).rejects.toThrow(/names no stack/);
+    await expect(readFile(join(store, 'runs', runId, 'admission.json'))).rejects.toThrow();
+    await expect(vault.recordAdmission(admission())).resolves.toMatchObject({ kind: 'admission' });
   });
 
   test('an admission ref carrying another hash does not read the run\'s record back as if it matched', async () => {
