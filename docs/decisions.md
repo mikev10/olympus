@@ -4196,10 +4196,10 @@ Found by the external review of R4 (codex-2) and recorded there as a known limit
 
 - **Found:** the external review of R18 (codex-1, codex-7; triage `docs/reviews/2026-10-21-R18-stack-per-run-triage.md`). `verify` writes its evidence bundle before the commit that appends it to `evidenceRefs`, and `readRunRecords` builds attempts from `evidenceRefs` alone. A stop between the two, then a resume whose replay passes, leaves the failed bundle durable and unread: caught false-done loses the failure and first-pass yield records a pass, per stack included. The gate-failed decision is recorded before the commit, so `decisionsByCause` still counts it and the two views disagree. Separately (codex-7), the autonomy ratio leaves unfinished runs out by R2's rule, so a party controlling stops can keep likely failures out of a stack's sample; the population count shows them, but nothing reads the two together. Both predate R18 (P4, 296e28d; R2); R18 added readers of the same attempts.
 - **Decision:** not fixed in R18. The fix is a Vault read of a run's evidence independent of its state, as `readUsage` does for usage (A-I1a-05), reconciling replays without double counting: a Vault interface change outside R18's deliverables. Stack attribution is unaffected.
-- **Owner:** R10, as a prerequisite for any policy reading a per-stack rate, with how unfinished runs count against a stack decided there; tracked in an issue opened by the maintainer.
+- **Owner:** R10, as a prerequisite for any policy reading a per-stack rate, with how unfinished runs count against a stack decided there; issue #59.
 
 ### D-R18-07: a run with an admission record and no state reads as naming no stack (known limit)
 
 - **Found:** the external review of R18 (codex-2; gemini-1 assessed the same stop as sound). A stop between `recordAdmission` and `commitRunState` leaves an admission record that names a stack; `readRunRecords` reaches the admission only through `state.admission`, so its missing-state branch reports `stack: null`. R18's deliverable 3 said `null` meant no admission record or one written before R18.
 - **Decision:** not fixed in R18. No rate changes: the run is `unfinished` with no tasks, so it is outside every attempt rate and the autonomy denominator, and `unrecorded` receives no count from it. Reading the stack would need the admission found by run id, the same Vault change as D-R18-06. Deliverable 3 now states the case instead of contradicting the code.
-- **Owner:** the same issue and owner as D-R18-06.
+- **Owner:** R10, issue #59, as D-R18-06.
