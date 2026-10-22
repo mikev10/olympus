@@ -547,6 +547,10 @@ export class LocalVault implements Vault {
     if (!isRecord(a) || !isRecord(a.run) || typeof a.run.id !== 'string') {
       throw new Error('LocalVault: an admission record must carry the run it admits');
     }
+    // A stack not written at admission cannot be backfilled, so a record without one is refused (R18).
+    if (typeof (a.stack as unknown) !== 'string' || a.stack === '') {
+      throw new Error(`LocalVault: the admission record of run ${a.run.id} names no stack; nothing was stored`);
+    }
     const runId = a.run.id;
     const bytes = encode(a);
     if (!(await createExclusive(join(runDir(this.#store, runId), ADMISSION_FILE), bytes))) {

@@ -345,8 +345,7 @@ export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, {
  * adapters' own refusal takes, so what is recorded is what that refusal
  * would name (D-P8-03).
  */
-async function unavailableControls(base: string, level: AutonomyLevel, components: BuiltGraph): Promise<string[]> {
-  const set = await adapterSetOf(base, components);
+function unavailableControls(set: AdapterSet, level: AutonomyLevel): string[] {
   const unavailable = [...new Set([...set.unavailableControls(), ...missingControls(set)])].sort();
   const refusal = adapterAdmission(set, level);
   // The two derive from the same set; if they ever disagree the record would misstate the refusal.
@@ -557,7 +556,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: unscanned };
   }
-  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel, req.components);
+  const controls = unavailableControls(set, req.requestedLevel);
 
   const now = new Date().toISOString();
   const run: Run = {
@@ -576,6 +575,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     artifacts: admitted.admitted.artifacts,
     baseTreeSha256,
     unavailableControls: controls,
+    // The same detection the controls and the security checks were read from (R18).
+    stack: set.stack,
   };
   const refusedControls = admissionRefusal(record);
   if (refusedControls !== undefined) {
@@ -647,7 +648,9 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
     typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object' &&
     specPartsShaped(artifacts.specParts) &&
     typeof r.baseTreeSha256 === 'string' && Array.isArray(r.unavailableControls) &&
-    r.unavailableControls.every((control) => typeof control === 'string');
+    r.unavailableControls.every((control) => typeof control === 'string') &&
+    // Absent on a run admitted before R18, which resumes as it did; present, it is a stack.
+    (r.stack === undefined || (typeof r.stack === 'string' && r.stack !== ''));
   if (!shaped) throw new Error(`run ${state.runId}: the admission record does not hold a run and its artifacts; refusing to resume from it`);
   const policy = checkedPolicy(r.policy);
   if (!policy.ok) throw new Error(`run ${state.runId}: the admitted policy no longer validates; refusing to resume under it:\n${policy.message}`);
