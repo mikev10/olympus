@@ -72,6 +72,7 @@ The term is stated here and is not yet wired: no unit reads it until R1 lands, t
 | Term | Meaning | Location |
 |---|---|---|
 | Spec | One shippable capability. Locked at `spec`. | Vault |
+| Role | Instructions for one seat. Versioned by hash; changed only by a person. | Vault |
 | Acceptance tests | Black-box oracle. Locked at `test-design`. | Vault |
 | Task graph | DAG of tasks emitted by `plan`. | Vault |
 | Lock manifest | Hashes of locked artifacts. | Vault |
