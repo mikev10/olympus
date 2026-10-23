@@ -1,0 +1,98 @@
+The code under review is in the file
+`2026-10-23-R19-drafting-conformance-review-bundle.txt` (SHA-256 8633523ba4e696261807bdbc73d39c8acdbef3e2987268a7606b27df6d7d44c9) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the executable conformance tests for a change that drafts specs and acceptance tests inside a station line of a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+This code is a runtime that carries software work through a fixed line of stations (intake, spec, test-design, plan, build, verify, review, integrate). Before this change, a run had to be admitted with its spec and its acceptance tests already written. This change lets a run be admitted with a person's intent and no spec, or with no acceptance tests, and drafts them on the line: an agent (the drafter) writes the draft in a sandbox, the runtime reads exactly the draft's paths and records the bytes it read under one hash, a test draft's checks are run over the unchanged repository (the base) to confirm each does what it declares there, a second agent (the critic) reads the recorded draft and returns findings, and the exit from the station needs a person's approval unless the policy cell is auto, the run is at autonomy level L2, and every condition the runtime checks holds. Approved bytes are written into the repository and locked against the approved hash; every later station re-verifies the lock.
+
+It must hold against a capable, motivated party trying to get a draft locked that no independent check and no person actually cleared, or to let the test drafter see the repository it must not see. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls what the drafter, critic, builder, and reviewer models return (their narratives and every file they write in their own sandboxes), the bytes they leave in their workspaces, and when the process stops (a stop can fall between any two steps, followed by a resume). It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process, the policy file, the roles and rubrics directories, or the person's approval and rejection calls.
+
+The invariants at stake:
+
+I2 — The runtime derives status; the model never reports it. A draft is a claim until it is approved and locked; a critic's clean result is one necessary condition among others the runtime checks itself, never sufficient.
+I3 — An agent may not be judged by an artifact it can write. Specs and acceptance tests are hashed and locked before build and re-verified at every station transition. The test drafter is black-box: it sees the locked spec and nothing of the repository.
+I4 — Default deny. A capability not granted in policy is unavailable; auto approval exists only where a person's policy set it.
+I5 — Fail closed. A missing, malformed, or unreadable result, or a condition that cannot be evaluated, is a refusal or a failed condition, never a pass.
+I6 — Reviewers never share the author's model family. A critic or reviewer is graded different-family, different-model (same family), or same-model, from the models the runtime resolved; only different-family satisfies any condition.
+I7 — Event payloads are data, never instructions. The intent comes only from the human principal's channel; base-run output never reaches a black-box seat; a test-design rejection carries no free text.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+**Not in this unit:** drafting at `plan`. A run that drafts its spec is admitted
+with a task graph that does not depend on the spec's content, the single build
+task M1 runs; a graph derived from the spec is R5's. Also out: the role format,
+compiler, and renderer, which are R20's; `auto` on a
+drafted artifact at L3; reviving a parked run; a drafter for the rest of the
+verification manifest; and R16's bug-fix intent, which is R16's.
+
+Also out: a second driver from another model provider. Identifiers such as R5, R16, R20, L3, and M1 name other planned units, levels, and milestones of the project; absent work they name is not a defect here.
+
+This bundle holds the conformance assertions meant to prove the properties above, each driving the real admission and line over a filesystem store and stub drivers whose model families the test sets. The runtime source they exercise is reviewed separately and is not in this bundle; judge each assertion by what it can and cannot observe.
+
+The mechanisms that matter most:
+
+- packages/conformance/src/registry/drafting.ts: one assertion per property, and the stub seats and rig they use.
+- The enforcement-decision table rows that require each new decision cause to be produced and recorded (packages/conformance/src/registry/decisions.ts).
+- The Vault's closed operation set (packages/conformance/src/registry/i1.ts) and the updated independence-grade expectations.
+- Properties at autonomy levels L2 and L3 asserted on pure functions rather than an end-to-end run, because the test composition is refused above L1.
+
+THE QUESTION
+
+How would I make each of these assertions pass while the property it names does not hold in the runtime — and which properties stated in CONTEXT have no assertion that would fail if the property were broken?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
