@@ -2234,6 +2234,13 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Reverse:** if a review misses a bypass that lived in an unchanged function of a modified file, return that file to full text. Fall back to splitting the range before raising the ceiling past the pricing tier.
 
 
+### D-TOOLING-08: at the newest date, a pair this family already counted is passed over, and two uncounted pairs refuse
+
+- **Problem:** R19 was reviewed in halves, bundled as two pairs on one date. Newest-wins (D-TOOLING-06) broke the tie by listing order and chose the conformance half on every run. That half already had counted reviews, so the runner refused, and the runtime half could never be sent. No flag or artifact edit could reach it without routing around the runner.
+- **Chosen:** only pairs at the newest date are eligible. Among them, `findUnitArtifacts` passes over any pair whose manifest for this family records `counted`. If none is left, it keeps the newest, so the existing counted refusal still fires. If one is left, that pair is chosen. If more than one is left, it refuses and names them all. The runner prints what it passed over, and the manifest's `artifacts` is unchanged.
+- **Rejected:** a slug argument. It is a second input that the skill would have to document, and it would let a run target a superseded pair. Also rejected: passing over counted pairs at every date. A re-bundle whose newest pair is counted would then fall back to an older pair, which is code that is no longer the unit's.
+- **Reverse:** drop the `isCounted` predicate and `skippedCounted`. A unit with several pairs on one date then resolves by listing order again, and only the first pair is reachable.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
