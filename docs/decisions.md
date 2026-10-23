@@ -4253,3 +4253,63 @@ amendments R20 names land in its own pull request.
 - **Why:** shipping drafter and critic roles before anything seats them would be content with no assertion behind it (I8).
 - **Reverse:** let an undefined role run under the CLI's default prompt, recorded as no role.
 - **Confirmed** by the maintainer, 2026-10-22.
+
+## R20: Role compiler
+
+Built against `v2` at 1613543. The maintainer delegated every decision in this
+unit to the session's recommendation (2026-10-22). Each entry below says where
+the code differed from the unit entry, or what the entry left open.
+
+### D-R20-01: the default roles ship in the compiler package
+
+- **Found:** the entry ships `builder` and `reviewer` "beside the shipped default policy". There is no shipped policy file: the default policy is `DEFAULT_POLICY_DOCUMENT`, a TypeScript constant in core, and a role must be a file the compiler reads.
+- **Chosen:** `packages/compiler/roles/builder.md` and `reviewer.md`, exported as `DEFAULT_ROLES_DIRECTORY`. A host is configured with a roles directory (`FACTORY_ROLES_DIR`) as it is with a policy file, and may point it there. The default policy still grants nothing, so the default roles give nobody anything to run under until a person writes a policy.
+- **Reverse:** move the two files and the constant; nothing else names the path.
+
+### D-R20-02: a role id is lowercase words joined by hyphens, at most 64 characters
+
+- **Ambiguous:** the entry refuses "a name that is not a valid role id", and policy accepts any non-empty role id that is not a prototype key.
+- **Chosen:** `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`, at most 64 characters, file named `<id>.md` exactly. Lowercase only, so `Builder.md` and `builder.md` cannot both exist on one host and mean one role on another that ignores case. A policy role with no such name cannot be seated, and admission says so as `role-undefined`.
+- **Reverse:** widen `isRoleId` in `packages/compiler/src/compile.ts`.
+
+### D-R20-03: the byte cap is 32 KiB, and a file of only whitespace is empty
+
+- **Ambiguous:** the entry names a byte cap and an empty file without a size or a definition.
+- **Chosen:** 32 KiB, checked against the file's size and again against what was read, before any byte is decoded. A role reaches the CLI as one argv element, JSON-escaped, and Linux refuses a single argument over 128 KiB; 32 KiB leaves room for the escaping prose needs. A file of only whitespace (a byte-order mark included) is refused as `empty`: it is the CLI's default prompt by another name, which D-A-RC-06 forbids.
+- **Reverse:** change `ROLE_FILE_MAX_BYTES` and the conformance figure beside it.
+
+### D-R20-04: a roles directory inside the workspace or the workspace store is refused
+
+- **Found:** D-A-RC-01 says no sandbox mounts the roles directory, and nothing checked it. A sandbox mounts a copy of the workspace from the workspace store, so a roles directory in either is a role an agent could rewrite, or one a merged change could rewrite for later runs.
+- **Chosen:** admission refuses it as an invalid request on `roles`, code `overlaps`, comparing paths with every link resolved. A role file that is a symbolic link is refused as `not-regular` wherever it points, and the file opened must be the file listed, so a link swapped in between is refused too.
+- **Reverse:** drop `rolesProblems` in `packages/api/src/run.ts`.
+
+### D-R20-05: the role hash is recorded on the usage record, one per call
+
+- **Ambiguous:** the entry puts the hash on "run state's record of each task attempt … beside the model". `TaskAttempts` holds counts, not a model. The record of each call is `UsageRecord`, referenced from run state, which names the model and the attempt.
+- **Chosen:** `UsageRecord.role: { id, sha256 }`, written by the line from the admission record, required by both Vaults. A review seat's records name `reviewer`, whatever role its task names, since that is what it ran under.
+- **Reverse:** move the field to `TaskAttempts` keyed by attempt.
+
+### D-R20-06: admission compiles the directory; a server reads it for every run
+
+- **Ambiguous:** `RunRequest.policy` arrives resolved, and a policy file the server cannot read is an HTTP refusal that records nothing. The entry requires a broken role file to refuse admission, which the enforcement record counts (P14).
+- **Chosen:** `RunRequest.roles` is the directory's absolute path, and admission compiles it after the policy refusals and before the cost check: a run that cannot be seated is refused before a person is asked to approve its cost. The two refusals are new `RunOutcome` and `AdmissionRefusal` arms, `roles-refused` (each entry and code, no message) and `role-undefined` (the roles). The server passes the directory it was started with, read again for each run, so an edit reaches the next run and no earlier one.
+- **Reverse:** compile in the server and pass `CompiledRole`s in the request, with admission re-hashing them.
+
+### D-R20-07: a resume refuses a record with no roles, and checks each hash
+
+- **Ambiguous:** R18 let a record written before it resume without a stack. A run admitted before R20 has no roles, and its seats would have to run under the CLI's prompt or under today's files.
+- **Chosen:** resume refuses it. Each pinned role must hash to its version, and `reviewer` must be among them. The compiler keeps a byte-order mark in the text so the check holds for every file it compiles.
+- **Reverse:** read a missing `roles` as the shipped defaults, recorded as such.
+
+### D-R20-08: the Claude Code driver renders every task's role as the session's agent
+
+- **Chosen:** `runTask` passes `--agents` with one definition, `{ description, prompt: instructions }`, and `--agent <id>`; the granted context stays in `--append-system-prompt`. The definition carries no `tools` or `model`, so the grant stays `--tools` and the model `--model` (I4). `spawnSubagent(role, req)` renders `role` in place of `req.role`. A session whose init does not list the role is refused, so a definition the CLI ignored is not a run under its default prompt (I5). The contract version is 2.0.0: `TaskRequest.role` and `spawnSubagent` changed shape.
+- **Known limit:** whether the CLI puts the agent's prompt ahead of the appended context, and keeps the prefix cacheable across two tasks under one role, is the CLI's to decide and is not observable without a model call. The paid driver suite (`run-driver`) runs every task through this path; `stablePrefixCaching` is asserted there.
+- **Reverse:** render the instructions at the head of `--append-system-prompt` and drop `--agent`.
+
+### D-R20-09: the review seat's grants are its task's role's, as before
+
+- **Found:** D-A-RC-06 calls today's grants "the reviewed task's scope". The code resolves the review seat's scope from the review task's own role in the graph (`scopeFor(ctx, task)`), not from the task it reviews.
+- **Chosen:** unchanged, as the entry requires. Only the instructions change: the seat runs under `reviewer` whatever role its task names, asserted with a review task whose role has a different scope.
+- **Reverse:** none needed; R9 owns a review seat with its own scope.

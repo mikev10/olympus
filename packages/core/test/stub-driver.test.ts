@@ -13,7 +13,7 @@ import { DRIVER_CONTRACT_VERSION, StubDriver, type ModelTier, type RoleId, type 
 function request(tier: ModelTier = 'fast'): TaskRequest {
   return {
     taskId: 'task-1' as TaskId,
-    role: 'builder' as RoleId,
+    role: { role: 'builder' as RoleId, instructions: 'build', sha256: '0'.repeat(64) },
     stablePrefix: '# spec',
     variableSuffix: 'task-1',
     tier,
@@ -125,7 +125,7 @@ describe('events, cancel, emitArtifacts', () => {
   test('emitArtifacts writes nothing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'stub-driver-'));
     try {
-      await new StubDriver().emitArtifacts([{ role: 'builder' as RoleId, instructions: 'build' }], dir);
+      await new StubDriver().emitArtifacts([{ role: 'builder' as RoleId, instructions: 'build', sha256: '0'.repeat(64) }], dir);
       expect(await readdir(dir)).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });

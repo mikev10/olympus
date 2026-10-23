@@ -8,6 +8,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
   StubDriver,
@@ -228,7 +229,7 @@ export function doingTheWork<D extends Driver>(driver: D, sandbox: SandboxProvid
     get(target, key, receiver) {
       if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
       return async (req: TaskRequest): Promise<TaskResult> => {
-        if (req.role !== BUILDER) return target.runTask(req);
+        if (req.role.role !== BUILDER) return target.runTask(req);
         const wrote = await sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').writeFileSync(${JSON.stringify(HELLO_FILE)}, 'hello')`]);
         if (wrote.exitCode !== 0) throw new Error(`the hello fixture's work did not land in task ${req.taskId}: ${wrote.stderr}`);
         const result = await target.runTask(req);
@@ -242,6 +243,9 @@ export function doingTheWork<D extends Driver>(driver: D, sandbox: SandboxProvid
 }
 
 const UNWRAPPED = new WeakMap<Driver, Driver>();
+
+/** The roles every request is admitted with: the shipped `builder` and `reviewer`, outside every workspace a test makes. */
+export const ROLES = DEFAULT_ROLES_DIRECTORY;
 
 /** The stub graph, built: every run on it is refused above L1 for the stubs' own declarations. Its builder does the fixture's work. */
 export function stubComponents(workspace: string, overrides: Partial<GraphParts> = {}): BuiltGraph {
@@ -268,6 +272,7 @@ export function runRequest(runId: RunId, workspace: string, parts: GraphParts, o
     workspace,
     artifacts: ARTIFACTS,
     policy: policy(),
+    roles: ROLES,
     components: working(built(parts)),
     approvedCostUsd: null,
     ...overrides,

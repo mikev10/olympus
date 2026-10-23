@@ -32,6 +32,7 @@ import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
+import { R20_I5 } from './roles.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
 const SKELETON_COMPONENTS: readonly string[] = ['StubVault', 'StubSandboxProvider', 'StubDriver', 'no integrator', 'unattested scanners'];
@@ -43,6 +44,8 @@ const CONTENDERS = 8;
 export const I5: InvariantEntry = {
   title: INVARIANTS.I5,
   assertions: [
+    // R20: the role compiler.
+    ...R20_I5,
     // R17: security at the gate.
     ...R17_I5,
     // R4: parallel task execution.

@@ -368,7 +368,7 @@ export const RUN_REPORT_READS_ONLY_RECORDS = runtime({
 
       // Served and printed: the API's report is the same object, and the CLI asks for it.
       const { createApiServer } = await api();
-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml') });
+      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
       const address = await server.listen(0, '127.0.0.1');
       try {
         const res = await fetch(`${address}/runs/${it.rig.runId}/report`, { headers: { authorization: `Bearer ${REPORT_TOKEN}` } });
@@ -438,7 +438,7 @@ export const OUTCOMES_DERIVED_FROM_RUN_RECORDS = runtime({
       if (cost.kind !== 'cost' || cost.bound !== 'exact' || Math.abs(cost.usd - 0.002 * read) > 1e-12) throw new Error(`I2: cost per merged change is ${JSON.stringify(cost)}, not ${String(read)} calls at $0.002`);
 
       const { createApiServer } = await api();
-      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml') });
+      const server = createApiServer({ components: await it.components(), token: REPORT_TOKEN, principal: 'conformance', policyFile: join(it.rig.dirs.artifacts, 'missing-policy.yaml'), rolesDirectory: it.rig.roles });
       const address = await server.listen(0, '127.0.0.1');
       try {
         const headers = { authorization: `Bearer ${REPORT_TOKEN}` };

@@ -31,7 +31,6 @@ import type {
   ModelFamily,
   ModelIdentity,
   ModelTier,
-  RoleId,
   TaskId,
   TaskRequest,
   TaskResult,
@@ -413,8 +412,14 @@ export class ClaudeCodeDriver implements Driver {
     return { provider: 'anthropic', family: FAMILY, model, version: CLI_VERSION };
   }
 
+  /**
+   * Runs the task under `req.role`, rendered as the agent definition the
+   * session runs as (D-A-RC-03). The definition is on the argv, never a file in
+   * the workspace, which the agent being judged can write (I3); and it carries
+   * the instructions alone, so the tools and the model stay the request's (I4).
+   */
   runTask(req: TaskRequest): Promise<TaskResult> {
-    return this.#serialized(req.sandbox, () => this.#runTask(req, undefined));
+    return this.#serialized(req.sandbox, () => this.#runTask(req, req.role));
   }
 
   /**
@@ -427,7 +432,7 @@ export class ClaudeCodeDriver implements Driver {
    * same argv, so a subagent is a session this driver configured rather than
    * one the workspace supplied (I3).
    */
-  spawnSubagent(role: RoleId, req: TaskRequest): Promise<TaskResult> {
+  spawnSubagent(role: CompiledRole, req: TaskRequest): Promise<TaskResult> {
     return this.#serialized(req.sandbox, () => this.#runTask(req, role));
   }
 
@@ -465,17 +470,22 @@ export class ClaudeCodeDriver implements Driver {
     }
   }
 
-  async #runTask(req: TaskRequest, asRole: RoleId | undefined): Promise<TaskResult> {
+  async #runTask(req: TaskRequest, role: CompiledRole): Promise<TaskResult> {
     this.#refuseUngrantedTools(req);
     const identity = this.resolveModel(req.tier);
     const servers = this.#mcpConfigFor(req);
     const configPath = await this.#writeMcpConfig(req, servers);
     const ungranted = await this.#ungrantedMcpTools(req, servers, configPath);
-    const invocation = this.#invocationFor(req, identity, asRole, configPath, ungranted);
+    const invocation = this.#invocationFor(req, identity, role, configPath, ungranted);
 
     const exec = await this.#provider.exec(req.sandbox, invocation.argv, { env: invocation.env });
     const stream = parseStream(exec.stdout);
     const init = this.#refuseUnusableStream(req, exec.exitCode, exec.stderr, stream);
+    // The role is what the session was configured with, read from what the CLI printed before it took a turn.
+    // A session that did not load it ran under the CLI's own prompt, which is never a fallback (I5, D-A-RC-06).
+    if (!init.agents.includes(role.role)) {
+      refuse('invocation', `the session for task ${req.taskId} did not load the ${role.role} role it was given; it reported the agents [${init.agents.join(', ')}]`);
+    }
 
     const events = eventsFrom(stream);
     for (const event of events) this.#emit(event);
@@ -708,7 +718,7 @@ export class ClaudeCodeDriver implements Driver {
   #invocationFor(
     req: TaskRequest,
     identity: ModelIdentity,
-    asRole: RoleId | undefined,
+    role: CompiledRole,
     configPath: string | undefined,
     ungrantedMcpTools: readonly string[],
   ): Invocation {
@@ -752,9 +762,10 @@ export class ClaudeCodeDriver implements Driver {
     // with the rest and a later `--allowedTools` does not bring them back.
     if (ungrantedMcpTools.length > 0) cli.push('--disallowedTools', ungrantedMcpTools.join(','));
     if (this.#settingsPath !== undefined) cli.push('--settings', this.#settingsPath);
-    if (asRole !== undefined) {
-      cli.push('--agents', JSON.stringify({ [asRole]: { description: `the ${asRole} role`, prompt: req.stablePrefix } }), '--agent', asRole);
-    }
+    // The role, as the agent definition the session runs as: its instructions and nothing else, so no
+    // field in it can widen the tools or change the model above (I4). It sits in the system prompt
+    // with the granted context appended after it, so two tasks under one role share a prefix (D-A-RC-03).
+    cli.push('--agents', JSON.stringify({ [role.role]: { description: `the ${role.role} role`, prompt: role.instructions } }), '--agent', role.role);
     // `exec "$@"` runs the CLI as the process itself, with every argument an
     // argv element the shell never re-reads. Only the working directory is
     // interpolated, and it is quoted.

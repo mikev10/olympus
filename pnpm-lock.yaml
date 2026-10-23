@@ -164,6 +164,9 @@ importers:
       '@olympus-ai/adapters':
         specifier: workspace:*
         version: link:../adapters
+      '@olympus-ai/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@olympus-ai/core':
         specifier: workspace:*
         version: link:../core
@@ -207,6 +210,16 @@ importers:
       '@olympus-ai/vault':
         specifier: workspace:*
         version: link:../vault
+
+  packages/compiler:
+    dependencies:
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
   packages/conformance:
     dependencies:

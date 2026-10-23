@@ -266,3 +266,15 @@ describe('policy and capabilities, checked before anything is admitted (I4, I5)'
     await expectNothingWritten(components.vault);
   });
 });
+
+describe('the roles directory (R20)', () => {
+  test('a relative roles path is refused before anything is compiled', async () => {
+    await expectInvalid(await start({ roles: 'roles' }), 'roles', 'not-absolute');
+  });
+
+  test('a roles directory that does not exist refuses admission as roles-refused, naming the directory', async () => {
+    const outcome = await start({ roles: join(workspace, '..', 'no-such-roles') });
+    expect(outcome).toMatchObject({ ok: false, reason: 'roles-refused', refused: [{ entry: '.', code: 'unreadable' }] });
+    await expectNothingWritten(components.vault);
+  });
+});

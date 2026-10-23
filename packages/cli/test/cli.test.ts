@@ -73,13 +73,18 @@ beforeEach(async () => {
     { id: 'hello-review', station: 'review', role: 'reviewer', dependsOn: ['hello'], dependencySet: ['**'] },
   ] }));
   const policyFile = join(root, 'policy.yaml');
+  // The roles the graph's seats run under, beside the workspace and outside it (R20).
+  const roles = join(root, 'roles');
+  await mkdir(roles);
+  await writeFile(join(roles, 'builder.md'), 'Build the task.');
+  await writeFile(join(roles, 'reviewer.md'), 'Review the change.');
   await writeFile(policyFile, JSON.stringify(POLICY));
   const sandbox = new StubSandboxProvider();
   const stub = new StubDriver();
   // The builder makes the change the reproduction asks for, through its own sandbox, and claims it.
   const driver: Driver = Object.assign(Object.create(stub) as Driver, {
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
-      if (req.role !== 'builder') return stub.runTask(req);
+      if (req.role.role !== 'builder') return stub.runTask(req);
       await sandbox.exec(req.sandbox, ['node', '-e', "require('node:fs').writeFileSync('done', 'done')"]);
       const result = await stub.runTask(req);
       return { ...result, claim: { ...result.claim, filesChanged: ['done'] } };
@@ -100,6 +105,7 @@ beforeEach(async () => {
     token: TOKEN,
     principal: 'cli-test',
     policyFile,
+    rolesDirectory: roles,
   });
   // Not a default: an ephemeral port on the loopback address, known to the CLI only through --url.
   url = await server.listen(0, '127.0.0.1');

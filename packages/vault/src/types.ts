@@ -8,7 +8,7 @@
  * The Vault stores both.
  */
 import type {
-  AgentClaim, ApprovalKey, AutonomyLevel, ModelIdentity, ModelTier, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  AgentClaim, ApprovalKey, AutonomyLevel, CompiledRole, ModelIdentity, ModelTier, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
@@ -123,8 +123,21 @@ export interface UsageRecord {
    * (A-I1a-01). I2: never `TaskResult.model`, the driver's account of itself.
    */
   model: ModelIdentity;
+  /**
+   * The role the call ran under, as admission pinned it: its id and the hash
+   * of the version the run was admitted with (D-A-RC-04). A review seat runs
+   * under `reviewer` whatever role its task names. I2: the runtime's, from the
+   * admission record, never anything the driver returned.
+   */
+  role: RoleVersion;
   reading: UsageReading;
   collectedBy: 'runtime';
+}
+
+/** One role at one version: what a call ran under. */
+export interface RoleVersion {
+  readonly id: RoleId;
+  readonly sha256: string;
 }
 
 /**
@@ -152,6 +165,14 @@ export type AdmissionRefusal =
   | { readonly reason: 'cost-unapproved'; readonly requestedLevel: AutonomyLevel; readonly worstCaseUsd: number; readonly approvedCostUsd: number | null }
   | { readonly reason: 'controls-unavailable'; readonly requestedLevel: AutonomyLevel; readonly unavailable: readonly string[] }
   | { readonly reason: 'policy-refused'; readonly station: StationId; readonly role: RoleId | null; readonly refusal: PolicyRefusal }
+  /**
+   * The roles directory did not compile (D-A-RC-02). Each entry it refused,
+   * by its name in the directory and the compiler's code, and not its
+   * message; `.` is the directory itself.
+   */
+  | { readonly reason: 'roles-refused'; readonly refused: ReadonlyArray<{ readonly entry: string; readonly code: string }> }
+  /** A seat with no role: every role the task graph names, and `reviewer`, that the directory does not define (D-A-RC-06). */
+  | { readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
   | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal };
 
 /**
@@ -298,6 +319,13 @@ export interface AdmittedArtifact {
 export interface AdmissionRecord {
   readonly run: Run;
   readonly policy: Policy;
+  /**
+   * Every role the roles directory held at admission, compiled, with its
+   * hash, sorted by id (D-A-RC-01). A run's tasks receive these and only
+   * these: a role file edited after admission changes later runs, never this
+   * one.
+   */
+  readonly roles: readonly CompiledRole[];
   readonly artifacts: {
     readonly spec: readonly AdmittedArtifact[];
     readonly acceptanceTests: readonly AdmittedArtifact[];

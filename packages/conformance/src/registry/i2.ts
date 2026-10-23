@@ -13,11 +13,14 @@ import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
 import { ADMISSION_RECORDS_THE_DETECTED_STACK } from './outcomes.js';
 import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
+import { R20_I2 } from './roles.js';
 
 /** I2: The runtime derives status; the model never reports it. */
 export const I2: InvariantEntry = {
   title: INVARIANTS.I2,
   assertions: [
+    // R20: the role compiler.
+    ...R20_I2,
     // R17: security at the gate.
     ...R17_I2,
     // R4: parallel task execution.

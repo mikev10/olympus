@@ -223,7 +223,7 @@ describe('estimateCost', () => {
     const vault = new StubVault(process.cwd());
     for (const [i, usd] of costs.entries()) {
       const runId = `past-${String(i)}` as RunId;
-      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
+      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, roles: [], stack: 'vitest@4' } as unknown as AdmissionRecord);
       const record = usage(runId, 't', 'build', 1, MODEL, usd);
       const ref = await vault.recordUsage(lost && i === 0 ? { ...record, reading: { kind: 'lost', detail: 'gone' } } : record);
       const state = {
@@ -256,7 +256,7 @@ describe('estimateCost', () => {
 describe('readRunRecords', () => {
   const runId = 'r' as RunId;
   async function admitted(vault: StubVault, approvals: RunState['approvals']): Promise<void> {
-    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
+    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, roles: [], stack: 'vitest@4' } as unknown as AdmissionRecord);
     await vault.commitRunState({
       runId, admission, station: 'integrate', phase: 'awaiting-approval', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
       violations: [], approvals, reviews: [], usage: [], cancelled: null, halted: null, version: '0',

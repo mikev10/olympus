@@ -5,6 +5,8 @@
  *
  * - `FACTORY_API_TOKEN`: the local token every request must bear
  * - `FACTORY_POLICY_FILE`: the `policy.yaml` every run is admitted under
+ * - `FACTORY_ROLES_DIR`: the roles directory every run's seats are compiled
+ *   from, outside the repository and the trees (D-A-RC-01)
  * - `FACTORY_VAULT_STORE`: what the Vault owns
  * - `FACTORY_REPOSITORY`: the working copy runs are admitted from
  * - `FACTORY_TREES`: where the runtime keeps each run's trees
@@ -49,6 +51,7 @@ const server = createApiServer({
   token: required('FACTORY_API_TOKEN'),
   principal: process.env.FACTORY_PRINCIPAL ?? 'local',
   policyFile: required('FACTORY_POLICY_FILE'),
+  rolesDirectory: required('FACTORY_ROLES_DIR'),
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');
 
