@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/brand/banner.png" alt="Olympus: done is earned, not reported. An open-source software factory. Agents write the code; Olympus runs the checks, keeps the evidence, and gates the merge." width="100%"></p>
+
 # Olympus
 
 Olympus is a software factory runtime: a provider-neutral engine that carries
