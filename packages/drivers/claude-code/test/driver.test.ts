@@ -94,14 +94,14 @@ function request(overrides: Partial<TaskRequest> = {}): TaskRequest {
 }
 
 /** A minimal stream that satisfies every refusal, so a test can vary one thing. */
-function stream(parts: { tools?: string[]; servers?: Array<{ name: string; status: string }>; usage?: Record<string, number>; extra?: string[]; agents?: string[] } = {}): string {
+function stream(parts: { tools?: string[]; servers?: Array<{ name: string; status: string }>; usage?: Record<string, number>; extra?: string[] } = {}): string {
   const init = {
     type: 'system',
     subtype: 'init',
     session_id: '11111111-2222-5333-a444-555566667777',
     tools: parts.tools ?? ['Read'],
     mcp_servers: parts.servers ?? [],
-    agents: parts.agents ?? ['claude', 'builder'],
+    agents: ['claude', 'builder'],
     model: 'claude-sonnet-5',
     apiKeySource: KEY_VARIABLE,
     claude_code_version: '2.1.277',
@@ -249,7 +249,7 @@ describe('the invocation', () => {
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
     const cmd = provider.calls[0]?.cmd ?? [];
-    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe('the invariant half');
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe(`${BUILDER.instructions}\n\nthe invariant half`);
     expect(cmd[cmd.indexOf('--print') + 1]).toBe('this task only');
     expect(cmd).toContain('--exclude-dynamic-system-prompt-sections');
   });
@@ -282,31 +282,23 @@ describe('the invocation', () => {
   });
 });
 
-describe('the role the task runs under (D-A-RC-03, D-A-RC-06)', () => {
-  /** The agent definitions the task's argv carries, parsed from `--agents`. */
-  function agentsOn(cmd: readonly string[]): Record<string, Record<string, unknown>> {
-    const at = cmd.indexOf('--agents');
-    expect(at).toBeGreaterThan(-1);
-    return JSON.parse(cmd[at + 1] ?? '') as Record<string, Record<string, unknown>>;
-  }
-
-  test('the argv carries the role as the agent the session runs as, with its instructions verbatim', async () => {
+describe('the role the task runs under (D-A-RC-03, D-R20-14)', () => {
+  test('the appended prompt is the role\'s instructions verbatim, then the granted context, and nothing else', async () => {
     const provider = new RecordingProvider();
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
     const cmd = taskCall(provider)?.cmd ?? [];
-    expect(agentsOn(cmd)).toEqual({ builder: { description: 'the builder role', prompt: BUILDER.instructions } });
-    expect(cmd[cmd.indexOf('--agent') + 1]).toBe('builder');
-    // The granted context stays in the appended prompt, apart from the role.
-    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe('the invariant half');
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe(`${BUILDER.instructions}\n\nthe invariant half`);
   });
 
-  test('the agent definition carries the instructions and nothing that could widen a grant (I4)', async () => {
+  test('the session keeps the CLI\'s own prompt: no agent replaces it, and no definition could carry a grant (I4)', async () => {
     const provider = new RecordingProvider();
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
-    const definition = agentsOn(taskCall(provider)?.cmd ?? []).builder ?? {};
-    expect(Object.keys(definition).sort()).toEqual(['description', 'prompt']);
+    const cmd = taskCall(provider)?.cmd ?? [];
+    expect(cmd).not.toContain('--agents');
+    expect(cmd).not.toContain('--agent');
+    expect(cmd).not.toContain('--system-prompt');
   });
 
   test('no file is written into the workspace to deliver the role: only the task invocation carries its text (I3)', async () => {
@@ -319,19 +311,12 @@ describe('the role the task runs under (D-A-RC-03, D-A-RC-06)', () => {
     expect(provider.calls.every((call) => !(call.env?.[ARTIFACT_CONTENT]?.includes('Touch nothing else.') ?? false))).toBe(true);
   });
 
-  test('a session that did not load the role is refused: the CLI default prompt is never a fallback (I5)', async () => {
-    const provider = new RecordingProvider();
-    provider.stdout = stream({ agents: ['claude'] });
-    await expect(driverWith(provider).runTask(request())).rejects.toThrow(/did not load the builder role/);
-  });
-
   test('spawnSubagent renders the role it is given in place of the request\'s, under the request\'s grants', async () => {
     const provider = new RecordingProvider();
-    provider.stdout = stream({ agents: ['claude', 'reviewer'] });
+    provider.stdout = stream();
     await driverWith(provider).spawnSubagent(role('reviewer', 'Review it.'), request());
     const cmd = taskCall(provider)?.cmd ?? [];
-    expect(agentsOn(cmd)).toEqual({ reviewer: { description: 'the reviewer role', prompt: 'Review it.' } });
-    expect(cmd[cmd.indexOf('--agent') + 1]).toBe('reviewer');
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe('Review it.\n\nthe invariant half');
     expect(cmd[cmd.indexOf('--tools') + 1]).toBe('Read');
   });
 });

@@ -216,3 +216,7 @@ same inference D-A-RC-03 made. It assessed the code and not the assertions
 behind it, and left item 2 empty, so it did not see codex-2, codex-3, or
 codex-4. Its note that `rolesProblem` is duplicated in `api` and `vault` is
 accurate and is not a defect. **Holds in part; no change.**
+
+## Found after triage, by neither review
+
+The paid driver suite on PR #61 failed `driver.stablePrefixCaching`, and it had already failed on `67fbaf9`, before any fix above. `--agent` replaced the CLI's own system prompt, so the prefix fell below the cacheable minimum (6816 cached tokens per task before R20, 895 uncached under it). Neither family raised it; D-R20-08 had named it as unobservable without a model call. The maintainer chose to render the role at the head of the appended system prompt and drop the agent definition (D-R20-14).

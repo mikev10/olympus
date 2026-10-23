@@ -1666,9 +1666,9 @@ Binding:
   renders it into its CLI's native form on the invocation itself, never as a
   file in the workspace: the workspace is agent-writable, and an instruction
   file there is one the agent being judged could rewrite (I3). The Claude Code
-  driver renders it as the agent definition it already passes on its argv for
-  `spawnSubagent`, in the cacheable half ahead of the granted context, so two
-  tasks under one role still share a prefix. `emitArtifacts` stays in the
+  driver renders it at the head of the system prompt it appends on its argv,
+  in the cacheable half ahead of the granted context, so two tasks under one
+  role still share a prefix, and the CLI's own prompt stays (D-R20-14). `emitArtifacts` stays in the
   contract and the line does not call it. A Codex driver renders the same
   `CompiledRole` its own way, so one role can be seated on another family
 - **Every seat has a role, or the run is refused (D-A-RC-06).** Admission

@@ -274,17 +274,17 @@ export const REVIEW_SEAT_RUNS_AS_REVIEWER: LocalAssertion = runtime({
   },
 });
 
-/** Records every exec and starts nothing; answers a `claude` invocation with a session that loaded `agents`. */
+/** Records every exec and starts nothing; answers a `claude` invocation with a session that ran. */
 class RecordingProvider implements SandboxProvider {
   readonly id = 'recording';
   readonly calls: Array<{ readonly cmd: readonly string[]; readonly env: Readonly<Record<string, string>> }> = [];
-  constructor(private readonly key: string, private readonly agents: readonly string[]) {}
+  constructor(private readonly key: string) {}
   provision(_spec: SandboxSpec): Promise<SandboxHandle> {
     return Promise.resolve('recorded' as SandboxHandle);
   }
   exec(_h: SandboxHandle, cmd: string[], options?: { env?: Readonly<Record<string, string>> }): Promise<ExecResult> {
     this.calls.push({ cmd: [...cmd], env: { ...options?.env } });
-    const init = { type: 'system', subtype: 'init', session_id: '11111111-2222-5333-a444-555566667777', tools: ['Read'], mcp_servers: [], agents: this.agents, model: 'm', apiKeySource: this.key, claude_code_version: '0' };
+    const init = { type: 'system', subtype: 'init', session_id: '11111111-2222-5333-a444-555566667777', tools: ['Read'], mcp_servers: [], agents: [], model: 'm', apiKeySource: this.key, claude_code_version: '0' };
     const result = { type: 'result', subtype: 'success', is_error: false, num_turns: 1, result: 'done', total_cost_usd: 0, duration_ms: 1, usage: { input_tokens: 1, output_tokens: 1 } };
     return Promise.resolve({ exitCode: 0, stdout: `${JSON.stringify(init)}\n${JSON.stringify(result)}`, stderr: '', durationMs: 1 });
   }
@@ -299,7 +299,7 @@ class RecordingProvider implements SandboxProvider {
 export const DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION: LocalAssertion = runtime({
   id: 'I3.driver-renders-the-role-on-the-invocation',
   title:
-    'the Claude Code driver\'s argv carries the role\'s instructions as the agent the session runs as, with no field beside them that could carry a grant; no exec writes them into the workspace; and a session that did not load the role is refused rather than run under the CLI\'s default prompt',
+    'the Claude Code driver\'s argv carries the role\'s instructions verbatim at the head of the appended system prompt, followed by the granted context and nothing else, with no agent definition that could carry a grant or replace the CLI\'s prompt; and no exec writes them into the workspace',
   run: async () => {
     const { ClaudeCodeDriver, KEY_VARIABLE } = await import('@olympus-ai/driver-claude-code');
     const role: CompiledRole = { role: 'builder' as RoleId, instructions: 'A distinctive line only the role carries.', sha256: sha256('A distinctive line only the role carries.') };
@@ -307,26 +307,19 @@ export const DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION: LocalAssertion = runtime
       taskId: 't' as TaskId, role, stablePrefix: 'granted context', variableSuffix: 't', tier: 'standard', tools: ['Read'], sandbox, timeoutMs: 1000,
       budget: { maxTokens: 1, maxCostUsd: 1, maxWallClockMs: 1000 },
     });
-    const provider = new RecordingProvider(KEY_VARIABLE, ['claude', 'builder']);
+    const provider = new RecordingProvider(KEY_VARIABLE);
     await new ClaudeCodeDriver({ provider }).runTask(request('recorded' as SandboxHandle));
     const carrying = provider.calls.filter((c) => [...c.cmd, ...Object.values(c.env)].some((part) => part.includes(role.instructions)));
     const [task] = carrying;
     if (carrying.length !== 1 || !task?.cmd.includes('claude')) throw new Error(`R20: ${String(carrying.length)} execs carry the role's text; exactly one, the CLI invocation, may`);
-    const at = task.cmd.indexOf('--agents');
-    const agents = JSON.parse(task.cmd[at + 1] ?? '{}') as Record<string, Record<string, unknown>>;
-    if (JSON.stringify(agents) !== JSON.stringify({ builder: { description: 'the builder role', prompt: role.instructions } })) {
-      throw new Error(`R20: the argv's agent definition is ${JSON.stringify(agents)}, not the role's instructions alone`);
+    const appended = task.cmd[task.cmd.indexOf('--append-system-prompt') + 1];
+    if (appended !== `${role.instructions}\n\ngranted context`) {
+      throw new Error(`R20: the appended prompt is ${JSON.stringify(appended)}, not the role's instructions followed by the granted context`);
     }
-    if (task.cmd[task.cmd.indexOf('--agent') + 1] !== 'builder') throw new Error('R20: the session does not run as the role');
-
-    const unloaded = new RecordingProvider(KEY_VARIABLE, ['claude']);
-    try {
-      await new ClaudeCodeDriver({ provider: unloaded }).runTask(request('recorded' as SandboxHandle));
-    } catch (error) {
-      if ((error as Error).message.includes('did not load the builder role')) return;
-      throw error;
+    // An agent definition could carry tools or a model beside the grant, and replaces the CLI's prompt (D-R20-14).
+    for (const flag of ['--agents', '--agent', '--system-prompt']) {
+      if (task.cmd.includes(flag)) throw new Error(`R20: the argv carries ${flag}`);
     }
-    throw new Error('R20: a session that did not load its role returned a result');
   },
 });
 

@@ -208,9 +208,9 @@ invariantTest(
 /**
  * Instruction files the agent could plant in the tree a later seat runs over,
  * each asking for a token no session under its own role would print. The
- * agent definition shares the role's id, so a CLI that let a workspace
- * definition override `--agents` would be caught as well as one that loaded
- * memory or rules beside it. Found by R20's external review (codex-1); the
+ * agent definition shares the role's id, so a CLI that ran a workspace
+ * definition as the session's agent would be caught as well as one that
+ * loaded memory or rules beside it. Found by R20's external review (codex-1); the
  * CLI excluding all three under `--setting-sources ''`, and loading all three
  * without it, was first observed on 2.1.309 (D-R20-12).
  */

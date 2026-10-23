@@ -4304,6 +4304,8 @@ the code differed from the unit entry, or what the entry left open.
 
 ### D-R20-08: the Claude Code driver renders every task's role as the session's agent
 
+**Superseded by D-R20-14.**
+
 - **Chosen:** `runTask` passes `--agents` with one definition, `{ description, prompt: instructions }`, and `--agent <id>`; the granted context stays in `--append-system-prompt`. The definition carries no `tools` or `model`, so the grant stays `--tools` and the model `--model` (I4). `spawnSubagent(role, req)` renders `role` in place of `req.role`. A session whose init does not list the role is refused, so a definition the CLI ignored is not a run under its default prompt (I5). The contract version is 2.0.0: `TaskRequest.role` and `spawnSubagent` changed shape.
 - **Known limit:** whether the CLI puts the agent's prompt ahead of the appended context, and keeps the prefix cacheable across two tasks under one role, is the CLI's to decide and is not observable without a model call. The paid driver suite (`run-driver`) runs every task through this path; `stablePrefixCaching` is asserted there.
 - **Reverse:** render the instructions at the head of `--append-system-prompt` and drop `--agent`.
@@ -4341,3 +4343,10 @@ the code differed from the unit entry, or what the entry left open.
 - **Chosen:** every `.ts` file under `src`, at any depth, is parsed with the TypeScript compiler API. Each import, export-from, `import()` and `require()` must name a node built-in, a relative module, or core, and a computed specifier is refused. Any identifier `process` is refused. `compileRoles` must declare exactly one parameter, with no default, rest or optional marker. The title now says what is checked. The type fixture is unchanged: what it proves (certain typed expressions do not compile) is what its own title claims.
 - **Consequence:** a `process.env` read with a double-quoted dynamic import, and a defaulted second parameter, each pass the old assertion and fail the new one.
 - **Reverse:** none needed.
+
+### D-R20-14: the role leads the appended system prompt; no agent definition (amends D-A-RC-03, supersedes D-R20-08)
+
+- **Found:** the paid driver suite on PR #61. `driver.stablePrefixCaching` passed before R20 and failed on `67fbaf9`, R20 before any review fix: the second task read 0 cached tokens. CI's cost lines show each task before R20 writing 6816 tokens to cache and reading 6548; under R20 each sent 895 uncached input tokens and touched no cache. `--agent` replaces the CLI's own system prompt with the agent's, so the prefix fell below the model's cacheable minimum, and every seat ran without the CLI's tool guidance. The appended context still reached the model under `--agent` (CLI 2.1.309), so nothing granted was lost. Neither external review raised it; D-R20-08's known limit named exactly this as unobservable without a model call.
+- **Chosen:** `--append-system-prompt` carries the role's instructions, a blank line, then the granted context. `--agents` and `--agent` are gone, so the CLI's prompt stays and two tasks under one role share a prefix. The unit entry's "as the agent definition it already passes" now reads "at the head of the system prompt it appends". The init check that refused a session not listing its role is removed: an argv element cannot go unloaded the way a definition the CLI ignored could. `driver.subagents` proves the role reached the session by a token only the role asks for, in the same paid call. `I3.driver-renders-the-role-on-the-invocation` now checks the appended prompt exactly and refuses `--agents`, `--agent` and `--system-prompt`.
+- **Reverse:** D-R20-08, with the stable prefix padded past the cacheable minimum.
+- **Confirmed** by the maintainer, 2026-10-23 (option A).

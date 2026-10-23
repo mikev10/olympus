@@ -481,12 +481,6 @@ export class ClaudeCodeDriver implements Driver {
     const exec = await this.#provider.exec(req.sandbox, invocation.argv, { env: invocation.env });
     const stream = parseStream(exec.stdout);
     const init = this.#refuseUnusableStream(req, exec.exitCode, exec.stderr, stream);
-    // The role is what the session was configured with, read from what the CLI printed before it took a turn.
-    // A session that did not load it ran under the CLI's own prompt, which is never a fallback (I5, D-A-RC-06).
-    if (!init.agents.includes(role.role)) {
-      refuse('invocation', `the session for task ${req.taskId} did not load the ${role.role} role it was given; it reported the agents [${init.agents.join(', ')}]`);
-    }
-
     const events = eventsFrom(stream);
     for (const event of events) this.#emit(event);
     this.#sessions.set(req.taskId, init);
@@ -734,12 +728,16 @@ export class ClaudeCodeDriver implements Driver {
       '--output-format', 'stream-json',
       '--verbose',
       '--model', identity.model,
-      // The cacheable half. Appended rather than replacing the default prompt,
-      // so the session still behaves like the CLI it is, and the dynamic
-      // sections that change between tasks — cwd, git status, env — are moved
-      // out of the prefix, so two tasks in one run present the same prefix and
-      // the second reads it from cache instead of writing it again.
-      '--append-system-prompt', req.stablePrefix,
+      // The cacheable half: the role, then the granted context. Appended rather
+      // than replacing the default prompt, so the session still behaves like
+      // the CLI it is, and the dynamic sections that change between tasks —
+      // cwd, git status, env — are moved out of the prefix, so two tasks under
+      // one role present the same prefix and the second reads it from cache
+      // instead of writing it again. The role is its instructions and nothing
+      // else, so nothing beside them can widen the tools or change the model
+      // (I4), and an argv element cannot go unloaded the way an agent
+      // definition could (D-A-RC-03, D-R20-14).
+      '--append-system-prompt', `${role.instructions}\n\n${req.stablePrefix}`,
       '--exclude-dynamic-system-prompt-sections',
       '--tools', req.tools.filter((tool) => mcpServerOf(tool) === undefined).join(','),
       // Nothing outside this argv configures the session: no user, project, or
@@ -762,10 +760,6 @@ export class ClaudeCodeDriver implements Driver {
     // with the rest and a later `--allowedTools` does not bring them back.
     if (ungrantedMcpTools.length > 0) cli.push('--disallowedTools', ungrantedMcpTools.join(','));
     if (this.#settingsPath !== undefined) cli.push('--settings', this.#settingsPath);
-    // The role, as the agent definition the session runs as: its instructions and nothing else, so no
-    // field in it can widen the tools or change the model above (I4). It sits in the system prompt
-    // with the granted context appended after it, so two tasks under one role share a prefix (D-A-RC-03).
-    cli.push('--agents', JSON.stringify({ [role.role]: { description: `the ${role.role} role`, prompt: role.instructions } }), '--agent', role.role);
     // `exec "$@"` runs the CLI as the process itself, with every argument an
     // argv element the shell never re-reads. Only the working directory is
     // interpolated, and it is quoted.
