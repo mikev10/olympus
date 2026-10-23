@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, expect } from 'vitest';
-import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
+import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { ExecOptions, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
 
@@ -179,6 +179,13 @@ function spec(image: string, workspaceDir: string): SandboxSpec {
  * hands `body` a driver wired to both. Everything is torn down when `body`
  * settles, whether it threw or not.
  */
+/** A role whose instructions a session that loaded it can be seen to follow, and one that did not cannot. */
+export const PROBE_ROLE: CompiledRole = {
+  role: 'builder' as RoleId,
+  instructions: 'You are the builder role of a test harness. Do exactly what the message asks and nothing more.',
+  sha256: '0'.repeat(64),
+};
+
 export async function withDriver<T>(
   body: (h: Harness) => Promise<T>,
   options: Partial<Omit<ClaudeCodeDriverOptions, 'provider'>> = {},
@@ -260,7 +267,7 @@ export async function withDriver<T>(
     workspaceDir,
     request: (overrides: Partial<TaskRequest> = {}): TaskRequest => ({
       taskId: 'probe' as TaskId,
-      role: 'builder' as TaskRequest['role'],
+      role: PROBE_ROLE,
       stablePrefix: prefix,
       variableSuffix: 'Reply with the single word: ready',
       tier: 'fast',

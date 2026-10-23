@@ -3,6 +3,7 @@ import { inlineSuppressions, resolvedRuleSeverity, workspaceEslint } from '../ki
 import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
+import { R20_I7 } from './roles.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
@@ -28,6 +29,8 @@ const CAST_ALLOWLIST: readonly string[] = [];
 export const I7: InvariantEntry = {
   title: INVARIANTS.I7,
   assertions: [
+    // R20: the role compiler.
+    ...R20_I7,
     compileError({
       id: 'I7.untrusted-text-is-not-a-string',
       title: 'UntrustedPayload.raw cannot reach a string-typed slot, a steer message, or a string method without a cast',

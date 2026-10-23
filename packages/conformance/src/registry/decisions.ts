@@ -10,7 +10,7 @@
  * and the station. Deleting the write for any one cause fails its row (I8).
  */
 import { createHash } from 'node:crypto';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ComponentGraph } from '@olympus-ai/api';
 import type { ParkCause, RoleId, RunId, RunState, StationId, StationRefusal, TaskId } from '@olympus-ai/core';
@@ -348,6 +348,21 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
   'admission:policy-refused': admissionRow('admission:policy-refused', 'p14-policy-', async (rig) => {
     const { startRun } = await api();
     await startRun(await rig.request(await rig.components(), { policy: await linePolicy({}, { stationCaps: { build: 0 } }) }));
+  }),
+  'admission:roles-refused': admissionRow('admission:roles-refused', 'p14-roles-refused-', async (rig) => {
+    const { startRun } = await api();
+    // A broken copy beside the rig's roles, so the control admission after it reads the intact ones.
+    const roles = join(rig.roles, '..', 'roles-broken');
+    await cp(rig.roles, roles, { recursive: true });
+    await writeFile(join(roles, 'builder.md'), '');
+    await startRun(await rig.request(await rig.components(), { roles }));
+  }),
+  'admission:role-undefined': admissionRow('admission:role-undefined', 'p14-role-undefined-', async (rig) => {
+    const { startRun } = await api();
+    const roles = join(rig.roles, '..', 'roles-unreviewed');
+    await cp(rig.roles, roles, { recursive: true });
+    await rm(join(roles, 'reviewer.md'));
+    await startRun(await rig.request(await rig.components(), { roles }));
   }),
   'admission:refused': admissionRow('admission:refused', 'p14-capability-', async (rig) => {
     const { startRun } = await api();

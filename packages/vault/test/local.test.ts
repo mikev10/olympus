@@ -99,6 +99,8 @@ function state(version: string): RunState {
   };
 }
 
+const BUILDER_ROLE = { role: 'builder' as RoleId, instructions: 'Build.', sha256: createHash('sha256').update('Build.').digest('hex') };
+
 function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
   return {
     run: {
@@ -112,6 +114,7 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
       createdAt: '2026-09-14T00:00:00.000Z',
     },
     policy: new StrictPolicyEngine().resolvePolicy(DEFAULT_POLICY_DOCUMENT),
+    roles: [BUILDER_ROLE],
     artifacts: {
       spec: [{ path: 'spec.md', sha256: 'd'.repeat(64) }],
       acceptanceTests: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }],
@@ -121,6 +124,7 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
     },
     baseTreeSha256: '1'.repeat(64),
     unavailableControls: ['mutation'],
+    stack: 'vitest@4',
   };
 }
 
@@ -192,6 +196,22 @@ describe('admission and task results', () => {
     expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
   });
 
+  test('an admission record that does not pin its roles is refused and stores nothing (D-A-RC-01)', async () => {
+    const { roles: _omitted, ...roleless } = admission();
+    await expect(vault.recordAdmission(roleless as AdmissionRecord)).rejects.toThrow(/does not pin its roles/);
+    await expect(vault.recordAdmission({ ...admission(), roles: [{ ...BUILDER_ROLE, instructions: 'Build differently.' }] })).rejects.toThrow(/not the hash of its instructions/);
+    await expect(vault.recordAdmission({ ...admission(), roles: [BUILDER_ROLE, BUILDER_ROLE] })).rejects.toThrow(/listed twice/);
+    await expect(vault.readRunState(runId)).rejects.toMatchObject({ code: 'no-run-state' });
+  });
+
+  test('an admission record that names no stack is refused and stores nothing, since a stack cannot be backfilled (R18)', async () => {
+    const { stack: _omitted, ...unstacked } = admission();
+    await expect(vault.recordAdmission(unstacked as AdmissionRecord)).rejects.toThrow(/names no stack/);
+    await expect(vault.recordAdmission({ ...admission(), stack: '' })).rejects.toThrow(/names no stack/);
+    await expect(readFile(join(store, 'runs', runId, 'admission.json'))).rejects.toThrow();
+    await expect(vault.recordAdmission(admission())).resolves.toMatchObject({ kind: 'admission' });
+  });
+
   test('an admission ref carrying another hash does not read the run\'s record back as if it matched', async () => {
     const ref = await vault.recordAdmission(admission());
     await expect(vault.read({ ...ref, hash: 'b'.repeat(64) })).rejects.toThrow(/no admission/);
@@ -200,7 +220,7 @@ describe('admission and task results', () => {
   test('a task result is stored under its own kind and reads back exactly as the driver returned it', async () => {
     const result = await new StubDriver().runTask({
       taskId,
-      role: 'builder' as RoleId,
+      role: BUILDER_ROLE,
       stablePrefix: '',
       variableSuffix: taskId,
       tier: 'fast',
@@ -227,6 +247,7 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     station: 'build' as const,
     attempt: 1,
     model: { provider: 'anthropic', family: 'claude' as ModelFamily, model: 'sonnet', version: '1' },
+    role: { id: 'builder' as RoleId, sha256: 'a'.repeat(64) },
     reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
     collectedBy: 'runtime' as const,
   };
@@ -249,6 +270,13 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     const { model: _omitted, ...unnamed } = record;
     await expect(vault.recordUsage(unnamed as never)).rejects.toThrow(/model/);
     await expect(vault.recordUsage({ ...record, model: { ...record.model, model: '' } })).rejects.toThrow(/model/);
+  });
+
+  test('refuses a record that names no role version the call ran under (D-A-RC-04)', async () => {
+    const { role: _omitted, ...roleless } = record;
+    await expect(vault.recordUsage(roleless as never)).rejects.toThrow(/role/);
+    await expect(vault.recordUsage({ ...record, role: { ...record.role, sha256: 'not-a-hash' } })).rejects.toThrow(/role/);
+    await expect(vault.recordUsage({ ...record, role: { ...record.role, id: '' as RoleId } })).rejects.toThrow(/role/);
   });
 
   test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {

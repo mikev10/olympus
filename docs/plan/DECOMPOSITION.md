@@ -598,13 +598,13 @@ order between them is settled before any of them is picked up.
 | R2 | Outcome measurement | M2 | P4, P6, P9, P14 | `docs/plan/R2-outcomes.md` |
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
-| R5 | Goal decomposition | M3 | R4, role compiler | — |
+| R5 | Goal decomposition | M3 | R4, R20 | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | — |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
 | R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
-| R11 | Learning loop | M3 | R2, R7, R8, P14, R13 | — |
+| R11 | Learning loop | M3 | R2, R7, R8, P14, R13, R20 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
 | R13 | Nightly review | M2 | P14, R2, R9, R17, M2 triggers | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
@@ -612,7 +612,8 @@ order between them is settled before any of them is picked up.
 | R16 | Bug-fix intake | M2 | R15, R19, P14, M2 triggers | — |
 | R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
-| R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, role compiler | — |
+| R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | — |
+| R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
 
 ### R1 — Readiness
 
@@ -1292,6 +1293,69 @@ written by the runtime and never a model's account, and R2 adds it as a key.
 A run admitted before it lands has no stack and is reported under `unrecorded`,
 never guessed. Found by R2 (D-R2-01).
 
+Specified when the unit started (D-R18-01), against the code on `v2` at
+141f4b2. The stack is `AdapterSet.stack` as P8 detects it: the test
+framework and its major version (`vitest@4`, `jest@29`), or `unsupported`
+where no framework is detected. `unsupported` is a detected stack and is
+recorded as one; `unrecorded` means no record names a stack.
+
+**Deliverables:**
+
+1. **A-R18-01: `AdmissionRecord` gains `stack`.** Required, a non-empty
+   string, taken from the same adapter set admission already builds for the
+   security checks and the unavailable controls, so the stack, the controls,
+   and the static-analysis slot are read from one detection. The local and
+   stub Vaults refuse an admission record without one: from this unit on, a
+   record that names no stack is a fault, and a stack not written at admission
+   cannot be backfilled.
+2. **Resume reads a record with or without it.** A run admitted before this
+   unit resumes as it did; a `stack` present and not a non-empty string is a
+   malformed record and is refused, as any other malformed field is.
+3. **R2 keys by stack.** `RunRecords.stack` is the recorded stack, or `null`
+   for a run with no admission record or one admitted before this unit,
+   and for a run with an admission record but no run state, whose record
+   the reader reaches only through that state (D-R18-07).
+   `outcomes` adds `caughtFalseDoneByStack`, `autonomyRatioByStack`, and
+   `firstPassYieldByStack`, a `null` stack keyed `unrecorded`. The
+   not-measured line for stack is removed.
+
+**Out of scope:**
+
+- per-stack refusal counts: a run refused at admission has no admission
+  record, so it carries no stack; its refusal decision is unchanged
+- gating L3 per stack, or any policy reading a per-stack rate (R10, the trust
+  ratchet)
+- changing what P8 detects, or naming a stack for a repository P8 calls
+  `unsupported`
+- backfilling a stack for any run admitted before this unit
+- the CLI: it prints the service's report as it stands, so the new keys reach
+  it with no change
+
+**Conformance:** `I2.admission-records-the-detected-stack`. A run admitted
+over a workspace declaring vitest 4 records `vitest@4`; the same rig with no
+`package.json` records `unsupported`, so the value is read from the base and
+not a constant; `readRunRecords` returns the recorded stack and `outcomes`
+keys the run under it; an admission record with its stack removed is keyed
+`unrecorded`, never under a guessed stack; the local Vault refuses an
+admission record that names no stack.
+
+**Acceptance:**
+
+- `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass
+- `pnpm conformance`: the R18 assertion is registered and passes;
+  `pending-baseline.json` is unchanged
+- changesets for `@olympus-ai/vault`, `@olympus-ai/api`, `@olympus-ai/conformance`
+- `git ls-files -- .plan/` prints nothing
+
+**Gate paths:** `packages/vault/src/types.ts` and `packages/conformance/` are
+protected, so the pull request carries `gate-change` and the squash body
+carries `Gate-Change: acknowledged`.
+
+**Invariants:** I2 is the subject: the stack is what the runtime's adapter
+detection found, never a model's account. I5: a new record without a stack
+is refused, and a run with none is `unrecorded`, never guessed. I8: the
+assertion fails when the recording, the read, or the key is deleted.
+
 ### R19 — Drafting at `spec` and `test-design`
 
 Today the spec, the acceptance tests, the verification manifest, and the task
@@ -1429,6 +1493,9 @@ Binding:
   shown at admission covers them (P13, D-P9-03). A draft approved without a
   person is recorded as such, so a later refusal or revert of its change is
   attributable to it (R2, R8)
+- **Its seats' roles.** R19 writes the spec drafter, spec critic, test
+  drafter, and test critic roles in R20's format, and admission refuses a
+  run that seats one of them without its role (D-A-RC-06)
 
 **Contract amendments, owed by the unit's pull request:**
 - `RequestedArtifacts` and `AdmissionRecord.artifacts`: the spec and the
@@ -1474,8 +1541,8 @@ Binding:
 
 **Not in this unit:** drafting at `plan`. A run that drafts its spec is admitted
 with a task graph that does not depend on the spec's content, the single build
-task M1 runs; a graph derived from the spec is R5's. Also out: the instructions
-each drafter and critic runs under, which are the role compiler's; `auto` on a
+task M1 runs; a graph derived from the spec is R5's. Also out: the role format,
+compiler, and renderer, which are R20's; `auto` on a
 drafted artifact at L3; reviving a parked run; a drafter for the rest of the
 verification manifest; and R16's bug-fix intent, which is R16's.
 
@@ -1512,8 +1579,8 @@ and a third attempt a person rejects parks the run; a trigger cannot supply an
 intent; a run admitted with all its
 artifacts seats no drafter.
 
-**Why M2:** it needs R15's base run, R17's security part, and the role compiler
-for the drafters' and critics' instructions. A second driver (R6 or Codex) is
+**Why M2:** it needs R15's base run, R17's security part, and R20's role
+compiler for the drafters' and critics' instructions. A second driver (R6 or Codex) is
 what lets a critic be a different family; R6 with a local open-weight model
 makes that cost nothing per token. Without one, every draft goes to a person,
 and the record says why.
@@ -1559,39 +1626,111 @@ framework. It needs a spec before the second half of M2 can start, so it is
 written while R15 is being built, and it lands as a unit with an ID, a row in
 the table above, and a section here, in the shape of the units it unblocks.
 
-### Recorded gap: the role compiler has no spec
+### R20 — Role compiler
 
-The line seats agents at `build` and `review` today, and R19 adds drafters at
-`spec` and `test-design`. Nothing tells any of them how to work. The driver
-contract carries `CompiledRole.instructions`, and the Claude Code driver renders
-it verbatim as a native agent definition, but nothing produces it: F1 lists a
-`compiler` package for M2, P3 and P5 leave role content to it, and no unit
-specifies it. Today a seated agent runs under its CLI's own system prompt, with
-the granted context the line appends: the locked spec, the acceptance tests, and
-the task graph at `build` (`packages/api/src/line.ts`).
+The line seats agents at `build` and `review` today, and R19 adds drafters and
+critics at `spec` and `test-design`. Nothing tells any of them how to work. The
+driver contract carries `CompiledRole.instructions`, and the Claude Code driver
+renders it, but nothing produces it: a seated agent runs under its CLI's own
+system prompt, with the granted context the line appends (the locked spec, the
+acceptance tests, and the task graph at `build`; `packages/api/src/line.ts`).
+This unit gives every seat instructions a person wrote, pins the exact version
+each run was admitted with, and records it beside the model (D-A-DS-03,
+D-A-RC-01 to D-A-RC-06).
 
-R19 and R5 depend on it, and R11 writes its
-proposals against roles. It needs a spec before those units start, so it is
-written alongside the trigger framework's, while R15 is being built. That spec
-settles at least these (D-A-DS-03):
+What a role may do stays where it is. Tools, egress, writable paths, tier, and
+budget come from policy through `TaskRequest`, as the comment on `CompiledRole`
+already requires: one source of truth for grants (I4). A role is instructions
+and nothing else.
 
-- **Where roles live.** In the Vault, so no agent edits its own instructions or
-  another's (I1). A change is a versioned edit a person approves, as a policy
-  change is, and a live run keeps the version it was admitted with
-- **What a role is.** Instructions only, in one neutral format. What a role may
-  do stays in policy, which the contract comment on `CompiledRole` already
-  requires: one source of truth for grants (I4)
-- **How a driver renders one.** The compiler emits one driver-neutral
-  `CompiledRole`, and each driver's `emitArtifacts` renders it, so one role runs
-  as a Claude Code agent definition or as Codex's instruction file, and the same
-  role can be seated on another family
-- **The vocabulary.** A role held in the Vault is a new artifact. Adding it to
-  F1's artifact table is a deliberate amendment the spec takes first, as R5 does
-  with "goal".
-- **What a run records.** The hash of every role version it ran, beside the
-  model, so R2's rates and R11's proposals can be compared per role version
-- **What never enters a role.** Untrusted text of any kind (I7), and anything
-  that judges: a role never carries acceptance criteria, rubrics, or R7's corpus
+Binding:
+
+- **Where roles live (D-A-RC-01).** One directory of role files, read by the
+  service from the host and configured the way the policy file is. No sandbox
+  mounts it, so no agent edits its own instructions or another's (I1). At
+  admission the runtime reads and compiles the directory, and the admission
+  record carries every compiled role with its hash, beside the resolved
+  policy. A run keeps the versions it was admitted with; a role file edited
+  after admission changes only later runs. A change is a person's edit to that
+  file, as a policy change is. The line adds no approval workflow of its own
+- **What a role is (D-A-RC-02).** One Markdown file per role, named
+  `<role-id>.md`, whose whole content is the instructions. It carries no front
+  matter, so no field in it can be read as a grant, a model, or a tier. The
+  role's version is the SHA-256 of the file's bytes as read. The compiler
+  refuses, naming the file, and never skips or truncates: a file over a byte
+  cap checked before decoding, bytes that are not UTF-8, an empty file, a name
+  that is not a valid role id, and anything in the directory that is not a
+  regular `.md` file (I5)
+- **How a driver renders one (D-A-RC-03).** The compiler emits one
+  driver-neutral `CompiledRole`. `TaskRequest` carries it, and the driver
+  renders it into its CLI's native form on the invocation itself, never as a
+  file in the workspace: the workspace is agent-writable, and an instruction
+  file there is one the agent being judged could rewrite (I3). The Claude Code
+  driver renders it at the head of the system prompt it appends on its argv,
+  in the cacheable half ahead of the granted context, so two tasks under one
+  role still share a prefix, and the CLI's own prompt stays (D-R20-14). `emitArtifacts` stays in the
+  contract and the line does not call it. A Codex driver renders the same
+  `CompiledRole` its own way, so one role can be seated on another family
+- **Every seat has a role, or the run is refused (D-A-RC-06).** Admission
+  refuses a run whose task graph names a role with no compiled definition, and
+  a run when no `reviewer` role is defined, before any driver is invoked. The
+  CLI's default prompt is never a fallback. The review seat's instructions
+  come from the `reviewer` role; its grants stay exactly as today, the
+  reviewed task's scope, and a review seat with its own scope in policy is
+  R9's. This unit ships two default roles, `builder` and `reviewer`, beside
+  the shipped default policy. R19 writes the roles for its own four seats
+- **What a run records (D-A-RC-04).** Run state's record of each task attempt
+  names the hash of the role version it ran under, beside the model, written
+  by the runtime and never reported by the model (I2). R2's rates are not
+  keyed by role version in this unit; comparing them is R11's
+- **What never enters a role (D-A-RC-05).** The compiler's only input is the
+  bytes of the files in the roles directory. It takes no parameter through
+  which an `UntrustedPayload`, an extracted trigger field, a rubric, an
+  acceptance check, or R7's corpus could arrive, so untrusted text never
+  reaches a role (I7) and nothing that judges an agent is written into its
+  instructions (I3)
+
+**Contract amendments, owed by the unit's pull request:**
+- `CompiledRole` gains the role's SHA-256
+- `TaskRequest.role` carries a `CompiledRole` instead of a `RoleId`, and
+  `spawnSubagent` takes one
+- `AdmissionRecord` gains the compiled role set
+- run state's task attempt record gains the role hash
+- an admission refusal for a role file the compiler refuses and for a seat
+  with no role
+- the `compiler` package, depending on `core`'s published types only
+
+**Not in this unit:** the roles for R19's drafters and critics, which are
+R19's; R5's planner role; R11's proposals to roles; an API, CLI, or approval
+flow for editing a role, which is a person's edit to a file as policy is;
+rates keyed by role version (R11); a review seat with its own policy scope
+(R9); any change to what `emitArtifacts` does; and the Codex driver's
+rendering, which is that driver's.
+
+**Known limits, stated now:** the compiler cannot tell what a role says. A
+person who pastes acceptance criteria or a rubric into a role file puts
+judging content in front of the agent it judges; the compiler keeps every
+untrusted and judging input out by construction, not by reading the text. A
+role edit between runs is recorded by hash and reviewed by nobody in the line,
+as a policy edit is today. How well a role's instructions work is not measured
+until R7's corpus and R11's comparisons exist.
+
+**Conformance:** a run admitted with the roles directory records every
+compiled role and its hash in the admission record; a role file edited after
+admission does not change what that run's tasks receive; a task graph naming
+a role with no file is refused at admission, before any driver call, and so is
+a run with no `reviewer` role; an oversized, non-UTF-8, empty, misnamed, or
+non-regular entry in the roles directory refuses admission and names the
+entry; each task attempt in run state names the hash of the role it ran under;
+the Claude Code driver's argv carries the role's instructions, and no file is
+written into the workspace to deliver them; the review seat runs under the
+`reviewer` role's instructions and the reviewed task's grants; a compiler call
+given an `UntrustedPayload` does not compile; and a `CompiledRole` still
+carries no grant.
+
+**Why M2:** R19's drafters and critics, R5's planner, and R11's proposals all
+assume roles with content, and a unit started on that assumption would invent
+the format inside its own scope.
 
 ---
 

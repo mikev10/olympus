@@ -406,7 +406,7 @@ async function writingDependency(path: string, text: string, sandbox: SandboxPro
     get(target, key, receiver) {
       if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
       return async (req: TaskRequest): Promise<TaskResult> => {
-        if ((req.role as string) === 'builder') {
+        if (req.role.role === 'builder') {
           const script = `const fs = require('node:fs'); fs.mkdirSync(require('node:path').dirname(${JSON.stringify(path)}), { recursive: true }); fs.writeFileSync(${JSON.stringify(path)}, ${JSON.stringify(text)})`;
           const wrote = await sandbox.exec(req.sandbox, ['node', '-e', script]);
           if (wrote.exitCode !== 0) throw new Error(`the write under node_modules did not land: ${wrote.stderr}`);

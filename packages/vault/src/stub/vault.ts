@@ -115,6 +115,13 @@ export class StubVault implements Vault {
 
   recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
     const runId = a.run.id;
+    if (typeof (a.stack as unknown) !== 'string' || a.stack === '') {
+      return Promise.reject(new Error(`StubVault: the admission record of run ${runId} names no stack; nothing was stored`));
+    }
+    // The roles a run's seats run under cannot be supplied later (D-A-RC-01).
+    if (!Array.isArray(a.roles)) {
+      return Promise.reject(new Error(`StubVault: the admission record of run ${runId} does not pin its roles; nothing was stored`));
+    }
     if (this.admitted.has(runId)) {
       return Promise.reject(new Error(`StubVault: run ${runId} already has an admission record; nothing was stored`));
     }

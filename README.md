@@ -116,6 +116,7 @@ packages/
   triggers/     the untrusted-input envelope
   adapters/     per-stack test, coverage, mutation, behavioral hooks
   readiness/    the autonomy ceiling a repository supports, from probes that ran
+  compiler/     the roles a person wrote, compiled and versioned by hash
   api/          the runtime as a service: the line, the HTTP API, factory-host
   cli/          the command line, a client of the HTTP API and nothing more
   conformance/  the kit that proves invariants, and the registry

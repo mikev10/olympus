@@ -10,8 +10,8 @@
  * in `@olympus-ai/core`; the line itself is in `line.ts`.
  */
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import {
   approvalKey,
   capabilityRefusal,
@@ -34,6 +34,7 @@ import {
 import type {
   ApprovalKey,
   AutonomyLevel,
+  CompiledRole,
   Driver,
   Policy,
   PolicyRefusal,
@@ -48,13 +49,14 @@ import type {
   TaskId,
 } from '@olympus-ai/core';
 import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } from '@olympus-ai/adapters';
+import { compileRoles, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, EvidenceBundle, ResumeRefusal, Vault } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { integrateEscalations, readIntegration, runLine, type LineContext } from './line.js';
+import { integrateEscalations, readIntegration, REVIEWER_ROLE, runLine, type LineContext } from './line.js';
 import type { BuiltGraph } from './graph.js';
 import { reachesRemote, type Integrator } from './integrate.js';
 import { unsafeComponents, type UnsafeDeclaration } from './safety.js';
@@ -116,6 +118,14 @@ export interface RunRequest {
   readonly artifacts: RequestedArtifacts;
   /** A resolved Policy, validated again here all the same. `loadPolicyFile` is how a service reads one from disk. */
   readonly policy: Policy;
+  /**
+   * Absolute path of the roles directory on the host: one `<role-id>.md` per
+   * role (D-A-RC-01). Read and compiled here, at admission, and pinned in the
+   * admission record. No sandbox mounts it, and it may lie inside neither the
+   * workspace nor the workspace store, so no agent edits its own
+   * instructions or another's (I1).
+   */
+  readonly roles: string;
   /** Only a graph `buildGraph` made: provenance is read when it is built, never from a graph handed in (D-A-I1-05). */
   readonly components: BuiltGraph;
   /**
@@ -189,6 +199,14 @@ export type RunOutcome =
       readonly role: RoleId | null;
       readonly refusal: PolicyRefusal;
     }
+  /** The roles directory did not compile: every entry the compiler refused, each named (D-A-RC-02). */
+  | { readonly ok: false; readonly reason: 'roles-refused'; readonly refused: readonly RoleFileRefusal[] }
+  /**
+   * A seat with no role: the roles the task graph names, and `reviewer`, that
+   * the directory does not define. The CLI's default prompt is never a
+   * fallback (D-A-RC-06).
+   */
+  | { readonly ok: false; readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
   | {
       readonly ok: false;
       readonly reason: 'refused';
@@ -345,8 +363,7 @@ export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, {
  * adapters' own refusal takes, so what is recorded is what that refusal
  * would name (D-P8-03).
  */
-async function unavailableControls(base: string, level: AutonomyLevel, components: BuiltGraph): Promise<string[]> {
-  const set = await adapterSetOf(base, components);
+function unavailableControls(set: AdapterSet, level: AutonomyLevel): string[] {
   const unavailable = [...new Set([...set.unavailableControls(), ...missingControls(set)])].sort();
   const refusal = adapterAdmission(set, level);
   // The two derive from the same set; if they ever disagree the record would misstate the refusal.
@@ -366,6 +383,49 @@ function storeProblems(req: RunRequest): RequestProblem[] {
   const { root } = req.components.workspaces;
   if (!within(root, req.workspace) && !within(req.workspace, root)) return [];
   return [{ path: 'components.workspaces', code: 'overlaps', message: `the workspace store ${root} and the workspace ${req.workspace} overlap; each must lie outside the other` }];
+}
+
+/** `path` with every link resolved, or as given where it cannot be: a directory that does not exist is refused when it is compiled. */
+async function resolved(path: string): Promise<string> {
+  return realpath(path).catch(() => resolve(path));
+}
+
+/**
+ * The roles directory may lie inside neither the workspace nor the workspace
+ * store, nor hold either: a copy of what is there is what a sandbox mounts,
+ * and a role there is one an agent could rewrite. Compared with every link
+ * resolved, so a link is no way around it (I1, D-R20-04).
+ */
+async function rolesProblems(req: RunRequest): Promise<RequestProblem[]> {
+  if (typeof req.roles !== 'string' || req.roles === '' || !isAbsolute(req.roles)) {
+    return [{ path: 'roles', code: 'not-absolute', message: 'roles must be the absolute path of the roles directory' }];
+  }
+  const roles = await resolved(req.roles);
+  const places = [['workspace', req.workspace], ['workspace store', req.components.workspaces.root]] as const;
+  for (const [name, place] of places) {
+    const outer = await resolved(place);
+    if (within(outer, roles) || within(roles, outer)) {
+      return [{ path: 'roles', code: 'overlaps', message: `the roles directory ${req.roles} and the ${name} ${place} overlap; roles are read from the host, outside every tree a sandbox mounts` }];
+    }
+  }
+  return [];
+}
+
+/**
+ * The roles directory compiled, and every seat the graph schedules given a
+ * role, before any driver is invoked (D-A-RC-06). Every role the graph names
+ * is checked, and `reviewer` as well, since every review seat runs under it.
+ */
+async function admitRoles(
+  directory: string, graph: TaskGraph,
+): Promise<{ ok: true; roles: readonly CompiledRole[] } | Extract<AdmissionOutcome, { reason: 'roles-refused' | 'role-undefined' }>> {
+  const compiled = await compileRoles(directory);
+  if (!compiled.ok) return { ok: false, reason: 'roles-refused', refused: compiled.refused };
+  const defined = new Set<string>(compiled.roles.map((r) => r.role));
+  const needed = [...new Set([...graph.tasks.map((t) => t.role), REVIEWER_ROLE])].sort();
+  const missing = needed.filter((role) => !defined.has(role));
+  if (missing.length > 0) return { ok: false, reason: 'role-undefined', roles: missing };
+  return { ok: true, roles: compiled.roles };
 }
 
 /** The driver that runs a task at an agent station. */
@@ -501,6 +561,11 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
       return { reason: 'controls-unavailable', requestedLevel: outcome.requestedLevel, unavailable: outcome.unavailable };
     case 'policy-refused':
       return { reason: 'policy-refused', station: outcome.station, role: outcome.role, refusal: outcome.refusal };
+    case 'roles-refused':
+      // Each entry is a name in the host's roles directory, which a person wrote; the message is left out, as an invalid request's is.
+      return { reason: 'roles-refused', refused: outcome.refused.map(({ entry, code }) => ({ entry, code })) };
+    case 'role-undefined':
+      return { reason: 'role-undefined', roles: [...outcome.roles] };
     case 'refused':
       return { reason: 'refused', at: outcome.at, refusal: outcome.transition };
   }
@@ -526,6 +591,10 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy);
   if (refused !== undefined) return refused;
+  const rolesAt = await rolesProblems(req);
+  if (rolesAt.length > 0) return { ok: false, reason: 'invalid-request', problems: rolesAt };
+  const roles = await admitRoles(req.roles, admitted.admitted.graph);
+  if (!roles.ok) return roles;
   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
   if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
     const likely = await likelyCost(req.components, worstCase, policy.policy);
@@ -557,7 +626,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: unscanned };
   }
-  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel, req.components);
+  const controls = unavailableControls(set, req.requestedLevel);
 
   const now = new Date().toISOString();
   const run: Run = {
@@ -573,9 +642,12 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   const record: AdmissionRecord = {
     run,
     policy: policy.policy,
+    roles: roles.roles,
     artifacts: admitted.admitted.artifacts,
     baseTreeSha256,
     unavailableControls: controls,
+    // The same detection the controls and the security checks were read from (R18).
+    stack: set.stack,
   };
   const refusedControls = admissionRefusal(record);
   if (refusedControls !== undefined) {
@@ -611,6 +683,7 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
       drive: (hooks: DriveHooks = {}) => runLine({
         run,
         policy: policy.policy,
+        roles: record.roles,
         artifacts: record.artifacts,
         graph: admitted.admitted.graph,
         checks: admitted.admitted.checks,
@@ -647,11 +720,32 @@ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: A
     typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object' &&
     specPartsShaped(artifacts.specParts) &&
     typeof r.baseTreeSha256 === 'string' && Array.isArray(r.unavailableControls) &&
-    r.unavailableControls.every((control) => typeof control === 'string');
+    r.unavailableControls.every((control) => typeof control === 'string') &&
+    // Absent on a run admitted before R18, which resumes as it did; present, it is a stack.
+    (r.stack === undefined || (typeof r.stack === 'string' && r.stack !== ''));
   if (!shaped) throw new Error(`run ${state.runId}: the admission record does not hold a run and its artifacts; refusing to resume from it`);
+  // A run admitted before R20 pinned no roles, and its seats have none to run under; it is not resumed under today's files (D-A-RC-06).
+  const roles = rolesProblem(r.roles);
+  if (roles !== undefined) throw new Error(`run ${state.runId}: ${roles}; refusing to resume from it`);
   const policy = checkedPolicy(r.policy);
   if (!policy.ok) throw new Error(`run ${state.runId}: the admitted policy no longer validates; refusing to resume under it:\n${policy.message}`);
   return { record: r as AdmissionRecord, policy: policy.policy };
+}
+
+/**
+ * Why a record's `roles` is not a role set a resume can run, or undefined:
+ * each role's hash is its instructions' hash, so the record holds the
+ * versions it names, and `reviewer` is among them.
+ */
+function rolesProblem(roles: unknown): string | undefined {
+  if (!Array.isArray(roles)) return 'the admission record pins no roles';
+  for (const role of roles as unknown[]) {
+    const r = (typeof role === 'object' && role !== null ? role : {}) as Partial<Record<keyof CompiledRole, unknown>>;
+    if (typeof r.role !== 'string' || typeof r.instructions !== 'string' || typeof r.sha256 !== 'string') return 'a pinned role carries no id, instructions, and hash';
+    if (createHash('sha256').update(r.instructions, 'utf8').digest('hex') !== r.sha256) return `the pinned role ${r.role}'s instructions do not hash to its version`;
+  }
+  if (!(roles as Array<{ role?: unknown }>).some((r) => r.role === REVIEWER_ROLE)) return 'the admission record pins no reviewer role';
+  return undefined;
 }
 
 interface Reloaded {
@@ -744,6 +838,7 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
   const ctx: LineContext = {
     run: record.run,
     policy,
+    roles: record.roles,
     artifacts: record.artifacts,
     graph: reloaded.graph,
     checks: reloaded.checks,

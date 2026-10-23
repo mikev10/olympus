@@ -6,7 +6,7 @@
  */
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
+import { STATION_CONTRACTS, type RoleId, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
 import type { BaseRunRecord, EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
@@ -209,7 +209,7 @@ describe('hello at L1', () => {
     expect(driver.requests).toHaveLength(1);
     const [req] = driver.requests;
     if (req === undefined) return;
-    expect(req).toMatchObject({ taskId: hello, role: 'builder', variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
+    expect(req).toMatchObject({ taskId: hello, role: { role: 'builder' }, variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
     // The first two run the reproduction and the secret scan over the base (D-A-BF-01, R17); the build's is the third.
@@ -259,7 +259,7 @@ describe('the verdict follows the checks and nothing else (I2)', () => {
     const state = refusedState(outcome);
     expect(driver.requests).toHaveLength(3);
     expect(state.tasks[hello]).toBe('parked');
-    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3, conflicts: [] });
+    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3, conflicts: [], parkedFor: 'iterations-exhausted' });
     expect(state.evidenceRefs).toHaveLength(3);
     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
     for (const ref of state.evidenceRefs) {
@@ -390,7 +390,7 @@ describe('retries are bounded (I5)', () => {
     expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'retries-exhausted', limit: 2 } });
     expect(driver.calls).toBe(3);
     const state = refusedState(outcome);
-    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3, conflicts: [] });
+    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3, conflicts: [], parkedFor: 'retries-exhausted' });
 
     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
 
@@ -529,6 +529,29 @@ describe('a replayed attempt is spent, not free (I5)', () => {
     expect(parked).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
     expect(await parkDecisions(base.vault, runId)).toHaveLength(1);
+  });
+
+  test('replays of the last iteration past the bound park for exhausted starts, not failed gates, in the record and on every resume (#47)', async () => {
+    await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
+    const driver = new ChosenDriver({ narrative: 'built' });
+    const base = stubComponents(workspace, { driver, reviewer: driver });
+    // Two gates fail; the third iteration is stopped before its result is committed, every time, so its gate never runs.
+    const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying' && s.attempts[hello]?.iterations === 3;
+    const bound = STATION_CONTRACTS.build.maxIterations * (STATION_CONTRACTS.build.retry.max + 1);
+
+    await expect(startRun(runRequest(runId, workspace, { ...base, vault: new KillsBeforeCommit(base.vault, kill) }))).rejects.toThrow('killed');
+    for (let starts = 4; starts <= bound; starts += 1) {
+      await expect(resumeRun({ runId, components: { ...base, vault: new KillsBeforeCommit(base.vault, kill) } })).rejects.toThrow('killed');
+    }
+    expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 3, starts: bound } } });
+
+    const parked = await resumeRun({ runId, components: base });
+    expect(parked).toMatchObject({ transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
+    const [decision, ...rest] = await parkDecisions(base.vault, runId);
+    expect(rest).toEqual([]);
+    expect(decision?.decision).toMatchObject({ refusal: { cause: 'starts-exhausted' } });
+    // A resume derives the refusal again from committed state, and it must say the same.
+    expect(await resumeRun({ runId, components: base })).toMatchObject({ transition: { reason: 'parked', cause: 'starts-exhausted' } });
   });
 });
 
@@ -824,7 +847,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
   });
 
   test('a call whose usage the relay could not read makes its total a lower bound, counted apart from exact calls (D-P13-19)', () => {
-    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), collectedBy: 'runtime' as const };
+    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, collectedBy: 'runtime' as const };
     const exact = { kind: 'metered' as const, calls: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, exhausted: 'none' as const, refused: 0 };
     expect(costTotals([{ ...base, reading: exact }]).run).toMatchObject({ bound: 'exact', metered: { unreadable: 0 } });
     const totals = costTotals([{ ...base, reading: exact }, { ...base, attempt: 2, reading: { ...exact, exhausted: 'unreadable' } }]);

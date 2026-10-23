@@ -1,0 +1,147 @@
+The code under review is in the file
+`2026-10-21-R18-stack-per-run-review-bundle.txt` (SHA-256 bae66f76ef94fb1e048d9c572a0ff9ac258fda009660a9e6a10364e415b0e9c0) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing how a software-delivery runtime records which technology
+stack a run targeted, and how its outcome measurement splits its rates by that
+stack, in a TypeScript project. You have the source and nothing else — no design
+documents, no author reasoning, no prior version, no conversation that produced
+it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries an AI agent's work on a repository through a fixed line of
+gated stations. When a run is admitted, the runtime inspects the base
+repository with an "adapter set" that detects its test framework and major
+version (for example `vitest@4`), or `unsupported` where it detects none, and
+writes a write-once admission record to a store the agent cannot write (the
+Vault). This change adds that detected stack to the admission record, makes the
+store refuse an admission record that names no stack, and has the outcome
+measurement (false-done rate, autonomy ratio, first-pass yield, each with a
+sample size and a confidence bound) keep those rates per stack. A run whose
+record names no stack — one admitted before this change, or one refused at
+admission — is reported under the key `unrecorded`. These per-stack rates are
+meant, later, to decide whether a given stack may run with less human
+oversight, so a rate filed under the wrong stack, or a run silently dropped from
+or added to a stack's sample, would grant oversight relief on evidence that does
+not support it.
+
+The commit range also contains two earlier changes that have not been reviewed:
+an amendment that makes a parked task record the cause of its park in run state,
+and a README update. Review them as part of the bundle. The range also carries a
+test-only change to a sandbox test that now checks its own sandbox's proxy names
+rather than every such object on the Docker host.
+
+It must hold against a capable, motivated party trying to make a stack's
+recorded rates look better than the runs on that stack were, or to have a run
+counted under a stack other than the one the runtime detected. Assume no
+deceptive intent — only that the easiest path gets taken.
+
+That party controls the contents of the repository the run targets (including
+its package.json and any config files), what the agent returns from each task,
+and when the process stops, including between any two writes. It does not
+control the components the runtime is wired with — the Vault, the sandbox
+provider, the drivers, and the scanners are runtime-selected and trusted, even
+where a function takes one as an argument — and it does not control code running
+inside the runtime's own process.
+
+The invariants at stake:
+
+- The runtime derives status; the model never reports it. An agent's account of
+  its work is a claim, stored apart from the evidence; every rate is derived
+  from runtime records, never from what a model said.
+- Fail closed. A missing required check, an absent capability, an unsupported
+  stack, or a missing record is a refusal or an explicit "not established",
+  never a silent degrade, a guessed value, or a warning that lets the run
+  continue.
+- No agent writes to the Vault. Every Vault mutator is a named operation the
+  runtime calls; nothing inside a task's workspace can reach one.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.
+
+The mechanisms that matter most:
+
+- Admission: the stack is read from the same adapter set as the unavailable
+  controls and the static-analysis slot, and written into the admission record
+  (packages/api/src/run.ts).
+- The Vault's refusal of an admission record with no stack, in both the local
+  and the stub store (packages/vault/src/local/vault.ts, stub/vault.ts).
+- Reading the stack back: `readRunRecords` and `recordedStack` in
+  packages/api/src/outcomes.ts, and resume's validation of the admission record
+  (`readAdmission` in run.ts), which accepts a record with no stack.
+- The conformance assertion `I2.admission-records-the-detected-stack`
+  (packages/conformance/src/registry/outcomes.ts).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- per-stack refusal counts: a run refused at admission has no admission
+  record, so it carries no stack; its refusal decision is unchanged
+- gating L3 per stack, or any policy reading a per-stack rate (R10, the trust
+  ratchet)
+- changing what P8 detects, or naming a stack for a repository P8 calls
+  `unsupported`
+- backfilling a stack for any run admitted before this unit
+- the CLI: it prints the service's report as it stands, so the new keys reach
+  it with no change
+
+Identifiers such as R10 and P8 name other units of work in the project and mean
+nothing beyond that here; L3 is the highest autonomy level. Absent work listed
+above is not a defect.
+
+THE QUESTION
+
+How would I get a run counted under a stack other than the one the runtime
+detected on its base, or have a stack's rates reflect runs they should not —
+through the repository's contents, through a record the store accepts that it
+should refuse, through a reader that guesses where it should say `unrecorded`,
+or through a process stop between admission's writes?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

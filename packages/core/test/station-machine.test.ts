@@ -302,6 +302,23 @@ describe('nextStep', () => {
     expect(nextStep(retried, GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'retries-exhausted', limit: 2 } });
   });
 
+  test('the cause a park recorded is the cause read back, where the counts alone cannot tell it (A-R4-05, #47)', () => {
+    // The last iteration replayed to the start bound, and three iterations each spending every retry, leave the same counts.
+    const counts = { iterations: 3, retries: 0, starts: 9, conflicts: [] };
+    const parkedWith = (attempts: object): RunState =>
+      state({ station: 'build', tasks: { a: 'parked' } as RunState['tasks'], attempts: { a: attempts } as RunState['attempts'] });
+    expect(nextStep(parkedWith({ ...counts, parkedFor: 'starts-exhausted' }), GRAPH, ONE_AT_A_TIME)).toMatchObject({
+      kind: 'refuse',
+      refusal: { reason: 'parked', task: 'a', cause: 'starts-exhausted', limit: 9 },
+    });
+    expect(nextStep(parkedWith({ ...counts, parkedFor: 'iterations-exhausted' }), GRAPH, ONE_AT_A_TIME)).toMatchObject({
+      kind: 'refuse',
+      refusal: { reason: 'parked', cause: 'iterations-exhausted', limit: 3 },
+    });
+    // A park committed before the cause was recorded is read from its counts, as it always was.
+    expect(nextStep(parkedWith(counts), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'iterations-exhausted' } });
+  });
+
   test('build names every buildable task up to the limit, in graph order, and never zero (R4)', () => {
     const wide: TaskGraph = { tasks: [task('a', 'build'), task('b', 'build'), task('c', 'build'), task('d', 'build', ['a'])], edges: [] };
     const tasks = { a: 'pending', b: 'failed', c: 'running', d: 'pending' } as RunState['tasks'];

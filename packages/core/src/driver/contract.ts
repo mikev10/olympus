@@ -6,7 +6,7 @@
 import type { RelaySpec, SandboxHandle } from '@olympus-ai/sandbox';
 import type { ModelTier, RoleId, TaskId } from '../run/types.js';
 
-export const DRIVER_CONTRACT_VERSION = '1.1.0';
+export const DRIVER_CONTRACT_VERSION = '2.0.0';
 
 /**
  * I6: reviewers never share the author's model family. Branded so a driver
@@ -59,7 +59,12 @@ export type DriverCapability = keyof DriverCapabilities;
 /** Context is split so invariant material forms a cacheable prefix. */
 export interface TaskRequest {
   taskId: TaskId;
-  role: RoleId;
+  /**
+   * The role this task runs under, as admission compiled and pinned it. The
+   * driver renders it on the invocation itself, never as a file in the
+   * workspace, which the agent being judged can write (I3, D-A-RC-03).
+   */
+  role: CompiledRole;
   stablePrefix: string;       // spec, rubric, conventions - identical across a run
   variableSuffix: string;     // this task only
   tier: ModelTier;
@@ -104,20 +109,27 @@ export interface Usage {
 }
 
 /**
- * A role in driver-neutral compiled form: what a driver renders into its native
- * artifact format (agent definitions, instructions, hooks) via emitArtifacts().
+ * A role in driver-neutral compiled form: the instructions a person wrote for
+ * one seat, which a driver renders into its CLI's native form on the
+ * invocation (D-A-RC-03).
  *
- * The contract spec references this type without defining it. The compiler
- * package (M2) will produce it; it is declared here because drivers consume it,
- * so the compiler depends on core and not the reverse. Capability grants
- * (tools, network, writable paths) are deliberately absent: they arrive from
- * policy through TaskRequest, so there is exactly one source of truth for what
- * a role may do (I4). The compiler unit may add fields; additions are
- * non-breaking.
+ * The compiler package produces it from the roles directory; it is declared
+ * here because drivers consume it, so the compiler depends on core and not the
+ * reverse. Capability grants (tools, network, writable paths, tier, budget)
+ * are deliberately absent: they arrive from policy through TaskRequest, so
+ * there is exactly one source of truth for what a role may do (I4). A role is
+ * instructions and nothing else.
  */
 export interface CompiledRole {
-  role: RoleId;
-  instructions: string;
+  readonly role: RoleId;
+  readonly instructions: string;
+  /**
+   * The role's version: the SHA-256, lowercase hex, of the role file's bytes
+   * as the runtime read them. Computed by the runtime, never reported (I2).
+   * `instructions` is those bytes decoded with nothing stripped, so encoding
+   * it as UTF-8 again gives the bytes this hashes.
+   */
+  readonly sha256: string;
 }
 
 export interface Driver {
@@ -149,7 +161,8 @@ export interface Driver {
    */
   relayRequest(): Omit<RelaySpec, 'budget'> | null;
   runTask(req: TaskRequest): Promise<TaskResult>;
-  spawnSubagent?(role: RoleId, req: TaskRequest): Promise<TaskResult>;
+  /** Runs `role` as a child task under `req`'s grants: the role replaces `req.role`, and nothing else does. */
+  spawnSubagent?(role: CompiledRole, req: TaskRequest): Promise<TaskResult>;
   steer?(taskId: TaskId, message: string): Promise<void>;   // runtime-only; never a human channel
   cancel(taskId: TaskId): Promise<void>;
   emitArtifacts(roles: CompiledRole[], targetDir: string): Promise<void>;

@@ -28,6 +28,8 @@ export interface ApiServerOptions {
   readonly principal: string;
   /** The `policy.yaml` every run is admitted under. */
   readonly policyFile: string;
+  /** The roles directory every run's seats are compiled from at admission, read again for each run (D-A-RC-01). */
+  readonly rolesDirectory: string;
 }
 
 export interface ApiServer {
@@ -250,7 +252,7 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const policy = await loadPolicyFile(options.policyFile);
     if (!policy.ok) throw new HttpError(422, 'refused', `the server's policy file is refused: ${policy.message}`, policy);
     const runId = randomUUID() as RunId;
-    const admission = await admitRun({ runId, ...body, policy: policy.policy, components });
+    const admission = await admitRun({ runId, ...body, policy: policy.policy, roles: options.rolesDirectory, components });
     if (!admission.ok) throw new HttpError(refusalStatus(admission), 'refused', `run refused: ${admission.reason}`, admission);
     const { admitted } = admission;
     drive(runId, (hooks) => admitted.drive(hooks));

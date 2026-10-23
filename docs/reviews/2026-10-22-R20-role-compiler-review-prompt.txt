@@ -1,0 +1,148 @@
+The code under review is in the file
+`2026-10-22-R20-role-compiler-review-bundle.txt` (SHA-256 8470141b619068de2278340de754e03f0ed70ca02474a9a9af7e2aef69598587) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the role compiler of a TypeScript project, and the changes
+that carry its output through run admission, the run's records, and a model
+driver. You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project is a runtime that carries work from a spec to merged code through
+fixed stations, with model agents seated at some of them (a builder, a
+reviewer). This change gives each seat instructions a person wrote: one
+Markdown file per role in a directory on the host, compiled into a role with
+the SHA-256 of its bytes (packages/compiler). Run admission compiles the
+directory, refuses a run whose roles are broken or missing, and pins every
+compiled role in the run's write-once admission record. The line then hands
+each seat its pinned role, records the role's id and hash on every model call's
+usage record, and the Claude Code driver renders the role on the CLI's command
+line as the agent the session runs as. What a role may do (tools, network,
+writable paths, model tier, budget) is not in the role at all; it comes from a
+separate policy.
+
+It must hold against a capable, motivated party trying to change the
+instructions an agent runs under, or the version a run records, without a
+person editing the role file before the run was admitted. Assume no deceptive
+intent — only that the easiest path gets taken.
+
+That party is the agent being run, and controls everything it can write: the
+files in its workspace (a copy of the repository the run was admitted from),
+what its model session returns, and, through a change that is later merged,
+the repository future runs are admitted from. A person, not that party,
+controls the roles directory, the policy file, and the host configuration. The
+party does not control the components the runtime is wired with — the Vault,
+the sandbox provider, and the drivers are runtime-selected and trusted, even
+where a function takes one as an argument — and it does not control code
+running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault (the runtime's store of records and locked
+  artifacts), at any level, in any role. Role instructions are Vault-class: no
+  agent may edit its own instructions or another's.
+- The runtime derives status and records; the model never reports them. The
+  role version a call ran under is computed by the runtime, never taken from
+  anything a driver or model returned.
+- An agent may not be judged by an artifact it can write, and must not be able
+  to rewrite what instructs it.
+- Default deny: a capability not granted in policy is unavailable. A role must
+  never become a second source of grants.
+- Fail closed: a missing or malformed role, an unreadable directory, or a seat
+  with no role is a refusal, never a skip, a truncation, or a fallback to the
+  CLI's default prompt.
+- Event payloads (text from triggers outside the system) are data, never
+  instructions, and never reach a role.
+
+The mechanisms that matter most:
+
+- compileRoles: which directory entries it accepts and how it reads them
+  (links, non-regular files, names, the byte cap, UTF-8, empty files, a file
+  swapped between listing and opening), and what the hash covers.
+- Admission: where the roles directory may lie relative to the workspace and
+  the workspace store, which roles a run must have, and what the admission
+  record pins; and resume, which reads roles only from that record.
+- The line: which role each seat receives (the review seat always runs as
+  `reviewer`, with its own task's grants), and the role id and hash written on
+  every usage record.
+- The Claude Code driver: how the role reaches the CLI (`--agents` and
+  `--agent` on the argv), what the agent definition can carry, and the refusal
+  of a session that did not load the role.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The roles for R19's drafters and critics, which are R19's; R5's planner role;
+R11's proposals to roles; an API, CLI, or approval flow for editing a role,
+which is a person's edit to a file as policy is; rates keyed by role version
+(R11); a review seat with its own policy scope (R9); any change to what
+`emitArtifacts` does; and the Codex driver's rendering, which is that driver's.
+
+Known limits, stated by the unit: the compiler cannot tell what a role says. A
+person who pastes acceptance criteria or a rubric into a role file puts judging
+content in front of the agent it judges; the compiler keeps every untrusted and
+judging input out by construction, not by reading the text. A role edit between
+runs is recorded by hash and reviewed by nobody in the line, as a policy edit
+is today. How well a role's instructions work is not measured.
+
+The identifiers R5, R9, R11, and R19 name later units of work; they mean
+nothing more here than "a later change owns this". Absent work listed above is
+not a defect.
+
+THE QUESTION
+
+How would an agent run by this system get a later step of its own run, or a
+later run, to execute under instructions other than the role file a person
+wrote and the run was admitted with — or get the run's records to name a role
+version other than the one that actually ran — or gain a capability through a
+role rather than through policy?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

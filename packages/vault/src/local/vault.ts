@@ -216,6 +216,31 @@ const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens
 const EXHAUSTED = new Set(['none', 'tokens', 'cost', 'unreadable']);
 
 /** Why a usage record is not one the runtime collected, or `undefined` when it is. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Why `roles` is not the compiled role set an admission pins, or undefined.
+ * Each role's hash is checked against its instructions, which the compiler
+ * keeps byte for byte, so a record cannot pin one version and carry another's
+ * text (D-A-RC-01).
+ */
+function rolesProblem(roles: unknown): string | undefined {
+  if (!Array.isArray(roles)) return 'it carries no compiled roles';
+  const seen = new Set<string>();
+  for (const role of roles as unknown[]) {
+    if (!isRecord(role) || !hasString(role, 'role') || role.role === '' || !hasString(role, 'instructions') || typeof role.sha256 !== 'string') {
+      return 'a role carries no id, instructions, and hash';
+    }
+    const { role: id, instructions, sha256 } = role as { role: string; instructions: string; sha256: string };
+    if (seen.has(id)) return `role ${id} is listed twice`;
+    seen.add(id);
+    if (createHash('sha256').update(instructions, 'utf8').digest('hex') !== sha256) {
+      return `role ${id}'s hash is not the hash of its instructions`;
+    }
+  }
+  return undefined;
+}
+
 function usageProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId') || !hasString(r, 'station')) return 'it names no run, task, and station';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
@@ -223,6 +248,10 @@ function usageProblem(r: unknown): string | undefined {
   const model = r.model;
   if (!isRecord(model) || !hasString(model, 'provider') || !hasString(model, 'family') || !hasString(model, 'model') || model.family === '' || model.model === '') {
     return 'it names no model the call ran on (A-I1a-01)';
+  }
+  const role = r.role;
+  if (!isRecord(role) || !hasString(role, 'id') || role.id === '' || typeof role.sha256 !== 'string' || !SHA256_HEX.test(role.sha256)) {
+    return 'it names no role and version the call ran under (D-A-RC-04)';
   }
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
@@ -547,6 +576,13 @@ export class LocalVault implements Vault {
     if (!isRecord(a) || !isRecord(a.run) || typeof a.run.id !== 'string') {
       throw new Error('LocalVault: an admission record must carry the run it admits');
     }
+    // A stack not written at admission cannot be backfilled, so a record without one is refused (R18).
+    if (typeof (a.stack as unknown) !== 'string' || a.stack === '') {
+      throw new Error(`LocalVault: the admission record of run ${a.run.id} names no stack; nothing was stored`);
+    }
+    // The roles a run's seats run under cannot be supplied later, so a record without them is refused (D-A-RC-01).
+    const roles = rolesProblem(a.roles);
+    if (roles !== undefined) throw new Error(`LocalVault: the admission record of run ${a.run.id} does not pin its roles: ${roles}; nothing was stored`);
     const runId = a.run.id;
     const bytes = encode(a);
     if (!(await createExclusive(join(runDir(this.#store, runId), ADMISSION_FILE), bytes))) {

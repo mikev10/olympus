@@ -49,6 +49,12 @@ export interface RunRecords {
   readonly ending: RunEnding;
   /** Null for a run refused at admission, which has no admission record. */
   readonly requestedLevel: AutonomyLevel | null;
+  /**
+   * The stack admission recorded (R18). Null where no record names one: a run
+   * refused at admission, which has no admission record, or one admitted before
+   * R18. Keyed `unrecorded`, never guessed.
+   */
+  readonly stack: string | null;
   /** Admission time; for a run refused at admission, the refusal's. Null where neither exists. */
   readonly startedAt: string | null;
   /** GitHub's merge time (A-R2-01); null unless merged. */
@@ -79,6 +85,8 @@ export interface Outcomes {
     /** Keyed by the task's one model, or `escalated` where its calls ran on more than one. */
     readonly caughtFalseDoneByModel: Keyed<Proportion>;
     readonly caughtFalseDoneByLevel: Keyed<Proportion>;
+    /** Keyed by the stack admission recorded, or `unrecorded` (R18). */
+    readonly caughtFalseDoneByStack: Keyed<Proportion>;
     /** A change that passed every gate and failed later needs `observe` (R8). Never implied to be zero. */
     readonly escapedFalseDone: 'not-established';
   };
@@ -86,9 +94,11 @@ export interface Outcomes {
     /** Merged runs that spent no approval, over admitted runs that finished. Per run: approvals are granted per station exit. */
     readonly autonomyRatio: Proportion;
     readonly autonomyRatioByLevel: Keyed<Proportion>;
+    readonly autonomyRatioByStack: Keyed<Proportion>;
     readonly firstPassYieldByStation: Keyed<Proportion>;
     /** Keyed by the model of each task's first call. */
     readonly firstPassYieldByModel: Keyed<Proportion>;
+    readonly firstPassYieldByStack: Keyed<Proportion>;
     /** The product of the per-station yields; null when any station has no sample. */
     readonly rolledYield: number | null;
     readonly iterationsToGreen: Distribution;
@@ -124,11 +134,23 @@ export type CostPerMerge =
 export const NOT_MEASURED: readonly string[] = [
   'escaped false-done: needs post-merge observation (R8)',
   "the team's own baseline: attributed by R8",
-  'stack: no run record names one (R18)',
   'role per call: read from the station, review being the reviewer',
 ];
 
 const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
+
+/** The key a run's stack is kept under: the recorded stack, or `unrecorded` where no record names one (R18). */
+export const UNRECORDED_STACK = 'unrecorded';
+
+function stackKey(run: RunRecords): string {
+  return run.stack ?? UNRECORDED_STACK;
+}
+
+/** The stack an admission record names, or null for one written before R18. Read from a record, so its type is not trusted. */
+function recordedStack(admission: AdmissionRecord): string | null {
+  const stack: unknown = (admission as Partial<AdmissionRecord>).stack;
+  return typeof stack === 'string' && stack !== '' ? stack : null;
+}
 
 /** The model as one key: provider, family, and model, so two families never share a row (I6). */
 export function modelKey(m: ModelIdentity): string {
@@ -156,6 +178,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       runId,
       ending: refusal === undefined ? 'unfinished' : 'refused',
       requestedLevel: null,
+      stack: null,
       startedAt: refusal?.decidedAt ?? null,
       mergedAt: null,
       approvalsSpent: 0,
@@ -213,6 +236,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     runId,
     ending,
     requestedLevel: admission.run.requestedLevel,
+    stack: recordedStack(admission),
     startedAt: admission.run.createdAt,
     mergedAt: merged?.kind === 'merged' ? merged.mergedAt : null,
     // The drive merges before it spends the integrate grant (D-I1b-01), so on a merged run that grant
@@ -271,6 +295,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const fdStation = new Tally();
   const fdModel = new Tally();
   const fdLevel = new Tally();
+  const fdStack = new Tally();
   for (const run of runs) {
     for (const task of run.tasks) {
       const model = task.models.length > 1 ? 'escalated' : (task.models[0] ?? 'no-call');
@@ -281,6 +306,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
         fdStation.add(task.station ?? 'no-call', bad);
         fdModel.add(model, bad);
         fdLevel.add(`L${String(run.requestedLevel)}`, bad);
+        fdStack.add(stackKey(run), bad);
       }
     }
   }
@@ -289,10 +315,15 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const finished = runs.filter((r) => r.ending !== 'refused' && r.ending !== 'unfinished');
   const autonomous = (r: RunRecords): boolean => r.ending === 'merged' && r.approvalsSpent === 0;
   const byLevel = new Tally();
-  for (const r of finished) byLevel.add(`L${String(r.requestedLevel)}`, autonomous(r));
+  const byStack = new Tally();
+  for (const r of finished) {
+    byLevel.add(`L${String(r.requestedLevel)}`, autonomous(r));
+    byStack.add(stackKey(r), autonomous(r));
+  }
 
   const fpStation = new Tally();
   const fpModel = new Tally();
+  const fpStack = new Tally();
   const toGreen: number[] = [];
   const perTask: number[] = [];
   for (const run of runs) {
@@ -301,6 +332,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       if (first === undefined) continue;
       fpStation.add(task.station ?? 'no-call', first.outcome === 'passed');
       fpModel.add(task.firstModel ?? 'no-call', first.outcome === 'passed');
+      fpStack.add(stackKey(run), first.outcome === 'passed');
       perTask.push(task.attempts.length);
       if (task.status === 'passed') toGreen.push(task.iterations);
     }
@@ -360,13 +392,16 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       caughtFalseDoneByStation: fdStation.rates(failureRate),
       caughtFalseDoneByModel: fdModel.rates(failureRate),
       caughtFalseDoneByLevel: fdLevel.rates(failureRate),
+      caughtFalseDoneByStack: fdStack.rates(failureRate),
       escapedFalseDone: 'not-established',
     },
     throughput: {
       autonomyRatio: successRate(finished.filter(autonomous).length, finished.length),
       autonomyRatioByLevel: byLevel.rates(successRate),
+      autonomyRatioByStack: byStack.rates(successRate),
       firstPassYieldByStation: yields,
       firstPassYieldByModel: fpModel.rates(successRate),
+      firstPassYieldByStack: fpStack.rates(successRate),
       rolledYield,
       iterationsToGreen: distribution(toGreen),
       attemptsPerTask: distribution(perTask),

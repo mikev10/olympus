@@ -67,10 +67,12 @@ import type {
   RunCancellation,
   ApprovalGrant,
   ApprovalKey,
+  CompiledRole,
   ContextGrant,
   Driver,
   FailedCheck,
   ModelIdentity,
+  ParkCause,
   Policy,
   RoleId,
   Run,
@@ -123,6 +125,8 @@ import {
 export interface LineContext {
   readonly run: Run;
   readonly policy: Policy;
+  /** Every role as admission compiled and pinned it; the only source of a seat's instructions (D-A-RC-01). */
+  readonly roles: readonly CompiledRole[];
   readonly artifacts: AdmissionRecord['artifacts'];
   readonly graph: TaskGraph;
   readonly checks: readonly CheckSpec[];
@@ -144,6 +148,9 @@ export interface LineContext {
 }
 
 const engine = new StrictPolicyEngine();
+
+/** The role every review seat runs under, whatever role its task names (D-A-RC-06). */
+export const REVIEWER_ROLE = 'reviewer' as RoleId;
 
 const NO_ESCALATIONS = { protectedPathsTouched: [], tamperFindings: [] } as const;
 
@@ -274,8 +281,13 @@ function parksRecorded(ctx: LineContext): Set<TaskId> {
  * status is committed: committed state never holds a park its record lacks,
  * and a stop between the two leaves a record of a park that did not take
  * effect, never the reverse (D-P14-07; external review of P14, codex-2).
+ * The cause is the caller's, committed with the park, because the counts
+ * cannot always tell one exhaustion from another and a resume reads the park
+ * back from committed state (A-R4-05).
  */
-async function park(ctx: LineContext, task: Task, change: StateChange): Promise<StationRefusal> {
+async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
+  const spent = parking.attempts !== undefined && Object.hasOwn(parking.attempts, task.id) ? parking.attempts[task.id] : undefined;
+  const change: StateChange = { ...parking, attempts: { ...parking.attempts, [task.id]: { ...(spent ?? attemptsOf(ctx.state, task)), parkedFor: cause } } };
   const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
@@ -556,7 +568,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
     ? { ...spent, starts: spent.starts + 1 }
     : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1, conflicts: spent.conflicts };
   if (attempt.starts > maxStarts(contract, spent.conflicts.length)) {
-    return park(ctx, task, { attempts: { [task.id]: spent } });
+    return park(ctx, task, { attempts: { [task.id]: spent } }, 'starts-exhausted');
   }
   // An escalation is a decision, recorded before the attempt that carries it is committed, as a park
   // is: a stop between the two leaves a record of an escalation that did not take effect, and the
@@ -584,7 +596,7 @@ async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal 
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
   if (spent.retries + 1 > contract.retry.max) {
-    return park(ctx, task, { attempts });
+    return park(ctx, task, { attempts }, 'retries-exhausted');
   }
   await commit(ctx, { attempts });
   await new Promise((done) => setTimeout(done, contract.retry.backoffMs));
@@ -693,7 +705,7 @@ function scopeFor(ctx: LineContext, task: Task) {
  * it (I5, D-P13-15).
  */
 async function runTask(
-  ctx: LineContext, task: Task, driver: Driver, context: string, workspace: string,
+  ctx: LineContext, task: Task, driver: Driver, role: CompiledRole, context: string, workspace: string,
 ): Promise<{ ok: true; result: TaskResult } | { ok: false; error: unknown }> {
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
@@ -718,7 +730,7 @@ async function runTask(
   }
   // The call is recorded before it is made: a process stop during it leaves this record and nothing after it, and a resume finds it (D-I1a-12).
   try {
-    await recordPending(ctx, task, model);
+    await recordPending(ctx, task, model, role);
   } catch (error) {
     await sandbox.destroy(handle).catch(() => undefined);
     throw error;
@@ -727,7 +739,7 @@ async function runTask(
   try {
     const request: TaskRequest = {
       taskId: task.id,
-      role: task.role,
+      role,
       stablePrefix: context,
       variableSuffix: task.id,
       tier,
@@ -747,7 +759,7 @@ async function runTask(
     teardown = await sandbox.destroy(handle);
   } catch (error) {
     // The call was made and what it cost is unknown: recorded as lost before the run stops, so a resume finds it and refuses (D-P13-20).
-    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model);
+    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model, role);
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
       { cause: error },
@@ -756,7 +768,7 @@ async function runTask(
   const site = { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station };
   await recordEgress(site, teardown.egress);
   const { meter } = teardown;
-  const usage = await recordUsage(ctx, task, meter, model);
+  const usage = await recordUsage(ctx, task, meter, model, role);
   // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
@@ -780,8 +792,8 @@ export function boundTo(meter: RelayMeter, model: string): RelayMeter {
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
-async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): Promise<VaultRef> {
-  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model));
+async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole): Promise<VaultRef> {
+  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model, role));
   await commit(ctx, { usage: ref });
   return ref;
 }
@@ -791,20 +803,33 @@ async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, 
  * Vault lists it by run (A-I1a-05), and a state a resume can start from never
  * holds a call that has not begun (D-I1a-12).
  */
-async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity): Promise<void> {
-  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model));
+async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity, role: CompiledRole): Promise<void> {
+  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model, role));
 }
 
-function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity): UsageRecord {
+function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole): UsageRecord {
   return {
     runId: ctx.run.id,
     taskId: task.id,
     station: ctx.state.station,
     attempt: attemptsOf(ctx.state, task).starts,
     model,
+    // The version the run was admitted with, beside the model, from the record the runtime pinned (D-A-RC-04).
+    role: { id: role.role, sha256: role.sha256 },
     reading,
     collectedBy: 'runtime',
   };
+}
+
+/**
+ * The role `id` as admission pinned it. Admission refused a graph naming a
+ * role it did not compile, and a run with no `reviewer`, so a seat with
+ * none is a fault, never a reason to run under the CLI's own prompt (I5).
+ */
+function pinnedRole(ctx: LineContext, id: RoleId): CompiledRole {
+  const role = ctx.roles.find((r) => r.role === id);
+  if (role === undefined) throw new Error(`line: role ${id} was not pinned at admission, so its seat has no instructions to run under`);
+  return role;
 }
 
 function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
@@ -1019,7 +1044,7 @@ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConfli
   );
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, conflicts: [...spent.conflicts, conflict] } };
-  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts });
+  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts }, 'conflicts-exhausted');
   await commit(ctx, { tasks: { [task.id]: 'pending' }, attempts });
   return undefined;
 }
@@ -1052,7 +1077,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
     'acceptance-tests': tests.text,
     'task-graph': JSON.stringify(ctx.graph.tasks.map(({ id, station, role, dependsOn }) => ({ id, station, role, dependsOn }))),
   };
-  const ran = await runTask(ctx, task, driver, joinParts(grantedContext(STATION_CONTRACTS.build, offered)), work);
+  const ran = await runTask(ctx, task, driver, pinnedRole(ctx, task.role), joinParts(grantedContext(STATION_CONTRACTS.build, offered)), work);
   if (!ran.ok) return spendRetry(ctx, task);
   // I2: a result is recorded only as the contract shapes it. A key it does not name, `status`
   // among them, is a driver speaking outside the contract; it is not recorded, and the run stops.
@@ -1322,7 +1347,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
     );
   }
   // The station machine returns this park to the line on its next step; it is recorded here, first.
-  if (status === 'parked') await park(ctx, task, { evidence: ref });
+  if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');
   else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
   return undefined;
 }
@@ -1418,7 +1443,8 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
     plan: JSON.stringify(ctx.graph.tasks),
   };
-  const ran = await runTask(ctx, task, reviewer, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
+  // The seat's instructions are the `reviewer` role's; its grants stay its task's scope (D-A-RC-06).
+  const ran = await runTask(ctx, task, reviewer, pinnedRole(ctx, REVIEWER_ROLE), joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
   if (!ran.ok) return spendRetry(ctx, task);
   // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
   const problems = taskResultProblems(ran.result);

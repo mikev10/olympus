@@ -18,6 +18,7 @@ import {
   allowedHosts,
   DockerUnavailable,
   LocalDockerProvider,
+  proxyNames,
   SandboxRefusal,
   type SandboxHandle,
   type SandboxSpec,
@@ -235,10 +236,17 @@ describe('egress', () => {
     const controls = provider.appliedControls(handle);
     // The union makes this the whole of it: `deny-all` has no proxy field to read.
     expect(controls.egress).toStrictEqual({ mode: 'deny-all', network: 'none' });
-    const networks = await run('docker', ['network', 'ls', '--format', '{{.Name}}']);
-    expect(networks.stdout).not.toContain('egress-in-');
-    const containers = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
-    expect(containers.stdout).not.toContain('egress-proxy-');
+    // Checked by the names this sandbox's id gives its proxy, not by every egress object on the
+    // daemon: another suite's allowlisted sandbox running at the same time is not this one's (#56).
+    const { stdout: name } = await run('docker', ['inspect', '--format', '{{.Name}}', controls.containerId]);
+    const id = /^\/?sandbox-(.+)$/.exec(name.trim())?.[1];
+    expect(id).toBeDefined();
+    const names = proxyNames(id ?? '');
+    const networks = (await run('docker', ['network', 'ls', '--format', '{{.Name}}'])).stdout.trim().split(/\s+/);
+    expect(networks).not.toContain(names.internal);
+    expect(networks).not.toContain(names.outbound);
+    const containers = (await run('docker', ['ps', '--all', '--format', '{{.Names}}'])).stdout.trim().split(/\s+/);
+    expect(containers).not.toContain(names.container);
   });
 
   test('an empty allow list under an allowlist is refused, as neither deny-all nor allow-all', async () => {

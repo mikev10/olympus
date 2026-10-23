@@ -1,0 +1,2705 @@
+BASE: 7f3fe7a
+HEAD: f41f5a5
+
+=== COMMITS ===
+f41f5a5 R18: Stack recorded per run
+141f4b2 amend: a park records its cause (A-R4-05) (#57)
+b4b279b docs: bring the README up to date with M1 and the started M2 (#52)
+
+=== CHANGED ===
+ .changeset/park-records-its-cause.md             |  6 ++
+ .changeset/r18-stack-per-run.md                  |  7 +++
+ .changeset/sandbox-deny-all-test-own-names.md    |  5 ++
+ README.md                                        | 53 +++++++++++------
+ docs/decisions.md                                | 50 ++++++++++++++++
+ docs/plan/DECOMPOSITION.md                       | 61 ++++++++++++++++++++
+ docs/plan/R2-outcomes.md                         |  6 +-
+ packages/api/src/line.ts                         | 16 ++++--
+ packages/api/src/outcomes.ts                     | 39 ++++++++++++-
+ packages/api/src/run.ts                          | 11 ++--
+ packages/api/test/line.test.ts                   | 27 ++++++++-
+ packages/api/test/outcomes.test.ts               | 51 ++++++++++++++++-
+ packages/conformance/src/registry/i2.ts          |  3 +
+ packages/conformance/src/registry/local-vault.ts |  2 +-
+ packages/conformance/src/registry/outcomes.ts    | 72 ++++++++++++++++++++++++
+ packages/core/src/run/types.ts                   | 10 +++-
+ packages/core/src/station/machine.ts             | 20 +++++--
+ packages/core/test/station-machine.test.ts       | 17 ++++++
+ packages/sandbox/test/local.test.ts              | 16 ++++--
+ packages/vault/src/local/vault.ts                |  4 ++
+ packages/vault/src/stub/vault.ts                 |  3 +
+ packages/vault/src/types.ts                      |  7 +++
+ packages/vault/test/local.test.ts                |  9 +++
+ 23 files changed, 447 insertions(+), 48 deletions(-)
+
+
+===== .changeset/park-records-its-cause.md =====
+---
+"@olympus-ai/core": minor
+"@olympus-ai/api": patch
+---
+
+A park records its cause. `TaskAttempts` gains an optional `parkedFor`, written by every park in the commit that parks the task, and `parkRefusal` returns it, so a task whose last iteration was replayed to the start bound is recorded as `starts-exhausted` rather than as a gate that failed on every iteration, on the first record and on every resume (A-R4-05, #47). A park committed without one is read from its counts as before.
+
+===== .changeset/r18-stack-per-run.md =====
+---
+"@olympus-ai/vault": minor
+"@olympus-ai/api": minor
+"@olympus-ai/conformance": minor
+---
+
+The admission record names the stack (R18, A-R18-01). `AdmissionRecord` gains `stack`, the `AdapterSet.stack` admission detected on the base, read from the same detection as the unavailable controls; the local and stub Vaults refuse an admission record without one. `RunRecords` gains `stack`, null where no record names one, and `outcomes` adds `caughtFalseDoneByStack`, `autonomyRatioByStack`, and `firstPassYieldByStack`, a run with no recorded stack keyed `unrecorded`. Resume still reads a record written before R18. `I2.admission-records-the-detected-stack` asserts it.
+
+===== .changeset/sandbox-deny-all-test-own-names.md =====
+---
+"@olympus-ai/sandbox": patch
+---
+
+The deny-all test checks this sandbox's own proxy names rather than every egress network and proxy on the Docker host, so another suite's allowlisted sandbox running at the same time no longer fails it (#56). Test only.
+
+===== README.md =====
+diff --git a/README.md b/README.md
+index ea927e2..9abb611 100644
+--- a/README.md
++++ b/README.md
+@@ -17,8 +17,8 @@ autonomous work is real, so that a false-done failure is caught at the gate
+ rather than reported as done: the runtime derives what happened from checks it
+ ran itself, and a model's own account of its work is stored as a claim beside
+ the evidence, never as the verdict. That it *measurably reduces* false-done
+-failures is not asserted until outcome measurement (R2) derives the rate from
+-finished runs.
++failures is not asserted. Outcome measurement (R2) derives the rate from
++finished runs, and the claim waits for that number from real runs.
+ 
+ The two are kept apart on purpose. The runtime is designed for the mission and
+ only the claim is asserted. Olympus does not claim lights-off autonomy. Every
+@@ -37,38 +37,39 @@ Nothing in this repository depends on it, and no capability here is gated by
+ it.
+ 
+ ## Status
+ 
+-| Unit | What it delivered | State |
+-|---|---|---|
+-| F2 | The type contracts for every package: runs, tasks, the driver contract, policy, stations, the Vault, integrity checks, the sandbox mount table, the trigger envelope, stack adapters. Types only. | done |
+-| F3 | The conformance kit, the invariant registry, this contribution surface, and CI. | done |
+-| S1 | A walking skeleton: stub driver, in-memory Vault, three stations, one task reaching a gate verdict. | next |
++**M1 is complete.** The line runs end to end, from `intake` through
++`integrate`: real sandboxes, a locked Vault, the Claude Code driver, verified
++evidence, tamper detection, cost bounds, an enforcement record, and a merge
++that is gated by all of them. `observe` and `learn` are not entered yet.
+ 
+-There is no runtime implementation yet. The contracts and the assertions
+-that protect them exist so that the implementation can be built in parallel,
+-one package at a time, by people who have not seen the rest.
++**M2 is in progress.** Readiness (R1), outcome measurement (R2), model tier per
++station (R14), acceptance checks on the base before build (R15), and security
++at the gate (R17) have shipped. The current unit and everything after it are
++listed in [docs/plan/DECOMPOSITION.md](docs/plan/DECOMPOSITION.md), which is
++the source of truth for what is done and what is next.
+ 
+ ## How the line works
+ 
+ Work moves through ten stations, in order:
+ 
+ | # | Station | What happens |
+ |---|---|---|
+ | 1 | `intake` | A trigger enters. The payload is data inside an envelope; it selects a pre-declared template and supplies parameters only. |
+ | 2 | `spec` | One shippable capability is written and locked. |
+ | 3 | `test-design` | A black-box acceptance oracle is written against the spec and locked. |
+ | 4 | `plan` | A task graph is emitted. |
+ | 5 | `build` | Tasks run in sandboxes. Agents write only to their workspace. |
+ | 6 | `verify` | The runtime runs the pinned checks in a fresh sandbox and collects evidence. |
+ | 7 | `review` | Reviewers that never share the author's model family. |
+ | 8 | `integrate` | Merge, gated by evidence and integrity. |
+-| 9 | `observe` | Post-merge signals. |
+-| 10 | `learn` | What the next run should do differently. |
++| 9 | `observe` | Post-merge signals. Not entered yet (R8). |
++| 10 | `learn` | What the next run should do differently. Not entered yet (R11). |
+ 
+ Four autonomy levels bound how far a run may advance without a person:
+ `L0` manual, `L1` supervised, `L2` delegated, `L3` autonomous. The effective
+-level is the minimum of what the run asked for, the station's cap, and the
+-global cap. Asking for more than policy allows is refused, never quietly
++cap is the tightest of the global cap, the station's cap, and the role's own
++ceiling. Asking for more than policy allows is refused, never quietly
+ lowered.
+ 
+ Two places hold state. The **Vault** is the runtime-only store for everything
+@@ -107,12 +108,14 @@ against.
+ ```
+ packages/
+   core/         runs, tasks, the driver contract, policy, stations
+   vault/        locked artifacts, evidence bundles, run state
+   integrity/    checks, results, tamper analysis, violations
+   sandbox/      the mount table and the sandbox provider contract
+   triggers/     the untrusted-input envelope
+   adapters/     per-stack test, coverage, mutation, behavioral hooks
+-  api/          the entry point: startRun, the line, and the unsafe declarations
++  readiness/    the autonomy ceiling a repository supports, from probes that ran
++  api/          the runtime as a service: the line, the HTTP API, factory-host
++  cli/          the command line, a client of the HTTP API and nothing more
+   conformance/  the kit that proves invariants, and the registry
+   drivers/
+     claude-code/  the Claude Code CLI, run inside a provisioned sandbox
+@@ -127,8 +130,10 @@ a sibling's `src/`. `core` is the root of the graph.
+ 
+ ## Getting started
+ 
+-Requires Node 22 or later and pnpm 12 (the `packageManager` field pins the
+-exact version).
++Requires Node 22 or later, pnpm 12 (the `packageManager` field pins the
++exact version), and a Docker daemon. Without Docker the suites fail rather
++than skip: the Vault boundary is enforced where the sandbox is mounted, and
++there is no way to observe that without a container.
+ 
+ ```
+ pnpm install
+@@ -138,7 +143,19 @@ pnpm test          # every package's tests
+ pnpm conformance   # the invariant registry and its report
+ ```
+ 
+-CI runs the same four commands on every push and pull request to `v2`.
++CI runs these four on every push and pull request to `v2`, along with the
++maintainer tooling's own typecheck and tests. On a pull request, the tests
++that call a paid model run only once a maintainer applies the `run-driver`
++label, and the registry fails until they have run for that tree. A push
++reuses the report of an earlier run of the same tree.
++
++The runtime runs as a service. The `factory-host` executable
++(`packages/api/src/host/main.ts`) serves the HTTP API and is configured only
++from its environment; its header lists every variable, and a missing one
++stops it before it listens. The `olympus-ai` command line talks to it with
++`create`, `status`, `approve`, `cancel`, `events`, `report`, and `outcomes`,
++given `--url` and `--token` (or `FACTORY_API_URL` and `FACTORY_API_TOKEN`).
++Neither is published as a package yet.
+ 
+ ## Contributing
+ 
+
+===== packages/api/src/line.ts =====
+diff --git a/packages/api/src/line.ts b/packages/api/src/line.ts
+index 32b4d58..21a52b7 100644
+--- a/packages/api/src/line.ts
++++ b/packages/api/src/line.ts
+@@ -49,43 +49,44 @@ import {
+   capabilityRefusal,
+   escalationAt,
+   gatedIterations,
+   grantedContext,
+   locksHeldLeaving,
+   M1_STATIONS,
+   maxStarts,
+   nextStep,
+   parkRefusal,
+   seatReviewer,
+   STATION_CONTRACTS,
+   StrictPolicyEngine,
+   tierFor,
+   transition,
+   type StepLimits,
+ } from '@olympus-ai/core';
+ import type {
+   AgentClaim,
+   RunCancellation,
+   ApprovalGrant,
+   ApprovalKey,
+   ContextGrant,
+   Driver,
+   FailedCheck,
+   ModelIdentity,
++  ParkCause,
+   Policy,
+   RoleId,
+   Run,
+   RunId,
+   RunState,
+   StationId,
+   StationRefusal,
+   TamperedPath,
+   Task,
+   TaskAttempts,
+   TaskConflict,
+   TaskGraph,
+   TaskId,
+   TaskRequest,
+   TaskResult,
+   TaskStatus,
+   VaultRef,
+ } from '@olympus-ai/core';
+@@ -263,27 +264,32 @@ const PARKS_RECORDED = new WeakMap<LineContext, Set<TaskId>>();
+ function parksRecorded(ctx: LineContext): Set<TaskId> {
+   let parks = PARKS_RECORDED.get(ctx);
+   if (parks === undefined) {
+     parks = new Set();
+     PARKS_RECORDED.set(ctx, parks);
+   }
+   return parks;
+ }
+ 
+ /**
+  * Parks a task. The park is a decision, so it is recorded before the parked
+  * status is committed: committed state never holds a park its record lacks,
+  * and a stop between the two leaves a record of a park that did not take
+  * effect, never the reverse (D-P14-07; external review of P14, codex-2).
++ * The cause is the caller's, committed with the park, because the counts
++ * cannot always tell one exhaustion from another and a resume reads the park
++ * back from committed state (A-R4-05).
+  */
+-async function park(ctx: LineContext, task: Task, change: StateChange): Promise<StationRefusal> {
++async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
++  const spent = parking.attempts !== undefined && Object.hasOwn(parking.attempts, task.id) ? parking.attempts[task.id] : undefined;
++  const change: StateChange = { ...parking, attempts: { ...parking.attempts, [task.id]: { ...(spent ?? attemptsOf(ctx.state, task)), parkedFor: cause } } };
+   const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
+   await recordDecision(
+     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+     { cause: 'station-refused', decidedBy: stationDecider(refusal), refusal },
+   );
+   parksRecorded(ctx).add(task.id);
+   await commit(ctx, { ...change, tasks: { [task.id]: 'parked' } });
+   return refusal;
+ }
+ 
+ /** Every violation the line finds is written through the Vault and then recorded as its decision, pointing at it (D-P14-08). */
+@@ -543,50 +549,50 @@ function statusOf(state: RunState, task: Task): TaskStatus {
+ /**
+  * Starts an attempt at a task, counted and committed before the driver is
+  * called. A task already `running` was in flight when the run stopped: the
+  * attempt is run again, so it costs no iteration — but it is another
+  * invocation, and `starts` counts it. Past the station's invocation bound the
+  * task parks rather than being replayed into the same attempt forever
+  * (A-P4-06).
+  */
+ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const contract = STATION_CONTRACTS[ctx.state.station];
+   const spent = attemptsOf(ctx.state, task);
+   const replay = statusOf(ctx.state, task) === 'running';
+   const attempt: TaskAttempts = replay
+     ? { ...spent, starts: spent.starts + 1 }
+     : { iterations: spent.iterations + 1, retries: 0, starts: spent.starts + 1, conflicts: spent.conflicts };
+   if (attempt.starts > maxStarts(contract, spent.conflicts.length)) {
+-    return park(ctx, task, { attempts: { [task.id]: spent } });
++    return park(ctx, task, { attempts: { [task.id]: spent } }, 'starts-exhausted');
+   }
+   // An escalation is a decision, recorded before the attempt that carries it is committed, as a park
+   // is: a stop between the two leaves a record of an escalation that did not take effect, and the
+   // resume decides it again from the same counts (A-R14-02, D-P14-07). A replay is the same iteration.
+   const escalation = replay ? null : escalationAt(scopeFor(ctx, task), ctx.state.station, attempt);
+   if (escalation !== null) {
+     await recordDecision(
+       { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station },
+       { cause: 'tier-escalated', decidedBy: 'line', ...escalation },
+     );
+   }
+   await commit(ctx, {
+     tasks: { [task.id]: 'running' },
+     attempts: { [task.id]: attempt },
+   });
+   return undefined;
+ }
+ 
+ /**
+  * A driver or sandbox failure: one retry spent, committed before the next
+  * attempt. Past the station's `retry.max` the task parks and the run stops.
+  */
+ async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const contract = STATION_CONTRACTS[ctx.state.station];
+   const spent = attemptsOf(ctx.state, task);
+   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
+   if (spent.retries + 1 > contract.retry.max) {
+-    return park(ctx, task, { attempts });
++    return park(ctx, task, { attempts }, 'retries-exhausted');
+   }
+   await commit(ctx, { attempts });
+   await new Promise((done) => setTimeout(done, contract.retry.backoffMs));
+   return undefined;
+ }
+@@ -1008,20 +1014,20 @@ async function acceptedChain(ctx: LineContext): Promise<EvidenceBundle[]> {
+ /**
+  * A conflict: recorded as the line's decision before it is committed, as a
+  * park is (A-R4-03, D-P14-07), then counted on the task, which goes back to
+  * `build` to start again over the accepted tree. It is not a failed gate and
+  * raises no tier (A-R4-01). One past the policy's `maxConflictRetries` parks
+  * the task, naming the siblings and the paths, rather than picking a side (I5).
+  */
+ async function recordConflict(ctx: LineContext, task: Task, conflict: TaskConflict): Promise<StationRefusal | undefined> {
+   await recordDecision(
+     { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+     { cause: 'task-conflict', decidedBy: 'line', task: task.id, with: conflict.with, paths: conflict.paths },
+   );
+   const spent = attemptsOf(ctx.state, task);
+   const attempts = { [task.id]: { ...spent, conflicts: [...spent.conflicts, conflict] } };
+-  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts });
++  if (spent.conflicts.length + 1 > ctx.policy.concurrency.maxConflictRetries) return park(ctx, task, { attempts }, 'conflicts-exhausted');
+   await commit(ctx, { tasks: { [task.id]: 'pending' }, attempts });
+   return undefined;
+ }
+ 
+ /** `build`: one attempt at one task. The result is recorded in the Vault before the task is handed to `verify`. */
+@@ -1149,188 +1155,188 @@ async function recordFindings(ctx: LineContext, task: Task, report: TamperReport
+ /**
+  * `verify`: the task's own diff, held to the locks and the grant; then the
+  * checks, run over a tree built from base and the cumulative diff, where the
+  * agent never ran, mounted read-only with no egress. The verdict follows the
+  * check results and nothing else (I2).
+  */
+ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+   const { sandbox, vault, driver, workspaces } = ctx.components;
+   const before = await tamperedPaths(ctx);
+   if (before.length > 0) return recordTamper(ctx, 'verify', task, before, { phase: 'before-checks' });
+   const result = await readResult(ctx, task);
+ 
+   const { start, work } = attemptPaths(workspaces, ctx.run.id, task.id, attemptsOf(ctx.state, task).iterations);
+   const written = await ownDiff(start, work);
+   // D-R15-05: what the task wrote under node_modules is recorded and escalated, never carried. Every
+   // check, and the runner a suite check starts, runs over the base's dependency trees.
+   const own = written.filter((entry) => !inDependencyTree(entry.path));
+   const notCarried = [...new Set(written.filter((entry) => inDependencyTree(entry.path)).map((entry) => dependencyEntry(entry.path)))].sort();
+ 
+   // I3: the task's copy is not where the Vault checks the locks, so its diff is checked instead.
+   // A locked path in it is the tamper the Vault's own check can no longer see.
+   const admitted = new Map(admittedArtifacts(ctx).map((a) => [a.path, a.sha256]));
+   const locked = own.filter((entry) => admitted.has(entry.path));
+   if (locked.length > 0) {
+     const tampered = locked.map((entry) => ({ path: entry.path, expected: admitted.get(entry.path) ?? 'missing', actual: entry.sha256 ?? 'missing' }));
+     return recordTamper(ctx, 'verify', task, tampered, { phase: 'diff' });
+   }
+   const scope = scopeFor(ctx, task);
+   const outside = writesOutsideGrant(own, scope.writableGlobs, STATION_CONTRACTS.build.writeBoundary.workspaceGlobs);
+   if (outside.length > 0) return recordEscape(ctx, task, outside);
+ 
+   const prior = await accepted(ctx);
+   // I5: a path a sibling's accepted change touched after this task started would be overwritten by
+   // composing; the task is rebuilt over the accepted tree instead, and no side is picked (R4).
+   const conflict = await conflictOf(ctx, task, start, own, prior);
+   if (conflict !== null) return recordConflict(ctx, task, conflict);
+   const diff = await composeDiff(basePath(workspaces, ctx.run.id), prior.diff, own);
+   const diffSha256 = diffDigest(diff);
+   const tree = treePath(workspaces, ctx.run.id, diffSha256);
+   const fromTask = new Set(own.map((entry) => entry.path));
+   await materialize(workspaces, ctx.run.id, tree, diff, (path) => (fromTask.has(path) ? work : prior.tree));
+   const built = await tamperedIn(ctx, tree);
+   if (built.length > 0) return recordTamper(ctx, 'verify', task, built, { phase: 'tree' });
+   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
+   const security = ctx.checks.filter(isSecurityCheck);
+   const tamper = await analyzeTamper(prior.tree, tree, {
+     protectedPaths: ctx.policy.protectedPaths,
+     coverage: coverageReport(ctx),
+     // A security check pins no command: its scanner's arguments are the runtime's, and name no file in the tree.
+     commands: ctx.checks.filter((c) => !isSecurityCheck(c)).map((c) => commandOf(c, runner)),
+     markers: [...new Set(security.map((c) => c.kind))].map((kind) => ({ kind, markers: scannerFor(kind, ctx.components.scanners).markers })),
+   });
+ 
+   // Results stay aligned with the specs by position, never matched up by id afterwards.
+   const specs = ctx.checks;
+   const results: Array<CheckResult | undefined> = [];
+   const unstarted: UnstartedCheck[] = [];
+   // Each check gets a sandbox of its own, whose wall clock is the check's pinned timeout. A check
+   // shares no container with the one before it, so nothing an earlier check did to the container
+   // can change what a later one runs (codex-2); and a check that outruns its timeout is ended by
+   // the provider and produces no result, recorded in `unstarted` like any other (codex-7).
+   for (const [index, check] of specs.entries()) {
+     if (isSecurityCheck(check)) {
+       const scanned = await runSecurity(ctx, tree, diffSha256, index, check, task.id);
+       if (scanned.ok) results.push(scanned.result);
+       else if (scanned.at === 'provision') return spendRetry(ctx, task);
+       else {
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: scanned.reason });
+       }
+       continue;
+     }
+     const missing = await runnerMissing(check, runner, tree);
+     if (missing !== undefined) {
+       results.push(undefined);
+       unstarted.push({ checkId: check.id, reason: missing });
+       continue;
+     }
+     let handle: SandboxHandle;
+     try {
+       handle = await sandbox.provision(checkSandbox(ctx, tree, check));
+     } catch {
+       return spendRetry(ctx, task);
+     }
+     try {
+       const startedAt = new Date().toISOString();
+       try {
+         // The pinned argument vector, or a suite check's runner, exactly: no shell, no splitting (A-P6-01, D-R15-04).
+         const exec = await sandbox.exec(handle, [...commandOf(check, runner)]);
+         results.push({
+           checkId: check.id,
+           exitCode: exec.exitCode,
+           stdout: exec.stdout,
+           stderr: exec.stderr,
+           suiteCount: await suitesRun(check, runner, tree),
+           expectation: null,
+           findings: null,
+           durationMs: exec.durationMs,
+           startedAt,
+         });
+       } catch (error) {
+         // There is no exit code to record and none is invented; the bundle says why (A-P6-02).
+         results.push(undefined);
+         unstarted.push({ checkId: check.id, reason: describe(error) });
+       }
+     } finally {
+       // A check's sandbox has no route out today, and whatever its proxy decided is recorded all the same (D-P14-04).
+       const { egress } = await sandbox.destroy(handle);
+       await recordEgress({ vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station }, egress);
+     }
+   }
+   const checks = results.filter((r): r is CheckResult => r !== undefined);
+ 
+   // Evidence collected over a changed artifact is not evidence, whatever the provider claims about ro.
+   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
+   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
+ 
+   // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
+   const baseRun = await vault.readBaseRun(ctx.run.id);
+   if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
+   const baseRecord = await readRecord<BaseRunRecord>(ctx, baseRun);
+   const failed: FailedCheck[] = [];
+   specs.forEach((check, i) => {
+     // A security check is judged by its findings against the base's, never by its exit code alone (D-A-SC-02).
+     const shortfall = isSecurityCheck(check)
+       ? securityShortfall(check, results[i], baseRecord.checks.find((r) => r.checkId === check.id)?.findings ?? [], scannerFor(check.kind, ctx.components.scanners), tamper)
+       : requiredShortfall(check, results[i]);
+     if (shortfall !== undefined) failed.push(shortfall);
+   });
+   const differences = claimEvidenceDiff(result.claim, own);
+   if (differences.length > 0) {
+     // Recorded, and deliberately not entered in run state: every entry there halts the run, and a
+     // halt the claim could trigger would let the model's story decide the outcome (D-P6-03).
+     await recordViolation(ctx, {
+       runId: ctx.run.id,
+       taskId: task.id,
+       kind: 'claim-mismatch',
+       role: task.role,
+       driverProvenanceId: driver.provenanceId(),
+       contractVersion: driver.contractVersion,
+       detectedAt: new Date().toISOString(),
+       detail: { station: 'verify', claimEvidenceDiff: differences },
+     });
+   }
+   await recordFindings(ctx, task, tamper);
+   const evidence: EvidenceBundle = {
+     runId: ctx.run.id,
+     taskId: task.id,
+     baseCommit: ctx.run.baseCommit,
+     baseTreeSha256: ctx.baseTreeSha256,
+     baseRun,
+     diff,
+     diffSha256,
+     checks,
+     unstarted,
+     claim: result.claim,
+     claimEvidenceDiff: differences,
+     tamper,
+     notCarried,
+     collectedBy: 'runtime',
+     driverProvenanceId: driver.provenanceId(),
+     contractVersion: driver.contractVersion,
+   };
+   const ref = await vault.writeEvidence(evidence);
+   // The status follows the verdict and nothing else (I2). A failure with no iteration left parks the task;
+   // an iteration a conflict sent back was judged by no gate and spends none of them (D-R4-03).
+   const spent = gatedIterations(attemptsOf(ctx.state, task));
+   const status: TaskStatus = failed.length === 0 ? 'passed' : spent >= STATION_CONTRACTS[task.station].maxIterations ? 'parked' : 'failed';
+   // A failed gate is a decision, recorded before the status it sets is committed, at every iteration, so each failure is counted by its cause (R17, D-R17-06).
+   if (failed.length > 0) {
+     await recordDecision(
+       { vault, runId: ctx.run.id, taskId: task.id, station: 'verify' },
+       { cause: 'station-refused', decidedBy: 'line', refusal: { ok: false, reason: 'gate-failed', failed, message: `the gate failed on ${failed.map((f) => `${f.checkId} (${f.cause})`).join(', ')}` } },
+     );
+   }
+   // The station machine returns this park to the line on its next step; it is recorded here, first.
+-  if (status === 'parked') await park(ctx, task, { evidence: ref });
++  if (status === 'parked') await park(ctx, task, { evidence: ref }, 'iterations-exhausted');
+   else await commit(ctx, { tasks: { [task.id]: status }, evidence: ref });
+   return undefined;
+ }
+ 
+ /**
+  * The review seat's tree: the files its grants cover and nothing else. The
+  * contract grants the locked spec, the acceptance tests, and the diff, so the
+  * view holds those files as the accepted tree has them; the task graph, the
+  * manifest, and every file the diff does not carry are absent, so a reviewer
+  * with a read tool cannot open what its contract denies it (I6).
+  */
+
+===== packages/api/src/outcomes.ts =====
+diff --git a/packages/api/src/outcomes.ts b/packages/api/src/outcomes.ts
+index 71e211b..fdea1d7 100644
+--- a/packages/api/src/outcomes.ts
++++ b/packages/api/src/outcomes.ts
+@@ -46,19 +46,25 @@ export interface TaskRecord {
+ /** Everything R2 reads about one run, as the Vault holds it. */
+ export interface RunRecords {
+   readonly runId: RunId;
+   readonly ending: RunEnding;
+   /** Null for a run refused at admission, which has no admission record. */
+   readonly requestedLevel: AutonomyLevel | null;
++  /**
++   * The stack admission recorded (R18). Null where no record names one: a run
++   * refused at admission, which has no admission record, or one admitted before
++   * R18. Keyed `unrecorded`, never guessed.
++   */
++  readonly stack: string | null;
+   /** Admission time; for a run refused at admission, the refusal's. Null where neither exists. */
+   readonly startedAt: string | null;
+   /** GitHub's merge time (A-R2-01); null unless merged. */
+   readonly mergedAt: string | null;
+   readonly approvalsSpent: number;
+   readonly tasks: readonly TaskRecord[];
+   readonly decisions: readonly EnforcementDecision[];
+   readonly usage: readonly UsageRecord[];
+   /** Null for a run with no state. */
+   readonly cost: UsageTotal | null;
+ }
+ 
+ /** A window over admission time, inclusive at `from` and exclusive at `to`. */
+@@ -72,40 +78,44 @@ export type Keyed<T> = Readonly<Record<string, T>>;
+ export interface Outcomes {
+   readonly window: OutcomeWindow;
+   readonly population: Readonly<Record<RunEnding, number>> & { readonly total: number };
+   readonly safety: {
+     /** Attempts the agent ended whose verdict was not a pass, or whose claim differed from the evidence. */
+     readonly caughtFalseDone: Proportion;
+     readonly caughtFalseDoneByStation: Keyed<Proportion>;
+     /** Keyed by the task's one model, or `escalated` where its calls ran on more than one. */
+     readonly caughtFalseDoneByModel: Keyed<Proportion>;
+     readonly caughtFalseDoneByLevel: Keyed<Proportion>;
++    /** Keyed by the stack admission recorded, or `unrecorded` (R18). */
++    readonly caughtFalseDoneByStack: Keyed<Proportion>;
+     /** A change that passed every gate and failed later needs `observe` (R8). Never implied to be zero. */
+     readonly escapedFalseDone: 'not-established';
+   };
+   readonly throughput: {
+     /** Merged runs that spent no approval, over admitted runs that finished. Per run: approvals are granted per station exit. */
+     readonly autonomyRatio: Proportion;
+     readonly autonomyRatioByLevel: Keyed<Proportion>;
++    readonly autonomyRatioByStack: Keyed<Proportion>;
+     readonly firstPassYieldByStation: Keyed<Proportion>;
+     /** Keyed by the model of each task's first call. */
+     readonly firstPassYieldByModel: Keyed<Proportion>;
++    readonly firstPassYieldByStack: Keyed<Proportion>;
+     /** The product of the per-station yields; null when any station has no sample. */
+     readonly rolledYield: number | null;
+     readonly iterationsToGreen: Distribution;
+     readonly attemptsPerTask: Distribution;
+     /** Runs whose `review` exit was refused for any reason but a pending approval, over runs that seated a reviewer. */
+     readonly reviewExitRefused: Proportion;
+     readonly decisionsByCause: Keyed<number>;
+     readonly refusalsByReason: Keyed<number>;
+     readonly parksByCause: Keyed<number>;
+     /** Milliseconds from the first `approval-required` refusal of an exit to the grant that cleared it, keyed `station:level`. */
+     readonly approvalWait: Keyed<Distribution>;
+     /** Approval requests no grant has cleared yet, keyed `station:level`; counted, never folded into a wait. */
+     readonly approvalsOpen: Keyed<number>;
+     /** Milliseconds from admission to GitHub's merge time, merged runs only. */
+     readonly cycleTime: Distribution;
+     readonly costPerMergedChange: CostPerMerge;
+   };
+   /** What is not measured, said once so a reader never takes an absence for a zero. */
+   readonly notMeasured: readonly string[];
+ }
+@@ -124,12 +134,24 @@ export type CostPerMerge =
+ export const NOT_MEASURED: readonly string[] = [
+   'escaped false-done: needs post-merge observation (R8)',
+   "the team's own baseline: attributed by R8",
+-  'stack: no run record names one (R18)',
+   'role per call: read from the station, review being the reviewer',
+ ];
+ 
+ const decode = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
+ 
++/** The key a run's stack is kept under: the recorded stack, or `unrecorded` where no record names one (R18). */
++export const UNRECORDED_STACK = 'unrecorded';
++
++function stackKey(run: RunRecords): string {
++  return run.stack ?? UNRECORDED_STACK;
++}
++
++/** The stack an admission record names, or null for one written before R18. Read from a record, so its type is not trusted. */
++function recordedStack(admission: AdmissionRecord): string | null {
++  const stack: unknown = (admission as Partial<AdmissionRecord>).stack;
++  return typeof stack === 'string' && stack !== '' ? stack : null;
++}
++
+ /** The model as one key: provider, family, and model, so two families never share a row (I6). */
+ export function modelKey(m: ModelIdentity): string {
+   return `${m.provider}/${m.family}/${m.model}`;
+@@ -138,89 +160,91 @@ export function modelKey(m: ModelIdentity): string {
+ /** Reads one run's records. A run with no state is one refused at admission, or one with nothing yet. */
+ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRecords> {
+   const decisions: EnforcementDecision[] = [];
+   for (const ref of await vault.readDecisions(runId)) decisions.push(decode(await vault.read(ref)) as EnforcementDecision);
+   decisions.sort((a, b) => a.decidedAt.localeCompare(b.decidedAt));
+ 
+   // Integration before state: a merge happens only after its grant is committed, so a state read
+   // after a merge was seen holds that grant, and a merge is never paired with an older state.
+   const integration: IntegrationRecord[] = await readIntegration(vault, runId);
+ 
+   let state: RunState;
+   try {
+     state = await vault.readRunState(runId);
+   } catch (error) {
+     // Only absence is absence; a state that cannot be read is a fault, never a run with no evidence (I5).
+     if (!isNoRunState(error)) throw error;
+     const refusal = decisions.find((d) => d.decision.cause === 'admission-refused');
+     return {
+       runId,
+       ending: refusal === undefined ? 'unfinished' : 'refused',
+       requestedLevel: null,
++      stack: null,
+       startedAt: refusal?.decidedAt ?? null,
+       mergedAt: null,
+       approvalsSpent: 0,
+       tasks: [],
+       decisions,
+       usage: [],
+       cost: null,
+     };
+   }
+ 
+   const admission = decode(await vault.read(state.admission)) as AdmissionRecord;
+   const merged = integration.find((r) => r.kind === 'merged');
+   const usage = await readUsage(vault, state);
+ 
+   const bundles: EvidenceBundle[] = [];
+   for (const ref of state.evidenceRefs) bundles.push(decode(await vault.read(ref)) as EvidenceBundle);
+ 
+   const tasks = Object.entries(state.tasks).map(([id, status]): TaskRecord => {
+     const taskId = id as TaskId;
+     const own = bundles.filter((b) => b.taskId === taskId);
+     // The line builds again only after a failed verdict, so every bundle before the last failed;
+     // the last carries the task's status, the runtime's verdict and nothing else (I2).
+     const attempts = own.map((b, i): AttemptRecord => ({
+       outcome: i === own.length - 1 && status === 'passed' ? 'passed' : 'failed',
+       claimMismatch: b.claimEvidenceDiff.length > 0,
+     }));
+     const calls = usage.filter((r) => r.taskId === taskId);
+     const first = calls.find((r) => r.attempt === 1) ?? calls[0];
+     const spent = state.attempts[taskId];
+     return {
+       taskId,
+       station: calls[0]?.station ?? null,
+       status,
+       iterations: spent === undefined ? 0 : gatedIterations(spent),
+       attempts,
+       firstModel: first === undefined ? null : modelKey(first.model),
+       models: [...new Set(calls.map((r) => modelKey(r.model)))].sort(),
+     };
+   });
+ 
+   const ending: RunEnding = merged !== undefined
+     ? 'merged'
+     : state.cancelled !== null
+       ? 'cancelled'
+       : state.halted !== null
+         ? 'halted'
+         : state.approvals.some((g) => g.key === approvalKey('integrate', admission.run.requestedLevel) && g.usedAt !== null)
+           // The grant for the last exit is spent in the commit that ends a passed run, as `runStanding` reads it (D-P9-08).
+           ? 'passed'
+           : Object.values(state.tasks).includes('parked')
+           ? 'parked'
+           : 'unfinished';
+ 
+   return {
+     runId,
+     ending,
+     requestedLevel: admission.run.requestedLevel,
++    stack: recordedStack(admission),
+     startedAt: admission.run.createdAt,
+     mergedAt: merged?.kind === 'merged' ? merged.mergedAt : null,
+     // The drive merges before it spends the integrate grant (D-I1b-01), so on a merged run that grant
+     // was consumed by the merge, spent in state or not yet.
+     approvalsSpent: state.approvals.filter((g) => g.usedAt !== null || (merged !== undefined && g.key === approvalKey('integrate', admission.run.requestedLevel))).length,
+     tasks,
+     decisions,
+     usage,
+     cost: costTotals(usage).run,
+   };
+ }
+@@ -263,126 +287,137 @@ export async function outcomes(vault: Vault, window: OutcomeWindow = {}): Promis
+ /** The derivation itself, over records already read: pure, so a figure is a function of its records. */
+ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindow = {}): Outcomes {
+   const population: Record<RunEnding, number> = { refused: 0, merged: 0, passed: 0, cancelled: 0, halted: 0, parked: 0, unfinished: 0 };
+   for (const run of runs) population[run.ending] += 1;
+ 
+   // Safety: every attempt, finished run or not — an attempt the runtime judged is a fact either way.
+   let attempts = 0;
+   let falseDone = 0;
+   const fdStation = new Tally();
+   const fdModel = new Tally();
+   const fdLevel = new Tally();
++  const fdStack = new Tally();
+   for (const run of runs) {
+     for (const task of run.tasks) {
+       const model = task.models.length > 1 ? 'escalated' : (task.models[0] ?? 'no-call');
+       for (const a of task.attempts) {
+         const bad = a.outcome !== 'passed' || a.claimMismatch;
+         attempts += 1;
+         if (bad) falseDone += 1;
+         fdStation.add(task.station ?? 'no-call', bad);
+         fdModel.add(model, bad);
+         fdLevel.add(`L${String(run.requestedLevel)}`, bad);
++        fdStack.add(stackKey(run), bad);
+       }
+     }
+   }
+ 
+   // Throughput over admitted runs that finished; an unfinished run is counted in the population and nowhere else.
+   const finished = runs.filter((r) => r.ending !== 'refused' && r.ending !== 'unfinished');
+   const autonomous = (r: RunRecords): boolean => r.ending === 'merged' && r.approvalsSpent === 0;
+   const byLevel = new Tally();
+-  for (const r of finished) byLevel.add(`L${String(r.requestedLevel)}`, autonomous(r));
++  const byStack = new Tally();
++  for (const r of finished) {
++    byLevel.add(`L${String(r.requestedLevel)}`, autonomous(r));
++    byStack.add(stackKey(r), autonomous(r));
++  }
+ 
+   const fpStation = new Tally();
+   const fpModel = new Tally();
++  const fpStack = new Tally();
+   const toGreen: number[] = [];
+   const perTask: number[] = [];
+   for (const run of runs) {
+     for (const task of run.tasks) {
+       const first = task.attempts[0];
+       if (first === undefined) continue;
+       fpStation.add(task.station ?? 'no-call', first.outcome === 'passed');
+       fpModel.add(task.firstModel ?? 'no-call', first.outcome === 'passed');
++      fpStack.add(stackKey(run), first.outcome === 'passed');
+       perTask.push(task.attempts.length);
+       if (task.status === 'passed') toGreen.push(task.iterations);
+     }
+   }
+   const yields = fpStation.rates(successRate);
+   const rolledYield = Object.keys(yields).length === 0 || Object.values(yields).some((p) => p.kind === 'no-sample')
+     ? null
+     : Object.values(yields).reduce((product, p) => product * (p.kind === 'rate' ? p.rate : 1), 1);
+ 
+   let seated = 0;
+   let returned = 0;
+   const decisionsByCause: Record<string, number> = {};
+   const refusalsByReason: Record<string, number> = {};
+   const parksByCause: Record<string, number> = {};
+   const waits = new Map<string, number[]>();
+   const open: Record<string, number> = {};
+   for (const run of runs) {
+     // A run-level rate, so over finished runs: a review that has not returned is not a sample.
+     if (finished.includes(run) && run.usage.some((u) => u.station === 'review')) {
+       seated += 1;
+       if (run.decisions.some((d) => d.station === 'review' && d.decision.cause === 'station-refused' && d.decision.refusal.reason !== 'approval-required')) returned += 1;
+     }
+     const requested = new Map<string, string[]>();
+     for (const d of run.decisions) {
+       bump(decisionsByCause, d.decision.cause);
+       if (d.decision.cause === 'station-refused') {
+         bump(refusalsByReason, d.decision.refusal.reason);
+         if (d.decision.refusal.reason === 'parked') bump(parksByCause, d.decision.refusal.cause);
+         if (d.decision.refusal.reason === 'approval-required') requested.set(d.decision.refusal.key, [...(requested.get(d.decision.refusal.key) ?? []), d.decidedAt]);
+       }
+     }
+     // Each grant clears the first request of its key made before it; the requests repeated by resumes before that grant are the same wait.
+     for (const [key, times] of requested) {
+       const grants = run.decisions.filter((d) => d.decision.cause === 'approval-granted' && d.decision.key === key).map((d) => d.decidedAt);
+       let from = 0;
+       for (const granted of grants) {
+         const first = times.slice(from).find((t) => t <= granted);
+         if (first === undefined) continue;
+         waits.set(key, [...(waits.get(key) ?? []), Date.parse(granted) - Date.parse(first)]);
+         from = times.findIndex((t) => t > granted);
+         if (from === -1) from = times.length;
+       }
+       if (from < times.length) bump(open, key);
+     }
+   }
+ 
+   const merges = runs.filter((r) => r.ending === 'merged');
+   const cycle = merges.flatMap((r) => (r.startedAt === null || r.mergedAt === null ? [] : [Date.parse(r.mergedAt) - Date.parse(r.startedAt)]));
+   const spent = runs.reduce((sum, r) => sum + (r.cost?.metered.costUsd ?? 0), 0);
+   const unknown = runs.some((r) => r.cost !== null && r.cost.bound === 'lower');
+ 
+   return {
+     window,
+     population: { ...population, total: runs.length },
+     safety: {
+       caughtFalseDone: failureRate(falseDone, attempts),
+       caughtFalseDoneByStation: fdStation.rates(failureRate),
+       caughtFalseDoneByModel: fdModel.rates(failureRate),
+       caughtFalseDoneByLevel: fdLevel.rates(failureRate),
++      caughtFalseDoneByStack: fdStack.rates(failureRate),
+       escapedFalseDone: 'not-established',
+     },
+     throughput: {
+       autonomyRatio: successRate(finished.filter(autonomous).length, finished.length),
+       autonomyRatioByLevel: byLevel.rates(successRate),
++      autonomyRatioByStack: byStack.rates(successRate),
+       firstPassYieldByStation: yields,
+       firstPassYieldByModel: fpModel.rates(successRate),
++      firstPassYieldByStack: fpStack.rates(successRate),
+       rolledYield,
+       iterationsToGreen: distribution(toGreen),
+       attemptsPerTask: distribution(perTask),
+       reviewExitRefused: failureRate(returned, seated),
+       decisionsByCause,
+       refusalsByReason,
+       parksByCause,
+       approvalWait: Object.fromEntries([...waits.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, distribution(v)])),
+       approvalsOpen: open,
+       cycleTime: distribution(cycle),
+       costPerMergedChange: merges.length === 0
+         ? { kind: 'no-sample', spentUsd: spent }
+         : { kind: 'cost', usd: spent / merges.length, spentUsd: spent, merges: merges.length, bound: unknown ? 'lower' : 'exact' },
+     },
+     notMeasured: NOT_MEASURED,
+   };
+ }
+ 
+ /** The fewest past tasks a station-and-model cell needs before its median is used (D-R2-01). */
+
+===== packages/api/src/run.ts =====
+diff --git a/packages/api/src/run.ts b/packages/api/src/run.ts
+index 3ae4cb5..81170b9 100644
+--- a/packages/api/src/run.ts
++++ b/packages/api/src/run.ts
+@@ -342,18 +342,17 @@ export function admissionRefusal(record: AdmissionRecord): Extract<RunOutcome, {
+ /**
+  * The controls the base's adapter set lacks: what the set reports, and what
+  * its empty slots show whether it reports them or not. The same union the
+  * adapters' own refusal takes, so what is recorded is what that refusal
+  * would name (D-P8-03).
+  */
+-async function unavailableControls(base: string, level: AutonomyLevel, components: BuiltGraph): Promise<string[]> {
+-  const set = await adapterSetOf(base, components);
++function unavailableControls(set: AdapterSet, level: AutonomyLevel): string[] {
+   const unavailable = [...new Set([...set.unavailableControls(), ...missingControls(set)])].sort();
+   const refusal = adapterAdmission(set, level);
+   // The two derive from the same set; if they ever disagree the record would misstate the refusal.
+   if (!refusal.ok && refusal.unavailable.join('\0') !== unavailable.join('\0')) {
+     throw new Error('admission: the recorded controls and the adapters\' own refusal disagree');
+   }
+   return unavailable;
+ }
+ 
+ /** The base's adapter set, its static-analysis slot holding the graph's scanner where the stack has one. */
+@@ -509,119 +508,121 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
+ /** Every check admission makes, in order; `admitRun` records whichever refuses. */
+ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
+   const problems = [...requestProblems(req), ...storeProblems(req)];
+   if (problems.length > 0) return { ok: false, reason: 'invalid-request', problems };
+ 
+   const unsafe = unsafeComponents(req.components);
+   if (unsafe.length > 0 && req.requestedLevel > 1) {
+     return { ok: false, reason: 'unsafe-above-l1', requestedLevel: req.requestedLevel, unsafe };
+   }
+   const policy = checkedPolicy(req.policy);
+   if (!policy.ok) return { ok: false, reason: 'invalid-request', problems: [{ path: 'policy', code: 'invalid-policy', message: policy.message }] };
+   const admitted = await admitArtifacts(req);
+   if (!admitted.ok) return { ok: false, reason: 'invalid-request', problems: admitted.problems };
+ 
+   const capability = capabilityRefusalFor(req.components);
+   if (capability !== undefined) return { ok: false, reason: 'refused', at: capability.at, transition: capability.refusal, state: null };
+   const remote = remoteEgress(policy.policy, req.components.integrator ?? null);
+   if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
+   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy);
+   if (refused !== undefined) return refused;
+   const worstCase = worstCaseCost(admitted.admitted.graph, policy.policy);
+   if (req.requestedLevel > 0 && req.approvedCostUsd !== worstCase.usd) {
+     const likely = await likelyCost(req.components, worstCase, policy.policy);
+     return { ok: false, reason: 'cost-unapproved', requestedLevel: req.requestedLevel, worstCase, likely, approvedCostUsd: req.approvedCostUsd };
+   }
+ 
+   const { vault } = req.components;
+   if (await hasState(vault, req.runId)) {
+     return {
+       ok: false,
+       reason: 'invalid-request',
+       problems: [{ path: 'runId', code: 'already-admitted', message: `run ${req.runId} was admitted before; resume it, do not start it again` }],
+     };
+   }
+ 
+   // The base is what every workspace is built from, so it is taken before anything is recorded,
+   // and discarded if admission refuses after it: a refusal leaves nothing behind.
+   const { workspaces } = req.components;
+   const baseTreeSha256 = await snapshotBase(workspaces, req.runId, req.workspace);
+   const unbound = await suiteBindingProblems(admitted.admitted.checks, basePath(workspaces, req.runId), req.artifacts.acceptanceTests);
+   if (unbound.length > 0) {
+     await discardRun(workspaces, req.runId);
+     return { ok: false, reason: 'invalid-request', problems: unbound };
+   }
+   // The security checks the base's stack must be scanned with, read from the base like the suite bindings (R17).
+   const set = await adapterSetOf(basePath(workspaces, req.runId), req.components);
+   const unscanned = securityProblems(admitted.admitted.checks, { secretScan: req.components.scanners.secretScan, staticAnalysis: set.staticAnalysis });
+   if (unscanned.length > 0) {
+     await discardRun(workspaces, req.runId);
+     return { ok: false, reason: 'invalid-request', problems: unscanned };
+   }
+-  const controls = await unavailableControls(basePath(workspaces, req.runId), req.requestedLevel, req.components);
++  const controls = unavailableControls(set, req.requestedLevel);
+ 
+   const now = new Date().toISOString();
+   const run: Run = {
+     id: req.runId,
+     repo: req.workspace,
+     baseCommit: req.baseCommit,
+     trigger: { kind: 'human', eventId: req.runId, lineage: { depth: 0, chain: [], windowStart: now } },
+     requestedLevel: req.requestedLevel,
+     station: 'intake',
+     graph: null,
+     createdAt: now,
+   };
+   const record: AdmissionRecord = {
+     run,
+     policy: policy.policy,
+     artifacts: admitted.admitted.artifacts,
+     baseTreeSha256,
+     unavailableControls: controls,
++    // The same detection the controls and the security checks were read from (R18).
++    stack: set.stack,
+   };
+   const refusedControls = admissionRefusal(record);
+   if (refusedControls !== undefined) {
+     await discardRun(workspaces, req.runId);
+     return refusedControls;
+   }
+   const admission = await vault.recordAdmission(record);
+   const state = await vault.commitRunState(
+     {
+       runId: req.runId,
+       admission,
+       station: 'intake',
+       phase: 'working',
+       tasks: {},
+       attempts: {},
+       results: {},
+       evidenceRefs: [],
+       violations: [],
+       approvals: [],
+       reviews: [],
+       usage: [],
+       cancelled: null,
+       halted: null,
+       version: '0',
+     },
+     '0',
+   );
+   return {
+     ok: true,
+     admitted: {
+       state,
+       worstCase,
+       drive: (hooks: DriveHooks = {}) => runLine({
+         run,
+         policy: policy.policy,
+         artifacts: record.artifacts,
+         graph: admitted.admitted.graph,
+         checks: admitted.admitted.checks,
+         securityPart: admitted.admitted.securityPart,
+         components: req.components,
+         baseTreeSha256,
+         state,
+         ...hooks,
+       }),
+     },
+   };
+ }
+ 
+ /** A record's `specParts`: an object whose security part is an admitted artifact or null. Read from a record, so its type is not trusted. */
+@@ -634,22 +635,24 @@ function specPartsShaped(parts: unknown): boolean {
+ /**
+  * The admission record, read back and checked in full: a record that does not
+  * hold what the line reads is refused, not trusted (D-P1-12).
+  */
+ async function readAdmission(vault: Vault, state: RunState): Promise<{ record: AdmissionRecord; policy: Policy }> {
+   const parsed = parseJson(await vault.read(state.admission));
+   const r = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as Partial<Record<keyof AdmissionRecord, unknown>>;
+   const run = r.run as Partial<Run> | undefined;
+   const artifacts = r.artifacts as Partial<AdmissionRecord['artifacts']> | undefined;
+   const shaped =
+     typeof run === 'object' && run.id === state.runId && typeof run.repo === 'string' && typeof run.baseCommit === 'string' &&
+     typeof run.requestedLevel === 'number' && typeof artifacts === 'object' &&
+     Array.isArray(artifacts.spec) && Array.isArray(artifacts.acceptanceTests) &&
+     typeof artifacts.verificationManifest === 'object' && typeof artifacts.taskGraph === 'object' &&
+     specPartsShaped(artifacts.specParts) &&
+     typeof r.baseTreeSha256 === 'string' && Array.isArray(r.unavailableControls) &&
+-    r.unavailableControls.every((control) => typeof control === 'string');
++    r.unavailableControls.every((control) => typeof control === 'string') &&
++    // Absent on a run admitted before R18, which resumes as it did; present, it is a stack.
++    (r.stack === undefined || (typeof r.stack === 'string' && r.stack !== ''));
+   if (!shaped) throw new Error(`run ${state.runId}: the admission record does not hold a run and its artifacts; refusing to resume from it`);
+   const policy = checkedPolicy(r.policy);
+   if (!policy.ok) throw new Error(`run ${state.runId}: the admitted policy no longer validates; refusing to resume under it:\n${policy.message}`);
+   return { record: r as AdmissionRecord, policy: policy.policy };
+ }
+
+===== packages/api/test/line.test.ts =====
+diff --git a/packages/api/test/line.test.ts b/packages/api/test/line.test.ts
+index e7d9a28..52513f0 100644
+--- a/packages/api/test/line.test.ts
++++ b/packages/api/test/line.test.ts
+@@ -248,82 +248,82 @@ describe('hello at L1', () => {
+ describe('the verdict follows the checks and nothing else (I2)', () => {
+   test('a failing check fails the gate whatever the driver claimed; the task is rebuilt, then parks after maxIterations', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
+     const driver = new ChosenDriver({ narrative: 'all tests pass' });
+     const outcome = await startRun(runRequest(runId, workspace, { ...components, driver, reviewer: driver }));
+     expect(outcome).toMatchObject({
+       ok: false,
+       reason: 'refused',
+       at: 'verify',
+       transition: { ok: false, reason: 'parked', task: hello, cause: 'iterations-exhausted', limit: 3 },
+     });
+     const state = refusedState(outcome);
+     expect(driver.requests).toHaveLength(3);
+     expect(state.tasks[hello]).toBe('parked');
+-    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3, conflicts: [] });
++    expect(state.attempts[hello]).toEqual({ iterations: 3, retries: 0, starts: 3, conflicts: [], parkedFor: 'iterations-exhausted' });
+     expect(state.evidenceRefs).toHaveLength(3);
+     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
+     for (const ref of state.evidenceRefs) {
+       const bundle = await read<EvidenceBundle>(components.vault, ref);
+       expect(bundle.checks[0]?.exitCode).toBe(3);
+       expect(bundle.claim.narrative).toBe('all tests pass');
+     }
+   });
+ 
+   test('a required check with an expected suite count fails while the count is unknown (I5)', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, expectedSuiteCount: 1 }]);
+     const outcome = await startRun(runRequest(runId, workspace, components));
+     expect(outcome).toMatchObject({ transition: { reason: 'parked', cause: 'iterations-exhausted' } });
+   });
+ 
+   test('a required check that cannot be started has no result and fails the gate', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cannot-start', command: ['no-such-program-p4', '--version'] }]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('parked');
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) return;
+     expect((await read<EvidenceBundle>(components.vault, ref)).checks.map((c) => c.checkId)).toEqual(['hello-written', 'secret-scan']);
+   });
+ 
+   test('a failing check that is not required does not fail the gate', async () => {
+     await writeChecks(workspace, [HELLO_CHECK, { ...HELLO_CHECK, id: 'optional', command: ['node', '-e', 'process.exit(1)'], required: false }]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('passed');
+   });
+ 
+   // codex-4, D-R15-04: a unit or acceptance check is a suite run by its kind, and its runner is the
+   // base framework's; a base with none has no runner, so the check is refused before anything runs.
+   test('a unit check over a base with no test framework is refused at admission, with no count pinned (I5)', async () => {
+     await writeChecks(workspace, [UNIT_CHECK]);
+     const outcome = await startRun(runRequest(runId, workspace, components));
+     expect(outcome).toMatchObject({ ok: false, reason: 'invalid-request', problems: [{ path: 'manifest.checks[0]', code: 'unbound' }] });
+   });
+ 
+   test('a unit check runs the base framework\'s installed runner over every suite, passes, and records the count', async () => {
+     await writeFile(join(workspace, 'package.json'), JSON.stringify({ name: 'p6', devDependencies: { vitest: '4.1.11' } }));
+     await writeFile(join(workspace, 'a.test.ts'), "test('a', () => {})\n");
+     await mkdir(join(workspace, 'node_modules', 'vitest'), { recursive: true });
+     await writeFile(join(workspace, 'node_modules', 'vitest', 'vitest.mjs'), 'process.exit(0)\n');
+     // A package.json gives the stack its static-analysis slot, so the manifest pins its check (R17).
+     await writeChecks(workspace, [UNIT_CHECK, STATIC_ANALYSIS_CHECK]);
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     expect(state.tasks[hello]).toBe('passed');
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) return;
+     expect((await read<EvidenceBundle>(components.vault, ref)).checks[0]?.suiteCount).toBe(1);
+   });
+ 
+   // D-P7-05: a check over a read-only tree has nowhere to write a report the host can read.
+   test('a pinned coverage check is refused rather than read as covering nothing, and no evidence is written', async () => {
+     await writeChecks(workspace, [{ ...HELLO_CHECK, id: 'cov', kind: 'coverage' }]);
+     await expect(startRun(runRequest(runId, workspace, components))).rejects.toThrow(/coverage check/);
+   });
+ 
+   test('every bundle carries a tamper report, empty for a task that touched no test', async () => {
+     const state = refusedState(await startRun(runRequest(runId, workspace, components)));
+     const [ref] = state.evidenceRefs;
+     if (ref === undefined) throw new Error('no evidence written');
+     expect((await read<EvidenceBundle>(components.vault, ref)).tamper).toEqual({
+       assertionsWeakened: [], skipMarkersAdded: [], testsDeleted: [], snapshotsRegenerated: [], coverageDelta: null, protectedPathsTouched: [], suppressionMarkersAdded: [],
+     });
+   });
+ });
+@@ -386,16 +386,16 @@ describe('the review seat is shown what changed', () => {
+ describe('retries are bounded (I5)', () => {
+   test('a driver that keeps failing parks the task after retry.max retries, with the count in run state', async () => {
+     const driver = new ThrowingDriver(new ChosenDriver());
+     const outcome = await startRun(runRequest(runId, workspace, { ...components, driver }));
+     expect(outcome).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'retries-exhausted', limit: 2 } });
+     expect(driver.calls).toBe(3);
+     const state = refusedState(outcome);
+-    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3, conflicts: [] });
++    expect(state.attempts[hello]).toEqual({ iterations: 1, retries: 3, starts: 3, conflicts: [], parkedFor: 'retries-exhausted' });
+ 
+     expect(await parkDecisions(components.vault, runId)).toHaveLength(1);
+ 
+     // A resume with a driver that works does not get the task back: parked is parked.
+     const resumed = await resumeRun({ runId, components: built(components) });
+     expect(resumed).toMatchObject({ ok: false, reason: 'refused', transition: { reason: 'parked', cause: 'retries-exhausted' } });
+   });
+ });
+@@ -494,42 +494,65 @@ describe('approvals gate the station (I4)', () => {
+ describe('a replayed attempt is spent, not free (I5)', () => {
+     test('a kill between the running commit and the result runs the driver again, and the replay is counted', async () => {
+     const driver = new ChosenDriver({ narrative: 'built' });
+     const base = stubComponents(workspace, { driver, reviewer: driver });
+     // The commit after `running` is the one recording the result and moving the task to verifying.
+     const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying';
+ 
+     const first = { ...base, vault: new KillsBeforeCommit(base.vault, kill) };
+     await expect(startRun(runRequest(runId, workspace, first))).rejects.toThrow('killed');
+     expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 1, retries: 0, starts: 1 } } });
+ 
+     // Each resume runs the driver again; each one is counted, and the iteration is not re-spent.
+     for (const starts of [2, 3]) {
+       const components = { ...base, vault: new KillsBeforeCommit(base.vault, kill) };
+       await expect(resumeRun({ runId, components: built(components) })).rejects.toThrow('killed');
+       expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 1, retries: 0, starts } } });
+     }
+     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(3);
+   });
+ 
+   test('replays past the station invocation bound park the task rather than spending forever', async () => {
+     const driver = new ChosenDriver({ narrative: 'built' });
+     const base = stubComponents(workspace, { driver, reviewer: driver });
+     const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying';
+     // build: maxIterations 3, retry.max 2, so nine driver calls is the most an uninterrupted run could make.
+     const bound = STATION_CONTRACTS.build.maxIterations * (STATION_CONTRACTS.build.retry.max + 1);
+ 
+     await expect(startRun(runRequest(runId, workspace, { ...base, vault: new KillsBeforeCommit(base.vault, kill) }))).rejects.toThrow('killed');
+     for (let i = 1; i < bound; i += 1) {
+       await expect(resumeRun({ runId, components: { ...base, vault: new KillsBeforeCommit(base.vault, kill) } })).rejects.toThrow('killed');
+     }
+     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
+ 
+     // The next resume does not reach the driver at all.
+     const parked = await resumeRun({ runId, components: base });
+     expect(parked).toMatchObject({ at: 'build', transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
+     expect(driver.requests.filter((r) => r.taskId === hello)).toHaveLength(bound);
+     expect(await parkDecisions(base.vault, runId)).toHaveLength(1);
+   });
++
++  test('replays of the last iteration past the bound park for exhausted starts, not failed gates, in the record and on every resume (#47)', async () => {
++    await writeChecks(workspace, [{ ...HELLO_CHECK, command: ['node', '-e', 'process.exit(3)'] }]);
++    const driver = new ChosenDriver({ narrative: 'built' });
++    const base = stubComponents(workspace, { driver, reviewer: driver });
++    // Two gates fail; the third iteration is stopped before its result is committed, every time, so its gate never runs.
++    const kill = (s: RunState): boolean => s.tasks[hello] === 'verifying' && s.attempts[hello]?.iterations === 3;
++    const bound = STATION_CONTRACTS.build.maxIterations * (STATION_CONTRACTS.build.retry.max + 1);
++
++    await expect(startRun(runRequest(runId, workspace, { ...base, vault: new KillsBeforeCommit(base.vault, kill) }))).rejects.toThrow('killed');
++    for (let starts = 4; starts <= bound; starts += 1) {
++      await expect(resumeRun({ runId, components: { ...base, vault: new KillsBeforeCommit(base.vault, kill) } })).rejects.toThrow('killed');
++    }
++    expect(await base.vault.readRunState(runId)).toMatchObject({ attempts: { [hello]: { iterations: 3, starts: bound } } });
++
++    const parked = await resumeRun({ runId, components: base });
++    expect(parked).toMatchObject({ transition: { reason: 'parked', task: hello, cause: 'starts-exhausted', limit: bound } });
++    const [decision, ...rest] = await parkDecisions(base.vault, runId);
++    expect(rest).toEqual([]);
++    expect(decision?.decision).toMatchObject({ refusal: { cause: 'starts-exhausted' } });
++    // A resume derives the refusal again from committed state, and it must say the same.
++    expect(await resumeRun({ runId, components: base })).toMatchObject({ transition: { reason: 'parked', cause: 'starts-exhausted' } });
++  });
+ });
+ 
+ describe('what a station is handed, beyond its prompt', () => {
+
+===== packages/api/test/outcomes.test.ts =====
+diff --git a/packages/api/test/outcomes.test.ts b/packages/api/test/outcomes.test.ts
+index 7cb384e..9b17aaa 100644
+--- a/packages/api/test/outcomes.test.ts
++++ b/packages/api/test/outcomes.test.ts
+@@ -37,15 +37,16 @@ function decision(runId: string, at: string, station: StationId | null, d: Enfor
+ function run(id: string, over: Partial<RunRecords>): RunRecords {
+   return {
+     runId: id as RunId,
+     ending: 'merged',
+     requestedLevel: 2,
++    stack: 'vitest@4',
+     startedAt: '2026-10-01T00:00:00.000Z',
+     mergedAt: '2026-10-01T01:00:00.000Z',
+     approvalsSpent: 0,
+     tasks: [],
+     decisions: [],
+     usage: [],
+     cost: null,
+     ...over,
+   };
+ }
+@@ -91,103 +92,127 @@ describe('bounds', () => {
+ describe('deriveOutcomes', () => {
+   it('counts a failed attempt and a passing attempt whose claim differed as caught false-dones, and not a passing, matching one', () => {
+     const o = deriveOutcomes([run('r1', { tasks: [task('a', ['failed', 'passed']), task('b', ['passed'], { mismatch: 0 }), task('c', ['passed'])] })]);
+     expect(o.safety.caughtFalseDone).toMatchObject({ kind: 'rate', count: 2, sample: 4 });
+     expect(o.safety.escapedFalseDone).toBe('not-established');
+   });
+ 
+   it("keys a task's attempts under one model, or escalated when its calls ran on more than one", () => {
+     const o = deriveOutcomes([run('r1', { tasks: [task('a', ['failed', 'passed'], { models: ['x/claude/deep', 'x/claude/std'] }), task('b', ['passed'])] })]);
+     expect(Object.keys(o.safety.caughtFalseDoneByModel)).toEqual(['anthropic/claude/m-standard', 'escalated']);
+     expect(o.safety.caughtFalseDoneByModel.escalated).toMatchObject({ count: 1, sample: 2 });
+   });
+ 
+   it('counts every ending, and leaves an unfinished run out of every run-level rate', () => {
+     const o = deriveOutcomes([
+       run('m', {}),
+       run('p', { ending: 'parked', mergedAt: null }),
+       run('h', { ending: 'halted', mergedAt: null }),
+       run('u', { ending: 'unfinished', mergedAt: null }),
+       run('x', { ending: 'refused', requestedLevel: null, mergedAt: null }),
+     ]);
+     expect(o.population).toMatchObject({ merged: 1, parked: 1, halted: 1, unfinished: 1, refused: 1, total: 5 });
+     expect(o.throughput.autonomyRatio).toMatchObject({ kind: 'rate', count: 1, sample: 3 });
+   });
+ 
+   it('does not count a merge that spent an approval as autonomous', () => {
+     const o = deriveOutcomes([run('m', { approvalsSpent: 1 }), run('n', {})]);
+     expect(o.throughput.autonomyRatio).toMatchObject({ count: 1, sample: 2 });
+     expect(o.throughput.autonomyRatioByLevel.L2).toMatchObject({ count: 1, sample: 2 });
+   });
+ 
+   it('pairs each grant with the first request it cleared, and counts a request with no grant as open', () => {
+     const key = 'integrate:2' as const;
+     const required = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'approval-required', key, escalations: [], message: '' } } as const;
+     const granted = { cause: 'approval-granted', decidedBy: 'approval', key, principal: 'p' } as const;
+     const o = deriveOutcomes([
+       run('a', {
+         decisions: [
+           decision('a', '2026-10-01T00:00:00.000Z', 'integrate', required as unknown as EnforcementDecision['decision']),
+           // repeated by a resume before the grant: the same wait
+           decision('a', '2026-10-01T00:05:00.000Z', 'integrate', required as unknown as EnforcementDecision['decision']),
+           decision('a', '2026-10-01T00:10:00.000Z', 'integrate', granted),
+         ],
+       }),
+       run('b', { ending: 'unfinished', mergedAt: null, decisions: [decision('b', '2026-10-01T00:00:00.000Z', 'integrate', required as unknown as EnforcementDecision['decision'])] }),
+     ]);
+     expect(o.throughput.approvalWait[key]).toEqual({ kind: 'distribution', sample: 1, median: 600_000, p90: 600_000 });
+     expect(o.throughput.approvalsOpen[key]).toBe(1);
+     expect(o.throughput.refusalsByReason['approval-required']).toBe(3);
+   });
+ 
+   it('takes cycle time from admission to the merge time GitHub reported', () => {
+     const o = deriveOutcomes([run('a', {}), run('b', { mergedAt: '2026-10-01T03:00:00.000Z' })]);
+     expect(o.throughput.cycleTime).toEqual({ kind: 'distribution', sample: 2, median: 3_600_000, p90: 10_800_000 });
+   });
+ 
+   it("charges an unmerged run's spend to the merges, and marks the figure a lower bound when a cost is unknown", () => {
+     const total = (usd: number, bound: 'exact' | 'lower') => ({ calls: 1, unmetered: 0, lost: bound === 'lower' ? 1 : 0, metered: { calls: 1, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: usd, exhausted: 0, unreadable: 0 }, bound });
+     const exact = deriveOutcomes([run('a', { cost: total(3, 'exact') }), run('b', { ending: 'parked', mergedAt: null, cost: total(1, 'exact') })]);
+     expect(exact.throughput.costPerMergedChange).toEqual({ kind: 'cost', usd: 4, spentUsd: 4, merges: 1, bound: 'exact' });
+     const lower = deriveOutcomes([run('a', { cost: total(3, 'lower') })]);
+     expect(lower.throughput.costPerMergedChange).toMatchObject({ bound: 'lower' });
+     expect(deriveOutcomes([run('p', { ending: 'parked', mergedAt: null, cost: total(2, 'exact') })]).throughput.costPerMergedChange).toEqual({ kind: 'no-sample', spentUsd: 2 });
+   });
+ 
+   it('counts a refused review exit as a return, but not a pending approval there', () => {
+     const gate = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'gate-failed', failed: [], message: '' } } as unknown as EnforcementDecision['decision'];
+     const wait = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'approval-required', key: 'review:2', escalations: [], message: '' } } as unknown as EnforcementDecision['decision'];
+     const o = deriveOutcomes([
+       run('a', { usage: [usage('a', 'r', 'review', 1)], decisions: [decision('a', '2026-10-01T00:00:00.000Z', 'review', gate)] }),
+       run('b', { usage: [usage('b', 'r', 'review', 1)], decisions: [decision('b', '2026-10-01T00:00:00.000Z', 'review', wait)] }),
+       run('c', {}),
+     ]);
+     expect(o.throughput.reviewExitRefused).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
+   });
+ 
+   it('leaves a review on an unfinished run out of the review refusal rate', () => {
+     const gate = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'gate-failed', failed: [], message: '' } } as unknown as EnforcementDecision['decision'];
+     const seatedOnly = (id: string): RunRecords => run(id, { ending: 'unfinished', mergedAt: null, usage: [usage(id, 'r', 'review', 1)] });
+     const o = deriveOutcomes([
+       run('a', { ending: 'halted', mergedAt: null, usage: [usage('a', 'r', 'review', 1)], decisions: [decision('a', '2026-10-01T00:00:00.000Z', 'review', gate)] }),
+       seatedOnly('u1'), seatedOnly('u2'), seatedOnly('u3'),
+     ]);
+     expect(o.throughput.reviewExitRefused).toMatchObject({ kind: 'rate', count: 1, sample: 1 });
+   });
+ 
+   it('measures first-pass yield per station and per first model, and rolls it across stations', () => {
+     const o = deriveOutcomes([run('a', { tasks: [task('a', ['passed']), task('b', ['failed', 'passed']), task('r', ['passed'], { station: 'review' })] })]);
+     expect(o.throughput.firstPassYieldByStation.build).toMatchObject({ count: 1, sample: 2 });
+     expect(o.throughput.rolledYield).toBeCloseTo(0.5, 9);
+     expect(o.throughput.iterationsToGreen).toEqual({ kind: 'distribution', sample: 3, median: 1, p90: 2 });
+   });
+ 
+   it('yields no-sample everywhere over no runs, and lists what is not measured', () => {
+     const o = deriveOutcomes([]);
+     expect(o.safety.caughtFalseDone).toEqual({ kind: 'no-sample' });
+     expect(o.throughput.autonomyRatio).toEqual({ kind: 'no-sample' });
+     expect(o.throughput.cycleTime).toEqual({ kind: 'no-sample' });
+     expect(o.throughput.rolledYield).toBeNull();
+-    expect(o.notMeasured.some((n) => n.startsWith('stack'))).toBe(true);
++    expect(o.safety.caughtFalseDoneByStack).toEqual({});
++    expect(o.notMeasured.some((n) => n.startsWith('stack'))).toBe(false);
++  });
++
++  it('keys every per-run and per-attempt rate by the stack admission recorded, and a run that names none as unrecorded (R18)', () => {
++    const o = deriveOutcomes([
++      run('a', { stack: 'vitest@4', tasks: [task('t', ['failed', 'passed'])] }),
++      run('b', { stack: 'jest@29', approvalsSpent: 1, tasks: [task('t', ['passed'])] }),
++      run('c', { stack: null, tasks: [task('t', ['passed'])] }),
++    ]);
++    expect(o.safety.caughtFalseDoneByStack).toEqual({
++      'jest@29': failureRate(0, 1),
++      unrecorded: failureRate(0, 1),
++      'vitest@4': failureRate(1, 2),
++    });
++    expect(o.throughput.autonomyRatioByStack).toEqual({
++      'jest@29': successRate(0, 1),
++      unrecorded: successRate(1, 1),
++      'vitest@4': successRate(1, 1),
++    });
++    expect(o.throughput.firstPassYieldByStack).toEqual({
++      'jest@29': successRate(1, 1),
++      unrecorded: successRate(1, 1),
++      'vitest@4': successRate(0, 1),
++    });
+   });
+ 
+ });
+@@ -195,35 +220,35 @@ describe('deriveOutcomes', () => {
+ describe('estimateCost', () => {
+   /** One past run per cost, each with one build task whose single call read that cost. */
+   async function history(costs: readonly number[], lost = false, status = 'passed'): Promise<StubVault> {
+     const vault = new StubVault(process.cwd());
+     for (const [i, usd] of costs.entries()) {
+       const runId = `past-${String(i)}` as RunId;
+-      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' } } as unknown as AdmissionRecord);
++      const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
+       const record = usage(runId, 't', 'build', 1, MODEL, usd);
+       const ref = await vault.recordUsage(lost && i === 0 ? { ...record, reading: { kind: 'lost', detail: 'gone' } } : record);
+       const state = {
+         runId, admission, station: 'build', phase: 'working', tasks: { t: status }, attempts: {}, results: {}, evidenceRefs: [],
+         violations: [], approvals: [], reviews: [], usage: [ref], cancelled: null, halted: null, version: '0',
+       } as unknown as RunState;
+       await vault.commitRunState(state, '0');
+     }
+     return vault;
+   }
+ 
+   it('prices each task at the median past cost of its station and model', async () => {
+     const estimate = await estimateCost(await history([1, 2, 3, 4, 100]), [{ station: 'build', model: MODEL }, { station: 'build', model: MODEL }]);
+     expect(estimate).toMatchObject({ kind: 'likely', usd: 6, cells: [{ station: 'build', medianUsd: 3, sample: 5 }] });
+   });
+ 
+   it('declines below five past tasks, and does not count a task whose cost was lost', async () => {
+     expect(await estimateCost(await history([1, 2, 3, 4]), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', needed: MIN_ESTIMATE_SAMPLE, short: [{ station: 'build', sample: 4 }] });
+     expect(await estimateCost(await history([1, 2, 3, 4, 5], true), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', short: [{ sample: 4 }] });
+   });
+ 
+   it('does not count a task that has not finished as a past task, a failed one awaiting its next build included', async () => {
+     for (const status of ['running', 'failed']) {
+       expect(await estimateCost(await history([1, 1, 1, 1, 1], false, status), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'insufficient-sample', short: [{ sample: 0 }] });
+     }
+     expect(await estimateCost(await history([1, 1, 1, 1, 1], false, 'parked'), [{ station: 'build', model: MODEL }])).toMatchObject({ kind: 'likely' });
+   });
+ });
+@@ -231,34 +256,54 @@ describe('estimateCost', () => {
+ describe('readRunRecords', () => {
+   const runId = 'r' as RunId;
+   async function admitted(vault: StubVault, approvals: RunState['approvals']): Promise<void> {
+-    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' } } as unknown as AdmissionRecord);
++    const admission = await vault.recordAdmission({ run: { id: runId, requestedLevel: 2, createdAt: '2026-10-01T00:00:00.000Z' }, stack: 'vitest@4' } as unknown as AdmissionRecord);
+     await vault.commitRunState({
+       runId, admission, station: 'integrate', phase: 'awaiting-approval', tasks: {}, attempts: {}, results: {}, evidenceRefs: [],
+       violations: [], approvals, reviews: [], usage: [], cancelled: null, halted: null, version: '0',
+     } as unknown as RunState, '0');
+   }
+ 
+   it('does not read a merge whose integrate grant is not yet spent as autonomous', async () => {
+     const vault = new StubVault(process.cwd());
+     await admitted(vault, [{ key: 'integrate:2', approvedBy: 'maintainer', approvedAt: '2026-10-01T00:30:00.000Z', usedAt: null }] as unknown as RunState['approvals']);
+     await vault.recordIntegration({ runId, kind: 'merged', mergedAt: '2026-10-01T01:00:00.000Z', collectedBy: 'runtime' } as unknown as IntegrationMerged);
+     const records = await readRunRecords(vault, runId);
+     expect(records).toMatchObject({ ending: 'merged', approvalsSpent: 1 });
+     expect(deriveOutcomes([records]).throughput.autonomyRatio).toMatchObject({ count: 0, sample: 1 });
+   });
+ 
+   it('refuses a run whose state cannot be read, never reading it as a run with no state', async () => {
+     class Torn extends StubVault {
+       override readRunState(): Promise<RunState> {
+         return Promise.reject(new SyntaxError('Unexpected end of JSON input'));
+       }
+     }
+     const vault = new Torn(process.cwd());
+     await admitted(vault, []);
+     await expect(readRunRecords(vault, runId)).rejects.toThrow(/JSON/);
+   });
+ 
++  it('reads the stack the admission record names, and none from a record written before R18 or a run with no admission', async () => {
++    const vault = new StubVault(process.cwd());
++    await admitted(vault, []);
++    expect((await readRunRecords(vault, runId)).stack).toBe('vitest@4');
++
++    // A record written before R18 carries no stack; the store now refuses one, so the read is what changes.
++    class Unstacked extends StubVault {
++      override async read(ref: Parameters<StubVault['read']>[0]): Promise<Uint8Array> {
++        const bytes = await super.read(ref);
++        if (ref.kind !== 'admission') return bytes;
++        const { stack: _dropped, ...before } = JSON.parse(new TextDecoder().decode(bytes)) as AdmissionRecord;
++        return new TextEncoder().encode(JSON.stringify(before));
++      }
++    }
++    const old = new Unstacked(process.cwd());
++    await admitted(old, []);
++    expect((await readRunRecords(old, runId)).stack).toBeNull();
++    expect((await readRunRecords(new StubVault(process.cwd()), runId)).stack).toBeNull();
++  });
++
+   it('reads a run with no state yet as unfinished', async () => {
+     await expect(readRunRecords(new StubVault(process.cwd()), runId)).resolves.toMatchObject({ ending: 'unfinished', tasks: [], usage: [] });
+   });
+ });
+
+===== packages/conformance/src/registry/i2.ts =====
+diff --git a/packages/conformance/src/registry/i2.ts b/packages/conformance/src/registry/i2.ts
+index a456c65..e867f72 100644
+--- a/packages/conformance/src/registry/i2.ts
++++ b/packages/conformance/src/registry/i2.ts
+@@ -11,90 +11,93 @@ import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from
+ import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
+ import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
+ import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
++import { ADMISSION_RECORDS_THE_DETECTED_STACK } from './outcomes.js';
+ import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
+ 
+ /** I2: The runtime derives status; the model never reports it. */
+ export const I2: InvariantEntry = {
+   title: INVARIANTS.I2,
+   assertions: [
+     // R17: security at the gate.
+     ...R17_I2,
+     // R4: parallel task execution.
+     ...R4_I2,
+     READINESS_OUTCOME_IS_RUNTIME_DERIVED,
+     RUN_REPORT_READS_ONLY_RECORDS,
+     compileError({
+       id: 'I2.task-result-has-no-status',
+       title: 'TaskResult and AgentClaim have no status, passed, success, verdict, ok, or exitCode field',
+       fixture: 'i2/task-result-has-no-status.ts',
+     }),
+     compileError({
+       id: 'I2.task-status-lives-in-run-state',
+       title: 'Task carries no status; RunState.tasks is the only place it can be read from',
+       fixture: 'i2/task-status-lives-in-run-state.ts',
+     }),
+     compileError({
+       id: 'I2.evidence-collected-by-runtime',
+       title: 'EvidenceBundle.collectedBy admits only "runtime" and the bundle has no pass/fail field',
+       fixture: 'i2/evidence-collected-by-runtime.ts',
+     }),
+     compileError({
+       id: 'I2.gate-verdict-single-source',
+       title: 'GateResult has one verdict and no second boolean to disagree with it',
+       fixture: 'i2/gate-verdict-single-source.ts',
+     }),
+     compileError({
+       id: 'I2.records-are-readonly',
+       title:
+         'RunState, TaskResult, and AgentClaim cannot be mutated after construction: status, station, references, events, and the claim are read-only, and a new state is a new record',
+       fixture: 'i2/records-are-readonly.ts',
+     }),
+     compileError({
+       id: 'I2.check-result-declares-expectation',
+       title:
+         'CheckResult.expectation is required, null for a check with none; a held expectation carries no mismatch and a failed one at least one',
+       fixture: 'i2/check-result-declares-expectation.ts',
+     }),
+     RESUME_DERIVES_STATE_FROM_THE_VAULT,
+     UNMET_EXPECTATION_FAILS_THE_GATE,
+     // P11: an HTTP verdict is drawn from a client the product cannot replace, and made on the host.
+     HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT,
+     HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM,
+     STATUS_DERIVED_FROM_CHECK_RESULTS,
+     TASK_RESULT_KEY_SET_ENFORCED,
+     UNSTARTED_CHECK_IS_IN_THE_EVIDENCE,
+     // P13: what a call cost is collected by the runtime from the relay, never taken from the driver's report.
+     COST_IS_RUNTIME_METERED,
+     // I1a: a call is on record before it is made, so a process stop during it is a lost reading, not a silence (D-I1a-12).
+     CALL_RECORDED_BEFORE_IT_IS_MADE,
+     // P14: every enforcement decision, by cause, recorded by the runtime for the component that made it.
+     ENFORCEMENT_DECISIONS_RECORDED,
+     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
+     ESCALATION_DECIDED_FROM_FAILED_GATES,
+     RELAY_BOUND_TO_TIER_MODEL,
+     // R2: a rate over every run reads the set the store names, never one a caller chose.
+     VAULT_LISTS_EVERY_RUN,
+     OUTCOMES_DERIVED_FROM_RUN_RECORDS,
++    // R18: a rate is kept per stack, the stack being what admission's adapter detection found.
++    ADMISSION_RECORDS_THE_DETECTED_STACK,
+     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
+     external({
+       id: 'I2.relay-meter-agrees-with-session',
+       title: "the relay's reading of a session equals the CLI's own account of it, class by class, so the meter is not blind to what the session used",
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     // I1a's paid run: on the composed host, every real call is metered by the relay the line provisioned, and its record names the runtime's model.
+     external({
+       id: 'I2.line-usage-is-metered-and-names-its-model',
+       title:
+         "every usage record of a real driver call on the composed host is metered by the relay the line provisioned, and names the model the runtime resolved the scope's tier to, never the driver's own account",
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R15: the base run's results are the runtime's, and a resume reads them rather than running them again.
+     BASE_RESULTS_ARE_THE_RUNTIMES,
+     RESUME_READS_THE_BASE_RECORD,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/local-vault.ts =====
+diff --git a/packages/conformance/src/registry/local-vault.ts b/packages/conformance/src/registry/local-vault.ts
+index 24b285d..ae1917d 100644
+--- a/packages/conformance/src/registry/local-vault.ts
++++ b/packages/conformance/src/registry/local-vault.ts
+@@ -185,34 +185,34 @@ export async function contendOnCommit(
+ /**
+  * A-R2-02: the store names every run it holds a record for, whichever record
+  * it is, so a rate over "every run" cannot be a rate over a sample a caller
+  * chose. A run refused at admission holds a decision and nothing else, and is
+  * listed; an empty store lists nothing rather than failing.
+  */
+ export const VAULT_LISTS_EVERY_RUN = runtime({
+   id: 'I2.vault-lists-every-run',
+   title:
+     'the Vault lists every run it holds any record for, a run refused at admission included, sorted by id, and an empty store lists none; the local and stub Vaults agree',
+   run: async () => {
+     const { StubVault } = await import('@olympus-ai/vault');
+     await withVault('r2-list-', async (local, _dirs, base) => {
+       for (const vault of [local, new StubVault(base)]) {
+         const name = vault === local ? 'LocalVault' : 'StubVault';
+         if ((await vault.listRuns()).length !== 0) throw new Error(`I2: an empty ${name} lists runs`);
+         const refused = 'run-a-refused' as RunId;
+         const admitted = 'run-b-admitted' as RunId;
+-        await vault.recordAdmission({ run: { id: admitted } } as unknown as AdmissionRecord);
++        await vault.recordAdmission({ run: { id: admitted }, stack: 'unsupported' } as unknown as AdmissionRecord);
+         await vault.recordDecision({
+           runId: refused,
+           taskId: null,
+           station: null,
+           decidedAt: new Date(0).toISOString(),
+           occurrence: 'r2-list',
+           decision: { cause: 'admission-refused', decidedBy: 'admission', refusal: { reason: 'invalid-request', problems: [] } },
+           collectedBy: 'runtime',
+         });
+         const listed = await vault.listRuns();
+         if (listed.join() !== [refused, admitted].join()) throw new Error(`I2: ${name} lists ${JSON.stringify(listed)}, not the refused and the admitted run in order`);
+       }
+     });
+   },
+ });
+
+===== packages/conformance/src/registry/outcomes.ts =====
+diff --git a/packages/conformance/src/registry/outcomes.ts b/packages/conformance/src/registry/outcomes.ts
+index a25e110..b8fb91b 100644
+--- a/packages/conformance/src/registry/outcomes.ts
++++ b/packages/conformance/src/registry/outcomes.ts
+@@ -1,48 +1,120 @@
+ /**
+  * R2's refusals to guess. A rate over nothing is `no-sample`, never 0% or
+  * 100%; a run refused at admission is counted and judged by no throughput
+  * rate; and a cost estimate without history declines, naming the cells it
+  * lacks, rather than offering a figure nobody measured (I5).
+  */
++import { writeFile } from 'node:fs/promises';
++import { join } from 'node:path';
+ import type { ModelFamily, RunId } from '@olympus-ai/core';
++import type { AdmissionRecord, Vault } from '@olympus-ai/vault';
+ import { runtime } from '../kit/assert.js';
++import { readRecord, withLine } from './line.js';
+ 
+ const api = async () => import('@olympus-ai/api');
+ 
+ export const OUTCOMES_REFUSE_WITHOUT_A_SAMPLE = runtime({
+   id: 'I5.outcomes-refuse-without-a-sample',
+   title:
+     'over an empty Vault every rate and distribution is no-sample and cost per merge has no figure; a run refused at admission is counted refused and enters no throughput rate; a cost estimate for a station and model with no past tasks declines and names the cell',
+   run: async () => {
+     const { estimateCost, outcomes } = await api();
+     const { StubVault } = await import('@olympus-ai/vault');
+     const vault = new StubVault(process.cwd());
+ 
+     const empty = await outcomes(vault);
+     const rates = [empty.safety.caughtFalseDone, empty.throughput.autonomyRatio, empty.throughput.reviewExitRefused];
+     const spreads = [empty.throughput.cycleTime, empty.throughput.iterationsToGreen, empty.throughput.attemptsPerTask];
+     if ([...rates, ...spreads].some((r) => r.kind !== 'no-sample') || empty.throughput.costPerMergedChange.kind !== 'no-sample' || empty.throughput.rolledYield !== null) {
+       throw new Error(`I5: an empty Vault yields a figure: ${JSON.stringify(empty)}`);
+     }
+ 
+     await vault.recordDecision({
+       runId: 'r2-refused' as RunId,
+       taskId: null,
+       station: null,
+       decidedAt: new Date().toISOString(),
+       occurrence: 'r2-refused',
+       decision: { cause: 'admission-refused', decidedBy: 'admission', refusal: { reason: 'invalid-request', problems: [] } },
+       collectedBy: 'runtime',
+     });
+     const refused = await outcomes(vault);
+     if (refused.population.refused !== 1 || refused.population.total !== 1) throw new Error(`I5: a run refused at admission is not counted refused: ${JSON.stringify(refused.population)}`);
+     if (refused.throughput.autonomyRatio.kind !== 'no-sample') throw new Error('I5: a run refused at admission entered the autonomy ratio');
+     if (refused.throughput.decisionsByCause['admission-refused'] !== 1) throw new Error('I5: the admission refusal is not counted by cause');
+ 
+     const model = { provider: 'conformance', family: 'claude' as ModelFamily, model: 'never-run', version: '1' };
+     const estimate = await estimateCost(vault, [{ station: 'build', model }]);
+     if (estimate.kind !== 'insufficient-sample' || estimate.short.length !== 1 || estimate.short[0]?.sample !== 0 || estimate.short[0].station !== 'build') {
+       throw new Error(`I5: a cost estimate with no history did not decline naming its cell: ${JSON.stringify(estimate)}`);
+     }
+   },
+ });
++
++/**
++ * A Vault that reads every admission record as one written before R18, with
++ * no stack. The store now refuses to write such a record, so the read is what
++ * stands in for it.
++ */
++function beforeStacks(inner: Vault): Vault {
++  return new Proxy(inner, {
++    get(target, key) {
++      if (key === 'read') {
++        return async (ref: Parameters<Vault['read']>[0]): Promise<Uint8Array> => {
++          const bytes = await target.read(ref);
++          if (ref.kind !== 'admission') return bytes;
++          const { stack: _dropped, ...before } = JSON.parse(new TextDecoder().decode(bytes)) as AdmissionRecord;
++          return new TextEncoder().encode(JSON.stringify(before));
++        };
++      }
++      const value: unknown = Reflect.get(target, key, target);
++      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
++    },
++  });
++}
++
++/**
++ * R18: the stack a rate is kept under is the one the runtime's adapter
++ * detection found at admission, written into the admission record and never
++ * taken from a model's account. A run with no stack on record is
++ * `unrecorded`, never filed under a guess, and a record that names none is
++ * refused rather than stored, since a stack cannot be written later.
++ */
++export const ADMISSION_RECORDS_THE_DETECTED_STACK = runtime({
++  id: 'I2.admission-records-the-detected-stack',
++  title:
++    "admission records the stack the base's adapter set detected: vitest 4 declared is recorded vitest@4, and the same rig with no package.json unsupported; the run's records read that stack and outcomes key the run under it; a record with no stack is keyed unrecorded, never a guessed stack; the local Vault refuses an admission record that names no stack and stores nothing",
++  run: async () => {
++    const { admitRun, deriveOutcomes, readRunRecords, UNRECORDED_STACK } = await api();
++    const admitted = (prefix: string, vitest: boolean): Promise<string> => withLine(prefix, async (rig) => {
++      if (vitest) await writeFile(join(rig.dirs.artifacts, 'package.json'), JSON.stringify({ name: 'hello', private: true, devDependencies: { vitest: '^4.1.0' } }));
++      const components = await rig.components();
++      const admission = await admitRun(await rig.request(components));
++      if (!admission.ok) throw new Error(`I2: the rig's run was not admitted: ${JSON.stringify(admission)}`);
++      const record = await readRecord<AdmissionRecord>(components.vault, admission.admitted.state.admission);
++
++      const read = await readRunRecords(components.vault, rig.runId);
++      if (read.stack !== record.stack) throw new Error(`I2: the run's records read stack ${String(read.stack)}, not the ${record.stack} admission recorded`);
++      const keys = Object.keys(deriveOutcomes([{ ...read, ending: 'merged' }]).throughput.autonomyRatioByStack);
++      if (keys.join() !== record.stack) throw new Error(`I2: a run admitted on ${record.stack} was keyed under ${keys.join(', ')}`);
++
++      const before = await readRunRecords(beforeStacks(components.vault), rig.runId);
++      const unkeyed = Object.keys(deriveOutcomes([{ ...before, ending: 'merged' }]).throughput.autonomyRatioByStack);
++      if (before.stack !== null || unkeyed.join() !== UNRECORDED_STACK) {
++        throw new Error(`I5: a run whose record names no stack was read as ${String(before.stack)} and keyed under ${unkeyed.join(', ')}, not ${UNRECORDED_STACK}`);
++      }
++
++      const other = `${rig.runId}-unstacked` as RunId;
++      const { stack: _dropped, ...unstacked } = { ...record, run: { ...record.run, id: other } };
++      const stored = await components.vault.recordAdmission(unstacked as AdmissionRecord).then(() => true, () => false);
++      if (stored || (await components.vault.listRuns()).includes(other)) throw new Error('I5: the local Vault stored an admission record that names no stack');
++      return record.stack;
++    });
++
++    const detected = await admitted('r18-vitest-', true);
++    if (detected !== 'vitest@4') throw new Error(`I2: a base declaring vitest 4 was recorded as ${detected}`);
++    // The control: the value is read from the base, not a constant every record carries.
++    const none = await admitted('r18-none-', false);
++    if (none !== 'unsupported') throw new Error(`I2 control: a base declaring no test framework was recorded as ${none}`);
++  },
++});
+
+===== packages/core/src/run/types.ts =====
+diff --git a/packages/core/src/run/types.ts b/packages/core/src/run/types.ts
+index 87a13d7..2d44ee8 100644
+--- a/packages/core/src/run/types.ts
++++ b/packages/core/src/run/types.ts
+@@ -9,7 +9,7 @@
+  * implementation.
+  */
+ import type { ApprovalKey } from '../policy/types.js';
+-import type { ReviewSeat } from '../station/types.js';
++import type { ParkCause, ReviewSeat } from '../station/types.js';
+ 
+ export type RunId = string & { readonly __brand: 'RunId' };
+ export type TaskId = string & { readonly __brand: 'TaskId' };
+@@ -101,39 +101,47 @@ export type StationPhase = 'working' | 'exiting';
+ /**
+  * How much of a task's budget is spent. Every count is committed before the
+  * attempt it counts begins, so no attempt runs uncounted.
+  *
+  * `iterations` and `retries` measure work: what the model was asked to do, and
+  * how often the machinery under it failed. `starts` measures invocations, and
+  * the two are not the same number. A run stopped between the commit that marks
+  * a task `running` and the commit that records its result leaves an attempt in
+  * flight; the resume runs the driver again, which costs money and spends no
+  * iteration. `starts` is what makes that replay visible and bounded (A-P4-06).
+  */
+ export interface TaskAttempts {
+   /** Builds the model was asked for. Bounded by the build contract's `maxIterations`. */
+   readonly iterations: number;
+   /** Driver or sandbox failures in the current iteration. Bounded by the station contract's `retry.max`; a new iteration starts at zero. */
+   readonly retries: number;
+   /**
+    * Times the driver was actually invoked for this task, including every
+    * replay of an attempt a stop left in flight. Never lower than `iterations`;
+    * the gap between them is how often the run was interrupted mid-attempt.
+    * Bounded by `maxStarts` for the station.
+    */
+   readonly starts: number;
+   /**
+    * Each time `verify` found that a path this task changed was also changed by
+    * a sibling's accepted work after the task started, in the order found
+    * (A-R4-01). A conflict sends the task back to `build` and spends an
+    * iteration that no gate judged, so the gates failed so far are
+    * `iterations - 1 - conflicts.length`. Bounded by the policy's
+    * `concurrency.maxConflictRetries`.
+    */
+   readonly conflicts: readonly TaskConflict[];
++  /**
++   * Why the task was parked, recorded by the park itself in the commit that
++   * parks it. The counts cannot always say: the last iteration replayed to the
++   * start bound, and every iteration spending every retry, leave the same
++   * numbers (A-R4-05). Absent on a task that is not parked, and on a park
++   * committed before the cause was recorded, which is read from its counts.
++   */
++  readonly parkedFor?: ParkCause;
+ }
+ 
+ /**
+  * One conflict: the siblings whose accepted change touched a path this task
+  * also changed, and those paths. A conflict is a whole path changed by both;
+  * nothing is merged inside a file, and no side is picked (I5, D-R4-04).
+  */
+
+===== packages/core/src/station/machine.ts =====
+diff --git a/packages/core/src/station/machine.ts b/packages/core/src/station/machine.ts
+index 116f481..e70259c 100644
+--- a/packages/core/src/station/machine.ts
++++ b/packages/core/src/station/machine.ts
+@@ -282,55 +282,63 @@ export interface StepLimits {
+ /**
+  * The most times a station may invoke a driver for one task: every iteration
+  * spending every retry, and one more iteration's worth for each of the task's
+  * `conflicts` (A-R4-01). An uninterrupted run cannot exceed it, so a run that
+  * does is replaying an attempt a stop left in flight rather than progressing,
+  * and the task parks instead of spending without bound (A-P4-06).
+  */
+ export function maxStarts(contract: StationContract, conflicts: number): number {
+   return (contract.maxIterations + conflicts) * (contract.retry.max + 1);
+ }
+ 
+-/** Why a parked task was parked, read back from its attempt counts against the contract of the station it parked at and the policy's conflict bound. */
++/**
++ * Why a parked task was parked: the cause its park recorded, or, for a park
++ * committed before the cause was recorded, the cause read back from its attempt
++ * counts against the contract of the station it parked at and the policy's
++ * conflict bound (A-R4-05).
++ */
+ export function parkRefusal(state: RunState, task: Task, limits: StepLimits, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
+   const attempts = Object.hasOwn(state.attempts, task.id) ? state.attempts[task.id] : undefined;
++  const recorded = attempts?.parkedFor;
+   const last = attempts?.conflicts.at(-1);
+-  if (attempts !== undefined && last !== undefined && attempts.conflicts.length > limits.maxConflictRetries) {
++  const byConflicts = recorded === undefined ? attempts !== undefined && attempts.conflicts.length > limits.maxConflictRetries : recorded === 'conflicts-exhausted';
++  if (byConflicts && last !== undefined) {
+     const limit = limits.maxConflictRetries;
+     return {
+       ok: false,
+       reason: 'parked',
+       task: task.id,
+       cause: 'conflicts-exhausted',
+       limit,
+       conflictsWith: last.with,
+       paths: last.paths,
+       message: `task ${task.id} parked at ${state.station}: its change collided with ${last.with.join(', ')} on ${last.paths.join(', ')}, `
+         + `past the ${String(limit)} rebuild(s) the policy allows; no side was picked`,
+     };
+   }
+   const at = contracts[state.station];
+   const startLimit = maxStarts(at, attempts?.conflicts.length ?? 0);
+   const retryLimit = at.retry.max;
+   const byStarts = attempts !== undefined && attempts.starts >= startLimit && gatedIterations(attempts) < contracts[task.station].maxIterations;
+   const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
+-  const cause: ParkCause = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
+-  const limit = byStarts ? startLimit : byRetries ? retryLimit : contracts[task.station].maxIterations;
++  const derived: Exclude<ParkCause, 'conflicts-exhausted'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
++  const cause = recorded === undefined || recorded === 'conflicts-exhausted' ? derived : recorded;
++  const limit = cause === 'starts-exhausted' ? startLimit : cause === 'retries-exhausted' ? retryLimit : contracts[task.station].maxIterations;
+   const message =
+-    byStarts
++    cause === 'starts-exhausted'
+       ? `task ${task.id} parked at ${state.station}: its driver was invoked ${String(limit)} times, the most an uninterrupted run could, without the task finishing`
+-      : byRetries
++      : cause === 'retries-exhausted'
+         ? `task ${task.id} parked at ${state.station}: its driver or sandbox failed more than ${String(limit)} retries`
+         : `task ${task.id} parked: its gate failed on all ${String(limit)} iterations`;
+   return { ok: false, reason: 'parked', task: task.id, cause, limit, message };
+ }
+ 
+ /**
+  * The next thing the line does, from committed state alone.
+  *
+  * `build` builds every task whose dependencies have passed and that has not,
+  * up to `limits.maxParallelTasks` at once, in graph order (R4); `verify`
+  * verifies one task at a time, every task
+  * `build` left verifying; leaving `verify` goes back to `build` while any build
+  * task has not passed, and on to `review` once all have. A task whose status is
+  * `running` was in flight when the run stopped, and is run again.
+  */
+
+===== packages/core/test/station-machine.test.ts =====
+diff --git a/packages/core/test/station-machine.test.ts b/packages/core/test/station-machine.test.ts
+index 3c19499..edbd252 100644
+--- a/packages/core/test/station-machine.test.ts
++++ b/packages/core/test/station-machine.test.ts
+@@ -240,95 +240,112 @@ describe('station caps where no role acts (I5)', () => {
+ describe('nextStep', () => {
+   test('refuses every step of a cancelled run, before anything else it holds, naming who and when (A-P9-01)', () => {
+     const cancelled = { by: 'local', at: '2026-09-28T00:00:00.000Z' };
+     for (const s of [state({ cancelled }), state({ cancelled, station: 'build', tasks: { a: 'running' } as RunState['tasks'] }), state({ cancelled, station: 'integrate', phase: 'exiting' })]) {
+       expect(nextStep(s, GRAPH, ONE_AT_A_TIME)).toEqual({
+         kind: 'refuse',
+         refusal: { ok: false, reason: 'cancelled', cancelledBy: 'local', cancelledAt: cancelled.at, message: expect.stringContaining('cancelled by local') as unknown },
+       });
+     }
+   });
+ 
+ 
+   test('refuses every step of a halted run, after a cancellation and before anything else (A-P9-02)', () => {
+     const halted = { at: '2026-09-28T00:00:00.000Z', message: 'the result did not match the contract' };
+     for (const s of [state({ halted }), state({ halted, station: 'build', tasks: { a: 'running' } as RunState['tasks'] })]) {
+       expect(nextStep(s, GRAPH, ONE_AT_A_TIME)).toEqual({
+         kind: 'refuse',
+         refusal: { ok: false, reason: 'halted', haltedAt: halted.at, message: expect.stringContaining('the result did not match the contract') as unknown },
+       });
+     }
+     const cancelled = { by: 'local', at: '2026-09-28T00:00:01.000Z' };
+     expect(nextStep(state({ halted, cancelled }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'cancelled' } });
+   });
+ 
+   test('the runtime stations work, then exit into their successor', () => {
+     expect(nextStep(state(), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'work', station: 'intake' });
+     expect(nextStep(state({ station: 'plan', phase: 'exiting' }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'plan', to: 'build' });
+   });
+ 
+   test('build takes tasks in graph order once their dependencies pass; verify takes what build left verifying', () => {
+     const tasks = { a: 'pending', b: 'pending', r: 'pending' } as RunState['tasks'];
+     expect(nextStep(state({ station: 'build', tasks }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }] });
+     const built = { ...tasks, a: 'verifying' } as RunState['tasks'];
+     expect(nextStep(state({ station: 'build', tasks: built }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'finish', station: 'build' });
+     expect(nextStep(state({ station: 'verify', tasks: built }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'verify', task: { id: 'a' } });
+     const passed = { ...tasks, a: 'passed' } as RunState['tasks'];
+     expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: passed }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'verify', to: 'build' });
+     expect(nextStep(state({ station: 'build', tasks: passed }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'b' }] });
+     const all = { a: 'passed', b: 'passed', r: 'pending' } as RunState['tasks'];
+     expect(nextStep(state({ station: 'verify', phase: 'exiting', tasks: all }), GRAPH, ONE_AT_A_TIME)).toEqual({ kind: 'exit', from: 'verify', to: 'review' });
+     expect(nextStep(state({ station: 'review', tasks: all }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'review', task: { id: 'r' } });
+   });
+ 
+   test('a task running when the run stopped is run again', () => {
+     const tasks = { a: 'running', b: 'pending', r: 'pending' } as RunState['tasks'];
+     expect(nextStep(state({ station: 'build', tasks }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }] });
+   });
+ 
+   test('a recorded violation or a parked task refuses before anything else, naming the cause from the counts', () => {
+     const violation = { runId, kind: 'violation' as const, hash: '1'.repeat(64) };
+     expect(nextStep(state({ station: 'build', violations: [violation] }), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'violation', violations: [violation] } });
+     const parked = state({
+       station: 'verify',
+       tasks: { a: 'parked' } as RunState['tasks'],
+       attempts: { a: { iterations: 3, retries: 0, starts: 3, conflicts: [] } } as RunState['attempts'],
+     });
+     expect(nextStep(parked, GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', task: 'a', cause: 'iterations-exhausted', limit: 3 } });
+     const retried = state({
+       station: 'build',
+       tasks: { a: 'parked' } as RunState['tasks'],
+       attempts: { a: { iterations: 1, retries: 3, starts: 1, conflicts: [] } } as RunState['attempts'],
+     });
+     expect(nextStep(retried, GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'retries-exhausted', limit: 2 } });
+   });
+ 
++  test('the cause a park recorded is the cause read back, where the counts alone cannot tell it (A-R4-05, #47)', () => {
++    // The last iteration replayed to the start bound, and three iterations each spending every retry, leave the same counts.
++    const counts = { iterations: 3, retries: 0, starts: 9, conflicts: [] };
++    const parkedWith = (attempts: object): RunState =>
++      state({ station: 'build', tasks: { a: 'parked' } as RunState['tasks'], attempts: { a: attempts } as RunState['attempts'] });
++    expect(nextStep(parkedWith({ ...counts, parkedFor: 'starts-exhausted' }), GRAPH, ONE_AT_A_TIME)).toMatchObject({
++      kind: 'refuse',
++      refusal: { reason: 'parked', task: 'a', cause: 'starts-exhausted', limit: 9 },
++    });
++    expect(nextStep(parkedWith({ ...counts, parkedFor: 'iterations-exhausted' }), GRAPH, ONE_AT_A_TIME)).toMatchObject({
++      kind: 'refuse',
++      refusal: { reason: 'parked', cause: 'iterations-exhausted', limit: 3 },
++    });
++    // A park committed before the cause was recorded is read from its counts, as it always was.
++    expect(nextStep(parkedWith(counts), GRAPH, ONE_AT_A_TIME)).toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', cause: 'iterations-exhausted' } });
++  });
++
+   test('build names every buildable task up to the limit, in graph order, and never zero (R4)', () => {
+     const wide: TaskGraph = { tasks: [task('a', 'build'), task('b', 'build'), task('c', 'build'), task('d', 'build', ['a'])], edges: [] };
+     const tasks = { a: 'pending', b: 'failed', c: 'running', d: 'pending' } as RunState['tasks'];
+     const two = { maxParallelTasks: 2, maxConflictRetries: 0 };
+     expect(nextStep(state({ station: 'build', tasks }), wide, two)).toMatchObject({ kind: 'build', tasks: [{ id: 'a' }, { id: 'b' }] });
+     const step = nextStep(state({ station: 'build', tasks }), wide, { ...two, maxParallelTasks: 8 });
+     expect(step.kind === 'build' ? step.tasks.map((t) => t.id) : step).toEqual(['a', 'b', 'c']);
+     expect(() => nextStep(state({ station: 'build', tasks }), wide, { ...two, maxParallelTasks: 0 })).toThrow(/not a positive integer/);
+   });
+ 
+   test('a task parked past the conflict bound names the siblings and paths of its last conflict (A-R4-02)', () => {
+     const conflicts = [{ with: ['b'], paths: ['x.txt'] }, { with: ['b', 'c'], paths: ['x.txt', 'y.txt'] }];
+     const parked = state({
+       station: 'verify',
+       tasks: { a: 'parked' } as RunState['tasks'],
+       attempts: { a: { iterations: 3, retries: 0, starts: 3, conflicts } } as unknown as RunState['attempts'],
+     });
+     expect(nextStep(parked, GRAPH, { maxParallelTasks: 2, maxConflictRetries: 1 })).toMatchObject({
+       kind: 'refuse',
+       refusal: { reason: 'parked', task: 'a', cause: 'conflicts-exhausted', limit: 1, conflictsWith: ['b', 'c'], paths: ['x.txt', 'y.txt'] },
+     });
+     // Within the bound, the same counts are no conflict park: two of three iterations were conflicts, so one gate was judged.
+     expect(nextStep(parked, GRAPH, { maxParallelTasks: 2, maxConflictRetries: 2 })).toMatchObject({ refusal: { cause: 'iterations-exhausted' } });
+   });
+ 
+   test('leaving verify with unpassed tasks none of which can be built is a defect, not a loop', () => {
+     const stuck = { a: 'passed', b: 'verifying', r: 'pending' } as RunState['tasks'];
+     expect(() => nextStep(state({ station: 'verify', phase: 'exiting', tasks: stuck }), GRAPH, ONE_AT_A_TIME)).toThrow(/cannot finish/);
+   });
+ });
+
+===== packages/sandbox/test/local.test.ts =====
+diff --git a/packages/sandbox/test/local.test.ts b/packages/sandbox/test/local.test.ts
+index 48a6768..8268814 100644
+--- a/packages/sandbox/test/local.test.ts
++++ b/packages/sandbox/test/local.test.ts
+@@ -17,8 +17,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest
+ import {
+   allowedHosts,
+   DockerUnavailable,
+   LocalDockerProvider,
++  proxyNames,
+   SandboxRefusal,
+   type SandboxHandle,
+   type SandboxSpec,
+ } from '../src/index.js';
+@@ -210,58 +211,65 @@ describe('the mount table is what the container gets', () => {
+ describe('egress', () => {
+   test('deny-all is --network none, and the container has no route off the host', async () => {
+     const handle = await provision();
+     const controls = provider.appliedControls(handle);
+     expect(controls.egress.mode).toBe('deny-all');
+     expect(controls.egress.network).toBe('none');
+     expect(controls.runArgs).toStrictEqual(expect.arrayContaining(['--network', 'none']));
+     expect((await hostConfig(controls.containerId)).networkMode).toBe('none');
+ 
+     // The container has a loopback interface and nothing else, so there is no route off the
+     // host to attempt. Asserted on the interface list rather than only on a failed request:
+     // a request also fails when the tool is missing, and that would pass while proving nothing.
+     const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+     expect(interfaces.stdout.trim().split(/\s+/)).toStrictEqual(['lo']);
+ 
+     // And the request itself, to an IP literal so the attempt is a route and not a name lookup.
+     // The message must name the route: `wget` is present in this image and works when a network
+     // is attached, so "Network unreachable" is the daemon's doing and not a missing binary.
+     const result = await provider.exec(handle, ['sh', '-c', 'wget -T 2 -O /dev/null http://1.1.1.1/ 2>&1']);
+     expect(result.exitCode).not.toBe(0);
+     expect(result.stdout + result.stderr).toContain('Network unreachable');
+   });
+ 
+   test('a deny-all sandbox starts no proxy and creates no network', async () => {
+     const handle = await provision();
+     const controls = provider.appliedControls(handle);
+     // The union makes this the whole of it: `deny-all` has no proxy field to read.
+     expect(controls.egress).toStrictEqual({ mode: 'deny-all', network: 'none' });
+-    const networks = await run('docker', ['network', 'ls', '--format', '{{.Name}}']);
+-    expect(networks.stdout).not.toContain('egress-in-');
+-    const containers = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
+-    expect(containers.stdout).not.toContain('egress-proxy-');
++    // Checked by the names this sandbox's id gives its proxy, not by every egress object on the
++    // daemon: another suite's allowlisted sandbox running at the same time is not this one's (#56).
++    const { stdout: name } = await run('docker', ['inspect', '--format', '{{.Name}}', controls.containerId]);
++    const id = /^\/?sandbox-(.+)$/.exec(name.trim())?.[1];
++    expect(id).toBeDefined();
++    const names = proxyNames(id ?? '');
++    const networks = (await run('docker', ['network', 'ls', '--format', '{{.Name}}'])).stdout.trim().split(/\s+/);
++    expect(networks).not.toContain(names.internal);
++    expect(networks).not.toContain(names.outbound);
++    const containers = (await run('docker', ['ps', '--all', '--format', '{{.Names}}'])).stdout.trim().split(/\s+/);
++    expect(containers).not.toContain(names.container);
+   });
+ 
+   test('an empty allow list under an allowlist is refused, as neither deny-all nor allow-all', async () => {
+     const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'allowlist', allow: [] } })));
+     expect(error.layer).toBe('egress');
+     expect(error.message).toContain('empty');
+   });
+ 
+   test('an allow entry that is not one host the proxy can match exactly is refused', async () => {
+     for (const entry of ['*.example.com', 'https://example.com', 'example.com/path', 'example.com:443', 'exa mple.com', '']) {
+       const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'allowlist', allow: [entry] } })));
+       expect(error.layer).toBe('egress');
+       expect(error.message).toContain(JSON.stringify(entry));
+     }
+     // The control: a hostname and both address families are accepted by the same check, so the
+     // refusals above are the entries being read and not the list being rejected.
+     for (const entry of ['example.com', '192.0.2.10', '2001:db8::1']) {
+       expect(allowedHosts([entry])).toStrictEqual([entry]);
+     }
+   });
+ 
+   test('a deny-all policy carrying allow entries contradicts itself and is refused', async () => {
+     const error = await refusal(() => provider.provision(specFor({ egress: { mode: 'deny-all', allow: ['example.com'] } })));
+     expect(error.layer).toBe('egress');
+   });
+ });
+
+===== packages/vault/src/local/vault.ts =====
+diff --git a/packages/vault/src/local/vault.ts b/packages/vault/src/local/vault.ts
+index 19cded3..865ea41 100644
+--- a/packages/vault/src/local/vault.ts
++++ b/packages/vault/src/local/vault.ts
+@@ -427,285 +427,289 @@ async function storeObject(store: string, runId: RunId, kind: VaultRefKind, reco
+ export class LocalVault implements Vault {
+   readonly #store: string;
+   readonly #artifacts: string;
+ 
+   constructor(roots: VaultRoots) {
+     const store = resolve(roots.store);
+     const artifacts = resolve(roots.artifacts);
+     if (contains(store, artifacts) || contains(artifacts, store)) {
+       throw new Error(
+         `LocalVault: the store (${store}) and the artifact root (${artifacts}) overlap. The artifact root is the tree ` +
+           'an agent writes; a store inside it, or holding it, is a Vault an agent can reach, which is exactly what I1 denies.',
+       );
+     }
+     this.#store = store;
+     this.#artifacts = artifacts;
+   }
+ 
+   async read(ref: VaultRef): Promise<Uint8Array> {
+     let bytes: Uint8Array;
+     try {
+       bytes = await readFile(objectFile(this.#store, ref));
+     } catch (error) {
+       if (isAbsent(error)) throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}`, { cause: error });
+       throw error;
+     }
+     // Every other kind is named by its hash, so the file a ref names holds that
+     // content. The admission record is named by its run, so a ref carrying some
+     // other hash must not read it back as if it matched.
+     if ((ref.kind === 'admission' || ref.kind === 'base-run') && sha256(bytes) !== ref.hash) {
+       throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}; the run's ${ref.kind} record hashes to ${sha256(bytes)}`);
+     }
+     return bytes;
+   }
+ 
+   /**
+    * Adds to the run's manifest; never replaces it. `spec` locks the spec and
+    * `test-design` locks the acceptance tests, and I3 requires both still
+    * verified at every later transition, so a later lock that dropped the
+    * earlier one would make the invariant unsatisfiable. An already-locked path
+    * is refused rather than re-hashed: re-locking is how a tamper would launder
+    * itself, and the station and instant of the first lock are the audit record.
+    */
+   async lock(runId: RunId, paths: string[], by: StationId): Promise<LockManifest> {
+     if (paths.length === 0) {
+       throw new Error(`LocalVault: refusing to lock nothing for run ${runId}; an empty manifest would verify as intact`);
+     }
+     refuseUnusablePaths(runId, paths);
+ 
+     const locks = join(runDir(this.#store, runId), 'locks');
+     const generation = await highestIn(locks);
+     const existing: LockEntry[] =
+       generation === null ? [] : [...requireManifest(await readJson(join(locks, `${String(generation)}.json`)), `${String(generation)}.json`).entries];
+ 
+     const already = paths.filter((path) => existing.some((entry) => entry.path === path));
+     if (already.length > 0) {
+       const held = already.map((path) => {
+         const entry = existing.find((e) => e.path === path);
+         return `'${path}' (locked at ${entry === undefined ? 'an earlier station' : entry.lockedBy})`;
+       });
+       throw new Error(
+         `LocalVault: refusing to lock ${held.join(', ')} again for run ${runId}. An artifact is fixed from its first ` +
+           'lock; re-locking would rebase its hash onto whatever the bytes are now.',
+       );
+     }
+ 
+     const root = await artifactRoot(this.#artifacts);
+     const lockedAt = new Date().toISOString();
+     const added: LockEntry[] = [];
+     for (const path of paths) {
+       const hash = await hashArtifact(root, path);
+       if (hash === MISSING) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: no such file under ${this.#artifacts}`);
+       if (hash === ESCAPED) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: it resolves outside ${this.#artifacts}`);
+       if (hash === UNREADABLE) throw new Error(`LocalVault: cannot lock ${path} for run ${runId}: it exists but cannot be read as bytes`);
+       added.push({ path, sha256: hash, lockedAt, lockedBy: by });
+     }
+ 
+     const manifest: LockManifest = { runId, entries: [...existing, ...added] };
+     const next = (generation ?? 0) + 1;
+     if (!(await createExclusive(join(locks, `${String(next)}.json`), encode(manifest)))) {
+       throw new Error(
+         `LocalVault: another writer locked generation ${String(next)} for run ${runId} first; nothing was stored. ` +
+           'Re-read the manifest and lock again.',
+       );
+     }
+     return manifest;
+   }
+ 
+   async verifyLocks(runId: RunId): Promise<LockVerdict> {
+     const locks = join(runDir(this.#store, runId), 'locks');
+     const generation = await highestIn(locks);
+     if (generation === null) {
+       throw new Error(`LocalVault: nothing is locked for run ${runId}; refusing to report intact`);
+     }
+     const file = join(locks, `${String(generation)}.json`);
+     const manifest = requireManifest(await readJson(file), file);
+ 
+     const root = await artifactRoot(this.#artifacts);
+     const tampered: Array<{ path: string; expected: string; actual: string }> = [];
+     for (const entry of manifest.entries) {
+       const actual = await hashArtifact(root, entry.path);
+       if (actual !== entry.sha256) tampered.push({ path: entry.path, expected: entry.sha256, actual });
+     }
+     return tampered.length === 0 ? { ok: true } : { ok: false, tampered };
+   }
+ 
+   writeEvidence(b: EvidenceBundle): Promise<VaultRef> {
+     return storeObject(this.#store, b.runId, 'evidence', b);
+   }
+ 
+   recordViolation(v: IntegrityViolation): Promise<VaultRef> {
+     return storeObject(this.#store, v.runId, 'violation', v);
+   }
+ 
+   /**
+    * Once per run. The record is created with the same exclusive create as run
+    * state, under a fixed name rather than its hash, so a second admission for
+    * the run finds the file present and stores nothing: a run cannot be
+    * re-admitted at another level or under another policy.
+    */
+   async recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
+     if (!isRecord(a) || !isRecord(a.run) || typeof a.run.id !== 'string') {
+       throw new Error('LocalVault: an admission record must carry the run it admits');
+     }
++    // A stack not written at admission cannot be backfilled, so a record without one is refused (R18).
++    if (typeof (a.stack as unknown) !== 'string' || a.stack === '') {
++      throw new Error(`LocalVault: the admission record of run ${a.run.id} names no stack; nothing was stored`);
++    }
+     const runId = a.run.id;
+     const bytes = encode(a);
+     if (!(await createExclusive(join(runDir(this.#store, runId), ADMISSION_FILE), bytes))) {
+       throw new Error(`LocalVault: run ${runId} already has an admission record; a run is admitted once, and nothing was stored`);
+     }
+     return { runId, kind: 'admission', hash: sha256(bytes) };
+   }
+ 
+   recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef> {
+     if (!isRecord(r) || typeof r.taskId !== 'string') {
+       return Promise.reject(new Error(`LocalVault: refusing to record a task result for run ${runId} that names no task`));
+     }
+     return storeObject(this.#store, runId, 'task-result', r);
+   }
+ 
+   /**
+    * I2: only a record the runtime collected. A reading is checked for its
+    * shape too, because a total derived from a record with a missing count
+    * would be a figure nobody measured.
+    */
+   recordUsage(r: UsageRecord): Promise<VaultRef> {
+     const problem = usageProblem(r);
+     if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a usage record: ${problem}`));
+     return storeObject(this.#store, r.runId, 'usage', r);
+   }
+ 
+   /**
+    * I2: only a decision the runtime recorded, attributed to a component that
+    * makes its cause. Written under the run's directory whether or not the run
+    * has state, so a refused admission leaves this and nothing else (D-P14-01).
+    */
+   recordDecision(d: EnforcementDecision): Promise<VaultRef> {
+     const problem = decisionProblem(d);
+     if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing an enforcement decision: ${problem}`));
+     return storeObject(this.#store, d.runId, 'decision', d);
+   }
+ 
+   /** Every decision file under the run, by its name; the name is the hash, so each ref reads back the file it names. */
+   readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+     return this.#objects(runId, 'decision');
+   }
+ 
+   /** Every usage file under the run, referenced from run state or not (A-I1a-05). */
+   readUsage(runId: RunId): Promise<readonly VaultRef[]> {
+     return this.#objects(runId, 'usage');
+   }
+ 
+   /**
+    * I2: only the runtime's record, whole. Once per run, by an exclusive
+    * create: a second base run would let a run be judged against whichever
+    * base suited it, so it is refused and nothing is stored.
+    */
+   async recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
+     const problem = baseRunProblem(r);
+     if (problem !== undefined) throw new Error(`LocalVault: refusing a base record: ${problem}`);
+     const bytes = encode(r);
+     if (!(await createExclusive(join(runDir(this.#store, r.runId), BASE_RUN_FILE), bytes))) {
+       throw new Error(`LocalVault: run ${r.runId} already has a base record; the checks run over a base once, and nothing was stored`);
+     }
+     return { runId: r.runId, kind: 'base-run', hash: sha256(bytes) };
+   }
+ 
+   async readBaseRun(runId: RunId): Promise<VaultRef | null> {
+     let bytes: Uint8Array;
+     try {
+       bytes = await readFile(join(runDir(this.#store, runId), BASE_RUN_FILE));
+     } catch (error) {
+       if (isAbsent(error)) return null;
+       throw error;
+     }
+     return { runId, kind: 'base-run', hash: sha256(bytes) };
+   }
+ 
+   /** I2: only what the runtime did, whole. The same act recorded twice is one entry, since the record carries no time. */
+   recordIntegration(r: IntegrationRecord): Promise<VaultRef> {
+     const problem = integrationProblem(r);
+     if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing an integration record: ${problem}`));
+     return storeObject(this.#store, r.runId, 'integration', r);
+   }
+ 
+   readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
+     return this.#objects(runId, 'integration');
+   }
+ 
+   /** Every run directory under the store, whatever it holds, so a run refused at admission is listed too (A-R2-02). */
+   async listRuns(): Promise<readonly RunId[]> {
+     let entries: Dirent[];
+     try {
+       entries = await readdir(join(this.#store, 'runs'), { withFileTypes: true });
+     } catch (error) {
+       if (isAbsent(error)) return [];
+       throw error;
+     }
+     return entries
+       .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
+       .map((entry) => entry.name as RunId)
+       .sort();
+   }
+ 
+   async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {
+     const dir = join(runDir(this.#store, runId), 'objects', kind);
+     let names: string[];
+     try {
+       names = await readdir(dir);
+     } catch (error) {
+       if (isAbsent(error)) return [];
+       throw error;
+     }
+     return names
+       .map((name) => /^([0-9a-f]{64})\.json$/.exec(name)?.[1])
+       .filter((hash): hash is string => hash !== undefined)
+       .sort()
+       .map((hash) => ({ runId, kind, hash }));
+   }
+ 
+   async readRunState(runId: RunId): Promise<RunState> {
+     const states = join(runDir(this.#store, runId), 'state');
+     const version = await highestIn(states);
+     if (version === null) throw Object.assign(new Error(`LocalVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState;
+     const file = join(states, `${String(version)}.json`);
+     return requireRunState(await readJson(file), file);
+   }
+ 
+   /**
+    * Compare-and-swap, arbitrated by the filesystem. The next version's file is
+    * created with `wx`, so of any number of writers holding the same
+    * `ifVersion` exactly one creates it and the rest are refused with `EEXIST`.
+    * There is deliberately no read-then-compare here: that shape loses an
+    * update whenever two writers interleave between the read and the write, and
+    * it passes a sequential test while doing so.
+    *
+    * `ifVersion` is authoritative and `s.version` is ignored; the contract left
+    * the choice to this unit (D-S1, S1 spec section 2). The precondition below
+    * is an extra refusal, not the concurrency control: it rejects a version
+    * that never existed, so a caller cannot jump the run forward and leave a
+    * hole in its history.
+    */
+   async commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
+     if (!VERSION.test(ifVersion)) {
+       throw new Error(`LocalVault: '${ifVersion}' is not a run state version`);
+     }
+     const states = join(runDir(this.#store, s.runId), 'state');
+     const current = Number(ifVersion);
+     if (!Number.isSafeInteger(current)) throw new Error(`LocalVault: run state version ${ifVersion} is out of range`);
+ 
+     const held = await highestIn(states);
+     if (current === 0 ? held !== null : held === null || held < current) {
+       const at = held === null ? 'no committed state' : `version ${String(held)}`;
+       throw new Error(`LocalVault: run ${s.runId} has ${at}, so version ${ifVersion} was never current; nothing stored`);
+     }
+ 
+     const next = String(current + 1);
+     const stored: RunState = { ...s, version: next };
+     if (!(await createExclusive(join(states, `${next}.json`), encode(stored)))) {
+       throw new Error(
+         `LocalVault: run ${s.runId} has already moved past version ${ifVersion}; another writer committed ${next} first. ` +
+           'Nothing was stored. Re-read the state and commit again.',
+       );
+     }
+     return stored;
+   }
+ }
+
+===== packages/vault/src/stub/vault.ts =====
+diff --git a/packages/vault/src/stub/vault.ts b/packages/vault/src/stub/vault.ts
+index 2fa5d60..b75112f 100644
+--- a/packages/vault/src/stub/vault.ts
++++ b/packages/vault/src/stub/vault.ts
+@@ -31,196 +31,199 @@ function isMissingFile(error: unknown): boolean {
+ export class StubVault implements Vault {
+   /**
+    * Read structurally by the entry point in @olympus-ai/api, which this
+    * package cannot import; the conformance fixture I5.stubs-declare-unsafe
+    * pins the shape.
+    */
+   readonly unsafe: { readonly component: 'StubVault'; readonly cannotEnforce: readonly string[] } = {
+     component: 'StubVault',
+     cannotEnforce: [
+       'persistence: the store is process memory, and everything in it is lost with the process',
+       "I1 at the mount layer: nothing prevents a process on the host from reaching this memory; the guarantee is the sandbox's, and the sandbox is also a stub",
+     ],
+   };
+ 
+   private readonly root: string;
+   private readonly blobs = new Map<string, Uint8Array>();
+   private readonly locks = new Map<RunId, LockManifest>();
+   private readonly states = new Map<RunId, RunState>();
+   private readonly decisions = new Map<RunId, VaultRef[]>();
+   private readonly integration = new Map<RunId, VaultRef[]>();
+   private readonly usage = new Map<RunId, VaultRef[]>();
+   private readonly admitted = new Set<RunId>();
+   private readonly baseRuns = new Map<RunId, VaultRef>();
+   /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
+   private readonly runs = new Set<RunId>();
+ 
+   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
+   constructor(root: string) {
+     this.root = root;
+   }
+ 
+   read(ref: VaultRef): Promise<Uint8Array> {
+     const bytes = this.blobs.get(refKey(ref));
+     if (bytes === undefined) return Promise.reject(new Error(`StubVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}`));
+     return Promise.resolve(new Uint8Array(bytes));
+   }
+ 
+   /**
+    * Adds to the run's manifest and refuses an already-locked path, as the
+    * local Vault does (D-P1-05). The skeleton replaced the manifest instead,
+    * which went unnoticed while its line locked once; a line that locks at
+    * `spec`, `test-design`, and `plan` would drop the spec from verification at
+    * the second lock (D-P4-05).
+    */
+   async lock(runId: RunId, paths: string[], by: StationId): Promise<LockManifest> {
+     if (paths.length === 0) {
+       throw new Error(`StubVault: refusing to lock nothing for run ${runId}; an empty manifest would verify as intact`);
+     }
+     const existing = this.locks.get(runId)?.entries ?? [];
+     const already = paths.filter((path) => existing.some((entry) => entry.path === path));
+     if (already.length > 0) {
+       throw new Error(`StubVault: refusing to lock ${already.join(', ')} again for run ${runId}; an artifact is fixed from its first lock`);
+     }
+     const lockedAt = new Date().toISOString();
+     const entries: LockEntry[] = [...existing];
+     for (const path of paths) {
+       const hash = await this.hashFile(path);
+       if (hash === undefined) throw new Error(`StubVault: cannot lock ${path} for run ${runId}: no such file under ${this.root}`);
+       entries.push({ path, sha256: hash, lockedAt, lockedBy: by });
+     }
+     const manifest: LockManifest = { runId, entries };
+     this.locks.set(runId, manifest);
+     this.runs.add(runId);
+     return structuredClone(manifest);
+   }
+ 
+   async verifyLocks(runId: RunId): Promise<LockVerdict> {
+     const manifest = this.locks.get(runId);
+     if (manifest === undefined) throw new Error(`StubVault: nothing is locked for run ${runId}; refusing to report intact`);
+     const tampered: Array<{ path: string; expected: string; actual: string }> = [];
+     for (const entry of manifest.entries) {
+       const actual = (await this.hashFile(entry.path)) ?? MISSING;
+       if (actual !== entry.sha256) tampered.push({ path: entry.path, expected: entry.sha256, actual });
+     }
+     return tampered.length === 0 ? { ok: true } : { ok: false, tampered };
+   }
+ 
+   writeEvidence(b: EvidenceBundle): Promise<VaultRef> {
+     return Promise.resolve(this.store(b.runId, 'evidence', b));
+   }
+ 
+   recordViolation(v: IntegrityViolation): Promise<VaultRef> {
+     return Promise.resolve(this.store(v.runId, 'violation', v));
+   }
+ 
+   recordAdmission(a: AdmissionRecord): Promise<VaultRef> {
+     const runId = a.run.id;
++    if (typeof (a.stack as unknown) !== 'string' || a.stack === '') {
++      return Promise.reject(new Error(`StubVault: the admission record of run ${runId} names no stack; nothing was stored`));
++    }
+     if (this.admitted.has(runId)) {
+       return Promise.reject(new Error(`StubVault: run ${runId} already has an admission record; nothing was stored`));
+     }
+     this.admitted.add(runId);
+     return Promise.resolve(this.store(runId, 'admission', a));
+   }
+ 
+   recordTaskResult(runId: RunId, r: TaskResult): Promise<VaultRef> {
+     return Promise.resolve(this.store(runId, 'task-result', r));
+   }
+ 
+   recordUsage(r: UsageRecord): Promise<VaultRef> {
+     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: a usage record is collected by the runtime, or it is not recorded"));
+     const ref = this.store(r.runId, 'usage', r);
+     const refs = this.usage.get(r.runId) ?? [];
+     if (!refs.some((u) => u.hash === ref.hash)) refs.push(ref);
+     this.usage.set(r.runId, refs);
+     return Promise.resolve(ref);
+   }
+ 
+   readUsage(runId: RunId): Promise<readonly VaultRef[]> {
+     return Promise.resolve([...(this.usage.get(runId) ?? [])]);
+   }
+ 
+   recordDecision(d: EnforcementDecision): Promise<VaultRef> {
+     if ((d.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: an enforcement decision is collected by the runtime, or it is not recorded'));
+     const ref = this.store(d.runId, 'decision', d);
+     const refs = this.decisions.get(d.runId) ?? [];
+     if (!refs.some((r) => r.hash === ref.hash)) refs.push(ref);
+     this.decisions.set(d.runId, refs);
+     return Promise.resolve(ref);
+   }
+ 
+   readDecisions(runId: RunId): Promise<readonly VaultRef[]> {
+     return Promise.resolve([...(this.decisions.get(runId) ?? [])]);
+   }
+ 
+   recordIntegration(r: IntegrationRecord): Promise<VaultRef> {
+     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: an integration record is collected by the runtime, or it is not recorded'));
+     const ref = this.store(r.runId, 'integration', r);
+     const refs = this.integration.get(r.runId) ?? [];
+     if (!refs.some((i) => i.hash === ref.hash)) refs.push(ref);
+     this.integration.set(r.runId, refs);
+     return Promise.resolve(ref);
+   }
+ 
+   readIntegration(runId: RunId): Promise<readonly VaultRef[]> {
+     return Promise.resolve([...(this.integration.get(runId) ?? [])]);
+   }
+ 
+   recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
+     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a base record is collected by the runtime, or it is not recorded'));
+     if (this.baseRuns.has(r.runId)) return Promise.reject(new Error(`StubVault: run ${r.runId} already has a base record; nothing was stored`));
+     const ref = this.store(r.runId, 'base-run', r);
+     this.baseRuns.set(r.runId, ref);
+     return Promise.resolve(ref);
+   }
+ 
+   readBaseRun(runId: RunId): Promise<VaultRef | null> {
+     return Promise.resolve(this.baseRuns.get(runId) ?? null);
+   }
+ 
+   listRuns(): Promise<readonly RunId[]> {
+     return Promise.resolve([...this.runs].sort());
+   }
+ 
+   readRunState(runId: RunId): Promise<RunState> {
+     const state = this.states.get(runId);
+     if (state === undefined) return Promise.reject(Object.assign(new Error(`StubVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState);
+     return Promise.resolve(structuredClone(state));
+   }
+ 
+   /**
+    * `ifVersion` is authoritative and `s.version` is ignored; the contract
+    * leaves which of the two wins to P1 (docs/decisions.md, D-S1).
+    */
+   commitRunState(s: RunState, ifVersion: string): Promise<RunState> {
+     const current = this.states.get(s.runId)?.version ?? '0';
+     if (ifVersion !== current) {
+       return Promise.reject(new Error(`StubVault: run ${s.runId} is at version ${current}, not ${ifVersion}; nothing stored`));
+     }
+     const stored = structuredClone({ ...s, version: String(Number(current) + 1) });
+     this.states.set(s.runId, stored);
+     this.runs.add(s.runId);
+     return Promise.resolve(structuredClone(stored));
+   }
+ 
+   private store(
+     runId: RunId,
+     kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run',
+     record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord | BaseRunRecord,
+   ): VaultRef {
+     const bytes = new TextEncoder().encode(JSON.stringify(record));
+     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };
+     this.blobs.set(refKey(ref), bytes);
+     this.runs.add(runId);
+     return ref;
+   }
+ 
+   /** SHA-256 of the file's bytes under root, or undefined when there is no such file. */
+   private async hashFile(path: string): Promise<string | undefined> {
+     try {
+       return sha256(await readFile(resolve(this.root, path)));
+     } catch (error) {
+       if (isMissingFile(error)) return undefined;
+       throw error;
+     }
+   }
+ }
+
+===== packages/vault/src/types.ts =====
+diff --git a/packages/vault/src/types.ts b/packages/vault/src/types.ts
+index 6032875..28a8d5f 100644
+--- a/packages/vault/src/types.ts
++++ b/packages/vault/src/types.ts
+@@ -288,37 +288,44 @@ export interface AdmittedArtifact {
+ /**
+  * What a run was admitted as. Written once, before the run's first state, and
+  * never again: a resume reads the requested level, the policy, and the
+  * artifacts from here, so its caller has no way to restate them (I5).
+  *
+  * `policy` is the resolved Policy, not the document it came from, so an
+  * auditor reads the effective table. Each artifact carries the hash it had at
+  * admission; the station that locks it refuses a lock whose hash differs,
+  * so what a station locks is what was admitted (I3).
+  */
+ export interface AdmissionRecord {
+   readonly run: Run;
+   readonly policy: Policy;
+   readonly artifacts: {
+     readonly spec: readonly AdmittedArtifact[];
+     readonly acceptanceTests: readonly AdmittedArtifact[];
+     readonly verificationManifest: AdmittedArtifact;
+     readonly taskGraph: AdmittedArtifact;
+     /** Each part every spec carries, locked with the spec at `spec`, or `null` where it was not admitted and `spec` refuses (R17). */
+     readonly specParts: { readonly security: AdmittedArtifact | null };
+   };
+   /** The digest of the base tree the runtime snapshotted at admission; every workspace is built from it (A-P6-03). */
+   readonly baseTreeSha256: string;
+   /**
+    * The controls the run's adapter set lacks, recorded so a resume reads them
+    * rather than having them restated. An L3 run is refused at admission while
+    * this is non-empty (I5).
+    */
+   readonly unavailableControls: readonly string[];
++  /**
++   * The stack the base's adapter set detected (`AdapterSet.stack`), so a rate
++   * can be kept per stack (R18). Written by the runtime from the same
++   * detection as `unavailableControls`, never a model's account (I2). A record
++   * without one was written before R18, and is reported as `unrecorded`.
++   */
++  readonly stack: string;
+ }
+ 
+ /**
+  * The store holds no state for this run: refused at admission, or admitted and
+  * not yet committed. A code, not a class, so a store module carries no value
+  * import and still loads where its types are only stripped; `isNoRunState`
+  * tells it from a fault.
+  */
+
+===== packages/vault/test/local.test.ts =====
+diff --git a/packages/vault/test/local.test.ts b/packages/vault/test/local.test.ts
+index 5d52db6..de2a7e7 100644
+--- a/packages/vault/test/local.test.ts
++++ b/packages/vault/test/local.test.ts
+@@ -102,25 +102,26 @@ function state(version: string): RunState {
+ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
+   return {
+     run: {
+       id: runId,
+       repo: artifacts,
+       baseCommit: 'a'.repeat(40),
+       trigger: { kind: 'human', eventId: runId, lineage: { depth: 0, chain: [], windowStart: '2026-09-14T00:00:00.000Z' } },
+       requestedLevel: level,
+       station: 'intake',
+       graph: null,
+       createdAt: '2026-09-14T00:00:00.000Z',
+     },
+     policy: new StrictPolicyEngine().resolvePolicy(DEFAULT_POLICY_DOCUMENT),
+     artifacts: {
+       spec: [{ path: 'spec.md', sha256: 'd'.repeat(64) }],
+       acceptanceTests: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }],
+       verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
+       taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
+       specParts: { security: null },
+     },
+     baseTreeSha256: '1'.repeat(64),
+     unavailableControls: ['mutation'],
++    stack: 'vitest@4',
+   };
+ }
+ 
+@@ -182,40 +183,48 @@ describe('evidence and violations', () => {
+ describe('admission and task results', () => {
+   test('a run is admitted once: the record reads back byte-identical, verifies as its own hash, and a second admission stores nothing', async () => {
+     const ref = await vault.recordAdmission(admission(1));
+     expect(ref).toMatchObject({ runId, kind: 'admission' });
+     expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(admission(1));
+     const file = join(store, 'runs', runId, 'admission.json');
+     expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
+ 
+     // Re-admitting at another level is how a resume would raise its own level.
+     await expect(vault.recordAdmission(admission(2))).rejects.toThrow(/already has an admission record/);
+     expect(createHash('sha256').update(await readFile(file)).digest('hex')).toBe(ref.hash);
+   });
+ 
++  test('an admission record that names no stack is refused and stores nothing, since a stack cannot be backfilled (R18)', async () => {
++    const { stack: _omitted, ...unstacked } = admission();
++    await expect(vault.recordAdmission(unstacked as AdmissionRecord)).rejects.toThrow(/names no stack/);
++    await expect(vault.recordAdmission({ ...admission(), stack: '' })).rejects.toThrow(/names no stack/);
++    await expect(readFile(join(store, 'runs', runId, 'admission.json'))).rejects.toThrow();
++    await expect(vault.recordAdmission(admission())).resolves.toMatchObject({ kind: 'admission' });
++  });
++
+   test('an admission ref carrying another hash does not read the run\'s record back as if it matched', async () => {
+     const ref = await vault.recordAdmission(admission());
+     await expect(vault.read({ ...ref, hash: 'b'.repeat(64) })).rejects.toThrow(/no admission/);
+   });
+ 
+   test('a task result is stored under its own kind and reads back exactly as the driver returned it', async () => {
+     const result = await new StubDriver().runTask({
+       taskId,
+       role: 'builder' as RoleId,
+       stablePrefix: '',
+       variableSuffix: taskId,
+       tier: 'fast',
+       tools: [],
+       sandbox: {} as never,
+       timeoutMs: 0,
+       budget: { maxTokens: 0, maxCostUsd: 0, maxWallClockMs: 0 },
+     });
+     const ref = await vault.recordTaskResult(runId, result);
+     expect(ref).toMatchObject({ runId, kind: 'task-result' });
+     expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(result);
+     expect(await vault.recordTaskResult(runId, result)).toEqual(ref);
+   });
+ 
+   test('refuses a task result that names no task', async () => {
+     await expect(vault.recordTaskResult(runId, {} as never)).rejects.toThrow(/names no task/);
+   });
+ });
+
+=== BUNDLE END === 8448ff2398d6e24e88c556aa5f6d84a6

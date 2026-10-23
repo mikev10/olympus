@@ -290,11 +290,18 @@ export function maxStarts(contract: StationContract, conflicts: number): number 
   return (contract.maxIterations + conflicts) * (contract.retry.max + 1);
 }
 
-/** Why a parked task was parked, read back from its attempt counts against the contract of the station it parked at and the policy's conflict bound. */
+/**
+ * Why a parked task was parked: the cause its park recorded, or, for a park
+ * committed before the cause was recorded, the cause read back from its attempt
+ * counts against the contract of the station it parked at and the policy's
+ * conflict bound (A-R4-05).
+ */
 export function parkRefusal(state: RunState, task: Task, limits: StepLimits, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
   const attempts = Object.hasOwn(state.attempts, task.id) ? state.attempts[task.id] : undefined;
+  const recorded = attempts?.parkedFor;
   const last = attempts?.conflicts.at(-1);
-  if (attempts !== undefined && last !== undefined && attempts.conflicts.length > limits.maxConflictRetries) {
+  const byConflicts = recorded === undefined ? attempts !== undefined && attempts.conflicts.length > limits.maxConflictRetries : recorded === 'conflicts-exhausted';
+  if (byConflicts && last !== undefined) {
     const limit = limits.maxConflictRetries;
     return {
       ok: false,
@@ -313,12 +320,13 @@ export function parkRefusal(state: RunState, task: Task, limits: StepLimits, con
   const retryLimit = at.retry.max;
   const byStarts = attempts !== undefined && attempts.starts >= startLimit && gatedIterations(attempts) < contracts[task.station].maxIterations;
   const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
-  const cause: ParkCause = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
-  const limit = byStarts ? startLimit : byRetries ? retryLimit : contracts[task.station].maxIterations;
+  const derived: Exclude<ParkCause, 'conflicts-exhausted'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
+  const cause = recorded === undefined || recorded === 'conflicts-exhausted' ? derived : recorded;
+  const limit = cause === 'starts-exhausted' ? startLimit : cause === 'retries-exhausted' ? retryLimit : contracts[task.station].maxIterations;
   const message =
-    byStarts
+    cause === 'starts-exhausted'
       ? `task ${task.id} parked at ${state.station}: its driver was invoked ${String(limit)} times, the most an uninterrupted run could, without the task finishing`
-      : byRetries
+      : cause === 'retries-exhausted'
         ? `task ${task.id} parked at ${state.station}: its driver or sandbox failed more than ${String(limit)} retries`
         : `task ${task.id} parked: its gate failed on all ${String(limit)} iterations`;
   return { ok: false, reason: 'parked', task: task.id, cause, limit, message };

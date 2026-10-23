@@ -31,7 +31,6 @@ import type {
   ModelFamily,
   ModelIdentity,
   ModelTier,
-  RoleId,
   TaskId,
   TaskRequest,
   TaskResult,
@@ -413,8 +412,14 @@ export class ClaudeCodeDriver implements Driver {
     return { provider: 'anthropic', family: FAMILY, model, version: CLI_VERSION };
   }
 
+  /**
+   * Runs the task under `req.role`, rendered as the agent definition the
+   * session runs as (D-A-RC-03). The definition is on the argv, never a file in
+   * the workspace, which the agent being judged can write (I3); and it carries
+   * the instructions alone, so the tools and the model stay the request's (I4).
+   */
   runTask(req: TaskRequest): Promise<TaskResult> {
-    return this.#serialized(req.sandbox, () => this.#runTask(req, undefined));
+    return this.#serialized(req.sandbox, () => this.#runTask(req, req.role));
   }
 
   /**
@@ -427,7 +432,7 @@ export class ClaudeCodeDriver implements Driver {
    * same argv, so a subagent is a session this driver configured rather than
    * one the workspace supplied (I3).
    */
-  spawnSubagent(role: RoleId, req: TaskRequest): Promise<TaskResult> {
+  spawnSubagent(role: CompiledRole, req: TaskRequest): Promise<TaskResult> {
     return this.#serialized(req.sandbox, () => this.#runTask(req, role));
   }
 
@@ -465,18 +470,17 @@ export class ClaudeCodeDriver implements Driver {
     }
   }
 
-  async #runTask(req: TaskRequest, asRole: RoleId | undefined): Promise<TaskResult> {
+  async #runTask(req: TaskRequest, role: CompiledRole): Promise<TaskResult> {
     this.#refuseUngrantedTools(req);
     const identity = this.resolveModel(req.tier);
     const servers = this.#mcpConfigFor(req);
     const configPath = await this.#writeMcpConfig(req, servers);
     const ungranted = await this.#ungrantedMcpTools(req, servers, configPath);
-    const invocation = this.#invocationFor(req, identity, asRole, configPath, ungranted);
+    const invocation = this.#invocationFor(req, identity, role, configPath, ungranted);
 
     const exec = await this.#provider.exec(req.sandbox, invocation.argv, { env: invocation.env });
     const stream = parseStream(exec.stdout);
     const init = this.#refuseUnusableStream(req, exec.exitCode, exec.stderr, stream);
-
     const events = eventsFrom(stream);
     for (const event of events) this.#emit(event);
     this.#sessions.set(req.taskId, init);
@@ -708,7 +712,7 @@ export class ClaudeCodeDriver implements Driver {
   #invocationFor(
     req: TaskRequest,
     identity: ModelIdentity,
-    asRole: RoleId | undefined,
+    role: CompiledRole,
     configPath: string | undefined,
     ungrantedMcpTools: readonly string[],
   ): Invocation {
@@ -724,12 +728,16 @@ export class ClaudeCodeDriver implements Driver {
       '--output-format', 'stream-json',
       '--verbose',
       '--model', identity.model,
-      // The cacheable half. Appended rather than replacing the default prompt,
-      // so the session still behaves like the CLI it is, and the dynamic
-      // sections that change between tasks — cwd, git status, env — are moved
-      // out of the prefix, so two tasks in one run present the same prefix and
-      // the second reads it from cache instead of writing it again.
-      '--append-system-prompt', req.stablePrefix,
+      // The cacheable half: the role, then the granted context. Appended rather
+      // than replacing the default prompt, so the session still behaves like
+      // the CLI it is, and the dynamic sections that change between tasks —
+      // cwd, git status, env — are moved out of the prefix, so two tasks under
+      // one role present the same prefix and the second reads it from cache
+      // instead of writing it again. The role is its instructions and nothing
+      // else, so nothing beside them can widen the tools or change the model
+      // (I4), and an argv element cannot go unloaded the way an agent
+      // definition could (D-A-RC-03, D-R20-14).
+      '--append-system-prompt', `${role.instructions}\n\n${req.stablePrefix}`,
       '--exclude-dynamic-system-prompt-sections',
       '--tools', req.tools.filter((tool) => mcpServerOf(tool) === undefined).join(','),
       // Nothing outside this argv configures the session: no user, project, or
@@ -752,9 +760,6 @@ export class ClaudeCodeDriver implements Driver {
     // with the rest and a later `--allowedTools` does not bring them back.
     if (ungrantedMcpTools.length > 0) cli.push('--disallowedTools', ungrantedMcpTools.join(','));
     if (this.#settingsPath !== undefined) cli.push('--settings', this.#settingsPath);
-    if (asRole !== undefined) {
-      cli.push('--agents', JSON.stringify({ [asRole]: { description: `the ${asRole} role`, prompt: req.stablePrefix } }), '--agent', asRole);
-    }
     // `exec "$@"` runs the CLI as the process itself, with every argument an
     // argv element the shell never re-reads. Only the working directory is
     // interpolated, and it is quoted.

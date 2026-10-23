@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@olympus-ai/adapters": "workspace:*",
+    "@olympus-ai/compiler": "workspace:*",
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/driver-claude-code": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
