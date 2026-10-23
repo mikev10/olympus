@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Olympus README banner</title>
+<!-- README banner, rendered to ../banner.png at 1280x320. Edit the copy below, then re-render. -->
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@800&family=Inter:wght@500&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<script>
+  tailwind.config = { theme: { extend: {
+    colors: { ink: '#0A0A0B', signal: '#22C55E' },
+    fontFamily: { display: ['Outfit', 'sans-serif'], body: ['Inter', 'sans-serif'], mono: ['"JetBrains Mono"', 'monospace'] },
+  } } };
+</script>
+<style>
+  .scrim { background: linear-gradient(90deg, #0A0A0B 0%, #0A0A0B 36%, rgba(10,10,11,.85) 46%, rgba(10,10,11,0) 60%); }
+</style>
+</head>
+<body class="m-0 bg-ink">
+<main id="frame" class="relative overflow-hidden bg-ink" style="width:1280px;height:320px">
+  <canvas id="bg" width="1280" height="320" class="absolute inset-0"></canvas>
+  <div class="scrim absolute inset-0"></div>
+  <div class="relative flex h-full flex-col justify-center pl-16">
+    <p class="font-mono text-[13px] uppercase tracking-[0.22em] text-zinc-400">Olympus</p>
+    <h1 class="mt-3 font-display text-[54px] leading-none tracking-[-0.03em] text-white">Done is <span class="text-signal">earned,</span> not reported.</h1>
+    <p class="mt-5 max-w-[560px] font-body text-[17px] leading-[1.5] text-zinc-300">An open-source software factory. Agents write the code; Olympus runs the checks, keeps the evidence, and gates the merge.</p>
+  </div>
+</main>
+<script>
+  // The ten stations drawn as a constellation tracing a mountain; verify is the summit star.
+  document.fonts.ready.then(() => {
+    const W = 1280, H = 320, GREEN = '#22C55E';
+    const g = document.getElementById('bg').getContext('2d');
+    // Seeded so every render draws the same sky.
+    let a = 7;
+    const R = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    for (let k = 0; k < 512; k++) R(); // keep the sky identical to the approved concept
+    for (let k = 0; k < 340; k++) { g.fillStyle = 'rgba(255,255,255,' + (.12 + R() * .5) + ')'; g.beginPath(); g.arc(R() * W, R() * H, .4 + R() * 1.1, 0, 7); g.fill(); }
+    const st = [['intake', 700, 250], ['spec', 752, 206], ['test-design', 806, 232], ['plan', 862, 164], ['build', 916, 188],
+      ['verify', 980, 74], ['review', 1036, 150], ['integrate', 1088, 120], ['observe', 1146, 190], ['learn', 1206, 240]];
+    g.strokeStyle = 'rgba(255,255,255,.38)'; g.lineWidth = 1.4; g.beginPath();
+    st.forEach(([, x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+    g.font = '500 11px "JetBrains Mono"'; g.textAlign = 'center';
+    st.forEach(([n, x, y], i) => {
+      const peak = (i === 0 || y < st[i - 1][2]) && (i === st.length - 1 || y < st[i + 1][2]);
+      const v = n === 'verify';
+      g.fillStyle = v ? GREEN : '#FFFFFF'; g.beginPath(); g.arc(x, y, v ? 5 : 3, 0, 7); g.fill();
+      if (v) { g.strokeStyle = GREEN; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, 11, 0, 7); g.stroke(); }
+      g.fillStyle = v ? GREEN : '#71717A'; g.fillText(n, x, peak ? y - 16 : y + 22);
+    });
+  });
+</script>
+</body>
+</html>
