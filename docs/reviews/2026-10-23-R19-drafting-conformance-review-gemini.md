@@ -1,3 +1,49 @@
+# External review of R19, gemini, 2026-10-23
+
+An adversarial review of R19's conformance half: the assertions in
+`packages/conformance/src/registry/drafting.ts` that are meant to prove
+drafting at `spec` and `test-design`, the enforcement-decision rows for the new
+causes, the Vault's closed operation set, and the updated independence grades.
+One of two reviews run from the same prompt and bundle; the other is
+`2026-10-23-R19-drafting-conformance-review-codex.md`. Both are triaged in
+`2026-10-23-R19-drafting-conformance-triage.md`, which cites this review's
+numbered findings as `gemini-1` to `gemini-6`. R19's runtime half has its own
+prompt and bundle (`2026-10-23-R19-drafting-runtime-review-*`) and is not
+covered here.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no
+  tools; `cleanRoom` is `null` because an API call loads no local
+  configuration. Exit 0, not timed out, 200.8 s. Ingestion `complete`: 57,971
+  prompt tokens against a floor of 41,585. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `b117b7cd552d6dfd9d35ac6ab8048fdd05bf89b46802537558400821be9a8801`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `9ef13be`.
+- **Cross-family agreement:** gemini-1 was raised by codex too (codex-1), and
+  so was gemini-3 (the park-ordering part of codex-4). gemini-4 and codex-10
+  both question `draftingDecision`'s existential match, from different angles.
+  gemini-2, gemini-5, and gemini-6 were raised by gemini alone.
+- **Date:** 2026-10-23 (run started 2026-10-23T16:56Z).
+- **Bundle:** `2026-10-23-R19-drafting-conformance-review-bundle.txt`, SHA-256
+  `8633523ba4e696261807bdbc73d39c8acdbef3e2987268a7606b27df6d7d44c9`, base
+  `cd1b536` (`v2` after `reviewed/R20` at `bc2ada7`, plus the docs-only #62),
+  head `e772ef9` ("R19: Drafting at spec and test-design"), one commit. It held
+  the 16 changed paths under `packages/conformance/`, new files in full and
+  modified files as whole-function diffs. The runtime source, docs, and
+  changeset were excluded and went to the separate runtime bundle. Prompt:
+  `2026-10-23-R19-drafting-conformance-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context and
+  made no lookups. These are self-reports and cannot be independently verified.
+- **Coverage, and any gap:** items 1, 6, and 7 were answered. Items 2
+  (tautologies), 3 (fail-open), 4 (language escape hatches; the reply's only
+  word on them is that the I7 fixture is sound), and 5 (configuration) came back
+  empty. Silence on them is not a clearance.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle, not the repository. Treat them as hints, not locations.
+
 Prior context: None. I relied entirely on the provided bundle and CONTEXT.
 Lookups performed: None.
 

@@ -13,6 +13,7 @@
  * floor at L2 and L3 is asserted on the pure transition the line's exit calls,
  * over the conditions the line itself recorded for a draft (D-R19-11).
  */
+import { createHash } from 'node:crypto';
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AdmissionOutcome, BuiltGraph, DraftingDrivers, RunOutcome, RunRequest } from '@olympus-ai/api';
@@ -34,9 +35,10 @@ import type {
   TaskResult,
 } from '@olympus-ai/core';
 import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
-import type { CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, Vault } from '@olympus-ai/vault';
+import type { CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, Vault } from '@olympus-ai/vault';
 import { compileError, runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
+import { around } from './line-assertions.js';
 import { ARTIFACTS, lineScope, linePolicy, readRecord, refusalOf, withLine, type LineRig } from './line.js';
 
 const api = async () => import('@olympus-ai/api');
@@ -118,15 +120,29 @@ function attemptOf(req: TaskRequest): number {
   return match === null ? 1 : Number(match[1]);
 }
 
+/** Every file in the task's sandbox workspace, by relative path, read through the provider that runs it. */
+async function workspaceOf(sandbox: SandboxProvider, req: TaskRequest): Promise<Record<string, string>> {
+  const script = "const fs=require('node:fs');const path=require('node:path');const out={};const walk=(d)=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else out[path.relative('.',p).split(path.sep).join('/')]=e.isFile()?fs.readFileSync(p,'utf8'):'<not a file>';}};walk('.');process.stdout.write(JSON.stringify(out));";
+  const listed = await sandbox.exec(req.sandbox, ['node', '-e', script]);
+  if (listed.exitCode !== 0) throw new Error(`R19: a stub seat could not list its workspace: ${listed.stderr}`);
+  return JSON.parse(listed.stdout) as Record<string, string>;
+}
+
 interface SeatOptions {
   readonly family: string;
   readonly model?: string;
+  /** The family the seat's result reports, where it is not the one it resolves; only the resolved one may grade it. */
+  readonly reportedFamily?: string;
   /** What the seat does in its sandbox, and the narrative it returns; undefined returns a plain account. */
   readonly act?: (req: TaskRequest) => Promise<string | undefined>;
+  /** The provider the seat runs on; where given, its workspace is read when each call begins. */
+  readonly sandbox?: SandboxProvider;
 }
 
 export interface ObservedSeat extends Driver {
   readonly requests: TaskRequest[];
+  /** What each call's workspace held when the call began, in the order of `requests`; empty where no provider was given. */
+  readonly workspaces: Array<Record<string, string>>;
 }
 
 /** A stub driver for one seat, whose model the assertion sets, recording every request it is given. */
@@ -134,11 +150,14 @@ async function seat(options: SeatOptions): Promise<ObservedSeat> {
   const { StubDriver } = await core();
   const inner = new StubDriver();
   const model: ModelIdentity = { provider: 'stub', family: options.family as ModelFamily, model: options.model ?? `${options.family}-model`, version: '0' };
+  const reported: ModelIdentity = options.reportedFamily === undefined ? model : { ...model, family: options.reportedFamily as ModelFamily, model: `${options.reportedFamily}-model` };
   const requests: TaskRequest[] = [];
+  const workspaces: Array<Record<string, string>> = [];
   return {
     id: inner.id,
     contractVersion: inner.contractVersion,
     requests,
+    workspaces,
     provenanceId: () => inner.provenanceId(),
     capabilities: () => inner.capabilities(),
     declaredTools: () => inner.declaredTools(),
@@ -146,9 +165,10 @@ async function seat(options: SeatOptions): Promise<ObservedSeat> {
     relayRequest: () => null,
     runTask: async (req: TaskRequest): Promise<TaskResult> => {
       requests.push(req);
+      if (options.sandbox !== undefined) workspaces.push(await workspaceOf(options.sandbox, req));
       const narrative = (await options.act?.(req)) ?? 'drafted as asked';
       const result = await inner.runTask(req);
-      return { ...result, claim: { narrative, filesChanged: [] }, model };
+      return { ...result, claim: { narrative, filesChanged: [] }, model: reported };
     },
     cancel: (taskId: TaskId) => inner.cancel(taskId),
     emitArtifacts: (roles: CompiledRole[], targetDir: string) => inner.emitArtifacts(roles, targetDir),
@@ -167,6 +187,9 @@ interface Seats {
   readonly testDrafterFamily?: string;
   readonly criticFamily?: string;
   readonly criticModel?: string;
+  /** The family the critics' and the test drafter's results report, where it is not the one they resolve. */
+  readonly criticReports?: string;
+  readonly testDrafterReports?: string;
   readonly spec?: (attempt: number, runId: string) => Record<string, string>;
   readonly tests?: (attempt: number, runId: string) => Record<string, string>;
   readonly critic?: (station: DraftStation, attempt: number) => string;
@@ -195,25 +218,34 @@ async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
   const drafterFamily = seats.drafterFamily ?? 'drafter-family';
   const criticFamily = seats.criticFamily ?? 'critic-family';
   const critic = (station: DraftStation) => (req: TaskRequest): Promise<string> => Promise.resolve((seats.critic ?? (() => CLEAN))(station, criticAttempt(req)));
+  const criticSeat = {
+    family: criticFamily,
+    sandbox,
+    ...(seats.criticModel === undefined ? {} : { model: seats.criticModel }),
+    ...(seats.criticReports === undefined ? {} : { reportedFamily: seats.criticReports }),
+  };
   const drivers = {
     specDrafter: await seat({
       family: drafterFamily,
+      sandbox,
       ...(seats.drafterModel === undefined ? {} : { model: seats.drafterModel }),
       act: async (req) => {
         await writeIn(sandbox, req, (seats.spec ?? ((_, id) => helloSpec(id)))(attemptOf(req), rig.runId));
         return undefined;
       },
     }),
-    specCritic: await seat({ family: criticFamily, ...(seats.criticModel === undefined ? {} : { model: seats.criticModel }), act: critic('spec') }),
+    specCritic: await seat({ ...criticSeat, act: critic('spec') }),
     testDrafter: await seat({
       family: seats.testDrafterFamily ?? drafterFamily,
+      sandbox,
       ...(seats.drafterModel === undefined ? {} : { model: seats.drafterModel }),
+      ...(seats.testDrafterReports === undefined ? {} : { reportedFamily: seats.testDrafterReports }),
       act: async (req) => {
         await writeIn(sandbox, req, (seats.tests ?? ((_, id) => helloTests(id)))(attemptOf(req), rig.runId));
         return undefined;
       },
     }),
-    testCritic: await seat({ family: criticFamily, ...(seats.criticModel === undefined ? {} : { model: seats.criticModel }), act: critic('test-design') }),
+    testCritic: await seat({ ...criticSeat, act: critic('test-design') }),
   };
   const components = async (): Promise<BuiltGraph> => rig.components({ sandbox, drafting: drivers });
   const request = async (overrides: Partial<RunRequest> = {}): Promise<RunRequest> => {
@@ -277,6 +309,10 @@ async function decisionsOf(vault: Vault, runId: string): Promise<EnforcementDeci
   return out;
 }
 
+function sha256Of(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
 function sameStrings(a: readonly string[], b: readonly string[]): boolean {
   return JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 }
@@ -316,6 +352,42 @@ export const DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED: LocalAssertion = runtime
       if (lock == null) throw new Error('R19: no draft lock was committed');
       const lockRecord = await readRecord<DraftLockRecord>(components.vault, lock);
       if (lockRecord.approval.by !== 'principal' || lockRecord.draft.sha256 !== attempt.sha256) throw new Error(`R19: the draft lock records ${JSON.stringify(lockRecord.approval)} for ${lockRecord.draft.sha256}`);
+    });
+  },
+});
+
+export const DRAFTED_TESTS_LOCK_AND_RUN: LocalAssertion = runtime({
+  id: 'I3.drafted-tests-lock-and-run-at-verify',
+  title:
+    'an approved test draft is written into the artifact root and locked at test-design against the approved hash, its manifest and every test, and verify runs its checks; a locked drafted test changed afterwards verifies as tampered',
+  run: async () => {
+    await withLine('r19-tests-lock-', async (rig) => {
+      const r = await drafting(rig);
+      awaiting(await admitAndDrive(r, { artifacts: artifactsFor(true, true) }), 'spec:1', 'a drafted spec');
+      const spec = lastAttempt(await rig.state(), 'spec');
+      awaiting(await approveAndResume(rig, r, 'spec:1', spec.sha256 ?? ''), 'test-design:1', 'drafted tests');
+      const attempt = lastAttempt(await rig.state(), 'test-design');
+      if (attempt.sha256 === null || attempt.draft === null) throw new Error('R19: the test draft was not recorded');
+      const vault = (await r.components()).vault;
+      if ((await vault.readLocks(rig.runId))?.entries.some((e) => e.lockedBy === 'test-design') === true) throw new Error('R19: something was locked at test-design before the test draft was approved');
+      awaiting(await approveAndResume(rig, r, 'test-design:1', attempt.sha256), 'integrate:1', 'the run after its drafted tests were approved');
+      const record = await readRecord<DraftRecord>(vault, attempt.draft);
+      const drafted = helloTests(rig.runId);
+      if (!sameStrings(record.files.map((f) => f.path), Object.keys(drafted))) throw new Error(`R19: the test draft recorded ${JSON.stringify(record.files.map((f) => f.path))}`);
+      const locks = await vault.readLocks(rig.runId);
+      for (const file of record.files) {
+        const entry = locks?.entries.find((e) => e.path === file.path);
+        if (entry?.sha256 !== file.sha256 || entry.lockedBy !== 'test-design') throw new Error(`R19: ${file.path} is not locked at test-design against the approved hash: ${JSON.stringify(entry)}`);
+        if ((await readFile(join(rig.dirs.artifacts, file.path), 'utf8')) !== drafted[file.path]) throw new Error(`R19: the artifact root holds other bytes at ${file.path} than the test draft approved`);
+      }
+      // verify ran the drafted check over the build, and it passed there.
+      const evidence = await Promise.all((await rig.state()).evidenceRefs.map(async (ref) => readRecord<EvidenceBundle>(vault, ref)));
+      if (!evidence.some((b) => b.checks.some((c) => c.checkId === 'drafted-hello' && c.exitCode === 0))) {
+        throw new Error(`R19: verify's evidence holds no passing run of the drafted check: ${JSON.stringify(evidence.map((b) => b.checks.map((c) => [c.checkId, c.exitCode])))}`);
+      }
+      await writeFile(join(rig.dirs.artifacts, 'checks', 'hello.check.cjs'), 'process.exit(0);\n');
+      const verdict = await vault.verifyLocks(rig.runId);
+      if (verdict.ok || !verdict.tampered.some((t) => t.path === 'checks/hello.check.cjs')) throw new Error(`R19: a locked drafted test changed after approval verified as ${JSON.stringify(verdict)}`);
     });
   },
 });
@@ -389,11 +461,7 @@ export const APPROVAL_BINDS_THE_DRAFT: LocalAssertion = runtime({
       const first = lastAttempt(await rig.state(), 'spec');
       if (first.sha256 === null) throw new Error('R19: no draft hash');
       for (const draft of ['0'.repeat(64), null]) {
-        const wrong = await approveStation({ runId: rig.runId, key: 'spec:1', draft, approvedBy: 'conformance', vault });
-        if (wrong.ok || wrong.reason !== 'draft-mismatch') throw new Error(`R19: an approval naming ${String(draft)} was ${wrong.ok ? 'granted' : wrong.reason}`);
-      }
-      if (!(await decisionsOf(vault, rig.runId)).some((d) => d.decision.cause === 'approval-refused' && d.decision.reason === 'draft-mismatch')) {
-        throw new Error('R19: a refused approval of another draft was not recorded');
+        await refusedApproval(rig, vault, draft, 'draft-mismatch');
       }
       // A grant recorded for attempt 1, then the attempt rejected: attempt 2 drafts the same bytes and still waits.
       const granted = await approveStation({ runId: rig.runId, key: 'spec:1', draft: first.sha256, approvedBy: 'conformance', vault });
@@ -410,16 +478,38 @@ export const APPROVAL_BINDS_THE_DRAFT: LocalAssertion = runtime({
 
 export const LOCKED_DRAFT_IS_THE_BYTES_READ: LocalAssertion = runtime({
   id: 'I3.locked-draft-is-the-bytes-read',
-  title: 'bytes changed in the drafter\'s workspace after the runtime read the draft are not what is approved or locked: the lock holds the hash recorded, and the artifact root the bytes recorded',
+  title: 'bytes changed in the drafter\'s workspace after the runtime read the draft are not what the critic reads, nor what is approved or locked: the critic\'s context and workspace hold the bytes recorded, the lock the hash recorded, and the artifact root the bytes recorded',
   run: async () => {
     await withLine('r19-bytes-', async (rig) => {
-      const { draftPaths } = await api();
+      const { admitRun, draftPaths } = await api();
       const r = await drafting(rig);
-      awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec');
-      const attempt = lastAttempt(await rig.state(), 'spec');
-      if (attempt.sha256 === null || attempt.draft === null) throw new Error('R19: no draft');
       const { work } = draftPaths(rig.workspaces, rig.runId, 'spec', 'drafter', 1);
       const spec = `.drafts/${rig.runId}/spec.md`;
+      // Between the runtime's read of the draft and the critic's call, the drafter's workspace changes.
+      const base = await r.components();
+      const vault: Vault = {
+        ...around(base.vault, {}),
+        recordDraft: async (rec) => {
+          const ref = await base.vault.recordDraft(rec);
+          await writeFile(join(work, ...spec.split('/')), '# Rewritten before the critic\n');
+          return ref;
+        },
+      };
+      const admission = await admitRun({ ...(await r.request()), components: { ...base, vault } });
+      if (!admission.ok) throw new Error(`R19: refused as ${admission.reason}: ${JSON.stringify(admission)}`);
+      awaiting(await admission.admitted.drive(), 'spec:1', 'a drafted spec');
+      const attempt = lastAttempt(await rig.state(), 'spec');
+      if (attempt.sha256 === null || attempt.draft === null) throw new Error('R19: no draft');
+      const read = await readRecord<DraftRecord>(base.vault, attempt.draft);
+      const [critic] = r.drivers.specCritic.requests;
+      const [criticTree] = r.drivers.specCritic.workspaces;
+      if (critic === undefined || criticTree === undefined) throw new Error('R19: the spec critic was never seated');
+      for (const file of read.files) {
+        const bytes = Buffer.from(file.base64, 'base64').toString('utf8');
+        if (!critic.stablePrefix.includes(`--- ${file.path}\n${bytes}`)) throw new Error(`R19: the critic's context does not hold the recorded bytes of ${file.path}`);
+        if (criticTree[file.path] !== bytes) throw new Error(`R19: the critic's workspace holds other bytes at ${file.path} than the draft recorded`);
+      }
+      if (critic.stablePrefix.includes('Rewritten before the critic')) throw new Error('R19: the critic read the drafter\'s workspace after the draft was recorded');
       await writeFile(join(work, ...spec.split('/')), '# Rewritten after the read\n');
       await approveAndResume(rig, r, 'spec:1', attempt.sha256);
       const record = await readRecord<DraftRecord>((await r.components()).vault, attempt.draft);
@@ -457,7 +547,6 @@ export const TEST_DRAFTER_IS_BLACK_BOX: LocalAssertion = runtime({
     'the test drafter\'s sandbox mounts a tree holding the locked spec and nothing of the repository, with no egress, and its context grants the locked spec alone; the test critic sees the same tree with the draft and is mounted read-only; a policy granting either test seat egress is refused at admission',
   run: async () => {
     await withLine('r19-blackbox-', async (rig) => {
-      const { readdir } = await import('node:fs/promises');
       const recorded = await recordingSandbox();
       const r = await drafting(rig, { sandbox: recorded.sandbox });
       const components = r.components;
@@ -475,26 +564,35 @@ export const TEST_DRAFTER_IS_BLACK_BOX: LocalAssertion = runtime({
       const drafterSpec = recorded.specs.find((s) => s.mounts.workspace.source.includes(`test-design.drafter.`));
       if (drafterSpec === undefined) throw new Error('R19: no sandbox was provisioned for the test drafter');
       if (drafterSpec.egress.mode !== 'deny-all' || drafterSpec.mounts.others.length > 0) throw new Error(`R19: the test drafter's sandbox had egress ${JSON.stringify(drafterSpec.egress)} and ${String(drafterSpec.mounts.others.length)} other mounts`);
-      const start = drafterSpec.mounts.workspace.source.replace(/work$/, 'start');
-      const handed = (await readdir(start, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name).sort();
-      if (JSON.stringify(handed) !== JSON.stringify(['run-requirements.json', 'security.json', 'spec.md'])) throw new Error(`R19: the test drafter was handed ${JSON.stringify(handed)}, not the locked spec alone`);
+      // What the mounted workspace held when the drafter's call began: the locked spec's files at their locked bytes, and nothing else.
+      const locked = ((await (await components()).vault.readLocks(rig.runId))?.entries ?? []).filter((e) => e.lockedBy === 'spec');
+      const [handed] = r.drivers.testDrafter.workspaces;
+      if (handed === undefined) throw new Error('R19: the test drafter\'s workspace was not read when its call began');
+      if (locked.length === 0 || !sameStrings(Object.keys(handed), locked.map((e) => e.path))) {
+        throw new Error(`R19: the test drafter's workspace held ${JSON.stringify(Object.keys(handed))}, not the locked spec ${JSON.stringify(locked.map((e) => e.path))} alone`);
+      }
+      for (const entry of locked) {
+        if (sha256Of(handed[entry.path] ?? '') !== entry.sha256) throw new Error(`R19: the test drafter's workspace held other bytes at ${entry.path} than the spec locked`);
+      }
       const criticSpec = recorded.specs.find((s) => s.mounts.workspace.source.includes('test-design.critic.'));
-      if (criticSpec?.mounts.workspace.mode !== 'ro' || criticSpec.egress.mode !== 'deny-all') throw new Error('R19: the test critic was not mounted read-only with no egress');
+      if (criticSpec?.mounts.workspace.mode !== 'ro' || criticSpec.egress.mode !== 'deny-all' || criticSpec.mounts.others.length > 0) throw new Error('R19: the test critic was not mounted read-only alone with no egress');
       const [critic] = r.drivers.testCritic.requests;
       if (critic === undefined || !critic.stablePrefix.includes('[draft]') || !critic.stablePrefix.includes('[rubric]') || critic.stablePrefix.includes('[intent]')) {
         throw new Error('R19: the test critic was not granted the locked spec, the draft, and the rubric alone');
       }
     });
-    await withLine('r19-blackbox-egress-', async (rig) => {
-      const { admitRun } = await api();
-      const r = await drafting(rig);
-      const open = { ...lineScope(['test-design'], 'deep'), network: { egress: ['example.com'] } };
-      const policy = await draftingPolicy({}, { ['test-drafter' as RoleId]: open });
-      const outcome = await admitRun(await r.request({ policy, artifacts: artifactsFor(true, true) }));
-      if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.code === 'not-black-box')) {
-        throw new Error(`R19: a test drafter granted egress was ${outcome.ok ? 'admitted' : outcome.reason}`);
-      }
-    });
+    for (const role of ['test-drafter', 'test-critic']) {
+      await withLine('r19-blackbox-egress-', async (rig) => {
+        const { admitRun } = await api();
+        const r = await drafting(rig);
+        const open = { ...lineScope(['test-design'], 'deep'), network: { egress: ['example.com'] } };
+        const policy = await draftingPolicy({}, { [role as RoleId]: open });
+        const outcome = await admitRun(await r.request({ policy, artifacts: artifactsFor(true, true) }));
+        if (outcome.ok || outcome.reason !== 'invalid-request' || !outcome.problems.some((p) => p.code === 'not-black-box')) {
+          throw new Error(`R19: a ${role} granted egress was ${outcome.ok ? 'admitted' : outcome.reason}`);
+        }
+      });
+    }
   },
 });
 
@@ -519,7 +617,10 @@ export const BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS: LocalAssertion = runtime({
       if (retry === undefined) throw new Error('R19: the test drafter was not called again');
       if (!retry.variableSuffix.includes('[base-refusal]') || !retry.variableSuffix.includes('drafted-hello declared fails: exit 0')) throw new Error(`R19: the retry was told ${JSON.stringify(retry.variableSuffix)}`);
       for (const req of [...r.drivers.testDrafter.requests, ...r.drivers.testCritic.requests]) {
-        if (req.variableSuffix.includes(marker) || req.stablePrefix.includes(marker)) throw new Error('R19: base output reached a black-box seat');
+        if (req.variableSuffix.includes(marker) || req.stablePrefix.includes(marker) || req.role.instructions.includes(marker)) throw new Error('R19: base output reached a black-box seat');
+      }
+      for (const tree of [...r.drivers.testDrafter.workspaces, ...r.drivers.testCritic.workspaces]) {
+        if (Object.values(tree).some((bytes) => bytes.includes(marker))) throw new Error('R19: base output reached a black-box seat\'s workspace');
       }
       if (r.drivers.testCritic.requests.length !== 1) throw new Error('R19: the critic read a draft the base run had already refused');
     });
@@ -657,6 +758,14 @@ export const CRITIC_FINDING_SENDS_BACK: LocalAssertion = runtime({
       const [, retry] = r.drivers.specDrafter.requests;
       if (!retry?.variableSuffix.includes('statement 2 cannot be tested')) throw new Error('R19: the finding did not reach the next attempt\'s variable suffix');
       if (retry.stablePrefix.includes('statement 2 cannot be tested') || retry.role.instructions.includes('statement 2 cannot be tested')) throw new Error('R19: a finding reached the stable prefix or the role');
+      // Attempt 3 is told attempt 2's result could not be read, in its suffix alone.
+      const third = r.drivers.specDrafter.requests[2];
+      const unreadableFinding = unreadable.findings[0] ?? '';
+      if (!third?.variableSuffix.includes(unreadableFinding)) throw new Error(`R19: the third attempt was not told the second critic's result was unreadable: ${JSON.stringify(third?.variableSuffix)}`);
+      if (third.stablePrefix.includes(unreadableFinding) || third.role.instructions.includes(unreadableFinding)) throw new Error('R19: the unreadable result reached the stable prefix or the role');
+      for (const tree of r.drivers.specDrafter.workspaces.slice(1)) {
+        if (Object.values(tree).some((bytes) => bytes.includes('statement 2 cannot be tested') || bytes.includes(unreadableFinding))) throw new Error('R19: a finding reached a retry\'s workspace');
+      }
       if (!(await decisionsOf(vault, rig.runId)).some((d) => d.decision.cause === 'draft-sent-back')) throw new Error('R19: no draft-sent-back decision was recorded');
     });
   },
@@ -665,11 +774,11 @@ export const CRITIC_FINDING_SENDS_BACK: LocalAssertion = runtime({
 export const CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY: LocalAssertion = runtime({
   id: 'I6.critic-of-drafter-family-is-advisory',
   title:
-    'a critic of the drafter\'s family, on another model, is graded different-model: its findings are recorded and shown to the person deciding the draft, and they neither send it back nor end an attempt',
+    'a critic of the drafter\'s family, on another model, is graded different-model, from the model the runtime resolved even where its result reports another family: its findings are recorded and shown to the person deciding the draft, and they neither send it back nor end an attempt',
   run: async () => {
-    await withLine('r19-advisory-', async (rig) => {
+    for (const criticReports of [undefined, 'critic-family']) await withLine('r19-advisory-', async (rig) => {
       const { runStanding } = await api();
-      const r = await drafting(rig, { criticFamily: 'drafter-family', criticModel: 'another-model', critic: () => JSON.stringify({ findings: ['the spec says nothing about permissions'] }) });
+      const r = await drafting(rig, { criticFamily: 'drafter-family', criticModel: 'another-model', ...(criticReports === undefined ? {} : { criticReports }), critic: () => JSON.stringify({ findings: ['the spec says nothing about permissions'] }) });
       awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec with an advisory finding');
       const attempts = (await rig.state()).drafts.spec?.attempts ?? [];
       if (attempts.length !== 1 || attempts[0]?.sentBack !== null) throw new Error('R19: an advisory finding sent the draft back');
@@ -711,6 +820,15 @@ export const TEST_DRAFTER_OF_BUILDER_FAMILY: LocalAssertion = runtime({
       const names = resolved.map((m) => m.family).sort();
       if (JSON.stringify(names) !== JSON.stringify(['deep-family', 'stub'])) throw new Error(`R19: the builder's models were read as ${JSON.stringify(names)}, escalation not included`);
     });
+    // On the line, a test drafter that resolves to the builder's family and reports another is graded by the one resolved.
+    await withLine('r19-builder-reported-', async (rig) => {
+      const r = await drafting(rig, { testDrafterFamily: 'stub', testDrafterReports: 'other-family' });
+      awaiting(await admitAndDrive(r, { artifacts: artifactsFor(true, true) }), 'spec:1', 'a drafted spec');
+      const spec = lastAttempt(await rig.state(), 'spec');
+      awaiting(await approveAndResume(rig, r, 'spec:1', spec.sha256 ?? ''), 'test-design:1', 'drafted tests');
+      const failed = lastAttempt(await rig.state(), 'test-design').failed ?? [];
+      if (!failed.includes('drafter-independent-of-builder')) throw new Error(`R19: a test drafter resolved to the builder's family and reporting another was graded independent; failed ${JSON.stringify(failed)}`);
+    });
   },
 });
 
@@ -726,9 +844,21 @@ export const LAST_ATTEMPT_GOES_TO_A_PERSON: LocalAssertion = runtime({
       const state = await rig.state();
       const attempt = lastAttempt(state, 'spec');
       if (attempt.attempt !== 3 || !(attempt.failed ?? []).includes('independent-critic-clean')) throw new Error(`R19: the third draft reached the gate as ${JSON.stringify(attempt)}`);
-      const vault = (await r.components()).vault;
+      const base = (await r.components()).vault;
+      // The park is recorded before the parked state is committed: a stop between the two leaves no park unrecorded.
+      let parkRecorded = false;
+      const parkedCommits: boolean[] = [];
+      const vault: Vault = {
+        ...around(base, { beforeCommit: (s) => { if (s.drafts.spec?.parked === true) parkedCommits.push(parkRecorded); } }),
+        recordDecision: async (d) => {
+          const ref = await base.recordDecision(d);
+          if (d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked' && d.decision.refusal.cause === 'drafts-rejected') parkRecorded = true;
+          return ref;
+        },
+      };
       const rejected = await rejectDraft({ runId: rig.runId, key: 'spec:1', draft: attempt.sha256 ?? '', notes: null, rejectedBy: 'conformance', vault });
       if (!rejected.ok || !rejected.parked) throw new Error(`R19: rejecting the third draft was ${JSON.stringify(rejected)}`);
+      if (parkedCommits.length === 0 || parkedCommits.some((recorded) => !recorded)) throw new Error(`R19: the parked state was committed before its park was recorded: ${JSON.stringify(parkedCommits)}`);
       const decisions = await decisionsOf(vault, rig.runId);
       const park = decisions.find((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'parked' && d.decision.refusal.cause === 'drafts-rejected');
       if (park?.station !== 'spec') throw new Error('R19: the park was not recorded at spec');
@@ -758,6 +888,7 @@ export const REJECTION_TEXT_ONLY_AT_SPEC: LocalAssertion = runtime({
       const [, retry] = r.drivers.specDrafter.requests;
       if (!retry?.variableSuffix.includes(`[approver-notes]\n${notes}`)) throw new Error('R19: the notes did not reach the next spec attempt');
       if (retry.stablePrefix.includes(notes) || retry.role.instructions.includes(notes)) throw new Error('R19: the notes reached the stable prefix or the role');
+      if (Object.values(r.drivers.specDrafter.workspaces[1] ?? {}).some((bytes) => bytes.includes(notes))) throw new Error('R19: the notes reached the retry\'s workspace');
       const second = lastAttempt(await rig.state(), 'spec');
       awaiting(await approveAndResume(rig, r, 'spec:1', second.sha256 ?? ''), 'test-design:1', 'drafted tests');
       const tests = lastAttempt(await rig.state(), 'test-design');
@@ -770,6 +901,8 @@ export const REJECTION_TEXT_ONLY_AT_SPEC: LocalAssertion = runtime({
       if (testRetry === undefined || !testRetry.variableSuffix.includes('[rejection-reason]\nnot-black-box') || testRetry.variableSuffix.includes('src/')) {
         throw new Error(`R19: the test drafter's retry was told ${JSON.stringify(testRetry?.variableSuffix)}`);
       }
+      if (testRetry.stablePrefix.includes(notes) || testRetry.role.instructions.includes(notes)) throw new Error('R19: the spec\'s rejection notes reached the test drafter');
+      if (Object.values(r.drivers.testDrafter.workspaces[1] ?? {}).some((bytes) => bytes.includes(notes) || bytes.includes('src/'))) throw new Error('R19: rejection text reached the test drafter\'s workspace');
     });
   },
 });
@@ -816,10 +949,31 @@ export const WORST_CASE_COVERS_DRAFTING: LocalAssertion = runtime({
   },
 });
 
+/**
+ * Asks for approval of `draft` at spec:1 and requires it refused as `reason`:
+ * exactly one decision added, an approval-refused for that reason at that
+ * key, no grant among the decisions added, and the run's grants unchanged.
+ */
+async function refusedApproval(rig: LineRig, vault: Vault, draft: string | null, reason: 'draft-mismatch' | 'draft-invalid'): Promise<EnforcementDecision> {
+  const { approveStation } = await api();
+  const before = new Set((await vault.readDecisions(rig.runId as never)).map((ref) => ref.hash));
+  const grants = JSON.stringify((await rig.state()).approvals);
+  const refused = await approveStation({ runId: rig.runId, key: 'spec:1', draft, approvedBy: 'conformance', vault });
+  if (refused.ok || refused.reason !== reason) throw new Error(`R19: an approval naming ${String(draft)} was ${refused.ok ? 'granted' : refused.reason}, not ${reason}`);
+  const added: EnforcementDecision[] = [];
+  for (const ref of await vault.readDecisions(rig.runId)) if (!before.has(ref.hash)) added.push(await readRecord<EnforcementDecision>(vault, ref));
+  const [only] = added;
+  if (added.length !== 1 || only?.decision.cause !== 'approval-refused' || only.decision.reason !== reason || only.decision.key !== 'spec:1') {
+    throw new Error(`R19: refusing an approval naming ${String(draft)} recorded ${JSON.stringify(added.map((d) => d.decision))}`);
+  }
+  if (JSON.stringify((await rig.state()).approvals) !== grants) throw new Error(`R19: a refused approval naming ${String(draft)} changed the run's grants`);
+  return only;
+}
+
 /** For P14's table: a drafting run that records each drafting decision, read back for its decider and station. */
 export async function draftingDecision(cause: 'approval-rejected' | 'draft-sent-back' | 'draft-floor-applied' | 'draft-mismatch' | 'draft-invalid'): Promise<void> {
   await withLine(`p14-${cause}-`, async (rig) => {
-    const { approveStation, rejectDraft } = await api();
+    const { rejectDraft } = await api();
     const seats: Seats = cause === 'draft-sent-back'
       ? { critic: (_, attempt) => (attempt === 1 ? JSON.stringify({ findings: ['one'] }) : CLEAN) }
       : cause === 'draft-invalid'
@@ -829,20 +983,24 @@ export async function draftingDecision(cause: 'approval-rejected' | 'draft-sent-
     awaiting(await admitAndDrive(r), 'spec:1', `a drafted spec for ${cause}`);
     const vault = (await r.components()).vault;
     const attempt = lastAttempt(await rig.state(), 'spec');
+    let found: EnforcementDecision | undefined;
     if (cause === 'approval-rejected') {
       const rejected = await rejectDraft({ runId: rig.runId, key: 'spec:1', draft: attempt.sha256 ?? '', rejectedBy: 'conformance', vault });
       if (!rejected.ok) throw new Error(`P14: the rejection was refused as ${rejected.reason}`);
+      const rejections = (await decisionsOf(vault, rig.runId)).filter((d) => d.decision.cause === 'approval-rejected');
+      // Bound to the draft rejected, and recorded once.
+      const [only] = rejections;
+      if (rejections.length !== 1 || only?.decision.cause !== 'approval-rejected' || only.decision.draft.sha256 !== attempt.sha256 || only.decision.draft.attempt !== attempt.attempt) {
+        throw new Error(`P14: the rejection of ${String(attempt.sha256)} was recorded as ${JSON.stringify(rejections.map((d) => d.decision))}`);
+      }
+      found = only;
     } else if (cause === 'draft-mismatch' || cause === 'draft-invalid') {
-      const refused = await approveStation({ runId: rig.runId, key: 'spec:1', draft: cause === 'draft-mismatch' ? '0'.repeat(64) : attempt.sha256, approvedBy: 'conformance', vault });
-      if (refused.ok || refused.reason !== cause) throw new Error(`P14: the approval was ${refused.ok ? 'granted' : refused.reason}, not ${cause}`);
+      found = await refusedApproval(rig, vault, cause === 'draft-mismatch' ? '0'.repeat(64) : attempt.sha256, cause);
+    } else {
+      const decisions = await decisionsOf(vault, rig.runId);
+      found = decisions.find((d) => d.decision.cause === cause);
+      if (found === undefined) throw new Error(`P14: no ${cause} decision was recorded; recorded ${JSON.stringify(decisions.map((d) => d.decision.cause))}`);
     }
-    const decisions = await decisionsOf(vault, rig.runId);
-    const found = decisions.find((d) => {
-      const c = d.decision;
-      if (cause === 'draft-mismatch' || cause === 'draft-invalid') return c.cause === 'approval-refused' && c.reason === cause;
-      return c.cause === cause;
-    });
-    if (found === undefined) throw new Error(`P14: no ${cause} decision was recorded; recorded ${JSON.stringify(decisions.map((d) => d.decision.cause))}`);
     const decider = cause === 'approval-rejected' || cause === 'draft-mismatch' || cause === 'draft-invalid' ? 'approval' : 'line';
     if (found.decision.decidedBy !== decider || found.station !== 'spec' || found.runId !== rig.runId) throw new Error(`P14: a ${cause} decision was recorded as ${JSON.stringify(found)}`);
   });
@@ -854,7 +1012,7 @@ export async function draftsRejectedPark(): Promise<void> {
 }
 
 export const R19_ASSERTIONS = {
-  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS],
+  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS],
   I4: [DRAFTED_EXIT_FLOOR, DRAFTED_FLOOR_CONDITIONS],
   I5: [SPEC_LESS_RUN_NEEDS_AN_INTENT, CRITIC_FINDING_SENDS_BACK, LAST_ATTEMPT_GOES_TO_A_PERSON, WORST_CASE_COVERS_DRAFTING],
   I6: [CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY, TEST_DRAFTER_OF_BUILDER_FAMILY],

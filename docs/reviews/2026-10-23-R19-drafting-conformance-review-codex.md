@@ -1,3 +1,57 @@
+# External review of R19, codex, 2026-10-23
+
+An adversarial review of R19's conformance half: the assertions in
+`packages/conformance/src/registry/drafting.ts` that are meant to prove
+drafting at `spec` and `test-design` (black-box seating, draft recording and
+locking, the critic, approval binding, rejection, the floor, costing), the
+enforcement-decision rows for the new causes, the Vault's closed operation set,
+and the updated independence grades. One of two reviews run from the same
+prompt and bundle; the other is
+`2026-10-23-R19-drafting-conformance-review-gemini.md`. Both are triaged in
+`2026-10-23-R19-drafting-conformance-triage.md`, which cites this review's
+numbered findings as `codex-1` to `codex-11`. R19's runtime half has its own
+prompt and bundle (`2026-10-23-R19-drafting-runtime-review-*`) and is not
+covered here.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 266.1 s. Ingestion `complete`: 65,527
+  input tokens against a floor of 41,585. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `fce6b3419fcbe217b8e89bb8dc9894b5722958e3858e3f6c38c205ece11564b0`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `9ef13be`.
+- **Cross-family agreement:** codex-1 was raised by gemini too (gemini-1), and
+  so was the park-ordering part of codex-4 (gemini-3). codex-10 and gemini-4
+  both question `draftingDecision`'s existential match, from different angles.
+  codex-2, codex-3, codex-5 to codex-9, and codex-11 were raised by codex
+  alone.
+- **Date:** 2026-10-23 (run started 2026-10-23T16:51Z).
+- **Bundle:** `2026-10-23-R19-drafting-conformance-review-bundle.txt`, SHA-256
+  `8633523ba4e696261807bdbc73d39c8acdbef3e2987268a7606b27df6d7d44c9`, base
+  `cd1b536` (`v2` after `reviewed/R20` at `bc2ada7`, plus the docs-only #62),
+  head `e772ef9` ("R19: Drafting at spec and test-design"), one commit. It held
+  the 16 changed paths under `packages/conformance/`, new files in full and
+  modified files as whole-function diffs. The runtime source, docs, and
+  changeset were excluded and went to the separate runtime bundle. Prompt:
+  `2026-10-23-R19-drafting-conformance-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups. It said a local file-listing attempt
+  was denied, and that it did not verify the bundle's hash or run the tests.
+  These are self-reports and cannot be independently verified.
+- **Coverage, and any gap:** items 1, 3 (it found no fail-open in the new
+  harness), 4, 6, and 7 were answered. Item 2 was answered in a sentence ("no
+  unconditional tautology"). Item 5 (configuration satisfied without doing what
+  it appears to do) got no separate answer.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle. Most findings cite `drafting.ts:857–860`, the registration lines,
+  rather than the assertion bodies. Treat them as hints, not locations.
+
 BASE: cd1b536
 HEAD: e772ef9
 packages/conformance/src/registry/verification.ts
