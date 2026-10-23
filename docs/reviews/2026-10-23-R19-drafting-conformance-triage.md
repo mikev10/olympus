@@ -135,8 +135,7 @@ were each run against the new assertions and reverted, and each was caught
   which retry treats as no critic, never clean. D-R19-12 records the lock order.
 - **Outcome:** known limit. A full stop-injection matrix over the drafting
   lifecycle is larger than a review fix, and the runtime it would guard reads
-  correct today. Recorded as D-R19-22, owner unassigned; an issue is
-  recommended.
+  correct today. Recorded as D-R19-22, owned by issue #66.
 
 ## codex-7: refused approvals and stray grants
 
@@ -240,7 +239,7 @@ were each run against the new assertions and reverted, and each was caught
   `LocalVault` has no superclass (`vault/src/local/vault.ts` ~576). Nothing was
   shown to be reachable by an agent. Ruling out an agent's access to the Vault
   is the mount layer's job, and a separate assertion covers it.
-- **Outcome:** belongs to the Vault's conformance, not R19. An issue is opened:
+- **Outcome:** belongs to the Vault's conformance, not R19. Opened as issue #65:
   inspect an instance and its prototype chain with `Reflect.ownKeys` and
   descriptors.
 

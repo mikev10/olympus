@@ -4477,7 +4477,7 @@ what was chosen, and how to reverse it.
 
 - **Found:** the external review of R19's conformance half (codex-4). Every drafting assertion resumes after a completed approval or rejection call. None stops between a grant and its draft binding, between a recorded draft and its critic, or between a lock and its commit. The runtime orders that triage read are sound: `approveStation` records the grant's decision before its commit, a missing critic is `critic: null` and never clean, and D-R19-12 orders the lock. But no assertion fails if those orders change.
 - **Chosen:** known limit. The park ordering alone is now asserted (D-R19-21). A stop-injection matrix over the drafting lifecycle (draft, base record, critic, grant, installation, lock, rejection, each followed by a resume from a fresh runtime) is larger than a review fix.
-- **Owner:** unassigned. The triage recommends an issue.
+- **Owner:** issue #66.
 - **Reverse:** the matrix, using the `around` vault wrapper that the P4 replay assertion and the park check already use.
 
 ### D-R19-23: drafted fail-closed cases are narrow, and one runtime question goes to the runtime half
