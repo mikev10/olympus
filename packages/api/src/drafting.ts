@@ -78,7 +78,7 @@ import {
 import { denialRefusal, parseSecurityPart, type SecurityPart } from './security.js';
 import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
 import { mergedCheckProblems, parseManifest } from './validate.js';
-import { suiteBindingProblems, taskResultProblems } from './verification.js';
+import { suiteBindingProblems, taskResultProblems, writesOutsideGrant } from './verification.js';
 import { basePath, copyOnly, copyTree, draftBaseRunPath, draftPaths, existsIn, ownDiff, scratchPath, treeDigest, writeFiles } from './workspace.js';
 
 /** The drivers that seat each drafter and each critic (R19). A run that drafts is refused without them. */
@@ -305,23 +305,39 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** What the previous attempt's ending tells the next drafter, typed, and nothing else (D-A-DS-02). */
+/**
+ * The runtime problems a test draft can have only because of what the base
+ * holds: a drafted path the base already has, and a suite check the base's
+ * framework would not run as named (A-R19-11).
+ */
+const BASE_PROBLEMS: ReadonlySet<string> = new Set(['exists', 'unbound']);
+
+/**
+ * What the previous attempt's ending tells the next drafter, typed, and
+ * nothing else (D-A-DS-02). At `test-design` every fact the base supplied
+ * is one `base-refusal` with nothing in it, so a drafted check cannot read
+ * the repository back through its exit code or a path's existence: two
+ * retries carry at most two bits of it (A-R19-11).
+ */
 async function retryParts(ctx: LineContext, station: DraftStation, previous: DraftAttempt | null): Promise<RetryPart[]> {
   const back = previous?.sentBack ?? null;
   if (previous === null || back === null) return [];
   switch (back.by) {
-    case 'runtime':
-      return [{ kind: 'runtime-problems', problems: back.problems }];
+    case 'runtime': {
+      if (station !== 'test-design') return [{ kind: 'runtime-problems', problems: back.problems }];
+      const own = back.problems.filter((p) => !BASE_PROBLEMS.has(p.code));
+      return [
+        ...(own.length > 0 ? [{ kind: 'runtime-problems' as const, problems: own }] : []),
+        ...(own.length < back.problems.length ? [{ kind: 'base-refusal' as const }] : []),
+      ];
+    }
     case 'critic': {
       if (previous.critic === null || previous.critic === 'not-seated') return [];
       const critic = await readRecord<CriticRecord>(ctx, previous.critic);
       return [{ kind: 'critic-findings', findings: critic.findings }];
     }
-    case 'base-run': {
-      if (previous.baseRun === null || previous.draft === null) return [];
-      const record = await readRecord<DraftRecord>(ctx, previous.draft);
-      return [{ kind: 'base-refusal', checks: (await judgeBase(ctx, previous.baseRun, record)).parts }];
-    }
+    case 'base-run':
+      return [{ kind: 'base-refusal' }];
     case 'principal':
       if (station === 'spec') return back.notes === null ? [] : [{ kind: 'notes', notes: back.notes }];
       return back.reason === null ? [] : [{ kind: 'rejection-reason', reason: back.reason }];
@@ -383,6 +399,11 @@ async function draft(ctx: LineContext, station: DraftStation, current: DraftAtte
   await commit(ctx, { tasks: { [seat.id]: 'verifying' }, results: { [seat.id]: result } });
 
   const read = station === 'spec' ? await readSpecDraft(ctx, start, work) : await readTestDraft(ctx, start, work);
+  // A drafted path the drafter's policy grant does not cover is a problem, as a build's write outside it is an escape (I4, A-R19-11).
+  const entries = read.files.map((f) => ({ path: f.path, change: 'added' as const, sha256: f.sha256 }));
+  for (const path of writesOutsideGrant(entries, scopeFor(ctx, seat).writableGlobs, STATION_CONTRACTS[station].writeBoundary.workspaceGlobs)) {
+    read.problems.push({ path, code: 'outside-grant' });
+  }
   const record: DraftRecord = {
     runId: ctx.run.id,
     station,
@@ -575,7 +596,7 @@ async function baseRunDraft(ctx: LineContext, record: DraftRecord): Promise<Stat
 
 /**
  * The base record of a test draft, judged: each drafted check that did not do
- * what it declared, as the next attempt may learn it (D-A-DS-01), and a
+ * what it declared, as the run's records and a person read it, and a
  * refusal of the run where a check the run was admitted with did not, which
  * no draft caused and no redraft cures.
  */
@@ -813,8 +834,7 @@ export function parsedParts(texts: { security: unknown; runRequirements: unknown
 /**
  * Writes each committed draft lock's files into the base again, so a base a
  * stop left half-written is whole before a resume checks its digest (R19).
- * Only the base: the artifact root holds locked bytes the runtime never
- * rewrites, since a rewrite there would launder a tamper.
+ * Only the base: the artifact root is `settleArtifactRoot`'s.
  */
 export async function settleBase(vault: Vault, base: string, state: RunState): Promise<string | null> {
   let digest: string | null = null;
@@ -829,4 +849,27 @@ export async function settleBase(vault: Vault, base: string, state: RunState): P
     digest = lock.baseTreeSha256;
   }
   return digest;
+}
+
+/**
+ * Writes the files of each committed draft lock that a stop left unwritten
+ * into the artifact root, so a resume does not read the runtime's own
+ * unfinished step as a tamper (A-R19-11). Only a path the Vault has not
+ * locked and the artifact root does not hold: bytes already there are never
+ * replaced, and a locked path that is missing stays a tamper, since a
+ * rewrite of either would launder one.
+ */
+export async function settleArtifactRoot(vault: Vault, repo: string, state: RunState): Promise<void> {
+  const held = new Set((await vault.readLocks(state.runId))?.entries.map((e) => e.path) ?? []);
+  for (const station of ['spec', 'test-design'] as const) {
+    const lockRef = state.drafts[station]?.locked ?? null;
+    if (lockRef === null) continue;
+    const lock = JSON.parse(new TextDecoder().decode(await vault.read(lockRef))) as DraftLockRecord;
+    const attempt = state.drafts[station]?.attempts.find((a) => a.attempt === lock.draft.attempt);
+    if (attempt?.draft == null) throw new Error(`run ${state.runId}: the ${station} lock names an attempt run state does not hold`);
+    const record = JSON.parse(new TextDecoder().decode(await vault.read(attempt.draft))) as DraftRecord;
+    const absent: DraftFile[] = [];
+    for (const file of record.files) if (!held.has(file.path) && (await fileAt(repo, file.path)) === undefined) absent.push(file);
+    await writeFiles(repo, absent.map((f) => ({ path: f.path, bytes: bytesOf(f) })));
+  }
 }

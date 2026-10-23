@@ -532,8 +532,8 @@ export function draftsRejected(station: DraftStation, contracts: StationContract
  * stable prefix or a role. At `test-design` the locked-spec-alone rule
  * admits these parts and no other: a person's notes there are refused, since
  * an approver who has read the repository would otherwise be a channel
- * around the black box, and a test drafter learns of a base run only each
- * check's id, declaration, and exit code or fixed cause.
+ * around the black box, and a test drafter learns of the base only that its
+ * draft did not hold there, never which check, path, or exit code (A-R19-11).
  */
 export function retrySuffix(station: DraftStation, attempt: number, parts: readonly RetryPart[]): string {
   const lines = [`attempt ${String(attempt)}`];
@@ -546,7 +546,7 @@ export function retrySuffix(station: DraftStation, attempt: number, parts: reado
         lines.push('[runtime-problems]', ...part.problems.map((p) => `- ${p.path}: ${p.code}`));
         break;
       case 'base-refusal':
-        lines.push('[base-refusal]', ...part.checks.map((c) => `- ${c.checkId} declared ${c.declared ?? 'nothing'}: ${'exitCode' in c ? `exit ${String(c.exitCode)}` : c.cause}`));
+        lines.push('[base-refusal]', '- the draft did not hold over the repository; nothing more about the repository is told');
         break;
       case 'rejection-reason':
         lines.push('[rejection-reason]', part.reason);

@@ -521,6 +521,86 @@ export const LOCKED_DRAFT_IS_THE_BYTES_READ: LocalAssertion = runtime({
   },
 });
 
+/**
+ * A drafted spec approved, then a resume stopped inside `lockApproved` by a
+ * vault that throws once at `stop`, then a resume with the real vault: the run
+ * must lock the approved bytes and move on, with no tamper recorded.
+ */
+async function lockAcrossAStop(window: 'after-lock-record' | 'after-lock-commit'): Promise<void> {
+  await withLine(`r19-stop-${window}-`, async (rig) => {
+    const { approveStation, resumeRun } = await api();
+    const r = await drafting(rig);
+    awaiting(await admitAndDrive(r), 'spec:1', 'a drafted spec');
+    const attempt = lastAttempt(await rig.state(), 'spec');
+    if (attempt.sha256 === null || attempt.draft === null) throw new Error('R19: no spec draft');
+    const base = await r.components();
+    const approved = await approveStation({ runId: rig.runId, key: 'spec:1', draft: attempt.sha256, approvedBy: 'conformance', vault: base.vault });
+    if (!approved.ok) throw new Error(`R19: approving the drafted spec was refused as ${approved.reason}`);
+    const stopped = new Error('R19: the process stopped here');
+    let armed = true;
+    const vault: Vault = window === 'after-lock-record'
+      ? {
+          ...around(base.vault, {}),
+          recordDraftLock: async (rec) => {
+            const ref = await base.vault.recordDraftLock(rec);
+            if (armed) { armed = false; throw stopped; }
+            return ref;
+          },
+        }
+      : {
+          ...around(base.vault, {}),
+          // The first read of the locks after the lock's commit is the step before the artifact root is written.
+          readLocks: async (runId) => {
+            if (armed && (await base.vault.readRunState(runId)).drafts.spec?.locked != null) { armed = false; throw stopped; }
+            return base.vault.readLocks(runId);
+          },
+        };
+    const first = await resumeRun({ runId: rig.runId, components: { ...base, vault } }).then(() => null, (error: unknown) => error);
+    if (first !== stopped) throw new Error(`R19: the stop was not reached in ${window}: ${String(first)}`);
+    const next = await resumeRun({ runId: rig.runId, components: await r.components() });
+    awaiting(next, 'integrate:1', `the run resumed after a stop ${window}`);
+    const record = await readRecord<DraftRecord>(base.vault, attempt.draft);
+    const locks = await base.vault.readLocks(rig.runId);
+    for (const file of record.files) {
+      const entry = locks?.entries.find((e) => e.path === file.path);
+      if (entry?.sha256 !== file.sha256) throw new Error(`R19: after a stop ${window}, ${file.path} is not locked against the approved hash`);
+      const there = createHash('sha256').update(await readFile(join(rig.dirs.artifacts, file.path))).digest('hex');
+      if (there !== file.sha256) throw new Error(`R19: after a stop ${window}, the artifact root holds other bytes at ${file.path}`);
+    }
+    const tampers = (await decisionsOf(base.vault, rig.runId)).filter((d) => d.decision.cause === 'station-refused' && d.decision.refusal.reason === 'lock-tamper');
+    if (tampers.length > 0) throw new Error(`R19: a stop ${window} was recorded as a tamper: ${JSON.stringify(tampers)}`);
+  });
+}
+
+export const DRAFT_LOCK_SURVIVES_A_STOP: LocalAssertion = runtime({
+  id: 'I5.draft-lock-survives-a-stop',
+  title:
+    'a stop between recording a draft lock and committing it, or between committing it and writing the approved bytes into the artifact root, is finished by the next resume: the approved bytes are locked against their hash and written, the run moves on, and no tamper is recorded for the runtime\'s own unfinished step',
+  run: async () => {
+    await lockAcrossAStop('after-lock-record');
+    await lockAcrossAStop('after-lock-commit');
+  },
+});
+
+export const DRAFT_OUTSIDE_THE_GRANT_GOES_BACK: LocalAssertion = runtime({
+  id: 'I4.draft-outside-the-grant-goes-back',
+  title:
+    'a drafted path the drafting role\'s policy grant does not cover is a runtime problem, outside-grant, which sends the draft back and is never approved or locked: a policy that narrows a drafter\'s writable globs is held at drafting as at build (A-R19-11)',
+  run: async () => {
+    await withLine('r19-grant-', async (rig) => {
+      const r = await drafting(rig);
+      const policy = await draftingPolicy({}, { ['spec-drafter' as RoleId]: lineScope(['spec'], 'deep', ['src/**']) });
+      await admitAndDrive(r, { policy });
+      const [first] = (await rig.state()).drafts.spec?.attempts ?? [];
+      const back = first?.sentBack;
+      if (back?.by !== 'runtime') throw new Error(`R19: a draft outside its grant was not sent back by the runtime: ${JSON.stringify(back)}`);
+      const outside = back.problems.filter((p) => p.code === 'outside-grant').map((p) => p.path);
+      if (!sameStrings(outside, Object.keys(helloSpec(rig.runId)))) throw new Error(`R19: the draft's paths outside the grant were ${JSON.stringify(outside)}, not its four files`);
+      if ((await (await r.components()).vault.readLocks(rig.runId)) !== null) throw new Error('R19: a draft outside its grant locked something');
+    });
+  },
+});
+
 /** A provider that records every sandbox spec it is asked to provision, forwarding to the stub. */
 async function recordingSandbox(): Promise<{ sandbox: SandboxProvider; specs: SandboxSpec[] }> {
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
@@ -596,10 +676,10 @@ export const TEST_DRAFTER_IS_BLACK_BOX: LocalAssertion = runtime({
   },
 });
 
-export const BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS: LocalAssertion = runtime({
-  id: 'I3.base-refusal-carries-only-id-declaration-and-exit',
+export const BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE: LocalAssertion = runtime({
+  id: 'I3.base-refusal-tells-the-drafter-nothing-of-the-repository',
   title:
-    'a test draft whose check does not do on the base what it declares is sent back before anyone is asked to approve it, and the next attempt learns the check\'s id, its declaration, and its exit code, and never its output, which carries the repository',
+    'a test draft whose check does not do on the base what it declares is sent back before anyone is asked to approve it, and the next attempt learns only that its draft did not hold over the repository: never the check, its exit code, which a drafted check chooses from what it read, or its output (A-R19-11)',
   run: async () => {
     await withLine('r19-base-', async (rig) => {
       const marker = 'REPOSITORY-OUTPUT-MARKER';
@@ -615,7 +695,14 @@ export const BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS: LocalAssertion = runtime({
       if (attempts.length !== 2 || attempts[0]?.sentBack?.by !== 'base-run') throw new Error(`R19: the first test draft was not sent back by its base run: ${JSON.stringify(attempts.map((a) => a.sentBack))}`);
       const [, retry] = r.drivers.testDrafter.requests;
       if (retry === undefined) throw new Error('R19: the test drafter was not called again');
-      if (!retry.variableSuffix.includes('[base-refusal]') || !retry.variableSuffix.includes('drafted-hello declared fails: exit 0')) throw new Error(`R19: the retry was told ${JSON.stringify(retry.variableSuffix)}`);
+      if (!retry.variableSuffix.includes('[base-refusal]')) throw new Error(`R19: the retry was not told its draft did not hold: ${JSON.stringify(retry.variableSuffix)}`);
+      // The record keeps what the check did, for a person; the drafter is told none of it.
+      const decided = (await decisionsOf((await r.components()).vault, rig.runId)).map((d) => d.decision).find((d) => d.cause === 'draft-sent-back' && d.sentBack.by === 'base-run');
+      const sent = decided?.cause === 'draft-sent-back' ? decided.sentBack : undefined;
+      if (sent?.by !== 'base-run' || !sent.checks.some((c) => c.checkId === 'drafted-hello' && 'exitCode' in c && c.exitCode === 0)) throw new Error(`R19: the base record does not keep the check's exit code: ${JSON.stringify(sent)}`);
+      for (const told of ['drafted-hello', 'exit', 'declared']) {
+        if (retry.variableSuffix.includes(told)) throw new Error(`R19: the retry was told ${JSON.stringify(told)} of the base run: ${JSON.stringify(retry.variableSuffix)}`);
+      }
       for (const req of [...r.drivers.testDrafter.requests, ...r.drivers.testCritic.requests]) {
         if (req.variableSuffix.includes(marker) || req.stablePrefix.includes(marker) || req.role.instructions.includes(marker)) throw new Error('R19: base output reached a black-box seat');
       }
@@ -1012,9 +1099,9 @@ export async function draftsRejectedPark(): Promise<void> {
 }
 
 export const R19_ASSERTIONS = {
-  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_ONLY_ITS_FACTS],
-  I4: [DRAFTED_EXIT_FLOOR, DRAFTED_FLOOR_CONDITIONS],
-  I5: [SPEC_LESS_RUN_NEEDS_AN_INTENT, CRITIC_FINDING_SENDS_BACK, LAST_ATTEMPT_GOES_TO_A_PERSON, WORST_CASE_COVERS_DRAFTING],
+  I3: [DRAFTED_SPEC_LOCKS_NOTHING_UNTIL_APPROVED, DRAFTED_TESTS_LOCK_AND_RUN, SUPPLIED_ARTIFACTS_SEAT_NO_DRAFTER, APPROVAL_BINDS_THE_DRAFT, LOCKED_DRAFT_IS_THE_BYTES_READ, TEST_DRAFTER_IS_BLACK_BOX, BASE_REFUSAL_CARRIES_NOTHING_OF_THE_BASE],
+  I4: [DRAFTED_EXIT_FLOOR, DRAFTED_FLOOR_CONDITIONS, DRAFT_OUTSIDE_THE_GRANT_GOES_BACK],
+  I5: [SPEC_LESS_RUN_NEEDS_AN_INTENT, CRITIC_FINDING_SENDS_BACK, LAST_ATTEMPT_GOES_TO_A_PERSON, WORST_CASE_COVERS_DRAFTING, DRAFT_LOCK_SURVIVES_A_STOP],
   I6: [CRITIC_OF_DRAFTER_FAMILY_IS_ADVISORY, TEST_DRAFTER_OF_BUILDER_FAMILY],
   I7: [REJECTION_TEXT_ONLY_AT_SPEC, INTENT_IS_NOT_A_PAYLOAD, INTENT_REFUSED_FROM_ANOTHER_CHANNEL],
 } as const;

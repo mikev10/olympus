@@ -36,8 +36,9 @@ describes, not an implementation you have seen.
 ## How you are judged
 
 The runtime runs your checks over the repository before any change is made,
-and each must do what it declares there. If one does not, you learn its id,
-its declaration, and its exit code or why it did not run, and nothing else. A
+and each must do what it declares there. If one does not, or a test path you
+chose is already taken there, you learn only that your draft did not hold over
+the repository: not which check, not its exit code, not which path. A
 critic checks the tests against the spec and a rubric a person wrote. Nothing
 you say decides it.
 

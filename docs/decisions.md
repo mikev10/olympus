@@ -4490,9 +4490,24 @@ what was chosen, and how to reverse it.
 ### D-R19-23: drafted fail-closed cases are narrow, and one runtime question goes to the runtime half
 
 - **Found:** the external review of R19's conformance half (codex-6). No drafted base-run case holds more than one declared check or names an absent file. The critic-shape half of the finding does not hold: `readCriticResult` requires exactly one key, `findings`, holding non-empty strings, and `api/test/drafting.test.ts` covers those branches.
+- **Answered** by the runtime half's triage: D-R19-24, issue #67.
 - **Open:** a behavioral check is judged by its exit code over the product (D-R15-02). A drafted behavioral check whose command names a path that is neither drafted nor in the base fails on the base as declared. The test-draft validator keeps only drafted paths in a command's `runs`, so nothing flags it. Whether the builder could later write that path, making the agent being judged the author of its judge, is a question about the runtime. This triage has neither read nor run the answer.
 - **Chosen:** known limit for the conformance gap. The open question goes to the triage of R19's runtime-half review, which should construct the case.
 - **Reverse:** a drafted case with two distinguishable checks, and one whose command names an absent script.
+
+### D-R19-24: what the runtime half's review left as known limits
+
+- **Found:** the external review of R19's runtime half (codex-3, and the question D-R19-23 handed over). A drafted behavioral check is tied to its test by naming it in its command, not by running it: `["node", "-e", "process.exit(0)", "test/guard.js"]` names `test/guard.js` and passes. A drafted check whose command names a path neither drafted nor in the base fails on the base as declared and is not flagged, and build may later write that path, so the check at verify runs a file its judged agent wrote.
+- **Chosen:** known limits. The first gives the drafter nothing a weak test it writes would not, and the critic reading the recorded bytes and the approving person are its controls. No argv the runtime does not own can prove execution. The second is escalated today, not refused: `analyzeTamper` adds a changed file a pinned command names to `protectedPathsTouched`, and the exit goes to a person. That was traced, not run. Refusing it at drafting needs a rule for which argv tokens are paths, and `commandPaths` takes every token.
+- **Owner:** issue #67, for the refusal and an end-to-end assertion of the escalation.
+- **Reverse:** runtime-owned runners for drafted checks, with the tests as their only operands.
+
+### D-R19-25: the runtime half's review fixes
+
+- **Found:** the external review of R19's runtime half (codex-1, gemini-1, codex-4, codex-5). A test drafter's retry carried each base check's id and exact exit code, and the paths `exists` named, so a drafted check could read the repository and exit with a byte of it: two retries, any number of checks. A stop after `recordDraftLock` and before the state's commit left a run every resume threw on, since the Vault refused the same lock again. A stop after that commit and before the artifact root was written made every resume record a `lock-tamper` for files the runtime had not yet written. A policy narrowing a drafting role's `writableGlobs` did nothing.
+- **Chosen:** A-R19-11. The base's facts reach a test drafter as one empty `base-refusal`. `recordDraftLock` takes the same record again. A resume writes a committed lock's files that are absent and not yet locked into the artifact root before checking it. A drafted path outside the role's grant is `outside-grant`.
+- **Consequence:** the three new or changed assertions, `I3.base-refusal-tells-the-drafter-nothing-of-the-repository`, `I5.draft-lock-survives-a-stop`, and `I4.draft-outside-the-grant-goes-back`, each failed against the runtime before these fixes, and the stop assertion's second window failed alone with the resume's write removed.
+- **Reverse:** none needed.
 
 ## R19 amendments to the contracts
 
@@ -4535,3 +4550,7 @@ what was chosen, and how to reverse it.
 ### A-R19-10: the spec's parts
 
 `SpecPart` gains `run-requirements` and `questions`, parsed by `parseRunRequirements` and `parseQuestions`.
+
+### A-R19-11: a test drafter learns one fact of the base
+
+Amends D-A-DS-01's "learns only the check's id, declaration, and exit code", D-R19-08, and D-R19-09, confirmed by the maintainer 2026-10-23. A drafted check chooses its exit code, so the code is base output, which D-A-DS-01's must-hold keeps from the black-box seats. At `test-design`, a base run's refusal and the runtime problems that come from the base (`exists`, `unbound`) reach the next attempt as one `RetryPart` `{ kind: 'base-refusal' }` with nothing in it; the draft's own problems still go back by path and code. Two retries carry at most two bits of the repository. `BaseRefusalPart` stays in the decision and the standing, for a person. Also: `recordDraftLock` returns the existing ref for a byte-identical record; a resume writes a committed lock's absent, unlocked files into the artifact root (`settleArtifactRoot`); and a drafted path outside the drafting role's `writableGlobs` is the runtime problem `outside-grant`.

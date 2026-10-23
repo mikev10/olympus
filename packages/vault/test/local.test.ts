@@ -438,8 +438,10 @@ describe('drafting records (R19)', () => {
   test('an approved draft is locked once per station, and the lock manifest reads back as it stands', async () => {
     expect(await vault.readLocks(runId)).toBeNull();
     const lock = { runId, station: 'spec' as const, draft: { sha256: draft.sha256, attempt: 1 }, files: [{ path: file.path, sha256: file.sha256 }], approval: { by: 'policy' as const }, baseTreeSha256: 'e'.repeat(64), collectedBy: 'runtime' as const };
-    await vault.recordDraftLock(lock);
-    await expect(vault.recordDraftLock(lock)).rejects.toThrow(/already locked a draft at spec/);
+    const ref = await vault.recordDraftLock(lock);
+    // The same record again is the lock a resume finishes; another is refused (A-R19-11).
+    expect(await vault.recordDraftLock(lock)).toEqual(ref);
+    await expect(vault.recordDraftLock({ ...lock, approval: { by: 'principal', principal: 'm' } })).rejects.toThrow(/already locked another draft at spec/);
     await writeFile(join(artifacts, 'spec.md'), SPEC);
     const manifest = await vault.lock(runId, ['spec.md'], 'spec');
     expect(await vault.readLocks(runId)).toEqual(manifest);

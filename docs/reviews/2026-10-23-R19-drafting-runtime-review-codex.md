@@ -1,3 +1,56 @@
+# External review of R19, codex, 2026-10-23
+
+An adversarial review of R19's runtime half: the drafting contracts, the
+Vault's draft and lock records, the line that drafts at `spec` and
+`test-design`, and the API and CLI that admit, approve, and reject drafts. One
+of two reviews run from the same prompt and bundle; the other is
+`2026-10-23-R19-drafting-runtime-review-gemini.md`. Both are triaged in
+`2026-10-23-R19-drafting-runtime-triage.md`, which cites this review's
+numbered findings as `codex-1` to `codex-5`. R19's conformance half has its
+own prompt, bundle, reviews, and triage
+(`2026-10-23-R19-drafting-conformance-*`).
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 291.5 s. Ingestion `complete`: 143,086
+  input tokens against a floor of 99,338. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `8c49557128285ea3960e24a27f281687ae41279b5f3c893ca537326487777b00`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `fb73282`.
+- **Cross-family agreement:** codex-1's exit-code channel was raised by gemini
+  too (gemini-1); its second half, the `exists` oracle, was codex's alone.
+  codex-2 to codex-5 were raised by codex alone.
+- **Date:** 2026-10-23 (run started 2026-10-23T20:09Z).
+- **Bundle:** `2026-10-23-R19-drafting-runtime-review-bundle.txt`, SHA-256
+  `c0bfe209261fd5d1462a81528cf4d6ab12efe55c71535d805b77135c34826fe9`, base
+  `cd1b536` (`v2` after `reviewed/R20`, plus the docs-only #62), head `e772ef9`
+  ("R19: Drafting at spec and test-design"), one commit. It held the 42 changed
+  paths outside `packages/conformance/`: the runtime source in `core`, `vault`,
+  `api`, `cli`, and `compiler`, the four drafting roles, the two default
+  rubrics, the changeset, and the unit tests beside them; new files in full and
+  modified files as whole-function diffs. The conformance assertions were
+  excluded and reviewed separately. Prompt:
+  `2026-10-23-R19-drafting-runtime-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups, that local command execution was
+  blocked, and that it did not verify the bundle's hash or run the tests. These
+  are self-reports and cannot be independently verified.
+- **Coverage, and any gap:** items 1 (codex-1, codex-3, codex-4, codex-5), 4
+  (it found no TypeScript escape hatch available to this adversary), 6, and 7
+  (codex-2, which argues the framing asks a critic's answer to be both
+  adversary-controlled and trusted) were answered. Item 2 (tautological checks)
+  got no separate answer. Item 3 (fail-open) got no separate answer; its
+  sound-mechanisms list names the critic's malformed-result handling as fail
+  closed. Item 5 is answered only through codex-5.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle, not the repository. Treat them as hints, not locations.
+
 BASE: cd1b536  
 HEAD: e772ef9  
 packages/vault/test/stub.test.ts  

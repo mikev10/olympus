@@ -54,7 +54,7 @@ export class StubVault implements Vault {
   private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
   private readonly baseRuns = new Map<string, VaultRef>();
-  private readonly draftLocks = new Set<string>();
+  private readonly draftLocks = new Map<string, string>();
   /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
   private readonly runs = new Set<RunId>();
 
@@ -212,8 +212,11 @@ export class StubVault implements Vault {
   recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a draft lock is collected by the runtime, or it is not recorded'));
     const key = `${r.runId}\0${r.station}`;
-    if (this.draftLocks.has(key)) return Promise.reject(new Error(`StubVault: run ${r.runId} already locked a draft at ${r.station}; nothing was stored`));
-    this.draftLocks.add(key);
+    // The same record again is the lock already taken, as a resume asks for it (A-R19-11).
+    const record = JSON.stringify(r);
+    const held = this.draftLocks.get(key);
+    if (held !== undefined && held !== record) return Promise.reject(new Error(`StubVault: run ${r.runId} already locked another draft at ${r.station}; nothing was stored`));
+    this.draftLocks.set(key, record);
     return Promise.resolve(this.store(r.runId, 'draft-lock', r));
   }
 

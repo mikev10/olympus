@@ -107,10 +107,11 @@ export type DraftCondition =
 export type RejectionReason = 'not-black-box' | 'does-not-follow-spec' | 'not-runnable' | 'misses-spec-cases';
 
 /**
- * What a check did on the base that refused a test draft, as the next
- * attempt learns it: the check's id, its declaration, and either its exit
- * code or a cause from a fixed set. Never its output, which carries the
- * repository (I7, D-A-DS-01).
+ * What a check did on the base that refused a test draft, as the run's
+ * records hold it and a person reads it: the check's id, its declaration,
+ * and either its exit code or a cause from a fixed set. Never its output.
+ * The test drafter learns none of it: a drafted check chooses its own exit
+ * code, so the code is base output (A-R19-11).
  */
 export type BaseRefusalPart =
   | { readonly checkId: string; readonly declared: 'fails' | 'passes' | null; readonly exitCode: number }
@@ -121,11 +122,14 @@ export type BaseRefusalPart =
  * suffix and never in its stable prefix or role (D-A-DS-02). The runtime's
  * own problems with a draft are paths and codes; `notes` exist at `spec`
  * alone, and a `test-design` rejection carries a reason and no text.
+ * `base-refusal` carries nothing: at `test-design` it is the one fact a test
+ * drafter learns of the repository, that its draft did not hold there
+ * (A-R19-11).
  */
 export type RetryPart =
   | { readonly kind: 'critic-findings'; readonly findings: readonly string[] }
   | { readonly kind: 'runtime-problems'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
-  | { readonly kind: 'base-refusal'; readonly checks: readonly BaseRefusalPart[] }
+  | { readonly kind: 'base-refusal' }
   | { readonly kind: 'rejection-reason'; readonly reason: RejectionReason }
   | { readonly kind: 'notes'; readonly notes: string };
 

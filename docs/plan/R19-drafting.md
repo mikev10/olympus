@@ -65,8 +65,10 @@ the session's recommendation (2026-10-23).
   against the drafter; `same-model` seats no critic.
 - **The base run per draft hash.** `test-design` runs R15's base run over the
   base plus the draft's files, and records it under the draft's hash. A
-  mismatch sends the draft back carrying, per check, its id, declaration, and
-  exit code or a fixed cause.
+  mismatch sends the draft back carrying one fact: that the draft did not hold
+  over the repository, never which check or its exit code (A-R19-11). The
+  record keeps each check's id, declaration, and exit code or a fixed cause,
+  for a person.
 - **The gate.** The runtime evaluates the station's conditions, records them
   in run state with the attempt, and `effectiveApproval` applies the drafted
   floor. A grant names the draft's hash and attempt, and is matched on both.

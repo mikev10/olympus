@@ -817,15 +817,21 @@ export class LocalVault implements Vault {
     return storeObject(this.#store, r.runId, 'critic-result', r);
   }
 
-  /** Once per run and station, by an exclusive create: an approved draft is locked once (R19). */
+  /**
+   * Once per run and station, by an exclusive create: an approved draft is
+   * locked once (R19). The same record again returns its ref, so a resume
+   * after a stop that fell between this and the state's commit can finish
+   * (A-R19-11); any other record at that station is refused.
+   */
   async recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
     const problem = draftLockProblem(r);
     if (problem !== undefined) throw new Error(`LocalVault: refusing a draft lock: ${problem}`);
     const bytes = encode(r);
     const ref: VaultRef = { runId: r.runId, kind: 'draft-lock', hash: sha256(bytes) };
     await createExclusive(objectFile(this.#store, ref), bytes);
-    if (!(await createExclusive(join(runDir(this.#store, r.runId), draftLockFile(r.station)), bytes))) {
-      throw new Error(`LocalVault: run ${r.runId} already locked a draft at ${r.station}; nothing more was stored`);
+    const station = join(runDir(this.#store, r.runId), draftLockFile(r.station));
+    if (!(await createExclusive(station, bytes)) && sha256(await readFile(station)) !== ref.hash) {
+      throw new Error(`LocalVault: run ${r.runId} already locked another draft at ${r.station}; nothing more was stored`);
     }
     return ref;
   }

@@ -1,3 +1,52 @@
+# External review of R19, gemini, 2026-10-23
+
+An adversarial review of R19's runtime half: the drafting contracts, the
+Vault's draft and lock records, the line that drafts at `spec` and
+`test-design`, and the API and CLI that admit, approve, and reject drafts. One
+of two reviews run from the same prompt and bundle; the other is
+`2026-10-23-R19-drafting-runtime-review-codex.md`. Both are triaged in
+`2026-10-23-R19-drafting-runtime-triage.md`, which cites this review's
+finding as `gemini-1`. R19's conformance half has its own prompt, bundle,
+reviews, and triage (`2026-10-23-R19-drafting-conformance-*`).
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`
+  (`generativelanguage/v1beta`), offering no tools. `cleanRoom` is `null`
+  because an API call loads no local configuration. Exit 0, not timed out,
+  194.5 s. Ingestion `complete`: 144,692 prompt tokens against a floor of
+  99,338. Integrity `verified`. Outcome `counted`. Reply SHA-256 as the
+  runner wrote it:
+  `21123ff587559769a43d3cc9240d33f123472dced212d2312c647d615bae2893`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `a6bb50b`.
+- **Cross-family agreement:** gemini-1 was raised by codex too (the first half
+  of codex-1). Gemini raised no other finding.
+- **Date:** 2026-10-23 (run started 2026-10-23T20:18Z).
+- **Bundle:** `2026-10-23-R19-drafting-runtime-review-bundle.txt`, SHA-256
+  `c0bfe209261fd5d1462a81528cf4d6ab12efe55c71535d805b77135c34826fe9`, base
+  `cd1b536` (`v2` after `reviewed/R20`, plus the docs-only #62), head `e772ef9`
+  ("R19: Drafting at spec and test-design"), one commit. It held the 42 changed
+  paths outside `packages/conformance/`: the runtime source in `core`, `vault`,
+  `api`, `cli`, and `compiler`, the four drafting roles, the two default
+  rubrics, the changeset, and the unit tests beside them; new files in full and
+  modified files as whole-function diffs. The conformance assertions were
+  excluded and reviewed separately. Prompt:
+  `2026-10-23-R19-drafting-runtime-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and made no lookups. This is a self-report and cannot be independently
+  verified.
+- **Coverage, and any gap:** items 1 (gemini-1) and 6 were answered. Items 2
+  (tautological checks), 3 (fail-open), 4 (language escape hatches), 5
+  (configuration), and 7 (the framing) came back empty; the reply's single
+  finding is numbered 1 and its sound list 6, with nothing between. Its sound
+  list also claims a stop before the lock is caught as tamper on resume, which
+  codex-4 disputes; that claim is checked under codex-4.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle, not the repository. Its `machine.ts:406` for `retrySuffix` is a
+  bundle position. Treat them as hints, not locations.
+
 BASE: cd1b536
 HEAD: e772ef9
 packages/vault/test/stub.test.ts

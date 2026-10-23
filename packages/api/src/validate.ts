@@ -100,6 +100,8 @@ export type RequestProblemCode =
   | 'not-draftable'
   /** A drafted test no drafted check runs, or a check naming a test that was not drafted (R19). */
   | 'unreferenced'
+  /** A drafted path the drafting role's policy grant does not cover (R19, I4, A-R19-11). */
+  | 'outside-grant'
   /** An authorization rule of the spec's security part that no drafted or admitted check denies (R17, R19). */
   | 'denial-check-missing'
   /** An intent that is not a person's text from the principal's channel (R19, I7). */

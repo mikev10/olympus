@@ -69,7 +69,7 @@ import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
 import { integrateEscalations, readIntegration, REVIEWER_ROLE, runLine, type LineArtifacts, type LineContext } from './line.js';
-import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
+import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
 import type { BuiltGraph } from './graph.js';
@@ -1194,6 +1194,8 @@ export async function resumeRun(req: ResumeRequest, hooks: DriveHooks = {}): Pro
   if (base !== expected) {
     throw new Error(`run ${req.runId}: the workspace store's base is ${base}, not the ${expected} its records name; refusing to resume on it`);
   }
+  // A lock committed before a stop wrote its files is finished, not read as a tamper (A-R19-11).
+  await settleArtifactRoot(vault, record.run.repo, state);
 
   const loaded = await loadLine(vault, record, state);
   const ctx: LineContext = {
