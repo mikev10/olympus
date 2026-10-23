@@ -1,3 +1,56 @@
+# External review of R20, gemini, 2026-10-22
+
+An adversarial review of R20, the role compiler: `compileRoles` and how it
+reads a roles directory, admission's pinning of every compiled role in the
+write-once admission record and resume's reading of roles only from it, the
+line's seat-to-role assignment and the role id and hash on every usage record,
+and the Claude Code driver's rendering of the role on the CLI's argv. One of
+two reviews run from the same prompt and bundle; the other is
+`2026-10-22-R20-role-compiler-review-codex.md`. Both are triaged in
+`2026-10-22-R20-role-compiler-triage.md`, which cites this review's
+assessment as `gemini-obs`; it numbered no findings.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`
+  (`api:generativelanguage/v1beta`), offering no tools; `cleanRoom` is `null`
+  because an API call loads no local configuration. Exit 0, not timed out,
+  254.5 s. Ingestion `complete`: 115,969 prompt tokens against a floor of
+  81,523 (36,021 thinking tokens, 1,262 candidate tokens). Integrity
+  `verified`. Outcome `counted`. Reply SHA-256 as the runner wrote it:
+  `e6473c9a175f33336bf06cc01ac4f778d7375ab01e96f04c1bba7e3e90a93efe`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `13c7302`.
+- **Cross-family agreement:** none. gemini reported no findings; codex raised
+  four (codex-1 to codex-4), none of which gemini raised. gemini's assessment
+  of the driver's `--setting-sources ''` is the opposite of codex-1's doubt;
+  on CLI 2.1.309 the triage found gemini's reading correct, an outcome its
+  reply asserted without evidence the bundle could have given it.
+- **Date:** 2026-10-22 (run started 2026-10-23T01:28Z).
+- **Bundle:** `2026-10-22-R20-role-compiler-review-bundle.txt`, SHA-256
+  `8470141b619068de2278340de754e03f0ed70ca02474a9a9af7e2aef69598587`, base
+  `60b83a0` (`reviewed/R18`), head `a61aac4` ("R20: Role compiler"), two
+  commits (the R20 spec amendment, #60, and the unit itself). It held 49 of the
+  52 changed paths, new files in full and modified files as whole-function
+  diffs; `docs/decisions.md`, `docs/plan/DECOMPOSITION.md` and
+  `docs/plan/F1-spine.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-22-R20-role-compiler-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it held no prior context
+  about the project and performed no external lookups. This is a self-report
+  and is not independently verifiable.
+- **Coverage, and any gap:** item 1 answered only in aggregate ("no places
+  where the properties ... are violated"); item 6 answered at length; item 7
+  answered (framing correct), with a note on `rolesProblem`'s duplication
+  between `api` and `vault`. Items 2 (tautological checks), 3 (fail-open), 4
+  (language escape hatches) and 5 (configuration satisfied without effect)
+  came back empty. Item 2 is where codex-2, codex-3 and codex-4 sit, and all
+  three held at least in part.
+- **Citations:** the reply cites no line numbers; its references to
+  constructs were located by name during triage.
+
+---
+
 BASE: 60b83a0
 HEAD: a61aac4
 path: pnpm-lock.yaml

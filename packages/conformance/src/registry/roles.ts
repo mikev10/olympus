@@ -11,13 +11,14 @@
  */
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
+import ts from 'typescript';
 import type { RunOutcome } from '@olympus-ai/api';
-import type { CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
+import type { CompiledRole, RoleId, RunId, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { ExecResult, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, UsageRecord } from '@olympus-ai/vault';
-import { compileError, runtime } from '../kit/assert.js';
-import type { LocalAssertion } from '../kit/types.js';
+import { compileError, external, runtime } from '../kit/assert.js';
+import type { Assertion, LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { HELLO_REVIEW, HELLO_TASK, lineScope, linePolicy, readRecord, stubDriver, withLine, type LineRig } from './line.js';
 
@@ -93,16 +94,32 @@ export const ADMISSION_PINS_EVERY_ROLE: LocalAssertion = runtime({
         throw new Error('R20: the builder ran under the role file as edited after admission, not as the run was admitted with');
       }
 
-      // A resume reads the pinned roles from the record, never the directory.
-      const { resumeRun } = await api();
-      const again = await stubDriver();
-      await resumeRun({ runId: rig.runId, components: await rig.components({ driver: again, reviewer: await stubDriver({ family: 'other' }) }) });
-      if (again.requests.some((r) => r.role.instructions !== original && r.role.role === 'builder')) throw new Error('R20: a resume ran the builder under the edited role file');
+      // A later run is admitted with the edit, and pins it.
+      const { admitRun } = await api();
+      const laterRunId = 'r20pinlaterrun' as RunId;
+      const later = await admitRun(await rig.request(await rig.components(), { runId: laterRunId }));
+      if (!later.ok) throw new Error(`R20: a later run was refused at admission as ${later.reason}`);
+      const laterRecord = await readRecord<AdmissionRecord>(components.vault, (await components.vault.readRunState(laterRunId)).admission);
+      const laterBuilder = laterRecord.roles.find((r) => r.role === 'builder');
+      if (laterBuilder?.sha256 !== sha256(edited) || laterBuilder.instructions !== edited) throw new Error('R20: a run admitted after the edit does not pin the edited role file');
+    });
 
-      // A later run is admitted with the edit.
-      const { compileRoles } = await import('@olympus-ai/compiler');
-      const later = await compileRoles(rig.roles);
-      if (!later.ok || later.roles.find((r) => r.role === 'builder')?.sha256 !== sha256(edited)) throw new Error('R20: the edited role file does not compile to its new version');
+    // A resume reads the pinned roles from the record, never the directory: a run admitted, its role file then
+    // edited, and first driven by the resume, so the builder's only call is the resume's (codex-2, D-R20-11).
+    await withLine('r20-pin-resume-', async (rig) => {
+      const { admitRun, resumeRun } = await api();
+      const builderHash = await fileHash(rig, 'builder');
+      const original = await readFile(join(rig.roles, 'builder.md'), 'utf8');
+      const admission = await admitRun(await rig.request(await rig.components()));
+      if (!admission.ok) throw new Error(`R20: the hello run was refused at admission as ${admission.reason}`);
+      await writeFile(join(rig.roles, 'builder.md'), `${original}\nAn instruction added after admission.\n`);
+      const resumed = await stubDriver();
+      await resumeRun({ runId: rig.runId, components: await rig.components({ driver: resumed, reviewer: await stubDriver({ family: 'other' }) }) });
+      const builds = resumed.requests.filter((r) => r.role.role === 'builder');
+      if (builds.length === 0) throw new Error('R20: the resume never called the builder, so no resumed role was delivered to check');
+      if (builds.some((r) => r.role.instructions !== original || r.role.sha256 !== builderHash)) {
+        throw new Error('R20: a resume ran the builder under the role file as edited after admission, not as the run was admitted with');
+      }
     });
   },
 });
@@ -175,12 +192,9 @@ export const BROKEN_ROLE_ENTRY_REFUSES_ADMISSION: LocalAssertion = runtime({
       const target = join(rig.dirs.artifacts, 'planted-role.md');
       await writeFile(target, 'Instructions planted where an agent can write them.');
       await rm(join(rig.roles, 'builder.md'));
-      try {
-        await symlink(target, join(rig.roles, 'builder.md'), 'file');
-      } catch {
-        // A host that cannot make a link without privilege cannot plant one either; the compiler's own suite covers it where it can.
-        return;
-      }
+      // No catch: a host that cannot make the link fails here rather than passing unexercised (D-R20-10).
+      // A file link and not a junction: a junction is a directory, refused as one whether or not the link is followed.
+      await symlink(target, join(rig.roles, 'builder.md'), 'file');
       const outcome = await startRun(await rig.request(await rig.components()));
       const refused = refusedAs(outcome, 'roles-refused', 'a role file that is a link into the workspace');
       if (!refused.refused.some((r) => r.entry === 'builder.md' && r.code === 'not-regular')) throw new Error(`R20: the link was refused as ${JSON.stringify(refused.refused)}`);
@@ -319,28 +333,74 @@ export const DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION: LocalAssertion = runtime
 export const COMPILER_TAKES_ONLY_A_DIRECTORY: LocalAssertion = runtime({
   id: 'I7.compiler-takes-only-a-directory',
   title:
-    'the compiler package depends on core alone and imports nothing but node built-ins and core, so no trigger payload, check, rubric, or corpus type can reach it; compileRoles takes one parameter',
+    'the compiler package depends on core alone; every module under its src, parsed, loads nothing but node built-ins, its own modules, and core — statically, dynamically, or by require — and never refers to process; compileRoles declares one parameter with no default. What reaches it is the directory path its caller passes',
   run: async () => {
     const root = join(workspaceRoot(), 'packages', 'compiler');
     const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
     if (JSON.stringify(Object.keys(manifest.dependencies ?? {})) !== JSON.stringify(['@olympus-ai/core'])) {
       throw new Error(`R20: the compiler depends on ${JSON.stringify(manifest.dependencies)}, not on core alone`);
     }
-    for (const file of await readdir(join(root, 'src'))) {
-      const source = await readFile(join(root, 'src', file), 'utf8');
-      for (const [, from] of source.matchAll(/from '([^']+)'/g)) {
-        if (from === undefined || from.startsWith('node:') || from.startsWith('./') || from === '@olympus-ai/core') continue;
-        throw new Error(`R20: compiler/src/${file} imports ${from}`);
-      }
+    const allowed = (from: string): boolean => from.startsWith('node:') || from.startsWith('./') || from === '@olympus-ai/core';
+    let declared: number | undefined;
+    for (const file of await sourceFiles(join(root, 'src'))) {
+      const name = relative(root, file).replaceAll('\\', '/');
+      const parsed = ts.createSourceFile(file, await readFile(file, 'utf8'), ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        if (ts.isIdentifier(node) && node.text === 'process') throw new Error(`R20: ${name} refers to process`);
+        const loaded = loadedModule(node);
+        if (loaded !== undefined && !allowed(loaded)) throw new Error(`R20: ${name} loads ${loaded}`);
+        if (ts.isFunctionDeclaration(node) && node.name?.text === 'compileRoles') {
+          if (node.parameters.some((p) => p.initializer !== undefined || p.dotDotDotToken !== undefined || p.questionToken !== undefined)) {
+            throw new Error(`R20: compileRoles in ${name} declares a parameter with a default, rest, or optional marker`);
+          }
+          declared = node.parameters.length;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(parsed);
     }
-    const { compileRoles } = await import('@olympus-ai/compiler');
-    if (compileRoles.length !== 1) throw new Error(`R20: compileRoles takes ${String(compileRoles.length)} parameters, not the directory alone`);
+    if (declared !== 1) throw new Error(`R20: compileRoles declares ${String(declared)} parameters, not the directory alone`);
   },
 });
 
+/** Every `.ts` file under `dir`, at any depth. */
+async function sourceFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await sourceFiles(path)));
+    else if (entry.name.endsWith('.ts')) files.push(path);
+  }
+  return files;
+}
+
+/** The module `node` loads — an import or export declaration, `import()`, or `require()` — or undefined. A specifier that is not a literal is named as such, so it is never allowed. */
+function loadedModule(node: ts.Node): string | undefined {
+  const specifier = (expr: ts.Expression | undefined): string => (expr !== undefined && ts.isStringLiteralLike(expr) ? expr.text : '<computed specifier>');
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return node.moduleSpecifier === undefined ? undefined : specifier(node.moduleSpecifier);
+  if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) return specifier(node.moduleReference.expression);
+  if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))) {
+    return specifier(node.arguments[0]);
+  }
+  return undefined;
+}
+
 export const R20_I1: readonly LocalAssertion[] = [ROLES_DIRECTORY_OUTSIDE_EVERY_MOUNT];
 export const R20_I2: readonly LocalAssertion[] = [ATTEMPT_RECORDS_ITS_ROLE_VERSION];
-export const R20_I3: readonly LocalAssertion[] = [ADMISSION_PINS_EVERY_ROLE, DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION];
+export const R20_I3: readonly Assertion[] = [
+  ADMISSION_PINS_EVERY_ROLE,
+  DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION,
+  // Paid: a real container on the pinned image and a real model call. Raised by R20's external review (codex-1, D-R20-12).
+  external({
+    id: 'I3.workspace-instructions-not-loaded',
+    title:
+      'a CLAUDE.md, a rules file, and an agent definition named for the role, planted in the workspace, reach none of the session\'s instructions: '
+      + 'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
+    level: 'runtime',
+    package: '@olympus-ai/driver-claude-code',
+    file: 'test/invariants.test.ts',
+  }),
+];
 export const R20_I4: readonly LocalAssertion[] = [REVIEW_SEAT_RUNS_AS_REVIEWER];
 export const R20_I5: readonly LocalAssertion[] = [SEAT_WITHOUT_A_ROLE_IS_REFUSED, BROKEN_ROLE_ENTRY_REFUSES_ADMISSION];
 export const R20_I7: readonly LocalAssertion[] = [

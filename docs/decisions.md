@@ -4313,3 +4313,31 @@ the code differed from the unit entry, or what the entry left open.
 - **Found:** D-A-RC-06 calls today's grants "the reviewed task's scope". The code resolves the review seat's scope from the review task's own role in the graph (`scopeFor(ctx, task)`), not from the task it reviews.
 - **Chosen:** unchanged, as the entry requires. Only the instructions change: the seat runs under `reviewer` whatever role its task names, asserted with a review task whose role has a different scope.
 - **Reverse:** none needed; R9 owns a review seat with its own scope.
+
+### D-R20-10: the symlink scenario plants a file link with no catch, on every platform
+
+- **Found:** the external review of R20 (codex-4). The link scenario in `I5.broken-role-entry-refuses-admission` caught every failure to create its link and returned, so a host that could not make one passed the assertion without exercising it. That is the pattern the I3 locked-artifact assertion's entry forbids ("There is no `runIf` and no `catch`").
+- **Chosen:** the scenario creates a file symlink with no catch, so a host that cannot make one fails there. The triage line proposed a junction on win32 to follow the I3 precedent. A junction is a directory, though, and the compiler refuses a directory as `not-regular` whether or not it follows links, so a junction would pass under a compiler that followed them. This workstation creates file links (Developer Mode), and CI runs on Linux. The compiler's unit test skips only on `EPERM` on win32 and rethrows anything else.
+- **Consequence:** `compile.ts` changed to follow links (`lstat` replaced by `stat`) fails the scenario.
+- **Reverse:** a junction on win32, accepting that it cannot tell a followed link from a directory.
+
+### D-R20-11: the role-pinning assertion requires a resume to deliver a role, and admits a later run
+
+- **Found:** the external review of R20 (codex-2). The resume in `I3.admission-pins-every-role` stopped at the integrate approval and made no model call (instrumented: zero requests), so `.some(...)` over an empty array passed. The "later run" half only called `compileRoles` and never admitted a run.
+- **Chosen:** a second scenario admits a run, edits the builder's role file, and first drives the run by `resumeRun`. It fails if the resume calls the builder zero times, or with instructions or a hash other than the admitted ones. The first scenario admits a later run in the same rig and checks that its admission record pins the edited file.
+- **Consequence:** resume handed the pinned roles with altered instructions passes the old assertion and fails the new one.
+- **Reverse:** none needed.
+
+### D-R20-12: the CLI's exclusion of workspace instruction files is an executable assertion
+
+- **Found:** the external review of R20 (codex-1). D-A-RC-03 says the driver "runs with `--setting-sources ''`, so a workspace file configures nothing". No test backed that: the flag's help text names setting sources, not `CLAUDE.md`, rules, or agent definitions. The gemini review asserted the same thing from the flag alone.
+- **Observed:** CLI 2.1.309 was run in a scratch repository planted with a `CLAUDE.md`, a `.claude/rules` file, and a `.claude/agents` definition sharing the role's id, each asking for a token. Under `--setting-sources ''`, with and without the driver's `--agents`/`--agent`, it printed none. Without the flag it printed all three, so the probe can see them load. The image pins 2.1.277, which was not run locally.
+- **Chosen:** `I3.workspace-instructions-not-loaded`, a paid external assertion in `packages/drivers/claude-code/test/invariants.test.ts`. It plants the three files in a real sandbox's workspace on the pinned image and fails if any token reaches the reply. It also requires the reply to contain the word asked for, so a session that never ran does not pass. It runs whenever the driver suite does, so a CLI upgrade that starts loading them goes red. D-A-RC-03 stands; this is its evidence.
+- **Reverse:** add `--bare` or the pinned version's own switch for instruction files, if the assertion ever goes red.
+
+### D-R20-13: the compiler-inputs assertion parses what it claims
+
+- **Found:** the external review of R20 (codex-3). `I7.compiler-takes-only-a-directory` scanned the top level of `packages/compiler/src` with `/from '([^']+)'/`, which misses double-quoted, dynamic, side-effect and `require` loads. It also checked `compileRoles.length`, which a defaulted second parameter leaves at 1. Its title claimed more than either check proves.
+- **Chosen:** every `.ts` file under `src`, at any depth, is parsed with the TypeScript compiler API. Each import, export-from, `import()` and `require()` must name a node built-in, a relative module, or core, and a computed specifier is refused. Any identifier `process` is refused. `compileRoles` must declare exactly one parameter, with no default, rest or optional marker. The title now says what is checked. The type fixture is unchanged: what it proves (certain typed expressions do not compile) is what its own title claims.
+- **Consequence:** a `process.env` read with a double-quoted dynamic import, and a defaulted second parameter, each pass the old assertion and fail the new one.
+- **Reverse:** none needed.

@@ -1,3 +1,61 @@
+# External review of R20, codex, 2026-10-22
+
+An adversarial review of R20, the role compiler: `compileRoles` and how it
+reads a roles directory, admission's pinning of every compiled role in the
+write-once admission record and resume's reading of roles only from it, the
+line's seat-to-role assignment and the role id and hash on every usage record,
+and the Claude Code driver's rendering of the role on the CLI's argv. One of
+two reviews run from the same prompt and bundle; the other is
+`2026-10-22-R20-role-compiler-review-gemini.md`. Both are triaged in
+`2026-10-22-R20-role-compiler-triage.md`, which cites this review's numbered
+findings as `codex-1` to `codex-4`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 93.8 s. Ingestion `complete`: 116,233
+  input tokens against a floor of 81,523. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `87560222a60e1c4e41d91db78fce1b5de590a1e203291aa3b3b3088ae602ca0f`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `13c7302`.
+- **Cross-family agreement:** none. codex-1 to codex-4 were raised by codex
+  alone; gemini reported no findings. gemini's assessment judged the driver's
+  `--setting-sources ''` sufficient to keep workspace configuration out, which
+  codex-1 questions; on CLI 2.1.309 the triage found gemini's reading correct,
+  but nothing in the repository showed it.
+- **Date:** 2026-10-22 (run started 2026-10-23T01:28Z).
+- **Bundle:** `2026-10-22-R20-role-compiler-review-bundle.txt`, SHA-256
+  `8470141b619068de2278340de754e03f0ed70ca02474a9a9af7e2aef69598587`, base
+  `60b83a0` (`reviewed/R18`), head `a61aac4` ("R20: Role compiler"), two
+  commits (the R20 spec amendment, #60, and the unit itself). It held 49 of the
+  52 changed paths, new files in full and modified files as whole-function
+  diffs; `docs/decisions.md`, `docs/plan/DECOMPOSITION.md` and
+  `docs/plan/F1-spine.md` were excluded, and so was every unchanged file.
+  Prompt: `2026-10-22-R20-role-compiler-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and performed no external lookups, reviewed the supplied bundle, had
+  a local file-listing attempt blocked, and ran no tests. This is a self-report
+  and is not independently verifiable.
+- **Coverage, and any gap:** item 1 answered (codex-1, unresolved rather than
+  demonstrated); item 2 answered (codex-2, codex-3); item 3 answered (codex-4, a
+  setup failure that returns as success); item 4 answered (codex-3's second
+  half: `unknown` widening, structural types, `readonly`); item 5 answered in
+  substance by codex-1 (the flag configures settings, which may not be every
+  instruction source); item 6 answered (compiler byte handling, admission and
+  resume, recording and grants, rendering); item 7 answered (framing
+  appropriate, with the distinction between pinning a role's bytes and proving
+  they are the only instructions the CLI loads). No item came back empty.
+- **Citations:** line numbers refer to positions in the bundle's new-side diff
+  hunks, not to the repository; they are hints, and each was located by
+  construct during triage.
+
+---
+
 Prior context: none. External lookups: none. I reviewed the bundle supplied in the prompt; a local file-listing attempt was blocked. Tests were not run.
 
 BASE: 60b83a0  

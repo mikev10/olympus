@@ -106,7 +106,9 @@ describe('compileRoles', () => {
       await writeFile(join(elsewhere, 'builder.md'), 'Build.');
       try {
         await symlink(join(elsewhere, 'builder.md'), join(dir, 'builder.md'), 'file');
-      } catch {
+      } catch (error) {
+        // Only the one refusal a Windows host without privilege gives; any other failure is the test's own.
+        if (process.platform !== 'win32' || (error as { code?: unknown }).code !== 'EPERM') throw error;
         context.skip('this host cannot create a symbolic link without privilege');
       }
       expect(refusedOnly(await compileRoles(dir))).toEqual([{ entry: 'builder.md', code: 'not-regular' }]);
