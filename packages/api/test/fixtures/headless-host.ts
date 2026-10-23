@@ -10,7 +10,7 @@
  */
 import { rm, writeFile } from 'node:fs/promises';
 import { createApiServer } from '../../src/index.js';
-import { makeWorkspace, policyDocument, removeWorkspace, stubComponents } from '../harness.js';
+import { makeWorkspace, policyDocument, removeWorkspace, ROLES, stubComponents } from '../harness.js';
 
 const token = process.env.FACTORY_API_TOKEN;
 if (token === undefined) throw new Error('headless host: FACTORY_API_TOKEN is not set');
@@ -50,7 +50,7 @@ const components = {
   driver,
   reviewer: stub.reviewer === stub.driver ? driver : counted(stub.reviewer, DRIVER_CALLS, countCall),
 };
-const server = createApiServer({ components, token, principal: 'headless-host', policyFile });
+const server = createApiServer({ components, token, principal: 'headless-host', policyFile, rolesDirectory: ROLES });
 const url = await server.listen(0, '127.0.0.1');
 
 // The parent going away is the only stop signal; the host closes what it opened and lets the event loop drain.

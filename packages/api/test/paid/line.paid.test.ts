@@ -13,6 +13,7 @@
 import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import { FakeGitHub } from '@olympus-ai/conformance/fake-github';
 import { invariantTest } from '@olympus-ai/conformance/vitest';
 import type { CapabilityScope, ModelTier, RunId, RunState } from '@olympus-ai/core';
@@ -84,6 +85,7 @@ beforeAll(async () => {
       approvals: { ...policy().approvals, ...L2_AUTO },
       roles: { [BUILDER]: paidScope(['build', 'verify'], ['Read', 'Edit', 'Write']), [REVIEWER]: paidScope(['review'], ['Read']) },
     }),
+    roles: DEFAULT_ROLES_DIRECTORY,
     components,
     approvedCostUsd: null,
   };

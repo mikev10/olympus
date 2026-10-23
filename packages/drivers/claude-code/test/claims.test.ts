@@ -29,7 +29,7 @@ invariantTest(
   async () => {
     await withDriver(async (h) => {
       const parent = h.request({ taskId: 'sub-parent' as TaskId, tools: ['Read'] });
-      const child = await h.driver.spawnSubagent('reviewer' as RoleId, {
+      const child = await h.driver.spawnSubagent({ role: 'reviewer' as RoleId, instructions: 'You review. Do exactly what the message asks, then end your reply with the exact token PLUM-6620.', sha256: '0'.repeat(64) }, {
         ...parent,
         taskId: 'sub-child' as TaskId,
         variableSuffix: 'Reply with the single word: child',
@@ -41,11 +41,12 @@ invariantTest(
       expect(child.claim.narrative.toLowerCase()).toContain('child');
       expect(child.contractVersion).toBe(h.driver.contractVersion);
 
-      // The session really was the role's, and really was under the parent's
-      // grants: both are read from what the CLI printed before it took a turn,
-      // not from what the model said afterwards.
+      // The session really ran under the role it was given: only the role's
+      // instructions ask for the token, and the message does not (D-R20-14).
+      expect(child.claim.narrative).toContain('PLUM-6620');
+      // And really was under the parent's grants, read from what the CLI
+      // printed before it took a turn, not from what the model said afterwards.
       const session = h.driver.sessionFor('sub-child' as TaskId);
-      expect(session?.agents).toContain('reviewer');
       expect(session?.tools).toEqual(['Read']);
       expect(session?.tools).not.toContain('Bash');
 
@@ -69,7 +70,7 @@ invariantTest(
       async (h) => {
         // The hook points come from emitArtifacts, written through the sandbox
         // like everything else, and the session is started with that file.
-        await h.driver.emitArtifacts([{ role: 'builder' as RoleId, instructions: 'unused here' }], settingsDir);
+        await h.driver.emitArtifacts([{ role: 'builder' as RoleId, instructions: 'unused here', sha256: '0'.repeat(64) }], settingsDir);
         const written = await h.provider.exec(h.handle, ['cat', settingsPath]);
         expect(written.exitCode).toBe(0);
         for (const point of Object.keys(HOOK_SETTINGS)) expect(written.stdout).toContain(point);
@@ -97,7 +98,7 @@ invariantTest(
 
         // The rendering and the firing are the same set: a point emitArtifacts
         // does not write is a point that cannot fire.
-        const rendered = artifactFiles([{ role: 'builder' as RoleId, instructions: '' }], '/t').find((f) => f.path.endsWith('settings.json'));
+        const rendered = artifactFiles([{ role: 'builder' as RoleId, instructions: '', sha256: '0'.repeat(64) }], '/t').find((f) => f.path.endsWith('settings.json'));
         for (const point of fired) expect(rendered?.content).toContain(point);
       },
       { settingsPath },

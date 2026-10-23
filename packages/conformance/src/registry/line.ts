@@ -169,12 +169,12 @@ export function doingTheWork<D extends Driver>(driver: D, sandbox: SandboxProvid
     get(target, key, receiver) {
       if (key !== 'runTask') return Reflect.get(target, key, receiver) as unknown;
       return async (req: TaskRequest): Promise<TaskResult> => {
-        if (req.role === ('builder' as RoleId)) {
+        if (req.role.role === ('builder' as RoleId)) {
           const wrote = await sandbox.exec(req.sandbox, ['node', '-e', `require('node:fs').writeFileSync(${JSON.stringify(HELLO_FILE)}, 'hello')`]);
           if (wrote.exitCode !== 0) throw new Error(`the hello fixture's work did not land in task ${req.taskId}: ${wrote.stderr}`);
         }
         const result = await target.runTask(req);
-        if (req.role !== ('builder' as RoleId) || result.claim.filesChanged.includes(HELLO_FILE)) return result;
+        if (req.role.role !== ('builder' as RoleId) || result.claim.filesChanged.includes(HELLO_FILE)) return result;
         return { ...result, claim: { ...result.claim, filesChanged: [...result.claim.filesChanged, HELLO_FILE] } };
       };
     },
@@ -193,6 +193,12 @@ export interface RigOptions {
 export interface LineRig {
   readonly dirs: VaultDirs;
   readonly runId: RunId;
+  /**
+   * The roles directory every request is admitted with: the shipped `builder`
+   * and `reviewer`, copied beside the Vault and the workspace, inside neither,
+   * so an assertion can edit one (D-A-RC-01).
+   */
+  readonly roles: string;
   /** The runtime's trees for the run: beside the Vault and the workspace, inside neither. */
   readonly workspaces: WorkspaceStore;
   /** A fresh component graph over the same store, as a new process would open it, built through `buildGraph`. */
@@ -219,6 +225,9 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
   return withVaultDirs(prefix, async (dirs, base) => {
     await cp(join(workspaceRoot(), HELLO_FIXTURE), dirs.artifacts, { recursive: true });
     const workspaces = await storeAt(join(base, 'trees'));
+    const { DEFAULT_ROLES_DIRECTORY } = await import('@olympus-ai/compiler');
+    const roles = join(base, 'roles');
+    await cp(DEFAULT_ROLES_DIRECTORY, roles, { recursive: true });
     const runId = `${prefix.replace(/[^A-Za-z0-9]/g, '')}run` as RunId;
     const open = async (): Promise<Vault> => {
       const { LocalVault } = await import('@olympus-ai/vault');
@@ -227,6 +236,7 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
     const rig: LineRig = {
       dirs,
       runId,
+      roles,
       workspaces,
       components: async (overrides = {}, options = {}) => {
         const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
@@ -248,6 +258,7 @@ export async function withLine<T>(prefix: string, body: (rig: LineRig) => Promis
           workspace: dirs.artifacts,
           artifacts: ARTIFACTS,
           policy: await linePolicy(),
+          roles,
           components,
           approvedCostUsd: null,
           ...overrides,

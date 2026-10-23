@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from 'vitest';
 import type { SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { Budget, TaskId, TaskRequest } from '@olympus-ai/core';
+import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
 import {
   PARALLELISM,
   KEY_PLACEHOLDER,
@@ -72,10 +72,16 @@ class RecordingProvider implements SandboxProvider {
 
 const BUDGET: Budget = { maxTokens: 1000, maxCostUsd: 0.5, maxWallClockMs: 60_000 };
 
+const BUILDER: CompiledRole = { role: 'builder' as RoleId, instructions: 'Build the task.\nTouch nothing else.', sha256: 'b'.repeat(64) };
+
+function role(id: string, instructions: string): CompiledRole {
+  return { role: id as RoleId, instructions, sha256: '0'.repeat(64) };
+}
+
 function request(overrides: Partial<TaskRequest> = {}): TaskRequest {
   return {
     taskId: 'task-1' as TaskId,
-    role: 'builder' as TaskRequest['role'],
+    role: BUILDER,
     stablePrefix: 'the invariant half',
     variableSuffix: 'this task only',
     tier: 'standard',
@@ -95,7 +101,7 @@ function stream(parts: { tools?: string[]; servers?: Array<{ name: string; statu
     session_id: '11111111-2222-5333-a444-555566667777',
     tools: parts.tools ?? ['Read'],
     mcp_servers: parts.servers ?? [],
-    agents: ['claude'],
+    agents: ['claude', 'builder'],
     model: 'claude-sonnet-5',
     apiKeySource: KEY_VARIABLE,
     claude_code_version: '2.1.277',
@@ -243,7 +249,7 @@ describe('the invocation', () => {
     provider.stdout = stream();
     await driverWith(provider).runTask(request());
     const cmd = provider.calls[0]?.cmd ?? [];
-    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe('the invariant half');
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe(`${BUILDER.instructions}\n\nthe invariant half`);
     expect(cmd[cmd.indexOf('--print') + 1]).toBe('this task only');
     expect(cmd).toContain('--exclude-dynamic-system-prompt-sections');
   });
@@ -273,6 +279,45 @@ describe('the invocation', () => {
     const cmd = provider.calls[0]?.cmd ?? [];
     expect(cmd[cmd.indexOf('--setting-sources') + 1]).toBe('');
     expect(cmd).toContain('--strict-mcp-config');
+  });
+});
+
+describe('the role the task runs under (D-A-RC-03, D-R20-14)', () => {
+  test('the appended prompt is the role\'s instructions verbatim, then the granted context, and nothing else', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request());
+    const cmd = taskCall(provider)?.cmd ?? [];
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe(`${BUILDER.instructions}\n\nthe invariant half`);
+  });
+
+  test('the session keeps the CLI\'s own prompt: no agent replaces it, and no definition could carry a grant (I4)', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request());
+    const cmd = taskCall(provider)?.cmd ?? [];
+    expect(cmd).not.toContain('--agents');
+    expect(cmd).not.toContain('--agent');
+    expect(cmd).not.toContain('--system-prompt');
+  });
+
+  test('no file is written into the workspace to deliver the role: only the task invocation carries its text (I3)', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).runTask(request());
+    const carrying = provider.calls.filter((call) => [...call.cmd, ...Object.values(call.env ?? {})].some((part) => part.includes('Touch nothing else.')));
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0]).toBe(taskCall(provider));
+    expect(provider.calls.every((call) => !(call.env?.[ARTIFACT_CONTENT]?.includes('Touch nothing else.') ?? false))).toBe(true);
+  });
+
+  test('spawnSubagent renders the role it is given in place of the request\'s, under the request\'s grants', async () => {
+    const provider = new RecordingProvider();
+    provider.stdout = stream();
+    await driverWith(provider).spawnSubagent(role('reviewer', 'Review it.'), request());
+    const cmd = taskCall(provider)?.cmd ?? [];
+    expect(cmd[cmd.indexOf('--append-system-prompt') + 1]).toBe('Review it.\n\nthe invariant half');
+    expect(cmd[cmd.indexOf('--tools') + 1]).toBe('Read');
   });
 });
 
@@ -587,7 +632,7 @@ describe('capabilities as declarations', () => {
 
 describe('artifacts', () => {
   test('roles render to agent files, a SKILL.md, and a settings file carrying the hook points', () => {
-    const files = artifactFiles([{ role: 'builder' as TaskRequest['role'], instructions: 'do the thing' }], '/workspace/.claude');
+    const files = artifactFiles([role('builder', 'do the thing')], '/workspace/.claude');
     const paths = files.map((f) => f.path);
     expect(paths).toContain('/workspace/.claude/agents/builder.md');
     expect(paths).toContain('/workspace/.claude/skills/factory-roles/SKILL.md');
@@ -599,16 +644,16 @@ describe('artifacts', () => {
 
   test('instructions are rendered verbatim; what they say is the compiler\'s (M2)', () => {
     const odd = 'a line with $VAR and `backticks` and \'quotes\'';
-    const files = artifactFiles([{ role: 'r' as TaskRequest['role'], instructions: odd }], '/t');
+    const files = artifactFiles([role('r', odd)], '/t');
     expect(files[0]?.content).toContain(odd);
   });
 
   test('emitArtifacts writes through the sandbox and refuses when it has none (I1)', async () => {
     const provider = new RecordingProvider();
     const driver = driverWith(provider);
-    await expect(driver.emitArtifacts([{ role: 'r' as TaskRequest['role'], instructions: 'x' }], '/t')).rejects.toThrow(/no sandbox/);
+    await expect(driver.emitArtifacts([role('r', 'x')], '/t')).rejects.toThrow(/no sandbox/);
     driver.useSandbox(HANDLE);
-    await driver.emitArtifacts([{ role: 'r' as TaskRequest['role'], instructions: 'x' }], '/t');
+    await driver.emitArtifacts([role('r', 'x')], '/t');
     expect(provider.calls.length).toBeGreaterThan(0);
     expect(provider.calls.every((c) => c.cmd[0] === 'sh')).toBe(true);
   });
@@ -620,7 +665,7 @@ describe('artifacts', () => {
     // The line that broke the here-document this replaced. It is content now,
     // not syntax, and it reaches the file through an environment value.
     const hostile = ['first', 'FACTORY_ARTIFACT_EOF', 'touch /tmp/INJECTED'].join(String.fromCharCode(10));
-    await driver.emitArtifacts([{ role: 'r' as TaskRequest['role'], instructions: hostile }], '/t');
+    await driver.emitArtifacts([role('r', hostile)], '/t');
     for (const call of provider.calls) {
       expect(call.cmd.join(' ')).not.toContain('touch /tmp/INJECTED');
       expect(call.cmd.join(' ')).not.toContain('FACTORY_ARTIFACT_EOF');

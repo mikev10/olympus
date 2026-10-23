@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { COMPOSED_HOST_MOUNTS_NO_VAULT } from './composition.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
+import { R20_I1 } from './roles.js';
 
 /** The eighteen named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01). Nothing else may be reachable on an instance. */
 const NAMED_OPERATIONS: readonly string[] = [
@@ -16,6 +17,8 @@ const NAMED_OPERATIONS: readonly string[] = [
 export const I1: InvariantEntry = {
   title: INVARIANTS.I1,
   assertions: [
+    // R20: the role compiler.
+    ...R20_I1,
     compileError({
       id: 'I1.write-boundary-vault-never',
       title: 'WriteBoundary.vault admits no value but "never"',

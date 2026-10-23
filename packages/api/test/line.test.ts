@@ -6,7 +6,7 @@
  */
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { STATION_CONTRACTS, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
+import { STATION_CONTRACTS, type RoleId, type RunId, type RunState, type TaskId, type TaskRequest, type TaskResult, type VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxSpec, type Teardown } from '@olympus-ai/sandbox';
 import type { BaseRunRecord, EnforcementDecision, EvidenceBundle, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
@@ -209,7 +209,7 @@ describe('hello at L1', () => {
     expect(driver.requests).toHaveLength(1);
     const [req] = driver.requests;
     if (req === undefined) return;
-    expect(req).toMatchObject({ taskId: hello, role: 'builder', variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
+    expect(req).toMatchObject({ taskId: hello, role: { role: 'builder' }, variableSuffix: hello, tier: 'standard', tools: ['read', 'write'] });
     expect(req.stablePrefix).toContain(await readSpec(workspace));
     expect(req.stablePrefix).toContain('The black-box oracle');
     // The first two run the reproduction and the secret scan over the base (D-A-BF-01, R17); the build's is the third.
@@ -847,7 +847,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
   });
 
   test('a call whose usage the relay could not read makes its total a lower bound, counted apart from exact calls (D-P13-19)', () => {
-    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), collectedBy: 'runtime' as const };
+    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, collectedBy: 'runtime' as const };
     const exact = { kind: 'metered' as const, calls: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, exhausted: 'none' as const, refused: 0 };
     expect(costTotals([{ ...base, reading: exact }]).run).toMatchObject({ bound: 'exact', metered: { unreadable: 0 } });
     const totals = costTotals([{ ...base, reading: exact }, { ...base, attempt: 2, reading: { ...exact, exhausted: 'unreadable' } }]);

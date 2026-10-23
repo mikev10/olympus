@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { StubDriver, type PolicyDocument, type RunState, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider, type SandboxHandle, type SandboxSpec } from '@olympus-ai/sandbox';
 import { createApiServer, egressFor, UNANALYSED_TESTS, worstCaseCost, type ApiServer, type BuiltGraph, type ComponentGraph, type CreatedRun, type RunView } from '../src/index.js';
-import { ARTIFACTS, BASE_COMMIT, makeWorkspace, policy, policyDocument, removeWorkspace, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
+import { ARTIFACTS, BASE_COMMIT, makeWorkspace, policy, policyDocument, removeWorkspace, ROLES, roleScope, stubComponents, BUILDER, REVIEWER } from './harness.js';
 import { DelegatingDriver, DelegatingSandbox } from './wrappers.js';
 
 const TOKEN = 't'.repeat(40);
@@ -29,7 +29,7 @@ async function writePolicy(doc: PolicyDocument = policyDocument()): Promise<stri
 
 async function serve(overrides: Partial<ComponentGraph> = {}, doc?: PolicyDocument): Promise<void> {
   components = stubComponents(workspace, overrides);
-  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc) });
+  server = createApiServer({ components, token: TOKEN, principal: PRINCIPAL, policyFile: await writePolicy(doc), rolesDirectory: ROLES });
   url = await server.listen(0, '127.0.0.1');
 }
 
@@ -92,7 +92,7 @@ describe('the local token (I4)', () => {
   });
 
   test('a server is not constructed with a short token or no principal', () => {
-    const base = { components: stubComponents(workspace), policyFile: 'x', principal: PRINCIPAL };
+    const base = { components: stubComponents(workspace), policyFile: 'x', rolesDirectory: ROLES, principal: PRINCIPAL };
     expect(() => createApiServer({ ...base, token: 'short' })).toThrow(/at least 32/);
     expect(() => createApiServer({ ...base, token: TOKEN, principal: ' ' })).toThrow(/principal/);
   });

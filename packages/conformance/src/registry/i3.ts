@@ -17,6 +17,7 @@ import {
 import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
 import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
+import { R20_I3 } from './roles.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
 function entryFor(entries: readonly LockEntry[], path: string): LockEntry {
@@ -42,6 +43,8 @@ function soleTampered(verdict: LockVerdict, context: string): { path: string; ex
 export const I3: InvariantEntry = {
   title: INVARIANTS.I3,
   assertions: [
+    // R20: the role compiler.
+    ...R20_I3,
     // R17: security at the gate.
     ...R17_I3,
     // R4: parallel task execution.

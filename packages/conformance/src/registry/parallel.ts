@@ -84,7 +84,7 @@ async function wideDriver(
   return stubDriver({
     capabilities: { parallelism },
     during: async (req) => {
-      if (req.role !== ('builder' as TaskRequest['role'])) return;
+      if (req.role.role !== 'builder') return;
       const call = (calls.get(req.taskId) ?? 0) + 1;
       calls.set(req.taskId, call);
       inside += 1;
@@ -150,7 +150,7 @@ export const PARALLELISM_CAPPED_BY_POLICY_AND_DRIVER: LocalAssertion = runtime({
           throw new Error(`I4: with maxParallelTasks 2 and a driver declaring ${String(declared)}, ${String(overlap.mostAtOnce)} builds ran at once, not ${String(expected)}`);
         }
         // Calls in one batch reach the driver in whatever order their setup finishes; each task is built once.
-        const built = driver.requests.filter((r) => r.role === ('builder' as TaskRequest['role'])).map((r) => r.taskId).sort();
+        const built = driver.requests.filter((r) => r.role.role === 'builder').map((r) => r.taskId).sort();
         if (JSON.stringify(built) !== JSON.stringify(['a', 'b', 'c'])) throw new Error(`I4: the builds were ${JSON.stringify(built)}, not each task once`);
         const { tasks } = await rig.state();
         if (tasks['a' as TaskId] !== 'passed' || tasks['b' as TaskId] !== 'passed' || tasks['c' as TaskId] !== 'passed') throw new Error(`I4: the tasks ended ${JSON.stringify(tasks)}`);
