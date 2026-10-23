@@ -4,6 +4,7 @@ import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { R20_I7 } from './roles.js';
+import { R19_ASSERTIONS } from './drafting.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
@@ -30,6 +31,8 @@ export const I7: InvariantEntry = {
   title: INVARIANTS.I7,
   assertions: [
     // R20: the role compiler.
+    // R19: drafting at spec and test-design.
+    ...R19_ASSERTIONS.I7,
     ...R20_I7,
     compileError({
       id: 'I7.untrusted-text-is-not-a-string',

@@ -8,7 +8,8 @@
  * The Vault stores both.
  */
 import type {
-  AgentClaim, ApprovalKey, AutonomyLevel, CompiledRole, ModelIdentity, ModelTier, Policy, PolicyRefusal, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
+  RejectionReason, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
@@ -52,12 +53,18 @@ export interface DiffEntry {
 /**
  * The declared checks (D-R15-02) as the runtime ran them over the base, at the
  * `test-design` exit and before any driver was invoked (D-A-BF-01). Written
- * once per run: a resume reads this rather than running them again, so the
- * base a run was judged against is the one it was first judged against. I2:
- * every field is the runtime's.
+ * once per run and draft: a resume reads this rather than running them again,
+ * so the base a run or a draft was judged against is the one it was first
+ * judged against. I2: every field is the runtime's.
  */
 export interface BaseRunRecord {
   readonly runId: RunId;
+  /**
+   * The hash of the test draft whose checks ran over the base plus its files,
+   * or null for checks the run was admitted with (R19). A record written
+   * before R19 carries none, and is read as null.
+   */
+  readonly draft: string | null;
   /** The digest of the tree the checks ran over: the base the runtime snapshotted at admission. */
   readonly baseTreeSha256: string;
   /** One result per declared check that produced one, in the manifest's order. */
@@ -196,10 +203,51 @@ export type DecisionCause =
   | { readonly cause: 'resume-refused'; readonly decidedBy: 'admission'; readonly refusal: ResumeRefusal }
   /** `station-machine` for a refusal `nextStep` or a capability check returned, `line` for one the line made itself. */
   | { readonly cause: 'station-refused'; readonly decidedBy: 'station-machine' | 'line'; readonly refusal: StationRefusal }
-  /** `principal` is what the caller authenticated, as `ApprovalGrant.approvedBy` records it. */
-  | { readonly cause: 'approval-granted'; readonly decidedBy: 'approval'; readonly key: ApprovalKey; readonly principal: string }
+  /** `principal` is what the caller authenticated, as `ApprovalGrant.approvedBy` records it; `draft` the draft it approved, or null (R19). */
+  | { readonly cause: 'approval-granted'; readonly decidedBy: 'approval'; readonly key: ApprovalKey; readonly principal: string; readonly draft: DraftRef | null }
   /** `key` is null when what the caller sent was not an approval key; it is not stored, since it is the caller's text. */
-  | { readonly cause: 'approval-refused'; readonly decidedBy: 'approval'; readonly key: ApprovalKey | null; readonly reason: 'invalid-request' | 'not-awaiting' }
+  | {
+      readonly cause: 'approval-refused';
+      readonly decidedBy: 'approval';
+      readonly key: ApprovalKey | null;
+      /**
+       * `draft-mismatch`: the approval named another draft than the one
+       * waiting. `draft-invalid`: the draft waiting carries problems the
+       * runtime would refuse to lock, so it can be rejected and not
+       * approved (R19).
+       */
+      readonly reason: 'invalid-request' | 'not-awaiting' | 'draft-mismatch' | 'draft-invalid';
+    }
+  /**
+   * A person's rejection of a draft (R19). `notes` says whether the rejection
+   * carried notes, which are the approver's text and are kept with the attempt
+   * in run state, not here; `reason` is the fixed-set reason at `test-design`.
+   */
+  | {
+      readonly cause: 'approval-rejected';
+      readonly decidedBy: 'approval';
+      readonly key: ApprovalKey;
+      readonly draft: DraftRef;
+      readonly principal: string;
+      readonly reason: RejectionReason | null;
+      readonly notes: boolean;
+    }
+  /**
+   * A draft sent back to its drafter, decided by the line from what the
+   * runtime recorded (R19): an independent critic's findings, the base run's
+   * refusal of its checks, or the runtime's own problems with it.
+   */
+  | {
+      readonly cause: 'draft-sent-back';
+      readonly decidedBy: 'line';
+      readonly draft: DraftRef;
+      readonly sentBack:
+        | { readonly by: 'critic'; readonly critic: VaultRef; readonly findings: number }
+        | { readonly by: 'base-run'; readonly baseRun: VaultRef; readonly checks: readonly BaseRefusalPart[] }
+        | { readonly by: 'runtime'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> };
+    }
+  /** The drafted floor raised a drafted exit to a person, naming each condition that failed (R19, D-A-DS-04). */
+  | { readonly cause: 'draft-floor-applied'; readonly decidedBy: 'line'; readonly draft: DraftRef; readonly level: AutonomyLevel; readonly failed: readonly DraftCondition[] }
   /** One connection the egress proxy decided, read from its log after it stopped. `host` is the agent's choice: data, never a prompt (I7). */
   | { readonly cause: 'egress-connection'; readonly decidedBy: 'egress-proxy'; readonly connection: EgressConnection }
   /** A violation already recorded; the decision points at it rather than copying it (D-P14-08). */
@@ -307,6 +355,121 @@ export interface AdmittedArtifact {
 }
 
 /**
+ * A set of artifacts as admitted: supplied with the run, or drafted on the
+ * line (R19). Drafting is an explicit state, never an empty list: a reader
+ * that has not handled it does not compile.
+ */
+export type AdmittedSet =
+  | { readonly source: 'supplied'; readonly files: readonly AdmittedArtifact[] }
+  | { readonly source: 'drafted' };
+
+/**
+ * The acceptance manifest: the checks of the acceptance tests, beside the
+ * rest of the verification manifest (R19). Supplied as a file, drafted with
+ * drafted tests, or `none` where the verification manifest holds every check
+ * as it did before R19.
+ */
+export type AdmittedManifest =
+  | { readonly source: 'supplied'; readonly file: AdmittedArtifact }
+  | { readonly source: 'drafted' }
+  | { readonly source: 'none' };
+
+/** A rubric a person wrote for one drafting station's critic, as admission read and recorded it (R19). */
+export interface RubricVersion {
+  readonly station: DraftStation;
+  readonly sha256: string;
+  readonly ref: VaultRef;
+}
+
+/** The intent a spec-less run was admitted with: a person's text, from the principal's channel alone (R19, I7). */
+export interface IntentRecord {
+  readonly runId: RunId;
+  readonly text: string;
+  readonly from: 'principal';
+  readonly collectedBy: 'runtime';
+}
+
+/** A rubric's text and hash, recorded for the run at admission (R19). */
+export interface RubricRecord {
+  readonly runId: RunId;
+  readonly station: DraftStation;
+  readonly text: string;
+  readonly sha256: string;
+  readonly collectedBy: 'runtime';
+}
+
+/** One file of a draft: its path, the SHA-256 of the bytes the runtime read, and those bytes, base64. */
+export interface DraftFile {
+  readonly path: string;
+  readonly sha256: string;
+  readonly base64: string;
+}
+
+/**
+ * A draft as the runtime read it from the drafter's workspace (R19). `sha256`
+ * binds everything about it: the critic reads these bytes, the base run runs
+ * over them, and an approval names this hash. A claim until it is approved and
+ * locked (I2).
+ */
+export interface DraftRecord {
+  readonly runId: RunId;
+  readonly station: DraftStation;
+  readonly attempt: number;
+  /** The SHA-256 of the canonical list of each file's path and hash, sorted by path. */
+  readonly sha256: string;
+  readonly files: readonly DraftFile[];
+  /** Paths the drafter wrote outside its draft's paths, discarded with its workspace and never read. */
+  readonly discarded: readonly string[];
+  /** The runtime's own problems with the draft, as paths and codes; non-empty sends it back. */
+  readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }>;
+  /** The model the runtime resolved the drafter's call to (I2). */
+  readonly model: ModelIdentity;
+  readonly role: RoleVersion;
+  readonly collectedBy: 'runtime';
+}
+
+/**
+ * A critic's result for one draft (R19). `findings` is the list the critic
+ * returned, with no severity; a result the runtime could not read is one
+ * finding, and `readable` says so (I5). `binding` is false unless the critic
+ * is of another family than the drafter: such findings are recorded and
+ * shown, and send nothing back (D-A-DS-06).
+ */
+export interface CriticRecord {
+  readonly runId: RunId;
+  readonly station: DraftStation;
+  readonly attempt: number;
+  readonly draft: string;
+  readonly drafter: ModelIdentity;
+  readonly critic: ModelIdentity;
+  readonly grade: IndependenceGrade;
+  readonly binding: boolean;
+  readonly readable: boolean;
+  readonly findings: readonly string[];
+  /** The hash of the rubric the critic was given. */
+  readonly rubric: string;
+  readonly role: RoleVersion;
+  readonly collectedBy: 'runtime';
+}
+
+/**
+ * An approved draft written into the artifact root and the base, and locked
+ * (R19). `approval` says who approved it: a person, or policy with every
+ * condition held, so a later refusal or revert is attributable (R2, R8).
+ * `baseTreeSha256` is the base's digest with the draft in it, which every
+ * later tree is built from and a resume checks the store against.
+ */
+export interface DraftLockRecord {
+  readonly runId: RunId;
+  readonly station: DraftStation;
+  readonly draft: DraftRef;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly sha256: string }>;
+  readonly approval: { readonly by: 'principal'; readonly principal: string } | { readonly by: 'policy' };
+  readonly baseTreeSha256: string;
+  readonly collectedBy: 'runtime';
+}
+
+/**
  * What a run was admitted as. Written once, before the run's first state, and
  * never again: a resume reads the requested level, the policy, and the
  * artifacts from here, so its caller has no way to restate them (I5).
@@ -327,13 +490,27 @@ export interface AdmissionRecord {
    */
   readonly roles: readonly CompiledRole[];
   readonly artifacts: {
-    readonly spec: readonly AdmittedArtifact[];
-    readonly acceptanceTests: readonly AdmittedArtifact[];
+    readonly spec: AdmittedSet;
+    readonly acceptanceTests: AdmittedSet;
+    /** Drafted exactly when the acceptance tests are (R19). */
+    readonly acceptanceManifest: AdmittedManifest;
     readonly verificationManifest: AdmittedArtifact;
     readonly taskGraph: AdmittedArtifact;
-    /** Each part every spec carries, locked with the spec at `spec`, or `null` where it was not admitted and `spec` refuses (R17). */
-    readonly specParts: { readonly security: AdmittedArtifact | null };
+    /**
+     * Each part of a supplied spec, locked with it at `spec`, or `null` where
+     * it was not admitted: `spec` then refuses a missing security part (R17).
+     * All null for a drafted spec, whose parts are drafted with it (R19).
+     */
+    readonly specParts: {
+      readonly security: AdmittedArtifact | null;
+      readonly runRequirements: AdmittedArtifact | null;
+      readonly questions: AdmittedArtifact | null;
+    };
   };
+  /** The intent a drafted spec is drafted from, or null for a run admitted with its spec (R19). */
+  readonly intent: VaultRef | null;
+  /** The rubric each drafting station's critic checks against, read at admission; empty for a run that drafts nothing (R19). */
+  readonly rubrics: readonly RubricVersion[];
   /** The digest of the base tree the runtime snapshotted at admission; every workspace is built from it (A-P6-03). */
   readonly baseTreeSha256: string;
   /**
@@ -394,13 +571,26 @@ export interface Vault {
    */
   readUsage(runId: RunId): Promise<readonly VaultRef[]>;
   /**
-   * The run's base record (D-A-BF-01). Refused unless `collectedBy` is
-   * `'runtime'`, and refused for a run that already has one: the base a run
-   * is judged against is fixed by its first run, as its admission is.
+   * A base record (D-A-BF-01). Refused unless `collectedBy` is `'runtime'`,
+   * and refused where the run already has one for the same draft, or for its
+   * admitted checks when `draft` is null: the base a run or a draft is judged
+   * against is fixed by its first run, as an admission is (R19).
    */
   recordBaseRun(r: BaseRunRecord): Promise<VaultRef>;
-  /** The run's base record, or null when the checks have not run over its base. */
-  readBaseRun(runId: RunId): Promise<VaultRef | null>;
+  /** The base record for `draft`, or for the admitted checks when null; null when they have not run over the base. */
+  readBaseRun(runId: RunId, draft: string | null): Promise<VaultRef | null>;
+  /** The intent a spec-less run was admitted with. Refused unless it came from the principal and `collectedBy` is `'runtime'` (R19). */
+  recordIntent(r: IntentRecord): Promise<VaultRef>;
+  /** A rubric as admission read it. Refused unless its hash is its text's (R19). */
+  recordRubric(r: RubricRecord): Promise<VaultRef>;
+  /** A draft as the runtime read it. Refused unless its hash is the hash of its files (R19). */
+  recordDraft(r: DraftRecord): Promise<VaultRef>;
+  /** A critic's result for a draft, as the runtime read it (R19). */
+  recordCriticResult(r: CriticRecord): Promise<VaultRef>;
+  /** An approved draft as it was written into the artifact root and locked; once per run and station (R19). */
+  recordDraftLock(r: DraftLockRecord): Promise<VaultRef>;
+  /** The run's lock manifest as it stands, or null when nothing is locked: read, never written, here (R19). */
+  readLocks(runId: RunId): Promise<LockManifest | null>;
   /** What `integrate` did on the remote. Refused unless `collectedBy` is `'runtime'` (A-I1b-01). */
   recordIntegration(r: IntegrationRecord): Promise<VaultRef>;
   /** Every integration record of a run, in no promised order; empty for a run that never integrated. */

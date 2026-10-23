@@ -9,7 +9,7 @@
  * implementation.
  */
 import type { ApprovalKey } from '../policy/types.js';
-import type { ParkCause, ReviewSeat } from '../station/types.js';
+import type { DraftCondition, DraftStation, ParkCause, RejectionReason, ReviewSeat } from '../station/types.js';
 
 export type RunId = string & { readonly __brand: 'RunId' };
 export type TaskId = string & { readonly __brand: 'TaskId' };
@@ -29,7 +29,8 @@ export type VaultRefKind =
   | 'spec' | 'acceptance-tests' | 'task-graph' | 'lock-manifest'
   | 'policy' | 'verification-manifest' | 'evidence' | 'violation'
   | 'run-state' | 'rubric' | 'learning'
-  | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run';
+  | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run'
+  | 'intent' | 'draft' | 'critic-result' | 'draft-lock';
 
 export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 
@@ -164,6 +165,69 @@ export interface ApprovalGrant {
    * in run state, because they are the record that a human approved.
    */
   readonly usedAt: string | null;
+  /**
+   * The draft this grant approved, at a drafting station's exit, or null at
+   * any other. A grant clears only the draft and attempt it names, so an
+   * approval of one draft never clears another (R19). The Vault reads a grant
+   * recorded before R19 as null.
+   */
+  readonly draft: DraftRef | null;
+}
+
+/** One draft: the hash the runtime computed over the bytes it read, and the attempt that produced it. */
+export interface DraftRef {
+  readonly sha256: string;
+  readonly attempt: number;
+}
+
+/**
+ * Why a draft went back, recorded with the attempt it ended (R19). `runtime`:
+ * the runtime's own problems with it, as paths and codes. `critic`: an
+ * independent critic's findings, held in the critic record. `base-run`: its
+ * checks did not do on the base what they declared, held in the base record.
+ * `principal`: a person rejected it, with notes at `spec` or a reason from a
+ * fixed set at `test-design`, never both (D-A-DS-02).
+ */
+export type DraftSendBack =
+  | { readonly by: 'runtime'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+  | { readonly by: 'critic' }
+  | { readonly by: 'base-run' }
+  | {
+      readonly by: 'principal';
+      readonly principal: string;
+      readonly at: string;
+      readonly notes: string | null;
+      readonly reason: RejectionReason | null;
+    };
+
+/**
+ * One attempt at a drafting station, filled in as the runtime does each part
+ * of it, so a resume does only what is not recorded. Every reference is to a
+ * record the runtime wrote (I2).
+ */
+export interface DraftAttempt {
+  readonly attempt: number;
+  /** The recorded draft, or null while the drafter has not produced one. */
+  readonly draft: VaultRef | null;
+  readonly sha256: string | null;
+  /** The critic's recorded result, `not-seated` where no model but the drafter's was available, or null before it ran. */
+  readonly critic: VaultRef | 'not-seated' | null;
+  /** `test-design` only: the base record for this draft's hash. */
+  readonly baseRun: VaultRef | null;
+  /** The drafted floor's failed conditions, evaluated by the runtime when the draft reached the gate; null before. */
+  readonly failed: readonly DraftCondition[] | null;
+  readonly sentBack: DraftSendBack | null;
+}
+
+/**
+ * A drafting station's record in run state: every attempt in order, the
+ * draft lock once its draft was approved and locked, and whether a person's
+ * rejection of the last allowed attempt parked the run (R19).
+ */
+export interface DraftState {
+  readonly attempts: readonly DraftAttempt[];
+  readonly locked: VaultRef | null;
+  readonly parked: boolean;
 }
 
 /**
@@ -211,6 +275,12 @@ export interface RunState {
   readonly approvals: readonly ApprovalGrant[];
   /** Every review seat assembled, with its independence (I6). */
   readonly reviews: readonly ReviewSeat[];
+  /**
+   * Each drafting station's attempts, for a run admitted without that
+   * station's artifact; empty for a run admitted with every artifact (R19).
+   * The Vault reads a state committed before R19 as empty.
+   */
+  readonly drafts: Readonly<Partial<Record<DraftStation, DraftState>>>;
   /**
    * One `UsageRecord` per driver call, failed attempts and review seats
    * included, in the order the calls ended (A-P13-04). No total is stored:

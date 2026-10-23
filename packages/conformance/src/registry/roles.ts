@@ -84,9 +84,12 @@ export const ADMISSION_PINS_EVERY_ROLE: LocalAssertion = runtime({
 
       const record = await admissionOf(rig, components.vault);
       const pinned = record.roles.map((r) => ({ role: r.role, sha256: r.sha256 }));
-      const expected = [{ role: 'builder', sha256: builderHash }, { role: 'reviewer', sha256: await fileHash(rig, 'reviewer') }];
+      // Every role file the directory holds, the drafting seats' included (R19), each with its file's hash.
+      const files = (await readdir(rig.roles)).filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -'.md'.length)).sort();
+      const expected = await Promise.all(files.map(async (role) => ({ role, sha256: role === 'builder' ? builderHash : await fileHash(rig, role) })));
+      if (!files.includes('builder') || !files.includes('reviewer')) throw new Error(`R20: the rig's roles directory holds ${JSON.stringify(files)}`);
       if (JSON.stringify(pinned) !== JSON.stringify(expected)) throw new Error(`R20: the admission record pins ${JSON.stringify(pinned)}, not every role in the directory with its file's hash ${JSON.stringify(expected)}`);
-      if (record.roles[0]?.instructions !== original) throw new Error('R20: the admission record does not carry the builder role\'s instructions as admitted');
+      if (record.roles.find((r) => r.role === ('builder' as RoleId))?.instructions !== original) throw new Error('R20: the admission record does not carry the builder role\'s instructions as admitted');
 
       const [build] = driver.requests;
       if (build === undefined) throw new Error('R20: the builder was never called');

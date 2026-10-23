@@ -21,7 +21,9 @@ import type {
 } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, BaseRunRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockManifest, LockVerdict, UsageRecord, Vault } from '@olympus-ai/vault';
+import type {
+  AdmissionRecord, BaseRunRecord, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, RubricRecord, UsageRecord, Vault,
+} from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
   protected readonly inner: Vault;
@@ -82,8 +84,32 @@ export class DelegatingVault implements Vault {
     return this.inner.recordBaseRun(r);
   }
 
-  readBaseRun(runId: RunId): Promise<VaultRef | null> {
-    return this.inner.readBaseRun(runId);
+  readBaseRun(runId: RunId, draft: string | null): Promise<VaultRef | null> {
+    return this.inner.readBaseRun(runId, draft);
+  }
+
+  recordIntent(r: IntentRecord): Promise<VaultRef> {
+    return this.inner.recordIntent(r);
+  }
+
+  recordRubric(r: RubricRecord): Promise<VaultRef> {
+    return this.inner.recordRubric(r);
+  }
+
+  recordDraft(r: DraftRecord): Promise<VaultRef> {
+    return this.inner.recordDraft(r);
+  }
+
+  recordCriticResult(r: CriticRecord): Promise<VaultRef> {
+    return this.inner.recordCriticResult(r);
+  }
+
+  recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
+    return this.inner.recordDraftLock(r);
+  }
+
+  readLocks(runId: RunId): Promise<LockManifest | null> {
+    return this.inner.readLocks(runId);
   }
 
   listRuns(): Promise<readonly RunId[]> {

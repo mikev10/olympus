@@ -9,6 +9,11 @@
  *   the station. `integrate`'s merge is I1's.
  * - `spec`, `test-design`, `plan`: lock the artifacts the run was admitted
  *   with, and refuse a lock whose hash differs from the admission hash (I3).
+ *   A run admitted without its spec or its acceptance tests drafts them at
+ *   that station instead (R19, `drafting.ts`): a drafter writes, an
+ *   independent critic reads, the base run runs a test draft, and the exit's
+ *   approval carries the drafted floor; the approved bytes are written into
+ *   the artifact root and the base, and locked against the approved hash.
  *   `plan` also enters the graph's tasks into run state. `test-design`
  *   then runs every declared check over a fresh copy of the base, read-only
  *   and with no egress, records what each did, and refuses its exit unless
@@ -47,7 +52,10 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   capabilityRefusal,
+  effectiveApproval,
   escalationAt,
+  grantClears,
+  isDraftStation,
   gatedIterations,
   grantedContext,
   locksHeldLeaving,
@@ -60,6 +68,8 @@ import {
   StrictPolicyEngine,
   tierFor,
   transition,
+  weakerGrade,
+  type DraftFloor,
   type StepLimits,
 } from '@olympus-ai/core';
 import type {
@@ -69,6 +79,8 @@ import type {
   ApprovalKey,
   CompiledRole,
   ContextGrant,
+  DraftRef,
+  DraftStation,
   Driver,
   FailedCheck,
   ModelIdentity,
@@ -100,6 +112,8 @@ import { recordDecision, recordEgress, stationDecider } from './decisions.js';
 import { requiredShortfall } from './gate.js';
 import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
+import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
+import type { RunRequirements } from './spec-parts.js';
 import type { BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
@@ -122,19 +136,44 @@ import {
   treePath,
 } from './workspace.js';
 
+/**
+ * The artifacts the line reads, as they stand: those the run was admitted
+ * with, and each drafted one once its draft was approved and locked (R19).
+ * A drafted artifact not yet locked is an empty list, and nothing reads it
+ * before its station's exit.
+ */
+export interface LineArtifacts {
+  readonly spec: readonly AdmittedArtifact[];
+  readonly acceptanceTests: readonly AdmittedArtifact[];
+  readonly acceptanceManifest: AdmittedArtifact | null;
+  readonly verificationManifest: AdmittedArtifact;
+  readonly taskGraph: AdmittedArtifact;
+  readonly specParts: {
+    readonly security: AdmittedArtifact | null;
+    readonly runRequirements: AdmittedArtifact | null;
+    readonly questions: AdmittedArtifact | null;
+  };
+}
+
 export interface LineContext {
   readonly run: Run;
   readonly policy: Policy;
   /** Every role as admission compiled and pinned it; the only source of a seat's instructions (D-A-RC-01). */
   readonly roles: readonly CompiledRole[];
-  readonly artifacts: AdmissionRecord['artifacts'];
+  /** Replaced when a drafted artifact is locked (R19). */
+  artifacts: LineArtifacts;
   readonly graph: TaskGraph;
-  readonly checks: readonly CheckSpec[];
-  /** The spec's security part as admitted, or null where none was and `spec` refuses (R17). */
-  readonly securityPart: SecurityPart | null;
+  /** The verification manifest's checks and the acceptance manifest's; replaced when drafted tests are locked (R19). */
+  checks: readonly CheckSpec[];
+  /** The spec's security part as admitted or locked, or null where none was and `spec` refuses (R17). */
+  securityPart: SecurityPart | null;
+  /** The spec's run-requirements part, or null where it has none (R19). */
+  requirements: RunRequirements | null;
+  /** What a drafting run was admitted to draft, its intent, and its rubrics (R19). */
+  readonly drafting: DraftingContext;
   readonly components: BuiltGraph;
-  /** The digest of the base the runtime snapshotted at admission. */
-  readonly baseTreeSha256: string;
+  /** The digest of the base: the one admission snapshotted, or the one the last locked draft wrote (R19). */
+  baseTreeSha256: string;
   /** Replaced by every commit. */
   state: RunState;
   /**
@@ -210,7 +249,10 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
         await commit(ctx, { phase: 'exiting' });
         break;
       case 'exit': {
-        const tampered = locksHeldLeaving(step.from) ? await tamperedPaths(ctx) : [];
+        // A drafted artifact's exit carries its draft and the conditions the runtime found failed (R19).
+        const floor = isDraftStation(step.from) && isDrafted(ctx, step.from) ? draftFloorOf(ctx.state, step.from) : undefined;
+        // A drafted spec locks nothing before its exit, so there is nothing yet to re-verify leaving it.
+        const tampered = locksHeldLeaving(step.from) && (await ctx.components.vault.readLocks(ctx.run.id)) !== null ? await tamperedPaths(ctx) : [];
         // Tamper findings escalate the gate `protectedPathPolicy` names, and only that one.
         const escalations = step.from === 'integrate' ? await integrateEscalations(ctx.components.vault, ctx.state, (ref) => readBundle(ctx, ref)) : NO_ESCALATIONS;
         const next = transition({
@@ -222,17 +264,29 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
           grants: ctx.state.approvals,
           protectedPathsTouched: escalations.protectedPathsTouched,
           tamperFindings: escalations.tamperFindings,
+          ...(floor === undefined ? {} : { draft: floor }),
         });
+        if (floor !== undefined && isDraftStation(step.from)) await recordFloor(ctx, step.from, floor);
         if (!next.ok) {
           refusal = next.reason === 'lock-tamper'
             ? await recordTamper(ctx, step.from, null, next.tampered, { phase: 'exit' })
             : next;
           break;
         }
+        const draft = floor?.draft ?? null;
+        // An approved draft is written and locked before the move, so the next station reads it (R19).
+        if (floor !== undefined && isDraftStation(step.from)) {
+          const grant = next.spends === null ? undefined : ctx.state.approvals.find((g) => grantClears(g, next.spends ?? g.key, draft));
+          const locked = await lockApproved(ctx, step.from, grant === undefined ? { by: 'policy' } : { by: 'principal', principal: grant.approvedBy });
+          if (locked !== undefined) {
+            refusal = locked;
+            break;
+          }
+        }
         // One human approval crosses one exit: the grant is spent in the same
         // commit as the move, so a stop between the two leaves it unspent and
         // the gate is evaluated again (A-P4-04).
-        const approvals = spend(ctx.state.approvals, next.spends);
+        const approvals = spend(ctx.state.approvals, next.spends, draft);
         // The run has passed its last M1 exit gate; `observe` is never entered at M1.
         if (!M1_STATIONS.includes(next.next)) {
           // Merged before the grant is spent: a stop between the two leaves the grant unspent, and the
@@ -256,7 +310,8 @@ export async function runLine(ctx: LineContext, changed: readonly TamperedPath[]
  */
 async function refused(ctx: LineContext, at: StationId, transition: StationRefusal, task: TaskId | null): Promise<RunOutcome> {
   // A park this drive made was recorded by `park`, before it was committed; a park found on resume is recorded again here (D-P14-07).
-  if (transition.reason === 'parked' && parksRecorded(ctx).has(transition.task)) return { ok: false, reason: 'refused', at, transition, state: ctx.state };
+  // A run parked by a person's rejection of its last draft was recorded by the rejection itself, before it was committed (R19).
+  if (transition.reason === 'parked' && (transition.task === null || parksRecorded(ctx).has(transition.task))) return { ok: false, reason: 'refused', at, transition, state: ctx.state };
   await recordDecision(
     { vault: ctx.components.vault, runId: ctx.run.id, taskId: transition.reason === 'parked' ? transition.task : task, station: at },
     { cause: 'station-refused', decidedBy: stationDecider(transition), refusal: transition },
@@ -285,7 +340,7 @@ function parksRecorded(ctx: LineContext): Set<TaskId> {
  * cannot always tell one exhaustion from another and a resume reads the park
  * back from committed state (A-R4-05).
  */
-async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
+export async function park(ctx: LineContext, task: Task, parking: StateChange, cause: ParkCause): Promise<StationRefusal> {
   const spent = parking.attempts !== undefined && Object.hasOwn(parking.attempts, task.id) ? parking.attempts[task.id] : undefined;
   const change: StateChange = { ...parking, attempts: { ...parking.attempts, [task.id]: { ...(spent ?? attemptsOf(ctx.state, task)), parkedFor: cause } } };
   const refusal = parkRefusal({ ...ctx.state, attempts: { ...ctx.state.attempts, ...change.attempts } }, task, stepLimits(ctx));
@@ -308,10 +363,26 @@ async function recordViolation(ctx: LineContext, violation: IntegrityViolation):
   return ref;
 }
 
-/** Marks the first unspent grant for `key` used. A spent grant stays in run state: it is the record that a human approved. */
-function spend(grants: readonly ApprovalGrant[], key: ApprovalKey | null): readonly ApprovalGrant[] {
+/**
+ * The drafted floor raised a drafted exit to a person: recorded with each
+ * failed condition by name, once per draft and evaluation (R19, D-A-DS-04).
+ * Recorded only where the policy cell alone would have let the exit pass.
+ */
+async function recordFloor(ctx: LineContext, station: DraftStation, floor: DraftFloor): Promise<void> {
+  const contract = STATION_CONTRACTS[station];
+  const level = ctx.run.requestedLevel;
+  if (effectiveApproval(contract, ctx.policy, level, []) !== 'auto') return;
+  if (effectiveApproval(contract, ctx.policy, level, [], floor) === 'auto') return;
+  await recordDecision(
+    { vault: ctx.components.vault, runId: ctx.run.id, taskId: null, station },
+    { cause: 'draft-floor-applied', decidedBy: 'line', draft: floor.draft, level, failed: [...floor.failed] },
+  );
+}
+
+/** Marks the first unspent grant for `key`, and the draft it names, used. A spent grant stays in run state: it is the record that a human approved. */
+function spend(grants: readonly ApprovalGrant[], key: ApprovalKey | null, draft: DraftRef | null): readonly ApprovalGrant[] {
   if (key === null) return grants;
-  const at = grants.findIndex((grant) => grant.key === key && grant.usedAt === null);
+  const at = grants.findIndex((grant) => grantClears(grant, key, draft));
   if (at === -1) return grants;
   const usedAt = new Date().toISOString();
   return grants.map((grant, i) => (i === at ? { ...grant, usedAt } : grant));
@@ -321,6 +392,8 @@ function spend(grants: readonly ApprovalGrant[], key: ApprovalKey | null): reado
 async function work(ctx: LineContext, station: StationId): Promise<StationRefusal | undefined> {
   switch (station) {
     case 'spec': {
+      // A drafted spec is drafted here; its draft is locked at the exit, once approved (R19).
+      if (isDrafted(ctx, 'spec')) return draftStation(ctx, 'spec');
       // A part every spec carries is refused before anything is locked: the run stops here (R17).
       const missing = specPartRefusal(ctx.securityPart);
       if (missing !== undefined) return missing;
@@ -329,16 +402,25 @@ async function work(ctx: LineContext, station: StationId): Promise<StationRefusa
       break;
     }
     case 'test-design': {
+      // A drafted spec's security part is the one its lock wrote, so the refusal R17 makes at `spec` of
+      // a supplied spec is made here of a drafted one approved without one (R19).
+      const missing = specPartRefusal(ctx.securityPart);
+      if (missing !== undefined) return missing;
+      // Drafted tests are drafted here; their draft is locked at the exit, once approved (R19).
+      if (isDrafted(ctx, 'test-design')) return draftStation(ctx, 'test-design');
       // Read from what was admitted, so it is refused before anything is locked or run (R17).
       const undenied = denialRefusal(ctx.securityPart, ctx.checks);
       if (undenied !== undefined) return undenied;
       // A base record means this station locked and ran its checks before a stop: the locks are
       // held, and the base is judged by the record rather than run again (D-A-BF-01).
-      let baseRun = await ctx.components.vault.readBaseRun(ctx.run.id);
+      let baseRun = await ctx.components.vault.readBaseRun(ctx.run.id, null);
       if (baseRun === null) {
-        const refusal = await lockAdmitted(ctx, 'test-design', [...ctx.artifacts.acceptanceTests, ctx.artifacts.verificationManifest]);
+        const manifests = [ctx.artifacts.verificationManifest, ...(ctx.artifacts.acceptanceManifest === null ? [] : [ctx.artifacts.acceptanceManifest])];
+        const refusal = await lockAdmitted(ctx, 'test-design', [...ctx.artifacts.acceptanceTests, ...manifests]);
         if (refusal !== undefined) return refusal;
-        const ran = await runOnBase(ctx);
+        const tree = baseRunPath(ctx.components.workspaces, ctx.run.id);
+        await copyTree(basePath(ctx.components.workspaces, ctx.run.id), tree);
+        const ran = await runOnBase(ctx, { tree, checks: ctx.checks, draft: null });
         if (!('hash' in ran)) return ran;
         baseRun = ran;
       }
@@ -399,17 +481,18 @@ async function lockAdmitted(ctx: LineContext, station: StationId, admitted: read
  * No driver is invoked. A check that does not start is recorded as unstarted
  * with its reason, and no exit code is invented for it (A-P6-02).
  */
-async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
+export async function runOnBase(
+  ctx: LineContext, on: { readonly tree: string; readonly checks: readonly CheckSpec[]; readonly draft: string | null },
+): Promise<VaultRef | StationRefusal> {
   const { sandbox, vault, workspaces } = ctx.components;
-  const tree = baseRunPath(workspaces, ctx.run.id);
-  await copyTree(basePath(workspaces, ctx.run.id), tree);
+  const { tree } = on;
   const before = await tamperedIn(ctx, tree);
   if (before.length > 0) return recordTamper(ctx, 'test-design', null, before, { phase: 'base' });
   const runner = await suiteRunner(basePath(workspaces, ctx.run.id));
 
   const checks: CheckResult[] = [];
   const unstarted: UnstartedCheck[] = [];
-  for (const check of declaredChecks(ctx.checks)) {
+  for (const check of declaredChecks(on.checks)) {
     const missing = await runnerMissing(check, runner, tree);
     if (missing !== undefined) {
       unstarted.push({ checkId: check.id, reason: missing });
@@ -448,9 +531,9 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
   }
   // Each security check runs over the base for its findings, which are the base set every finding at
   // `verify` is judged against (D-A-SC-02). One that produces none refuses the exit (D-R17-01).
-  for (const [index, check] of ctx.checks.entries()) {
+  for (const [index, check] of on.checks.entries()) {
     if (!isSecurityCheck(check)) continue;
-    const scanned = await runSecurity(ctx, tree, 'base', index, check, null);
+    const scanned = await runSecurity(ctx, tree, on.draft === null ? 'base' : `base.${on.draft}`, index, check, null);
     if (scanned.ok) checks.push(scanned.result);
     else unstarted.push({ checkId: check.id, reason: scanned.reason });
   }
@@ -458,7 +541,7 @@ async function runOnBase(ctx: LineContext): Promise<VaultRef | StationRefusal> {
   // Results collected over a changed artifact are not results, whatever the provider claims about ro.
   const after = [...(await tamperedPaths(ctx)), ...(await tamperedIn(ctx, tree))];
   if (after.length > 0) return recordTamper(ctx, 'test-design', null, after, { phase: 'after-base', checks });
-  return vault.recordBaseRun({ runId: ctx.run.id, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
+  return vault.recordBaseRun({ runId: ctx.run.id, draft: on.draft, baseTreeSha256: ctx.baseTreeSha256, checks, unstarted, collectedBy: 'runtime' });
 }
 
 /**
@@ -484,11 +567,11 @@ async function runSecurity(
   return scanned.ok ? { ok: true, result: scanned.result } : { ok: false, at: scanned.at, reason: scanned.reason };
 }
 
-async function readRecord<T>(ctx: LineContext, ref: VaultRef): Promise<T> {
+export async function readRecord<T>(ctx: LineContext, ref: VaultRef): Promise<T> {
   return JSON.parse(decode(await ctx.components.vault.read(ref))) as T;
 }
 
-async function tamperedPaths(ctx: LineContext): Promise<TamperedPath[]> {
+export async function tamperedPaths(ctx: LineContext): Promise<TamperedPath[]> {
   const verdict = await ctx.components.vault.verifyLocks(ctx.run.id);
   return verdict.ok ? [] : verdict.tampered.map((t) => ({ ...t }));
 }
@@ -518,7 +601,7 @@ function driverAt(ctx: LineContext, station: StationId): Driver {
  * detector's — the driver of the station the mismatch was found at — not
  * always the build driver's (A-P4-05).
  */
-async function recordTamper(
+export async function recordTamper(
   ctx: LineContext, station: StationId, task: Task | null, tampered: TamperedPath[], extra: Record<string, unknown>,
   suspect: Task | null = task,
 ): Promise<StationRefusal> {
@@ -544,11 +627,11 @@ async function recordTamper(
 
 const EMPTY_ATTEMPTS: TaskAttempts = { iterations: 0, retries: 0, starts: 0, conflicts: [] };
 
-function attemptsOf(state: RunState, task: Task): TaskAttempts {
+export function attemptsOf(state: RunState, task: Task): TaskAttempts {
   return Object.hasOwn(state.attempts, task.id) ? (state.attempts[task.id] ?? EMPTY_ATTEMPTS) : EMPTY_ATTEMPTS;
 }
 
-function statusOf(state: RunState, task: Task): TaskStatus {
+export function statusOf(state: RunState, task: Task): TaskStatus {
   return Object.hasOwn(state.tasks, task.id) ? (state.tasks[task.id] ?? 'pending') : 'pending';
 }
 
@@ -560,7 +643,7 @@ function statusOf(state: RunState, task: Task): TaskStatus {
  * task parks rather than being replayed into the same attempt forever
  * (A-P4-06).
  */
-async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+export async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
   const replay = statusOf(ctx.state, task) === 'running';
@@ -591,7 +674,7 @@ async function startAttempt(ctx: LineContext, task: Task): Promise<StationRefusa
  * A driver or sandbox failure: one retry spent, committed before the next
  * attempt. Past the station's `retry.max` the task parks and the run stops.
  */
-async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
+export async function spendRetry(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const contract = STATION_CONTRACTS[ctx.state.station];
   const spent = attemptsOf(ctx.state, task);
   const attempts = { [task.id]: { ...spent, retries: spent.retries + 1 } };
@@ -607,7 +690,7 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
-interface ReadArtifacts {
+export interface ReadArtifacts {
   readonly text: string;
   /** Artifacts whose bytes, as read, do not hash to what was admitted. */
   readonly tampered: TamperedPath[];
@@ -620,7 +703,7 @@ interface ReadArtifacts {
  * reach the model with every lock comparison still intact; what is hashed here
  * is exactly what is handed over (A-P4-05).
  */
-async function readText(ctx: LineContext, artifacts: readonly AdmittedArtifact[]): Promise<ReadArtifacts> {
+export async function readText(ctx: LineContext, artifacts: readonly AdmittedArtifact[]): Promise<ReadArtifacts> {
   const texts: string[] = [];
   const tampered: TamperedPath[] = [];
   for (const artifact of artifacts) {
@@ -684,7 +767,7 @@ function checkSandbox(ctx: LineContext, tree: string, check: CheckSpec): Sandbox
   return workspaceOnly(ctx, tree, 'ro', { mode: 'deny-all', allow: [] }, 'check', check.timeoutMs);
 }
 
-function scopeFor(ctx: LineContext, task: Task) {
+export function scopeFor(ctx: LineContext, task: Task) {
   const resolved = engine.resolveCapabilities(task.role, task.station, ctx.policy);
   // Admission resolved every role the graph schedules, against the same admitted policy.
   if (!resolved.ok) throw new Error(`line: role ${task.role} lost its scope at ${task.station}: ${resolved.detail}`);
@@ -704,12 +787,14 @@ function scopeFor(ctx: LineContext, task: Task) {
  * spent an amount nothing recorded, and a retry would spend again on top of
  * it (I5, D-P13-15).
  */
-async function runTask(
+export async function runTask(
   ctx: LineContext, task: Task, driver: Driver, role: CompiledRole, context: string, workspace: string,
-): Promise<{ ok: true; result: TaskResult } | { ok: false; error: unknown }> {
+  options: { readonly mode?: 'ro' | 'rw'; readonly suffix?: string } = {},
+): Promise<{ ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown }> {
   const { sandbox } = ctx.components;
   const scope = scopeFor(ctx, task);
-  const mode = STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw';
+  // A critic's tree is read-only whatever its station's contract says: it writes nothing (R19).
+  const mode = options.mode ?? (STATION_CONTRACTS[task.station].writeBoundary.workspaceGlobs.length === 0 ? 'ro' : 'rw');
   // The tier this call runs at: the scope's at this station, raised only by a granted escalation, from the counts run state keeps (I2, A-R14-01).
   const tier = tierFor(scope, task.station, attemptsOf(ctx.state, task));
   let handle: SandboxHandle;
@@ -735,13 +820,14 @@ async function runTask(
     await sandbox.destroy(handle).catch(() => undefined);
     throw error;
   }
-  let outcome: { ok: true; result: TaskResult } | { ok: false; error: unknown };
+  let outcome: { ok: true; result: TaskResult; model: ModelIdentity } | { ok: false; error: unknown };
   try {
     const request: TaskRequest = {
       taskId: task.id,
       role,
       stablePrefix: context,
-      variableSuffix: task.id,
+      // A drafter's retry carries what sent its last draft back, typed, here and never in the prefix (D-A-DS-02).
+      variableSuffix: options.suffix === undefined ? task.id : `${task.id}\n${options.suffix}`,
       tier,
       tools: [...scope.tools],
       sandbox: handle,
@@ -750,7 +836,7 @@ async function runTask(
     };
     const result = await driver.runTask(request);
     if (result.taskId !== task.id) throw new Error(`the driver returned a result for task ${String(result.taskId)} when asked to run ${task.id}`);
-    outcome = { ok: true, result };
+    outcome = { ok: true, result, model };
   } catch (error) {
     outcome = { ok: false, error };
   }
@@ -826,26 +912,26 @@ function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model:
  * role it did not compile, and a run with no `reviewer`, so a seat with
  * none is a fault, never a reason to run under the CLI's own prompt (I5).
  */
-function pinnedRole(ctx: LineContext, id: RoleId): CompiledRole {
+export function pinnedRole(ctx: LineContext, id: RoleId): CompiledRole {
   const role = ctx.roles.find((r) => r.role === id);
   if (role === undefined) throw new Error(`line: role ${id} was not pinned at admission, so its seat has no instructions to run under`);
   return role;
 }
 
-function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
+export function joinParts(parts: ReadonlyArray<{ grant: ContextGrant; text: string }>): string {
   return parts.map((p) => `[${p.grant}]\n${p.text}`).join('\n\n');
 }
 
 /** Every artifact the run was admitted with. Each is locked by its station, and none may appear in a task's diff. */
 function admittedArtifacts(ctx: LineContext): AdmittedArtifact[] {
-  const { acceptanceTests, verificationManifest, taskGraph } = ctx.artifacts;
-  return [...specArtifacts(ctx), ...acceptanceTests, verificationManifest, taskGraph];
+  const { acceptanceTests, acceptanceManifest, verificationManifest, taskGraph } = ctx.artifacts;
+  return [...specArtifacts(ctx), ...acceptanceTests, ...(acceptanceManifest === null ? [] : [acceptanceManifest]), verificationManifest, taskGraph];
 }
 
 /** The spec's files and each part it carries: what `spec` locks, and what a `locked-spec` grant reads (R17). */
-function specArtifacts(ctx: LineContext): AdmittedArtifact[] {
-  const { security } = ctx.artifacts.specParts;
-  return [...ctx.artifacts.spec, ...(security === null ? [] : [security])];
+export function specArtifacts(ctx: Pick<LineContext, 'artifacts'>): AdmittedArtifact[] {
+  const { security, runRequirements, questions } = ctx.artifacts.specParts;
+  return [...ctx.artifacts.spec, ...[security, runRequirements, questions].filter((part): part is AdmittedArtifact => part !== null)];
 }
 
 /**
@@ -1091,7 +1177,7 @@ async function build(ctx: LineContext, task: Task): Promise<StationRefusal | und
 }
 
 /** Locked artifacts whose content in `tree` is not what was admitted. */
-async function tamperedIn(ctx: LineContext, tree: string): Promise<TamperedPath[]> {
+export async function tamperedIn(ctx: LineContext, tree: string): Promise<TamperedPath[]> {
   const tampered: TamperedPath[] = [];
   for (const artifact of admittedArtifacts(ctx)) {
     const actual = (await hashAt(tree, artifact.path)) ?? 'missing';
@@ -1289,7 +1375,7 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
   if (after.length > 0) return recordTamper(ctx, 'verify', task, after, { phase: 'after-checks', checks });
 
   // The `test-design` exit is not crossed without a base record, so a task at verify has one (D-A-BF-01).
-  const baseRun = await vault.readBaseRun(ctx.run.id);
+  const baseRun = await vault.readBaseRun(ctx.run.id, testDraftOf(ctx));
   if (baseRun === null) throw new Error(`line: run ${ctx.run.id} reached verify with no base record`);
   const baseRecord = await readRecord<BaseRunRecord>(ctx, baseRun);
   const failed: FailedCheck[] = [];
@@ -1454,7 +1540,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const seated = seatReviewer(task.id, authors, ran.result.model, level);
   if (!seated.ok) return seated;
   // The stricter of the two seats: what the reviewer reports never widens what the runtime resolved (I2, I6; codex-1, gemini-1).
-  const seat = planned.seat.independence === 'reduced' ? planned.seat : seated.seat;
+  const seat = weakerGrade(planned.seat.independence, seated.seat.independence) === planned.seat.independence ? planned.seat : seated.seat;
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, {
     tasks: { [task.id]: 'passed' },
@@ -1491,7 +1577,7 @@ async function authorsOf(ctx: LineContext, reviewed: readonly Task[], authored: 
  * the commit is applied, so a task's commit never carries a sibling's entry
  * as it stood before an await (R4).
  */
-interface StateChange {
+export interface StateChange {
   readonly station?: StationId;
   readonly phase?: RunState['phase'];
   readonly approvals?: RunState['approvals'];
@@ -1503,6 +1589,8 @@ interface StateChange {
   readonly review?: RunState['reviews'][number];
   readonly usage?: VaultRef;
   readonly cancelled?: RunCancellation;
+  /** Drafting stations whose record this change replaces, whole (R19). */
+  readonly drafts?: RunState['drafts'];
 }
 
 /** Each drive's commits, one after another: the tail of its queue. */
@@ -1515,7 +1603,7 @@ const COMMITS = new WeakMap<LineContext, Promise<void>>();
  * against the same version and lose to each other (R4). A commit the Vault
  * refuses rejects its own caller and does not stop the queue.
  */
-function commit(ctx: LineContext, change: StateChange): Promise<void> {
+export function commit(ctx: LineContext, change: StateChange): Promise<void> {
   const applied = (COMMITS.get(ctx) ?? Promise.resolve()).then(() => apply(ctx, change));
   COMMITS.set(ctx, applied.catch(() => undefined));
   return applied;
@@ -1537,6 +1625,7 @@ async function apply(ctx: LineContext, change: StateChange): Promise<void> {
       reviews: change.review === undefined ? state.reviews : [...state.reviews, change.review],
       usage: change.usage === undefined ? state.usage : [...state.usage, change.usage],
       cancelled: change.cancelled ?? state.cancelled,
+      drafts: change.drafts === undefined ? state.drafts : { ...state.drafts, ...change.drafts },
     },
     state.version,
   );

@@ -14,11 +14,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { isAbsolute } from 'node:path';
 import { isApprovalKey, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
 import { loadPolicyFile } from '../policy-file.js';
-import { admitRun, approveStation, cancelRun, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
+import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import type { BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
-import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RunEvent, RunView } from './wire.js';
+import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
   readonly components: BuiltGraph;
@@ -30,6 +30,8 @@ export interface ApiServerOptions {
   readonly policyFile: string;
   /** The roles directory every run's seats are compiled from at admission, read again for each run (D-A-RC-01). */
   readonly rolesDirectory: string;
+  /** The rubrics directory a drafting run's critics are given, read at each such run's admission (R19); null where the server drafts nothing. */
+  readonly rubricsDirectory?: string | null;
 }
 
 export interface ApiServer {
@@ -122,8 +124,11 @@ function isStringArray(value: unknown): value is string[] {
 
 function createBody(value: unknown): CreateRunBody {
   if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
-  exactKeys(value, ['workspace', 'baseCommit', 'requestedLevel', 'artifacts', 'approvedCostUsd'], '');
-  const { workspace, baseCommit, requestedLevel, artifacts, approvedCostUsd } = value;
+  // `intent` is the one optional key at the top: the person's text a drafted spec is drafted from (R19).
+  const { intent, ...required } = value;
+  exactKeys(required, ['workspace', 'baseCommit', 'requestedLevel', 'artifacts', 'approvedCostUsd'], '');
+  if (intent !== undefined && (typeof intent !== 'string' || intent.trim() === '')) throw new HttpError(400, 'bad-request', 'intent is the text a drafted spec is drafted from');
+  const { workspace, baseCommit, requestedLevel, artifacts, approvedCostUsd } = required;
   if (typeof workspace !== 'string' || !isAbsolute(workspace)) throw new HttpError(400, 'bad-request', 'workspace must be an absolute path on the server');
   if (typeof baseCommit !== 'string' || baseCommit === '') throw new HttpError(400, 'bad-request', 'baseCommit must be a non-empty string');
   if (requestedLevel !== 0 && requestedLevel !== 1 && requestedLevel !== 2 && requestedLevel !== 3) {
@@ -133,25 +138,70 @@ function createBody(value: unknown): CreateRunBody {
     throw new HttpError(400, 'bad-request', 'approvedCostUsd must be a number or null');
   }
   if (!isRecord(artifacts)) throw new HttpError(400, 'bad-request', 'artifacts must be an object');
-  // `specParts` is the one optional key: a spec admitted without it is refused at the `spec` exit, naming the part (R17).
-  const { specParts, ...listed } = artifacts;
+  // `specParts` and `acceptanceManifest` are optional: a spec admitted without its security part is refused at the
+  // `spec` exit, naming the part (R17), and an acceptance manifest sits beside supplied tests or not at all (R19).
+  const { specParts, acceptanceManifest, ...listed } = artifacts;
   exactKeys(listed, ['spec', 'acceptanceTests', 'verificationManifest', 'taskGraph'], 'artifacts.');
   const { spec, acceptanceTests, verificationManifest, taskGraph } = listed;
-  if (!isStringArray(spec) || !isStringArray(acceptanceTests) || typeof verificationManifest !== 'string' || typeof taskGraph !== 'string') {
-    throw new HttpError(400, 'bad-request', 'artifacts: spec and acceptanceTests are string arrays; verificationManifest and taskGraph are strings');
+  const listOrDraft = (v: unknown): v is string[] | 'draft' => v === 'draft' || isStringArray(v);
+  if (!listOrDraft(spec) || !listOrDraft(acceptanceTests) || typeof verificationManifest !== 'string' || typeof taskGraph !== 'string') {
+    throw new HttpError(400, 'bad-request', "artifacts: spec and acceptanceTests are string arrays or 'draft'; verificationManifest and taskGraph are strings");
   }
-  if (specParts === undefined) return { workspace, baseCommit, requestedLevel, artifacts: { spec, acceptanceTests, verificationManifest, taskGraph }, approvedCostUsd };
-  if (!isRecord(specParts)) throw new HttpError(400, 'bad-request', 'artifacts.specParts must be an object');
-  exactKeys(specParts, ['security'], 'artifacts.specParts.');
-  if (typeof specParts.security !== 'string') throw new HttpError(400, 'bad-request', 'artifacts.specParts.security is a string');
-  return { workspace, baseCommit, requestedLevel, artifacts: { spec, acceptanceTests, verificationManifest, taskGraph, specParts: { security: specParts.security } }, approvedCostUsd };
+  if (acceptanceManifest !== undefined && typeof acceptanceManifest !== 'string') throw new HttpError(400, 'bad-request', 'artifacts.acceptanceManifest is a string');
+  let parts: { security?: string; runRequirements?: string; questions?: string } | undefined;
+  if (specParts !== undefined) {
+    if (!isRecord(specParts)) throw new HttpError(400, 'bad-request', 'artifacts.specParts must be an object');
+    const { security, runRequirements, questions, ...rest } = specParts;
+    exactKeys(rest, [], 'artifacts.specParts.');
+    for (const [name, part] of [['security', security], ['runRequirements', runRequirements], ['questions', questions]] as const) {
+      if (part !== undefined && typeof part !== 'string') throw new HttpError(400, 'bad-request', `artifacts.specParts.${name} is a string`);
+    }
+    parts = {
+      ...(typeof security === 'string' ? { security } : {}),
+      ...(typeof runRequirements === 'string' ? { runRequirements } : {}),
+      ...(typeof questions === 'string' ? { questions } : {}),
+    };
+  }
+  return {
+    workspace,
+    baseCommit,
+    requestedLevel,
+    artifacts: {
+      spec,
+      acceptanceTests,
+      verificationManifest,
+      taskGraph,
+      ...(typeof acceptanceManifest === 'string' ? { acceptanceManifest } : {}),
+      ...(parts === undefined ? {} : { specParts: parts }),
+    },
+    approvedCostUsd,
+    ...(typeof intent === 'string' ? { intent } : {}),
+  };
 }
 
 function approveBody(value: unknown): ApproveBody {
   if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
-  exactKeys(value, ['key'], '');
-  if (!isApprovalKey(value.key)) throw new HttpError(400, 'bad-request', `'${String(value.key)}' is not a station:level approval key`);
-  return { key: value.key };
+  const { draft, ...rest } = value;
+  exactKeys(rest, ['key'], '');
+  if (!isApprovalKey(rest.key)) throw new HttpError(400, 'bad-request', `'${String(rest.key)}' is not a station:level approval key`);
+  if (draft !== undefined && typeof draft !== 'string') throw new HttpError(400, 'bad-request', 'draft is the hash of the draft approved');
+  return { key: rest.key, ...(typeof draft === 'string' ? { draft } : {}) };
+}
+
+function rejectBody(value: unknown): RejectBody {
+  if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
+  const { notes, reason, ...rest } = value;
+  exactKeys(rest, ['key', 'draft'], '');
+  if (!isApprovalKey(rest.key)) throw new HttpError(400, 'bad-request', `'${String(rest.key)}' is not a station:level approval key`);
+  if (typeof rest.draft !== 'string') throw new HttpError(400, 'bad-request', 'draft is the hash of the draft rejected');
+  if (notes !== undefined && typeof notes !== 'string') throw new HttpError(400, 'bad-request', 'notes are text');
+  if (reason !== undefined && typeof reason !== 'string') throw new HttpError(400, 'bad-request', 'reason is one of the fixed reasons');
+  return {
+    key: rest.key,
+    draft: rest.draft,
+    ...(typeof notes === 'string' ? { notes } : {}),
+    ...(typeof reason === 'string' ? { reason: reason as RejectBody['reason'] & string } : {}),
+  };
 }
 
 /** HTTP status for a refusal before or on the line: the caller's input, or the runtime saying no. */
@@ -252,7 +302,17 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const policy = await loadPolicyFile(options.policyFile);
     if (!policy.ok) throw new HttpError(422, 'refused', `the server's policy file is refused: ${policy.message}`, policy);
     const runId = randomUUID() as RunId;
-    const admission = await admitRun({ runId, ...body, policy: policy.policy, roles: options.rolesDirectory, components });
+    const { intent, ...request } = body;
+    const admission = await admitRun({
+      runId,
+      ...request,
+      // Only this route, authenticated as the principal, supplies an intent (R19, I7).
+      intent: intent === undefined ? null : { text: intent, from: 'principal' },
+      rubrics: options.rubricsDirectory ?? null,
+      policy: policy.policy,
+      roles: options.rolesDirectory,
+      components,
+    });
     if (!admission.ok) throw new HttpError(refusalStatus(admission), 'refused', `run refused: ${admission.reason}`, admission);
     const { admitted } = admission;
     drive(runId, (hooks) => admitted.drive(hooks));
@@ -263,8 +323,19 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     const entry = tracked(runId);
     if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for an approval`);
     await view(runId);
-    const outcome = await approveStation({ runId, key: body.key, approvedBy: principal, vault: components.vault });
+    const outcome = await approveStation({ runId, key: body.key, draft: body.draft ?? null, approvedBy: principal, vault: components.vault });
     if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+    drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
+    return view(runId);
+  };
+
+  const reject = async (runId: RunId, body: RejectBody): Promise<RunView> => {
+    const entry = tracked(runId);
+    if (entry.drive !== null) throw new HttpError(409, 'conflict', `run ${runId} is being driven; it is not waiting for a decision on a draft`);
+    await view(runId);
+    const outcome = await rejectDraft({ runId, key: body.key, draft: body.draft, notes: body.notes ?? null, reason: body.reason ?? null, rejectedBy: principal, vault: components.vault });
+    if (!outcome.ok) throw new HttpError(outcome.reason === 'invalid-request' ? 400 : 409, 'refused', outcome.message, outcome);
+    // A draft sent back is drafted again; a parked run is driven only to record where it stopped.
     drive(runId, (hooks) => resumeRun({ runId, components }, hooks));
     return view(runId);
   };
@@ -356,9 +427,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
       await events(runId, res);
       return;
     }
-    if (action === 'approve' || action === 'cancel') {
+    if (action === 'approve' || action === 'cancel' || action === 'reject') {
       if (method !== 'POST') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
-      send(res, 200, action === 'approve' ? await approve(runId, approveBody(await readJson(req))) : await cancel(runId));
+      if (action === 'approve') send(res, 200, await approve(runId, approveBody(await readJson(req))));
+      else if (action === 'reject') send(res, 200, await reject(runId, rejectBody(await readJson(req))));
+      else send(res, 200, await cancel(runId));
       return;
     }
     throw new HttpError(404, 'not-found', `no route ${url.pathname}`);

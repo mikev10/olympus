@@ -172,7 +172,7 @@ describe('the CLI is a client of a remote API URL', () => {
     expect(events.out.some((line) => line.startsWith('state {'))).toBe(true);
 
     const waiting = await settle(run.runId);
-    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] });
+    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS], draft: null });
 
     const approved = await cli(remote('approve', run.runId, 'integrate:1'));
     expect(approved.code).toBe(0);

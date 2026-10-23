@@ -612,7 +612,7 @@ order between them is settled before any of them is picked up.
 | R16 | Bug-fix intake | M2 | R15, R19, P14, M2 triggers | — |
 | R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
-| R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | — |
+| R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | `docs/plan/R19-drafting.md` |
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
 
 ### R1 — Readiness

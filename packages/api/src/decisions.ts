@@ -45,6 +45,7 @@ export function stationDecider(refusal: StationRefusal): 'station-machine' | 'li
     case 'denial-check-missing':
     case 'lock-tamper':
     case 'violation':
+    case 'same-family-drafter':
       return 'line';
     case 'unsafe-above-l1':
     case 'capability-missing':

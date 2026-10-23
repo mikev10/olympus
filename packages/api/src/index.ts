@@ -24,13 +24,17 @@ export * from './outcomes.js';
 export {
   composeDiff,
   diffDigest,
+  draftPaths,
   localWorkspaceStore,
   ownDiff,
   treeDigest,
   type ContainerUser,
   type WorkspaceStore,
 } from './workspace.js';
-export { egressFor, integrateEscalations, readIntegration, UNANALYSED_TESTS } from './line.js';
+export { egressFor, integrateEscalations, readIntegration, UNANALYSED_TESTS, type LineArtifacts } from './line.js';
+export { builderModels, manifestDraftPath, readCriticResult, specDraftPaths, type DraftingContext, type DraftingDrivers } from './drafting.js';
+export { DEFAULT_RUBRICS_DIRECTORY, RUBRIC_MAX_BYTES, type ReadRubric } from './rubrics.js';
+export { DRAFT_DIR, isDraftableDirectory, parseQuestions, parseRunRequirements, type Questions, type RunRequirements } from './spec-parts.js';
 export * from './http/server.js';
 export * from './host/compose.js';
 export type * from './http/wire.js';

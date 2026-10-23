@@ -11,7 +11,10 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, BaseRunRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
+import type {
+  AdmissionRecord, BaseRunRecord, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord,
+  LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
+} from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file. */
 const MISSING = 'missing';
@@ -50,7 +53,8 @@ export class StubVault implements Vault {
   private readonly integration = new Map<RunId, VaultRef[]>();
   private readonly usage = new Map<RunId, VaultRef[]>();
   private readonly admitted = new Set<RunId>();
-  private readonly baseRuns = new Map<RunId, VaultRef>();
+  private readonly baseRuns = new Map<string, VaultRef>();
+  private readonly draftLocks = new Set<string>();
   /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
   private readonly runs = new Set<RunId>();
 
@@ -174,14 +178,48 @@ export class StubVault implements Vault {
 
   recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a base record is collected by the runtime, or it is not recorded'));
-    if (this.baseRuns.has(r.runId)) return Promise.reject(new Error(`StubVault: run ${r.runId} already has a base record; nothing was stored`));
+    const key = `${r.runId}\0${r.draft ?? ''}`;
+    if (this.baseRuns.has(key)) return Promise.reject(new Error(`StubVault: run ${r.runId} already has a base record for this draft; nothing was stored`));
     const ref = this.store(r.runId, 'base-run', r);
-    this.baseRuns.set(r.runId, ref);
+    this.baseRuns.set(key, ref);
     return Promise.resolve(ref);
   }
 
-  readBaseRun(runId: RunId): Promise<VaultRef | null> {
-    return Promise.resolve(this.baseRuns.get(runId) ?? null);
+  readBaseRun(runId: RunId, draft: string | null): Promise<VaultRef | null> {
+    return Promise.resolve(this.baseRuns.get(`${runId}\0${draft ?? ''}`) ?? null);
+  }
+
+  recordIntent(r: IntentRecord): Promise<VaultRef> {
+    if ((r.from as string) !== 'principal' || (r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: an intent comes from the principal's channel, collected by the runtime"));
+    return Promise.resolve(this.store(r.runId, 'intent', r));
+  }
+
+  recordRubric(r: RubricRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a rubric is collected by the runtime, or it is not recorded'));
+    return Promise.resolve(this.store(r.runId, 'rubric', r));
+  }
+
+  recordDraft(r: DraftRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a draft is collected by the runtime, or it is not recorded'));
+    return Promise.resolve(this.store(r.runId, 'draft', r));
+  }
+
+  recordCriticResult(r: CriticRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a critic result is collected by the runtime, or it is not recorded'));
+    return Promise.resolve(this.store(r.runId, 'critic-result', r));
+  }
+
+  recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a draft lock is collected by the runtime, or it is not recorded'));
+    const key = `${r.runId}\0${r.station}`;
+    if (this.draftLocks.has(key)) return Promise.reject(new Error(`StubVault: run ${r.runId} already locked a draft at ${r.station}; nothing was stored`));
+    this.draftLocks.add(key);
+    return Promise.resolve(this.store(r.runId, 'draft-lock', r));
+  }
+
+  readLocks(runId: RunId): Promise<LockManifest | null> {
+    const manifest = this.locks.get(runId);
+    return Promise.resolve(manifest === undefined ? null : structuredClone(manifest));
   }
 
   listRuns(): Promise<readonly RunId[]> {
@@ -191,7 +229,9 @@ export class StubVault implements Vault {
   readRunState(runId: RunId): Promise<RunState> {
     const state = this.states.get(runId);
     if (state === undefined) return Promise.reject(Object.assign(new Error(`StubVault: no run state for ${runId}`), { code: 'no-run-state' as const, runId }) satisfies NoRunState);
-    return Promise.resolve(structuredClone(state));
+    // As the filesystem Vault reads a state committed before R19: no drafts, and grants that name none.
+    const read = structuredClone(state) as Omit<RunState, 'drafts' | 'approvals'> & { drafts?: RunState['drafts']; approvals: ReadonlyArray<Omit<RunState['approvals'][number], 'draft'> & { draft?: RunState['approvals'][number]['draft'] }> };
+    return Promise.resolve({ ...read, drafts: read.drafts ?? {}, approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
   }
 
   /**
@@ -211,8 +251,9 @@ export class StubVault implements Vault {
 
   private store(
     runId: RunId,
-    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run',
-    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord | BaseRunRecord,
+    kind: 'evidence' | 'violation' | 'admission' | 'task-result' | 'usage' | 'decision' | 'integration' | 'base-run' | 'intent' | 'rubric' | 'draft' | 'critic-result' | 'draft-lock',
+    record: EvidenceBundle | IntegrityViolation | AdmissionRecord | TaskResult | UsageRecord | EnforcementDecision | IntegrationRecord | BaseRunRecord
+      | IntentRecord | RubricRecord | DraftRecord | CriticRecord | DraftLockRecord,
   ): VaultRef {
     const bytes = new TextEncoder().encode(JSON.stringify(record));
     const ref: VaultRef = { runId, kind, hash: sha256(bytes) };

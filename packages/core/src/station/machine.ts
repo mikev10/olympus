@@ -13,17 +13,36 @@
 import type { DriverCapabilities, DriverCapability, ModelIdentity } from '../driver/contract.js';
 import { isApprovalOutcome, isAutonomyLevel } from '../policy/constants.js';
 import type { ApprovalKey, ApprovalOutcome, Policy, PolicyRefusal } from '../policy/types.js';
-import type { ApprovalGrant, AutonomyLevel, RunState, StationId, Task, TaskGraph, TaskId, TaskStatus } from '../run/types.js';
+import type { ApprovalGrant, AutonomyLevel, DraftRef, RunState, StationId, Task, TaskGraph, TaskId, TaskStatus } from '../run/types.js';
 import { gatedIterations } from '../policy/tier.js';
 import {
+  CRITIC_CONTRACTS,
+  criticContractProblems,
+  DRAFT_ROLES,
+  DRAFT_STATIONS,
   LOCKING_STATIONS,
   M1_STATIONS,
   REVIEW_FORBIDDEN_GRANTS,
+  seatTaskId,
   STATION_CONTRACTS,
   type ReviewForbiddenGrant,
   type StationContractTable,
 } from './contracts.js';
-import type { ContextGrant, ParkCause, ReviewSeat, StationContract, StationRefusal, StationTransition, TamperedPath } from './types.js';
+import type {
+  ContextGrant,
+  CriticContract,
+  DraftCondition,
+  DraftSeat,
+  DraftStation,
+  IndependenceGrade,
+  ParkCause,
+  RetryPart,
+  ReviewSeat,
+  StationContract,
+  StationRefusal,
+  StationTransition,
+  TamperedPath,
+} from './types.js';
 
 /** The station after `from` in station order; `learn` has none. */
 export function successor(from: StationId): StationId | null {
@@ -89,10 +108,25 @@ export function approvalKey(station: StationId, level: AutonomyLevel): ApprovalK
 }
 
 /**
+ * A drafted artifact at its station's exit (R19): the draft, and the
+ * conditions the runtime found failed for it. Empty `failed` means every
+ * condition held; a condition the runtime could not evaluate is in it (I5).
+ */
+export interface DraftFloor {
+  readonly draft: DraftRef;
+  readonly failed: readonly DraftCondition[];
+}
+
+/**
  * The approval a station exit needs at a level: the stricter of the
  * contract's own floor and the policy cell, raised to `human-required` when a
  * protected path was touched or tamper analysis found anything
  * (`protectedPathPolicy: 'escalate'`).
+ *
+ * A drafted artifact's exit has a floor of its own, applied as `integrate`'s
+ * is (D-A-DS-04): `human-required` unless the level is L2 and every condition
+ * held, so `auto` stands only where the person's cell is `auto`, at L2, with
+ * nothing failed. L3 is `human-required` until its own amendment (M3).
  *
  * The policy is total, so a missing cell means the value did not come from
  * `resolvePolicy`; it reads `human-required`, the value `resolvePolicy` gives
@@ -100,17 +134,26 @@ export function approvalKey(station: StationId, level: AutonomyLevel): ApprovalK
  * nothing can be approved against a rule nobody can read (I5).
  */
 export function effectiveApproval(
-  contract: StationContract, policy: Policy, level: AutonomyLevel, protectedPathsTouched: readonly string[],
+  contract: StationContract, policy: Policy, level: AutonomyLevel, protectedPathsTouched: readonly string[], drafted?: DraftFloor,
 ): ApprovalOutcome {
   const key = approvalKey(contract.id, level);
   const cell: unknown = Object.hasOwn(policy.approvals, key) ? policy.approvals[key] : 'human-required';
   const fromPolicy: ApprovalOutcome = isApprovalOutcome(cell) ? cell : 'blocked';
   const floor: ApprovalOutcome = isApprovalOutcome(contract.exitGate.approval) ? contract.exitGate.approval : 'blocked';
-  const outcome = stricter(floor, fromPolicy);
+  let outcome = stricter(floor, fromPolicy);
+  if (drafted !== undefined) outcome = stricter(outcome, level === 2 && drafted.failed.length === 0 ? 'auto' : 'human-required');
   // `protectedPathPolicy` is the literal 'escalate' on every contract, so a
   // touched protected path always raises the gate; contractTableProblems
   // checks the literal on the values.
   return protectedPathsTouched.length > 0 ? stricter(outcome, 'human-required') : outcome;
+}
+
+/** Whether a grant clears this exit: the key, unspent, and for a drafted exit the same draft and attempt (R19). */
+export function grantClears(grant: ApprovalGrant, key: ApprovalKey, draft: DraftRef | null): boolean {
+  if (grant.key !== key || grant.usedAt !== null) return false;
+  const named = grant.draft;
+  if (draft === null) return named === null;
+  return named !== null && named.sha256 === draft.sha256 && named.attempt === draft.attempt;
 }
 
 export interface TransitionInput {
@@ -129,6 +172,8 @@ export interface TransitionInput {
    * the way a protected path does; none decides anything alone (P7).
    */
   readonly tamperFindings: readonly string[];
+  /** A drafted artifact's exit: its draft and failed conditions. Absent at every other exit (R19). */
+  readonly draft?: DraftFloor;
   readonly contracts?: StationContractTable;
 }
 
@@ -150,11 +195,11 @@ export function transition(input: TransitionInput): StationTransition {
   const contracts = input.contracts ?? STATION_CONTRACTS;
   const contract = contracts[input.from];
   const key = approvalKey(input.from, input.level);
-  const approval = effectiveApproval(contract, input.policy, input.level, [...input.protectedPathsTouched, ...input.tamperFindings]);
+  const approval = effectiveApproval(contract, input.policy, input.level, [...input.protectedPathsTouched, ...input.tamperFindings], input.draft);
   if (approval === 'blocked') {
     return { ok: false, reason: 'approval-blocked', key, message: `the exit from ${input.from} at L${String(input.level)} is blocked by policy; the run does not advance` };
   }
-  if (approval === 'human-required' && !input.grants.some((g) => g.key === key && g.usedAt === null)) {
+  if (approval === 'human-required' && !input.grants.some((g) => grantClears(g, key, input.draft?.draft ?? null))) {
     const escalations = [...input.protectedPathsTouched.map((path) => `protected path touched: ${path}`), ...input.tamperFindings];
     const why = escalations.length === 0 ? '' : `; escalated by: ${escalations.join('; ')}`;
     return { ok: false, reason: 'approval-required', key, escalations, message: `the exit from ${input.from} at L${String(input.level)} needs a human approval, and none is recorded${why}` };
@@ -164,10 +209,32 @@ export function transition(input: TransitionInput): StationTransition {
 
 export type SeatResult = { readonly ok: true; readonly seat: ReviewSeat } | StationRefusal;
 
+const GRADE_RANK: Readonly<Record<IndependenceGrade, number>> = { 'different-family': 0, 'different-model': 1, 'same-model': 2 };
+
+/**
+ * How independent two seats are, from the models the runtime resolved for
+ * them (D-A-DS-06). The family is the declared one, never inferred (I6); a
+ * model is the same model when its provider, name, and version all match.
+ */
+export function gradeOf(a: ModelIdentity, b: ModelIdentity): IndependenceGrade {
+  if (a.family !== b.family) return 'different-family';
+  return a.provider === b.provider && a.model === b.model && a.version === b.version ? 'same-model' : 'different-model';
+}
+
+/** The weaker of two grades: what a pair compared twice, or a seat compared with several authors, can claim. */
+export function weakerGrade(a: IndependenceGrade, b: IndependenceGrade): IndependenceGrade {
+  return GRADE_RANK[a] >= GRADE_RANK[b] ? a : b;
+}
+
+/** The weakest grade between `seat` and any of `others`. */
+export function gradeAgainst(seat: ModelIdentity, others: readonly ModelIdentity[]): IndependenceGrade {
+  return others.reduce<IndependenceGrade>((grade, other) => weakerGrade(grade, gradeOf(seat, other)), 'different-family');
+}
+
 /**
  * Assembles one review seat (I6). The reviewer's family is compared with every
  * author's. At L3 a match refuses the seat and the run does not advance. At
- * L0-L2 the seat is filled and says `reduced`, so the run records that it
+ * L0-L2 the seat is filled and records the weakest grade, so the run says it
  * lacks the guarantee rather than claiming it. A seat with no author is not a
  * review and throws.
  */
@@ -185,7 +252,7 @@ export function seatReviewer(task: TaskId, authors: readonly ModelIdentity[], re
   }
   return {
     ok: true,
-    seat: { task, authors: authors.map((a) => ({ ...a })), reviewer: { ...reviewer }, independence: shared === undefined ? 'independent' : 'reduced' },
+    seat: { task, authors: authors.map((a) => ({ ...a })), reviewer: { ...reviewer }, independence: gradeAgainst(reviewer, authors) },
   };
 }
 
@@ -320,8 +387,9 @@ export function parkRefusal(state: RunState, task: Task, limits: StepLimits, con
   const retryLimit = at.retry.max;
   const byStarts = attempts !== undefined && attempts.starts >= startLimit && gatedIterations(attempts) < contracts[task.station].maxIterations;
   const byRetries = !byStarts && attempts !== undefined && attempts.retries > retryLimit;
-  const derived: Exclude<ParkCause, 'conflicts-exhausted'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
-  const cause = recorded === undefined || recorded === 'conflicts-exhausted' ? derived : recorded;
+  const derived: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected'> = byStarts ? 'starts-exhausted' : byRetries ? 'retries-exhausted' : 'iterations-exhausted';
+  // A task's park never records `drafts-rejected`, which parks a station, not a task.
+  const cause = recorded === undefined || recorded === 'conflicts-exhausted' || recorded === 'drafts-rejected' ? derived : recorded;
   const limit = cause === 'starts-exhausted' ? startLimit : cause === 'retries-exhausted' ? retryLimit : contracts[task.station].maxIterations;
   const message =
     cause === 'starts-exhausted'
@@ -372,6 +440,14 @@ export function nextStep(state: RunState, graph: TaskGraph, limits: StepLimits, 
   }
   const parked = graph.tasks.find((task) => statusOf(state, task) === 'parked');
   if (parked !== undefined) return { kind: 'refuse', refusal: parkRefusal(state, parked, limits, contracts) };
+  // A drafting seat parks like a task, and a person's rejection of a station's last draft parks the run (R19).
+  for (const station of DRAFT_STATIONS) {
+    for (const seat of ['drafter', 'critic'] as const) {
+      const task = seatTask(state, station, seat);
+      if (statusOf(state, task) === 'parked') return { kind: 'refuse', refusal: parkRefusal(state, task, limits, contracts) };
+    }
+    if (state.drafts[station]?.parked === true) return { kind: 'refuse', refusal: draftsRejected(station, contracts) };
+  }
 
   const builds = graph.tasks.filter((task) => task.station === 'build');
   const reviews = graph.tasks.filter((task) => task.station === 'review');
@@ -415,4 +491,113 @@ export function nextStep(state: RunState, graph: TaskGraph, limits: StepLimits, 
     case 'learn':
       throw new Error(`station machine: M1 never enters ${state.station}`);
   }
+}
+
+/**
+ * A drafting seat as a task, so its attempts, retries, starts, usage, and park
+ * are counted by the same rules as a graph task's (R19). It depends on
+ * nothing, and no graph names it.
+ */
+export function seatTask(state: Pick<RunState, 'runId'>, station: DraftStation, seat: DraftSeat, baseCommit = ''): Task {
+  return {
+    id: seatTaskId(station, seat),
+    runId: state.runId,
+    station,
+    role: DRAFT_ROLES[station][seat],
+    dependsOn: [],
+    baseCommit,
+    dependencySet: [],
+    worktreePath: '',
+    attempt: 1,
+  };
+}
+
+/** The refusal of a run whose drafting station's last allowed draft a person rejected (R19, D-A-DS-02). */
+export function draftsRejected(station: DraftStation, contracts: StationContractTable = STATION_CONTRACTS): StationRefusal {
+  const limit = contracts[station].maxIterations;
+  return {
+    ok: false,
+    reason: 'parked',
+    task: null,
+    station,
+    cause: 'drafts-rejected',
+    limit,
+    message: `the run parked at ${station}: a person rejected its draft on the last of ${String(limit)} attempts`,
+  };
+}
+
+/**
+ * A drafter's retry as its request's variable suffix: the typed parts of
+ * what sent its last draft back, and nothing else (D-A-DS-02). Never in the
+ * stable prefix or a role. At `test-design` the locked-spec-alone rule
+ * admits these parts and no other: a person's notes there are refused, since
+ * an approver who has read the repository would otherwise be a channel
+ * around the black box, and a test drafter learns of a base run only each
+ * check's id, declaration, and exit code or fixed cause.
+ */
+export function retrySuffix(station: DraftStation, attempt: number, parts: readonly RetryPart[]): string {
+  const lines = [`attempt ${String(attempt)}`];
+  for (const part of parts) {
+    switch (part.kind) {
+      case 'critic-findings':
+        lines.push('[critic-findings]', ...part.findings.map((f) => `- ${f}`));
+        break;
+      case 'runtime-problems':
+        lines.push('[runtime-problems]', ...part.problems.map((p) => `- ${p.path}: ${p.code}`));
+        break;
+      case 'base-refusal':
+        lines.push('[base-refusal]', ...part.checks.map((c) => `- ${c.checkId} declared ${c.declared ?? 'nothing'}: ${'exitCode' in c ? `exit ${String(c.exitCode)}` : c.cause}`));
+        break;
+      case 'rejection-reason':
+        lines.push('[rejection-reason]', part.reason);
+        break;
+      case 'notes':
+        if (station !== 'spec') throw new Error(`station machine: a ${station} retry carries no notes; a rejection there carries a reason from a fixed set`);
+        lines.push('[approver-notes]', part.notes);
+        break;
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The context a critic seat is given: the offered parts its contract grants,
+ * in the contract's order, and nothing else (R19). The contract is checked
+ * again here rather than trusted, as `grantedContext` checks a station's: a
+ * `test-design` critic granted anything beyond the locked spec, the draft,
+ * and the rubric throws before anything is assembled.
+ */
+export function grantedCriticContext(contract: CriticContract, offered: Partial<Record<ContextGrant, string>>): ContextPart[] {
+  const problems = criticContractProblems({ ...CRITIC_CONTRACTS, [contract.station]: contract });
+  if (problems.length > 0) throw new Error(`station machine: ${problems.map((p) => `${p.station}: ${p.message}`).join('; ')}`);
+  const parts: ContextPart[] = [];
+  for (const grant of contract.allowedContext) {
+    const text = Object.hasOwn(offered, grant) ? offered[grant] : undefined;
+    if (typeof text === 'string') parts.push({ grant, text });
+  }
+  return parts;
+}
+
+/**
+ * Seats a test drafter against every model the build driver can resolve for
+ * the run (R19, R9's `test-design` and `build` row). A drafter of a builder's
+ * family writes the tests its own family is judged by: at L3 it is refused,
+ * as a same-family reviewer is; below L3 it is seated and the floor's
+ * `drafter-independent-of-builder` condition fails, so its draft goes to a
+ * person. The grade is the weakest against any builder model.
+ */
+export function seatTestDrafter(
+  drafter: ModelIdentity, builders: readonly ModelIdentity[], level: AutonomyLevel,
+): { readonly ok: true; readonly grade: IndependenceGrade } | StationRefusal {
+  const grade = gradeAgainst(drafter, builders);
+  if (grade !== 'different-family' && level === 3) {
+    return {
+      ok: false,
+      reason: 'same-family-drafter',
+      station: 'test-design',
+      family: drafter.family,
+      message: `the test drafter shares the model family '${drafter.family}' with a model the build driver can resolve, and L3 does not seat it`,
+    };
+  }
+  return { ok: true, grade };
 }

@@ -50,13 +50,13 @@ export const HELLO_FIXTURE = join('packages', 'api', 'test', 'fixtures', 'hello'
 export const HELLO_TASK = 'hello' as TaskId;
 export const HELLO_REVIEW = 'hello-review' as TaskId;
 
-export const ARTIFACTS: RunRequest['artifacts'] = {
+export const ARTIFACTS = {
   spec: ['spec.md'],
   acceptanceTests: ['acceptance.md'],
   verificationManifest: 'verify.json',
   taskGraph: 'graph.json',
   specParts: { security: 'security.json' },
-};
+} satisfies RunRequest['artifacts'];
 
 const M1: readonly string[] = ['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate'];
 

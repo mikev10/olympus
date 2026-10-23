@@ -43,6 +43,8 @@ function run(id: string, over: Partial<RunRecords>): RunRecords {
     startedAt: '2026-10-01T00:00:00.000Z',
     mergedAt: '2026-10-01T01:00:00.000Z',
     approvalsSpent: 0,
+    reviewGrade: 'different-family',
+    critiques: [],
     tasks: [],
     decisions: [],
     usage: [],
@@ -123,7 +125,7 @@ describe('deriveOutcomes', () => {
   it('pairs each grant with the first request it cleared, and counts a request with no grant as open', () => {
     const key = 'integrate:2' as const;
     const required = { cause: 'station-refused', decidedBy: 'station-machine', refusal: { ok: false, reason: 'approval-required', key, escalations: [], message: '' } } as const;
-    const granted = { cause: 'approval-granted', decidedBy: 'approval', key, principal: 'p' } as const;
+    const granted = { cause: 'approval-granted', decidedBy: 'approval', key, principal: 'p', draft: null } as const;
     const o = deriveOutcomes([
       run('a', {
         decisions: [

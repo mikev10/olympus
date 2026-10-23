@@ -17,8 +17,8 @@
  * (D-I1a-12). `bound` says which a total is, so a consumer does not have to
  * work it out.
  */
-import { isAgentStation, maxStarts, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
-import type { Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
+import { DRAFT_ROLES, isAgentStation, maxStarts, seatTaskId, STATION_CONTRACTS, StrictPolicyEngine } from '@olympus-ai/core';
+import type { DraftStation, Policy, RoleId, RunState, StationId, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { UsageRecord, Vault } from '@olympus-ai/vault';
 
 /** Sums over the calls a relay counted. */
@@ -171,9 +171,21 @@ export interface WorstCaseCost {
 
 const MICRO = 1_000_000;
 
-export function worstCaseCost(graph: TaskGraph, policy: Policy): WorstCaseCost {
+export function worstCaseCost(graph: TaskGraph, policy: Policy, drafted: readonly DraftStation[] = []): WorstCaseCost {
   const engine = new StrictPolicyEngine();
   const tasks: WorstCaseTask[] = [];
+  // Every seat a drafting station may hold, its drafter and its critic, each called at most once per
+  // attempt and its retries, so the figure shown at admission covers them (R19, D-P9-03).
+  for (const station of drafted) {
+    for (const seat of ['drafter', 'critic'] as const) {
+      const role = DRAFT_ROLES[station][seat];
+      const resolved = engine.resolveCapabilities(role, station, policy);
+      if (!resolved.ok) throw new Error(`worst-case cost: role ${role} has no scope at ${station}: ${resolved.detail}`);
+      const calls = maxStarts(STATION_CONTRACTS[station], 0);
+      const perCall = resolved.scope.budget.maxCostUsd;
+      tasks.push({ task: seatTaskId(station, seat), station, role, calls, maxCostUsdPerCall: perCall, usd: Number(microsCeiling(perCall, calls)) / MICRO });
+    }
+  }
   for (const task of graph.tasks) {
     if (!isAgentStation(task.station)) continue;
     const resolved = engine.resolveCapabilities(task.role, task.station, policy);

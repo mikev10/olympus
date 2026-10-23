@@ -25,6 +25,7 @@ import { around } from './line-assertions.js';
 import { realComponents, realPolicy } from './real-line.js';
 import { failingRun } from './tier.js';
 import { conflictScenario } from './parallel.js';
+import { draftingDecision, draftsRejectedPark } from './drafting.js';
 import { inTask, runHello, writes } from './verification.js';
 import { ARTIFACTS, HELLO_TASK, lineScope, linePolicy, readRecord, refusalOf, stubDriver, withLine, writeManifest, type LineRig } from './line.js';
 
@@ -53,7 +54,10 @@ export type CauseKey =
   | 'violation-recorded'
   | 'relay-refused'
   | 'tier-escalated'
-  | 'task-conflict';
+  | 'task-conflict'
+  | 'approval-rejected'
+  | 'draft-sent-back'
+  | 'draft-floor-applied';
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -77,6 +81,12 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'tier-escalated';
     case 'task-conflict':
       return 'task-conflict';
+    case 'approval-rejected':
+      return 'approval-rejected';
+    case 'draft-sent-back':
+      return 'draft-sent-back';
+    case 'draft-floor-applied':
+      return 'draft-floor-applied';
   }
 }
 
@@ -575,6 +585,14 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     },
   },
   'station:same-family-reviewer': { kind: 'blocked-until-m3' },
+  // R19: a test drafter of the builder's family is refused at L3 alone, as a same-family reviewer is.
+  'station:same-family-drafter': { kind: 'blocked-until-m3' },
+  'station:parked:drafts-rejected': { kind: 'scenario', run: draftsRejectedPark },
+  'approval-rejected': { kind: 'scenario', run: () => draftingDecision('approval-rejected') },
+  'draft-sent-back': { kind: 'scenario', run: () => draftingDecision('draft-sent-back') },
+  'draft-floor-applied': { kind: 'scenario', run: () => draftingDecision('draft-floor-applied') },
+  'approval-refused:draft-mismatch': { kind: 'scenario', run: () => draftingDecision('draft-mismatch') },
+  'approval-refused:draft-invalid': { kind: 'scenario', run: () => draftingDecision('draft-invalid') },
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
   'station:parked:retries-exhausted': { kind: 'scenario', run: () => parkScenario('retries-exhausted') },
   'station:parked:starts-exhausted': { kind: 'scenario', run: () => parkScenario('starts-exhausted') },

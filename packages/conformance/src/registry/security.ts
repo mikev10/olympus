@@ -187,7 +187,7 @@ export const RULE_NEEDS_A_DENIAL_CHECK: LocalAssertion = runtime({
       if (refused.at !== 'test-design' || refused.transition.reason !== 'denial-check-missing' || refused.transition.rules.join() !== 'owner-only') {
         throw new Error(`R17: an undenied rule was refused as ${JSON.stringify(refused.transition)} at ${refused.at}`);
       }
-      if ((await components.vault.readBaseRun(rig.runId)) !== null) throw new Error('R17: the base ran before the undenied rule refused the exit');
+      if ((await components.vault.readBaseRun(rig.runId, null)) !== null) throw new Error('R17: the base ran before the undenied rule refused the exit');
     });
     await withLine('r17-denial-control-', async (rig) => {
       await writeFile(join(rig.dirs.artifacts, 'security.json'), JSON.stringify(ONE_RULE));
