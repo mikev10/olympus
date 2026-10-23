@@ -4203,3 +4203,53 @@ Found by the external review of R4 (codex-2) and recorded there as a known limit
 - **Found:** the external review of R18 (codex-2; gemini-1 assessed the same stop as sound). A stop between `recordAdmission` and `commitRunState` leaves an admission record that names a stack; `readRunRecords` reaches the admission only through `state.admission`, so its missing-state branch reports `stack: null`. R18's deliverable 3 said `null` meant no admission record or one written before R18.
 - **Decision:** not fixed in R18. No rate changes: the run is `unfinished` with no tasks, so it is outside every attempt rate and the autonomy denominator, and `unrecorded` receives no count from it. Reading the stack would need the admission found by run id, the same Vault change as D-R18-06. Deliverable 3 now states the case instead of contradicting the code.
 - **Owner:** R10, issue #59, as D-R18-06.
+
+## Amendment: role compiler (R20)
+
+`/start-unit R19` stopped on an unshipped dependency: the role compiler had a
+recorded gap (D-A-DS-03) and no spec, unit, or package. This amendment closes
+the gap as unit R20 and points R19, R5, and R11 at it. Each row was checked
+against the code on `v2` at 60b83a0. No package changes: the contract
+amendments R20 names land in its own pull request.
+
+### D-A-RC-01: roles are files beside policy, compiled and pinned at admission
+
+- **Ambiguous:** the gap put roles "in the Vault", edited as an approved, versioned change, and the Vault has no operation for a person's edit. Policy is a host file the service is configured with (`packages/api/src/host/main.ts`), and the admission record carries the resolved policy (`AdmissionRecord.policy`).
+- **Chosen:** the same path as policy. A roles directory on the host, which no sandbox mounts; compiled at admission; every compiled role and its hash carried in the admission record. A live run keeps its versions. A change is a person's edit to the file; the line adds no approval flow.
+- **Must hold:** I1, because no agent can reach the directory. I2, because the version is a hash the runtime computes.
+- **Reverse:** add a Vault operation for roles and an approval flow; the admission record still pins the version.
+- **Confirmed** by the maintainer, 2026-10-22.
+
+### D-A-RC-02: a role is one Markdown file of instructions, with no front matter
+
+- **Chosen:** `<role-id>.md`, whose whole content is the instructions; the version is the SHA-256 of the bytes read. No front matter, so nothing in a role can be read as a grant, model, or tier; grants stay in `policy.roles`, as the comment on `CompiledRole` requires (I4). An oversized, non-UTF-8, empty, misnamed, or non-regular entry refuses admission and is named (I5).
+- **Reverse:** admit structured front matter, with a compiler that refuses any grant-shaped key.
+- **Confirmed** by the maintainer, 2026-10-22.
+
+### D-A-RC-03: a driver renders a role from the request, never from a file in the workspace
+
+- **Found:** the gap had each driver's `emitArtifacts` render roles. `emitArtifacts` writes into the sandbox (`packages/drivers/claude-code/src/driver.ts`, `emitArtifacts`), and the workspace is agent-writable, so the agent being judged could rewrite its own instructions (I3). Nothing calls `emitArtifacts` today. The Claude Code driver already passes an agent definition on its argv for `spawnSubagent` and runs with `--setting-sources ''`, so a workspace file configures nothing.
+- **Chosen:** `TaskRequest` carries the `CompiledRole`, and the driver renders it on the invocation itself, in the cacheable half of the prompt. `emitArtifacts` stays in the contract, unused by the line.
+- **Reverse:** render through `emitArtifacts` into a directory no agent can write, mounted read-only.
+- **Confirmed** by the maintainer, 2026-10-22.
+
+### D-A-RC-04: each task attempt records its role hash; rates per role version are R11's
+
+- **Chosen:** run state's task attempt record names the role hash beside the model. R2's rates gain no role-version key here.
+- **Why:** recording cannot be backfilled, and comparison has no reader until R11.
+- **Reverse:** add the key to R2's per-role rates.
+- **Confirmed** by the maintainer, 2026-10-22.
+
+### D-A-RC-05: nothing untrusted or judging can reach the compiler
+
+- **Chosen:** the compiler's only input is the bytes of the roles directory. No parameter can carry an `UntrustedPayload`, an extracted field, a rubric, an acceptance check, or R7's corpus, asserted the way `compiled-role-carries-no-grants` asserts grants (I7, I3).
+- **Known limit:** the compiler does not read meaning. A person who pastes judging content into a role file is not stopped.
+- **Confirmed** by the maintainer, 2026-10-22.
+
+### D-A-RC-06: every seat has a role or the run is refused; R20 ships `builder` and `reviewer`, R19 writes its own
+
+- **Found:** the review seat has no role of its own. `packages/api/src/line.ts` runs the reviewer with the reviewed task's `task.role`, so its grants are that task's scope.
+- **Chosen:** admission refuses a task graph naming a role with no definition, and a run with no `reviewer` role; the CLI's default prompt is never a fallback (I5). The review seat's instructions come from a fixed `reviewer` role and its grants stay as today; a review seat with its own policy scope is R9's. R20 ships default `builder` and `reviewer` roles. R19 writes the roles for its four seats in R20's format, which amends R19's out-of-scope list.
+- **Why:** shipping drafter and critic roles before anything seats them would be content with no assertion behind it (I8).
+- **Reverse:** let an undefined role run under the CLI's default prompt, recorded as no role.
+- **Confirmed** by the maintainer, 2026-10-22.
