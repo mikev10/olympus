@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Olympus logo</title>
+<!-- Every logo variant on ink and on white. The files themselves live in ../logo/. -->
+<style>
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #f4f4f5; color: #3f3f46; }
+  main { max-width: 960px; margin: 0 auto; padding: 40px 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: #71717a; margin: 32px 0 10px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 40px 16px; border-radius: 8px; }
+  .ink { background: #0A0A0B; }
+  .white { background: #fff; border: 1px solid #e4e4e7; }
+</style>
+</head>
+<body>
+<main>
+  <h2>Wordmark</h2>
+  <div class="row">
+    <div class="tile ink"><img src="../logo/wordmark-white.svg" alt="Olympus" width="360"></div>
+    <div class="tile white"><img src="../logo/wordmark-ink.svg" alt="Olympus" width="360"></div>
+  </div>
+  <h2>Mark at 120, 32 and 16px</h2>
+  <div class="row">
+    <div class="tile ink"><img src="../logo/mark-white.svg" alt="" width="120"><img src="../logo/mark-white.svg" alt="" width="32"><img src="../logo/mark-white.svg" alt="" width="16"></div>
+    <div class="tile white"><img src="../logo/mark-ink.svg" alt="" width="120"><img src="../logo/mark-ink.svg" alt="" width="32"><img src="../logo/mark-ink.svg" alt="" width="16"></div>
+  </div>
+  <h2>Avatar tile</h2>
+  <div class="row">
+    <div class="tile white"><img src="../logo/mark-tile.svg" alt="" width="120"><img src="../logo/mark-tile.svg" alt="" width="32"><img src="../logo/mark-tile.svg" alt="" width="16"></div>
+  </div>
+</main>
+</body>
+</html>
