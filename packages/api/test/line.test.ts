@@ -858,7 +858,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
 describe('the line provisions what the graph and the policy name (D-I1a-01, A-I1a-02)', () => {
   const PROFILE = { buildImage: 'build-image', checkImage: 'check-image', limits: { cpus: 1, memoryMb: 512, pids: 64 } };
   const PRICE = { inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25, cacheWrite1hPerMTok: 2 };
-  const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } } };
+  const RELAY: Omit<RelaySpec, 'budget'> = { upstream: 'https://models.example', paths: ['/v1/messages'], header: 'x-api-key', scheme: 'raw', credential: 'model', urlVariable: 'MODEL_URL', meter: { dialect: 'anthropic-messages', prices: { stub: PRICE, 'another-model': PRICE } } };
 
   class RelayingDriver extends ChosenDriver {
     override relayRequest(): typeof RELAY {

@@ -5,6 +5,7 @@
  * service this graph is served by (I9).
  */
 import { BASE_IMAGE, ClaudeCodeDriver, ensureImage, MODEL_CREDENTIAL } from '@olympus-ai/driver-claude-code';
+import { checkConfig, ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, type EndpointConfig } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
 import { buildGraph, type BuiltGraph, type SandboxProfile } from '../graph.js';
@@ -38,6 +39,60 @@ export interface HostConfig {
    * where there is nothing to derive it from (D-I1b-10).
    */
   readonly containerUser?: ContainerUser;
+  /**
+   * An OpenAI-compatible endpoint, its credential, and the seats it fills
+   * (R6, D-R6-07). Every seat it does not name keeps the Claude Code driver.
+   * Absent or null composes the Claude Code driver in every seat.
+   */
+  readonly endpoint?: HostEndpoint | null;
+}
+
+/** The seats an endpoint can fill: the build seat, the review seat, and the four drafting seats (R19). */
+export const ENDPOINT_SEATS = ['driver', 'reviewer', 'specDrafter', 'specCritic', 'testDrafter', 'testCritic'] as const;
+export type EndpointSeat = (typeof ENDPOINT_SEATS)[number];
+
+export interface HostEndpoint {
+  readonly config: EndpointConfig;
+  /** The endpoint's credential. Held by the sandbox provider for its relays and given to no sandbox (A-P12-01). */
+  readonly key: string;
+  readonly seats: readonly EndpointSeat[];
+}
+
+/**
+ * Reads the endpoint file `FACTORY_ENDPOINT_CONFIG` names: the driver's
+ * configuration and a `seats` list, nothing else. A file that does not parse
+ * exactly stops the host before it listens (I5): a seat that was misspelt
+ * would otherwise be a seat silently left to the other driver.
+ */
+export function parseEndpointFile(text: string, key: string): HostEndpoint {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`factory-host: the endpoint file is not JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('factory-host: the endpoint file is not a JSON object');
+  const { seats, ...config } = parsed as Record<string, unknown>;
+  if (!Array.isArray(seats) || seats.length === 0) throw new Error('factory-host: the endpoint file names no seats; an endpoint that fills none has nothing to do');
+  const known = new Set<string>(ENDPOINT_SEATS);
+  const named: EndpointSeat[] = [];
+  for (const seat of seats as unknown[]) {
+    if (typeof seat !== 'string' || !known.has(seat)) {
+      throw new Error(`factory-host: the endpoint file names the seat ${JSON.stringify(seat)}; the seats are ${ENDPOINT_SEATS.join(', ')}`);
+    }
+    if (named.includes(seat as EndpointSeat)) throw new Error(`factory-host: the endpoint file names the seat '${seat}' twice`);
+    named.push(seat as EndpointSeat);
+  }
+  if (key === '') throw new Error('factory-host: the endpoint has no credential; a local endpoint without one is R21');
+  // The driver's own check, so the host refuses exactly what the driver would, naming the field.
+  return { config: checkConfig(config), key, seats: named };
+}
+
+/** Each seat's driver: the endpoint's in the seats it names, the default in every other (D-R6-07). */
+export function seatedDrivers<D>(fallback: D, endpoint: { readonly driver: D; readonly seats: readonly EndpointSeat[] } | null): Record<EndpointSeat, D> {
+  const out = {} as Record<EndpointSeat, D>;
+  for (const name of ENDPOINT_SEATS) out[name] = endpoint?.seats.includes(name) === true ? endpoint.driver : fallback;
+  return out;
 }
 
 /** Bounds every sandbox the line provisions, whichever task it serves. */
@@ -59,22 +114,31 @@ export function containerUser(env: Readonly<Record<string, string | undefined>>)
 export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
   const docker = config.docker === undefined ? {} : { executable: config.docker };
+  const endpoint = config.endpoint ?? null;
   const sandbox = await LocalDockerProvider.create({
     ...docker,
     vaultPaths: [config.store, config.repository],
-    credentials: { [MODEL_CREDENTIAL]: config.modelKey },
+    credentials: {
+      [MODEL_CREDENTIAL]: config.modelKey,
+      ...(endpoint === null ? {} : { [ENDPOINT_CREDENTIAL]: endpoint.key }),
+    },
   });
-  const driver = new ClaudeCodeDriver({ provider: sandbox });
+  const claude = new ClaudeCodeDriver({ provider: sandbox });
+  // The endpoint's driver, in the seats the operator named and no others (D-R6-07). Its family is the operator's
+  // declaration, so a reviewer or critic seated on it is graded against that declaration (I6).
+  const other = endpoint === null ? null : new OpenAICompatibleDriver({ provider: sandbox, endpoint: endpoint.config });
+  const seats = seatedDrivers<ClaudeCodeDriver | OpenAICompatibleDriver>(claude, other === null || endpoint === null ? null : { driver: other, seats: endpoint.seats });
+  const seat = (name: EndpointSeat): ClaudeCodeDriver | OpenAICompatibleDriver => seats[name];
   const buildImage = await ensureImage(docker);
   return buildGraph({
     vault,
     sandbox,
-    driver,
-    // One driver in both seats: below L3 the seat is filled and run state records its independence as its grade (I6).
-    reviewer: driver,
-    // One driver in every drafting seat too: no critic is of another family than its drafter, so none is
-    // seated, the condition is recorded as failed, and every draft goes to a person (R19, D-A-DS-04).
-    drafting: { specDrafter: driver, specCritic: driver, testDrafter: driver, testCritic: driver },
+    driver: seat('driver'),
+    // With no endpoint, one driver in both seats: below L3 the seat is filled and run state records its independence as its grade (I6).
+    reviewer: seat('reviewer'),
+    // And in every drafting seat: a critic of its drafter's family is not seated, the condition is recorded as
+    // failed, and every draft goes to a person (R19, D-A-DS-04). An endpoint of another family seats one.
+    drafting: { specDrafter: seat('specDrafter'), specCritic: seat('specCritic'), testDrafter: seat('testDrafter'), testCritic: seat('testCritic') },
     workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },

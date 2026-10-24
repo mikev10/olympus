@@ -71,6 +71,7 @@ function relaySpec(overrides: Partial<RelaySpec> = {}): RelaySpec {
     upstream: UPSTREAM_ORIGIN,
     paths: ['/v1/messages'],
     header: 'x-api-key',
+    scheme: 'raw',
     credential: CREDENTIAL,
     urlVariable: URL_VARIABLE,
     budget: TEST_BUDGET,
@@ -335,6 +336,7 @@ describe('the credential never enters the sandbox', () => {
       upstream: UPSTREAM_ORIGIN,
       paths: ['/v1/messages'],
       header: 'x-api-key',
+      scheme: 'raw',
       credential: CREDENTIAL,
       urlVariable: URL_VARIABLE,
       endpoint: `${RELAY_ALIAS}:${String(RELAY_PORT)}`,
@@ -523,6 +525,19 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     }
   });
 
+  test('a spec with no scheme, or one the relay does not write, is refused; an unknown dialect is refused and openai-chat is not', () => {
+    const held = new Set([CREDENTIAL]);
+    const { scheme: _scheme, ...schemeless } = relaySpec();
+    for (const spec of [schemeless, relaySpec({ scheme: 'basic' as RelaySpec['scheme'] })]) {
+      expect(() => checkRelay(spec as RelaySpec, held)).toThrow(/relay\.scheme/u);
+    }
+    expect(checkRelay(relaySpec({ scheme: 'bearer' }), held).scheme).toBe('bearer');
+    expect(() => checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'gemini-generate' as RelaySpec['meter']['dialect'] } }), held)).toThrow(
+      /relay\.meter\.dialect/u,
+    );
+    expect(checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'openai-chat' } }), held).meter.dialect).toBe('openai-chat');
+  });
+
   test('a provider given a credential with no value, or under a name a spec could not match, refuses to be built', async () => {
     expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], credentials: { model: '' } }))).layer).toBe('relay');
     expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], credentials: { 'Not A Name': 'x' } }))).layer).toBe('relay');
@@ -535,7 +550,7 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
 
   test('the relay itself refuses to start without a credential or a grant', async () => {
     const valid: Record<string, string> = {
-      RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_PORT: '8080',
+      RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_SCHEME: 'raw', RELAY_PORT: '8080',
       RELAY_BUDGET: JSON.stringify(TEST_BUDGET), RELAY_METER: JSON.stringify(TEST_METER),
     };
     const flagsFor = (env: Record<string, string>): string[] => Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
@@ -556,7 +571,10 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       // P13: a relay nothing bounds, or that cannot price what it forwards, does not start either.
       [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_BUDGET')), 'no budget'],
       [{ ...valid, RELAY_BUDGET: JSON.stringify({ maxTokens: 0, maxCostUsd: 1 }) }, 'no budget'],
-      [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, dialect: 'openai-chat' }) }, 'no meter'],
+      [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, dialect: 'gemini-generate' }) }, 'no meter'],
+      // A-R6-02: a relay that does not know how to write its credential does not guess.
+      [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_SCHEME')), 'no scheme'],
+      [{ ...valid, RELAY_SCHEME: 'basic' }, 'no scheme'],
       [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { m: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } }) }, 'no price table'],
     ];
     for (const [env, named] of attempts) {

@@ -17,6 +17,7 @@
       "@olympus-ai/compiler": ["../compiler/src/index.ts"],
       "@olympus-ai/api": ["../api/src/index.ts"],
       "@olympus-ai/driver-claude-code": ["../drivers/claude-code/src/index.ts"],
+      "@olympus-ai/driver-openai-compatible": ["../drivers/openai-compatible/src/index.ts"],
       "olympus-ai": ["../cli/src/cli.ts"]
     }
   },

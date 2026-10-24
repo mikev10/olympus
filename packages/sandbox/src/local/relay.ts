@@ -34,7 +34,7 @@
 import { dockerCli } from './docker.js';
 import { normalizeHost } from './egress.js';
 import { refuse, withLeftovers } from './refusal.js';
-import type { MeterReading, ModelPrice, RelayBudget, RelayMeter, RelaySpec } from '../types.js';
+import type { MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
 
 /** The port the relay listens on, inside its own container. Nothing is published to the host. */
 export const RELAY_PORT = 8080;
@@ -87,6 +87,14 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   charged `max_tokens` as output, marks the budget `unreadable`, and stops
  *   the relay forwarding. A response in a content encoding the relay did not
  *   ask for is unreadable. A response that is not a success is charged nothing.
+ * - Under the `openai-chat` dialect (A-R6-01) the same rules hold with that
+ *   API's names: a `POST` to a granted path ending `/chat/completions` is
+ *   metered and a `GET` is free; the ceiling is the larger of
+ *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
+ *   `prompt_tokens` (less its cached part, counted as cache reads) and
+ *   `completion_tokens`, from the body or from the stream chunk that carries it.
+ * - The credential is written as the spec's scheme says: as it is, or as
+ *   `Bearer <credential>` (A-R6-02).
  * - On SIGTERM it stops taking requests, cuts off any call still in flight —
  *   which is then charged by the rules above — and writes a `closed` line, the
  *   provider's proof that the log it reads is complete.
@@ -108,6 +116,7 @@ function parsed(name) {
 
 const credential = String(process.env.RELAY_CREDENTIAL || '');
 const header = String(process.env.RELAY_HEADER || '').toLowerCase();
+const scheme = String(process.env.RELAY_SCHEME || '');
 const port = Number(process.env.RELAY_PORT);
 const trust = String(process.env.RELAY_TRUST || '');
 let upstream = null;
@@ -122,6 +131,7 @@ const PRICE_FIELDS = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cach
 
 if (credential === '') fail('no credential; a relay that forwarded without one would be an unauthenticated route out');
 if (header === '') fail('no header to write the credential to');
+if (scheme !== 'raw' && scheme !== 'bearer') fail('no scheme to write the credential in');
 if (upstream === null || upstream.protocol !== 'https:' || upstream.pathname !== '/' || upstream.search !== '' ||
     upstream.hash !== '' || upstream.username !== '' || upstream.password !== '') {
   fail('the upstream is not an https origin');
@@ -133,9 +143,10 @@ if (!Array.isArray(paths) || paths.length === 0 ||
 if (budget === null || typeof budget !== 'object' || !positive(budget.maxTokens) || !positive(budget.maxCostUsd)) {
   fail('no budget; a relay that forwarded without one would be a route to unbounded spend');
 }
-if (meter === null || typeof meter !== 'object' || meter.dialect !== 'anthropic-messages') {
+if (meter === null || typeof meter !== 'object' || (meter.dialect !== 'anthropic-messages' && meter.dialect !== 'openai-chat')) {
   fail('no meter for a dialect this relay reads');
 }
+const openai = meter.dialect === 'openai-chat';
 const prices = meter.prices;
 if (prices === null || typeof prices !== 'object' || Array.isArray(prices) || Object.keys(prices).length === 0 ||
     !Object.keys(prices).every(function (m) {
@@ -157,8 +168,15 @@ function granted(path) {
   return paths.some(function (p) { return path === p || path.indexOf(p + '/') === 0; });
 }
 
-// What a request costs, as the anthropic-messages dialect knows it.
+// What a request costs, as the dialect knows it. Under openai-chat a POST to a
+// chat-completions path is metered, a GET (a model list) is free, and every
+// other request is a cost the meter cannot count (A-R6-01).
 function kindOf(method, path) {
+  if (openai) {
+    if (method === 'POST' && (path === '/chat/completions' || /\\/chat\\/completions$/.test(path))) return 'metered';
+    if (method === 'GET' || method === 'HEAD') return 'free';
+    return 'unmeterable';
+  }
   if (method === 'POST' && path === '/v1/messages') return 'metered';
   if (method === 'POST' && path === '/v1/messages/count_tokens') return 'free';
   if (method === 'GET' || method === 'HEAD') return 'free';
@@ -243,6 +261,21 @@ function usageReader() {
     const output = count(usage.output_tokens);
     if (output !== null) { u.output = output; if (final) u.final = true; }
   };
+  // openai-chat: prompt_tokens counts the cached prompt too, so the cached part
+  // is taken out of the input and counted as cache reads. It reports no writes.
+  u.takeOpenai = function (usage) {
+    if (usage === null || typeof usage !== 'object') return;
+    const prompt = count(usage.prompt_tokens);
+    if (prompt !== null) {
+      const details = usage.prompt_tokens_details;
+      const cached = details !== null && typeof details === 'object' ? count(details.cached_tokens) : null;
+      u.cacheRead = cached === null ? 0 : Math.min(cached, prompt);
+      u.input = prompt - u.cacheRead;
+      u.any = true;
+    }
+    const output = count(usage.completion_tokens);
+    if (output !== null) { u.output = output; u.final = true; }
+  };
   return u;
 }
 
@@ -259,6 +292,8 @@ function streamParser(u) {
     let event = null;
     try { event = JSON.parse(text.slice(5)); } catch (error) { return; }
     if (event === null || typeof event !== 'object') return;
+    // openai-chat: the usage arrives on one chunk, the last before [DONE], which does not parse and is skipped.
+    if (openai) { if (event.usage !== null && typeof event.usage === 'object') u.takeOpenai(event.usage); return; }
     if (event.type === 'message_start' && event.message !== null && typeof event.message === 'object') u.take(event.message.usage, false);
     else if (event.type === 'message_delta') u.take(event.usage, true);
   }
@@ -289,7 +324,9 @@ function bodyParser(u) {
       if (size > BODY_LIMIT) return;
       let body = null;
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { return; }
-      if (body !== null && typeof body === 'object') u.take(body.usage, true);
+      if (body !== null && typeof body === 'object') {
+        if (openai) u.takeOpenai(body.usage); else u.take(body.usage, true);
+      }
     },
   };
 }
@@ -332,7 +369,7 @@ const ca = trust === '' ? undefined : tls.rootCertificates.concat([trust]);
 
 function send(req, res, target, path, headers, body, done) {
   headers.host = upstream.host;
-  headers[header] = credential;
+  headers[header] = scheme === 'bearer' ? 'Bearer ' + credential : credential;
   headers['accept-encoding'] = 'identity';
   let answered = false;
   const outbound = https.request({
@@ -372,6 +409,17 @@ function send(req, res, target, path, headers, body, done) {
   if (body === null) req.pipe(outbound); else outbound.end(body);
 }
 
+// The most an openai-chat request can generate: the larger of its two ceiling
+// fields, times the choices it asks for. A field present and not a positive
+// integer, or no ceiling at all, is no ceiling, and the request is refused (A-R6-01).
+function openaiCeiling(request) {
+  const fields = [request.max_completion_tokens, request.max_tokens].filter(function (v) { return v !== undefined && v !== null; });
+  if (fields.length === 0 || !fields.every(function (v) { return Number.isInteger(v) && v > 0; })) return undefined;
+  const n = request.n === undefined || request.n === null ? 1 : request.n;
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  return Math.max.apply(null, fields) * n;
+}
+
 // One metered call at a time (D-P13-13).
 let busy = false;
 const waiting = [];
@@ -408,7 +456,7 @@ function metered(req, res, target, path) {
       let request = null;
       try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = null; }
       const model = request !== null && typeof request === 'object' && typeof request.model === 'string' ? request.model : null;
-      const maxTokens = request !== null && typeof request === 'object' ? request.max_tokens : undefined;
+      const maxTokens = request !== null && typeof request === 'object' ? (openai ? openaiCeiling(request) : request.max_tokens) : undefined;
       if (model === null || !Object.prototype.hasOwnProperty.call(prices, model)) {
         refuseWith(res, 400, 'invalid_request_error',
           (model === null ? 'the request names no model' : 'the model ' + JSON.stringify(model.slice(0, 200)) + ' has no price') +
@@ -417,7 +465,9 @@ function metered(req, res, target, path) {
         return;
       }
       if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
-        refuseWith(res, 400, 'invalid_request_error', 'the request names no max_tokens, so an unreadable answer has no ceiling to charge', 'unreadable-request');
+        refuseWith(res, 400, 'invalid_request_error',
+          (openai ? 'the request names no positive max_completion_tokens or max_tokens, or an n that is not a positive integer' : 'the request names no max_tokens') +
+          ', so an unreadable answer has no ceiling to charge', 'unreadable-request');
         release();
         return;
       }
@@ -552,6 +602,7 @@ export interface RelayPlan {
   readonly upstreamHost: string;
   readonly paths: readonly string[];
   readonly header: string;
+  readonly scheme: RelayScheme;
   readonly credential: string;
   readonly urlVariable: string;
   readonly budget: RelayBudget;
@@ -566,6 +617,8 @@ export interface AppliedRelay {
   readonly upstream: string;
   readonly paths: readonly string[];
   readonly header: string;
+  /** How the credential is written into `header` (A-R6-02). */
+  readonly scheme: RelayScheme;
   /** The name of the credential the relay holds. The value is in no field of this record. */
   readonly credential: string;
   /** The variable the sandbox was given the relay's address in. */
@@ -666,6 +719,11 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPl
   if (!HEADER_NAME.test(relay.header) || RESERVED_HEADERS.has(relay.header.toLowerCase())) {
     refuse('relay', `relay.header ${JSON.stringify(relay.header)} is not a header a credential can be written to`);
   }
+  // Read as unknown: a spec arriving from untyped code may carry no scheme, and none is refused rather than read as raw (A-R6-02).
+  const scheme: unknown = (relay as { scheme?: unknown }).scheme;
+  if (scheme !== 'raw' && scheme !== 'bearer') {
+    refuse('relay', `relay.scheme must be 'raw' or 'bearer', not ${shown(scheme)}; a relay never guesses how its endpoint reads a credential`);
+  }
   if (!ENV_NAME.test(relay.urlVariable) || RESERVED_VARIABLES.has(relay.urlVariable)) {
     refuse('relay', `relay.urlVariable ${JSON.stringify(relay.urlVariable)} is not a plain environment-variable name the provider leaves unset`);
   }
@@ -683,6 +741,7 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPl
     upstreamHost: host,
     paths: [...new Set(relay.paths)],
     header: relay.header.toLowerCase(),
+    scheme,
     credential: relay.credential,
     urlVariable: relay.urlVariable,
     budget,
@@ -691,7 +750,11 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPl
 }
 
 /** The dialects the relay's source reads. A closed set: a dialect not here is refused, never guessed at (D-P13-06). */
-const DIALECTS: ReadonlySet<string> = new Set<RelayMeter['dialect']>(['anthropic-messages']);
+const DIALECTS: ReadonlySet<string> = new Set<RelayDialect>(['anthropic-messages', 'openai-chat']);
+
+function isDialect(value: unknown): value is RelayDialect {
+  return typeof value === 'string' && DIALECTS.has(value);
+}
 
 type PriceField = keyof ModelPrice;
 
@@ -724,8 +787,9 @@ function checkMeter(meter: unknown): RelayMeter {
   if (!isRecord(meter)) {
     refuse('relay', 'relay.meter is missing. A relay that cannot count what a call used cannot enforce a budget, so it is refused (A-P13-01).');
   }
-  if (typeof meter.dialect !== 'string' || !DIALECTS.has(meter.dialect)) {
-    refuse('relay', `relay.meter.dialect ${shown(meter.dialect)} is not one this relay reads; it reads ${[...DIALECTS].join(', ')}`);
+  const dialect = meter.dialect;
+  if (!isDialect(dialect)) {
+    refuse('relay', `relay.meter.dialect ${shown(dialect)} is not one this relay reads; it reads ${[...DIALECTS].join(', ')}`);
   }
   const prices = meter.prices;
   if (!isRecord(prices) || Object.keys(prices).length === 0) {
@@ -749,7 +813,7 @@ function checkMeter(meter: unknown): RelayMeter {
       cacheWrite1hPerMTok: at('cacheWrite1hPerMTok'),
     });
   }
-  return { dialect: 'anthropic-messages', prices: Object.freeze(table) };
+  return { dialect, prices: Object.freeze(table) };
 }
 
 /** Docker's own object names for one sandbox's relay (I10: no Greek name reaches `docker ps`). */
@@ -837,6 +901,7 @@ export async function startRelay(
       '--env', `RELAY_UPSTREAM=${plan.upstream}`,
       '--env', `RELAY_PATHS=${JSON.stringify(plan.paths)}`,
       '--env', `RELAY_HEADER=${plan.header}`,
+      '--env', `RELAY_SCHEME=${plan.scheme}`,
       '--env', `RELAY_PORT=${String(RELAY_PORT)}`,
       '--env', `RELAY_BUDGET=${JSON.stringify(plan.budget)}`,
       '--env', `RELAY_METER=${JSON.stringify(plan.meter)}`,
@@ -861,6 +926,7 @@ export async function startRelay(
       upstream: plan.upstream,
       paths: Object.freeze([...plan.paths]),
       header: plan.header,
+      scheme: plan.scheme,
       credential: plan.credential,
       urlVariable: plan.urlVariable,
       budget: plan.budget,

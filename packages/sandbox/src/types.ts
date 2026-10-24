@@ -55,6 +55,12 @@ export interface RelaySpec {
   paths: string[];
   /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
   header: string;
+  /**
+   * How the credential is written into `header` (A-R6-02): `'raw'` as it is,
+   * `'bearer'` as `Bearer <credential>`. Required, so no relay writes a scheme
+   * its endpoint did not ask for; any other value is refused.
+   */
+  scheme: RelayScheme;
   /** The name of a credential the provider holds. Never a value. */
   credential: string;
   /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
@@ -70,11 +76,17 @@ export interface RelaySpec {
   meter: RelayMeter;
 }
 
+/** How a relay writes its credential into the header its grant names. */
+export type RelayScheme = 'raw' | 'bearer';
+
 /** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
 export interface RelayBudget {
   maxTokens: number;
   maxCostUsd: number;
 }
+
+/** The usage dialects a relay reads. Closed: one not here is refused (D-P13-06). */
+export type RelayDialect = 'anthropic-messages' | 'openai-chat';
 
 /** US dollars per million tokens of each class. Each MUST be a non-negative finite number. */
 export interface ModelPrice {
@@ -91,9 +103,15 @@ export interface ModelPrice {
  * Where the usage sits in a response, and what each model costs. The dialect
  * is a closed union so a relay never guesses at a response it was not built to
  * read; a model absent from `prices` is refused before its request is sent.
+ *
+ * `'anthropic-messages'` is the Messages API (P13). `'openai-chat'` is the
+ * OpenAI-compatible chat-completions API (A-R6-01): a `POST` to a granted path
+ * ending `/chat/completions` is metered, and its usage is `prompt_tokens`,
+ * `completion_tokens`, and `prompt_tokens_details.cached_tokens`. The cache
+ * write prices are never charged under it, as the dialect reports no writes.
  */
 export interface RelayMeter {
-  dialect: 'anthropic-messages';
+  dialect: RelayDialect;
   /** Keyed by the exact model name a request carries. Never empty. */
   prices: Readonly<Record<string, ModelPrice>>;
 }

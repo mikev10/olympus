@@ -24,7 +24,7 @@ import {
   withProvider,
   withSandbox,
 } from './local-sandbox.js';
-import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE } from './local-relay.js';
+import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT } from './local-relay.js';
 import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
 import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
@@ -465,6 +465,8 @@ export const I5: InvariantEntry = {
     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+    // R6: the same, under the openai-chat dialect (A-R6-01).
+    MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT,
     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,

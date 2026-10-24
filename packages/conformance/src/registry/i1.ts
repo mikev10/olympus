@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { COMPOSED_HOST_MOUNTS_NO_VAULT } from './composition.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
+import { OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX } from './openai-compatible.js';
 import { R20_I1 } from './roles.js';
 
 /** The twenty-four named, audited operations the Vault contract declares (`recordUsage` is P13's, A-P13-03; `recordDecision` and `readDecisions` are P14's, A-P14-01; `readUsage` is I1a's, A-I1a-05; `recordIntegration` and `readIntegration` are I1b's, A-I1b-01; `listRuns` is R2's, A-R2-02; `recordBaseRun` and `readBaseRun` are R15's, D-A-BF-01; `recordIntent`, `recordRubric`, `recordDraft`, `recordCriticResult`, `recordDraftLock`, and `readLocks` are R19's, A-R19-07). Nothing else may be reachable on an instance. */
@@ -185,6 +186,8 @@ export const I1: InvariantEntry = {
     ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST,
     // I1a: the composed line, in real containers, mounts no Vault.
     COMPOSED_HOST_MOUNTS_NO_VAULT,
+    // R6: the second driver's loop is on the host, and every tool and model call it makes is in the sandbox (D-R6-01).
+    OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX,
   ],
   pending: [],
 };
