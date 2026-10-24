@@ -37,6 +37,12 @@ export const TEST_METER: RelayMeter = {
   },
 };
 
+/** `TEST_METER`'s prices, read as the OpenAI-compatible chat API reports usage (A-R6-01). */
+export const TEST_OPENAI_METER: RelayMeter = { dialect: 'openai-chat', prices: TEST_METER.prices };
+
+/** The chat-completions path the `openai-chat` suites are granted. */
+export const OPENAI_PATH = '/v1/chat/completions';
+
 /** A budget no suite that is not about budgets comes near. */
 export const TEST_BUDGET: RelayBudget = { maxTokens: 10_000_000, maxCostUsd: 100 };
 
@@ -103,6 +109,46 @@ function messages(q, s, body, echo) {
   if (t.hangup === true) { s.socket.destroy(); return; }
   // Held back, so other calls can arrive while this one is in flight.
   setTimeout(function () { answer(s, request, t, body, echo); }, typeof t.hold === 'number' ? t.hold : 0);
+}
+// The OpenAI-compatible chat API: usage is prompt_tokens (cached part
+// included), completion_tokens, and prompt_tokens_details.cached_tokens. A
+// stream carries it on one chunk before [DONE].
+function chat(q, s, body, echo) {
+  let request = {};
+  try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = {}; }
+  const t = request.relay_test || {};
+  if (t.hangup === true) { s.socket.destroy(); return; }
+  const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
+  const status = t.status || 200;
+  const usage = t.omit === 'all' ? undefined : {
+    prompt_tokens: counts.input + counts.cacheRead,
+    prompt_tokens_details: { cached_tokens: counts.cacheRead },
+  };
+  if (usage !== undefined && t.omit !== 'final') usage.completion_tokens = counts.output;
+  let payload;
+  let type;
+  if (status !== 200) {
+    type = 'application/json';
+    payload = JSON.stringify({ error: { type: 'server_error', message: 'test upstream' } });
+  } else if (request.stream === true) {
+    type = 'text/event-stream';
+    const chunks = [
+      { id: 'chat_test', object: 'chat.completion.chunk', model: request.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(echo) } }] },
+      { id: 'chat_test', object: 'chat.completion.chunk', model: request.model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+    ];
+    if (usage !== undefined) chunks.push({ id: 'chat_test', object: 'chat.completion.chunk', model: request.model, choices: [], usage: usage });
+    payload = chunks.map(function (c) { return 'data: ' + JSON.stringify(c) + '\\n\\n'; }).join('') + 'data: [DONE]\\n\\n';
+  } else {
+    type = 'application/json';
+    const completion = { id: 'chat_test', object: 'chat.completion', model: request.model,
+      choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(echo) }, finish_reason: 'stop' }] };
+    if (usage !== undefined) completion.usage = usage;
+    payload = JSON.stringify(completion);
+  }
+  const bytes = Buffer.from(payload, 'utf8');
+  console.log('UPSTREAM_BODY ' + sha(body) + ' UPSTREAM_SENT ' + sha(bytes));
+  s.writeHead(status, { 'content-type': type });
+  s.end(bytes);
 }
 function answer(s, request, t, body, echo) {
   const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
@@ -177,11 +223,13 @@ https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_C
       keyMatches: q.headers['x-api-key'] === expected,
       keyCount: keys,
       authorization: q.headers.authorization === undefined ? null : 'present',
+      bearerMatches: q.headers.authorization === 'Bearer ' + expected,
       acceptEncoding: q.headers['accept-encoding'] === undefined ? null : q.headers['accept-encoding'],
       bodyBytes: body.length,
     };
     const path = q.url.split('?')[0];
     if (q.method === 'POST' && path === '/v1/messages') { messages(q, s, body, echo); return; }
+    if (q.method === 'POST' && path === '${OPENAI_PATH}') { chat(q, s, body, echo); return; }
     s.writeHead(200, { 'content-type': 'application/json' });
     s.end(JSON.stringify(echo));
   });

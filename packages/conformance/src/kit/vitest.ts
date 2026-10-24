@@ -22,8 +22,15 @@ const INVARIANT_SHAPE = /^(I\d+)\.[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * camelCase — `computerUse`, `stablePrefixCaching`. Requiring kebab-case here
  * would mean no claim id could ever be written, which went unnoticed until P5
  * became the first package to contribute one from its own suite.
+ *
+ * A second implementation's assertion of the same claim extends the claim's
+ * id with its own name, in kebab-case, as every assertion id extends its
+ * owner's: `driver.computerUse.openai-compatible` (D-R6-06). The registry keys
+ * the claim by `driver.<capabilityKey>` alone and lists each implementation's
+ * assertion under it, so the suffix never reaches the key set the fixture
+ * holds equal to the interface.
  */
-const CLAIM_SHAPE = /^(driver|sandbox)\.[a-z][A-Za-z0-9]*$/;
+const CLAIM_SHAPE = /^(driver|sandbox)\.[a-z][A-Za-z0-9]*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)?$/;
 
 /** Throws unless `id` names a real invariant assertion or a capability claim. */
 export function validateAssertionId(id: string): asserts id is AssertionId | ClaimId {

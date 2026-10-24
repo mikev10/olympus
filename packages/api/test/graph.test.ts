@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StubDriver } from '@olympus-ai/core';
 import { ClaudeCodeDriver, MODEL_RELAY } from '@olympus-ai/driver-claude-code';
+import { OpenAICompatibleDriver, type EndpointConfig } from '@olympus-ai/driver-openai-compatible';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { LocalVault, StubVault } from '@olympus-ai/vault';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -48,6 +49,21 @@ describe('buildGraph', () => {
 
   test('attests the real vault and driver, and names nothing for them', () => {
     expect(names(real())).toEqual(['StubSandboxProvider']);
+  });
+
+  test('attests an OpenAI-compatible driver in every driver seat, beside or instead of the Claude Code driver (A-R6-04)', () => {
+    const parts = real();
+    const price = { inputPerMTok: 1, outputPerMTok: 1, cacheReadPerMTok: 1, cacheWritePerMTok: 0, cacheWrite1hPerMTok: 0 };
+    const endpoint: EndpointConfig = {
+      upstream: 'https://models.example', path: '/v1/chat/completions', header: 'authorization', scheme: 'bearer',
+      provider: 'example', family: 'example-family', version: '1', models: { fast: 'm', standard: 'm', deep: 'm' }, prices: { m: price },
+      maxOutputTokens: 1024, ceilingField: 'max_tokens', parallelism: 1, maxTurns: 10,
+    };
+    const other = new OpenAICompatibleDriver({ provider: parts.sandbox, endpoint });
+    expect(names({ ...parts, reviewer: other })).toEqual(['StubSandboxProvider']);
+    expect(names({ ...parts, driver: other, reviewer: other, drafting: { specDrafter: other, specCritic: parts.driver, testDrafter: other, testCritic: parts.driver } }))
+      .toEqual(['StubSandboxProvider']);
+    expect(names({ ...parts, reviewer: new DelegatingDriver(other) })).toContain('unattested reviewer');
   });
 
   test('a wrapper that does not forward a stub\'s declaration is named unattested, whether it was made before the build or not (D-I1a-06)', () => {

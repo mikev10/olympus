@@ -9,7 +9,8 @@
  *
  * Provenance is positive (D-I1a-06). A component is safe only when it is an
  * instance of the real component for its slot — `LocalVault`,
- * `LocalDockerProvider`, `ClaudeCodeDriver` — and declares nothing. One that
+ * `LocalDockerProvider`, and in a driver seat `ClaudeCodeDriver` or
+ * `OpenAICompatibleDriver` (A-R6-04) — and declares nothing. One that
  * declares itself unsafe is named by its declaration; any other is named
  * unattested. So a wrapper that does not forward a stub's declaration fails
  * closed: it is not the real component either, and it is refused above L1
@@ -17,6 +18,7 @@
  * component is still that component, and passes.
  */
 import { ClaudeCodeDriver } from '@olympus-ai/driver-claude-code';
+import { OpenAICompatibleDriver } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import type { SandboxSpec } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
@@ -60,12 +62,23 @@ const provenance = new WeakMap<object, readonly UnsafeDeclaration[]>();
 
 type Slot = 'vault' | 'sandbox' | 'driver' | 'reviewer';
 
+/**
+ * The drivers a seat attests: the Claude Code CLI, and any OpenAI-compatible
+ * endpoint (A-R6-04). The second is real whatever endpoint it is configured
+ * for, because what it can enforce does not depend on the endpoint: its tools
+ * run in the sandbox, its calls go through a metered relay, and its family is
+ * a declaration the run records rather than one the builder could check.
+ */
+function isRealDriver(c: object): boolean {
+  return c instanceof ClaudeCodeDriver || c instanceof OpenAICompatibleDriver;
+}
+
 /** The real component each slot attests, by its exported name. */
 const REAL: Readonly<Record<Slot, { readonly name: string; readonly is: (c: object) => boolean }>> = {
   vault: { name: 'LocalVault', is: (c) => c instanceof LocalVault },
   sandbox: { name: 'LocalDockerProvider', is: (c) => c instanceof LocalDockerProvider },
-  driver: { name: 'ClaudeCodeDriver', is: (c) => c instanceof ClaudeCodeDriver },
-  reviewer: { name: 'ClaudeCodeDriver', is: (c) => c instanceof ClaudeCodeDriver },
+  driver: { name: 'ClaudeCodeDriver or OpenAICompatibleDriver', is: isRealDriver },
+  reviewer: { name: 'ClaudeCodeDriver or OpenAICompatibleDriver', is: isRealDriver },
 };
 
 /** The declaration a slot's component carries, or the one the builder gives a component it cannot attest; undefined when it is real. */

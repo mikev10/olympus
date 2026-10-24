@@ -120,6 +120,7 @@ export const MODEL_RELAY: Readonly<Omit<RelaySpec, 'budget'>> = Object.freeze({
   upstream: 'https://api.anthropic.com',
   paths: ['/v1/messages'],
   header: 'x-api-key',
+  scheme: 'raw',
   credential: MODEL_CREDENTIAL,
   urlVariable: 'ANTHROPIC_BASE_URL',
   meter: MODEL_METER,

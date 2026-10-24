@@ -37,7 +37,19 @@ import {
   type SandboxHandle,
   type SandboxSpec,
 } from '../src/index.js';
-import { TEST_BUDGET, TEST_METER, TEST_MODEL, UPSTREAM_ORIGIN, makeCertificate, startUpstream, upstreamDigests, upstreamLog, type Certificate } from './upstream.js';
+import {
+  OPENAI_PATH,
+  TEST_BUDGET,
+  TEST_METER,
+  TEST_MODEL,
+  TEST_OPENAI_METER,
+  UPSTREAM_ORIGIN,
+  makeCertificate,
+  startUpstream,
+  upstreamDigests,
+  upstreamLog,
+  type Certificate,
+} from './upstream.js';
 
 const run = promisify(execFile);
 
@@ -58,6 +70,7 @@ function relaySpec(overrides: Partial<RelaySpec> = {}): RelaySpec {
     upstream: UPSTREAM_ORIGIN,
     paths: ['/v1/messages'],
     header: 'x-api-key',
+    scheme: 'raw',
     credential: CREDENTIAL,
     urlVariable: URL_VARIABLE,
     budget: TEST_BUDGET,
@@ -92,8 +105,12 @@ function relayFor(handle: SandboxHandle): AppliedRelay {
 }
 
 /** A metered sandbox with its upstream answering. Returns the upstream's container name. */
-async function metered(budget: RelayBudget = TEST_BUDGET, overrides: Partial<SandboxSpec> = {}): Promise<{ handle: SandboxHandle; upstream: string }> {
-  const handle = await provisioned(specFor({ budget }, overrides));
+async function metered(
+  budget: RelayBudget = TEST_BUDGET,
+  overrides: Partial<SandboxSpec> = {},
+  spec: Partial<RelaySpec> = {},
+): Promise<{ handle: SandboxHandle; upstream: string }> {
+  const handle = await provisioned(specFor({ ...spec, budget }, overrides));
   const relay = relayFor(handle);
   const id = randomUUID();
   const network = `meter-up-${id}`;
@@ -363,6 +380,82 @@ describe('what the meter cannot read, it charges or refuses', () => {
   });
 });
 
+describe('the openai-chat dialect is metered by the same rules (A-R6-01)', () => {
+  /** A relay for the OpenAI-compatible chat API, writing its credential as a bearer token. */
+  const OPENAI: Partial<RelaySpec> = { paths: [OPENAI_PATH], header: 'authorization', scheme: 'bearer', meter: TEST_OPENAI_METER };
+
+  function chat(usage: Usage, extra: Record<string, unknown> = {}, test: Record<string, unknown> = {}): Sent {
+    return {
+      path: OPENAI_PATH,
+      body: { model: TEST_MODEL, max_tokens: 64, messages: [{ role: 'user', content: 'x' }], ...extra, relay_test: { usage, ...test } },
+    };
+  }
+
+  test('a crossing call is forwarded and every later one refused naming the bound; cached prompt tokens are cache reads, not input', async () => {
+    const { handle, upstream } = await metered({ maxTokens: 1_000_000_000, maxCostUsd: 0.003 }, {}, OPENAI);
+    const usage = { input: 800, output: 100, cacheRead: 200, cacheWrite: 0 };
+    const answers = await send(handle, [chat(usage), chat(usage), chat(usage)]);
+
+    expect(answers.map((a) => a.status)).toStrictEqual([200, 200, 402]);
+    expect(answers[2]?.body).toContain('maxCostUsd');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(2);
+    // The relay wrote the provider's credential as the bearer scheme says, and the client's own header never arrived.
+    const completion = JSON.parse(answers[0]?.body ?? '{}') as { choices: Array<{ message: { content: string } }> };
+    expect(JSON.parse(completion.choices[0]?.message.content ?? '{}')).toMatchObject({ bearerMatches: true });
+    const reading = meteredReading(await destroyed(handle));
+    expect(reading).toMatchObject({ calls: 2, inputTokens: 1600, outputTokens: 200, cacheReadTokens: 400, cacheWriteTokens: 0, exhausted: 'cost', refused: 1 });
+    expect(reading.costUsd).toBeCloseTo(2 * priced(usage), 12);
+  });
+
+  test('a streamed answer and a whole one are metered identically, from the chunk that carries the usage', async () => {
+    const usage = { input: 1000, output: 100, cacheRead: 200, cacheWrite: 0 };
+    const readings: MeterReading[] = [];
+    for (const stream of [true, false]) {
+      const { handle, upstream } = await metered(TEST_BUDGET, {}, OPENAI);
+      const [answer] = await send(handle, [chat(usage, stream ? { stream, stream_options: { include_usage: true } } : { stream })]);
+      const [digest] = await upstreamDigests(upstream);
+      expect(answer?.status).toBe(200);
+      expect(digest?.received).toBe(answer?.sent);
+      expect(digest?.sent).toBe(answer?.received);
+      readings.push(await destroyed(handle));
+    }
+    expect(readings[0]).toStrictEqual(readings[1]);
+    expect(meteredReading(readings[0] ?? { kind: 'unmetered' })).toMatchObject({ calls: 1, inputTokens: 1000, outputTokens: 100, cacheReadTokens: 200, exhausted: 'none' });
+  });
+
+  test('the ceiling is the larger of max_completion_tokens and max_tokens times n, and a request with no ceiling is refused unsent', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, OPENAI);
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const answers = await send(handle, [
+      chat(usage, { max_tokens: undefined }),
+      chat(usage, { max_tokens: 0 }),
+      chat(usage, { n: 0 }),
+      chat(usage, { max_tokens: 32, max_completion_tokens: 50, n: 2 }, { omit: 'final' }),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 400, 400, 200]);
+    expect(answers[0]?.body).toContain('max_completion_tokens');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    // Charged its ceiling, 50 times 2, for the output it never reported.
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, inputTokens: 1000, outputTokens: 100, refused: 3, exhausted: 'none' });
+  });
+
+  test('an unpriced model is refused unsent, an answer with no usage stops the relay, and only the chat path is metered', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, OPENAI);
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const unpriced = chat(usage);
+    const answers = await send(handle, [
+      { ...unpriced, body: { ...(unpriced.body as Record<string, unknown>), model: 'unpriced-model' } },
+      { method: 'POST', path: `${OPENAI_PATH}/batch`, body: {} },
+      chat(usage, {}, { omit: 'all' }),
+      chat(usage),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 403, 200, 402]);
+    expect(answers[0]?.body).toContain('unpriced-model');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, outputTokens: 64, exhausted: 'unreadable', refused: 3 });
+  });
+});
+
 describe('destroy reads the meter after the sandbox stopped', () => {
   test('every call a process left running completed is in the reading, and none the upstream answered is missing from it', async () => {
     const { handle, upstream } = await metered();
@@ -426,7 +519,7 @@ describe('a relay nothing bounds is refused at provisioning, naming the field', 
     ['a negative cost bound', { budget: { maxTokens: 1, maxCostUsd: -1 } }, /relay\.budget\.maxCostUsd/u],
     ['a non-finite bound', { budget: { maxTokens: Number.POSITIVE_INFINITY, maxCostUsd: 1 } }, /relay\.budget\.maxTokens/u],
     ['a NaN bound', { budget: { maxTokens: 1, maxCostUsd: Number.NaN } }, /relay\.budget\.maxCostUsd/u],
-    ['an unknown dialect', { meter: { ...TEST_METER, dialect: 'openai-chat' } }, /relay\.meter\.dialect/u],
+    ['an unknown dialect', { meter: { ...TEST_METER, dialect: 'gemini-generate' } }, /relay\.meter\.dialect/u],
     ['an empty price table', { meter: { ...TEST_METER, prices: {} } }, /relay\.meter\.prices/u],
     [
       'a negative price',

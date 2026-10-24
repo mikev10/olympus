@@ -3,7 +3,8 @@ import { R4_I4 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
-import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
+import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
+import { OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE, OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED } from './openai-compatible.js';
 import {
   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
   UNDEFINED_ROLE, UNGRANTED_TOOL, grantingDocument,
@@ -308,6 +309,10 @@ export const I4: InvariantEntry = {
     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
     // P13: spending is a capability, bounded where the task cannot reach it.
     MODEL_RELAY_ENFORCES_BUDGET,
+    // R6: the second dialect and the second driver, under the same controls (A-R6-01, A-R6-02).
+    MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
+    OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED,
+    OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE,
     // R14: the tier a call runs at is policy's, per station, and escalation is a grant (A-R14-01).
     TIER_PER_STATION_FOLLOWS_POLICY,
     ESCALATION_ONLY_UNDER_A_GRANT,
