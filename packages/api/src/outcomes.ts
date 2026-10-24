@@ -11,7 +11,7 @@
  */
 import { approvalKey, gatedIterations } from '@olympus-ai/core';
 import type { AutonomyLevel, ModelIdentity, RunId, RunState, StationId, TaskId, TaskStatus } from '@olympus-ai/core';
-import { isNoRunState, type AdmissionRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type UsageRecord, type Vault } from '@olympus-ai/vault';
+import { isNoRunState, type AdmissionRecord, type CriticRecord, type EnforcementDecision, type EvidenceBundle, type IntegrationRecord, type UsageRecord, type Vault } from '@olympus-ai/vault';
 import { distribution, failureRate, successRate, type Distribution, type Proportion } from './bounds.js';
 import { costTotals, readUsage, type UsageTotal } from './cost.js';
 import { readIntegration } from './line.js';
@@ -65,6 +65,14 @@ export interface RunRecords {
   readonly usage: readonly UsageRecord[];
   /** Null for a run with no state. */
   readonly cost: UsageTotal | null;
+  /**
+   * The weakest independence grade among the run's review seats (D-A-DS-06),
+   * `no-review` where none was seated, and `reduced` for a seat recorded
+   * before grades, which said only that its family was shared.
+   */
+  readonly reviewGrade: string;
+  /** One entry per critic result the run recorded: its grade, and whether it found anything (R19). */
+  readonly critiques: ReadonlyArray<{ readonly grade: string; readonly found: boolean }>;
 }
 
 /** A window over admission time, inclusive at `from` and exclusive at `to`. */
@@ -87,6 +95,8 @@ export interface Outcomes {
     readonly caughtFalseDoneByLevel: Keyed<Proportion>;
     /** Keyed by the stack admission recorded, or `unrecorded` (R18). */
     readonly caughtFalseDoneByStack: Keyed<Proportion>;
+    /** Keyed by the run's weakest review-seat grade, so what a cheaper, less independent seat costs is seen (D-A-DS-06). */
+    readonly caughtFalseDoneByGrade: Keyed<Proportion>;
     /** A change that passed every gate and failed later needs `observe` (R8). Never implied to be zero. */
     readonly escapedFalseDone: 'not-established';
   };
@@ -95,6 +105,10 @@ export interface Outcomes {
     readonly autonomyRatio: Proportion;
     readonly autonomyRatioByLevel: Keyed<Proportion>;
     readonly autonomyRatioByStack: Keyed<Proportion>;
+    /** Keyed by the run's weakest review-seat grade (D-A-DS-06). */
+    readonly autonomyRatioByGrade: Keyed<Proportion>;
+    /** Critic results that found anything, over critic results, keyed by the critic's grade against its drafter (R19). */
+    readonly criticFindingsByGrade: Keyed<Proportion>;
     readonly firstPassYieldByStation: Keyed<Proportion>;
     /** Keyed by the model of each task's first call. */
     readonly firstPassYieldByModel: Keyed<Proportion>;
@@ -186,6 +200,8 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
       decisions,
       usage: [],
       cost: null,
+      reviewGrade: 'no-review',
+      critiques: [],
     };
   }
 
@@ -228,7 +244,7 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
         : state.approvals.some((g) => g.key === approvalKey('integrate', admission.run.requestedLevel) && g.usedAt !== null)
           // The grant for the last exit is spent in the commit that ends a passed run, as `runStanding` reads it (D-P9-08).
           ? 'passed'
-          : Object.values(state.tasks).includes('parked')
+          : Object.values(state.tasks).includes('parked') || Object.values(state.drafts).some((d) => d.parked)
           ? 'parked'
           : 'unfinished';
 
@@ -246,7 +262,35 @@ export async function readRunRecords(vault: Vault, runId: RunId): Promise<RunRec
     decisions,
     usage,
     cost: costTotals(usage).run,
+    reviewGrade: reviewGradeOf(state),
+    critiques: await critiquesOf(vault, state),
   };
+}
+
+const GRADE_ORDER: readonly string[] = ['different-family', 'different-model', 'reduced', 'same-model'];
+
+/** The weakest grade among the run's review seats. A seat recorded before grades reads `independent` as another family, and `reduced` as itself. */
+function reviewGradeOf(state: RunState): string {
+  let weakest: string | null = null;
+  for (const seat of state.reviews) {
+    const raw = seat.independence as string;
+    const grade = raw === 'independent' ? 'different-family' : raw;
+    if (weakest === null || GRADE_ORDER.indexOf(grade) > GRADE_ORDER.indexOf(weakest)) weakest = grade;
+  }
+  return weakest ?? 'no-review';
+}
+
+/** Every critic result the run recorded, by grade, from the attempts run state holds (R19). */
+async function critiquesOf(vault: Vault, state: RunState): Promise<RunRecords['critiques']> {
+  const critiques: Array<{ grade: string; found: boolean }> = [];
+  for (const drafts of Object.values(state.drafts)) {
+    for (const attempt of drafts.attempts) {
+      if (attempt.critic === null || attempt.critic === 'not-seated') continue;
+      const critic = decode(await vault.read(attempt.critic)) as CriticRecord;
+      critiques.push({ grade: critic.grade, found: critic.findings.length > 0 });
+    }
+  }
+  return critiques;
 }
 
 function inWindow(at: string | null, window: OutcomeWindow): boolean {
@@ -296,6 +340,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const fdModel = new Tally();
   const fdLevel = new Tally();
   const fdStack = new Tally();
+  const fdGrade = new Tally();
   for (const run of runs) {
     for (const task of run.tasks) {
       const model = task.models.length > 1 ? 'escalated' : (task.models[0] ?? 'no-call');
@@ -307,6 +352,7 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
         fdModel.add(model, bad);
         fdLevel.add(`L${String(run.requestedLevel)}`, bad);
         fdStack.add(stackKey(run), bad);
+        fdGrade.add(run.reviewGrade, bad);
       }
     }
   }
@@ -316,10 +362,14 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
   const autonomous = (r: RunRecords): boolean => r.ending === 'merged' && r.approvalsSpent === 0;
   const byLevel = new Tally();
   const byStack = new Tally();
+  const byGrade = new Tally();
   for (const r of finished) {
     byLevel.add(`L${String(r.requestedLevel)}`, autonomous(r));
     byStack.add(stackKey(r), autonomous(r));
+    byGrade.add(r.reviewGrade, autonomous(r));
   }
+  const critics = new Tally();
+  for (const run of runs) for (const c of run.critiques) critics.add(c.grade, c.found);
 
   const fpStation = new Tally();
   const fpModel = new Tally();
@@ -393,12 +443,15 @@ export function deriveOutcomes(runs: readonly RunRecords[], window: OutcomeWindo
       caughtFalseDoneByModel: fdModel.rates(failureRate),
       caughtFalseDoneByLevel: fdLevel.rates(failureRate),
       caughtFalseDoneByStack: fdStack.rates(failureRate),
+      caughtFalseDoneByGrade: fdGrade.rates(failureRate),
       escapedFalseDone: 'not-established',
     },
     throughput: {
       autonomyRatio: successRate(finished.filter(autonomous).length, finished.length),
       autonomyRatioByLevel: byLevel.rates(successRate),
       autonomyRatioByStack: byStack.rates(successRate),
+      autonomyRatioByGrade: byGrade.rates(successRate),
+      criticFindingsByGrade: critics.rates(failureRate),
       firstPassYieldByStation: yields,
       firstPassYieldByModel: fpModel.rates(successRate),
       firstPassYieldByStack: fpStack.rates(successRate),

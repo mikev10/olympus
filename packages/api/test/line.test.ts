@@ -186,7 +186,7 @@ describe('hello at L1', () => {
       expect.objectContaining({ checkId: 'secret-scan', exitCode: 0, findings: [] }),
     ]);
     // The same reproduction, failing over the base before build, from the record the bundle names (D-A-BF-01).
-    expect(bundle.baseRun).toEqual(await components.vault.readBaseRun(runId));
+    expect(bundle.baseRun).toEqual(await components.vault.readBaseRun(runId, null));
     const base = await read<BaseRunRecord>(components.vault, bundle.baseRun);
     expect(base.checks.map((c) => [c.checkId, c.exitCode])).toEqual([['hello-written', 1], ['secret-scan', 0]]);
   });

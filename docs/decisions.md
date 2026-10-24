@@ -2234,6 +2234,13 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Reverse:** if a review misses a bypass that lived in an unchanged function of a modified file, return that file to full text. Fall back to splitting the range before raising the ceiling past the pricing tier.
 
 
+### D-TOOLING-08: at the newest date, a pair this family already counted is passed over, and two uncounted pairs refuse
+
+- **Problem:** R19 was reviewed in halves, bundled as two pairs on one date. Newest-wins (D-TOOLING-06) broke the tie by listing order and chose the conformance half on every run. That half already had counted reviews, so the runner refused, and the runtime half could never be sent. No flag or artifact edit could reach it without routing around the runner.
+- **Chosen:** only pairs at the newest date are eligible. Among them, `findUnitArtifacts` passes over any pair whose manifest for this family records `counted`. If none is left, it keeps the newest, so the existing counted refusal still fires. If one is left, that pair is chosen. If more than one is left, it refuses and names them all. The runner prints what it passed over, and the manifest's `artifacts` is unchanged.
+- **Rejected:** a slug argument. It is a second input that the skill would have to document, and it would let a run target a superseded pair. Also rejected: passing over counted pairs at every date. A re-bundle whose newest pair is counted would then fall back to an older pair, which is code that is no longer the unit's.
+- **Reverse:** drop the `isCounted` predicate and `skippedCounted`. A unit with several pairs on one date then resolves by listing order again, and only the first pair is reachable.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
@@ -4350,3 +4357,200 @@ the code differed from the unit entry, or what the entry left open.
 - **Chosen:** `--append-system-prompt` carries the role's instructions, a blank line, then the granted context. `--agents` and `--agent` are gone, so the CLI's prompt stays and two tasks under one role share a prefix. The unit entry's "as the agent definition it already passes" now reads "at the head of the system prompt it appends". The init check that refused a session not listing its role is removed: an argv element cannot go unloaded the way a definition the CLI ignored could. `driver.subagents` proves the role reached the session by a token only the role asks for, in the same paid call. `I3.driver-renders-the-role-on-the-invocation` now checks the appended prompt exactly and refuses `--agents`, `--agent` and `--system-prompt`.
 - **Reverse:** D-R20-08, with the stable prefix padded past the cacheable minimum.
 - **Confirmed** by the maintainer, 2026-10-23 (option A).
+
+## R19: Drafting at `spec` and `test-design`
+
+Built against `v2` at cd1b536. The maintainer delegated every decision in this
+unit to the session's recommendation (2026-10-23). The spec is
+`docs/plan/R19-drafting.md`; each entry below says what was ambiguous or found,
+what was chosen, and how to reverse it.
+
+### D-R19-01: the entry had no spec; one was written against the code first
+
+- **Found:** the entry is binding and long, but leaves open where drafts live, how a seat is counted, how a critic reports, how a lock taken before a stop is resumed, and how a person rejects a draft. `RequestedArtifacts` admits only lists, `spec` and `test-design` are runtime stations, base records are one per run, and approvals match by key alone.
+- **Chosen:** `docs/plan/R19-drafting.md`, with what the code holds, the deliverables, and the contract amendments below, written before any code.
+- **Reverse:** amend the spec; the code follows it.
+
+### D-R19-02: drafting is an explicit state in every record that holds it
+
+- **Ambiguous:** the entry requires absence to be explicit in the admission record, and every reader of `artifacts.spec` today takes a list.
+- **Chosen:** the request takes the literal `'draft'` for the spec or the tests. The admission record holds each as `{ source: 'supplied', files }` or `{ source: 'drafted' }`, and the acceptance manifest as supplied, drafted, or `none`, so a reader that has not handled drafting does not compile. `RunState.drafts` and `ApprovalGrant.draft` are required. A record or state written before R19 is read as supplied lists, no drafts, and grants naming no draft, by the Vault and by `readAdmission`, as R18 reads a missing stack.
+- **Reverse:** lists with a `drafted` flag beside them.
+
+### D-R19-03: an intent is a person's text from the principal's channel
+
+- **Chosen:** `RunRequest.intent: { text, from: 'principal' } | null`, at most 32 KiB, required exactly when the spec is drafted: neither, or both, is refused (`missing`, `not-applicable`, `not-an-intent`). `POST /runs` is the only producer; the server builds the intent from its body, authenticated as the principal. It is recorded with `recordIntent`, which refuses one not `from: 'principal'`, and the admission record names it. `I7.intent-is-not-a-payload` holds an `UntrustedPayload`, its raw text, and another channel out of the type; `I7.intent-refused-from-another-channel` holds the same at admission and in the Vault.
+- **Known limit:** an extracted trigger field is a plain string and fits `text`. Keeping extracted fields away from an intent is the trigger framework's, with `I7.untrusted-sink-lint-rule` and `I7.extracted-field-schemas`, which stay pending with M2 triggers. No trigger starts a run today.
+- **Reverse:** a plain string field.
+
+### D-R19-04: where a draft is written, read, and locked
+
+- **Chosen:** a spec draft is four files under `.drafts/<run id>/`: `spec.md`, `security.json`, `run-requirements.json`, `questions.json`. A test draft is every file under the spec's `testDirectory` and `.drafts/<run id>/acceptance.json`. The paths are the same in the drafter's tree, the artifact root, and the base, so nothing is renamed between what was read and what is locked. Admission refuses a workspace that already holds `.drafts/<run id>` (`exists`); a test path the base already holds is a runtime problem (`exists`). The runtime reads those paths alone; anything else a drafter wrote is discarded with its workspace and listed in the draft record. Approved bytes are never written over other bytes already at a path in the artifact root: that is recorded as a tamper.
+- **Why:** the tests must sit where the repository's framework finds them, which only the spec's run requirements say, and the test drafter cannot see the repository.
+- **Reverse:** a fixed drafts directory for tests too, with the framework configured to read it.
+
+### D-R19-05: each drafting seat is a task in run state
+
+- **Chosen:** the drafter and the critic at each station are counted under fixed task ids (`spec.drafter`, `spec.critic`, `test-design.drafter`, `test-design.critic`), so their iterations, retries, starts, results, usage records, escalation, and parks follow the rules a graph task's do, and `nextStep` refuses a parked seat as it refuses a parked task. A graph naming one of those ids is refused (`reserved`). Run state's `drafts` holds what is drafting's own: each attempt's draft, critic result, base record, failed conditions, and why it went back.
+- **Reverse:** a separate counter set for seats.
+
+### D-R19-06: the seats' roles and grants are fixed by name
+
+- **Chosen:** the seats run under `spec-drafter`, `spec-critic`, `test-drafter`, and `test-critic`, which R19 ships in the compiler's roles directory; admission refuses a drafting run whose directory lacks one (`role-undefined`) and whose policy does not grant it the station (`policy-refused`). A policy granting either test seat egress is refused at admission (`not-black-box`): the relay is the only endpoint a deny-all sandbox reaches. The contract's write globs are `.drafts/**` at `spec` and `**` at `test-design`, whose directory no static glob can name; what is read is the draft's paths alone.
+- **Known limit:** a seat's tools are the policy's. What keeps the repository from the test drafter is the mount table, which mounts a tree holding the locked spec and nothing else, and its egress, which is none; a tool can read the image's own files.
+- **Reverse:** roles named by the graph, with a scope per run.
+
+### D-R19-07: a critic's result is its final message, read strictly
+
+- **Chosen:** `{"findings": [string, …]}` and nothing else, as the run's narrative; one fenced block is unwrapped. Anything else, an extra key, an empty finding, or prose, is one finding, recorded with `readable: false` (I5). A finding has no severity, so no model grades its own finding (D-A-DS-07).
+- **Reverse:** a result file in a writable path, which would give the critic something writable.
+
+### D-R19-08: the runtime's own problems with a draft send it back
+
+- **Ambiguous:** the entry has the critic and the base run send a draft back, and says every refusal R15 makes of a manifest at admission happens at the `test-design` exit for a drafted one, without saying whether it stops the run.
+- **Chosen:** a part that does not parse, a drafted manifest admission would have refused, a drafted check of a kind a drafter does not write (`not-draftable`), a test no check runs (`unreferenced`), a rule no check denies, or an unbound test sends the draft back as paths and codes, like a finding, since a redraft can cure it. The last attempt goes to a person with `shape` failed. A person may reject that draft but not approve it (`draft-invalid`): the runtime would refuse to lock it.
+- **Reverse:** stop the run on any runtime problem.
+
+### D-R19-09: at `test-design`, the base run before the critic
+
+- **Chosen:** runtime problems, then the base run, then the critic. A draft its base run refuses goes back before a critic is paid to read it. A check the run was admitted with that does not do on the base what it declared refuses the run as it does today: no redraft cures it.
+- **Reverse:** run the critic on every draft.
+
+### D-R19-10: conditions are evaluated once, by the line, and recorded
+
+- **Chosen:** when a draft reaches the gate, the line evaluates the station's conditions and commits the failed ones with the attempt. The exit's transition, `approveStation`, `rejectDraft`, and the run's standing read them from run state, so none of them needs a driver to resolve the builder's models. `draft-floor-applied` is recorded where the cell alone would have let the exit pass.
+- **Reverse:** evaluate at each read, with the drivers passed in.
+
+### D-R19-11: the floor above L1 is asserted on the transition the line calls
+
+- **Found:** admission refuses every stub composition above L1 (D-I1a-06), and the real composition calls a paid model, so no conformance run reaches L2 or L3.
+- **Chosen:** the line is driven at L0 and L1, where it records each condition and the floor holds the exit; L2 and L3 are asserted on `effectiveApproval` and `transition`, the functions the line's exit calls, over the conditions the line recorded. L3's same-family test drafter is asserted on `seatTestDrafter`, as a same-family reviewer is on `seatReviewer`, and its P14 row is `blocked-until-m3`.
+- **Reverse:** a paid L2 assertion in `test/paid/`.
+
+### D-R19-12: an approved draft is locked in an order a stop cannot break
+
+- **Found:** `lock` refuses a path already locked, so a lock a drive took before a stop could not be taken again by the resume, and nothing could read which paths were locked.
+- **Chosen:** the draft lock record comes first, naming the base digest the draft makes (computed on a copy), and is committed; then the bytes are written into the artifact root at paths not yet locked, and into the base; then the paths not yet locked are locked, read back with `readLocks`, and held to the approved hashes. A resume rewrites each committed lock's files into the base before checking its digest against the latest lock's. `readLocks` is a read and writes nothing.
+- **Reverse:** make `lock` accept a path locked at the same hash.
+
+### D-R19-13: base records per draft hash
+
+- **Chosen:** `recordBaseRun` stores each record under its hash and names it once per run and draft: `base-run.json` for the admitted checks, as before, and `base-run.<draft>.json` for a test draft. `readBaseRun(runId, draft)` reads by that name, and `verify` reads the locked draft's. A record written before R19 is read from its fixed name.
+- **Reverse:** one base record per run, rerun on redraft.
+
+### D-R19-14: a critic is graded against its drafter, and the drafter's own model seats none
+
+- **Chosen:** the grade is taken from the model the runtime resolved for each seat, and again from the model the critic's result names, keeping the weaker (I6). `same-model` seats no critic, records `not-seated`, and fails `independent-critic-clean`. `different-model` seats one whose findings are recorded and shown to the person, and send nothing back.
+- **Reverse:** seat a same-model critic as advisory.
+
+### D-R19-15: rejection, and what it carries
+
+- **Chosen:** `rejectDraft` and `POST /runs/:id/reject`. Notes at `spec`, at most 32 KiB; at `test-design` a reason from `not-black-box`, `does-not-follow-spec`, `not-runnable`, `misses-spec-cases`, and no text. The rejection is recorded (`approval-rejected`) before it is committed; notes are kept with the attempt in run state, not in the decision. A grant recorded before a rejection clears nothing later, since a grant names its draft and attempt. Rejecting the last allowed draft parks the run and records the park, with its station, before committing it; a drive that meets that park later does not record it again.
+- **Reverse:** notes at both stations (D-A-DS-02's reverse).
+
+### D-R19-16: rubrics are host files, like roles
+
+- **Chosen:** a rubrics directory on the host holding `spec.md` and `test-design.md`, required for a drafting run (`unseated`), refused inside the workspace or the store (`overlaps`), read at admission for each station the run drafts with the role compiler's limits, recorded with `recordRubric`, and named in the admission record by hash. The defaults ship in `@olympus-ai/api` as `DEFAULT_RUBRICS_DIRECTORY`; the server takes `rubricsDirectory`, and the host reads `FACTORY_RUBRICS_DIR`, optional, so a host without one refuses drafting runs and nothing else.
+- **Reverse:** rubrics in policy.
+
+### D-R19-17: the production host seats one driver in every drafting seat
+
+- **Chosen:** `composeHost` names the Claude Code driver for all four seats. No critic is of another family than its drafter, so none is seated, `independent-critic-clean` fails, and every draft goes to a person, as D-A-DS-04's consequence says until a second driver exists.
+- **Reverse:** compose a second driver once R6 or the Codex driver exists.
+
+### D-R19-18: grades in R2's rates
+
+- **Chosen:** each run is keyed by the weakest grade among its review seats (`no-review` where none was seated; a seat recorded before grades reads `independent` as `different-family` and keeps `reduced`). `caughtFalseDoneByGrade` and `autonomyRatioByGrade` are kept per that key, and `criticFindingsByGrade` counts critic results that found anything per critic grade.
+- **Reverse:** local to `packages/api/src/outcomes.ts`.
+
+### D-R19-19: the worst case counts both seats of each drafted station
+
+- **Chosen:** each seat is counted at its station's `maxStarts`, nine calls, at its own role's budget, whether or not its critic will be seated: which models resolve is the drivers', and the figure is a bound (D-P9-03).
+- **Reverse:** count a critic only where its grade would seat it.
+
+### D-R19-20: a run's standing names the draft a person decides
+
+- **Chosen:** `awaiting-approval` carries `draft`: the station, the draft's hash and attempt, the failed conditions, the runtime's problems, the critic's grade and findings, advisory ones included, and the attempts left; `null` at any other exit. The CLI's `approve` and `reject` take `--draft`.
+- **Reverse:** a separate read of the draft.
+
+### D-R19-21: the drafting assertions observe what a seat was given, not what the runtime meant to give it
+
+- **Found:** the external review of R19's conformance half (codex-1, codex-2, codex-3, codex-7, codex-8, codex-10, gemini-1 to gemini-3, gemini-5, gemini-6). Each assertion named a property the runtime holds, but checked a proxy for it. The black-box assertion listed the sibling `start` directory after the run, not the mounted `work` when the drafter's call began. The critic stubs never looked at their input. No scenario approved a test draft. Refusals were found by an existential search that one decision satisfied twice, and no assertion checked that a refusal left the grants unchanged. The park was found after the fact, not before its commit. In every fixture the drafting seats resolved and reported the same model. Text was checked in the prompt parts only, never in the role or the workspace.
+- **Chosen:** each stub seat reads its whole workspace through the sandbox provider when its call begins. The black-box assertion requires exactly the locked spec at its locked bytes, no other mount for either test seat, and refusal at admission of egress for the test critic as for the test drafter. `I3.locked-draft-is-the-bytes-read` changes the drafter's workspace between the runtime's record of the draft and the critic's call, then requires the recorded bytes in the critic's context and workspace. `I3.drafted-tests-lock-and-run-at-verify` is new: it approves a test draft, requires its manifest and test locked at `test-design` at the approved hash and written into the artifact root, requires verify's evidence to hold a passing run of the drafted check, and requires a drafted test changed afterwards to verify as tampered. A refused approval must add exactly one decision, `approval-refused` for its reason at its key, and leave the run's grants as they were. A rejection's decision must name the draft rejected and be recorded once. The park is checked through a wrapped vault: every commit of the parked state comes after the park decision. A critic that resolves to the drafter's family and reports another stays advisory, and a test drafter that resolves to the builder's family and reports another fails the independence condition. The base-run output and the rejection notes are checked in the role and in each retry's workspace too, and attempt 3 must be told that attempt 2's critic result was unreadable.
+- **Consequence:** three runtime mutations were run against the new assertions and then reverted. Copying the base into the test drafter's `work` fails the black-box assertion, which the old listing of `start` passed. Grading the critic by its reported model alone fails the advisory assertion. Rendering the draft to the critic without its bytes fails the bytes-read assertion.
+- **Reverse:** none needed.
+
+### D-R19-22: no drafting assertion stops the process between two persistence steps
+
+- **Found:** the external review of R19's conformance half (codex-4). Every drafting assertion resumes after a completed approval or rejection call. None stops between a grant and its draft binding, between a recorded draft and its critic, or between a lock and its commit. The runtime orders that triage read are sound: `approveStation` records the grant's decision before its commit, a missing critic is `critic: null` and never clean, and D-R19-12 orders the lock. But no assertion fails if those orders change.
+- **Chosen:** known limit. The park ordering alone is now asserted (D-R19-21). A stop-injection matrix over the drafting lifecycle (draft, base record, critic, grant, installation, lock, rejection, each followed by a resume from a fresh runtime) is larger than a review fix.
+- **Owner:** issue #66.
+- **Reverse:** the matrix, using the `around` vault wrapper that the P4 replay assertion and the park check already use.
+
+### D-R19-23: drafted fail-closed cases are narrow, and one runtime question goes to the runtime half
+
+- **Found:** the external review of R19's conformance half (codex-6). No drafted base-run case holds more than one declared check or names an absent file. The critic-shape half of the finding does not hold: `readCriticResult` requires exactly one key, `findings`, holding non-empty strings, and `api/test/drafting.test.ts` covers those branches.
+- **Answered** by the runtime half's triage: D-R19-24, issue #67.
+- **Open:** a behavioral check is judged by its exit code over the product (D-R15-02). A drafted behavioral check whose command names a path that is neither drafted nor in the base fails on the base as declared. The test-draft validator keeps only drafted paths in a command's `runs`, so nothing flags it. Whether the builder could later write that path, making the agent being judged the author of its judge, is a question about the runtime. This triage has neither read nor run the answer.
+- **Chosen:** known limit for the conformance gap. The open question goes to the triage of R19's runtime-half review, which should construct the case.
+- **Reverse:** a drafted case with two distinguishable checks, and one whose command names an absent script.
+
+### D-R19-24: what the runtime half's review left as known limits
+
+- **Found:** the external review of R19's runtime half (codex-3, and the question D-R19-23 handed over). A drafted behavioral check is tied to its test by naming it in its command, not by running it: `["node", "-e", "process.exit(0)", "test/guard.js"]` names `test/guard.js` and passes. A drafted check whose command names a path neither drafted nor in the base fails on the base as declared and is not flagged, and build may later write that path, so the check at verify runs a file its judged agent wrote.
+- **Chosen:** known limits. The first gives the drafter nothing a weak test it writes would not, and the critic reading the recorded bytes and the approving person are its controls. No argv the runtime does not own can prove execution. The second is escalated today, not refused: `analyzeTamper` adds a changed file a pinned command names to `protectedPathsTouched`, and the exit goes to a person. That was traced, not run. Refusing it at drafting needs a rule for which argv tokens are paths, and `commandPaths` takes every token.
+- **Owner:** issue #67, for the refusal and an end-to-end assertion of the escalation.
+- **Reverse:** runtime-owned runners for drafted checks, with the tests as their only operands.
+
+### D-R19-25: the runtime half's review fixes
+
+- **Found:** the external review of R19's runtime half (codex-1, gemini-1, codex-4, codex-5). A test drafter's retry carried each base check's id and exact exit code, and the paths `exists` named, so a drafted check could read the repository and exit with a byte of it: two retries, any number of checks. A stop after `recordDraftLock` and before the state's commit left a run every resume threw on, since the Vault refused the same lock again. A stop after that commit and before the artifact root was written made every resume record a `lock-tamper` for files the runtime had not yet written. A policy narrowing a drafting role's `writableGlobs` did nothing.
+- **Chosen:** A-R19-11. The base's facts reach a test drafter as one empty `base-refusal`. `recordDraftLock` takes the same record again. A resume writes a committed lock's files that are absent and not yet locked into the artifact root before checking it. A drafted path outside the role's grant is `outside-grant`.
+- **Consequence:** the three new or changed assertions, `I3.base-refusal-tells-the-drafter-nothing-of-the-repository`, `I5.draft-lock-survives-a-stop`, and `I4.draft-outside-the-grant-goes-back`, each failed against the runtime before these fixes, and the stop assertion's second window failed alone with the resume's write removed.
+- **Reverse:** none needed.
+
+## R19 amendments to the contracts
+
+### A-R19-01: admission says what is drafted
+
+`RequestedArtifacts.spec` and `.acceptanceTests` take `'draft'`; `.acceptanceManifest`, `.specParts.runRequirements`, and `.specParts.questions` are new and optional. `RunRequest` gains `intent` and `rubrics`. `AdmissionRecord.artifacts.spec` and `.acceptanceTests` become `AdmittedSet`; the record gains `acceptanceManifest`, the two spec parts, `intent`, and `rubrics`. `ComponentGraph` gains `drafting`, the driver of each seat.
+
+### A-R19-02: drafting stations are agent stations
+
+`AgentStation` gains `spec` and `test-design`, with contracts requiring `parallelism`, granting the intent and the base at `spec` and the locked spec alone at `test-design`, writing `.drafts/**` and `**`, three iterations, and tier `deep`. `CRITIC_CONTRACTS` holds the critic seats and `criticContractProblems` checks them; the `test-design` critic is granted the locked spec, the draft, and the rubric. `ContextGrant` gains `intent`, `draft`, `rubric`. `RetryPart` and `retrySuffix` type a retry's variable suffix. `DRAFT_ROLES`, `seatTaskId`, `seatTask`, `grantedCriticContext`, and `seatTestDrafter` are new.
+
+### A-R19-03: the drafted floor
+
+`effectiveApproval` takes a `DraftFloor`; `TransitionInput.draft` carries it; `grantClears` matches a grant by key, draft hash, and attempt.
+
+### A-R19-04: approvals and decisions name the draft
+
+`ApprovalGrant.draft` and `ApprovalRequest.draft`; `approveStation` refuses `draft-mismatch` and `draft-invalid`; `rejectDraft` is new. `DecisionCause` gains `approval-rejected`, `draft-sent-back`, and `draft-floor-applied`; `approval-granted` carries the draft.
+
+### A-R19-05: a park of a draft names its station
+
+`ParkCause` gains `drafts-rejected`, and its `parked` arm names the station and no task. `StationRefusal` gains `same-family-drafter`.
+
+### A-R19-06: run state records drafting
+
+`RunState.drafts`: each drafting station's attempts, its draft lock, and whether it parked.
+
+### A-R19-07: the Vault's drafting operations
+
+`recordIntent`, `recordRubric`, `recordDraft`, `recordCriticResult`, `recordDraftLock`, and `readLocks`, with `VaultRefKind` gaining `intent`, `draft`, `critic-result`, `draft-lock`. I1's closed operation set is updated to twenty-four.
+
+### A-R19-08: base records per draft
+
+`BaseRunRecord.draft`; `recordBaseRun` is once per run and draft; `readBaseRun(runId, draft)`.
+
+### A-R19-09: independence is a grade
+
+`ReviewSeat.independence` is `IndependenceGrade`: `different-family`, `different-model`, or `same-model`; `gradeOf` and `weakerGrade` derive it.
+
+### A-R19-10: the spec's parts
+
+`SpecPart` gains `run-requirements` and `questions`, parsed by `parseRunRequirements` and `parseQuestions`.
+
+### A-R19-11: a test drafter learns one fact of the base
+
+Amends D-A-DS-01's "learns only the check's id, declaration, and exit code", D-R19-08, and D-R19-09, confirmed by the maintainer 2026-10-23. A drafted check chooses its exit code, so the code is base output, which D-A-DS-01's must-hold keeps from the black-box seats. At `test-design`, a base run's refusal and the runtime problems that come from the base (`exists`, `unbound`) reach the next attempt as one `RetryPart` `{ kind: 'base-refusal' }` with nothing in it; the draft's own problems still go back by path and code. Two retries carry at most two bits of the repository. `BaseRefusalPart` stays in the decision and the standing, for a person. Also: `recordDraftLock` returns the existing ref for a byte-identical record; a resume writes a committed lock's absent, unlocked files into the artifact root (`settleArtifactRoot`); and a drafted path outside the drafting role's `writableGlobs` is the runtime problem `outside-grant`.

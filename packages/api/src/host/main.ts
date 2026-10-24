@@ -7,6 +7,9 @@
  * - `FACTORY_POLICY_FILE`: the `policy.yaml` every run is admitted under
  * - `FACTORY_ROLES_DIR`: the roles directory every run's seats are compiled
  *   from, outside the repository and the trees (D-A-RC-01)
+ * - `FACTORY_RUBRICS_DIR` (optional): the rubrics directory a drafting run's
+ *   critics are given, outside the repository and the trees (R19). Unset, a
+ *   run that drafts is refused at admission
  * - `FACTORY_VAULT_STORE`: what the Vault owns
  * - `FACTORY_REPOSITORY`: the working copy runs are admitted from
  * - `FACTORY_TREES`: where the runtime keeps each run's trees
@@ -52,6 +55,7 @@ const server = createApiServer({
   principal: process.env.FACTORY_PRINCIPAL ?? 'local',
   policyFile: required('FACTORY_POLICY_FILE'),
   rolesDirectory: required('FACTORY_ROLES_DIR'),
+  rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');
 

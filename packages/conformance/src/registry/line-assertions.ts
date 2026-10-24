@@ -60,7 +60,13 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     recordIntegration: (r) => inner.recordIntegration(r),
     readIntegration: (runId) => inner.readIntegration(runId),
     recordBaseRun: (r) => inner.recordBaseRun(r),
-    readBaseRun: (runId) => inner.readBaseRun(runId),
+    readBaseRun: (runId, draft) => inner.readBaseRun(runId, draft),
+    recordIntent: (r) => inner.recordIntent(r),
+    recordRubric: (r) => inner.recordRubric(r),
+    recordDraft: (r) => inner.recordDraft(r),
+    recordCriticResult: (r) => inner.recordCriticResult(r),
+    recordDraftLock: (r) => inner.recordDraftLock(r),
+    readLocks: (runId) => inner.readLocks(runId),
     listRuns: () => inner.listRuns(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
@@ -452,21 +458,23 @@ function identity(family: string): ModelIdentity {
 export const REVIEW_SEAT_FAMILY_CHECK: LocalAssertion = runtime({
   id: 'I6.review-seat-family-check',
   title:
-    'every review seat compares the reviewer family with each author family read from the recorded results: at L0-L2 a same-family seat is filled and run state records reduced independence, and a different family records independent; at L3 a same-family reviewer is refused and the run does not advance (asserted on the machine, since the line refuses every run above L1 until P6)',
+    'every review seat compares the reviewer family with each author family read from the recorded results: at L0-L2 a same-family seat is filled and run state records its reduced grade, the same model or another model of the family, and a different family records different-family; at L3 a same-family reviewer is refused and the run does not advance (asserted on the machine, since the line refuses every run above L1 until P6; grades, D-A-DS-06)',
   run: async () => {
     const { seatReviewer } = await import('@olympus-ai/core');
     const review = 'review-1' as TaskId;
     const authors = [identity('claude')];
     for (const level of [0, 1, 2] as AutonomyLevel[]) {
       const seat = seatReviewer(review, authors, identity('claude'), level);
-      if (!seat.ok || seat.seat.independence !== 'reduced') throw new Error(`I6: a same-family seat at L${String(level)} was ${JSON.stringify(seat)}`);
+      if (!seat.ok || seat.seat.independence !== 'same-model') throw new Error(`I6: a same-family seat at L${String(level)} was ${JSON.stringify(seat)}`);
+      const sibling = seatReviewer(review, authors, { ...identity('claude'), model: 'another' }, level);
+      if (!sibling.ok || sibling.seat.independence !== 'different-model') throw new Error(`I6: another model of the family at L${String(level)} was ${JSON.stringify(sibling)}`);
     }
     const l3 = seatReviewer(review, authors, identity('claude'), 3);
     if (l3.ok || l3.reason !== 'same-family-reviewer') throw new Error(`I6: a same-family reviewer at L3 was ${JSON.stringify(l3)}`);
     const l3Other = seatReviewer(review, authors, identity('gpt'), 3);
-    if (!l3Other.ok || l3Other.seat.independence !== 'independent') throw new Error('I6: a different-family reviewer at L3 was not seated as independent');
+    if (!l3Other.ok || l3Other.seat.independence !== 'different-family') throw new Error('I6: a different-family reviewer at L3 was not seated as different-family');
 
-    for (const [family, independence] of [['stub', 'reduced'], ['other-family', 'independent']] as const) {
+    for (const [family, independence] of [['stub', 'same-model'], ['other-family', 'different-family']] as const) {
       await withLine(`p4-i6-${independence}-`, async (rig) => {
         const { startRun } = await api();
         const author = await stubDriver();

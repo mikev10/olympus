@@ -104,7 +104,7 @@ describe('the run lifecycle over HTTP', () => {
     const run = await created();
     expect(run.state.station).toBe('intake');
     const waiting = await settled(run.runId);
-    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] });
+    expect(waiting.standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS], draft: null });
     expect(waiting.lastOutcome).toMatchObject({ kind: 'outcome', outcome: { ok: false, reason: 'refused', transition: { reason: 'approval-required' } } });
 
     // Who approved is the token's principal; a body that tries to say otherwise is refused.
@@ -150,7 +150,7 @@ describe('the worst-case cost, approved before a run starts (D-P9-03)', () => {
   test('at L0 no figure is needed', async () => {
     await serve();
     const run = await created({ requestedLevel: 0, approvedCostUsd: null });
-    expect((await settled(run.runId)).standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:0', escalations: [UNANALYSED_TESTS] });
+    expect((await settled(run.runId)).standing).toEqual({ standing: 'awaiting-approval', key: 'integrate:0', escalations: [UNANALYSED_TESTS], draft: null });
   });
 });
 
@@ -290,7 +290,7 @@ describe('the event stream', () => {
       return { event: name.replace('event: ', ''), data: JSON.parse(data.replace('data: ', '')) as unknown };
     });
     expect(events[0]?.event).toBe('state');
-    expect(events.at(-2)).toEqual({ event: 'standing', data: { standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS] } });
+    expect(events.at(-2)).toEqual({ event: 'standing', data: { standing: 'awaiting-approval', key: 'integrate:1', escalations: [UNANALYSED_TESTS], draft: null } });
     expect(events.at(-1)).toMatchObject({ event: 'end', data: { kind: 'outcome' } });
     const versions = events.filter((e) => e.event === 'state').map((e) => Number((e.data as RunState).version));
     expect(versions.length).toBeGreaterThan(3);

@@ -28,12 +28,15 @@
  * it (`I5.stale-commit-is-refused-under-contention`).
  */
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AdmissionRecord, BaseRunRecord, DecisionCause, EnforcementDecision, EvidenceBundle, IntegrationRecord, LockEntry, LockManifest, LockVerdict, NoRunState, UsageRecord, Vault } from '../types.js';
+import type {
+  AdmissionRecord, BaseRunRecord, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord,
+  LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
+} from '../types.js';
 
 /** Reported as `actual` for a locked path that no longer exists: a deleted artifact is a mismatch, not an empty file (D-S1-02). */
 const MISSING = 'missing';
@@ -76,13 +79,29 @@ const KINDS: readonly VaultRefKind[] = [
   'spec', 'acceptance-tests', 'task-graph', 'lock-manifest', 'policy',
   'verification-manifest', 'evidence', 'violation', 'run-state', 'rubric', 'learning',
   'admission', 'task-result', 'usage', 'decision', 'integration', 'base-run',
+  'intent', 'draft', 'critic-result', 'draft-lock',
 ];
 
 /** The one admission record a run may have. Named, not hash-addressed, so its exclusive create is what makes it once-only. */
 const ADMISSION_FILE = 'admission.json';
 
-/** The one base record a run may have (D-A-BF-01), named for the same reason as the admission record. */
+/**
+ * The one base record a run's admitted checks may have (D-A-BF-01), named for
+ * the same reason as the admission record. A test draft's is named for its
+ * hash beside it, once per draft (R19).
+ */
 const BASE_RUN_FILE = 'base-run.json';
+
+function baseRunFile(draft: string | null): string {
+  return draft === null ? BASE_RUN_FILE : `base-run.${draft}.json`;
+}
+
+/** Once per run and station: an approved draft is locked once, as an admission is admitted once (R19). */
+function draftLockFile(station: string): string {
+  return `draft-lock.${station}.json`;
+}
+
+const DRAFT_STATIONS = new Set(['spec', 'test-design']);
 
 export interface VaultRoots {
   /** What the Vault owns. Never inside `artifacts`, and never the same directory. */
@@ -97,6 +116,16 @@ function sha256(bytes: Uint8Array): string {
 
 function hasCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
+}
+
+async function pathExists(file: string): Promise<boolean> {
+  try {
+    await stat(file);
+    return true;
+  } catch (error) {
+    if (isAbsent(error)) return false;
+    throw error;
+  }
 }
 
 function isAbsent(error: unknown): boolean {
@@ -209,7 +238,11 @@ function requireRunState(value: unknown, file: string): RunState {
     (value.cancelled === null || (isRecord(value.cancelled) && hasString(value.cancelled, 'by') && hasString(value.cancelled, 'at'))) &&
     (value.halted === null || (isRecord(value.halted) && hasString(value.halted, 'at') && hasString(value.halted, 'message')));
   if (!ok) throw new Error(`LocalVault: ${file} does not hold a run state; refusing to return a partial record`);
-  return value as unknown as RunState;
+  // A state committed before R19 holds no drafts and grants that name no draft: read as none (R19).
+  const drafts = value.drafts === undefined ? {} : value.drafts;
+  if (!isMap(drafts)) throw new Error(`LocalVault: ${file} holds drafts that are not a map; refusing to return a partial record`);
+  const approvals = (value.approvals as unknown[]).map((grant) => (isRecord(grant) && grant.draft === undefined ? { ...grant, draft: null } : grant));
+  return { ...value, drafts, approvals } as unknown as RunState;
 }
 
 const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd', 'refused'] as const;
@@ -280,6 +313,9 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'relay-refused': ['model-relay'],
   'tier-escalated': ['line'],
   'task-conflict': ['line'],
+  'approval-rejected': ['approval'],
+  'draft-sent-back': ['line'],
+  'draft-floor-applied': ['line'],
 };
 
 function isNullableString(r: Record<string, unknown>, key: string): boolean {
@@ -324,6 +360,7 @@ function isBaseResult(c: unknown): boolean {
 function baseRunProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (!(r.draft === null || (typeof r.draft === 'string' && SHA256_HEX.test(r.draft)))) return 'it names neither a draft hash nor null (R19)';
   if (!hasString(r, 'baseTreeSha256') || !/^[0-9a-f]{64}$/.test(r.baseTreeSha256 as string)) return 'it names no base tree digest';
   if (!Array.isArray(r.checks) || !r.checks.every(isBaseResult)) {
     return 'its checks are not results';
@@ -331,6 +368,90 @@ function baseRunProblem(r: unknown): string | undefined {
   if (!Array.isArray(r.unstarted) || !r.unstarted.every((u) => isRecord(u) && hasString(u, 'checkId') && hasString(u, 'reason'))) {
     return 'its unstarted checks do not each say why';
   }
+  return undefined;
+}
+
+function isModel(m: unknown): boolean {
+  return isRecord(m) && hasString(m, 'provider') && hasString(m, 'family') && hasString(m, 'model') && m.family !== '' && m.model !== '';
+}
+
+function isRoleVersion(r: unknown): boolean {
+  return isRecord(r) && hasString(r, 'id') && r.id !== '' && typeof r.sha256 === 'string' && SHA256_HEX.test(r.sha256);
+}
+
+function isDraftRef(d: unknown): boolean {
+  return isRecord(d) && typeof d.sha256 === 'string' && SHA256_HEX.test(d.sha256) && Number.isInteger(d.attempt) && (d.attempt as number) >= 1;
+}
+
+function isPathCodes(value: unknown): boolean {
+  return Array.isArray(value) && value.every((p) => isRecord(p) && hasString(p, 'path') && hasString(p, 'code'));
+}
+
+/**
+ * The hash a draft is named by: the SHA-256 of the canonical list of each
+ * file's path and hash, sorted by path (R19). Exported for the runtime, which
+ * computes it from the bytes it read, so the two cannot drift.
+ */
+export function draftDigest(files: ReadonlyArray<{ readonly path: string; readonly sha256: string }>): string {
+  const canonical = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)).map((f) => [f.path, f.sha256]);
+  return sha256(new TextEncoder().encode(JSON.stringify(canonical)));
+}
+
+/** R19: a draft as the runtime read it, whole, with its hash the hash of its files and each file's the hash of its bytes. */
+function draftProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (typeof r.station !== 'string' || !DRAFT_STATIONS.has(r.station)) return 'it names no drafting station';
+  if (!Number.isInteger(r.attempt) || (r.attempt as number) < 1) return 'attempt is not a positive whole number';
+  if (!Array.isArray(r.files) || r.files.length === 0) return 'it holds no file';
+  const seen = new Set<string>();
+  for (const file of r.files as unknown[]) {
+    if (!isRecord(file) || !hasString(file, 'path') || !hasString(file, 'sha256') || !hasString(file, 'base64')) return 'a file carries no path, hash, and bytes';
+    const { path, sha256: hash, base64 } = file as { path: string; sha256: string; base64: string };
+    if (seen.has(path)) return `${path} is listed twice`;
+    seen.add(path);
+    if (sha256(Buffer.from(base64, 'base64')) !== hash) return `${path}'s hash is not the hash of its bytes`;
+  }
+  if (r.sha256 !== draftDigest(r.files as Array<{ path: string; sha256: string }>)) return 'its hash is not the hash of its files';
+  if (!Array.isArray(r.discarded) || !r.discarded.every((d) => typeof d === 'string')) return 'its discarded paths are not a list';
+  if (!isPathCodes(r.problems)) return 'its problems are not paths and codes';
+  if (!isModel(r.model)) return 'it names no model the drafter ran on';
+  if (!isRoleVersion(r.role)) return 'it names no role and version the drafter ran under';
+  return undefined;
+}
+
+/** R19: a critic's result, whole: a binding result is of another family, and an unreadable one carries a finding (I5). */
+function criticProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (typeof r.station !== 'string' || !DRAFT_STATIONS.has(r.station)) return 'it names no drafting station';
+  if (!Number.isInteger(r.attempt) || (r.attempt as number) < 1) return 'attempt is not a positive whole number';
+  if (typeof r.draft !== 'string' || !SHA256_HEX.test(r.draft)) return 'it names no draft hash';
+  if (!isModel(r.drafter) || !isModel(r.critic)) return 'it names no drafter and critic model';
+  if (r.grade !== 'different-family' && r.grade !== 'different-model' && r.grade !== 'same-model') return 'its grade is not a grade';
+  if (r.binding !== (r.grade === 'different-family')) return 'only a critic of another family than the drafter is binding (D-A-DS-06)';
+  if (typeof r.readable !== 'boolean') return 'it does not say whether the result was readable';
+  if (!Array.isArray(r.findings) || !r.findings.every((f) => typeof f === 'string' && f !== '')) return 'its findings are not a list of text';
+  if (!r.readable && r.findings.length === 0) return 'an unreadable result counts as a finding (I5)';
+  if (typeof r.rubric !== 'string' || !SHA256_HEX.test(r.rubric)) return 'it names no rubric hash';
+  if (!isRoleVersion(r.role)) return 'it names no role and version the critic ran under';
+  return undefined;
+}
+
+/** R19: an approved draft's lock, whole. */
+function draftLockProblem(r: unknown): string | undefined {
+  if (!isRecord(r) || !hasString(r, 'runId')) return 'it names no run';
+  if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
+  if (typeof r.station !== 'string' || !DRAFT_STATIONS.has(r.station)) return 'it names no drafting station';
+  if (!isDraftRef(r.draft)) return 'it names no draft';
+  if (!Array.isArray(r.files) || r.files.length === 0 || !r.files.every((f) => isRecord(f) && hasString(f, 'path') && typeof f.sha256 === 'string' && SHA256_HEX.test(f.sha256))) {
+    return 'its files are not paths and hashes';
+  }
+  const approval = r.approval;
+  if (!isRecord(approval) || !((approval.by === 'principal' && hasString(approval, 'principal') && approval.principal !== '') || approval.by === 'policy')) {
+    return 'it does not say who approved it';
+  }
+  if (typeof r.baseTreeSha256 !== 'string' || !SHA256_HEX.test(r.baseTreeSha256)) return 'it names no base tree digest';
   return undefined;
 }
 
@@ -436,7 +557,6 @@ function objectFile(store: string, ref: VaultRef): string {
   if (!KINDS.includes(ref.kind)) throw new Error(`LocalVault: '${ref.kind}' is not a Vault reference kind`);
   if (!/^[0-9a-f]{64}$/.test(ref.hash)) throw new Error(`LocalVault: '${ref.hash}' is not a SHA-256 digest`);
   if (ref.kind === 'admission') return join(runDir(store, ref.runId), ADMISSION_FILE);
-  if (ref.kind === 'base-run') return join(runDir(store, ref.runId), BASE_RUN_FILE);
   return join(runDir(store, ref.runId), 'objects', ref.kind, `${ref.hash}.json`);
 }
 
@@ -475,8 +595,11 @@ export class LocalVault implements Vault {
     try {
       bytes = await readFile(objectFile(this.#store, ref));
     } catch (error) {
-      if (isAbsent(error)) throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}`, { cause: error });
-      throw error;
+      if (!isAbsent(error)) throw error;
+      // A base record written before R19 lives only under its fixed name.
+      const legacy = ref.kind === 'base-run' ? await readFile(join(runDir(this.#store, ref.runId), BASE_RUN_FILE)).catch(() => undefined) : undefined;
+      if (legacy === undefined) throw new Error(`LocalVault: no ${ref.kind} ${ref.hash} for run ${ref.runId}`, { cause: error });
+      bytes = legacy;
     }
     // Every other kind is named by its hash, so the file a ref names holds that
     // content. The admission record is named by its run, so a ref carrying some
@@ -631,29 +754,94 @@ export class LocalVault implements Vault {
   }
 
   /**
-   * I2: only the runtime's record, whole. Once per run, by an exclusive
-   * create: a second base run would let a run be judged against whichever
-   * base suited it, so it is refused and nothing is stored.
+   * I2: only the runtime's record, whole. Once per run and draft, by an
+   * exclusive create: a second base run would let a run or a draft be judged
+   * against whichever base suited it, so it is refused and nothing more is
+   * stored. The record is stored under its hash first, so the name that makes
+   * it once-only never points at a record that is not there (R19).
    */
   async recordBaseRun(r: BaseRunRecord): Promise<VaultRef> {
     const problem = baseRunProblem(r);
     if (problem !== undefined) throw new Error(`LocalVault: refusing a base record: ${problem}`);
     const bytes = encode(r);
-    if (!(await createExclusive(join(runDir(this.#store, r.runId), BASE_RUN_FILE), bytes))) {
-      throw new Error(`LocalVault: run ${r.runId} already has a base record; the checks run over a base once, and nothing was stored`);
+    const ref: VaultRef = { runId: r.runId, kind: 'base-run', hash: sha256(bytes) };
+    const named = join(runDir(this.#store, r.runId), baseRunFile(r.draft));
+    if (await pathExists(named)) {
+      throw new Error(`LocalVault: run ${r.runId} already has a base record${r.draft === null ? '' : ` for draft ${r.draft}`}; the checks run over a base once, and nothing was stored`);
     }
-    return { runId: r.runId, kind: 'base-run', hash: sha256(bytes) };
+    await createExclusive(objectFile(this.#store, ref), bytes);
+    if (!(await createExclusive(named, bytes))) {
+      throw new Error(`LocalVault: run ${r.runId} already has a base record${r.draft === null ? '' : ` for draft ${r.draft}`}; the checks run over a base once, and nothing was stored`);
+    }
+    return ref;
   }
 
-  async readBaseRun(runId: RunId): Promise<VaultRef | null> {
+  async readBaseRun(runId: RunId, draft: string | null): Promise<VaultRef | null> {
+    if (draft !== null && !SHA256_HEX.test(draft)) throw new Error(`LocalVault: '${draft}' is not a draft hash`);
     let bytes: Uint8Array;
     try {
-      bytes = await readFile(join(runDir(this.#store, runId), BASE_RUN_FILE));
+      bytes = await readFile(join(runDir(this.#store, runId), baseRunFile(draft)));
     } catch (error) {
       if (isAbsent(error)) return null;
       throw error;
     }
     return { runId, kind: 'base-run', hash: sha256(bytes) };
+  }
+
+  /** I7: only a person's intent, as the principal's channel supplied it (R19). */
+  recordIntent(r: IntentRecord): Promise<VaultRef> {
+    if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'text') || r.text.trim() === '') return Promise.reject(new Error('LocalVault: refusing an intent that names no run or carries no text'));
+    if ((r.from as string) !== 'principal') return Promise.reject(new Error("LocalVault: refusing an intent that did not come from the principal's channel"));
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("LocalVault: refusing an intent: collectedBy is not 'runtime'"));
+    return storeObject(this.#store, r.runId, 'intent', r);
+  }
+
+  recordRubric(r: RubricRecord): Promise<VaultRef> {
+    if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'text') || typeof r.station !== 'string' || !DRAFT_STATIONS.has(r.station)) {
+      return Promise.reject(new Error('LocalVault: refusing a rubric that names no run, station, or text'));
+    }
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("LocalVault: refusing a rubric: collectedBy is not 'runtime'"));
+    if (createHash('sha256').update(r.text, 'utf8').digest('hex') !== r.sha256) return Promise.reject(new Error('LocalVault: refusing a rubric whose hash is not its text\'s'));
+    return storeObject(this.#store, r.runId, 'rubric', r);
+  }
+
+  recordDraft(r: DraftRecord): Promise<VaultRef> {
+    const problem = draftProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a draft: ${problem}`));
+    return storeObject(this.#store, r.runId, 'draft', r);
+  }
+
+  recordCriticResult(r: CriticRecord): Promise<VaultRef> {
+    const problem = criticProblem(r);
+    if (problem !== undefined) return Promise.reject(new Error(`LocalVault: refusing a critic result: ${problem}`));
+    return storeObject(this.#store, r.runId, 'critic-result', r);
+  }
+
+  /**
+   * Once per run and station, by an exclusive create: an approved draft is
+   * locked once (R19). The same record again returns its ref, so a resume
+   * after a stop that fell between this and the state's commit can finish
+   * (A-R19-11); any other record at that station is refused.
+   */
+  async recordDraftLock(r: DraftLockRecord): Promise<VaultRef> {
+    const problem = draftLockProblem(r);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing a draft lock: ${problem}`);
+    const bytes = encode(r);
+    const ref: VaultRef = { runId: r.runId, kind: 'draft-lock', hash: sha256(bytes) };
+    await createExclusive(objectFile(this.#store, ref), bytes);
+    const station = join(runDir(this.#store, r.runId), draftLockFile(r.station));
+    if (!(await createExclusive(station, bytes)) && sha256(await readFile(station)) !== ref.hash) {
+      throw new Error(`LocalVault: run ${r.runId} already locked another draft at ${r.station}; nothing more was stored`);
+    }
+    return ref;
+  }
+
+  async readLocks(runId: RunId): Promise<LockManifest | null> {
+    const locks = join(runDir(this.#store, runId), 'locks');
+    const generation = await highestIn(locks);
+    if (generation === null) return null;
+    const file = join(locks, `${String(generation)}.json`);
+    return requireManifest(await readJson(file), file);
   }
 
   /** I2: only what the runtime did, whole. The same act recorded twice is one entry, since the record carries no time. */

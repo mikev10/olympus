@@ -23,10 +23,10 @@
  * never mounted anywhere.
  */
 import { createHash } from 'node:crypto';
-import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink } from 'node:fs/promises';
+import { copyFile, cp, lstat, mkdir, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { diffTrees, hashRegularFile, walkTree, type WalkOptions } from '@olympus-ai/adapters';
-import type { RunId, TaskId } from '@olympus-ai/core';
+import type { DraftSeat, DraftStation, RunId, TaskId } from '@olympus-ai/core';
 import type { DiffEntry } from '@olympus-ai/vault';
 
 /** Who a container runs as, and so who every workspace the store hands out must be writable by. */
@@ -112,6 +112,22 @@ export function attemptPaths(store: WorkspaceStore, runId: RunId, task: TaskId, 
 
 export function treePath(store: WorkspaceStore, runId: RunId, diffSha256: string): string {
   return join(runDir(store, runId), 'trees', diffSha256);
+}
+
+/** Where one drafting seat's attempt runs: the tree it was handed, and the copy it works in (R19). */
+export function draftPaths(store: WorkspaceStore, runId: RunId, station: DraftStation, seat: DraftSeat, attempt: number): { start: string; work: string } {
+  const dir = join(runDir(store, runId), 'drafts', `${station}.${seat}.${String(attempt)}`);
+  return { start: join(dir, 'start'), work: join(dir, 'work') };
+}
+
+/** Where a test draft's checks run over the base: a copy of it with the draft's files written in (R19). */
+export function draftBaseRunPath(store: WorkspaceStore, runId: RunId, draft: string): string {
+  return join(runDir(store, runId), 'base-runs', draft);
+}
+
+/** Scratch space for one computation over the base, discarded after (R19). */
+export function scratchPath(store: WorkspaceStore, runId: RunId, name: string): string {
+  return join(runDir(store, runId), 'scratch', name);
 }
 
 export function reviewPath(store: WorkspaceStore, runId: RunId, task: TaskId, iteration: number): string {
@@ -357,4 +373,30 @@ export async function copyOnly(source: string, target: string, paths: readonly s
     else if (facts.isFile()) await copyFile(from, to);
     else throw new Error(`workspace: ${path} is neither a file nor a link, so it cannot be put in a view`);
   }
+}
+
+/**
+ * Writes each file's bytes at its path under `root`, replacing what is
+ * there, and refuses a path whose parent is a link: the runtime writes
+ * approved draft bytes into the trees it owns and nowhere through them (R19).
+ */
+export async function writeFiles(root: string, files: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array }>): Promise<void> {
+  for (const file of files) {
+    await refuseLinkedParent(root, file.path, 'write');
+    const destination = join(root, ...file.path.split('/'));
+    await rm(destination, { recursive: true, force: true });
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, file.bytes);
+  }
+}
+
+/** Every regular file and link under `root`, as tree-relative paths with `/`, outside `.git`, sorted. */
+export async function filesIn(root: string): Promise<string[]> {
+  const entries = await walkTree(root, DIFF_WALK);
+  return [...entries.entries()].filter(([, entry]) => entry.kind !== 'other').map(([path]) => path).sort();
+}
+
+/** Whether `path` names anything under `root`, a link included. */
+export async function existsIn(root: string, path: string): Promise<boolean> {
+  return present(join(root, ...path.split('/')));
 }

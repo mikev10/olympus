@@ -208,7 +208,7 @@ export const EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR: LocalAssertion = runtime({
       if (JSON.stringify(families) !== '["first-family","second-family"]') {
         throw new Error(`I6: the seat's authors are of ${JSON.stringify(families)}; both models that built the task are authors`);
       }
-      if (seat.independence !== 'reduced') throw new Error(`I6: a reviewer sharing the first builder's family was seated as ${seat.independence}`);
+      if (seat.independence !== 'different-model') throw new Error(`I6: a reviewer sharing the first builder's family was seated as ${seat.independence}`);
     });
     // The reviewer resolves to an author's family and reports a third: what it reports never widens the seat (codex-1, gemini-1).
     await withLine('r14-i6-claims-', async (rig) => {
@@ -228,7 +228,7 @@ export const EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR: LocalAssertion = runtime({
       await startRun(await rig.request(components, { policy: await policyWith({ tier: 'fast', escalation: 'none' }) }));
       const [seat] = (await rig.state()).reviews;
       if (seat === undefined) throw new Error('I6: no review seat was recorded');
-      if (seat.independence !== 'reduced') {
+      if (seat.independence !== 'different-model') {
         throw new Error(`I6: a reviewer resolved to an author's family that reported '${seat.reviewer.family}' was seated as ${seat.independence}`);
       }
     });

@@ -795,7 +795,10 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
   // Step 1.
   let artifacts: UnitArtifacts;
   try {
-    artifacts = findUnitArtifacts(readdirSync(at(REVIEWS_DIR)), args.unit);
+    artifacts = findUnitArtifacts(readdirSync(at(REVIEWS_DIR)), args.unit, (pairStem) => {
+      const manifest = at(`${REVIEWS_DIR}/${pairStem}-review-${args.family}.run.json`);
+      return existsSync(manifest) && recordedOutcome(readFileSync(manifest, 'utf8')) === 'counted';
+    });
   } catch (err) {
     const branch = deps.git(deps.repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
     throw new Error(
@@ -815,6 +818,9 @@ function prepare(args: RunArgs, deps: RunnerDeps): Prepared {
       `(${String(pairs)} pair${pairs === 1 ? '' : 's'} matched ${args.unit}` +
       `${pairs === 1 ? '' : '; the newest was chosen'})`,
   );
+  if (artifacts.skippedCounted.length > 0) {
+    console.log(`passed over ${artifacts.skippedCounted.join(', ')}: ${args.family} already has a counted review of each`);
+  }
 
   const promptPath = `${REVIEWS_DIR}/${artifacts.promptFile}`;
   const bundlePath = `${REVIEWS_DIR}/${artifacts.bundleFile}`;

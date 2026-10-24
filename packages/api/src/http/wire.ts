@@ -7,7 +7,7 @@
  * what the runtime derived and recorded (I2); nothing a model wrote is
  * presented as status, and nothing here is ever placed in a prompt (I7).
  */
-import type { ApprovalKey, AutonomyLevel, RunId, RunState } from '@olympus-ai/core';
+import type { ApprovalKey, AutonomyLevel, RejectionReason, RunId, RunState } from '@olympus-ai/core';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
 
@@ -20,11 +20,30 @@ export interface CreateRunBody {
   readonly artifacts: RequestedArtifacts;
   /** The worst-case figure approved, or null to be told it. Above L0 a run is refused until it matches. */
   readonly approvedCostUsd: number | null;
+  /**
+   * The person's intent a drafted spec is drafted from, or absent (R19). This
+   * route is the human principal's channel, the only one an intent comes
+   * through (I7).
+   */
+  readonly intent?: string;
 }
 
 /** `POST /runs/:id/approve`. Who approved is the token's principal, never a field (D-P9-06). */
 export interface ApproveBody {
   readonly key: ApprovalKey;
+  /** The hash of the draft approved, at a drafted exit (R19). */
+  readonly draft?: string;
+}
+
+/**
+ * `POST /runs/:id/reject`: a person's rejection of the draft waiting (R19).
+ * Notes at `spec`; a reason from the fixed set at `test-design`, and no text.
+ */
+export interface RejectBody {
+  readonly key: ApprovalKey;
+  readonly draft: string;
+  readonly notes?: string;
+  readonly reason?: RejectionReason;
 }
 
 /** 201 from `POST /runs`: admitted and recorded; the line is driving it. */

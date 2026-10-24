@@ -13,7 +13,7 @@
  * the graph `build` schedules are the ones validated here.
  */
 import { isAbsolute, posix, win32 } from 'node:path';
-import { isAutonomyLevel } from '@olympus-ai/core';
+import { isAutonomyLevel, SEAT_TASK_IDS } from '@olympus-ai/core';
 import type { RoleId, RunId, Task, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { SecurityScanner } from '@olympus-ai/adapters';
 import type { CheckKind, CheckSpec, SecurityCheckKind, SecurityCheckSpec } from '@olympus-ai/integrity';
@@ -87,7 +87,27 @@ export type RequestProblemCode =
   /** A security check, or a check naming a rule it denies, is optional; a check nothing holds the gate to is not a control (I5). */
   | 'not-required'
   /** A security part that is not one: neither `none` with its reason nor every field the part requires (R17). */
-  | 'not-a-security-part';
+  | 'not-a-security-part'
+  /** A run-requirements or questions part that is not one (R19). */
+  | 'not-a-spec-part'
+  /** A graph task named as a drafting seat is, which run state counts the seat under (R19). */
+  | 'reserved'
+  /** A path a draft would be written to already exists in the base (R19). */
+  | 'exists'
+  /** A test drafter or critic granted egress beyond the model relay, which would let it see the repository (R19, I3). */
+  | 'not-black-box'
+  /** A drafted acceptance manifest names a check of a kind a test drafter does not write: only acceptance and behavioral checks (R19). */
+  | 'not-draftable'
+  /** A drafted test no drafted check runs, or a check naming a test that was not drafted (R19). */
+  | 'unreferenced'
+  /** A drafted path the drafting role's policy grant does not cover (R19, I4, A-R19-11). */
+  | 'outside-grant'
+  /** An authorization rule of the spec's security part that no drafted or admitted check denies (R17, R19). */
+  | 'denial-check-missing'
+  /** An intent that is not a person's text from the principal's channel (R19, I7). */
+  | 'not-an-intent'
+  /** The roles or rubrics the run needs, or the drivers that seat a drafter or a critic, are not given (R19). */
+  | 'unseated';
 
 export interface RequestProblem {
   /** The field, as a path into the request or an artifact: `graph.tasks[1].dependsOn[0]`. */
@@ -150,6 +170,11 @@ export function requestProblems(req: RequestFields): RequestProblem[] {
  * `..` segment would let the two name different files. A path listed under
  * two artifacts is a duplicate, since the second station's lock of it would
  * be refused.
+ *
+ * The spec and the acceptance tests are each a list of paths or `'draft'`
+ * (R19). A drafted spec's parts are drafted with it, so it names none; drafted
+ * tests need the spec's run-requirements part, admitted with a supplied spec,
+ * and carry their own acceptance manifest, so a supplied one is not named.
  */
 function artifactProblems(artifacts: unknown, report: Report): void {
   if (typeof artifacts !== 'object' || artifacts === null) {
@@ -170,6 +195,7 @@ function artifactProblems(artifacts: unknown, report: Report): void {
   };
   for (const list of ['spec', 'acceptanceTests'] as const) {
     const paths = a[list];
+    if (paths === 'draft') continue;
     if (!Array.isArray(paths) || paths.length === 0) {
       report(`artifacts.${list}`, 'missing', `artifacts.${list} must name at least one file; nothing locked is not a lock`);
       continue;
@@ -181,25 +207,62 @@ function artifactProblems(artifacts: unknown, report: Report): void {
   }
   one('artifacts.verificationManifest', a.verificationManifest);
   one('artifacts.taskGraph', a.taskGraph);
+  const testsDrafted = a.acceptanceTests === 'draft';
+  if (a.acceptanceManifest !== undefined) {
+    if (testsDrafted) report('artifacts.acceptanceManifest', 'not-applicable', 'drafted acceptance tests carry their own acceptance manifest; a supplied one is not named beside them');
+    else one('artifacts.acceptanceManifest', a.acceptanceManifest);
+  }
   const parts = a.specParts;
+  const named = new Set<string>();
   if (parts !== undefined) {
     if (typeof parts !== 'object' || parts === null || Array.isArray(parts)) {
       report('artifacts.specParts', 'empty', 'artifacts.specParts must be an object naming each part\'s file');
     } else {
       const p = parts as Record<string, unknown>;
       for (const key of Object.keys(p)) {
-        if (key !== 'security') report(`artifacts.specParts.${key}`, 'not-applicable', `artifacts.specParts.${key} is not a part a spec carries; the security part is the only one`);
+        if (key !== 'security' && key !== 'runRequirements' && key !== 'questions') {
+          report(`artifacts.specParts.${key}`, 'not-applicable', `artifacts.specParts.${key} is not a part a spec carries: security, runRequirements, and questions are`);
+        } else if (a.spec === 'draft') {
+          report(`artifacts.specParts.${key}`, 'not-applicable', `artifacts.specParts.${key} is named for a drafted spec, whose parts are drafted with it`);
+        } else if (p[key] !== undefined) {
+          one(`artifacts.specParts.${key}`, p[key]);
+          named.add(key);
+        }
       }
-      if (p.security !== undefined) one('artifacts.specParts.security', p.security);
     }
+  }
+  if (testsDrafted && a.spec !== 'draft' && !named.has('runRequirements')) {
+    report('artifacts.specParts.runRequirements', 'missing', 'drafted acceptance tests need the spec\'s run-requirements part: it is the test drafter\'s only view of the repository');
   }
 }
 
-/** The manifest's checks, or the problems that keep it from being one. */
-export function parseManifest(value: unknown): { ok: true; checks: CheckSpec[] } | { ok: false; problems: RequestProblem[] } {
+/**
+ * The merged checks of the verification manifest and an acceptance manifest
+ * (R19): ids distinct across both, and at least one required check that
+ * reproduces the change, which either manifest may hold.
+ */
+export function mergedCheckProblems(verification: readonly CheckSpec[], acceptance: readonly CheckSpec[]): RequestProblem[] {
+  const { problems, report } = collector();
+  const ids = new Set(verification.map((c) => c.id));
+  acceptance.forEach((check, i) => {
+    if (ids.has(check.id)) report(`acceptanceManifest.checks[${String(i)}].id`, 'duplicate', `'${check.id}' is also a check of the verification manifest; a duplicate id lets one result stand in for another`);
+  });
+  const merged = [...verification, ...acceptance];
+  if (!merged.some((c) => c.required && (c.kind === 'acceptance' || c.kind === 'behavioral') && c.onBase === 'fails')) {
+    report('manifest.checks', 'none-fails-on-base', "at least one required acceptance or behavioral check must declare onBase 'fails'; a run with nothing failing before the change has nothing to show the change did");
+  }
+  return problems;
+}
+
+/**
+ * The manifest's checks, or the problems that keep it from being one. A
+ * manifest read beside an acceptance manifest is not held alone to having a
+ * reproduction: the two are held to it together (`mergedCheckProblems`, R19).
+ */
+export function parseManifest(value: unknown, options: { readonly alone: boolean } = { alone: true }): { ok: true; checks: CheckSpec[] } | { ok: false; problems: RequestProblem[] } {
   const { problems, report } = collector();
   const checks = typeof value === 'object' && value !== null && 'checks' in value ? value.checks : undefined;
-  checkProblems(checks, report);
+  checkProblems(checks, report, options.alone);
   if (problems.length > 0) return { ok: false, problems };
   return {
     ok: true,
@@ -340,7 +403,7 @@ function commandProblems(command: unknown, at: string, report: Report): void {
  * check, and any behavioral check that declares one, does on the base
  * (D-A-BF-01, D-R15-02).
  */
-function checkProblems(checks: unknown, report: Report): void {
+function checkProblems(checks: unknown, report: Report, alone: boolean): void {
   if (!Array.isArray(checks) || checks.length === 0) {
     report('manifest.checks', 'missing', 'manifest.checks must name at least one check; no check is not a verification');
     return;
@@ -420,7 +483,7 @@ function checkProblems(checks: unknown, report: Report): void {
     report('manifest.checks', 'none-required', 'manifest.checks: at least one check must be required; a gate no check can fail is not a gate');
   }
   // An optional check does not hold verify's gate, so it cannot show what the change did (D-R15-01).
-  if (reproduces === 0) {
+  if (reproduces === 0 && alone) {
     report('manifest.checks', 'none-fails-on-base', "manifest.checks: at least one required acceptance or behavioral check must declare onBase 'fails'; a run with nothing failing before the change has nothing to show the change did");
   }
 }
@@ -453,6 +516,7 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
     const t = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
     const at = `graph.tasks[${String(i)}]`;
     if (!isNonEmptyString(t.id)) report(`${at}.id`, 'empty', `${at}.id must be a non-empty string`);
+    else if (SEAT_TASK_IDS.includes(t.id as TaskId)) report(`${at}.id`, 'reserved', `${at}.id '${t.id}' is a drafting seat's id in run state; a graph task may not use it (R19)`);
     else if (ids.has(t.id)) report(`${at}.id`, 'duplicate', `${at}.id '${t.id}' is listed twice`);
     else {
       ids.add(t.id);

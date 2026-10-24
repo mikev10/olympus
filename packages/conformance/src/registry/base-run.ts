@@ -239,7 +239,7 @@ export const BASE_RESULTS_ARE_THE_RUNTIMES: LocalAssertion = runtime({
       const components = await rig.components();
       await startRun(await rig.request(components));
       const vault = components.vault;
-      const ref = await vault.readBaseRun(rig.runId);
+      const ref = await vault.readBaseRun(rig.runId, null);
       if (ref === null) throw new Error('I2: the run crossed test-design with no base record');
       const record = await readRecord<BaseRunRecord>(vault, ref);
       const before = record.checks.find((c) => c.checkId === 'hello-written');
@@ -344,7 +344,7 @@ export const SUITE_CHECK_RUNS_WHAT_IT_NAMES: LocalAssertion = runtime({
         throw new Error(`D-R15-04: the line started ${JSON.stringify(started)}; once over the base and once at verify, each exactly ${expected}`);
       }
       const vault = components.vault;
-      const ref = await vault.readBaseRun(rig.runId);
+      const ref = await vault.readBaseRun(rig.runId, null);
       if (ref === null) throw new Error('D-R15-04: no base record');
       const before = (await readRecord<BaseRunRecord>(vault, ref)).checks.find((c) => c.checkId === REPRODUCES.id);
       const state = await vault.readRunState(rig.runId);

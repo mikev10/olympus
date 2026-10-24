@@ -70,8 +70,11 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     vault,
     sandbox,
     driver,
-    // One driver in both seats: below L3 the seat is filled and run state records its independence as reduced (I6).
+    // One driver in both seats: below L3 the seat is filled and run state records its independence as its grade (I6).
     reviewer: driver,
+    // One driver in every drafting seat too: no critic is of another family than its drafter, so none is
+    // seated, the condition is recorded as failed, and every draft goes to a person (R19, D-A-DS-04).
+    drafting: { specDrafter: driver, specCritic: driver, testDrafter: driver, testCritic: driver },
     workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },

@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { isNoRunState, LocalVault, StubVault, type AdmissionRecord, type EvidenceBundle } from '../src/index.js';
+import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CriticRecord, type DraftRecord, type EvidenceBundle } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -95,6 +95,7 @@ function state(version: string): RunState {
     usage: [],
     cancelled: null,
     halted: null,
+    drafts: {},
     version,
   };
 }
@@ -116,12 +117,15 @@ function admission(level: 0 | 1 | 2 | 3 = 1): AdmissionRecord {
     policy: new StrictPolicyEngine().resolvePolicy(DEFAULT_POLICY_DOCUMENT),
     roles: [BUILDER_ROLE],
     artifacts: {
-      spec: [{ path: 'spec.md', sha256: 'd'.repeat(64) }],
-      acceptanceTests: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }],
+      spec: { source: 'supplied', files: [{ path: 'spec.md', sha256: 'd'.repeat(64) }] },
+      acceptanceTests: { source: 'supplied', files: [{ path: 'acceptance.test.ts', sha256: 'e'.repeat(64) }] },
+      acceptanceManifest: { source: 'none' },
       verificationManifest: { path: 'verify.json', sha256: 'f'.repeat(64) },
       taskGraph: { path: 'graph.json', sha256: '0'.repeat(64) },
-      specParts: { security: null },
+      specParts: { security: null, runRequirements: null, questions: null },
     },
+    intent: null,
+    rubrics: [],
     baseTreeSha256: '1'.repeat(64),
     unavailableControls: ['mutation'],
     stack: 'vitest@4',
@@ -343,24 +347,25 @@ describe('the base record (D-A-BF-01)', () => {
     checks: [reproduced],
     unstarted: [],
     collectedBy: 'runtime' as const,
+    draft: null,
   };
 
   test('is absent until written, then read back by the reference it was written under', async () => {
-    expect(await vault.readBaseRun(runId)).toBeNull();
+    expect(await vault.readBaseRun(runId, null)).toBeNull();
     const ref = await vault.recordBaseRun(record);
-    expect(await vault.readBaseRun(runId)).toEqual(ref);
+    expect(await vault.readBaseRun(runId, null)).toEqual(ref);
     expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(record);
   });
 
   test('is written once: a second base for the run is refused and the first stands', async () => {
     const ref = await vault.recordBaseRun(record);
     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode: 0 }] })).rejects.toThrow(/already has a base record/);
-    expect(await vault.readBaseRun(runId)).toEqual(ref);
+    expect(await vault.readBaseRun(runId, null)).toEqual(ref);
   });
 
   test('refuses a record the runtime did not collect, and stores nothing', async () => {
     await expect(vault.recordBaseRun({ ...record, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
-    expect(await vault.readBaseRun(runId)).toBeNull();
+    expect(await vault.readBaseRun(runId, null)).toBeNull();
   });
 
   test('refuses a result whose suite count is absent, since the suite-count rule would read it as met (codex-obs), and stores nothing', async () => {
@@ -370,19 +375,85 @@ describe('the base record (D-A-BF-01)', () => {
     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, suiteCount: 1.5 }] })).rejects.toThrow(/not results/);
     // R17: a security check's findings are the base set, so one the runtime could not have written is refused.
     await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, findings: [{ rule: 'r', location: { path: 'a', line: 1 }, fingerprint: 'not-a-digest' }] }] })).rejects.toThrow(/not results/);
-    expect(await vault.readBaseRun(runId)).toBeNull();
+    expect(await vault.readBaseRun(runId, null)).toBeNull();
   });
 
   test('refuses an exit code that is not an integer: NaN is written as null and read back as a failure', async () => {
     for (const exitCode of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
       await expect(vault.recordBaseRun({ ...record, checks: [{ ...reproduced, exitCode }] })).rejects.toThrow(/not results/);
     }
-    expect(await vault.readBaseRun(runId)).toBeNull();
+    expect(await vault.readBaseRun(runId, null)).toBeNull();
+  });
+
+  test('is written once per draft hash beside the admitted checks\' (R19), and a draft\'s record is not the run\'s', async () => {
+    const draft = 'a'.repeat(64);
+    const admitted = await vault.recordBaseRun(record);
+    expect(await vault.readBaseRun(runId, draft)).toBeNull();
+    const drafted = await vault.recordBaseRun({ ...record, draft });
+    expect(await vault.readBaseRun(runId, draft)).toEqual(drafted);
+    expect(await vault.readBaseRun(runId, null)).toEqual(admitted);
+    await expect(vault.recordBaseRun({ ...record, draft, checks: [{ ...reproduced, exitCode: 0 }] })).rejects.toThrow(/already has a base record for draft/);
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(drafted)))).toEqual({ ...record, draft });
+    await expect(vault.recordBaseRun({ ...record, draft: 'not-a-hash' })).rejects.toThrow(/draft hash/);
   });
 
   test('a reference whose hash is not the record\'s reads nothing', async () => {
     await vault.recordBaseRun(record);
     await expect(vault.read({ runId, kind: 'base-run', hash: 'd'.repeat(64) })).rejects.toThrow(/hashes to/);
+  });
+});
+
+describe('drafting records (R19)', () => {
+  const model = { provider: 'p', family: 'claude' as ModelFamily, model: 'm', version: '1' };
+  const role = { id: 'spec-drafter' as RoleId, sha256: 'a'.repeat(64) };
+  const bytes = Buffer.from('# a drafted spec\n');
+  const file = { path: '.drafts/run-1/spec.md', sha256: createHash('sha256').update(bytes).digest('hex'), base64: bytes.toString('base64') };
+  const draft: DraftRecord = {
+    runId, station: 'spec', attempt: 1, sha256: draftDigest([file]), files: [file], discarded: [], problems: [], model, role, collectedBy: 'runtime',
+  };
+
+  test('a draft is stored only when its hash is the hash of its files, and each file\'s the hash of its bytes', async () => {
+    const ref = await vault.recordDraft(draft);
+    expect(JSON.parse(new TextDecoder().decode(await vault.read(ref)))).toEqual(draft);
+    await expect(vault.recordDraft({ ...draft, sha256: 'b'.repeat(64) })).rejects.toThrow(/not the hash of its files/);
+    await expect(vault.recordDraft({ ...draft, files: [{ ...file, base64: Buffer.from('other').toString('base64') }] })).rejects.toThrow(/not the hash of its bytes/);
+    await expect(vault.recordDraft({ ...draft, collectedBy: 'agent' } as never)).rejects.toThrow(/collectedBy/);
+  });
+
+  test('a critic result binds only from another family, and an unreadable one carries a finding (I5)', async () => {
+    const critic: CriticRecord = {
+      runId, station: 'spec', attempt: 1, draft: draft.sha256, drafter: model, critic: { ...model, family: 'gpt' as ModelFamily },
+      grade: 'different-family', binding: true, readable: true, findings: [], rubric: 'c'.repeat(64), role: { id: 'spec-critic' as RoleId, sha256: 'd'.repeat(64) }, collectedBy: 'runtime',
+    };
+    await vault.recordCriticResult(critic);
+    await expect(vault.recordCriticResult({ ...critic, grade: 'different-model', binding: true })).rejects.toThrow(/only a critic of another family/);
+    await expect(vault.recordCriticResult({ ...critic, readable: false, findings: [] })).rejects.toThrow(/counts as a finding/);
+  });
+
+  test('an intent comes from the principal\'s channel alone', async () => {
+    await vault.recordIntent({ runId, text: 'add a greeting', from: 'principal', collectedBy: 'runtime' });
+    await expect(vault.recordIntent({ runId, text: 'add a greeting', from: 'trigger', collectedBy: 'runtime' } as never)).rejects.toThrow(/principal/);
+  });
+
+  test('an approved draft is locked once per station, and the lock manifest reads back as it stands', async () => {
+    expect(await vault.readLocks(runId)).toBeNull();
+    const lock = { runId, station: 'spec' as const, draft: { sha256: draft.sha256, attempt: 1 }, files: [{ path: file.path, sha256: file.sha256 }], approval: { by: 'policy' as const }, baseTreeSha256: 'e'.repeat(64), collectedBy: 'runtime' as const };
+    const ref = await vault.recordDraftLock(lock);
+    // The same record again is the lock a resume finishes; another is refused (A-R19-11).
+    expect(await vault.recordDraftLock(lock)).toEqual(ref);
+    await expect(vault.recordDraftLock({ ...lock, approval: { by: 'principal', principal: 'm' } })).rejects.toThrow(/already locked another draft at spec/);
+    await writeFile(join(artifacts, 'spec.md'), SPEC);
+    const manifest = await vault.lock(runId, ['spec.md'], 'spec');
+    expect(await vault.readLocks(runId)).toEqual(manifest);
+  });
+
+  test('a state committed before R19 reads with no drafts and grants naming no draft', async () => {
+    const { drafts: _drafts, ...legacy } = state('0');
+    const grant = { key: 'spec:1', approvedBy: 'm', approvedAt: 't', usedAt: null };
+    await vault.commitRunState({ ...legacy, approvals: [grant] } as never, '0');
+    const read = await vault.readRunState(runId);
+    expect(read.drafts).toEqual({});
+    expect(read.approvals[0]?.draft).toBeNull();
   });
 });
 

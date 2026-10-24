@@ -15,7 +15,9 @@ export {
 } from './compile.js';
 
 /**
- * The roles shipped with the runtime, `builder` and `reviewer`: one seat at
+ * The roles shipped with the runtime: `builder`, `reviewer`, and the four
+ * drafting seats R19 adds (`spec-drafter`, `spec-critic`, `test-drafter`,
+ * `test-critic`). `builder` and `reviewer` are one seat at
  * `build` and the review seat. A service is configured with a roles directory
  * as it is with a policy file; this is one it can be pointed at.
  */

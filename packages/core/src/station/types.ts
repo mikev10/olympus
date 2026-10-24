@@ -6,10 +6,16 @@ import type { DriverCapability, ModelFamily, ModelIdentity } from '../driver/con
 import type { ApprovalKey, ApprovalOutcome } from '../policy/types.js';
 import type { ModelTier, StationId, TaskId, VaultRef } from '../run/types.js';
 
+/**
+ * `intent` is the person's text a spec-less run was admitted with, `draft`
+ * the bytes of a recorded draft, and `rubric` the person's rubric a critic
+ * checks a draft against (R19).
+ */
 export type ContextGrant =
   | 'locked-spec' | 'acceptance-tests' | 'task-graph' | 'plan'
   | 'base-repo-readonly' | 'diff' | 'evidence-bundle'
-  | 'author-narrative' | 'conversation';
+  | 'author-narrative' | 'conversation'
+  | 'intent' | 'draft' | 'rubric';
 
 export interface WriteBoundary {
   workspaceGlobs: string[];
@@ -51,18 +57,81 @@ export interface FailedCheck {
 }
 
 /**
+ * How independent two seats are, from the models the runtime resolved for
+ * them (D-A-DS-06): another family, another model in the same family, or the
+ * same model. Only `different-family` is independent (I6); the other two are
+ * recorded so a rate can be kept per grade, and satisfy nothing.
+ */
+export type IndependenceGrade = 'different-family' | 'different-model' | 'same-model';
+
+/**
  * One review seat as the runtime assembled it (I6). `authors` are the model
  * identities recorded with the results of the tasks under review, read from
  * the Vault; `reviewer` is the identity recorded with the review task's own
- * result. `reduced` means the reviewer's family is an author's: reportable at
- * L0-L2, never at L3, where the seat is refused instead.
+ * result. `independence` is the weakest grade between the reviewer and any
+ * author. Anything but `different-family` is reportable at L0-L2, and refused
+ * at L3 where the reviewer shares an author's family.
  */
 export interface ReviewSeat {
   readonly task: TaskId;
   readonly authors: readonly ModelIdentity[];
   readonly reviewer: ModelIdentity;
-  readonly independence: 'independent' | 'reduced';
+  readonly independence: IndependenceGrade;
 }
+
+/** The stations a drafter may be seated at (R19). */
+export type DraftStation = 'spec' | 'test-design';
+
+/** The two seats a drafting station holds. */
+export type DraftSeat = 'drafter' | 'critic';
+
+/**
+ * A condition the drafted floor requires for `auto` at L2, named so a failed
+ * one is recorded by name (D-A-DS-04). At `spec`: the parts parse, no open
+ * question, a clean independent critic. At `test-design`: the base run
+ * passed for the draft, a clean independent critic, and a test drafter of
+ * another family than every model the build driver can resolve.
+ */
+export type DraftCondition =
+  | 'shape'
+  | 'no-open-question'
+  | 'independent-critic-clean'
+  | 'base-run-passed'
+  | 'drafter-independent-of-builder';
+
+/**
+ * Why a person rejected a test draft: a fixed set and nothing else, since an
+ * approver who has read the repository would otherwise be a channel around
+ * the black box (D-A-DS-02).
+ */
+export type RejectionReason = 'not-black-box' | 'does-not-follow-spec' | 'not-runnable' | 'misses-spec-cases';
+
+/**
+ * What a check did on the base that refused a test draft, as the run's
+ * records hold it and a person reads it: the check's id, its declaration,
+ * and either its exit code or a cause from a fixed set. Never its output.
+ * The test drafter learns none of it: a drafted check chooses its own exit
+ * code, so the code is base output (A-R19-11).
+ */
+export type BaseRefusalPart =
+  | { readonly checkId: string; readonly declared: 'fails' | 'passes' | null; readonly exitCode: number }
+  | { readonly checkId: string; readonly declared: 'fails' | 'passes' | null; readonly cause: 'did-not-start' | 'suite-short' };
+
+/**
+ * A typed part of a drafter's retry, carried in the request's variable
+ * suffix and never in its stable prefix or role (D-A-DS-02). The runtime's
+ * own problems with a draft are paths and codes; `notes` exist at `spec`
+ * alone, and a `test-design` rejection carries a reason and no text.
+ * `base-refusal` carries nothing: at `test-design` it is the one fact a test
+ * drafter learns of the repository, that its draft did not hold there
+ * (A-R19-11).
+ */
+export type RetryPart =
+  | { readonly kind: 'critic-findings'; readonly findings: readonly string[] }
+  | { readonly kind: 'runtime-problems'; readonly problems: ReadonlyArray<{ readonly path: string; readonly code: string }> }
+  | { readonly kind: 'base-refusal' }
+  | { readonly kind: 'rejection-reason'; readonly reason: RejectionReason }
+  | { readonly kind: 'notes'; readonly notes: string };
 
 /**
  * One declared check that did not do on the base what the locked manifest
@@ -81,8 +150,13 @@ export interface BaseMismatch {
   cause: 'contrary' | 'no-result' | 'suite-count';
 }
 
-/** A part the runtime requires of every spec, whatever its template; the security part is the only one today. */
-export type SpecPart = 'security';
+/**
+ * A part of a spec, each a JSON file locked with it. The runtime requires the
+ * security part of every spec (R17). A drafted spec carries all three: what
+ * the acceptance checks need to run, and its assumptions and open questions
+ * (R19); a supplied spec may.
+ */
+export type SpecPart = 'security' | 'run-requirements' | 'questions';
 
 /** A locked artifact whose bytes no longer match the lock manifest (I3). */
 export interface TamperedPath { path: string; expected: string; actual: string; }
@@ -96,8 +170,10 @@ export interface TamperedPath { path: string; expected: string; actual: string; 
  * same attempt rather than making progress (A-P4-06). `conflicts-exhausted`:
  * a sibling's accepted change collided with the task's own more times than the
  * policy's `concurrency.maxConflictRetries` allows (A-R4-02).
+ * `drafts-rejected`: a person rejected a drafting station's last allowed
+ * draft, which parks the run terminally (R19, D-A-DS-02).
  */
-export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted';
+export type ParkCause = 'iterations-exhausted' | 'retries-exhausted' | 'starts-exhausted' | 'conflicts-exhausted' | 'drafts-rejected';
 
 /**
  * A refusal to advance. `reason` is a closed set and selects the payload a
@@ -140,7 +216,14 @@ export type StationRefusal =
    */
   | { ok: false; reason: 'approval-required'; key: ApprovalKey; escalations: string[]; message: string }
   | { ok: false; reason: 'same-family-reviewer'; task: TaskId; family: ModelFamily; message: string }
-  | { ok: false; reason: 'parked'; task: TaskId; cause: Exclude<ParkCause, 'conflicts-exhausted'>; limit: number; message: string }
+  /** At L3, a test drafter of a family the build driver can resolve: refused as a same-family reviewer is (R19, R9). */
+  | { ok: false; reason: 'same-family-drafter'; station: 'test-design'; family: ModelFamily; message: string }
+  | { ok: false; reason: 'parked'; task: TaskId; cause: Exclude<ParkCause, 'conflicts-exhausted' | 'drafts-rejected'>; limit: number; message: string }
+  /**
+   * A drafting station's last allowed draft rejected by a person. A draft has
+   * no graph task, so the arm names the station (R19).
+   */
+  | { ok: false; reason: 'parked'; task: null; station: DraftStation; cause: 'drafts-rejected'; limit: number; message: string }
   /**
    * A conflict past the policy's bound: the siblings and the paths of the last
    * one, read from run state, so the refusal names both sides (A-R4-02).
@@ -158,3 +241,16 @@ export type StationRefusal =
  * station move, so one human approval crosses one exit (A-P4-04).
  */
 export type StationTransition = { ok: true; next: StationId; spends: ApprovalKey | null } | StationRefusal;
+
+/**
+ * A critic's seat at a drafting station (R19): the drafter's grants, the
+ * recorded draft, and the rubric, and nothing writable. One call per draft,
+ * retried on a driver failure like any seat.
+ */
+export interface CriticContract {
+  readonly station: DraftStation;
+  readonly requires: DriverCapability[];
+  readonly allowedContext: ContextGrant[];
+  readonly writeBoundary: WriteBoundary & { readonly workspaceGlobs: [] };
+  readonly retry: { readonly max: number; readonly backoffMs: number };
+}

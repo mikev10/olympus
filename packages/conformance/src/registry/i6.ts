@@ -3,11 +3,14 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { REVIEW_SEAT_FAMILY_CHECK, REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL } from './line-assertions.js';
 import { EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR } from './tier.js';
 import { REVIEW_SEAT_READS_ONLY_ITS_GRANTS } from './verification.js';
+import { R19_ASSERTIONS } from './drafting.js';
 
 /** I6: Reviewers never share the author's model family. */
 export const I6: InvariantEntry = {
   title: INVARIANTS.I6,
   assertions: [
+    // R19: drafting at spec and test-design.
+    ...R19_ASSERTIONS.I6,
     compileError({
       id: 'I6.model-family-is-explicit',
       title: 'ModelFamily is branded: a plain string, the driver id, the provider, or the model name cannot be passed as a family',

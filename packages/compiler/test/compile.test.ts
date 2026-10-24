@@ -153,11 +153,12 @@ describe('isRoleId', () => {
 });
 
 describe('the shipped roles', () => {
-  test('are builder and reviewer, and compile', async () => {
-    expect((await readdir(DEFAULT_ROLES_DIRECTORY)).sort()).toEqual(['builder.md', 'reviewer.md']);
+  test('are builder, reviewer, and the four drafting seats (R19), and compile', async () => {
+    const roles = ['builder', 'reviewer', 'spec-critic', 'spec-drafter', 'test-critic', 'test-drafter'];
+    expect((await readdir(DEFAULT_ROLES_DIRECTORY)).sort()).toEqual(roles.map((r) => `${r}.md`));
     const outcome = await compileRoles(DEFAULT_ROLES_DIRECTORY);
     if (!outcome.ok) throw new Error(JSON.stringify(outcome.refused));
-    expect(outcome.roles.map((r) => r.role)).toEqual(['builder', 'reviewer']);
+    expect(outcome.roles.map((r) => r.role)).toEqual(roles);
     for (const role of outcome.roles) {
       expect(role.sha256).toBe(sha256(await readFile(join(DEFAULT_ROLES_DIRECTORY, `${role.role}.md`))));
     }

@@ -7,7 +7,7 @@
  * erased, so nothing of the runtime runs in this process (D-P9-07).
  */
 import { parseArgs } from 'node:util';
-import type { ApproveBody, CreateRunBody, ErrorBody } from '@olympus-ai/api';
+import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody } from '@olympus-ai/api';
 
 export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -28,8 +28,12 @@ const USAGE = [
   'commands:',
   '  create   --workspace <abs path> --base-commit <sha> --level <0-3> --spec <path>... --tests <path>...',
   '           --manifest <path> --graph <path> [--security-part <path>] [--approve-cost <usd>]',
+  '           [--draft-spec --intent <text>] [--draft-tests] [--acceptance-manifest <path>]',
+  '           [--run-requirements <path>] [--questions <path>]',
   '  status   <run id>',
-  '  approve  <run id> <station:level>',
+  '  approve  <run id> <station:level> [--draft <hash>]',
+  '  reject   <run id> <station:level> --draft <hash> [--notes <text>] [--reason <reason>]',
+  '           notes at spec; at test-design a reason: not-black-box, does-not-follow-spec, not-runnable, misses-spec-cases',
   '  cancel   <run id>',
   '  events   <run id>',
   '  report   <run id>      cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault',
@@ -161,23 +165,39 @@ async function create(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
       manifest: { type: 'string' },
       graph: { type: 'string' },
       'security-part': { type: 'string' },
+      'run-requirements': { type: 'string' },
+      questions: { type: 'string' },
+      'acceptance-manifest': { type: 'string' },
       'approve-cost': { type: 'string' },
+      'draft-spec': { type: 'boolean' },
+      'draft-tests': { type: 'boolean' },
+      intent: { type: 'string' },
     },
   });
   if (positionals.length > 0) throw new UsageError(`create takes no positional arguments: ${positionals.join(' ')}`);
+  // A drafted artifact is drafted on the line instead of named here (R19); naming both is a contradiction.
+  if (values['draft-spec'] === true && values.spec !== undefined) throw new UsageError('--draft-spec and --spec name the spec twice');
+  if (values['draft-tests'] === true && values.tests !== undefined) throw new UsageError('--draft-tests and --tests name the acceptance tests twice');
+  const parts = {
+    ...(values['security-part'] === undefined ? {} : { security: values['security-part'] }),
+    ...(values['run-requirements'] === undefined ? {} : { runRequirements: values['run-requirements'] }),
+    ...(values.questions === undefined ? {} : { questions: values.questions }),
+  };
   const body: CreateRunBody = {
     workspace: required(values.workspace, '--workspace'),
     baseCommit: required(values['base-commit'], '--base-commit'),
     requestedLevel: level(values.level),
     artifacts: {
-      spec: values.spec ?? [],
-      acceptanceTests: values.tests ?? [],
+      spec: values['draft-spec'] === true ? 'draft' : (values.spec ?? []),
+      acceptanceTests: values['draft-tests'] === true ? 'draft' : (values.tests ?? []),
       verificationManifest: required(values.manifest, '--manifest'),
       taskGraph: required(values.graph, '--graph'),
-      // Optional on the wire: a spec created without it is refused at the spec exit, naming the part (R17).
-      ...(values['security-part'] === undefined ? {} : { specParts: { security: values['security-part'] } }),
+      ...(values['acceptance-manifest'] === undefined ? {} : { acceptanceManifest: values['acceptance-manifest'] }),
+      // Optional on the wire: a spec created without its security part is refused at the spec exit, naming the part (R17).
+      ...(Object.keys(parts).length === 0 ? {} : { specParts: parts }),
     },
     approvedCostUsd: cost(values['approve-cost']),
+    ...(values.intent === undefined ? {} : { intent: values.intent }),
   };
   const res = await call(io, t, 'POST', 'runs', body);
   const unapproved = costRefusal(res.body);
@@ -259,9 +279,26 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
         return report(io, await call(io, t, 'GET', runPath(runId)));
       }
       case 'approve': {
-        const [runId = '', key = ''] = one(rest, ['<run id>', '<station:level>']);
-        const body: ApproveBody = { key: key as ApproveBody['key'] };
+        const { values: flags, positionals: named } = parseArgs({ args: own, strict: true, allowPositionals: true, options: { draft: { type: 'string' } } });
+        const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
+        const body: ApproveBody = { key: key as ApproveBody['key'], ...(flags.draft === undefined ? {} : { draft: flags.draft }) };
         return report(io, await call(io, t, 'POST', runPath(runId, 'approve'), body));
+      }
+      case 'reject': {
+        const { values: flags, positionals: named } = parseArgs({
+          args: own,
+          strict: true,
+          allowPositionals: true,
+          options: { draft: { type: 'string' }, notes: { type: 'string' }, reason: { type: 'string' } },
+        });
+        const [runId = '', key = ''] = one(named, ['<run id>', '<station:level>']);
+        const body: RejectBody = {
+          key: key as RejectBody['key'],
+          draft: required(flags.draft, '--draft'),
+          ...(flags.notes === undefined ? {} : { notes: flags.notes }),
+          ...(flags.reason === undefined ? {} : { reason: flags.reason as NonNullable<RejectBody['reason']> }),
+        };
+        return report(io, await call(io, t, 'POST', runPath(runId, 'reject'), body));
       }
       case 'cancel': {
         const [runId = ''] = one(rest, ['<run id>']);

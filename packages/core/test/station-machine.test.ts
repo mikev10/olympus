@@ -8,7 +8,13 @@ import {
   approvalKey,
   capabilityRefusal,
   contractTableProblems,
+  CRITIC_CONTRACTS,
+  criticContractProblems,
   DEFAULT_POLICY_DOCUMENT,
+  draftsRejected,
+  gradeOf,
+  grantClears,
+  seatTask,
   effectiveApproval,
   grantedContext,
   isBackward,
@@ -83,6 +89,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     usage: [],
     cancelled: null,
     halted: null,
+    drafts: {},
     version: '1',
     ...overrides,
   };
@@ -158,6 +165,58 @@ describe('approvals (I4)', () => {
   });
 });
 
+describe('the drafted floor (R19)', () => {
+  const base = { level: 1 as AutonomyLevel, tampered: [], grants: [], protectedPathsTouched: [], tamperFindings: [] };
+  const draft = { sha256: 'a'.repeat(64), attempt: 1 };
+  const autoEverywhere = policyWith(Object.fromEntries([0, 1, 2, 3].map((level) => [`spec:${String(level)}`, 'auto'])));
+
+  test('a drafted exit is human-required at L0, L1, and L3 under a cell of auto, and auto at L2 only with nothing failed', () => {
+    for (const level of [0, 1, 3] as const) {
+      expect(effectiveApproval(STATION_CONTRACTS.spec, autoEverywhere, level, [], { draft, failed: [] })).toBe('human-required');
+      // The same cell with the artifact supplied is unaffected.
+      expect(effectiveApproval(STATION_CONTRACTS.spec, autoEverywhere, level, [])).toBe('auto');
+    }
+    expect(effectiveApproval(STATION_CONTRACTS.spec, autoEverywhere, 2, [], { draft, failed: [] })).toBe('auto');
+    expect(effectiveApproval(STATION_CONTRACTS.spec, autoEverywhere, 2, [], { draft, failed: ['no-open-question'] })).toBe('human-required');
+    // The floor never loosens a cell: human-required and blocked stand.
+    expect(effectiveApproval(STATION_CONTRACTS.spec, policyWith({ 'spec:2': 'blocked' }), 2, [], { draft, failed: [] })).toBe('blocked');
+    expect(effectiveApproval(STATION_CONTRACTS.spec, policyWith(), 2, [], { draft, failed: [] })).toBe('human-required');
+  });
+
+  test('a grant clears only the draft and attempt it names, and an undrafted grant no draft', () => {
+    const grant = { key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: null, draft };
+    expect(grantClears(grant, 'spec:1', draft)).toBe(true);
+    expect(grantClears(grant, 'spec:1', { ...draft, sha256: 'b'.repeat(64) })).toBe(false);
+    expect(grantClears(grant, 'spec:1', { ...draft, attempt: 2 })).toBe(false);
+    expect(grantClears(grant, 'spec:1', null)).toBe(false);
+    expect(grantClears({ ...grant, draft: null }, 'spec:1', draft)).toBe(false);
+    const waits = transition({ ...base, from: 'spec', to: 'test-design', policy: autoEverywhere, draft: { draft, failed: [] } });
+    expect(waits).toMatchObject({ reason: 'approval-required', key: 'spec:1' });
+    expect(transition({ ...base, from: 'spec', to: 'test-design', policy: autoEverywhere, draft: { draft, failed: [] }, grants: [grant] })).toEqual({ ok: true, next: 'test-design', spends: 'spec:1' });
+  });
+
+  test('grades: another family, another model of the family, or the same model', () => {
+    expect(gradeOf(identity('claude'), identity('gpt'))).toBe('different-family');
+    expect(gradeOf(identity('claude'), { ...identity('claude'), model: 'other' })).toBe('different-model');
+    expect(gradeOf(identity('claude'), identity('claude'))).toBe('same-model');
+  });
+
+  test('the critic table holds its rules, and a test-design critic widened past its three grants is a problem', () => {
+    expect(criticContractProblems(CRITIC_CONTRACTS)).toEqual([]);
+    const widened = { ...CRITIC_CONTRACTS, 'test-design': { ...CRITIC_CONTRACTS['test-design'], allowedContext: ['locked-spec', 'draft', 'rubric', 'base-repo-readonly'] } } as unknown as typeof CRITIC_CONTRACTS;
+    expect(criticContractProblems(widened).map((p) => p.station)).toContain('test-design');
+  });
+
+  test('a parked seat and a rejected last draft both refuse the run', () => {
+    const graph: TaskGraph = { tasks: [], edges: [] };
+    const seat = seatTask(state(), 'spec', 'drafter');
+    expect(nextStep(state({ station: 'spec', tasks: { [seat.id]: 'parked' }, attempts: { [seat.id]: { iterations: 1, retries: 3, starts: 3, conflicts: [], parkedFor: 'retries-exhausted' } } }), graph, ONE_AT_A_TIME))
+      .toMatchObject({ kind: 'refuse', refusal: { reason: 'parked', task: 'spec.drafter', cause: 'retries-exhausted' } });
+    expect(nextStep(state({ station: 'spec', drafts: { spec: { attempts: [], locked: null, parked: true } } }), graph, ONE_AT_A_TIME))
+      .toEqual({ kind: 'refuse', refusal: draftsRejected('spec') });
+  });
+});
+
 describe('transition', () => {
   const base = { level: 1 as AutonomyLevel, tampered: [], grants: [], protectedPathsTouched: [], tamperFindings: [] };
 
@@ -170,12 +229,12 @@ describe('transition', () => {
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: policyWith({ 'spec:1': 'blocked' }) })).toMatchObject({ reason: 'approval-blocked', key: 'spec:1' });
     const waits = policyWith({ 'spec:1': 'human-required' });
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits })).toMatchObject({ reason: 'approval-required', key: 'spec:1' });
-    const wrong = [{ key: approvalKey('spec', 2), approvedBy: 'm', approvedAt: 't', usedAt: null }];
+    const wrong = [{ key: approvalKey('spec', 2), approvedBy: 'm', approvedAt: 't', usedAt: null, draft: null }];
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: wrong })).toMatchObject({ reason: 'approval-required' });
-    const right = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: null }];
+    const right = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: null, draft: null }];
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: right })).toEqual({ ok: true, next: 'test-design', spends: 'spec:1' });
     // A grant already spent is not a standing approval of the next visit (A-P4-04).
-    const spent = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: 't' }];
+    const spent = [{ key: approvalKey('spec', 1), approvedBy: 'm', approvedAt: 't', usedAt: 't', draft: null }];
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: waits, grants: spent })).toMatchObject({ reason: 'approval-required', key: 'spec:1' });
     expect(transition({ ...base, from: 'spec', to: 'test-design', policy: policyWith({ 'spec:1': 'auto' }) })).toEqual({ ok: true, next: 'test-design', spends: null });
   });
@@ -198,13 +257,13 @@ describe('the review seat (I6)', () => {
     expect(seatReviewer('r' as TaskId, authors, identity('gpt'), 3)).toMatchObject({ ok: false, reason: 'same-family-reviewer', task: 'r', family: 'gpt' });
   });
 
-  test.each([0, 1, 2] as const)('at L%i the same family is seated and recorded as reduced', (level) => {
-    expect(seatReviewer('r' as TaskId, authors, identity('claude'), level)).toMatchObject({ ok: true, seat: { independence: 'reduced' } });
+  test.each([0, 1, 2] as const)('at L%i the same family is seated and recorded with its grade', (level) => {
+    expect(seatReviewer('r' as TaskId, authors, identity('claude'), level)).toMatchObject({ ok: true, seat: { independence: 'same-model' } });
   });
 
   test('a reviewer of another family is independent at every level, and a seat with no author throws', () => {
     for (const level of [0, 1, 2, 3] as const) {
-      expect(seatReviewer('r' as TaskId, authors, identity('gemini'), level)).toMatchObject({ ok: true, seat: { independence: 'independent' } });
+      expect(seatReviewer('r' as TaskId, authors, identity('gemini'), level)).toMatchObject({ ok: true, seat: { independence: 'different-family' } });
     }
     expect(() => seatReviewer('r' as TaskId, [], identity('gemini'), 1)).toThrow(/no author/);
   });

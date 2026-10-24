@@ -147,11 +147,26 @@ export function buildGraph(parts: GraphParts): BuiltGraph {
       if (unmetered !== undefined) declarations.push(unmetered);
     }
   }
+  // Each drafting seat's driver is attested as the build driver is, unless it is one already attested (R19).
+  const drafting = components.drafting ?? null;
+  if (drafting !== null) {
+    const seen = new Set<object>([components.driver, components.reviewer]);
+    for (const [seat, driver] of Object.entries(drafting) as Array<[string, ComponentGraph['driver']]>) {
+      if (seen.has(driver)) continue;
+      seen.add(driver);
+      const declared = attest('driver', driver);
+      if (declared !== undefined) declarations.push({ ...declared, component: `${declared.component} (${seat})` });
+      else {
+        const unmetered = relayless('driver', driver);
+        if (unmetered !== undefined) declarations.push({ ...unmetered, component: `${unmetered.component} (${seat})` });
+      }
+    }
+  }
   const merger = unmerged(components.integrator ?? null);
   if (merger !== undefined) declarations.push(merger);
   const scanning = unattestedScanners(scanners ?? SCANNERS);
   if (scanning !== undefined) declarations.push(scanning);
-  const graph = Object.freeze({ ...components, integrator: components.integrator ?? null, profile: profile ?? null, scanners: scanners ?? SCANNERS }) as BuiltGraph;
+  const graph = Object.freeze({ ...components, drafting: drafting === null ? null : Object.freeze({ ...drafting }), integrator: components.integrator ?? null, profile: profile ?? null, scanners: scanners ?? SCANNERS }) as BuiltGraph;
   provenance.set(graph, Object.freeze(declarations));
   return graph;
 }
