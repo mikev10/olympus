@@ -1,0 +1,106 @@
+The code under review is in the file
+`2026-10-24-R6-openai-compatible-review-bundle.txt` (SHA-256 256ed8c0b1843dee21fcda94566010d41c2c706c68688053e933fbd4e7b3057c) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a model driver for an OpenAI-compatible chat endpoint, and the changes it required in a model relay and in the runtime that seats drivers, of a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project is a runtime that has AI models do software work inside sandboxed containers and then judges the result itself. This change adds a driver (packages/drivers/openai-compatible) for any endpoint speaking the OpenAI-compatible chat-completions API: the endpoint is only a model, so the driver runs the agent loop in the runtime's own process, makes each model call by running a fixed `node` program inside the sandbox that posts to a "model relay", and runs each tool the model calls (Bash, Edit, Read, Write) inside the sandbox through the sandbox provider's `exec`. The model relay (packages/sandbox/src/local/relay.ts) is a separate container on the sandbox's network that holds the endpoint's credential, forwards only granted paths to one fixed https upstream, meters what each call used, and refuses every call once a per-task budget is spent; this change teaches it a second usage dialect (`openai-chat`) and a second way of writing the credential (`bearer`). The runtime's graph builder now accepts the new driver as a trusted component, and the host can seat it in chosen seats from an operator's configuration file.
+
+It must hold against a capable, motivated party trying to get work done or judged in a way the runtime did not grant: run a command or write a file outside the sandbox, use a tool the task was not granted, read the endpoint credential, spend past the budget or spend without being counted, or have answers from one model attributed to the model family the operator declared. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls everything the model returns through the endpoint — message text, tool-call names and arguments, the `model` and `usage` fields, status codes and malformed bodies — and everything inside the sandbox: files in the workspace, processes it starts there, and any HTTP request it sends from inside the sandbox to the relay. It does not control the operator's endpoint configuration or the host's environment variables. It does not control the components the runtime is wired with — the Vault, the sandbox
+provider, and the drivers are runtime-selected and trusted, even where a
+function takes one as an argument — and it does not control code running inside
+the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, at any autonomy level, in any repository or role; this is enforced by what the sandbox mounts, so anything an agent does must happen inside the sandbox and never on the host.
+- The runtime derives status; the model never reports it. A task result carries no status field, and what the model says it did is a claim, not evidence.
+- Default deny. A capability not granted in policy is unavailable — this includes which tools a task may use and what it may spend.
+- Fail closed. A missing check, missing capability, unsupported configuration, or unreadable usage is a refusal — never a silent degrade and never a warning that lets the run continue.
+- Reviewers never share the author's model family. A model family is stated explicitly by whoever configures the driver and is never inferred from a driver id, a URL, or a model name.
+- Every capability a driver declares maps to an executable assertion that fails when the capability is removed; a declaration with nothing behind it is a defect.
+
+The mechanisms that matter most:
+
+- The host-side loop's grant check: only granted tools are offered to the endpoint, and a model call naming any other tool is answered with an error and not run (src/driver.ts, src/tools.ts).
+- That every tool and every model call reaches the sandbox only through `provider.exec`, with paths and commands passed as arguments rather than spliced into shell text (src/tools.ts, src/call.ts).
+- The relay's `openai-chat` metering and ceiling rules and its `bearer` credential writing (packages/sandbox/src/local/relay.ts, the relay source string and checkRelay/checkMeter).
+- Identity: the response's `model` must equal the requested model, and the family is the configuration's (src/driver.ts readTurn and #runTask, src/config.ts checkConfig).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Identifiers such as R21, R14, D-R6-06, and A-R6-02 in this list and in the code's comments refer to other units of work and to recorded design decisions you do not have; you can ignore what they point to.
+
+- a local endpoint: an `http` upstream, an endpoint with no credential, and the
+  sandbox network route to the host that reaching one needs. That loosens two
+  fail-closed rules of the relay and changes the sandbox's network posture, so
+  it is its own unit, R21
+- an endpoint that reports no usage figures. Refused, not served unmetered
+- streaming. The driver sends non-streamed requests; the relay meters a stream
+  anyway, because a request it forwards is not the driver's to choose
+- subagents, MCP, hooks, steering, and any artifact format: `emitArtifacts`
+  refuses, as the driver renders a role on each request and nowhere else
+- a paid suite against a real endpoint. Every assertion runs against a TLS
+  endpoint the test owns
+- a model per station (R14's), and changing what the compiler renders
+- the egress allowlist; a task's network grant is unchanged by this driver
+
+THE QUESTION
+
+How would a model answering through this endpoint, or code it runs in the sandbox, get a command run or a file written on the host, use a tool it was not granted, read or exfiltrate the endpoint credential, spend past its budget or spend without the relay counting it, or get its answers recorded under a model and family other than the one that actually produced them — and do the tests that claim to prove each of these properties actually fail when the property is removed?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
