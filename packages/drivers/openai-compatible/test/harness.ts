@@ -167,6 +167,11 @@ export async function withHarness<T>(body: (h: Harness) => Promise<T>, endpoint:
     for (const handle of live) await provider.destroy(handle).catch(() => undefined);
     await run('docker', ['rm', '--force', endpointName]).catch(() => undefined);
     await run('docker', ['network', 'rm', network]).catch(() => undefined);
+    // The task runs as root, and a bind mount carries that ownership to the
+    // host: on a GitHub runner, which is uid 1001, the host cannot delete what
+    // the task wrote. Root in a throwaway container can. On a developer's
+    // machine the two usually coincide and this changes nothing.
+    await run('docker', ['run', '--rm', '--user', '0:0', '--entrypoint', 'sh', '--volume', `${base}:/clean`, EGRESS_PROXY_IMAGE, '-c', 'rm -rf /clean/* /clean/.[!.]*']).catch(() => undefined);
     await rm(base, { recursive: true, force: true });
   }
 }
