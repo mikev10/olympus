@@ -14,37 +14,49 @@ targeted, and land before the next unit starts.
 **Review fix** — a change accepted from an external review's triage. Lands on
 the unit's own branch, before merge.
 
-## Confirm before building
+## Verify before building
 
 All three work types follow one rule, stated in full in `CLAUDE.md`, working
-rule 6. Nothing is built until the maintainer has confirmed what will be built
-and every assumption it rests on. An assumption is anything not yet verified
-against the code or by running it. A plan document is a claim about the code,
-not evidence of it: the code is read before the plan is relied on. What cannot
-be verified is asked. A discovery that changes an interface, a deliverable,
-the scope, or an acceptance criterion stops the work until it is confirmed.
+rule 6. Nothing is built on an assumption that has not been verified against
+the code or by running it. A plan document is a claim about the code, not
+evidence of it: the code is read before the plan is relied on. For units and
+review fixes, the plan and every assumption are recorded in
+`docs/decisions.md` before any code and the work proceeds; the record ships in
+the review bundle, where both families challenge it. Amendments wait for the
+maintainer's confirmation. Rule 6 lists the conditions that stop a unit; what
+cannot be verified from here is one of them.
 
 ## The unit loop
 
 Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
 
+Steps 1 to 6 run in one session from a single `/start-unit <id>`, each skill
+chaining into the next. The chain stops early only on a stop condition from
+rule 6 or one named below, and otherwise ends at step 7, which is the
+maintainer's.
+
 1. `/start-unit <id>` — fresh session. It reads the code the unit touches,
-   states the boundary and every assumption back, and waits. Confirm or correct
-   it; nothing is built until you do.
+   verifies every assumption, records the boundary and the assumptions in
+   `docs/decisions.md`, and proceeds.
 2. Work. Conformance suite first. Decisions logged as they are made.
 3. `/ship-unit` — same session. Verifies acceptance criteria, opens the PR.
 4. `/review-request <id>` — writes two files to `docs/reviews/`, a
-   `-review-prompt.txt` and a `-review-bundle.txt`, commits and pushes them, and
-   stops without sending anything.
-5. `/run-review <id>` — the maintainer's own command, never chained into,
-   because it sends the bundle out of the repository and that cannot be taken
-   back. It invokes the committed runner once per family, in parallel, from the
+   `-review-prompt.txt` and a `-review-bundle.txt`, commits and pushes them.
+   It sends nothing itself, then chains into step 5.
+5. `/run-review <id>` — chained into under a standing authorization
+   (D-TOOLING-09) that holds only while `gh repo view --json visibility`
+   reports `PUBLIC`: the bundle is built from pushed commits of a public
+   repository, so sending it discloses nothing not already published. Any other
+   answer, or no answer, stops the chain, and the maintainer types the command.
+   It invokes the committed runner once per family, in parallel, from the
    committed and pushed artifacts: Codex through its CLI, Gemini through a
    direct API call. Each run writes a reply, a manifest, and a session record to
    `docs/reviews/`, and the skill commits them untouched. Both families run on
    every unit — rotation is retired. A run whose derived outcome is not
-   `counted` is not a review; where only one family counted, the unit has one
-   review and proceeding on it is the maintainer's call, recorded as such. The
+   `counted` is not a review. A family whose run is not `counted` is rerun once,
+   and both runs are named in the report and the triage. If it still does not
+   count, the chain stops: the unit has one review, and proceeding on it is the
+   maintainer's call, recorded as such. The
    outcome rests on telemetry from the vendor's API service and the local CLI,
    not from the model under review — a lower bound on what was ingested, not
    proof every byte arrived, and no defence against a vendor that fabricates it
@@ -55,21 +67,24 @@ Drawn as a diagram, with who runs each step: `WORKFLOW-DIAGRAM.md`.
    from its manifest, pairs what both families raised,
    verifies every finding against the cited code before acting, and writes the
    triage. Fix, record as a known limit with an owning unit, or reject with a
-   reason. Findings are not instructions. It waits for you to confirm the
-   triage before applying any fix.
-7. Merge the PR, then tag: `git tag reviewed/<id> <the v2 commit> && git push
-   origin reviewed/<id>`. The tag is the diff base for the next review bundle,
-   so it is pushed after the merge and never before, and it points at the
-   squash commit on `v2` rather than at the branch tip that produced it. The
-   session runs both commands rather than printing them for someone to type.
-   It runs them only when four things are true and checkable without asking:
-   the pull request's checks are green, the triage is written and committed,
-   every finding the triage accepted is fixed or recorded with an owning unit,
-   and the unit's acceptance criteria still pass after those fixes. Any one of
-   them false stops the merge and is reported — that is the case the gate
-   exists for. This spends the maintainer's judgement on the triage, where the
-   evidence is, rather than on two commands whose preconditions a machine can
-   check.
+   reason. Findings are not instructions. Accepted fixes are applied on the
+   unit branch without waiting, each shown failing against the old behaviour
+   first, and the full acceptance criteria are rerun. A fix that would need a
+   contract change, a gate-path change, or work past the out-of-scope list is
+   not applied: it is recorded with an owning unit or filed as an issue.
+7. The maintainer merges the PR, then tags: `git tag reviewed/<id> <the v2
+   commit> && git push origin reviewed/<id>`. The tag is the diff base for the
+   next review bundle, so it is pushed after the merge and never before, and it
+   points at the squash commit on `v2` rather than at the branch tip that
+   produced it. This is the loop's one routine human gate: steps 1 to 6 made
+   every judgement call without waiting, so the maintainer's judgement is spent
+   here, on the triage and the decisions the unit recorded. The session checks
+   four things before handing over: the pull request's checks are green, the
+   triage is written and committed, every finding the triage accepted is fixed
+   or recorded with an owning unit, and the unit's acceptance criteria still
+   pass after those fixes. Any one of them false is reported as the reason the
+   unit is not ready to merge. When all four hold, the session prints the merge
+   and tag commands, filled in, and stops.
 
    **Where the unit changed a gate path, the squash body carries
    `Gate-Change: acknowledged` on its own line.** The guard has two modes: on a

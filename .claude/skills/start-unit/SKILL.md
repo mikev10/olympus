@@ -1,6 +1,6 @@
 ---
 name: start-unit
-description: Begin work on a decomposition unit. Loads the spine and the unit's spec, reads the code the unit touches, states the boundary and every assumption back, waits for the maintainer to confirm, then works the unit to its done-when criteria. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
+description: Begin work on a decomposition unit. Loads the spine and the unit's spec, reads the code the unit touches, verifies every assumption and records the boundary in docs/decisions.md, works the unit to its done-when criteria, then chains through ship, review, and triage, stopping only on a rule-6 stop condition or at the merge gate. Use when starting a new unit of Olympus v2 work. Takes a unit id, e.g. start-unit P1.
 ---
 
 # Start a unit
@@ -34,24 +34,35 @@ and the pending registry entries it owes. Note every place where the code
 differs from what the entry says. An entry that says an input already exists
 has been wrong before.
 
-## 4. State the boundary and every assumption, then wait
+## 4. Verify the boundary and every assumption, record it, then proceed
 
-Print the following, then stop. Write no code, no test, and no file until the
-maintainer confirms (`CLAUDE.md`, working rule 6).
+Write the following as the unit's first entry in `docs/decisions.md`, print it,
+and continue to step 5 without waiting (`CLAUDE.md`, working rule 6). The
+entry ships in the review bundle, so both reviewing families challenge it; that
+replaces a confirmation typed by the maintainer, and it is only as good as the
+verification behind each line.
 
 - Unit id and title
 - Deliverables, one line each
 - **Out of scope**, verbatim
 - Acceptance criteria, as the commands that will prove them
 - Which invariants this unit touches, and which pending registry entries it owes
-- **Every assumption the plan rests on.** Mark each one verified, naming the
-  file:line or the command that verified it, or unverified. Each unverified
-  assumption is a question, asked here with a recommended answer
+- **Every assumption the plan rests on**, each verified, naming the file:line
+  or the command that verified it. Run what can be run rather than reason
+  about it. An assumption that cannot be verified from here is a stop
+  condition (step 6), not a guess
 - Where the code differs from the unit entry, from step 3
+- Every choice point the spec leaves open: the options, each checked against
+  the code, the one chosen, what was rejected and why, and how to reverse it.
+  Choose the strongest on correctness, security, and the invariants — never the
+  easiest, and never the one that defers work to a later unit without an owner
 
-If any of the first five is absent from the spec, say which, propose what it
-should be, and ask. An underspecified unit is a spec defect, fixed in
-`docs/plan/DECOMPOSITION.md` before writing code, not after.
+If any of the first five is absent from the spec, propose what it should be.
+Where the proposal follows from the spine, the dependency graph, and the
+neighbouring units' entries, fix `docs/plan/DECOMPOSITION.md` in the unit's
+first commit and record it here. Where it does not — the missing piece would
+decide the unit's scope or what proves it done — stop and ask, with the
+proposal as the recommended answer.
 
 ## 5. Work the unit
 
@@ -70,20 +81,27 @@ Stop and ask when:
 
 - The spec contradicts itself, or contradicts `F1-spine.md`
 - Meeting an acceptance criterion would require weakening an invariant
-- The work needs a contract change (those are amendments, not unit work)
+- The work needs a contract change (those are amendments, not unit work), or a
+  gate-path change the unit does not declare in scope
 - A destructive operation has no safe default
-- A fact the work depends on turns out different from what was confirmed
-- A decision the confirmed plan does not cover would change an interface, a
-  deliverable, the scope, or an acceptance criterion
+- A discovery would change the unit's scope, deliverables, or acceptance
+  criteria
 - The next step depends on something that has not been verified and cannot be
   verified from here
 
-A choice inside the confirmed plan that changes none of those is made,
-recorded in `docs/decisions.md`, and the work continues. Anything outside it
-waits for the maintainer.
+Everything else is decided without waiting: verify the options against the
+code, take the strongest, record it in `docs/decisions.md` with what was
+rejected and how to reverse it, and continue. A fact that turns out different
+from step 4's record is corrected in that record, in a commit of its own, and
+the work continues unless the correction meets a condition above.
+
+When you stop, ask every open question together, each with its recommended
+answer, and nothing else.
 
 ## 7. Finish
 
-Run the acceptance criteria. When they pass, invoke `ship-unit`.
+Run the acceptance criteria. When they pass, invoke `ship-unit`. From there the
+chain runs `review-request`, `run-review`, and `triage-review` without stopping
+to ask, and ends at the merge gate (`docs/plan/WORKFLOW.md`, step 7).
 
 Do not begin the next unit. Every unit boundary is a human review gate.

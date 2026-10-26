@@ -1,6 +1,6 @@
 ---
 name: run-review
-description: Run a shipped unit's external review by invoking the review runner once per family, which sends the committed prompt and bundle — the source of every changed file — to two third-party services, OpenAI through the Codex CLI and Google through a direct Gemini API call, then commits what the runner wrote, untouched, and reports each run's outcome. Use after review-request has committed and pushed the prompt and the bundle. Takes a unit id, e.g. run-review P5.
+description: Run a shipped unit's external review by invoking the review runner once per family, which sends the committed prompt and bundle — the source of every changed file — to two third-party services, OpenAI through the Codex CLI and Google through a direct Gemini API call, then commits what the runner wrote, untouched, and reports each run's outcome, rerunning a family that did not count once, then chains into triage-review when both count. Use after review-request has committed and pushed the prompt and the bundle; review-request chains into it while the repository is public. Takes a unit id, e.g. run-review P5.
 ---
 
 # Run the external review
@@ -13,8 +13,16 @@ limit is what the evidence rests on.
 **This step sends the unit's source out of the repository.** The bundle carries the
 source of every changed file, and it goes to OpenAI and to Google. That is
 the first irreversible act in the unit loop — deleting a file afterwards
-recovers nothing — so it is invoked deliberately, on a named unit, and never
-chained into from `ship-unit` or `review-request`.
+recovers nothing — so it runs only on a named unit, either typed by the
+maintainer or chained into from `review-request` under the standing
+authorization in D-TOOLING-09.
+
+**Recheck the authorization before sending, whoever invoked this.** When chained
+into, run `gh repo view --json visibility -q .visibility` again here; anything
+but exactly `PUBLIC` stops the skill before the runner is invoked, with
+`Next: /run-review <UNIT>` for the maintainer. A repository made private between
+the two skills must not be sent on a check made before it changed. A run the
+maintainer typed needs no check: typing it is the authorization.
 
 **If no unit id was given, ask for one and stop.** Do not infer it from the
 branch, the last commit, or the newest file in `docs/reviews/`. An inferred unit
@@ -183,11 +191,20 @@ integrity checks exactly as an honest one does. The payload's delimiters carry
 the bundle's own nonce, so the bundle cannot forge the line that closes it, but
 nothing available prevents instruction-following (D-TOOLING-03).
 
-Report the outcome and stop. In particular:
+**Rerun that family once, visibly.** A family whose outcome is not `counted`,
+or whose run printed `withheld:` or `interrupted:`, is rerun once with the same
+command. Before rerunning, print the first run's outcome and what it means;
+the runner keeps that run's files as `.attempt-<N>`, and both are committed. A
+second run that counts, reported on its own, hides a first one that did not,
+so the report and the triage name both. Do not rerun a family that counted.
 
-- **Do not retry silently.** A second run that counts, reported on its own,
-  hides a first one that did not. If a rerun is warranted the maintainer decides
-  it, and both runs are named.
+If the rerun does not count either, report both outcomes and stop. In
+particular:
+
+- **Do not rerun again.** Two failures on one bundle are a finding about the
+  bundle, the runner, or the vendor, and which one it is is the maintainer's to
+  look at — an `INTEGRITY_FAILED` twice can be a reviewer following an
+  instruction planted in the bundle.
 - **Do not fall back to one family.** One review presented as the unit's review
   is a quieter failure than no review, because nothing after this step can see
   the pass that is missing.
@@ -213,10 +230,11 @@ Report the outcome and stop. In particular:
 Report the line the runner printed, verbatim, in place of an outcome. Neither is
 a review.
 
-## 4. Report, then stop
+## 4. Report, then hand over to triage
 
 Print both outcomes, the model each vendor reported, where the files landed, and
-the commit that holds them:
+the commit that holds them. Where a family was rerun, give each run its own
+line, the earlier one first, with its `.attempt-<N>` file name:
 
 ```
 REVIEW RUNS COMPLETE: <UNIT>
@@ -233,9 +251,14 @@ Next: /triage-review <UNIT>
 in the response's `modelVersion` — not what was asked for; print `none
 reported` where the manifest carries null rather than filling in a likely model
 name. For a run that wrote no files, print its `withheld:` or `interrupted:`
-line in place of the outcome. If either outcome is not `counted`, name it, say
-what it means, and say that `/triage-review` is not available yet instead of
-printing it as next.
+line in place of the outcome. If either family's last run is not `counted`, name
+it, say what it means, say that `/triage-review` is not available yet instead of
+printing it as next, and stop.
+
+When both families' last runs are `counted`, invoke `triage-review <UNIT>` with
+the Skill tool, without stopping to ask. Triage verifies every finding against
+the cited code before anything acts on it, so chaining into it moves no
+judgement out of the loop.
 
 ## Never
 
@@ -243,5 +266,9 @@ printing it as next.
 - Commit an output with anything else, or after anything has touched it
 - Report a run as a review when its outcome is not `counted`
 - Rerun a family without saying that the earlier run happened and what it said
-- Run a review for a unit the maintainer did not name
+- Rerun a family more than once, or rerun one that counted
+- Run a review for a unit that was not named, by the maintainer or by the
+  `review-request` that chained into this skill
+- Send when chained into and the repository is not `PUBLIC` at the moment of
+  sending
 - Review the unit yourself, or answer a finding on a reviewer's behalf

@@ -1,6 +1,6 @@
 ---
 name: triage-review
-description: Triage the two external reviews of a shipped unit. Heads each reply the runner wrote with a provenance header derived from its manifest, pairs what both families raised, verifies every finding against the cited code before acting on it, writes the triage record, waits for the maintainer to confirm it, applies the accepted fixes to the unit branch, and stops before merge. Use when run-review has reported both runs. Takes a unit id, e.g. triage-review P1.
+description: Triage the two external reviews of a shipped unit. Heads each reply the runner wrote with a provenance header derived from its manifest, pairs what both families raised, verifies every finding against the cited code before acting on it, writes the triage record, applies the verified in-scope fixes to the unit branch test-first, reruns the acceptance criteria, and stops at the merge gate with a report of every decision the unit made. Use when run-review has reported both runs; run-review chains into it when both count. Takes a unit id, e.g. triage-review P1.
 ---
 
 # Triage the two reviews
@@ -273,13 +273,28 @@ it is only useful if it is recorded when it is unflattering.
 
 ## 7. Apply the accepted fixes
 
-**Confirm first.** Print each accepted fix as one line naming the finding, the
-file, and the change, plus any fix that rests on an unverified assumption,
-marked as such. Then stop and wait. Apply nothing until the maintainer
-confirms (`CLAUDE.md`, working rule 6). A fix that turns out larger or
-different from the line confirmed stops again.
+**Apply without waiting, inside these limits** (`CLAUDE.md`, working rule 6).
+Print each accepted fix as one line naming the finding, the file, and the
+change, then apply them. A fix is applied only when all of these hold:
 
-On the unit branch, never on `v2`. Re-run the unit's full acceptance criteria
+- The finding was verified against the cited code in step 4, not taken on the
+  reviewer's word or on the two families agreeing.
+- Every assumption the fix rests on is verified. A fix that rests on one that
+  cannot be verified from here is not applied; it is listed for the maintainer
+  at step 9 with its recommended resolution.
+- The fix stays inside the unit's out-of-scope list and needs no contract change
+  and no gate-path change the unit does not declare in scope. One that needs
+  any of those is not a review fix: record it with an owning unit, or file it as
+  an issue, and name it at step 9.
+- Where the finding admits more than one fix, each was checked against the
+  code and the strongest on correctness, security, and the invariants was
+  chosen, never the smallest diff for its own sake. Record the choice in the
+  triage beside the finding.
+
+A fix that turns out larger or different from its line is re-verified against
+these limits before it lands, and its line in the triage is corrected.
+
+On the unit branch, never on `v2`. One commit per fix, naming the finding. Re-run the unit's full acceptance criteria
 afterwards, not just the tests near the change.
 
 **Never weaken a check, a test, an assertion, or an acceptance criterion to
@@ -311,14 +326,27 @@ lets anyone regenerate the bundle and prove it is the one that was sent.
 
 ## 9. Report and stop
 
-Print the counts by verdict and by family, how many findings both families
-raised, what changed, and the state of the gates.
+This report is the maintainer's one routine gate in the unit, so it carries
+everything the chain decided without them. Print:
 
-**Do not merge. Do not tag.** Step 7 of the loop is the maintainer's: they
-merge the pull request, then `git tag reviewed/<id> && git push --tags`, and
-that tag becomes the diff base for the next unit's bundle. They have just
-been handed the triage that says whether it should be. Print the two commands
-and stop.
+- The counts by verdict and by family, how many findings both families raised,
+  and every rerun `run-review` made
+- What changed: each applied fix, one line, with its commit
+- Every decision the unit made on its own, from its `docs/decisions.md`
+  entries: one line each, with the decision id and how to reverse it
+- Anything not applied and why — findings recorded with an owning unit, issues
+  filed, fixes held on an unverified assumption — each with a recommendation
+- The four merge conditions of `docs/plan/WORKFLOW.md` step 7, each checked
+  now: the pull request's checks are green, the triage is committed, every
+  accepted finding is fixed or recorded with an owning unit, and the acceptance
+  criteria pass after the fixes
+
+**Do not merge. Do not tag.** Step 7 of the loop is the maintainer's. When all
+four conditions hold, print the merge and tag commands, filled in — the squash
+merge with `--body "Gate-Change: acknowledged"` where the unit touched a gate
+path, then `git tag reviewed/<id> <the v2 squash commit> && git push origin
+reviewed/<id>` — and stop. When any is false, name it as the reason the unit is
+not ready to merge, and stop.
 
 ## Never
 

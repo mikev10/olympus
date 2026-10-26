@@ -8,14 +8,14 @@ who runs each step, and where one Claude session ends and the next begins.
  ONE UNIT, START TO FINISH                            who / where
  ─────────────────────────────────────────────────────────────────────────
  ┌──────────────────────────────┐
- │ /start-unit P5               │  Claude, NEW session
+ │ /start-unit P5               │  YOU type it; Claude, NEW session
  │  loads spec, checks deps,    │
  │  reads the code it touches,  │
- │  states the boundary and     │
- │  every assumption            │
+ │  verifies every assumption,  │
+ │  records them in decisions   │
  └──────────────┬───────────────┘
-                │ always, and again whenever the work finds something new
-                ├──────────────► waits for YOU to confirm, then continues
+                │ only on a rule-6 stop condition, at any step below
+                ├──────────────► waits for YOU, then continues
                 ▼
  ┌──────────────────────────────┐
  │ work the unit                │  Claude, same session
@@ -37,27 +37,29 @@ who runs each step, and where one Claude session ends and the next begins.
  └──────────────┬───────────────┘
                 │   docs/reviews/…-review-prompt.txt  (committed)
                 │   docs/reviews/…-review-bundle.txt  (committed)
-                │ nothing sent yet — YOU type the next command
-                ▼
- ╔══════════════════════════════╗
- ║ /run-review P5               ║  YOU type it, Claude runs it
- ║  the committed runner, once  ║
- ║  per family: codex, gemini   ║
- ║  sends the bundle out of the ║
- ║  repo — this cannot be undone║
- ║  each run: reply, manifest,  ║
- ║  session record; committed   ║
- ║  untouched                   ║
- ╚══════════════╤═══════════════╝
-                │ only a `counted` outcome is a review
+                │ runs automatically while the repo is PUBLIC
+                │ (anything else → stops, YOU type /run-review)
                 ▼
  ┌──────────────────────────────┐
- │ /triage-review P5            │  Claude, NEW session
+ │ /run-review P5               │  Claude, same session
+ │  the committed runner, once  │
+ │  per family: codex, gemini   │
+ │  sends the bundle out of the │
+ │  repo — this cannot be undone│
+ │  each run: reply, manifest,  │
+ │  session record; committed   │
+ │  untouched                   │
+ └──────────────┬───────────────┘
+                │ only a `counted` outcome is a review
+                │ a failed family reruns once; fails again → stops
+                ▼
+ ┌──────────────────────────────┐
+ │ /triage-review P5            │  Claude, same session
  │  reads both replies from disk│  on branch unit/p5
  │  checks each finding against │
  │  the code, writes triage,    │
- │  waits for YOU, then fixes   │
- │  on branch, stops            │
+ │  applies accepted fixes test-│
+ │  first, reruns gates, stops  │
  └──────────────┬───────────────┘
                 ▼
  ╔══════════════════════════════╗
@@ -73,26 +75,24 @@ who runs each step, and where one Claude session ends and the next begins.
                 └──► back to /start-unit
 ```
 
-## Your five touch points, in order
+## Your two touch points, in order
 
-1. Type `/start-unit <id>`, then confirm or correct the boundary and
-   assumptions it states. Nothing is built until you do.
-2. When `REVIEW ARTIFACTS READY` prints, type `/run-review <id>`. It is a
-   separate command, and not part of the chain, because it is the step that
-   sends the bundle to OpenAI and Google, and that cannot be taken back.
-3. Read the two outcomes it prints, one per family. Only `counted` is a review.
-4. In a new session, type `/triage-review <id>`. It reads both replies from
-   disk; there is nothing to hand it. Confirm the triage before any fix is
-   applied.
-5. Merge the PR, then push the tag.
+1. Type `/start-unit <id>`. Everything through triage and its fixes runs from
+   there without asking. It stops early only on a stop condition from
+   `CLAUDE.md` rule 6, a repository that is not `PUBLIC`, or a family that
+   fails to count twice.
+2. Read the final report — the triage counts, every decision the unit made on
+   its own, and the gate state — then merge the PR and push the tag with the
+   commands it prints.
 
 ## Session boundaries
 
-- **One session** covers `start-unit`, the work, `ship-unit`, and
-  `review-request`. Ship hands off to review-request without asking.
-- **Triage always starts fresh**, on the unit's branch, because the review may
-  come back days later.
-- **The next unit also starts fresh.**
+- **One session** covers `start-unit`, the work, `ship-unit`,
+  `review-request`, `run-review`, and `triage-review`. Each hands off to the
+  next without asking.
+- **A chain stopped early** resumes in a new session with the skill that
+  stopped, or with `/handoff resume` after a disconnect.
+- **The next unit starts fresh.**
 
 ## The files a review leaves in `docs/reviews/`
 

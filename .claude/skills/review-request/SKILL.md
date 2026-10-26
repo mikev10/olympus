@@ -1,6 +1,6 @@
 ---
 name: review-request
-description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, the prompt and the bundle the reviewers are given, commits and pushes them, and stops without sending anything. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
+description: Prepare an external adversarial review of a shipped unit. Writes exactly two files to docs/reviews/, the prompt and the bundle the reviewers are given, commits and pushes them, sends nothing itself, then chains into run-review while the repository is public. Use after a unit ships and before the next one starts. Takes a unit id, e.g. review-request F3.
 ---
 
 # Prepare an external review
@@ -10,8 +10,8 @@ bundle and nothing else — not Claude Code, not the session that built the unit
 That independence is the point: a reviewer sharing the author's context inherits
 the author's blind spots.
 
-Your job is to produce two files, hand them over in plain steps, and stop. You
-do not perform the review.
+Your job is to produce two files, report them, and hand off to `run-review`. You
+do not perform the review, and this skill sends nothing.
 
 ## What the maintainer gets
 
@@ -444,10 +444,9 @@ git commit -m "<UNIT>: the review prompt and bundle, as sent"
 git push
 ```
 
-## 6. Hand over, then stop
+## 6. Hand over to run-review
 
-End the turn with this block, filled in, and nothing after it except the
-"what is next" line WORKFLOW.md requires.
+Print this block, filled in:
 
 ```
 REVIEW ARTIFACTS READY: <UNIT> <title>
@@ -455,23 +454,30 @@ REVIEW ARTIFACTS READY: <UNIT> <title>
 Two files in docs/reviews/, both committed and pushed:
   PROMPT  <date>-<UNIT>-<slug>-review-prompt.txt   the instructions
   BUNDLE  <date>-<UNIT>-<slug>-review-bundle.txt   the code, <N> lines
-
-Nothing has been sent. To run both reviewers:
-  /run-review <UNIT>
-
-The other files in docs/reviews/ are records. You do not need to open them.
 ```
 
-**Nothing has been sent, and this skill does not send.** `/run-review` puts the
-bundle in front of two third-party services, and that cannot be undone: deleting
-a file afterwards recovers nothing. It stays the maintainer's own command, one
-per unit, and this skill never chains into it.
+**This skill does not send.** `run-review` puts the bundle in front of two
+third-party services, and that cannot be undone: deleting a file afterwards
+recovers nothing. It is chained into under the standing authorization in
+D-TOOLING-09, and only when both of these hold, each checked now, not
+remembered:
+
+- `gh repo view --json visibility -q .visibility` prints exactly `PUBLIC`. Then
+  the bundle, built from pushed commits, discloses nothing the repository has
+  not already published. Any other answer — `PRIVATE`, `INTERNAL`, an error,
+  nothing — fails closed.
+- Every self-check in steps 2 and 4 passed, and step 5 committed and pushed
+  both files.
+
+When both hold, invoke `run-review <UNIT>` with the Skill tool, naming the unit
+explicitly. When either fails, say which, print `Next: /run-review <UNIT>`, and
+stop: sending is then the maintainer's own command.
 
 Do not review the unit yourself. Do not act on a review you did not receive.
 
 ## When the review comes back
 
-Not this skill's job, and not this session's. The reviews run under
+Not this skill's job. The reviews run under
 `/run-review <unit>`, which leaves both replies on disk as the runner wrote them
 and commits them untouched. `triage-review <unit>` reads them from there, checks
 each against its manifest's hash, heads each with a provenance header derived
