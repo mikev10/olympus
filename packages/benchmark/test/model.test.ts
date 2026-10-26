@@ -32,7 +32,7 @@ afterEach(async () => {
 function bench(): Bench {
   const installed = new Map<string, { dir: string; commit: string }>();
   for (const repo of Object.keys(corpus.repos)) installed.set(repo, { dir: join(corpus.root, 'repos', repo), commit: '0'.repeat(40) });
-  return { provider: {} as Bench['provider'], base, user: { uid: 0, gid: 0 }, installed };
+  return { provider: {} as Bench['provider'], base, user: { uid: 1000, gid: 1000 }, installed };
 }
 
 const ROLE: CompiledRole = { role: 'done-checker' as RoleId, instructions: '', sha256: '0'.repeat(64) };
@@ -116,5 +116,18 @@ describe('modelTier', () => {
     const cap = drafted * DRAFT_ATTEMPTS * BUDGET.maxCostUsd + 2.5 * BUDGET.maxCostUsd;
     await expect(modelTier(options({ capUsd: cap, calls: { alone, critic: critic('passed', DRAFT_ATTEMPTS * BUDGET.maxCostUsd) } }))).rejects.toThrow(/cap/);
     expect(calls).toBe(2);
+  });
+});
+
+describe('the grants', () => {
+  test('a tool the driver does not declare is refused before any call is made', async () => {
+    let calls = 0;
+    const counting = (): Promise<CriticOutcome> => {
+      calls += 1;
+      return Promise.resolve({ verdict: 'passed', causes: [], costUsd: 0 });
+    };
+    // The stub declares no tools at all.
+    await expect(modelTier(options({ critic: { tier: 'fast', tools: ['Grep'], budget: BUDGET }, calls: { critic: counting } }))).rejects.toThrow(/grants Grep, which the driver does not declare; nothing was run/);
+    expect(calls).toBe(0);
   });
 });

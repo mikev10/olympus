@@ -148,7 +148,7 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   for (const p of record.problems) causes.push(`runtime:${p.code}`);
   if (first.critic === null || first.critic === 'not-seated') {
     // The runtime sent the draft back before a critic read it; the catch is the runtime's.
-    if (causes.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing`);
+    if (causes.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing. The run stopped with: ${outcome.ok ? 'no refusal' : JSON.stringify(outcome.reason === 'refused' ? { at: outcome.at, transition: outcome.transition } : outcome)}`);
   } else {
     const verdict = JSON.parse(new TextDecoder().decode(await vault.read(first.critic))) as CriticRecord;
     if (!verdict.binding) throw new Error('benchmark: the critic seated was not binding: its family is the drafter\'s, so its findings send nothing back');

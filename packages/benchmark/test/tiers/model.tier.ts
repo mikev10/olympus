@@ -62,8 +62,8 @@ test('the model tier of corpus v1, under the cap', async () => {
     limits: DEFAULT_LIMITS,
     capUsd: Number(required('BENCHMARK_CAP_USD')),
     repetitions,
-    alone: { role, tier: 'fast', tools: ['Read', 'Glob', 'Grep', 'Bash'], budget: { maxTokens: 400_000, maxCostUsd: 0.15, maxWallClockMs: 600_000 } },
-    critic: { tier: 'fast', tools: ['Read', 'Glob', 'Grep'], budget: { maxTokens: 400_000, maxCostUsd: 0.15, maxWallClockMs: 600_000 } },
+    alone: { role, tier: 'fast', tools: ['Read', 'Bash'], budget: { maxTokens: 400_000, maxCostUsd: 0.15, maxWallClockMs: 600_000 } },
+    critic: { tier: 'fast', tools: ['Read'], budget: { maxTokens: 400_000, maxCostUsd: 0.15, maxWallClockMs: 600_000 } },
   });
   await writeFile(RESULT, serialize(result.result));
   expect(result.spentUsd).toBeLessThanOrEqual(Number(required('BENCHMARK_CAP_USD')));

@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type RunOutcome } from '@olympus-ai/api';
+import { buildGraph, containerUser, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type RunOutcome } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -68,10 +68,16 @@ export interface Bench {
 
 /**
  * Who sandboxes run as: this process where the host has uids, so what they
- * write stays removable here, and root on a host without them (D-I1b-10).
+ * write stays removable here; on a host without them, the user
+ * `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID` name, as the host's
+ * are (D-I1b-10). Neither is guessed: root would be refused by a real
+ * driver's CLI, and any other number is a choice the operator makes.
  */
-export function benchUser(): ContainerUser {
-  return process.getuid === undefined || process.getgid === undefined ? { uid: 0, gid: 0 } : { uid: process.getuid(), gid: process.getgid() };
+export function benchUser(env: Readonly<Record<string, string | undefined>> = process.env): ContainerUser {
+  if (process.getuid !== undefined && process.getgid !== undefined) return { uid: process.getuid(), gid: process.getgid() };
+  const named = containerUser(env);
+  if (named === undefined) throw new Error('benchmark: this host has no uids, so the container user must be named: set FACTORY_CONTAINER_UID and FACTORY_CONTAINER_GID (D-I1b-10)');
+  return named;
 }
 
 /**

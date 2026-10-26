@@ -137,6 +137,10 @@ export interface ModelTierOptions {
  * against the cap on that.
  */
 export async function modelTier(options: ModelTierOptions): Promise<{ result: BenchmarkResult; spentUsd: number }> {
+  // Every grant checked against the driver before any call: a tool it does not declare is refused at the task, after money may have gone on the ones before it (I4, I5).
+  const declared = new Set(options.driver.declaredTools());
+  const undeclared = [...options.alone.tools, ...options.critic.tools].filter((t) => !declared.has(t));
+  if (undeclared.length > 0) throw new Error(`benchmark: the model tier grants ${[...new Set(undeclared)].join(', ')}, which the driver does not declare; nothing was run`);
   const spend = new Spend(options.capUsd);
   const { corpus } = options;
   const criticCall = options.calls?.critic ?? throughTheCritic;

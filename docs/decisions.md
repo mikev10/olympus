@@ -4828,6 +4828,12 @@ every later decision to the session's recommendation. The spec is
 - **Rejected:** an exemption for the corpus in the I7 scan. That would be a narrower check, and it would need a change under `packages/conformance/`. Suppressing the manifest's lines in the corpus check was also rejected, because the check would then pass for a reason other than the corpus being clean.
 - **Reverse:** move `corpus/` back under the package, and add the exemption to the scan.
 
+### D-R7-13: what the first paid attempt found, and the checks that now run before one
+
+- **Found:** the first model-tier run stopped after 29 seconds, with no model call made. The critic seat was granted `Glob` and `Grep`, which the Claude Code driver does not declare, so it refused every task. The line parked the seat as `retries-exhausted`, and the arm's error did not say why. Reproduced with the real driver and an invalid key, which the API refuses without charge, it then showed a second fault. On a host without uids the bench ran its containers as root, and the CLI refuses `--dangerously-skip-permissions` as root.
+- **Chosen:** the critic is granted `Read` and the driver-alone seat `Read` and `Bash`, as the line's paid review seat is. `modelTier` refuses any grant the driver does not declare before its first call. The critic arm's error now carries the refusal the run stopped with. On a host without uids, `benchUser` takes the container user from `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, as the host does, and refuses when they are unset rather than run as root (D-I1b-10). Both arms were then driven through the real driver with an invalid key: each reached the API, was refused with a 401, and spent $0.
+- **Reverse:** none intended; the checks only refuse what would have failed later at cost.
+
 ### Results the first run of the deterministic tier recorded
 
 These are findings for the units that own each detector, filed as issues and not fixed here (spec, out of scope):
