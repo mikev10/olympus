@@ -251,8 +251,16 @@ jobs:
       # bound to the package's tree hash, which nothing between the two steps
       # changes. No credential here: no other package calls a model, and one
       # that starts to should refuse loudly rather than find a key waiting.
+      #
+      # The conformance package runs after the others, not among them: every
+      # package with external assertions depends on it, so `pnpm -r` would run
+      # it first and its registry would find no report from a package whose
+      # tests this step runs (D-R6-08).
       - name: Test
-        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' test
+        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test
+
+      - name: Conformance package tests
+        run: pnpm --filter @olympus-ai/conformance test
 
       # scripts/ is not a workspace package, so `pnpm -r typecheck` and
       # `pnpm -r test` cannot see it. Without these two steps the review

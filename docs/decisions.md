@@ -4606,6 +4606,12 @@ later decision in the unit to the session's recommendation. The spec is
 - **Why:** an operator can seat a different-family reviewer or critic without a code change, which is what the entry exists for.
 - **Reverse:** drop the two variables; the driver is still composable in code.
 
+### D-R6-08: CI runs the conformance package after every other package
+
+- **Chosen:** the CI `Test` step excludes `@olympus-ai/conformance`, and a step after it runs that package's tests.
+- **Why:** every package with external assertions depends on `conformance`, so `pnpm -r test` runs it first. Until R6, every package with external assertions ran in a step of its own before `Test`; `driver-openai-compatible` is the first whose report is written inside `Test`, so the registry found no report and refused (`report-missing`). Found on PR #68 once the paid suite passed. Nothing is skipped: the same tests run, after the reports they read exist.
+- **Reverse:** a step per package with external assertions ahead of `Test`, which every new driver would have to add.
+
 ## R6 amendments to the contracts
 
 ### A-R6-01: the `openai-chat` meter dialect
