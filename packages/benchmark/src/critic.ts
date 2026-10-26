@@ -12,7 +12,7 @@
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { buildGraph, DEFAULT_LIMITS, DEFAULT_RUBRICS_DIRECTORY, localWorkspaceStore, readUsage, startRun, worstCaseCost, type RunRequest } from '@olympus-ai/api';
+import { buildGraph, DEFAULT_LIMITS, DEFAULT_RUBRICS_DIRECTORY, costTotals, localWorkspaceStore, readUsage, startRun, unsettledCalls, worstCaseCost, type RunRequest } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -137,9 +137,10 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   const state = await vault.readRunState(runId);
   const usage = await readUsage(vault, state);
   // A call whose cost was lost or never read cannot be charged against the cap, so the run stops (I5); an unmetered one is the scripted seat's and cost nothing.
-  const unknown = usage.filter((u) => u.reading.kind === 'lost' || u.reading.kind === 'pending');
-  if (unknown.length > 0) throw new Error(`benchmark: ${String(unknown.length)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
-  const costUsd = usage.reduce((sum, u) => sum + (u.reading.kind === 'metered' ? u.reading.costUsd : 0), 0);
+  const totals = costTotals(usage).run;
+  const unsettled = unsettledCalls(usage).length;
+  if (unsettled > 0 || totals.lost > 0) throw new Error(`benchmark: ${String(unsettled + totals.lost)} call(s) of the drafted run have no known cost, so the spend cannot be held to the cap`);
+  const costUsd = totals.metered.costUsd;
   const first = state.drafts[station]?.attempts[0];
   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
   const causes: string[] = [];
