@@ -60,6 +60,23 @@ require('node:https').createServer({ key: process.env.UPSTREAM_KEY, cert: proces
   q.on('data', function (c) { parts.push(c); });
   q.on('end', function () {
     console.log('UPSTREAM ' + q.method + ' ' + q.url);
+    // A-R6-01: the OpenAI-compatible chat API, answering with its own usage names and saying whether the bearer credential arrived.
+    if (q.method === 'POST' && q.url.split('?')[0] === '/v1/chat/completions') {
+      let request = {};
+      try { request = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { request = {}; }
+      const t = request.relay_test || {};
+      const completion = { id: 'chat', object: 'chat.completion', model: request.model,
+        bearer: q.headers.authorization === 'Bearer ' + expected,
+        choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }] };
+      if (t.omit !== 'all') {
+        completion.usage = { prompt_tokens: t.input };
+        if (t.omit !== 'final') completion.usage.completion_tokens = t.output;
+      }
+      const answer = JSON.stringify(completion);
+      s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
+      s.end(answer);
+      return;
+    }
     if (q.method === 'POST' && q.url.split('?')[0] === '/v1/messages') {
       let request = {};
       try { request = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { request = {}; }
@@ -222,11 +239,25 @@ const METER: RelayMeter = {
 };
 const AMPLE: RelayBudget = { maxTokens: 1_000_000_000, maxCostUsd: 100 };
 
-function meteredRelay(budget: RelayBudget = AMPLE): RelaySpec {
-  return { upstream: UPSTREAM_ORIGIN, paths: ['/v1/messages'], header: 'x-api-key', credential: CREDENTIAL, urlVariable: 'MODEL_BASE_URL', budget, meter: METER };
+/** The path each dialect's calls are sent to and granted. */
+const DIALECT_PATH: Readonly<Record<RelayMeter['dialect'], string>> = { 'anthropic-messages': '/v1/messages', 'openai-chat': '/v1/chat/completions' };
+
+/** A relay for `dialect`: the Messages API with its key written raw, or the chat API with a bearer token (A-R6-01, A-R6-02). */
+function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'] = 'anthropic-messages'): RelaySpec {
+  const openai = dialect === 'openai-chat';
+  return {
+    upstream: UPSTREAM_ORIGIN,
+    paths: [DIALECT_PATH[dialect]],
+    header: openai ? 'authorization' : 'x-api-key',
+    scheme: openai ? 'bearer' : 'raw',
+    credential: CREDENTIAL,
+    urlVariable: 'MODEL_BASE_URL',
+    budget,
+    meter: { ...METER, dialect },
+  };
 }
 
-/** A Messages API request the upstream answers with the usage it names; `omit` drops the final output count, or every count. */
+/** A request the upstream answers with the usage it names, in either dialect; `omit` drops the final output count, or every count. */
 function message(input: number, output: number, omit?: 'final' | 'all', model = METERED_MODEL): Record<string, unknown> {
   return { model, max_tokens: 64, messages: [], relay_test: { input, output, ...(omit === undefined ? {} : { omit }) } };
 }
@@ -239,10 +270,11 @@ function message(input: number, output: number, omit?: 'final' | 'all', model = 
 const CLIENT = `
 const http = require('node:http');
 const base = new URL(process.env.MODEL_BASE_URL);
+const path = String(process.argv[1] || '/v1/messages');
 function send(body) {
   return new Promise(function (resolve) {
     const bytes = Buffer.from(JSON.stringify(body));
-    const q = http.request({ host: base.hostname, port: base.port, method: 'POST', path: '/v1/messages', agent: false,
+    const q = http.request({ host: base.hostname, port: base.port, method: 'POST', path: path, agent: false,
       headers: { 'content-type': 'application/json', 'content-length': String(bytes.length) } }, function (s) {
       let text = '';
       s.on('data', function (c) { text += c; });
@@ -261,8 +293,13 @@ process.stdin.on('end', async function () {
 });
 `;
 
-async function sendAll(provider: LocalDockerProvider, handle: SandboxHandle, bodies: readonly unknown[]): Promise<Array<{ status: number; body: string }>> {
-  const result = await provider.exec(handle, ['node', '--eval', CLIENT], { stdin: JSON.stringify(bodies) });
+async function sendAll(
+  provider: LocalDockerProvider,
+  handle: SandboxHandle,
+  bodies: readonly unknown[],
+  dialect: RelayMeter['dialect'] = 'anthropic-messages',
+): Promise<Array<{ status: number; body: string }>> {
+  const result = await provider.exec(handle, ['node', '--eval', CLIENT, DIALECT_PATH[dialect]], { stdin: JSON.stringify(bodies) });
   if (result.exitCode !== 0) throw new Error(`the in-sandbox client exited ${String(result.exitCode)}: ${result.stderr}`);
   return JSON.parse(result.stdout) as Array<{ status: number; body: string }>;
 }
@@ -278,15 +315,17 @@ async function withMeteredSandbox(
   certificate: { cert: string; key: string },
   budget: RelayBudget,
   body: (handle: SandboxHandle, upstreamLog: () => Promise<string[]>) => Promise<void>,
+  dialect: RelayMeter['dialect'] = 'anthropic-messages',
+  expected = 'unused',
 ): Promise<MeterReading> {
   const { EGRESS_PROXY_IMAGE, relayOf } = await import('@olympus-ai/sandbox');
-  const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay(budget) }));
+  const handle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: meteredRelay(budget, dialect) }));
   const upstreamName = `relay-upstream-${randomUUID()}`;
   let destroyed = false;
   try {
     const applied = relayOf(provider.appliedControls(handle).egress);
     if (applied === undefined) throw new Error('a spec with a relay was provisioned without one');
-    await startUpstream(upstreamName, applied.outboundNetwork, certificate, 'unused');
+    await startUpstream(upstreamName, applied.outboundNetwork, certificate, expected);
     await body(handle, async () => {
       const { stdout } = await docker('docker', ['logs', upstreamName]);
       return stdout.split(/\r?\n/u).filter((line) => line.startsWith('UPSTREAM POST '));
@@ -391,6 +430,94 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE = runtime({
       );
       if (!outcome.includes('closing meter line')) throw new Error(`I5: destroy over an unaccounted relay log ${outcome}`);
       if (await dockerHas('container', applied.name)) throw new Error('I5: the relay outlived a destroy whose meter could not be read');
+    });
+  },
+});
+
+/** The budget, under the OpenAI-compatible chat dialect (A-R6-01): the same bounds, read from that API's usage names. */
+export const MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT = runtime({
+  id: 'I4.model-relay-enforces-budget-openai-chat',
+  title:
+    "under the openai-chat dialect a sandbox's relay counts prompt_tokens and completion_tokens and, once its budget's dollars or tokens are spent, refuses every later call naming the bound, " +
+    'for calls made from inside the sandbox by node; every forwarded call carries the credential as a bearer token, and destroy returns what was counted',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i4-relay-budget-openai-', async (dirs) => {
+      const secret = `canary-${randomUUID()}`;
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: secret }, relayTrust: certificate.cert });
+      // Each call costs 1000 * $1 + 100 * $10 per million: $0.002. The second crosses $0.003.
+      for (const [bound, budget] of [
+        ['maxCostUsd', { maxTokens: 1_000_000_000, maxCostUsd: 0.003 }],
+        ['maxTokens', { maxTokens: 2000, maxCostUsd: 100 }],
+      ] as const) {
+        const reading = metered(
+          await withMeteredSandbox(
+            provider,
+            dirs,
+            certificate,
+            budget,
+            async (handle, upstreamLog) => {
+              const answers = await sendAll(provider, handle, [message(1000, 100), message(1000, 100), message(1000, 100)], 'openai-chat');
+              const statuses = answers.map((a) => a.status).join(',');
+              if (statuses !== '200,200,402') throw new Error(`I4: under ${bound} the openai-chat calls were answered ${statuses}, expected 200,200,402`);
+              if (!(answers[2]?.body ?? '').includes(bound)) throw new Error(`I4: the refusal does not name ${bound}: ${answers[2]?.body ?? ''}`);
+              for (const answer of answers.slice(0, 2)) {
+                if (!answer.body.includes('"bearer":true')) throw new Error(`I4: a forwarded call did not carry the credential as a bearer token: ${answer.body}`);
+              }
+              const reached = await upstreamLog();
+              if (reached.length !== 2) throw new Error(`I4: the upstream received ${String(reached.length)} calls under ${bound}; the refused one must not reach it`);
+            },
+            'openai-chat',
+            secret,
+          ),
+          'I4',
+        );
+        const exhausted = bound === 'maxCostUsd' ? 'cost' : 'tokens';
+        if (reading.calls !== 2 || reading.inputTokens !== 2000 || reading.outputTokens !== 200 || reading.refused !== 1 || reading.exhausted !== exhausted) {
+          throw new Error(`I4: under ${bound} the openai-chat destroy read ${JSON.stringify(reading)}`);
+        }
+      }
+    });
+  },
+});
+
+/** What the relay cannot count under the openai-chat dialect it does not forgive, as P13 set for the other (A-R6-01). */
+export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
+  id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-chat',
+  title:
+    'under the openai-chat dialect a model with no price and a request with no output ceiling are refused before the upstream sees them, an answer with no completion_tokens is charged its ceiling, ' +
+    'and an answer with no readable usage stops the relay forwarding',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i5-relay-unmetered-openai-', async (dirs) => {
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+      const reading = metered(
+        await withMeteredSandbox(
+          provider,
+          dirs,
+          certificate,
+          AMPLE,
+          async (handle, upstreamLog) => {
+            const { max_tokens: _ceiling, ...uncapped } = message(10, 1);
+            const unsent = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model'), uncapped], 'openai-chat');
+            if (unsent.map((a) => a.status).join(',') !== '400,400' || (await upstreamLog()).length !== 0) {
+              throw new Error(`I5: an unpriced or uncapped openai-chat request was answered ${JSON.stringify(unsent)} or reached the upstream`);
+            }
+            // Charged its ceiling: 64 output tokens, not the 7 the upstream never reported.
+            const partial = await sendAll(provider, handle, [message(1000, 7, 'final')], 'openai-chat');
+            if (partial[0]?.status !== 200) throw new Error(`I5: an openai-chat call with partial usage was answered ${JSON.stringify(partial)}`);
+            const blind = await sendAll(provider, handle, [message(1000, 7, 'all'), message(10, 1)], 'openai-chat');
+            if (blind.map((a) => a.status).join(',') !== '200,402') throw new Error(`I5: after an unreadable openai-chat answer the relay answered ${JSON.stringify(blind)}`);
+          },
+          'openai-chat',
+        ),
+        'I5',
+      );
+      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
+        throw new Error(`I5: the openai-chat destroy read ${JSON.stringify(reading)}`);
+      }
     });
   },
 });

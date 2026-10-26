@@ -32,24 +32,67 @@ import { specFor, withProvider, withSandbox } from './local-sandbox.js';
 const DRIVER_PACKAGE = '@olympus-ai/driver-claude-code';
 const DRIVER_CLAIMS_FILE = 'test/claims.test.ts';
 
-function driverClaim(id: ClaimId, title: string): [ClaimId, ClaimEntry] {
+/**
+ * The second driver (R6). Each claim is a key of `DriverCapabilities`, and
+ * every driver declares a value for every key, so each driver owes an
+ * assertion under each claim: its own id, `driver.<key>.openai-compatible`,
+ * in its own suite, beside the Claude Code driver's (D-R6-06). Its suite
+ * calls no model, so its report is written by the ordinary test run.
+ */
+const OPENAI_COMPATIBLE_PACKAGE = '@olympus-ai/driver-openai-compatible';
+
+type DriverClaimKey = 'subagents' | 'hooks' | 'mcp' | 'parallelism' | 'computerUse' | 'steering' | 'stablePrefixCaching';
+
+function driverClaim(key: DriverClaimKey, title: string, openaiCompatible: string): [ClaimId, ClaimEntry] {
+  const id: ClaimId = `driver.${key}`;
   return [
     id,
     {
-      assertions: [external({ id, title, level: 'runtime', package: DRIVER_PACKAGE, file: DRIVER_CLAIMS_FILE })],
+      assertions: [
+        external({ id, title, level: 'runtime', package: DRIVER_PACKAGE, file: DRIVER_CLAIMS_FILE }),
+        external({ id: `driver.${key}.openai-compatible`, title: openaiCompatible, level: 'runtime', package: OPENAI_COMPATIBLE_PACKAGE, file: DRIVER_CLAIMS_FILE }),
+      ],
       pending: [],
     },
   ];
 }
 
 const DRIVER: Array<[ClaimId, ClaimEntry]> = [
-  driverClaim('driver.subagents', "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult"),
-  driverClaim('driver.hooks', 'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported'),
-  driverClaim('driver.mcp', "the MCP servers a task's grants name are reachable from that task, and no other server is loaded"),
-  driverClaim('driver.parallelism', 'the driver runs the declared number of tasks concurrently, each on its own sandbox, under one provenance id: four overlap, a fifth waits, and a second task on one sandbox waits for the first'),
-  driverClaim('driver.computerUse', 'computerUse is declared false and is absent: no declared tool drives a display, and a session granted the whole inventory offers none'),
-  driverClaim('driver.steering', 'steering is declared false and there is no steer(): a running task has no runtime message channel, in both directions'),
-  driverClaim('driver.stablePrefixCaching', 'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix and differs only in variableSuffix'),
+  driverClaim(
+    'subagents',
+    "spawnSubagent() runs a child task under the parent request's policy grants and returns its own TaskResult",
+    'subagents is declared false and absent: there is no spawnSubagent(), and a model call naming a subagent tool is answered with an error and runs nothing',
+  ),
+  driverClaim(
+    'hooks',
+    'the driver installs the hook points emitArtifacts() renders, and each one that fires arrives as a DriverEvent the CLI reported',
+    'hooks is declared false and absent: emitArtifacts refuses at the capability layer and writes nothing, so no hook point exists to fire',
+  ),
+  driverClaim(
+    'mcp',
+    "the MCP servers a task's grants name are reachable from that task, and no other server is loaded",
+    'mcp is declared false and absent: a grant naming an MCP tool is refused before anything runs, and no request offers one',
+  ),
+  driverClaim(
+    'parallelism',
+    'the driver runs the declared number of tasks concurrently, each on its own sandbox, under one provenance id: four overlap, a fifth waits, and a second task on one sandbox waits for the first',
+    'the driver runs the declared number of tasks concurrently, each on its own sandbox: two overlap, a third waits for a slot, and a second task on one sandbox waits for the first',
+  ),
+  driverClaim(
+    'computerUse',
+    'computerUse is declared false and is absent: no declared tool drives a display, and a session granted the whole inventory offers none',
+    'computerUse is declared false and absent: no declared tool drives a display, and a task granted the whole inventory is offered exactly Bash, Edit, Read, and Write',
+  ),
+  driverClaim(
+    'steering',
+    'steering is declared false and there is no steer(): a running task has no runtime message channel, in both directions',
+    'steering is declared false and there is no steer(): a running task has no runtime message channel',
+  ),
+  driverClaim(
+    'stablePrefixCaching',
+    'cacheReadTokens is zero on the first task of a run and non-zero on a second that shares its stablePrefix and differs only in variableSuffix',
+    "stablePrefixCaching is declared false: no request marks a prefix for caching, and the cached tokens a result reports are the endpoint's own count and nothing the driver claims",
+  ),
 ];
 
 /** One assertion per sandbox claim: observe the provisioned container, then require the declaration to match. */

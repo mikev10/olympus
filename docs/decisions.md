@@ -4554,3 +4554,82 @@ what was chosen, and how to reverse it.
 ### A-R19-11: a test drafter learns one fact of the base
 
 Amends D-A-DS-01's "learns only the check's id, declaration, and exit code", D-R19-08, and D-R19-09, confirmed by the maintainer 2026-10-23. A drafted check chooses its exit code, so the code is base output, which D-A-DS-01's must-hold keeps from the black-box seats. At `test-design`, a base run's refusal and the runtime problems that come from the base (`exists`, `unbound`) reach the next attempt as one `RetryPart` `{ kind: 'base-refusal' }` with nothing in it; the draft's own problems still go back by path and code. Two retries carry at most two bits of the repository. `BaseRefusalPart` stays in the decision and the standing, for a person. Also: `recordDraftLock` returns the existing ref for a byte-identical record; a resume writes a committed lock's absent, unlocked files into the artifact root (`settleArtifactRoot`); and a drafted path outside the drafting role's `writableGlobs` is the runtime problem `outside-grant`.
+
+## R6 — Driver: any OpenAI-compatible endpoint
+
+The scope was confirmed by the maintainer on 2026-10-24, who delegated every
+later decision in the unit to the session's recommendation. The spec is
+`docs/plan/R6-openai-compatible.md`.
+
+### D-R6-01: the agent loop runs on the host; every model turn and every tool runs in the sandbox
+
+- **Ambiguous:** the entry gives the driver the loop the endpoint lacks and sends every tool call through `provider.exec`, without saying where the loop runs or how a model call reaches the relay, which is on the sandbox's own network and not the host's.
+- **Chosen:** the loop is the driver's, in the runtime's process. Each model turn is one `provider.exec` of a fixed `node --eval` program inside the sandbox, which reads the request on stdin, posts it to the relay's address from the variable the provider set, and prints the status and body. Each tool call is `provider.exec` inside the sandbox.
+- **Why:** every byte to the model still crosses the relay, so the credential stays out of the sandbox and the budget is enforced where the task cannot reach it (P12, P13). The grant check, the tool definitions offered, and the decision to run a call stay in code the model's commands cannot touch; a loop inside the container would sit beside the tools it polices. The option not taken, the loop in the container, costs one exec less per turn and gives that up. A loop on the host calling the endpoint directly was not considered: it would hold the credential and bypass the meter.
+- **Reverse:** ship the loop as a program in the image and exec it once per task.
+- **Amended** (review fix, gemini-1 in `2026-10-24-R6-openai-compatible-triage.md`): a model turn is no longer an exec in the sandbox. A task granted `Bash` or `Write` could replace the sandbox's `node`, and every later turn was then whatever that program printed, attributed to the declared model. Each turn is now `provider.relayCall`, made from the relay's own container (A-R6-05). Tools still run in the sandbox.
+
+### D-R6-02: the operator states the whole configuration, and the constructor refuses what is missing
+
+- **Chosen:** origin, path, header, scheme, provider, family, version, a model per tier, a price per model, the output ceiling and its request field, parallelism, and the turn bound are all required. The family is branded in the constructor and nowhere else; an empty one, a model without a price, a non-`https` origin, or a non-positive bound is refused naming the field (I5, I6).
+- **Why:** a default family would be a family nobody declared, and a default price a cost nobody stated.
+- **Reverse:** defaults for the bounds.
+
+### D-R6-03: a response that names another model, or none, refuses the task
+
+- **Chosen:** strict equality between the response's `model` and the request's. The operator configures exact model ids, as D-R14-01 already requires of the Claude Code driver, and an endpoint that resolves an alias to a dated id is configured with the dated id.
+- **Why:** the driver cannot see a family. The one mismatch it can see is the endpoint serving another model than the one the family was declared for, and the entry says that refuses rather than warns.
+- **Limit** (review fix, codex-2 in `2026-10-24-R6-openai-compatible-triage.md`): the check is consistency validation, not authentication. The endpoint is the operator's configuration, and that it serves the model it names, and reports its usage honestly, is the operator's trust assumption; nothing in a response can prove either.
+- **Reverse:** a configured map from requested to reported ids.
+
+### D-R6-04: the tool inventory is `Bash`, `Edit`, `Read`, `Write`
+
+- **Chosen:** four tools, named as the Claude Code driver names its own, so one policy grants either driver. `Edit` reads the file through the sandbox, replaces exactly one occurrence on the host, and writes it back through the sandbox; zero or several occurrences are an error the model reads. Relative paths resolve against the working directory; the sandbox, not the tool, is the boundary, as it is for the CLI.
+- **Why:** these are what a build or a review task needs, and every tool added is a capability the driver must prove.
+- **Reverse:** add tools; each needs its definition and its assertion.
+
+### D-R6-05: an endpoint that reports no usage is refused, not served unmetered
+
+- **Chosen:** a response without usage refuses the task. The relay has already charged its ceiling and stopped forwarding (D-P13-04).
+- **Why:** serving it unmetered needs a relay that forwards without a meter, which nothing has, and a run on it would be capped at L1 anyway.
+- **Reverse:** a relay mode that forwards without counting, recorded as unmetered.
+
+### D-R6-06: every feature capability is false and parallelism is configured
+
+- **Chosen:** `subagents`, `hooks`, `mcp`, `computerUse`, `steering`, `stablePrefixCaching` false; `emitArtifacts` refuses, because the role is rendered on each request and nowhere else; `parallelism` is the operator's number, enforced across sandboxes, one task per sandbox. Each claim's assertion lives in this package's suite as a second assertion under the same `driver.*` claim (`driver.<key>.openai-compatible`), as every assertion id extends its owner's, so the claim keys stay equal to `DriverCapabilities`.
+- **Why:** an endpoint the driver has not measured cannot back a `true`, and `stablePrefixCaching` depends on the endpoint, which the driver does not control.
+- **Reverse:** a measured capability per endpoint, with its assertion.
+
+### D-R6-07: the host seats the driver from a file and a key
+
+- **Chosen:** `FACTORY_ENDPOINT_CONFIG` names a JSON file holding the driver's configuration and the seats it fills (`driver`, `reviewer`, and the four drafting seats); `FACTORY_ENDPOINT_KEY` is its credential, held by the sandbox provider under `ENDPOINT_CREDENTIAL`. One without the other, an unknown key, or a seat outside that list stops the host before it listens. Seats not named keep the Claude Code driver.
+- **Why:** an operator can seat a different-family reviewer or critic without a code change, which is what the entry exists for.
+- **Reverse:** drop the two variables; the driver is still composable in code.
+
+### D-R6-08: CI runs the conformance package after every other package
+
+- **Chosen:** the CI `Test` step excludes `@olympus-ai/conformance`, and a step after it runs that package's tests.
+- **Why:** every package with external assertions depends on `conformance`, so `pnpm -r test` runs it first. Until R6, every package with external assertions ran in a step of its own before `Test`; `driver-openai-compatible` is the first whose report is written inside `Test`, so the registry found no report and refused (`report-missing`). Found on PR #68 once the paid suite passed. Nothing is skipped: the same tests run, after the reports they read exist.
+- **Reverse:** a step per package with external assertions ahead of `Test`, which every new driver would have to add.
+
+## R6 amendments to the contracts
+
+### A-R6-01: the `openai-chat` meter dialect
+
+`RelayMeter.dialect` is `'anthropic-messages' | 'openai-chat'`. Under `openai-chat` a `POST` to a granted path ending `/chat/completions` is metered, a `GET` is free, and anything else is refused as unmeterable. The ceiling is `max_completion_tokens` or `max_tokens`, whichever is larger, times `n`; a request with neither, or an `n` that is not a positive integer, is refused before sending. Usage is `prompt_tokens` less `prompt_tokens_details.cached_tokens` as input, the cached count as cache reads, `completion_tokens` as output, and no cache writes, read from a JSON body or from a stream chunk carrying `usage`. Every other P13 rule holds as written.
+
+### A-R6-02: `RelaySpec.scheme`
+
+`RelaySpec` gains a required `scheme: 'raw' | 'bearer'`. `'raw'` writes the credential as it is, which is what the Claude Code driver's relay does; `'bearer'` writes `Bearer <credential>`. A spec without one, or with another, is refused at the `relay` layer. `AppliedRelay` records it.
+
+### A-R6-03: the spine names the package
+
+`F1-spine.md`'s package list gains `drivers/openai-compatible`.
+
+### A-R6-04: the graph attests the driver
+
+`buildGraph` treats an `OpenAICompatibleDriver` as the real component in the `driver` and `reviewer` slots and every drafting seat, as it does a `ClaudeCodeDriver`. A relayless driver is still capped at L1, and this driver is never relayless.
+
+### A-R6-05: `SandboxProvider.relayCall`, and the driver's turns through it
+
+`SandboxProvider` gains an optional `relayCall(h, { path, body })` returning `{ status, body }`: it posts one request to the sandbox's relay from a fixed program in the relay's own container, which is read-only, has no capabilities, and is outside the sandbox's filesystem and process tree, so nothing the task wrote answers in the relay's place. It refuses a sandbox with no relay, a path without a leading `/`, and an ended sandbox, and charges the sandbox's wall clock as `exec` does; the call is metered as any request to the relay is. `LocalDockerProvider` implements it with `docker exec` into the relay container, which its readiness check already does. `OpenAICompatibleDriver` refuses at construction a provider without it, and makes every model turn through it. The I1 and I6 entries' titles say so; I6's assertion replaces `node` in the sandbox and requires the next turn to be the endpoint's answer, and fails against `bd07193`, where the forgery is recorded. Review fix, gemini-1 in `2026-10-24-R6-openai-compatible-triage.md`.

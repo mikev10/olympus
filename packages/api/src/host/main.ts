@@ -21,11 +21,16 @@
  *   that merges it, held by the host and given to no sandbox (D-I1b-06)
  * - `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither: who
  *   sandboxes run as, required on a host with no uids (D-I1b-10)
+ * - `FACTORY_ENDPOINT_CONFIG` and `FACTORY_ENDPOINT_KEY`, both or neither: a
+ *   JSON file outside the repository naming an OpenAI-compatible endpoint and
+ *   the seats it fills, and that endpoint's credential, held by the sandbox
+ *   provider for its relays and given to no sandbox (R6, D-R6-07)
  *
  * A missing variable stops the host before it listens (I5).
  */
 import { createApiServer } from '../http/server.js';
-import { composeHost, containerUser } from './compose.js';
+import { readFile } from 'node:fs/promises';
+import { composeHost, containerUser, parseEndpointFile } from './compose.js';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -37,8 +42,15 @@ const port = Number(required('FACTORY_LISTEN_PORT'));
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factory-host: FACTORY_LISTEN_PORT is not a port');
 
 const user = containerUser(process.env);
+const endpointFile = process.env.FACTORY_ENDPOINT_CONFIG ?? '';
+const endpointKey = process.env.FACTORY_ENDPOINT_KEY ?? '';
+if ((endpointFile === '') !== (endpointKey === '')) {
+  throw new Error('factory-host: FACTORY_ENDPOINT_CONFIG and FACTORY_ENDPOINT_KEY must both be set, or neither');
+}
+const endpoint = endpointFile === '' ? null : parseEndpointFile(await readFile(endpointFile, 'utf8'), endpointKey);
 const components = await composeHost({
   ...(user === undefined ? {} : { containerUser: user }),
+  endpoint,
   store: required('FACTORY_VAULT_STORE'),
   repository: required('FACTORY_REPOSITORY'),
   trees: required('FACTORY_TREES'),

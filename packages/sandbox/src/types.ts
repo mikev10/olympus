@@ -55,6 +55,12 @@ export interface RelaySpec {
   paths: string[];
   /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
   header: string;
+  /**
+   * How the credential is written into `header` (A-R6-02): `'raw'` as it is,
+   * `'bearer'` as `Bearer <credential>`. Required, so no relay writes a scheme
+   * its endpoint did not ask for; any other value is refused.
+   */
+  scheme: RelayScheme;
   /** The name of a credential the provider holds. Never a value. */
   credential: string;
   /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
@@ -70,11 +76,17 @@ export interface RelaySpec {
   meter: RelayMeter;
 }
 
+/** How a relay writes its credential into the header its grant names. */
+export type RelayScheme = 'raw' | 'bearer';
+
 /** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
 export interface RelayBudget {
   maxTokens: number;
   maxCostUsd: number;
 }
+
+/** The usage dialects a relay reads. Closed: one not here is refused (D-P13-06). */
+export type RelayDialect = 'anthropic-messages' | 'openai-chat';
 
 /** US dollars per million tokens of each class. Each MUST be a non-negative finite number. */
 export interface ModelPrice {
@@ -91,9 +103,15 @@ export interface ModelPrice {
  * Where the usage sits in a response, and what each model costs. The dialect
  * is a closed union so a relay never guesses at a response it was not built to
  * read; a model absent from `prices` is refused before its request is sent.
+ *
+ * `'anthropic-messages'` is the Messages API (P13). `'openai-chat'` is the
+ * OpenAI-compatible chat-completions API (A-R6-01): a `POST` to a granted path
+ * ending `/chat/completions` is metered, and its usage is `prompt_tokens`,
+ * `completion_tokens`, and `prompt_tokens_details.cached_tokens`. The cache
+ * write prices are never charged under it, as the dialect reports no writes.
  */
 export interface RelayMeter {
-  dialect: 'anthropic-messages';
+  dialect: RelayDialect;
   /** Keyed by the exact model name a request carries. Never empty. */
   prices: Readonly<Record<string, ModelPrice>>;
 }
@@ -260,6 +278,18 @@ export type SandboxCapabilities = {
   computerUse: boolean; gpu: boolean; os: 'linux' | 'macos'; persistent: boolean; remote: boolean;
 };
 
+/** One request `relayCall` posts to a sandbox's model relay (A-R6-05). `path` begins with `/`; `body` is sent as it is. */
+export interface RelayCallRequest {
+  readonly path: string;
+  readonly body: string;
+}
+
+/** What the relay answered: its status and its body, unread. */
+export interface RelayCallResult {
+  readonly status: number;
+  readonly body: string;
+}
+
 /**
  * M1 implements a local Docker provider only. Remote workers and pools arrive
  * later behind this same interface.
@@ -286,6 +316,18 @@ export interface SandboxProvider {
    * on an ended sandbox.
    */
   probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
+  /**
+   * Posts one request to the sandbox's model relay from a client the
+   * sandbox's processes cannot replace: one in the relay's own container, whose
+   * root is read-only, so the answer is the relay's and not a program the task
+   * wrote (A-R6-05). The call is metered as any request to the relay is.
+   * Optional: a provider that cannot put the client out of the task's reach
+   * omits it, and a driver that makes its model calls from the host side
+   * refuses such a provider. An implementation MUST refuse a sandbox with no
+   * relay, MUST charge the call to the sandbox's wall-clock budget as `exec`
+   * does, and MUST refuse a call on an ended sandbox.
+   */
+  relayCall?(h: SandboxHandle, request: RelayCallRequest): Promise<RelayCallResult>;
   /**
    * Ends the sandbox and returns what its relay counted and what its egress
    * proxy decided, each read after the sidecar stopped so nothing spends or

@@ -122,6 +122,7 @@ packages/
   conformance/  the kit that proves invariants, and the registry
   drivers/
     claude-code/  the Claude Code CLI, run inside a provisioned sandbox
+    openai-compatible/  any OpenAI-compatible chat endpoint; the loop on the host, every tool in the sandbox
 docs/
   plan/         the spine, the decomposition into units, and unit specs
   decisions.md  every judgment call made while building each unit

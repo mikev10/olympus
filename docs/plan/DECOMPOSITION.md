@@ -599,7 +599,7 @@ order between them is settled before any of them is picked up.
 | R3 | Behavioral breadth (browser) | M3 | P8, P5 | — |
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
 | R5 | Goal decomposition | M3 | R4, R20 | — |
-| R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | — |
+| R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | — |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
@@ -614,6 +614,7 @@ order between them is settled before any of them is picked up.
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
 | R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | `docs/plan/R19-drafting.md` |
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
+| R21 | Local model endpoint | M2 | R6 | — |
 
 ### R1 — Readiness
 
@@ -760,19 +761,41 @@ waiting on a driver per vendor. Binding:
   misdeclared family defeats reviewer independence, so the run records the
   declared family beside the model the endpoint reported, and a mismatch the
   driver can see refuses rather than warns
-- the endpoint host is the egress allowlist's only entry, and the credential,
-  where there is one, is held at the egress layer (P12). A local endpoint with
+- the relay's upstream is the endpoint's only route, and the credential,
+  where there is one, is held at the egress layer (P12). The sandbox's own
+  egress allowlist never names the endpoint (D-P12-11). A local endpoint with
   no credential declares that, and nothing is inferred from its absence
 - capability claims are declared from what the endpoint was measured to
   support, and each maps to an assertion that fails when it is removed. An
   endpoint without tool calling, or without usage figures, declares the gap,
-  and `unavailableControls()` refuses the levels that need it
+  and the line refuses what needs it: a tool grant outside `declaredTools()`
+  and a capability a station requires are refused, and a driver with no
+  metered relay carries no run above L1
 
 A local open-weight model behind such an endpoint is the expected way for a
 user on one provider to seat a different-family critic or reviewer at no cost
 per token (R19, D-A-DS-06). Its family is the operator's declaration like any
 other, and a local endpoint's usage figures are its own, so cost recorded for
 it is zero only where the endpoint declares none.
+
+**Spec:** `docs/plan/R6-openai-compatible.md` holds the deliverables, the out
+of scope list, the conformance, and the acceptance criteria. A local endpoint
+is split out to R21.
+
+### R21 — Local model endpoint
+
+R6 serves an `https` endpoint that takes a credential. A local open-weight
+model is usually neither: it listens over `http` on the host, with no key.
+This unit lets the R6 driver reach one, which needs three things R6 does not
+do: a relay upstream over `http`, allowed only for an address the operator
+names as local and never inferred from the URL; a relay with no credential,
+declared as such rather than read from an absent value; and a route from the
+relay's outbound network to the host, which changes the sandbox's network
+posture the way P10 did. Each loosens a rule the relay fails closed on today
+(I5), so each is specified, reviewed, and asserted on its own. Metering, the
+budget, and the family declaration are unchanged: a local endpoint reports
+its own usage, and cost recorded for it is zero only where its declared
+prices are.
 
 ### R7 — False-done benchmark
 

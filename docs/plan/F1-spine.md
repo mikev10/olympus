@@ -85,7 +85,7 @@ The term is stated here and is not yet wired: no unit reads it until R1 lands, t
 
 ### Packages
 
-`core` · `vault` · `integrity` · `adapters` · `sandbox` · `triggers` · `api` · `cli` · `compiler` · `learning` · `readiness` · `drivers/claude-code` · `drivers/codex`
+`core` · `vault` · `integrity` · `adapters` · `sandbox` · `triggers` · `api` · `cli` · `compiler` · `learning` · `readiness` · `drivers/claude-code` · `drivers/codex` · `drivers/openai-compatible`
 
 ### Retired
 

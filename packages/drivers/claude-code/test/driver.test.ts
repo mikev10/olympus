@@ -197,6 +197,7 @@ describe('the invocation', () => {
       upstream: 'https://api.anthropic.com',
       paths: ['/v1/messages'],
       header: 'x-api-key',
+      scheme: 'raw',
       credential: 'anthropic',
       urlVariable: 'ANTHROPIC_BASE_URL',
       meter: MODEL_METER,

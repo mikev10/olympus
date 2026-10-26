@@ -173,6 +173,9 @@ importers:
       '@olympus-ai/driver-claude-code':
         specifier: workspace:*
         version: link:../drivers/claude-code
+      '@olympus-ai/driver-openai-compatible':
+        specifier: workspace:*
+        version: link:../drivers/openai-compatible
       '@olympus-ai/integrity':
         specifier: workspace:*
         version: link:../integrity
@@ -241,6 +244,19 @@ importers:
         version: link:../sandbox
 
   packages/drivers/claude-code:
+    dependencies:
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../../sandbox
+    devDependencies:
+      '@olympus-ai/conformance':
+        specifier: workspace:*
+        version: link:../../conformance
+
+  packages/drivers/openai-compatible:
     dependencies:
       '@olympus-ai/core':
         specifier: workspace:*

@@ -33,6 +33,7 @@ const RELAY: Omit<RelaySpec, 'budget'> = {
   upstream: 'https://models.example',
   paths: ['/v1/messages'],
   header: 'x-api-key',
+  scheme: 'raw',
   credential: 'model',
   urlVariable: 'MODEL_URL',
   meter: { dialect: 'anthropic-messages', prices: { 'stub-fast': PRICE, 'stub-standard': PRICE, 'stub-deep': PRICE } },

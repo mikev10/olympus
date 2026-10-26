@@ -20,6 +20,7 @@
     "@olympus-ai/compiler": "workspace:*",
     "@olympus-ai/core": "workspace:*",
     "@olympus-ai/driver-claude-code": "workspace:*",
+    "@olympus-ai/driver-openai-compatible": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
     "@olympus-ai/vault": "workspace:*",

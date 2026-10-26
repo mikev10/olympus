@@ -278,6 +278,10 @@ describe('validateAssertionId', () => {
     expect(() => {
       validateAssertionId('driver.subagents');
     }).not.toThrow();
+    // A second implementation's assertion of the same claim names itself between the two (D-R6-06).
+    expect(() => {
+      validateAssertionId('driver.stablePrefixCaching.openai-compatible');
+    }).not.toThrow();
   });
   test('rejects an invariant that does not exist', () => {
     expect(() => {
@@ -291,6 +295,11 @@ describe('validateAssertionId', () => {
     expect(() => {
       validateAssertionId('I2.Has Spaces');
     }).toThrow('not an assertion id');
+    for (const id of ['driver.subagents.OpenAI', 'driver.subagents.', 'driver..subagents', 'driver.subagents.a.b', 'driver.openai-compatible.subagents']) {
+      expect(() => {
+        validateAssertionId(id);
+      }, id).toThrow('not an assertion id');
+    }
   });
 });
 

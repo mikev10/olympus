@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { containerUser } from '../src/host/compose.js';
+import { containerUser, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
 
 describe('containerUser', () => {
   test('both absent or empty is no user, and both set is that user', () => {
@@ -20,5 +20,43 @@ describe('containerUser', () => {
     for (const bad of ['-1', '1.5', '1e3', '0x10', ' 1000', 'abc']) {
       expect(() => containerUser({ FACTORY_CONTAINER_UID: bad, FACTORY_CONTAINER_GID: '1000' })).toThrow(/both/u);
     }
+  });
+});
+
+describe('the endpoint file (R6, D-R6-07)', () => {
+  const price = { inputPerMTok: 1, outputPerMTok: 1, cacheReadPerMTok: 1, cacheWritePerMTok: 0, cacheWrite1hPerMTok: 0 };
+  const config = {
+    upstream: 'https://models.example', path: '/v1/chat/completions', header: 'authorization', scheme: 'bearer',
+    provider: 'example', family: 'example-family', version: '1', models: { fast: 'm', standard: 'm', deep: 'm' }, prices: { m: price },
+    maxOutputTokens: 1024, ceilingField: 'max_tokens', parallelism: 1, maxTurns: 10,
+  };
+  const file = (extra: Record<string, unknown>): string => JSON.stringify({ ...config, ...extra });
+
+  test('a file naming the configuration and its seats is read as written', () => {
+    const endpoint = parseEndpointFile(file({ seats: ['reviewer', 'specCritic', 'testCritic'] }), 'key');
+    expect(endpoint.seats).toStrictEqual(['reviewer', 'specCritic', 'testCritic']);
+    expect(endpoint.config.family).toBe('example-family');
+    expect(endpoint.key).toBe('key');
+  });
+
+  test('no seats, an unknown seat, a seat twice, no key, a field the driver does not read, and a file that is not JSON are each refused', () => {
+    expect(() => parseEndpointFile(file({}), 'key')).toThrow(/no seats/u);
+    expect(() => parseEndpointFile(file({ seats: [] }), 'key')).toThrow(/no seats/u);
+    expect(() => parseEndpointFile(file({ seats: ['critic'] }), 'key')).toThrow(/the seats are/u);
+    expect(() => parseEndpointFile(file({ seats: ['reviewer', 'reviewer'] }), 'key')).toThrow(/twice/u);
+    expect(() => parseEndpointFile(file({ seats: ['reviewer'] }), '')).toThrow(/no credential/u);
+    expect(() => parseEndpointFile(file({ seats: ['reviewer'], temperature: 0 }), 'key')).toThrow(/temperature/u);
+    expect(() => parseEndpointFile(file({ seats: ['reviewer'], family: undefined }), 'key')).toThrow(/family/u);
+    expect(() => parseEndpointFile('{', 'key')).toThrow(/not JSON/u);
+  });
+
+  test('the endpoint fills the seats it names and the default fills every other', () => {
+    expect(seatedDrivers('claude', null)).toStrictEqual({
+      driver: 'claude', reviewer: 'claude', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'claude',
+    });
+    expect(seatedDrivers('claude', { driver: 'other', seats: ['reviewer', 'testCritic'] })).toStrictEqual({
+      driver: 'claude', reviewer: 'other', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'other',
+    });
+    expect(ENDPOINT_SEATS).toHaveLength(6);
   });
 });
