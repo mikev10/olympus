@@ -600,7 +600,7 @@ order between them is settled before any of them is picked up.
 | R4 | Parallel task execution | M2 | P4, P6, I1 | `docs/plan/R4-parallel.md` |
 | R5 | Goal decomposition | M3 | R4, R20 | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
-| R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | — |
+| R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
 | R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
@@ -798,6 +798,8 @@ its own usage, and cost recorded for it is zero only where its declared
 prices are.
 
 ### R7 — False-done benchmark
+
+**Spec:** `docs/plan/R7-benchmark.md`, written when the unit started (D-R7-01). It splits the corpus into a deterministic tier, which CI runs, and a model tier, which runs under a cap the maintainer sets.
 
 The measurement the claim needs. A fixed corpus of tasks, each seeded with one
 known false-done — a skipped test, a weakened assertion, an edited acceptance
