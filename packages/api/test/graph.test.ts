@@ -59,7 +59,9 @@ describe('buildGraph', () => {
       provider: 'example', family: 'example-family', version: '1', models: { fast: 'm', standard: 'm', deep: 'm' }, prices: { m: price },
       maxOutputTokens: 1024, ceilingField: 'max_tokens', parallelism: 1, maxTurns: 10,
     };
-    const other = new OpenAICompatibleDriver({ provider: parts.sandbox, endpoint });
+    // The driver refuses a provider that cannot call the relay (A-R6-05). The graph is built and never run, so the call is never made.
+    const relaying = Object.assign(new StubSandboxProvider(), { relayCall: () => Promise.reject(new Error('the graph test makes no model call')) });
+    const other = new OpenAICompatibleDriver({ provider: relaying, endpoint });
     expect(names({ ...parts, reviewer: other })).toEqual(['StubSandboxProvider']);
     expect(names({ ...parts, driver: other, reviewer: other, drafting: { specDrafter: other, specCritic: parts.driver, testDrafter: other, testCritic: parts.driver } }))
       .toEqual(['StubSandboxProvider']);

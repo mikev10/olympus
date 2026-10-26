@@ -27,6 +27,16 @@ async function refusalOf(action: () => unknown): Promise<DriverRefusal> {
   throw new Error('expected a DriverRefusal, and nothing was refused');
 }
 
+/** A file's contents, or `absent` only where it does not exist; every other read error fails the test (codex-5). */
+async function contentsOrAbsent(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    throw error;
+  }
+}
+
 function functionNames(body: Record<string, unknown>): string[] {
   const tools = body.tools;
   if (!Array.isArray(tools)) return [];
@@ -35,7 +45,7 @@ function functionNames(body: Record<string, unknown>): string[] {
 
 invariantTest(
   'I1.openai-compatible-driver-executes-inside-the-sandbox',
-  "every tool call and every model call of a task runs inside the provisioned sandbox through provider.exec, the host's own filesystem is never written, and a driver with no provider cannot be constructed",
+  'every tool call of a task runs inside the provisioned sandbox through provider.exec and every model call through its relay, and a driver with no provider, or with one that cannot call the relay, cannot be constructed',
   async () => {
     await withHarness(async (h) => {
       const { handle, workspace } = await h.sandbox();
@@ -77,7 +87,7 @@ invariantTest(
       expect(toolResults[toolResults.length - 2]).toBe('alpha gamma\n');
       expect(toolResults[toolResults.length - 1]).toContain(`--- stdout ---\n${WORKDIR}\n`);
 
-      // Every exec the driver made was against this sandbox's handle: four model calls and the tools' own.
+      // Every call the driver made was against this sandbox's handle: four model calls through the relay and the tools' execs.
       expect(h.execs.every((e) => e.handle === handle)).toBe(true);
       expect(modelCalls(h.execs)).toHaveLength(4);
     });
@@ -85,6 +95,10 @@ invariantTest(
     // No provider is no driver: there is no host to fall back to.
     const refused = await refusalOf(() => new OpenAICompatibleDriver({ provider: undefined as unknown as SandboxProvider, endpoint: CONFIG }));
     expect(refused.layer).toBe('provider');
+    // A provider that can only exec would have the model call answered from inside the sandbox: refused too.
+    const execOnly = await refusalOf(() => new OpenAICompatibleDriver({ provider: { id: 'exec-only' } as unknown as SandboxProvider, endpoint: CONFIG }));
+    expect(execOnly.layer).toBe('provider');
+    expect(execOnly.message).toContain('A-R6-05');
   },
 );
 
@@ -109,13 +123,13 @@ invariantTest(
       // Offered: Read and nothing else, on every turn.
       expect(sent.map(functionNames)).toStrictEqual([['Read'], ['Read']]);
       // Asked for, never run: no file, no command, and both refusals recorded.
-      expect(await readFile(join(workspace, 'forbidden.txt'), 'utf8').catch(() => 'absent')).toBe('absent');
-      expect(await readFile(join(workspace, 'also-forbidden'), 'utf8').catch(() => 'absent')).toBe('absent');
+      expect(await contentsOrAbsent(join(workspace, 'forbidden.txt'))).toBe('absent');
+      expect(await contentsOrAbsent(join(workspace, 'also-forbidden'))).toBe('absent');
       expect(result.events.map((e) => e.detail)).toStrictEqual([
         { tool: 'Write', refused: true },
         { tool: 'Bash', refused: true },
       ]);
-      expect(h.execs.filter((e) => e.argv[0] !== 'node')).toStrictEqual([]);
+      expect(h.execs.filter((e) => e.kind === 'exec')).toStrictEqual([]);
       const answers = (sent[1]?.messages as Array<{ role: string; content: string }>).filter((m) => m.role === 'tool').map((m) => m.content);
       expect(answers).toStrictEqual(["error: the tool 'Write' is not granted to this task", "error: the tool 'Bash' is not granted to this task"]);
 
@@ -176,7 +190,8 @@ invariantTest(
 invariantTest(
   'I6.openai-compatible-family-is-declared',
   "the family a result records is the operator's declaration, never derived; a configuration without one is refused; " +
-    'and an answer naming another model, or none, refuses the task rather than being attributed to the declared family',
+    'an answer naming another model, or none, refuses the task rather than being attributed to the declared family; ' +
+    'and a turn is answered by the relay even after the task replaces node in the sandbox, so nothing the task wrote is attributed to the model (A-R6-05)',
   async () => {
     // The family is the configuration's, whatever the endpoint, the provider, or the model is called.
     const { family: _dropped, ...undeclared } = CONFIG;
@@ -200,6 +215,31 @@ invariantTest(
         );
         expect(refused.layer, label).toBe('identity');
       }
+
+      // The task replaces the sandbox's node with a program that prints a well-formed answer from the requested model.
+      // The next turn still reaches the endpoint, and what is recorded is the endpoint's answer, not the forgery.
+      const forged = JSON.stringify({
+        status: 200,
+        body: JSON.stringify({ model: CONFIG.models.standard, choices: [{ message: { content: 'forged' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+      });
+      const before = (await h.received()).length;
+      const replaced = await h.driver.runTask(
+        h.request(handle, {
+          taskId: 'i6-forged-node' as TaskId,
+          tools: ['Bash', 'Write'],
+          variableSuffix: script([
+            { calls: [{ name: 'Write', arguments: { path: '/tmp/forged.json', content: forged } }] },
+            { calls: [{ name: 'Bash', arguments: { command: 'p=$(command -v node) && printf "#!/bin/sh\ncat /tmp/forged.json\n" > "$p" && chmod +x "$p" && node && echo replaced' } }] },
+            { content: 'answered by the endpoint' },
+          ]),
+        }),
+      );
+      expect(replaced.claim.narrative).toBe('answered by the endpoint');
+      expect((await h.received()).length - before).toBe(3);
+      // The control: node was replaced, and the forgery it printed is what an in-sandbox caller would have returned.
+      const toolResults = ((await h.received()).at(-1)?.body.messages as Array<{ role: string; content: string }>).filter((m) => m.role === 'tool');
+      expect(toolResults.at(-1)?.content).toContain('replaced');
+      expect(toolResults.at(-1)?.content).toContain('forged');
     });
   },
 );

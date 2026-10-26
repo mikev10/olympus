@@ -23,6 +23,7 @@ every later decision in the unit to the session's recommendation.
 | A driver's gaps are `DriverCapabilities`, `declaredTools()`, and `relayRequest()` | `core/src/driver/contract.ts` | `unavailableControls()` is the adapter set's; the entry's "refuses the levels that need it" is the line's existing refusals of a missing capability, an ungranted tool, and a relayless driver above L1 |
 | Only `ClaudeCodeDriver` is attested in a driver seat | `api/src/graph.ts`, `REAL` | any other driver carries no run above L1 until it is attested (A-R6-04) |
 | The spine's package list names two drivers | `F1-spine.md`, Packages | `drivers/openai-compatible` is added there (A-R6-03) |
+| A provider reaches a sandbox only through `exec` and `probe` | `sandbox/src/types.ts`, `SandboxProvider` | a model call made by `exec` is answered by whatever the task left in the sandbox; R6 adds `relayCall` (A-R6-05, review fix) |
 | `ModelIdentity.family` is branded and explicit | `core/src/driver/contract.ts` | the operator's declaration is branded once, in the constructor |
 | The relay takes an extra trust anchor | `LocalDockerOptions.relayTrust`, `relay.ts` `RELAY_TRUST` | every assertion runs against a TLS endpoint the test owns, with no model spend |
 | `ExecOptions.stdin` | `sandbox/src/types.ts` | a model request reaches the in-sandbox caller on stdin, with no size bound from the environment |
@@ -42,9 +43,11 @@ every later decision in the unit to the session's recommendation.
   the run means, and nothing is inferred from the URL, a model name, or a
   response (D-R6-02).
 - **The agent loop is the driver's, on the host** (D-R6-01). Each model turn is
-  one `provider.exec` of a fixed `node` program inside the sandbox, handed the
-  request body on stdin, which posts it to the relay's address and prints the
-  status and body. Each tool call is one or more `provider.exec` calls inside
+  one `provider.relayCall`, which posts the request body to the relay from a
+  fixed program in the relay's own read-only container and returns the status
+  and body, so nothing the task wrote can answer in the model's place (A-R6-05,
+  a review fix; the first version ran that program inside the sandbox through
+  `provider.exec`). Each tool call is one or more `provider.exec` calls inside
   the sandbox. Nothing the model asks for runs on the host; the host holds the
   conversation and decides which calls are made.
 - **Tools.** The inventory is `Bash`, `Edit`, `Read`, `Write`, named as policy

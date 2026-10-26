@@ -6,10 +6,11 @@
  * driver's, and it runs in the runtime's process (D-R6-01). What reaches the
  * sandbox is narrow and fixed:
  *
- * - Each model turn is one `provider.exec` of `CALL_SOURCE`, which posts the
- *   request to the model relay. The relay holds the credential the sandbox
- *   never does and enforces the task's budget (P12, P13), so a turn is metered
- *   whether the model behaves or not.
+ * - Each model turn is one `provider.relayCall`, which posts the request to
+ *   the model relay from inside the relay's own read-only container, so no
+ *   program the task wrote can answer in the model's place (A-R6-05). The
+ *   relay holds the credential the sandbox never does and enforces the task's
+ *   budget (P12, P13), so a turn is metered whether the model behaves or not.
  * - Each tool call is `provider.exec` inside the sandbox. Nothing the model
  *   asks for runs on the host (I1).
  *
@@ -31,8 +32,8 @@ import {
   type TaskResult,
   type Usage,
 } from '@olympus-ai/core';
-import type { ExecOptions, ExecResult, RelaySpec, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
-import { CALL_SOURCE, RELAY_URL_VARIABLE } from './call.js';
+import { SandboxRefusal, type ExecOptions, type ExecResult, type RelaySpec, type SandboxHandle, type SandboxProvider } from '@olympus-ai/sandbox';
+import { RELAY_URL_VARIABLE } from './call.js';
 import { checkConfig, type CheckedConfig, type EndpointConfig } from './config.js';
 import { DriverRefusal, refuse } from './refusal.js';
 import { DECLARED_TOOLS, definitionsFor, runTool, type ToolOutcome } from './tools.js';
@@ -177,6 +178,12 @@ export class OpenAICompatibleDriver implements Driver {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the type requires a provider, but a missing one means running tools on the host (I1). A caller arriving from untyped code is refused, not trusted.
     if (options.provider === undefined || options.provider === null) {
       refuse('provider', 'OpenAICompatibleDriver needs the SandboxProvider that provisioned the handle; there is no host fallback (I1)');
+    }
+    if (typeof options.provider.relayCall !== 'function') {
+      refuse(
+        'provider',
+        `the provider '${options.provider.id}' cannot call the model relay from outside the sandbox; a model call made from inside it is answered by whatever the task left there (A-R6-05)`,
+      );
     }
     this.#provider = options.provider;
     this.#config = checkConfig(options.endpoint);
@@ -360,7 +367,7 @@ export class OpenAICompatibleDriver implements Driver {
         ...(tools.length === 0 ? {} : { tools }),
       };
       sent.push(JSON.parse(JSON.stringify(body)) as Record<string, unknown>);
-      const answer = await this.#call(exec, body);
+      const answer = await this.#call(req.sandbox, body);
       const reply = readTurn(answer);
       if (reply.model !== identity.model) {
         refuse(
@@ -413,20 +420,18 @@ export class OpenAICompatibleDriver implements Driver {
     }
   }
 
-  /** One model call through the relay, made from inside the sandbox. Returns the body of a success; refuses on anything else. */
-  async #call(exec: (argv: string[], options?: ExecOptions) => Promise<ExecResult>, body: Record<string, unknown>): Promise<string> {
-    const result = await exec(['node', '--eval', CALL_SOURCE, this.#config.path], { stdin: JSON.stringify(body) });
-    if (result.exitCode !== 0) {
-      refuse('invocation', `the model call inside the sandbox exited ${String(result.exitCode)}: ${result.stderr.trim()}`);
-    }
-    let answer: unknown;
+  /** One model call through the relay, made from the relay's own container (A-R6-05). Returns the body of a success; refuses on anything else. */
+  async #call(sandbox: SandboxHandle, body: Record<string, unknown>): Promise<string> {
+    const provider = this.#provider;
+    // The constructor refused a provider without relayCall; the field is optional in the type, so it is checked again here.
+    if (provider.relayCall === undefined) refuse('provider', `the provider '${provider.id}' cannot call the model relay (A-R6-05)`);
+    let answer: { readonly status: number; readonly body: string };
     try {
-      answer = JSON.parse(result.stdout);
-    } catch {
-      answer = undefined;
-    }
-    if (!isRecord(answer) || typeof answer.status !== 'number' || typeof answer.body !== 'string') {
-      refuse('invocation', `the model call inside the sandbox printed ${quoted(result.stdout)}, not a status and a body`);
+      answer = await provider.relayCall(sandbox, { path: this.#config.path, body: JSON.stringify(body) });
+    } catch (error) {
+      // The sandbox's own refusals (its wall clock, its output cap) are reported as the sandbox's.
+      if (error instanceof DriverRefusal || error instanceof SandboxRefusal) throw error;
+      refuse('invocation', `the model call through the relay failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (answer.status === 402) refuse('budget', `the relay refused the call: ${quoted(answer.body)}`);
     if (answer.status < 200 || answer.status >= 300) {

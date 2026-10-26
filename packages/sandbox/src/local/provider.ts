@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import type {
-  EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
+  EgressLog, ExecOptions, ExecResult, MeterReading, ProbeRequest, ProbeResult, RelayCallRequest, RelayCallResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown,
 } from '../types.js';
 import { CliOutputExceeded, CliTimeout, dockerCli, probeDaemon, type DaemonFacts } from './docker.js';
 import { checkEgress, type EgressPlan } from './egress.js';
@@ -26,6 +26,7 @@ import { refuse, SandboxRefusal, withLeftovers } from './refusal.js';
 import {
   CREDENTIAL_NAME,
   RELAY_ALIAS,
+  RELAY_CALL_SOURCE,
   RELAY_URL,
   checkRelay,
   readMeter,
@@ -656,6 +657,47 @@ export class LocalDockerProvider implements SandboxProvider {
       return await this.#overBudget(sandbox, h, error);
     } finally {
       sandbox.probes.delete(name);
+    }
+  }
+
+  /**
+   * Posts one request to the sandbox's relay from inside the relay container
+   * (A-R6-05): read-only, with no capabilities, and out of the sandbox's
+   * filesystem and process tree, so nothing the task wrote answers in the
+   * relay's place. The time it takes is the sandbox's, as an `exec`'s is.
+   */
+  async relayCall(h: SandboxHandle, request: RelayCallRequest): Promise<RelayCallResult> {
+    const sandbox = this.#require(h);
+    if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+    const relay = relayOf(sandbox.controls.egress);
+    if (relay === undefined) refuse('relay', `sandbox ${h} was provisioned without a model relay; there is nothing to call`);
+    if (!request.path.startsWith('/')) refuse('relay', `the relay call's path ${JSON.stringify(request.path)} does not begin with /`);
+    const remaining = await this.#remaining(sandbox, h);
+    try {
+      const result = await dockerCli(
+        this.#executable,
+        ['exec', '--interactive', relay.containerId, 'node', '--eval', RELAY_CALL_SOURCE, request.path],
+        { timeoutMs: remaining, ...this.#outputCap, stdin: request.body },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(`the relay call exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+      }
+      let answer: unknown;
+      try {
+        answer = JSON.parse(result.stdout);
+      } catch {
+        answer = undefined;
+      }
+      if (typeof answer !== 'object' || answer === null) {
+        throw new Error(`the relay call printed ${JSON.stringify(result.stdout.slice(0, 200))}, not a status and a body`);
+      }
+      const { status, body } = answer as { status?: unknown; body?: unknown };
+      if (typeof status !== 'number' || typeof body !== 'string') {
+        throw new Error(`the relay call printed ${JSON.stringify(result.stdout.slice(0, 200))}, not a status and a body`);
+      }
+      return { status, body };
+    } catch (error) {
+      return await this.#overBudget(sandbox, h, error);
     }
   }
 

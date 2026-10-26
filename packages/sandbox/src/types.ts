@@ -278,6 +278,18 @@ export type SandboxCapabilities = {
   computerUse: boolean; gpu: boolean; os: 'linux' | 'macos'; persistent: boolean; remote: boolean;
 };
 
+/** One request `relayCall` posts to a sandbox's model relay (A-R6-05). `path` begins with `/`; `body` is sent as it is. */
+export interface RelayCallRequest {
+  readonly path: string;
+  readonly body: string;
+}
+
+/** What the relay answered: its status and its body, unread. */
+export interface RelayCallResult {
+  readonly status: number;
+  readonly body: string;
+}
+
 /**
  * M1 implements a local Docker provider only. Remote workers and pools arrive
  * later behind this same interface.
@@ -304,6 +316,18 @@ export interface SandboxProvider {
    * on an ended sandbox.
    */
   probe?(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult>;
+  /**
+   * Posts one request to the sandbox's model relay from a client the
+   * sandbox's processes cannot replace: one in the relay's own container, whose
+   * root is read-only, so the answer is the relay's and not a program the task
+   * wrote (A-R6-05). The call is metered as any request to the relay is.
+   * Optional: a provider that cannot put the client out of the task's reach
+   * omits it, and a driver that makes its model calls from the host side
+   * refuses such a provider. An implementation MUST refuse a sandbox with no
+   * relay, MUST charge the call to the sandbox's wall-clock budget as `exec`
+   * does, and MUST refuse a call on an ended sandbox.
+   */
+  relayCall?(h: SandboxHandle, request: RelayCallRequest): Promise<RelayCallResult>;
   /**
    * Ends the sandbox and returns what its relay counted and what its egress
    * proxy decided, each read after the sidecar stopped so nothing spends or

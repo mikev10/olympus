@@ -52,7 +52,7 @@ invariantTest(
         h.request(handle, { taskId: 'sub' as TaskId, tools: [...DECLARED_TOOLS], variableSuffix: script([{ calls: [{ name: 'Task', arguments: { prompt: 'x' } }] }, { content: 'done' }]) }),
       );
       expect(result.events.map((e) => e.detail)).toStrictEqual([{ tool: 'Task', refused: true }]);
-      expect(h.execs.filter((e) => e.argv[0] !== 'node')).toStrictEqual([]);
+      expect(h.execs.filter((e) => e.kind === 'exec')).toStrictEqual([]);
     });
   },
 );

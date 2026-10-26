@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import type { TaskId } from '@olympus-ai/core';
-import { CALL_SOURCE, DriverRefusal, ENDPOINT_CREDENTIAL, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
+import { DriverRefusal, ENDPOINT_CREDENTIAL, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
 import { script } from './endpoint.js';
 import { BUDGET, CONFIG, withHarness } from './harness.js';
 
@@ -62,7 +62,6 @@ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () =>
         urlVariable: RELAY_URL_VARIABLE,
         meter: { dialect: 'openai-chat', prices: CONFIG.prices },
       });
-      expect(CALL_SOURCE).toContain(RELAY_URL_VARIABLE);
       return Promise.resolve();
     });
   });

@@ -4567,6 +4567,7 @@ later decision in the unit to the session's recommendation. The spec is
 - **Chosen:** the loop is the driver's, in the runtime's process. Each model turn is one `provider.exec` of a fixed `node --eval` program inside the sandbox, which reads the request on stdin, posts it to the relay's address from the variable the provider set, and prints the status and body. Each tool call is `provider.exec` inside the sandbox.
 - **Why:** every byte to the model still crosses the relay, so the credential stays out of the sandbox and the budget is enforced where the task cannot reach it (P12, P13). The grant check, the tool definitions offered, and the decision to run a call stay in code the model's commands cannot touch; a loop inside the container would sit beside the tools it polices. The option not taken, the loop in the container, costs one exec less per turn and gives that up. A loop on the host calling the endpoint directly was not considered: it would hold the credential and bypass the meter.
 - **Reverse:** ship the loop as a program in the image and exec it once per task.
+- **Amended** (review fix, gemini-1 in `2026-10-24-R6-openai-compatible-triage.md`): a model turn is no longer an exec in the sandbox. A task granted `Bash` or `Write` could replace the sandbox's `node`, and every later turn was then whatever that program printed, attributed to the declared model. Each turn is now `provider.relayCall`, made from the relay's own container (A-R6-05). Tools still run in the sandbox.
 
 ### D-R6-02: the operator states the whole configuration, and the constructor refuses what is missing
 
@@ -4578,6 +4579,7 @@ later decision in the unit to the session's recommendation. The spec is
 
 - **Chosen:** strict equality between the response's `model` and the request's. The operator configures exact model ids, as D-R14-01 already requires of the Claude Code driver, and an endpoint that resolves an alias to a dated id is configured with the dated id.
 - **Why:** the driver cannot see a family. The one mismatch it can see is the endpoint serving another model than the one the family was declared for, and the entry says that refuses rather than warns.
+- **Limit** (review fix, codex-2 in `2026-10-24-R6-openai-compatible-triage.md`): the check is consistency validation, not authentication. The endpoint is the operator's configuration, and that it serves the model it names, and reports its usage honestly, is the operator's trust assumption; nothing in a response can prove either.
 - **Reverse:** a configured map from requested to reported ids.
 
 ### D-R6-04: the tool inventory is `Bash`, `Edit`, `Read`, `Write`
@@ -4621,3 +4623,7 @@ later decision in the unit to the session's recommendation. The spec is
 ### A-R6-04: the graph attests the driver
 
 `buildGraph` treats an `OpenAICompatibleDriver` as the real component in the `driver` and `reviewer` slots and every drafting seat, as it does a `ClaudeCodeDriver`. A relayless driver is still capped at L1, and this driver is never relayless.
+
+### A-R6-05: `SandboxProvider.relayCall`, and the driver's turns through it
+
+`SandboxProvider` gains an optional `relayCall(h, { path, body })` returning `{ status, body }`: it posts one request to the sandbox's relay from a fixed program in the relay's own container, which is read-only, has no capabilities, and is outside the sandbox's filesystem and process tree, so nothing the task wrote answers in the relay's place. It refuses a sandbox with no relay, a path without a leading `/`, and an ended sandbox, and charges the sandbox's wall clock as `exec` does; the call is metered as any request to the relay is. `LocalDockerProvider` implements it with `docker exec` into the relay container, which its readiness check already does. `OpenAICompatibleDriver` refuses at construction a provider without it, and makes every model turn through it. The I1 and I6 entries' titles say so; I6's assertion replaces `node` in the sandbox and requires the next turn to be the endpoint's answer, and fails against `bd07193`, where the forgery is recorded. Review fix, gemini-1 in `2026-10-24-R6-openai-compatible-triage.md`.

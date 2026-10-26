@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
-import { EGRESS_PROXY_IMAGE, LocalDockerProvider, relayOf, type ExecOptions, type ExecResult, type SandboxHandle } from '@olympus-ai/sandbox';
+import { EGRESS_PROXY_IMAGE, LocalDockerProvider, relayOf, type ExecOptions, type ExecResult, type RelayCallRequest, type RelayCallResult, type SandboxHandle } from '@olympus-ai/sandbox';
 import { ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, type EndpointConfig } from '../src/index.js';
 import { ENDPOINT_ORIGIN, ENDPOINT_PATH, makeCertificate, received, startEndpoint, type Certificate, type Received } from './endpoint.js';
 
@@ -51,8 +51,9 @@ export const ROLE: CompiledRole = {
   sha256: '0'.repeat(64),
 };
 
-/** One exec the driver made, as the provider was asked to run it. */
+/** One call the driver made into the provider: an `exec` with its argv, or a `relayCall` with its path as the one element. */
 export interface SeenExec {
+  readonly kind: 'exec' | 'relayCall';
   readonly handle: SandboxHandle;
   readonly argv: readonly string[];
   readonly startedAt: number;
@@ -64,7 +65,7 @@ export interface Harness {
   readonly driver: OpenAICompatibleDriver;
   /** The credential the provider holds for the relay. A canary: never a real key. */
   readonly secret: string;
-  /** Every exec any driver built from this harness made, in order. */
+  /** Every exec and relay call any driver built from this harness made, in order. */
   readonly execs: SeenExec[];
   /** A fresh sandbox with its relay reaching the endpoint, and its workspace on the host. */
   sandbox(): Promise<{ handle: SandboxHandle; workspace: string }>;
@@ -77,13 +78,24 @@ export interface Harness {
 
 let certificate: Certificate | undefined;
 
-/** A provider whose exec is watched: what the driver ran, where, and when. */
+/** A provider whose exec and relay call are watched: what the driver ran, where, and when. */
 function watched(provider: LocalDockerProvider, execs: SeenExec[]): LocalDockerProvider {
   return new Proxy(provider, {
     get(target, property, receiver) {
+      if (property === 'relayCall') {
+        return async (handle: SandboxHandle, request: RelayCallRequest): Promise<RelayCallResult> => {
+          const seen: SeenExec = { kind: 'relayCall', handle, argv: [request.path], startedAt: Date.now() };
+          execs.push(seen);
+          try {
+            return await target.relayCall(handle, request);
+          } finally {
+            seen.endedAt = Date.now();
+          }
+        };
+      }
       if (property === 'exec') {
         return async (handle: SandboxHandle, argv: string[], options?: ExecOptions): Promise<ExecResult> => {
-          const seen: SeenExec = { handle, argv: [...argv], startedAt: Date.now() };
+          const seen: SeenExec = { kind: 'exec', handle, argv: [...argv], startedAt: Date.now() };
           execs.push(seen);
           try {
             return await target.exec(handle, argv, options);
@@ -159,9 +171,9 @@ export async function withHarness<T>(body: (h: Harness) => Promise<T>, endpoint:
   }
 }
 
-/** The execs that were model calls: the fixed caller, run by node. */
+/** The calls that were model calls: each made through the relay, never an exec in the sandbox (A-R6-05). */
 export function modelCalls(execs: readonly SeenExec[]): SeenExec[] {
-  return execs.filter((e) => e.argv[0] === 'node' && e.argv[1] === '--eval');
+  return execs.filter((e) => e.kind === 'relayCall');
 }
 
 /** The most of `execs` that were running at one moment. */

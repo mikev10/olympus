@@ -296,6 +296,38 @@ describe('the relay forwards its grant, with its own credential, to its own upst
   });
 });
 
+describe("relayCall posts from the relay container, out of the sandbox's reach (A-R6-05)", () => {
+  test("a call reaches the upstream with the provider's credential, is metered, and a path outside the grant is still refused", async () => {
+    const handle = await provisioned();
+    await withUpstream(relayFor(handle));
+
+    const answered = await provider.relayCall(handle, { path: '/v1/messages', body: MESSAGE });
+    expect(answered.status).toBe(200);
+    expect(JSON.parse(answered.body)).toMatchObject({ marker: UPSTREAM_MARKER, method: 'POST', url: '/v1/messages', keyMatches: true, bodyBytes: Buffer.byteLength(MESSAGE) });
+
+    const outside = await provider.relayCall(handle, { path: '/v1/other', body: MESSAGE });
+    expect(outside.status).toBe(403);
+
+    live.splice(live.indexOf(handle), 1);
+    // The upstream is on the relay's outbound network, which the teardown removes.
+    await removeUpstreams();
+    const { meter } = await provider.destroy(handle);
+    expect(meter.kind === 'metered' && meter.calls).toBe(1);
+  });
+
+  test('a sandbox with no relay, a path without a leading slash, and an ended sandbox are each refused', async () => {
+    const { relay: _none, ...unrelayed } = specFor();
+    const bare = await provisioned(unrelayed);
+    expect((await refusal(() => provider.relayCall(bare, { path: '/v1/messages', body: MESSAGE }))).layer).toBe('relay');
+
+    const handle = await provisioned();
+    expect((await refusal(() => provider.relayCall(handle, { path: 'v1/messages', body: MESSAGE }))).layer).toBe('relay');
+    live.splice(live.indexOf(handle), 1);
+    await provider.destroy(handle);
+    expect((await refusal(() => provider.relayCall(handle, { path: '/v1/messages', body: MESSAGE }))).layer).toBe('lifetime');
+  });
+});
+
 describe('the credential never enters the sandbox', () => {
   test('no process, file, environment entry, or argument of the sandbox holds it — and the same search finds one that is put there', async () => {
     const handle = await provisioned();

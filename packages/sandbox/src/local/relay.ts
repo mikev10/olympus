@@ -827,6 +827,37 @@ export interface SharedNetworks {
   readonly outbound: string;
 }
 
+/**
+ * The one program `relayCall` runs inside the relay container (A-R6-05). It
+ * reads a request body on stdin, posts it to the relay on the container's own
+ * loopback at the path its argument names, and prints the status and the body
+ * as one JSON line. It runs where the task cannot write: the relay's root is
+ * read-only and the sandbox has no route to its process tree, so what it
+ * prints is the relay's answer and never a program the task put in its place.
+ * It sets no timeout: a call is bounded by the sandbox's wall clock.
+ */
+export const RELAY_CALL_SOURCE = `'use strict';
+const http = require('node:http');
+const path = String(process.argv[1] || '');
+const parts = [];
+process.stdin.on('data', function (c) { parts.push(c); });
+process.stdin.on('end', function () {
+  const body = Buffer.concat(parts);
+  const q = http.request({
+    host: '127.0.0.1', port: Number(process.env.RELAY_PORT), method: 'POST', path: path, agent: false,
+    headers: { 'content-type': 'application/json', 'content-length': String(body.length) },
+  }, function (s) {
+    const out = [];
+    s.on('data', function (c) { out.push(c); });
+    s.on('end', function () {
+      process.stdout.write(JSON.stringify({ status: s.statusCode, body: Buffer.concat(out).toString('utf8') }));
+    });
+  });
+  q.on('error', function (e) { process.stderr.write('relay call failed: ' + String(e && e.message || e)); process.exit(2); });
+  q.end(body);
+});
+`;
+
 /** Probed from inside the relay container: the port is open or it is not. */
 const READY_SOURCE =
   "require('node:net').connect(Number(process.env.RELAY_PORT), '127.0.0.1')" +

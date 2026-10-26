@@ -12,11 +12,11 @@ import { external } from '../kit/assert.js';
 const PACKAGE = '@olympus-ai/driver-openai-compatible';
 const FILE = 'test/invariants.test.ts';
 
-/** I1: tools and model calls run in the sandbox; the agent loop holds no host filesystem access it hands the model. */
+/** I1: tools run in the sandbox and model calls through its relay; the agent loop holds no host filesystem access it hands the model. */
 export const OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX = external({
   id: 'I1.openai-compatible-driver-executes-inside-the-sandbox',
   title:
-    "every tool call and every model call of a task runs inside the provisioned sandbox through provider.exec, the host's own filesystem is never written, and a driver with no provider cannot be constructed",
+    'every tool call of a task runs inside the provisioned sandbox through provider.exec and every model call through its relay, and a driver with no provider, or with one that cannot call the relay, cannot be constructed',
   level: 'runtime',
   package: PACKAGE,
   file: FILE,
@@ -44,12 +44,16 @@ export const OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE = external({
   file: FILE,
 });
 
-/** I6: the family is the operator's declaration, and an answer from another model is not attributed to it (D-R6-03). */
+/**
+ * I6: the family is the operator's declaration, and an answer from another model is not attributed to it (D-R6-03).
+ * The `model` check is consistency, not authentication: that the endpoint serves the model it names is the operator's trust assumption.
+ */
 export const OPENAI_COMPATIBLE_FAMILY_IS_DECLARED = external({
   id: 'I6.openai-compatible-family-is-declared',
   title:
     "the family a result records is the operator's declaration, never derived; a configuration without one is refused; " +
-    'and an answer naming another model, or none, refuses the task rather than being attributed to the declared family',
+    'an answer naming another model, or none, refuses the task rather than being attributed to the declared family; ' +
+    'and a turn is answered by the relay even after the task replaces node in the sandbox, so nothing the task wrote is attributed to the model (A-R6-05)',
   level: 'runtime',
   package: PACKAGE,
   file: FILE,
