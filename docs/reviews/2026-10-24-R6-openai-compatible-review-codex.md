@@ -1,3 +1,58 @@
+# External review of R6, codex, 2026-10-24
+
+An adversarial review of R6: the driver for any OpenAI-compatible chat
+endpoint, the relay's second usage dialect and credential scheme, and the
+runtime's seating of the new driver. One of two reviews run from the same
+prompt and bundle; the other is `2026-10-24-R6-openai-compatible-review-gemini.md`.
+Both are triaged in `2026-10-24-R6-openai-compatible-triage.md`, which cites
+this review's findings as `codex-1` to `codex-5`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run (CLI 0.155.1) under a read-only sandbox, with
+  recorded approval policy `never`, in an empty scratch working directory and a
+  scratch config home holding only `auth.json`, with an environment of
+  `CODEX_HOME` alone; the pre-run listing of both is the manifest's
+  `cleanRoom`. Exit 0, not timed out, 96.2 s. Ingestion `complete`: 90,794
+  input tokens against a floor of 59,999. Integrity `verified`. Outcome
+  `counted`. Reply SHA-256 as the runner wrote it:
+  `43611a0dd938d1ad037484effa6ef81718a2e8e105411d6c1c818dd2f5dd263a`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `c89c72e`.
+- **Cross-family agreement:** none of codex-1 to codex-5 was raised by gemini.
+  codex-2 and gemini-1 reach the same consequence, an answer recorded under a
+  model that did not produce it, through different mechanisms (a lying
+  endpoint, and a replaced `node` in the sandbox), so they are not paired.
+- **Date:** 2026-10-24 (run started 2026-10-25T22:53Z).
+- **Bundle:** `2026-10-24-R6-openai-compatible-review-bundle.txt`, SHA-256
+  `256ed8c0b1843dee21fcda94566010d41c2c706c68688053e933fbd4e7b3057c`, base
+  `d039910` (`reviewed/R19`), head `bd07193` ("R6: Driver: any
+  OpenAI-compatible endpoint"), one commit. It held 42 of the 46 changed paths:
+  the new `drivers/openai-compatible` package and its tests, the relay's
+  `openai-chat` dialect and `bearer` credential, the graph and host seating in
+  `api`, the conformance registry entries, the changeset, and the lockfile; new
+  files in full and modified files as whole-function diffs. The four design
+  documents (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`,
+  `docs/plan/F1-spine.md`, `docs/plan/R6-openai-compatible.md`) were excluded.
+  Prompt: `2026-10-24-R6-openai-compatible-review-prompt.txt`.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle, not the repository. Treat them as hints, not locations.
+
+- **Prior context and lookups:** the reviewer stated it had no prior project
+  context and made no external lookups, and that it did not run the tests or
+  verify the bundle's hash. These are self-reports and cannot be independently
+  verified.
+- **Coverage, and any gap:** items 1 (codex-1, codex-2, codex-3), 2 (codex-4,
+  and a closing statement that no assertion is wholly tautological), 3
+  (codex-5), 4 (it found no TypeScript escape hatch reachable by this
+  adversary), 6, and 7 (that the framing overstates what the runtime can prove
+  about a hostile endpoint's identity and billing) were answered. Item 5
+  (configuration satisfied without doing what it appears to) got no separate
+  answer; codex-2 touches it.
+
+---
+
 BASE: d039910  
 HEAD: bd07193  
 pnpm-lock.yaml  

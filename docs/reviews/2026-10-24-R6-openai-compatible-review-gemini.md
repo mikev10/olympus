@@ -1,3 +1,52 @@
+# External review of R6, gemini, 2026-10-24
+
+An adversarial review of R6: the driver for any OpenAI-compatible chat
+endpoint, the relay's second usage dialect and credential scheme, and the
+runtime's seating of the new driver. One of two reviews run from the same
+prompt and bundle; the other is `2026-10-24-R6-openai-compatible-review-codex.md`.
+Both are triaged in `2026-10-24-R6-openai-compatible-triage.md`, which cites
+this review's findings as `gemini-1` and `gemini-2`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`
+  (`generativelanguage/v1beta`), offering no tools. `cleanRoom` is `null`
+  because an API call loads no local configuration. Exit 0, not timed out,
+  171.9 s. Ingestion `complete`: 86,683 prompt tokens against a floor of
+  59,999. Integrity `verified`. Outcome `counted`. Reply SHA-256 as the runner
+  wrote it:
+  `76785527b71879ea7f05cac1563c1faa72d0c4daf63c95c51d956ca3a2b4caff`, which
+  matched the manifest's `replySha256` before this header was prepended; the
+  untouched reply is in commit `c89c72e`.
+- **Cross-family agreement:** neither gemini-1 nor gemini-2 was raised by
+  codex. gemini-1 and codex-2 reach the same consequence through different
+  mechanisms and are not paired.
+- **Date:** 2026-10-24 (run started 2026-10-25T22:54Z).
+- **Bundle:** `2026-10-24-R6-openai-compatible-review-bundle.txt`, SHA-256
+  `256ed8c0b1843dee21fcda94566010d41c2c706c68688053e933fbd4e7b3057c`, base
+  `d039910` (`reviewed/R19`), head `bd07193` ("R6: Driver: any
+  OpenAI-compatible endpoint"), one commit. It held 42 of the 46 changed paths:
+  the new `drivers/openai-compatible` package and its tests, the relay's
+  `openai-chat` dialect and `bearer` credential, the graph and host seating in
+  `api`, the conformance registry entries, the changeset, and the lockfile; new
+  files in full and modified files as whole-function diffs. The four design
+  documents (`docs/decisions.md`, `docs/plan/DECOMPOSITION.md`,
+  `docs/plan/F1-spine.md`, `docs/plan/R6-openai-compatible.md`) were excluded.
+  Prompt: `2026-10-24-R6-openai-compatible-review-prompt.txt`.
+- **Citations:** line numbers are positions in the reviewer's reading of the
+  bundle, not the repository. Treat them as hints, not locations.
+
+- **Prior context and lookups:** the reviewer stated it had no prior context
+  and made no external lookups. This is a self-report and cannot be
+  independently verified.
+- **Coverage, and any gap:** items 1 (gemini-1), 2 (gemini-2), and 6 were
+  answered; item 4 only through the sound-mechanisms list (integer checks on
+  `n` and usage). Items 3 (fail-open), 5 (configuration), and 7 (framing) came
+  back empty.
+
+---
+
 BASE: d039910
 HEAD: bd07193
 pnpm-lock.yaml
