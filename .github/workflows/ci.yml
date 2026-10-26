@@ -289,3 +289,39 @@ jobs:
         run: |
           echo "::error::the composed line's real-model assertions have not run for tree ${{ steps.line-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model twice."
           exit 1
+
+  # The false-done benchmark's deterministic tier (R7, D-R7-06): every
+  # deterministic item of the current corpus through the real line, with the
+  # result held byte for byte to the one committed in docs/benchmark/. A
+  # control that stops catching an item, or starts refusing a clean one,
+  # changes the result and fails here until a commit records the new one
+  # (I8). Its own job, because each item is a run of several containers and
+  # the tier outlasts the verify job's limit. No credential: no seat calls a
+  # model.
+  benchmark:
+    name: false-done benchmark, deterministic tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The check image, the egress proxy the install reaches the registry through, and the two pinned scanners.
+      - name: Docker daemon and the pinned images
+        run: |
+          docker version --format 'server {{.Server.Version}}, {{.Server.Os}} containers'
+          docker pull --quiet node@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+          docker pull --quiet node@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85
+          docker pull --quiet zricethezav/gitleaks@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46
+          docker pull --quiet semgrep/semgrep@sha256:30e6afa99ebd8e7b4115d4904898108eb4bf77025819e9263f09cf14e6f6e549
+
+      - name: Deterministic tier reproduces the committed result
+        run: pnpm --filter @olympus-ai/benchmark run deterministic

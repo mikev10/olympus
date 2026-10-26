@@ -20,6 +20,8 @@ export default tseslint.config(
       // Compile-error fixtures fail to typecheck by design; the fixture
       // compiler is the only thing that reads them.
       'packages/conformance/fixtures/types/**',
+      // The benchmark's corpus (R7) is data: each repository in it is a target the line runs, with its own toolchain.
+      'corpus/**',
     ],
   },
   js.configs.recommended,

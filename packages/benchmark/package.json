@@ -1,0 +1,31 @@
+{
+  "name": "@olympus-ai/benchmark",
+  "version": "0.0.0",
+  "description": "The false-done benchmark: a versioned corpus of seeded false-dones and clean controls, carried through the line and through a driver alone",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "deterministic": "vitest run --config vitest.config.deterministic.ts",
+    "model": "vitest run --config vitest.config.model.ts"
+  },
+  "dependencies": {
+    "@olympus-ai/adapters": "workspace:*",
+    "@olympus-ai/api": "workspace:*",
+    "@olympus-ai/compiler": "workspace:*",
+    "@olympus-ai/core": "workspace:*",
+    "@olympus-ai/driver-claude-code": "workspace:*",
+    "@olympus-ai/integrity": "workspace:*",
+    "@olympus-ai/sandbox": "workspace:*",
+    "@olympus-ai/vault": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

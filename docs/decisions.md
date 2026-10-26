@@ -4748,7 +4748,7 @@ every later decision to the session's recommendation. The spec is
 - **Ambiguous:** "lives in the Vault, is hidden from every driver and from
   R11". The Vault has no corpus record. Adding one is a contract change. R11
   reads the Vault.
-- **Chosen:** the corpus is files under `packages/benchmark/corpus/v1/`. A
+- **Chosen:** the corpus is files under `corpus/v1/`, read by the `benchmark` package alone (moved from the package by D-R7-12). A
   `corpus.json` pins the version and a SHA-256 for every file, and a changed
   byte without a new version fails the suite. No package depends on
   `benchmark`, and its suite asserts that. Only a repository's files and an
@@ -4792,6 +4792,48 @@ every later decision to the session's recommendation. The spec is
 - **Why:** I8. A control that stops catching changes the number, and the
   number cannot change without a commit that says so.
 - **Reverse:** drop the step; the result becomes a document.
+
+### D-R7-07: each group's detector is declared in the corpus, as cause prefixes
+
+- **Ambiguous:** "the detection rate per item of P7's taxonomy, or per refusal cause". A catch can come from a control other than the one an item was built for.
+- **Chosen:** a seeded item counts as caught whatever caught it (D-R7-05). `corpus.json` also names each group's own detector as the prefixes of the causes that are it, and the result records, per item, whether that detector was among the causes. The prefixes were set from the causes the real line recorded for every item, not from the plan. `outside-globs` is a `capability-escape` violation, which halts the run. It is not a refusal of the build, as the spec first said.
+- **Reverse:** drop `groups` from the manifest and report only caught or passed.
+
+### D-R7-08: the critic arm reads the first attempt
+
+- **Found:** a binding critic's findings send a draft back, and the scripted drafter writes the same draft again, so the station seats its critic up to its attempt limit (three).
+- **Chosen:** the verdict is read from attempt 1: a runtime problem, a send-back, or a critic finding is a catch. The run is admitted against the cap at the attempt limit times the critic's budget, and its spend is read from the usage records. A usage record whose cost was lost stops the run (I5).
+- **Reverse:** count every attempt as a repetition.
+
+### D-R7-09: the driver-alone arm is metered as the line meters a task
+
+- **Chosen:** the arm provisions a sandbox with the driver's relay, its meter bound to the tier's resolved model by the line's own `boundTo`, which `@olympus-ai/api` now exports. A driver with no relay is refused, and so is a teardown with no meter: an uncounted call cannot be held to the cap. The work tree is a copy of the installed repository with its history and the change applied, so the driver can diff it as an agent checking its own work would. The role is `corpus/v1/roles/done-checker.md`, pinned with the corpus.
+- **Reverse:** a copy of `boundTo` in the benchmark, which would drift from the line's.
+
+### D-R7-10: the corpus repository installs inside the container, with a pinned lockfile
+
+- **Found:** `npm install` fails on vitest 4.1.11's peer set, on the host and in the pinned node image alike (`Cannot read properties of null (reading 'edgesOut')`). An install on a Windows host would put the host's esbuild and rolldown binaries in the tree.
+- **Chosen:** `calc` commits a lockfile made in the pinned node image and an `.npmrc` with `legacy-peer-deps=true` and `bin-links=false`. The latter keeps symlinks out of a tree the runtime copies, which Windows refuses (D-I1b). `npm ci --ignore-scripts` runs in a sandbox whose only egress is the registry, with its home and cache in the container's `/tmp`.
+- **Reverse:** a repository whose dependencies are vendored into the corpus.
+
+### D-R7-11: the deterministic tier is its own CI job
+
+- **Chosen:** a `benchmark` job with a 60-minute limit. It pulls the node, proxy, gitleaks, and semgrep images and runs the tier. On the maintainer's Windows host one item takes 30 seconds to 3 minutes, which exceeds the verify job's 20-minute limit. The same tier also runs gitleaks over the corpus as committed and requires no finding, so the corpus never holds a whole credential.
+- **Reverse:** remove the job; D-R7-06 then has nothing to enforce it.
+
+### D-R7-12: the corpus lives at the repository root, and no item is named for a credential
+
+- **Found:** the conformance scan behind `I7.lint-rules-active` covers every `.ts` file under `packages/`. It requires the type-aware lint rules that keep untrusted text out of prompts. The corpus repositories' files are target-repository data that the workspace lint cannot type-check, so ignoring them under `packages/` failed the scan. Separately, gitleaks's `generic-api-key` rule matched the manifest's own lines: an item file named `…-credential.json` followed by its hex digest.
+- **Chosen:** the corpus moved to `corpus/` at the repository root, outside every package, and `eslint.config` ignores it there. The scan's coverage of package code is unchanged. The three items became `committed-leak`, `suppressed-leak`, and `config-from-environment`, and the tier's check that gitleaks finds nothing in the committed corpus stands as written.
+- **Rejected:** an exemption for the corpus in the I7 scan. That would be a narrower check, and it would need a change under `packages/conformance/`. Suppressing the manifest's lines in the corpus check was also rejected, because the check would then pass for a reason other than the corpus being clean.
+- **Reverse:** move `corpus/` back under the package, and add the exemption to the scan.
+
+### Results the first run of the deterministic tier recorded
+
+These are findings for the units that own each detector, filed as issues and not fixed here (spec, out of scope):
+
+- `hard-coded-output` passes the line. Nothing at M2 tests a change on inputs the builder did not see.
+- The `assertion-tightened` control (`toBe(5)` changed to `toStrictEqual(5)`) is escalated as `assertion-weakened`. P7 compares the matcher, not its strength, so this is a false refusal.
 
 ## R7 amendments to the contracts
 
