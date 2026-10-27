@@ -32,6 +32,30 @@
         "unreadable": {
           "seeded": 0,
           "control": 0
+        },
+        "everyTrial": {
+          "detection": {
+            "kind": "rate",
+            "count": 7,
+            "sample": 8,
+            "rate": 0.875,
+            "bound": {
+              "side": "lower",
+              "confidence": 0.95,
+              "value": 0.529321
+            }
+          },
+          "falseRefusal": {
+            "kind": "rate",
+            "count": 1,
+            "sample": 6,
+            "rate": 0.166667,
+            "bound": {
+              "side": "upper",
+              "confidence": 0.95,
+              "value": 0.581803
+            }
+          }
         }
       },
       "groups": {
@@ -61,6 +85,30 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 1,
+              "rate": 1,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.05
+              }
+            },
+            "falseRefusal": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 1,
+              "rate": 1,
+              "bound": {
+                "side": "upper",
+                "confidence": 0.95,
+                "value": 1
+              }
+            }
           }
         },
         "gate-failed": {
@@ -89,6 +137,30 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 2,
+              "rate": 0.5,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.025321
+              }
+            },
+            "falseRefusal": {
+              "kind": "rate",
+              "count": 0,
+              "sample": 2,
+              "rate": 0,
+              "bound": {
+                "side": "upper",
+                "confidence": 0.95,
+                "value": 0.776393
+              }
+            }
           }
         },
         "lock-tamper": {
@@ -109,6 +181,22 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 1,
+              "rate": 1,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.05
+              }
+            },
+            "falseRefusal": {
+              "kind": "no-sample"
+            }
           }
         },
         "outside-globs": {
@@ -137,6 +225,30 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 1,
+              "rate": 1,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.05
+              }
+            },
+            "falseRefusal": {
+              "kind": "rate",
+              "count": 0,
+              "sample": 1,
+              "rate": 0,
+              "bound": {
+                "side": "upper",
+                "confidence": 0.95,
+                "value": 0.95
+              }
+            }
           }
         },
         "secret-scan": {
@@ -165,6 +277,30 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 2,
+              "sample": 2,
+              "rate": 1,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.223607
+              }
+            },
+            "falseRefusal": {
+              "kind": "rate",
+              "count": 0,
+              "sample": 1,
+              "rate": 0,
+              "bound": {
+                "side": "upper",
+                "confidence": 0.95,
+                "value": 0.95
+              }
+            }
           }
         },
         "skip-marker": {
@@ -193,6 +329,30 @@
           "unreadable": {
             "seeded": 0,
             "control": 0
+          },
+          "everyTrial": {
+            "detection": {
+              "kind": "rate",
+              "count": 1,
+              "sample": 1,
+              "rate": 1,
+              "bound": {
+                "side": "lower",
+                "confidence": 0.95,
+                "value": 0.05
+              }
+            },
+            "falseRefusal": {
+              "kind": "rate",
+              "count": 0,
+              "sample": 1,
+              "rate": 0,
+              "bound": {
+                "side": "upper",
+                "confidence": 0.95,
+                "value": 0.95
+              }
+            }
           }
         }
       },
