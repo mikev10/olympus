@@ -1,3 +1,19 @@
+# External review of R7, codex, 2026-10-26
+
+The false-done benchmark (`packages/benchmark`, `corpus/v1`, both tiers' results), reviewed from the bundle alone. Triage: `2026-10-26-R7-false-done-benchmark-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone; the pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-2 = gemini-2 (critic unreadable counted as a catch); codex-3 = gemini-1 (unreadable dropped from the denominator). codex-1 and codex-4 raised by codex alone.
+- **Date:** 2026-10-26 (run at 2026-10-27T02:26Z)
+- **Bundle:** `2026-10-26-R7-false-done-benchmark-review-bundle.txt`, SHA-256 `17bef4bb2a5505d58aa986130a299949cf25caa1fa1d9631af65c1a0dde97407`, base `ed19c31` (`reviewed/R6`), head `cacf9f6` (R7 with the model tier's result committed). It holds 70 files: new files in full, modified files as function-context diffs. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`. Prompt: `2026-10-26-R7-false-done-benchmark-review-prompt.txt`.
+- **Prior context and lookups:** it disclosed none of either, and said it executed no tests. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 3 and 5 through findings 1–4; item 6 (sound mechanisms) and item 7 (framing, judged appropriate with a sharper distinction proposed) answered; items 2 and 4 answered in prose (the statistical test reuses production helpers; no TypeScript escape found).
+- **Citations:** line numbers are positions in the bundle's new side, treated as hints and located by construct.
+
+---
+
 Prior context: none. Lookups: none; this review uses only the supplied bundle. I did not execute tests.
 
 BASE: ed19c31  
