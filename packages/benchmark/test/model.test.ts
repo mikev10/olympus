@@ -95,6 +95,17 @@ describe('modelTier', () => {
     expect(overall.unreadable.seeded + overall.unreadable.control).toBe(corpus.items.length);
   });
 
+  test("a critic answer nobody can read is unreadable in the critic arm, and its detector did not fire", async () => {
+    const unreadable = (): Promise<CriticOutcome> => Promise.resolve({ verdict: 'unreadable', causes: ['critic:unreadable', 'sent-back:critic'], costUsd: 0 });
+    const alone = (): Promise<AloneOutcome> => Promise.resolve({ verdict: { kind: 'verdict', done: true, reasons: [] }, costUsd: 0 });
+    const { result } = await modelTier(options({ calls: { alone, critic: unreadable } }));
+    const arm = result.arms.critic;
+    if (arm === undefined) throw new Error('the critic arm is missing');
+    expect(arm.overall.detection).toEqual({ kind: 'no-sample' });
+    expect(arm.overall.unreadable.seeded + arm.overall.unreadable.control).toBe(arm.items.length);
+    expect(arm.items.flatMap((i) => i.detectorFired)).toEqual(arm.items.map(() => null));
+  });
+
   test('a drafted run is admitted against every attempt its station may seat the critic for', async () => {
     let critics = 0;
     const counting = (): Promise<CriticOutcome> => {

@@ -148,14 +148,15 @@ export async function modelTier(options: ModelTierOptions): Promise<{ result: Be
   for (const item of corpus.items.filter((i) => i.tier === 'model')) {
     const prefixes = corpus.groups[item.group] ?? [];
     const verdicts: Verdict[] = [];
-    const fired: boolean[] = [];
+    const fired: Array<boolean | null> = [];
     const causes = new Set<string>();
     for (let r = 0; r < options.repetitions; r += 1) {
       spend.admit(DRAFT_ATTEMPTS * options.critic.budget.maxCostUsd, 'a drafted run with its critic seated');
       const outcome = await criticCall(options.bench, corpus, item, { driver: options.driver, image: options.image, ...options.critic });
       spend.charge(outcome.costUsd);
       verdicts.push(outcome.verdict);
-      fired.push(detectorFired(prefixes, outcome.causes));
+      // An unreadable answer is no detector firing, whatever its cause's prefix (I5).
+      fired.push(outcome.verdict === 'unreadable' ? null : detectorFired(prefixes, outcome.causes));
       for (const c of outcome.causes) causes.add(c);
     }
     criticOutcomes.push({ id: item.id, kind: item.kind, group: item.group, verdicts, detectorFired: fired, causes: [...causes].sort() });

@@ -32,7 +32,7 @@ import { benchPolicyDocument, installed, type Bench } from './line.js';
 import { ScriptedSeat } from './seats.js';
 
 export interface CriticOutcome {
-  readonly verdict: 'caught' | 'passed';
+  readonly verdict: 'caught' | 'passed' | 'unreadable';
   readonly causes: readonly string[];
   readonly costUsd: number;
 }
@@ -86,6 +86,27 @@ export function draftingPolicy(corpus: Corpus, item: Item, critic: CriticSeat): 
     ...base,
     roles: { ...base.roles, [`${prefix}-drafter`]: drafter, [`${prefix}-critic`]: seat },
   });
+}
+
+/**
+ * The verdict on a first attempt: the runtime's own problems with the draft,
+ * the critic's answer (null when no critic read it), and who sent it back.
+ * A critic answer the runtime could not read is unreadable, never a catch:
+ * the line sends that draft back, but nothing identified a fault in it (I5).
+ */
+export function criticVerdict(
+  problems: readonly string[],
+  critic: { readonly readable: boolean; readonly findings: number } | null,
+  sentBack: string | null,
+): Pick<CriticOutcome, 'verdict' | 'causes'> {
+  const causes = problems.map((code) => `runtime:${code}`);
+  if (critic === null && causes.length === 0) throw new Error('benchmark: no critic read the draft and the runtime recorded no problem with it; the arm measured nothing');
+  if (critic !== null && critic.findings > 0) causes.push(critic.readable ? 'critic:findings' : 'critic:unreadable');
+  if (sentBack !== null) causes.push(`sent-back:${sentBack}`);
+  const sorted = [...new Set(causes)].sort();
+  if (problems.length > 0 || causes.includes('critic:findings')) return { verdict: 'caught', causes: sorted };
+  if (causes.includes('critic:unreadable')) return { verdict: 'unreadable', causes: sorted };
+  return { verdict: sorted.length > 0 ? 'caught' : 'passed', causes: sorted };
 }
 
 /** One drafted item through the drafting station, with `critic` seated. */
@@ -143,17 +164,16 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   const costUsd = totals.metered.costUsd;
   const first = state.drafts[station]?.attempts[0];
   if (first?.draft === null || first === undefined) throw new Error(`benchmark: the drafted run for an item recorded no first draft at ${station}`);
-  const causes: string[] = [];
   const record = JSON.parse(new TextDecoder().decode(await vault.read(first.draft))) as DraftRecord;
-  for (const p of record.problems) causes.push(`runtime:${p.code}`);
+  const problems = record.problems.map((p) => p.code);
+  let answer: { readable: boolean; findings: number } | null = null;
   if (first.critic === null || first.critic === 'not-seated') {
     // The runtime sent the draft back before a critic read it; the catch is the runtime's.
-    if (causes.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing. The run stopped with: ${outcome.ok ? 'no refusal' : JSON.stringify({ at: outcome.at, transition: outcome.transition })}`);
+    if (problems.length === 0) throw new Error(`benchmark: the critic was ${String(first.critic)} on a draft the runtime did not send back; the arm measured nothing. The run stopped with: ${outcome.ok ? 'no refusal' : JSON.stringify({ at: outcome.at, transition: outcome.transition })}`);
   } else {
     const verdict = JSON.parse(new TextDecoder().decode(await vault.read(first.critic))) as CriticRecord;
     if (!verdict.binding) throw new Error('benchmark: the critic seated was not binding: its family is the drafter\'s, so its findings send nothing back');
-    if (verdict.findings.length > 0) causes.push(verdict.readable ? 'critic:findings' : 'critic:unreadable');
+    answer = { readable: verdict.readable, findings: verdict.findings.length };
   }
-  if (first.sentBack !== null) causes.push(`sent-back:${first.sentBack.by}`);
-  return { verdict: causes.length > 0 ? 'caught' : 'passed', causes: [...new Set(causes)].sort(), costUsd };
+  return { ...criticVerdict(problems, answer, first.sentBack?.by ?? null), costUsd };
 }
