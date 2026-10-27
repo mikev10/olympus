@@ -1,0 +1,150 @@
+The code under review is in the file
+`2026-10-26-R7-false-done-benchmark-review-bundle.txt` (SHA-256 17bef4bb2a5505d58aa986130a299949cf25caa1fa1d9631af65c1a0dde97407) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a false-done benchmark for a software factory runtime, a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries AI-written work through a fixed line of stations (spec,
+test design, build, verify, review, integrate) and decides from its own checks,
+never from the agent's word, whether the work is done. This change adds
+`packages/benchmark` and a pinned corpus under `corpus/v1/`. Each corpus item
+is either seeded (a change that looks done but is not: a skipped test, a
+weakened assertion, an edited locked acceptance test, a leaked credential, a
+write outside the files the builder may touch, a drafted spec or test that
+misses its intent) or a control (a similar change that is sound). The
+benchmark runs every item and publishes, per arm and per group, a detection
+rate over seeded items and a false-refusal rate over controls, each with a
+one-sided 95% Clopper–Pearson bound.
+
+There are two tiers. The deterministic tier puts a scripted seat on the real
+line (real vault, real Docker sandbox, real scanners), which applies the item's
+change and claims done; CI reruns it and requires the result to match the
+committed `docs/benchmark/v1-deterministic.json` byte for byte. The model tier
+runs once, under a spending cap: a real model as the critic of drafted items,
+and the same model alone, asked to answer strict JSON on whether the work is
+done. Its result is committed as `docs/benchmark/v1-model.json`. A small change
+to `packages/api` exports the meter binding the line uses, so the benchmark's
+model calls are metered the same way.
+
+It must hold against a capable, motivated party trying to make the published
+numbers better than the line's controls and the model actually earned — a
+detection rate that counts a catch nobody made, or a false-refusal rate that
+hides a refusal. Assume no deceptive intent — only that the easiest path gets
+taken.
+
+That party controls what the model returns (the alone arm's verdict text, the
+critic's findings), the files the seat writes in its workspace, and when a run
+stops or throws. It does not control the components the runtime is wired with —
+the Vault, the sandbox provider, the scanners, and the drivers are
+runtime-selected and trusted, even where a function takes one as an argument —
+and it does not control code running inside the runtime's own process.
+
+The invariants at stake:
+
+- No agent writes to the Vault, the runtime's record store. Any level, any
+  role.
+- The runtime derives status; the model never reports it. A task's result has
+  no status field.
+- An agent may not be judged by an artifact it can write. Specs and acceptance
+  tests are hashed before build. Here that also means the item's identity,
+  label, and expected detector must never reach a workspace or sandbox the
+  agent reads.
+- Default deny: a capability not granted in policy is unavailable.
+- Fail closed: a missing check, a missing capability, a harness error, an
+  unreadable answer, or uncounted spend refuses or is reported as such. It is
+  never counted as a pass or a catch, and never degrades silently.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is deleted. Here: a control that stops catching an item must change
+  the committed number, and CI must notice.
+
+The mechanisms that matter most:
+
+- Corpus pinning (`corpus.json` digests, `loadCorpus`) and what reaches a
+  workspace or sandbox (`render`, the scripted seat's apply script).
+- Classifying a run's outcome as caught, passed, or unreadable (`classify`,
+  `recorded`, the critic arm's read of attempt 1, the strict verdict parser),
+  and how rates and bounds are computed from those outcomes.
+- The spending cap and metering in the model tier (`Spend`, admission before
+  each call, cost from the usage records, refusal of an unmetered driver).
+- The CI reproduction of the deterministic result and the gitleaks check over
+  the corpus.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The ids below (R11, R8, R2, M3, D-R7-03) name other parts of the project's
+plan; they mean nothing more than "a different piece of work".
+
+- Seeding a false-done into a real model's own work. A model cannot be told to
+  cheat, so a seed is always scripted. What a model does with a temptation is
+  R11's held-out question, not this corpus's.
+- A Vault record type for the corpus (D-R7-03). The corpus is held in a package
+  no runtime package imports, and pinned by digest.
+- Escaped false-dones after merge (R8), and any rate R2 derives from real runs.
+- Corpus items for stacks other than TypeScript with vitest.
+- Making any detector catch an item it misses. The benchmark measures. A miss is
+  a finding for the unit that owns the detector, filed as an issue.
+- The review panel's verdict (M3). The review seat is scripted, and its verdict
+  is recorded, not read.
+
+THE QUESTION
+
+How would the published detection or false-refusal rate come out better than
+the line actually earned? For example: a harness failure, a change that never
+landed, or an unreadable answer counted as a catch or a pass; an item's
+expected answer visible to the agent; a corpus change that alters the numbers
+without a version bump; a CI comparison that passes whatever the result; or
+spend that escapes the cap or the meter.
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
