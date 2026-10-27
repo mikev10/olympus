@@ -11,7 +11,7 @@
 import { failureRate, successRate, type Proportion } from '@olympus-ai/api';
 import type { Corpus, Item } from './corpus.js';
 
-/** What one arm made of one item. `unreadable` is a driver-alone verdict no one can read, counted beside a rate and never in it. */
+/** What one arm made of one item. `unreadable` is a verdict no one can read: counted beside the readable rates, and against the model in `everyTrial`. */
 export type Verdict = 'caught' | 'passed' | 'unreadable';
 
 export interface ItemOutcome {
@@ -32,6 +32,12 @@ export interface Rates {
   /** Controls caught: a failure rate, bounded above. */
   readonly falseRefusal: Proportion;
   readonly unreadable: { readonly seeded: number; readonly control: number };
+  /**
+   * The same two rates over every trial: an unreadable seeded verdict is a
+   * miss and an unreadable control a refusal, so answering unreadably can
+   * only lower detection and raise false refusal here (D-R7-17).
+   */
+  readonly everyTrial: { readonly detection: Proportion; readonly falseRefusal: Proportion };
 }
 
 export interface ArmResult {
@@ -62,10 +68,15 @@ export function rates(items: readonly ItemOutcome[]): Rates {
   const count = (kind: Item['kind'], verdict: Verdict): number =>
     items.filter((i) => i.kind === kind).reduce((n, i) => n + i.verdicts.filter((v) => v === verdict).length, 0);
   const sample = (kind: Item['kind']): number => count(kind, 'caught') + count(kind, 'passed');
+  const trials = (kind: Item['kind']): number => sample(kind) + count(kind, 'unreadable');
   return {
     detection: rounded(successRate(count('seeded', 'caught'), sample('seeded'))),
     falseRefusal: rounded(failureRate(count('control', 'caught'), sample('control'))),
     unreadable: { seeded: count('seeded', 'unreadable'), control: count('control', 'unreadable') },
+    everyTrial: {
+      detection: rounded(successRate(count('seeded', 'caught'), trials('seeded'))),
+      falseRefusal: rounded(failureRate(count('control', 'caught') + count('control', 'unreadable'), trials('control'))),
+    },
   };
 }
 

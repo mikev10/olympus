@@ -140,7 +140,9 @@ never holds a string a scanner matches.
   - a harness failure (Docker down, a run that throws) fails the benchmark and
     is never counted as a catch or a pass (I5)
   - the driver-alone verdict parser reads only the strict shape. Anything else
-    is `unreadable`, reported with its count, and never counted
+    is `unreadable`, reported with its count, left out of the readable-only
+    rates, and counted against the model in the every-trial rates: a miss on
+    a seeded item, a refusal on a control (A-R7-02)
   - the paid runner refuses an item whose worst case would exceed the cap, and
     its tests drive it with scripted verdict drivers, which call no model
 - `pnpm --filter @olympus-ai/benchmark run deterministic` reproduces

@@ -4871,6 +4871,14 @@ The maintainer ran it once on 2026-10-26, with `claude-haiku-4-5` in every seat,
 - **Owner:** telling an errored check from a failing one belongs to the check gate's causes (P6), not to R7.
 - **Reverse:** require `detectorFired` for a catch, which turns D-R7-05 into a per-detector measure.
 
+### D-R7-17: every rate is also published over every trial (review fix, codex-3 / gemini-1)
+
+- **Found:** `rates` sets each sample to caught plus passed, so an unreadable verdict leaves the sample. A model that answers unreadably where it would be wrong chooses what its rate measures. The committed alone arm leaves out 9 of 33 seeded and 5 of 24 control trials.
+- **Chosen:** `Rates` keeps the readable-only rates and gains `everyTrial`, the same two rates over every trial: an unreadable seeded verdict is a miss and an unreadable control is a refusal. Unreadability can then only lower detection and raise false refusal there. The maintainer chose this on 2026-10-27 (A-R7-02).
+- **Rejected:** replacing the readable-only rate with the every-trial one. It would hide how well a model judges when it does answer, and the unreadable count beside the readable rate already shows how much that rate leaves out.
+- **Consequence:** `v1-deterministic.json` is regenerated. It holds no unreadable verdict, so each `everyTrial` rate equals its readable one. `v1-model.json` stays the record of its run, in the format that run wrote, until the maintainer reruns the model tier (D-R7-14).
+- **Reverse:** drop `everyTrial` from `Rates` and restore the criterion's earlier wording.
+
 ## R7 amendments to the contracts
 
 ### A-R7-01: the spine names the package
@@ -4878,3 +4886,11 @@ The maintainer ran it once on 2026-10-26, with `claude-haiku-4-5` in every seat,
 `F1-spine.md`'s package list gains `benchmark`, and so does `CLAUDE.md`'s
 vocabulary line. No contract type changes. The maintainer confirmed it on
 2026-10-26.
+
+### A-R7-02: an unreadable verdict counts against the model in a second rate
+
+`R7-benchmark.md`'s acceptance criterion for the driver-alone parser read
+"never counted". It now reads that an unreadable verdict is left out of the
+readable-only rates and counted against the model in the every-trial rates
+(D-R7-17). No contract type changes. The maintainer confirmed it on
+2026-10-27.

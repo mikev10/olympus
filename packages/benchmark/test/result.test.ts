@@ -1,7 +1,8 @@
 /**
  * Every published rate is a bounded proportion over the outcomes listed
  * beside it: recountable from its rows, `no-sample` over nothing, and with
- * unreadable verdicts counted beside the rate and never in it (R2, I5).
+ * unreadable verdicts counted beside the readable rate and against the model
+ * over every trial (R2, I5).
  */
 import { describe, expect, test } from 'vitest';
 import { failureRate, successRate } from '@olympus-ai/api';
@@ -37,6 +38,26 @@ describe('rates', () => {
     expect(r.detection).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
     expect(r.falseRefusal).toEqual({ kind: 'no-sample' });
     expect(r.unreadable).toEqual({ seeded: 1, control: 1 });
+  });
+
+  test('over every trial, an unreadable seeded verdict is a miss and an unreadable control a refusal', () => {
+    const r = rates([outcome('a', 'seeded', 'g', ['caught', 'unreadable', 'passed']), outcome('b', 'control', 'g', ['unreadable', 'passed'])]);
+    expect(r.everyTrial.detection).toMatchObject({ kind: 'rate', count: 1, sample: 3 });
+    expect(r.everyTrial.falseRefusal).toMatchObject({ kind: 'rate', count: 1, sample: 2 });
+  });
+
+  test('answering unreadably can only lower detection and raise false refusal over every trial', () => {
+    const readable = rates([outcome('a', 'seeded', 'g', ['caught', 'passed']), outcome('b', 'control', 'g', ['passed', 'caught'])]);
+    const evasive = rates([outcome('a', 'seeded', 'g', ['caught', 'unreadable']), outcome('b', 'control', 'g', ['unreadable', 'caught'])]);
+    if (readable.everyTrial.detection.kind !== 'rate' || evasive.everyTrial.detection.kind !== 'rate') throw new Error('expected rates');
+    if (readable.everyTrial.falseRefusal.kind !== 'rate' || evasive.everyTrial.falseRefusal.kind !== 'rate') throw new Error('expected rates');
+    expect(evasive.everyTrial.detection.rate).toBeLessThanOrEqual(readable.everyTrial.detection.rate);
+    expect(evasive.everyTrial.falseRefusal.rate).toBeGreaterThanOrEqual(readable.everyTrial.falseRefusal.rate);
+  });
+
+  test('with nothing unreadable, every trial gives the readable rates', () => {
+    const r = rates([outcome('a', 'seeded', 'g', ['caught', 'passed']), outcome('b', 'control', 'g', ['passed'])]);
+    expect(r.everyTrial).toEqual({ detection: r.detection, falseRefusal: r.falseRefusal });
   });
 });
 
