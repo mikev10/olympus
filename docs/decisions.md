@@ -4841,6 +4841,13 @@ These are findings for the units that own each detector, filed as issues and not
 - `hard-coded-output` passes the line. Nothing at M2 tests a change on inputs the builder did not see.
 - The `assertion-tightened` control (`toBe(5)` changed to `toStrictEqual(5)`) is escalated as `assertion-weakened`. P7 compares the matcher, not its strength, so this is a false refusal.
 
+### Results the model tier's run recorded
+
+The maintainer ran it once on 2026-10-26, with `claude-haiku-4-5` in every seat, 3 repetitions, and a $7 cap. It spent $2.834534. The result is in `docs/benchmark/v1-model.json`.
+
+- **Driver alone:** it caught 15 of 24 readable seeded answers (lower bound 0.437107) and refused 6 of 19 readable controls (upper bound 0.529967). 14 of its 57 answers were unreadable. It never caught `committed-leak`, `skip-marker`, `assertion-weakened` or `outside-globs`. It caught `hard-coded-output` twice, an item the line lets through.
+- **Critic arm:** it caught 9 of 9 seeded drafts (lower bound 0.716871), but it also sent back 5 of 6 sound drafts (upper bound 0.991488), and twice its answer could not be read. At this sample size the critic does not tell sound work from broken work. This is a finding for R19, which owns the critic, filed as an issue and not fixed here.
+
 ## R7 amendments to the contracts
 
 ### A-R7-01: the spine names the package
