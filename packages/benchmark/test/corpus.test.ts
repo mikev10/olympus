@@ -3,7 +3,7 @@
  * and a changed, added, or removed byte without a new version is refused
  * (D-R7-03).
  */
-import { cp, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -68,13 +68,45 @@ describe('a corpus that does not match its manifest is refused', () => {
   });
 });
 
+/** Rewrites part of a copied corpus's manifest, leaving its file pins as they are. */
+async function editManifest(version: string, edit: (m: Record<string, unknown>) => void): Promise<void> {
+  const path = join(root, version, 'corpus.json');
+  const manifest = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  edit(manifest);
+  await writeFile(path, JSON.stringify(manifest, null, 2));
+}
+
 describe('pinning', () => {
-  test('pinCorpus makes a changed corpus load again, and the digest moves with the bytes', async () => {
-    const before = await loadCorpus(CURRENT_CORPUS, root);
+  test('a released version repinned after a change is refused: a changed corpus is a new version', async () => {
     await writeFile(join(root, CURRENT_CORPUS, 'repos', 'calc', 'spec.md'), '# changed\n');
     await pinCorpus(join(root, CURRENT_CORPUS));
-    const after = await loadCorpus(CURRENT_CORPUS, root);
-    expect(after.digest).not.toBe(before.digest);
-    expect(after.groups).toEqual(before.groups);
+    await expect(loadCorpus(CURRENT_CORPUS, root)).rejects.toThrow(/released at sha256:/);
+  });
+
+  test("the manifest's detector groups are part of the digest", async () => {
+    await editManifest(CURRENT_CORPUS, (m) => {
+      m.groups = { ...(m.groups as Record<string, unknown>), 'skip-marker': ['gate-failed'] };
+    });
+    await expect(loadCorpus(CURRENT_CORPUS, root)).rejects.toThrow(/released at sha256:/);
+  });
+
+  test("the manifest's builder globs are part of the digest", async () => {
+    await editManifest(CURRENT_CORPUS, (m) => {
+      m.repos = { calc: { builderGlobs: ['src/**', 'test/**', 'docs/**'] } };
+    });
+    await expect(loadCorpus(CURRENT_CORPUS, root)).rejects.toThrow(/released at sha256:/);
+  });
+
+  test('a new version made from a released one loads once pinned, under a digest of its own', async () => {
+    const released = await loadCorpus(CURRENT_CORPUS, root);
+    await cp(join(root, CURRENT_CORPUS), join(root, 'v-next'), { recursive: true });
+    await editManifest('v-next', (m) => {
+      m.version = 'v-next';
+    });
+    await writeFile(join(root, 'v-next', 'repos', 'calc', 'spec.md'), '# changed\n');
+    await pinCorpus(join(root, 'v-next'));
+    const next = await loadCorpus('v-next', root);
+    expect(next.digest).not.toBe(released.digest);
+    expect(next.groups).toEqual(released.groups);
   });
 });

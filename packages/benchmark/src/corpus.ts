@@ -59,7 +59,7 @@ export interface RepoPolicy {
 
 export interface Corpus {
   readonly version: string;
-  /** SHA-256 over every pinned file's path and digest, in path order. */
+  /** SHA-256 over every pinned file's path and digest, in path order, and the manifest's grants and groups (`corpusDigest`). */
   readonly digest: string;
   readonly root: string;
   readonly repos: Readonly<Record<string, RepoPolicy>>;
@@ -103,8 +103,22 @@ export async function loadCorpus(version: string = CURRENT_CORPUS, root: string 
     if (ids.has(item.id)) throw new Error(`benchmark: corpus ${version} holds item '${item.id}' twice`);
     ids.add(item.id);
   }
-  return { version, digest: corpusDigest(found), root: dir, repos: manifest.repos, groups: manifest.groups, items };
+  const digest = corpusDigest(found, manifest);
+  const released = RELEASED[version];
+  if (released !== undefined && released !== digest) {
+    throw new Error(`benchmark: corpus ${version} was released at sha256:${released} and now digests to sha256:${digest}; a changed corpus is a new version`);
+  }
+  return { version, digest, root: dir, repos: manifest.repos, groups: manifest.groups, items };
 }
+
+/**
+ * Every released corpus version's digest. A published result names the corpus
+ * it measured, so a released version never changes: an edit is a new version,
+ * and repinning an old one in place is refused here, not trusted to a comment.
+ */
+const RELEASED: Readonly<Record<string, string>> = {
+  v1: '7ffb35d1884826309c0332cadefa81608eaa57ab6bb072978dab3ae2cba9fc58',
+};
 
 /** The directory a repository's files are read from. */
 export function repoDir(corpus: Corpus, repo: string): string {
@@ -138,10 +152,23 @@ export async function digests(dir: string): Promise<Record<string, string>> {
   return out;
 }
 
-export function corpusDigest(files: Readonly<Record<string, string>>): string {
+/**
+ * SHA-256 over every pinned file's path and digest, in path order, then the
+ * manifest's own content: the builder grants and the detector groups decide
+ * outcomes as much as any file does.
+ */
+export function corpusDigest(files: Readonly<Record<string, string>>, manifest: Pick<Manifest, 'repos' | 'groups'>): string {
   const hash = createHash('sha256');
   for (const path of Object.keys(files).sort()) hash.update(`${path}\0${files[path] ?? ''}\n`);
+  hash.update(`${MANIFEST}\0${canonical({ repos: manifest.repos, groups: manifest.groups })}\n`);
   return hash.digest('hex');
+}
+
+/** JSON with every object's keys in order, so the same content always hashes the same. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (isRecord(value)) return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`;
+  return JSON.stringify(value);
 }
 
 function parseManifest(text: string, version: string): Manifest {
