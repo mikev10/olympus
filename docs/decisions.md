@@ -4848,12 +4848,18 @@ The maintainer ran it once on 2026-10-26, with `claude-haiku-4-5` in every seat,
 - **Driver alone:** it caught 15 of 24 readable seeded answers (lower bound 0.437107) and refused 6 of 19 readable controls (upper bound 0.529967). 14 of its 57 answers were unreadable. It never caught `committed-leak`, `skip-marker`, `assertion-weakened` or `outside-globs`. It caught `hard-coded-output` twice, an item the line lets through.
 - **Critic arm:** it caught 9 of 9 seeded drafts (lower bound 0.716871), but it also sent back 5 of 6 sound drafts (upper bound 0.991488), and twice its answer could not be read. At this sample size the critic does not tell sound work from broken work. This is a finding for R19, which owns the critic, filed as an issue and not fixed here.
 
+**The rerun after the review fixes.** The maintainer ran it again on 2026-10-27, after D-R7-14, D-R7-15 and D-R7-17, with the same model, repetitions and cap. It spent $2.892965. Its result replaces the first in `docs/benchmark/v1-model.json`, under corpus digest `7ffb35d1…`. The first run's file stays in the branch history, at cacf9f6.
+
+- **Driver alone:** readable, it caught 18 of 28 seeded answers (lower bound 0.470021) and refused 6 of 19 controls (upper bound 0.529967). 10 of its 57 answers were unreadable. Over every trial it caught 18 of 33 (lower bound 0.389403) and refused 11 of 24 (upper bound 0.642436). It never caught `committed-leak`, `outside-globs`, `skip-marker` or `suppressed-leak`, and refused `sound-spec` and `tests-follow-spec` every time. It caught `hard-coded-output` every time, an item the line lets through.
+- **Critic arm:** readable, it caught 9 of 9 seeded drafts (lower bound 0.716871) and sent back 1 of 3 sound drafts (upper bound 0.86465). 3 of its 6 answers on sound drafts were unreadable, so over every trial it refused 4 of 6 (upper bound 0.93715). The first run's 5 of 6 counted unreadable answers as catches (D-R7-14). The finding for R19 stands: at this sample size the critic still does not tell sound work from broken work.
+
 ### D-R7-14: an unreadable critic answer is unreadable, never a catch (review fix, codex-2 / gemini-2)
 
 - **Found:** the critic arm counted `critic:unreadable` as a catch, and the `critic` prefix counted it as the detector firing.
 - **Chosen:** `criticVerdict` returns `unreadable` for an unreadable answer, unless the runtime itself found a problem with the draft. `detectorFired` is `null` for that repetition.
 - **Rejected:** counting an unreadable answer as a pass. It is no more a pass than it is a catch (I5).
 - **Not corrected:** the committed `v1-model.json` was made under the old rule. Its causes are aggregated across repetitions, so its critic arm cannot be recomputed. It stays as the record of that run. A corrected critic arm needs a paid rerun of the model tier, which is the maintainer's to make.
+- **Corrected by the rerun:** the maintainer reran the model tier on 2026-10-27, and `v1-model.json` now holds a critic arm counted under this rule.
 - **Reverse:** return `caught` for any cause again.
 
 ### D-R7-15: the corpus digest covers the manifest, and a released version is pinned in source (review fix, codex-4)
@@ -4876,7 +4882,7 @@ The maintainer ran it once on 2026-10-26, with `claude-haiku-4-5` in every seat,
 - **Found:** `rates` sets each sample to caught plus passed, so an unreadable verdict leaves the sample. A model that answers unreadably where it would be wrong chooses what its rate measures. The committed alone arm leaves out 9 of 33 seeded and 5 of 24 control trials.
 - **Chosen:** `Rates` keeps the readable-only rates and gains `everyTrial`, the same two rates over every trial: an unreadable seeded verdict is a miss and an unreadable control is a refusal. Unreadability can then only lower detection and raise false refusal there. The maintainer chose this on 2026-10-27 (A-R7-02).
 - **Rejected:** replacing the readable-only rate with the every-trial one. It would hide how well a model judges when it does answer, and the unreadable count beside the readable rate already shows how much that rate leaves out.
-- **Consequence:** `v1-deterministic.json` is regenerated. It holds no unreadable verdict, so each `everyTrial` rate equals its readable one. `v1-model.json` stays the record of its run, in the format that run wrote, until the maintainer reruns the model tier (D-R7-14).
+- **Consequence:** `v1-deterministic.json` is regenerated. It holds no unreadable verdict, so each `everyTrial` rate equals its readable one. `v1-model.json` gained the rates from the maintainer's rerun on 2026-10-27.
 - **Reverse:** drop `everyTrial` from `Rates` and restore the criterion's earlier wording.
 
 ## R7 amendments to the contracts
