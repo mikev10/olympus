@@ -5087,3 +5087,29 @@ The maintainer confirmed it on 2026-10-28.
 - The Vault reads a state written before R12 as `[]`.
 
 The maintainer confirmed it on 2026-10-28.
+
+### D-R12-05: local acceptance, and what reconciles only in CI
+
+- **Found:** locally, `pnpm conformance` on 9b66e3e fails 27 tests, every one
+  of them through an external assertion. 25 are refused as
+  `I8.external-assertion-execution-reconciled: tree-changed`. The other two are
+  the registry checks that count those refusals (`I8.registry-complete`, and
+  seven driver claims whose only assertions are external).
+  - The reports behind them are local artifacts from earlier trees. The api
+    report is `packages/api/.conformance/run.json`, `treeHash` c5e28e7d58fd,
+    written 2026-10-19.
+  - The drivers' reports are written only by CI's labelled, paid steps
+    (`.github/workflows/ci.yml`, "Driver assertions, which write the conformance
+    run report").
+  - A local `pnpm test` does not rewrite them.
+- **What R12 owns passes.** All three R12 assertions pass, along with
+  `pnpm typecheck`, `pnpm lint`, the vault, api, and CLI suites, and every
+  other local assertion.
+- **Also found:** one sandbox test, "a provision that fails after the relay
+  started leaves no relay behind", failed under concurrent Docker load and
+  passes when run alone. R12 does not change `packages/sandbox`.
+- **Chosen:** CI is the authority for the external assertions. No paid run was
+  started locally (only driver tests spend API credit, and only with the
+  maintainer's say).
+- **Reverse:** run the labelled driver steps, which spend API credit, to produce
+  fresh reports for this tree.
