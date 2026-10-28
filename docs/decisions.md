@@ -5291,6 +5291,34 @@ The spec is `docs/plan/R21-local-endpoint.md`.
 - **Rejected:** allowing any port once a spec declares local.
 - **Reverse:** drop the option and its check.
 
+### D-R21-06: what the build decided
+
+- **A key to a local endpoint is allowed.** A local upstream with `'raw'` or
+  `'bearer'` and a held credential is accepted, as for any upstream. A local
+  gateway may want a key, and refusing one would push the operator to `'none'`.
+  - **Reverse:** refuse a credential with a local upstream in `checkRelay` and
+    at the relay's start.
+- **A local upstream's host, for the allowlist contradiction check, is
+  `model-host`.** An allowlist naming it is refused as a second route, as it is
+  for any relay upstream. The proxy could not resolve the name anyway; the
+  refusal keeps the rule uniform.
+- **The route is added under both egress modes.** Under an allowlist the relay
+  joins the proxy's outbound network; `--add-host` is still on the relay
+  container alone.
+- **The host's grants are one exported function, `endpointGrants`,** so the
+  credential and the port a host hands its provider are unit-tested without a
+  daemon. `composeHost` calls it.
+- **The assertion's endpoint listens on every interface.** On a Linux engine
+  the host gateway is the bridge's address, so a loopback listener is
+  unreachable there. While the assertion runs, a random port on the developer's
+  machine answers a canned completion to anyone who can reach it. That port
+  holds nothing and is closed in a `finally`.
+  - **Reverse:** bind to the gateway's own address, which the test would have
+    to discover per platform.
+- **The relay's start checks run in a fixed order:** local value, scheme,
+  credential, header, then the upstream's form. Each refusal names one cause,
+  and the I5 assertion pins each cause by its message.
+
 ## R21 amendments to the contracts
 
 ### A-R21-01: a local upstream
