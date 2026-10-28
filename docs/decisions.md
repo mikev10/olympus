@@ -5117,3 +5117,23 @@ The maintainer confirmed it on 2026-10-28.
   No paid run was started locally.
 - **Reverse:** none needed. The pull request's `run-driver` job produces the
   fresh reports.
+
+### D-R12-06: the acceptance criteria after the review fixes
+
+- **Run:**
+  - `pnpm lint` and `pnpm -r typecheck`: clean;
+  - every package but the Claude Code driver and conformance, serially: all
+    passed (api 215 passed, 4 skipped);
+  - then `pnpm conformance`.
+- **Found:** F5's write-side check (the Vault refuses a state without a station
+  history) refused `I5.stale-commit-is-refused-under-contention`'s child
+  processes. Their hand-built state predates the field. The fixture now carries
+  `stations: []`. Nothing about the assertion changed: exactly one writer must
+  still win.
+- **Result:** conformance fails only on the set `ship-unit` exempts:
+  - the Claude Code driver's externals;
+  - the api `test/paid/` externals;
+  - the two meta-tests that count them.
+
+  CI's `run-driver` job writes those reports.
+- **Reverse:** none.

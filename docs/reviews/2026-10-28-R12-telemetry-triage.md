@@ -202,7 +202,30 @@ through named operations that validate them, and they are content-addressed.
 a cross-cutting change outside this unit; a malformed record still fails as an
 error rather than as a pass.
 
+## Fixes applied
+
+Each fix was written test-first, and each test failed against the old behaviour
+before the fix landed:
+
+| Fix | Findings | Commit | Change |
+|---|---|---|---|
+| F6 | codex-6 | 1a9006d | Times need a zone, and a call cannot end before it starts (Vault tests) |
+| F7 | codex-7 | abd8f22 | The stub Vault refuses malformed timing and a present non-list history |
+| F5 | codex-5 | f95c0a5, 248d69a | A commit keeps every stored station entry, and a history is recorded only if it begins at admission |
+| F8 | codex-8, gemini-4 | 248d69a | Each untimed call is counted once, and asserted exactly |
+| F1 | codex-1, gemini-2 | 282ca73 | A drafted manifest's check ids leave only as digests |
+| F2 | codex-3, gemini-1 | 8fbdcf6 | The read-back scan finds exported names and any `telemetry` import |
+| F3 | codex-4, gemini-3 | f0f7fe1 | The assertion holds its own key policy, checks resource attributes, and checks span-name shapes |
+| F4 | codex-2 | f2753d2 | Fixed collector-error messages, URL user information refused |
+
+Two departures from one commit per fix:
+
+- **248d69a carries F8 and the exporter half of F5.** Both change the same run
+  attributes and the same assertion.
+- **F2's evidence is its negative fixtures, not a failing run.** The old regex
+  would have missed the barrel fixture and the package-namespace fixture.
+
 ## Re-run after the fixes
 
-See the commits below and the acceptance record in `docs/decisions.md`
-(D-R12-06).
+The full acceptance criteria are rerun after F4, and the result is recorded in
+`docs/decisions.md` (D-R12-06).
