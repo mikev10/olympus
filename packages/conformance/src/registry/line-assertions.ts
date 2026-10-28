@@ -538,7 +538,7 @@ export const REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL: LocalAssertion = runtime({
  * (D-P13-11), and what is asserted here is that the line records what
  * `destroy` returns and nothing a driver says.
  */
-async function meteredProvider(readings: Map<SandboxHandle, MeterReading>): Promise<SandboxProvider> {
+export async function meteredProvider(readings: Map<SandboxHandle, MeterReading>): Promise<SandboxProvider> {
   const { StubSandboxProvider } = await import('@olympus-ai/sandbox');
   const inner = new StubSandboxProvider();
   let destroyed = 0;

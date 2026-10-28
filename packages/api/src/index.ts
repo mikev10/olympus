@@ -21,6 +21,7 @@ export * from './policy-file.js';
 export * from './report.js';
 export * from './bounds.js';
 export * from './outcomes.js';
+export * from './telemetry.js';
 export {
   composeDiff,
   diffDigest,

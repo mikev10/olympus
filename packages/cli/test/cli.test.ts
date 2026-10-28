@@ -3,11 +3,12 @@
  * URL it is given (I9). The server is the runtime's own, over stub
  * components; the CLI shares nothing with it but the socket.
  */
+import { createServer, type IncomingHttpHeaders } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { buildGraph, createApiServer, outcomes, STAND_IN_SCANNERS, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
+import { buildGraph, createApiServer, outcomes, STAND_IN_SCANNERS, telemetryOf, UNANALYSED_TESTS, localWorkspaceStore, type ApiServer, type CreatedRun, type RunView } from '@olympus-ai/api';
 import { StubDriver, type Driver, type TaskRequest, type TaskResult } from '@olympus-ai/core';
 import { StubSandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
@@ -236,5 +237,75 @@ describe('the CLI refuses rather than guessing', () => {
     const ran = await cli(['--url', 'http://127.0.0.1:9', '--token', TOKEN, 'status', 'x']);
     expect(ran.code).toBe(2);
     expect(ran.err[0]).toMatch(/could not reach the API/);
+  });
+});
+
+describe('telemetry (R12)', () => {
+  test('a finished run prints what the library exports, an unfinished one is refused, and a collector is sent both bodies with its headers by the client', async () => {
+    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3')))).out.join('\n')) as CreatedRun;
+    await settle(run.runId);
+    // Waiting at the integrate exit is unfinished: refused, never exported (D-R12-04).
+    const open = await cli(remote('telemetry', run.runId));
+    expect(open.code).toBe(1);
+    expect(open.err[0]).toMatch(/^error 409 not-finished/);
+    expect((await cli(remote('telemetry', 'no-such-run'))).err[0]).toMatch(/^error 404/);
+
+    expect((await cli(remote('approve', run.runId, 'integrate:1'))).code).toBe(0);
+    await settle(run.runId);
+    const printed = await cli(remote('telemetry', run.runId));
+    expect(printed.code).toBe(0);
+    expect(printed.out).toHaveLength(1);
+    const library = await telemetryOf(vault, run.runId);
+    if (!library.ok) throw new Error('the library refused a passed run');
+    expect(JSON.parse(printed.out[0] ?? '')).toEqual({ runId: run.runId, ...JSON.parse(JSON.stringify(library.export)) });
+
+    const received: Array<{ path: string; headers: IncomingHttpHeaders; body: unknown }> = [];
+    const collector = createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk: Buffer) => (body += chunk.toString('utf8')));
+      req.on('end', () => {
+        received.push({ path: req.url ?? '', headers: req.headers, body: JSON.parse(body) as unknown });
+        res.writeHead(200).end('{}');
+      });
+    });
+    await new Promise<void>((done) => collector.listen(0, '127.0.0.1', done));
+    const address = collector.address();
+    if (address === null || typeof address === 'string') throw new Error('the collector has no port');
+    try {
+      const sent = await cli(remote('telemetry', run.runId, '--header', 'x-collector-key=secret-value'), { OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${String(address.port)}/otlp` });
+      expect(sent.code).toBe(0);
+      expect(received.map((r) => r.path)).toEqual(['/otlp/v1/traces', '/otlp/v1/metrics']);
+      expect(received.map((r) => r.headers['x-collector-key'])).toEqual(['secret-value', 'secret-value']);
+      expect(received.map((r) => r.body)).toEqual([JSON.parse(JSON.stringify(library.export.traces)), JSON.parse(JSON.stringify(library.export.metrics))]);
+      // The collector's credential is sent, never printed.
+      expect([...sent.out, ...sent.err].join('\n')).not.toContain('secret-value');
+    } finally {
+      await new Promise((done) => collector.close(done));
+    }
+  });
+});
+
+describe('a collector credential is never printed (codex-2)', () => {
+  test('an endpoint with user information, another scheme, or no parse is refused without echoing it; a failed send prints no error text', async () => {
+    for (const endpoint of ['https://user:url-secret@collector.example', 'ftp://user:url-secret@collector.example', 'http://[url-secret']) {
+      const ran = await cli(remote('telemetry', 'any-run', '--endpoint', endpoint));
+      expect(ran.code).toBe(2);
+      expect([...ran.out, ...ran.err].join('\n')).not.toContain('url-secret');
+    }
+    // A send that fails reports the run and the signal, never the error's own text, which a custom fetch could fill with the request.
+    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3')))).out.join('\n')) as CreatedRun;
+    await settle(run.runId);
+    await cli(remote('cancel', run.runId));
+    const out: string[] = [];
+    const err: string[] = [];
+    const failing: typeof fetch = (input, init) => {
+      const target = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url;
+      if (target.includes('collector.invalid')) return Promise.reject(new Error(`could not send header-secret to ${target}`));
+      return globalThis.fetch(input, init);
+    };
+    const code = await runCli(remote('telemetry', run.runId, '--endpoint', 'http://collector.invalid', '--header', 'x-key=header-secret'), { env: {}, fetch: failing, out: (l) => out.push(l), err: (l) => err.push(l) });
+    expect(code).toBe(1);
+    expect([...out, ...err].join('\n')).not.toContain('header-secret');
+    expect(err.join('\n')).toMatch(/traces: the collector could not be reached/);
   });
 });

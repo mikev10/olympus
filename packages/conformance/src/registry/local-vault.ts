@@ -94,7 +94,7 @@ const vault = new LocalVault({ store, artifacts });
 // The tag makes this child's bytes identifiable, so the caller can prove the
 // state that landed is one winner's whole record and not a blend of several.
 const state = {
-  runId, admission: { runId, kind: 'admission', hash: 'c'.repeat(64) }, station: 'spec', phase: 'working',
+  runId, admission: { runId, kind: 'admission', hash: 'c'.repeat(64) }, station: 'spec', stations: [], phase: 'working',
   tasks: { [tag]: 'pending' }, attempts: {}, results: {}, evidenceRefs: [], violations: [], approvals: [], reviews: [], usage: [], cancelled: null, halted: null, version: ifVersion,
 };
 while (Date.now() < Number(startAt)) { /* spin: sleeping to a deadline wakes the children in sequence */ }

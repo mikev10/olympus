@@ -12,6 +12,7 @@ import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTAR
 import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
 import { ADMISSION_RECORDS_THE_DETECTED_STACK } from './outcomes.js';
+import { TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS } from './telemetry.js';
 import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
 import { R20_I2 } from './roles.js';
 
@@ -81,6 +82,8 @@ export const I2: InvariantEntry = {
     OUTCOMES_DERIVED_FROM_RUN_RECORDS,
     // R18: a rate is kept per stack, the stack being what admission's adapter detection found.
     ADMISSION_RECORDS_THE_DETECTED_STACK,
+    // R12: every span is drawn from a record the runtime wrote and timed by its clock.
+    TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',

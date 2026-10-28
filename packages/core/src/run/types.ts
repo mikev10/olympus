@@ -251,6 +251,14 @@ export interface RunHalt {
 }
 
 /**
+ * One station the run entered, and when, by the runtime's clock (A-R12-02).
+ */
+export interface StationEntry {
+  readonly station: StationId;
+  readonly enteredAt: string;
+}
+
+/**
  * Read-only: a consumer holding a state cannot alter it. A new state is a
  * new record, committed through the Vault; that is the only way status or
  * station changes (I2).
@@ -265,6 +273,12 @@ export interface RunState {
   /** The write-once admission record: the Run, the resolved Policy, and the artifacts each station locks. */
   readonly admission: VaultRef;
   readonly station: StationId;
+  /**
+   * Every station the run entered, in order, the first written at admission
+   * (A-R12-02). The Vault reads a state committed before R12 as empty, so an
+   * empty list means the entries were not recorded, never that none was entered.
+   */
+  readonly stations: readonly StationEntry[];
   readonly phase: StationPhase;
   readonly tasks: Readonly<Record<TaskId, TaskStatus>>;   // the sole authority for task status (I2); Task holds none
   readonly attempts: Readonly<Record<TaskId, TaskAttempts>>;

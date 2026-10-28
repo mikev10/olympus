@@ -227,6 +227,26 @@ function isRef(value: unknown): boolean {
   return isRecord(value) && hasString(value, 'runId') && hasString(value, 'kind') && hasString(value, 'hash');
 }
 
+/** A list of station entries, each a station and a time with a zone (A-R12-02). */
+function isStationHistory(value: unknown): value is RunState['stations'] {
+  return Array.isArray(value) && (value as unknown[]).every((e) => isRecord(e) && hasString(e, 'station') && e.station !== '' && isTime(e.enteredAt));
+}
+
+/**
+ * Why `next` may not replace the state holding `previous`, or undefined: a
+ * new state carries a station history, and it begins with every entry of the
+ * one it replaces, so an entry once recorded is never dropped or rewritten
+ * (codex-5).
+ */
+function stationsProblem(previous: RunState['stations'], next: unknown): string | undefined {
+  if (!isStationHistory(next)) return 'its station entries are not a list of stations, each with a time with a zone (A-R12-02)';
+  if (next.length < previous.length) return `it holds ${String(next.length)} station entries where the state it replaces holds ${String(previous.length)}`;
+  const pair = (e: RunState['stations'][number]): string => JSON.stringify([e.station, e.enteredAt]);
+  const kept = next.slice(0, previous.length).map(pair);
+  const changed = previous.findIndex((e, i) => kept[i] !== pair(e));
+  return changed === -1 ? undefined : `it rewrites station entry ${String(changed)} of the state it replaces`;
+}
+
 function requireRunState(value: unknown, file: string): RunState {
   const ok =
     isRecord(value) &&
@@ -242,7 +262,12 @@ function requireRunState(value: unknown, file: string): RunState {
   const drafts = value.drafts === undefined ? {} : value.drafts;
   if (!isMap(drafts)) throw new Error(`LocalVault: ${file} holds drafts that are not a map; refusing to return a partial record`);
   const approvals = (value.approvals as unknown[]).map((grant) => (isRecord(grant) && grant.draft === undefined ? { ...grant, draft: null } : grant));
-  return { ...value, drafts, approvals } as unknown as RunState;
+  // A state committed before R12 records no station entries: read as none, which says they were not recorded (A-R12-02).
+  const stations = value.stations === undefined ? [] : value.stations;
+  if (!isStationHistory(stations)) {
+    throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
+  }
+  return { ...value, drafts, approvals, stations } as unknown as RunState;
 }
 
 const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd', 'refused'] as const;
@@ -274,6 +299,18 @@ function rolesProblem(roles: unknown): string | undefined {
   return undefined;
 }
 
+/** An ISO 8601 time the runtime stamped: a string `Date` parses. */
+/**
+ * An ISO 8601 date and time with a zone, which every host reads as the same
+ * instant: the form the runtime writes. A time with no zone is read in each
+ * host's own zone, so it is refused rather than read (codex-6).
+ */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+function isTime(value: unknown): boolean {
+  return typeof value === 'string' && ISO_TIME.test(value) && !Number.isNaN(Date.parse(value));
+}
+
 function usageProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId') || !hasString(r, 'station')) return 'it names no run, task, and station';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
@@ -288,6 +325,14 @@ function usageProblem(r: unknown): string | undefined {
   }
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
+  const timing = r.timing;
+  if (!isRecord(timing) || !isTime(timing.startedAt)) return 'it carries no time the call started (A-R12-01)';
+  if (reading.kind === 'pending' ? timing.endedAt !== null : !isTime(timing.endedAt)) {
+    return reading.kind === 'pending' ? 'a pending record carries a time the call ended' : 'it carries no time the call ended (A-R12-01)';
+  }
+  if (typeof timing.endedAt === 'string' && Date.parse(timing.endedAt) < Date.parse(timing.startedAt as string)) {
+    return 'it records a call that ended before it started (codex-6)';
+  }
   if (reading.kind === 'unmetered' || reading.kind === 'pending') return undefined;
   if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
   if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, pending, or lost`;
@@ -921,6 +966,11 @@ export class LocalVault implements Vault {
       const at = held === null ? 'no committed state' : `version ${String(held)}`;
       throw new Error(`LocalVault: run ${s.runId} has ${at}, so version ${ifVersion} was never current; nothing stored`);
     }
+
+    // The history it replaces, read before anything is written: a commit may extend it and never shorten or rewrite it (codex-5).
+    const previous = current === 0 ? [] : requireRunState(await readJson(join(states, `${ifVersion}.json`)), `${ifVersion}.json`).stations;
+    const problem = stationsProblem(previous, (s as { stations?: unknown }).stations);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing run ${s.runId}'s state: ${problem}; nothing stored`);
 
     const next = String(current + 1);
     const stored: RunState = { ...s, version: next };

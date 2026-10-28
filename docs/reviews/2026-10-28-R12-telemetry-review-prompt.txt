@@ -1,0 +1,182 @@
+The code under review is in the file
+`2026-10-28-R12-telemetry-review-bundle.txt` (SHA-256 d05f562cd52968761cd0fb26d7ad068de2f86abd0c959d17955c475b79cb250e) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the telemetry export of a software factory runtime, and the
+two record changes it rests on, in a TypeScript project. You have the source and
+nothing else — no design documents, no author reasoning, no prior version, no
+conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change through a fixed line of stations: intake, spec,
+test-design, plan, build, verify, review, and integrate. It records what
+happened in an append-only, content-addressed store (the Vault), whose records
+include:
+
+- run state;
+- one usage record per model call, read from a metering relay;
+- evidence bundles of check results;
+- enforcement decisions.
+
+This change has two parts.
+
+- **The runtime now stamps times.**
+  - Each usage record gets a `timing` field: the start before the call, and the
+    end after the call's sandbox is torn down.
+  - Run state gets a `stations` list: one entry per station the run entered,
+    with the time it entered.
+- **A finished run can be exported as OpenTelemetry traces and metrics** in the
+  OTLP/HTTP JSON encoding. This is built in `packages/api/src/telemetry.ts`,
+  served by an HTTP route, and fetched by a CLI command. The CLI either prints
+  the export or POSTs it to a collector.
+
+The export is for an operator's dashboard. It must be recomputable from the
+records, and nothing in the runtime may read it back.
+
+It must hold against a capable, motivated party trying to make the export say
+something the records do not, or carry something out of the runtime it should
+not. Assume no deceptive intent — only that the easiest path gets taken. For
+example:
+
+- a time that was never recorded, presented as if it were;
+- a cost or token figure where the meter read none;
+- a span for a run whose records may still change;
+- model-written text, check output, or a credential leaving in the export or in
+  CLI output;
+- the export, or something derived from it, feeding a decision the runtime
+  makes.
+
+That party controls:
+
+- what the model returns, including its narrative claim and its reported events
+  and usage;
+- the files in the workspace, and so the output of checks;
+- the task ids in a plan the model drafted;
+- when the process stops (a crash between two writes);
+- the arguments an operator passes to the CLI, including a collector URL and
+  headers.
+
+It does not control the components the runtime is wired with: the Vault, the
+sandbox provider, the metering relay, and the drivers are runtime-selected and
+trusted, even where a function takes one as an argument. Nor does it control
+code running inside the runtime's own process. Records written by an older
+version of the runtime, before these fields existed, are legitimate input and
+must be read without being given invented values.
+
+The invariants at stake:
+
+- **The runtime derives status; the model never reports it.** An agent's
+  account of itself (its narrative, its reported usage and duration, its event
+  list) is a claim, stored apart from evidence, and is never presented as the
+  runtime's own fact.
+- **Fail closed.** A missing check, a missing value, or an unsupported case is a
+  refusal or an explicit "not recorded". It is never a silent default, never a
+  zero standing in for unknown, and never a warning that lets things continue.
+- **Event payloads are data, never instructions.** Untrusted text never enters a
+  prompt. Here it must also not leave in telemetry: only typed fields from a
+  fixed allowlist may be exported.
+- **Every capability claim maps to an executable assertion that fails when the
+  capability is deleted.**
+- **The runtime is a service; the CLI is a client.** The CLI talks only to the
+  service's HTTP API. The service makes no outbound request on a caller's
+  behalf.
+- **No Greek names in code.** The product name must not appear in type names,
+  paths, config keys, or attribute names. The npm scope `@olympus-ai/` is the
+  one exempt spelling.
+
+The mechanisms that matter most:
+
+- **Pairing pending records with terminal ones.** A pending usage record is
+  written before each call, and a terminal one after. The exporter pairs them,
+  turns a pending record with no terminal partner into a "lost" span, and counts
+  records with no timing as untimed.
+- **Placing spans in time.** Each call and check is assigned to a station span
+  by the recorded station entries and times. The run span ends at the latest
+  time any record holds. Every id is derived deterministically from the run and
+  the record.
+- **The attribute allowlist, and the no-read-back scan.** These are the
+  conformance assertions in `packages/conformance/src/registry/telemetry.ts`,
+  and the I7 one depends on both.
+- **The two new fields, written and read back.** The Vault validates `timing`
+  on write, and normalises `stations` and legacy usage records on read. The
+  line writes both at the call and commit sites.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Identifiers such as R2, P13, or D-A-LC-09 below refer to other units of work and
+design records you do not have. They mean nothing to you, and absent work listed
+here is not a defect.
+
+- live instrumentation of the line, or spans for a run still in flight
+- the server pushing to a collector, a background exporter, or a retry queue
+- any metric or attribute that is read back by a gate, a level, or a rate
+- prompt, completion, claim narrative, check stdout or stderr, event payloads,
+  or any opt-in to export them
+- the Claude Code CLI's own telemetry (D-A-LC-09)
+- a dashboard, local or hosted, or a reference dashboard definition
+- OTLP/protobuf or gRPC transport
+- listing every run over the API so that `telemetry` can export a window (the
+  caller names the runs)
+- re-timing records written before the amendments
+
+THE QUESTION
+
+How would you make the exported telemetry assert something the records do not
+support? That could be a time, a cost, a token count, a finished run, or a
+runtime fact that is really the model's claim. Or how would you make text the
+model or the workspace controls, or a collector credential, leave through the
+export or the CLI's output? And how would you make the runtime read telemetry
+back without the scan noticing? Separately: can a usage record or run state now
+be written, or read back, in a form that silently loses or invents the new
+timing fields?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.

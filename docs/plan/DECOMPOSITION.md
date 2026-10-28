@@ -605,7 +605,7 @@ order between them is settled before any of them is picked up.
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
 | R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
 | R11 | Learning loop | M3 | R2, R7, R8, P14, R13, R20 | — |
-| R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | — |
+| R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | `docs/plan/R12-telemetry.md` |
 | R13 | Nightly review | M2 | P14, R2, R9, R17, M2 triggers | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
@@ -908,6 +908,8 @@ improves a rate by shrinking what is measured — smaller tasks, fewer checks, a
 shorter suite — is refused (D-A-LC-05).
 
 ### R12 — Telemetry export (OpenTelemetry)
+
+**Spec:** `docs/plan/R12-telemetry.md`, written when the unit started (D-R12-01). Where this entry and the spec differ, the spec is the one verified against the code: no record timed a station, task, or attempt, so call and station times are contract amendments (A-R12-01, A-R12-02), and tool calls are the driver's account, exported as its claim.
 
 Traces and metrics an operator can put on a dashboard: one trace per run,
 spans per station, task, attempt, and check, carrying model identity, token use

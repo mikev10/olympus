@@ -13,11 +13,13 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
 import { isApprovalKey, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
+import { isNoRunState } from '@olympus-ai/vault';
 import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import type { BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
+import { telemetryOf, type TelemetryExport } from '../telemetry.js';
 import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
@@ -282,6 +284,24 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     return runReport(components.vault, runId);
   };
 
+  /**
+   * The run's records as OTLP/JSON, for the client to send where its operator
+   * chooses: the service itself never makes an outbound request (D-R12-02).
+   */
+  const telemetry = async (runId: RunId): Promise<TelemetryExport> => {
+    try {
+      await components.vault.readRunState(runId);
+    } catch (error) {
+      // A state that cannot be read is a fault, never absence (I5). A run refused at admission has no
+      // state and is still exported; only a run with no record at all is absent.
+      if (!isNoRunState(error)) throw error;
+      if ((await components.vault.readDecisions(runId)).length === 0) throw new HttpError(404, 'not-found', `no run ${runId}: ${describe(error)}`);
+    }
+    const result = await telemetryOf(components.vault, runId);
+    if (!result.ok) throw new HttpError(409, 'not-finished', `run ${runId} has not finished, so its records may still change and it is not exported`);
+    return result.export;
+  };
+
   const view = async (runId: RunId): Promise<RunView> => {
     // Taken before the read, not after: a drive that ends while the state is read has committed
     // past what was read, and a view saying `driving: false` beside that state would present a
@@ -420,6 +440,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     if (action === 'report') {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, await report(runId));
+      return;
+    }
+    if (action === 'telemetry') {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, await telemetry(runId));
       return;
     }
     if (action === 'events') {

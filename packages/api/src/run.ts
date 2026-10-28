@@ -906,6 +906,8 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
       runId: req.runId,
       admission,
       station: 'intake',
+      // The run enters its first station when it is admitted (A-R12-02).
+      stations: [{ station: 'intake', enteredAt: now }],
       phase: 'working',
       tasks: {},
       attempts: {},
