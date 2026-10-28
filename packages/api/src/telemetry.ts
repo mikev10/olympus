@@ -195,10 +195,14 @@ function callsOf(usage: readonly UsageRecord[]): { calls: Call[]; untimed: numbe
   let untimed = 0;
   const settled = new Set<string>();
   const key = (r: UsageRecord, startedAt: string): string => JSON.stringify([r.taskId, r.station, r.attempt, startedAt]);
+  // An untimed call is counted once: by its terminal record, or by its pending record where none followed (gemini-4).
+  const untimedCall = (r: UsageRecord): string => JSON.stringify([r.taskId, r.station, r.attempt]);
+  const untimedSettled = new Set<string>();
   for (const r of usage) {
     if (r.reading.kind === 'pending') continue;
     if (r.timing === 'not-recorded') {
       untimed += 1;
+      untimedSettled.add(untimedCall(r));
       continue;
     }
     settled.add(key(r, r.timing.startedAt));
@@ -207,7 +211,7 @@ function callsOf(usage: readonly UsageRecord[]): { calls: Call[]; untimed: numbe
   for (const r of usage) {
     if (r.reading.kind !== 'pending') continue;
     if (r.timing === 'not-recorded') {
-      untimed += 1;
+      if (!untimedSettled.has(untimedCall(r))) untimed += 1;
       continue;
     }
     if (!settled.has(key(r, r.timing.startedAt))) calls.push({ record: r, startedAt: r.timing.startedAt, endedAt: null });
@@ -404,7 +408,8 @@ export async function telemetryOf(vault: Vault, runId: RunId): Promise<Telemetry
     });
   }
 
-  runAttributes.push(bool('factory.stations.recorded', stations.length > 0));
+  // Recorded only when the history begins where the run did: a run admitted before R12 and resumed after it holds a later part alone (codex-5).
+  runAttributes.push(bool('factory.stations.recorded', stations[0]?.station === 'intake' && stations[0].enteredAt === records.startedAt));
   if (untimed > 0) runAttributes.push(int('factory.calls.untimed', untimed));
   spans.unshift({
     traceId, spanId: runSpanId, parentSpanId: '', name: 'run', kind: SPAN_INTERNAL,

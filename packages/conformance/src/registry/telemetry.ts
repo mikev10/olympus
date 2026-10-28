@@ -113,8 +113,10 @@ export const TELEMETRY_GUESSES_NOTHING: LocalAssertion = runtime({
   title:
     "a run that has not finished is refused, not exported; a run whose records predate the recorded times exports no station or call span, says its stations were not recorded and counts its untimed calls; a call whose reading was lost carries no token or cost attribute, is never a zero, and ends in error",
   run: async () => {
-    const { telemetryOf } = await api();
-    await finishedRun('r12-i5-', async (vault, runId) => {
+    const { readUsage, telemetryOf } = await api();
+    await finishedRun('r12-i5-', async (vault, runId, finished) => {
+      // Each call the run made, counted once: its terminal record, whose pending record is the same call (gemini-4).
+      const madeCalls = (await readUsage(vault, finished)).filter((r: UsageRecord) => r.reading.kind !== 'pending').length;
       // The same records as written before R12: no station entries, no call times.
       const legacy: Vault = new Proxy(vault, {
         get(target, prop, receiver) {
@@ -138,8 +140,28 @@ export const TELEMETRY_GUESSES_NOTHING: LocalAssertion = runtime({
       const spans = spansOf(old.export);
       if (spans.some((s) => s.name.startsWith('station ') || s.name.startsWith('invoke_agent '))) throw new Error('I5: a span was given a time no record holds');
       const run = spans.find((s) => s.name === 'run');
-      if (run === undefined || attr(run, 'factory.stations.recorded') !== false || Number(attr(run, 'factory.calls.untimed')) < 1) {
-        throw new Error(`I5: a run recorded before R12 does not say what was not recorded: ${JSON.stringify(run?.attributes)}`);
+      // The count is required and exact: a missing attribute is not a pass (codex-8).
+      if (run === undefined || attr(run, 'factory.stations.recorded') !== false || attr(run, 'factory.calls.untimed') !== String(madeCalls)) {
+        throw new Error(`I5: a run recorded before R12 does not say what was not recorded, ${String(madeCalls)} untimed calls: ${JSON.stringify(run?.attributes)}`);
+      }
+
+      // A run admitted before R12 and resumed after it holds only the entries made since: a partial history is not a recorded one (codex-5).
+      const resumed: Vault = new Proxy(vault, {
+        get(target, prop, receiver) {
+          if (prop === 'readRunState') {
+            return async (id: RunId) => {
+              const s = await target.readRunState(id);
+              return { ...s, stations: s.stations.slice(1) };
+            };
+          }
+          const value: unknown = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const partial = await telemetryOf(resumed, runId);
+      const partialRun = partial.ok ? spansOf(partial.export).find((s) => s.name === 'run') : undefined;
+      if (partialRun === undefined || attr(partialRun, 'factory.stations.recorded') !== false) {
+        throw new Error('I5: a station history that does not begin at admission was exported as recorded');
       }
 
       // Every reading lost: no token or cost figure on its span, and the span ends in error.
