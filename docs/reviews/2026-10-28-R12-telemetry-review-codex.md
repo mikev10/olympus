@@ -1,3 +1,19 @@
+# External review of R12, codex, 2026-10-28
+
+The Codex family's review of R12, telemetry export and the two record amendments it rests on. The triage of both reviews is `2026-10-28-R12-telemetry-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. 64,701 input tokens ingested against a floor of 39,100; echo verified.
+- **Cross-family agreement:** gemini raised findings 1 (model-controlled ids exported), 3 (no-read-back scan bypassed), and part of 4 (resource attributes unchecked) too. Findings 2 and 5–8 were raised by codex alone.
+- **Date:** 2026-10-28
+- **Bundle:** `2026-10-28-R12-telemetry-review-bundle.txt`, SHA-256 `d05f562cd52968761cd0fb26d7ad068de2f86abd0c959d17955c475b79cb250e`, base `6909a7c` (`reviewed/R7`), head `8daf393` (the unit branch after the acceptance run, before review). It held 24 sections: every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/plan/`, and `docs/reviews/` were excluded. Prompt: `2026-10-28-R12-telemetry-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context and made no external lookups, and that local command execution was blocked. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 2, 3, 4, 5, and 7 are answered through the findings and the closing paragraph. Item 6 (sound mechanisms) is answered with a list. The reviewer said it could not establish the finished-run guarantee because `readRunRecords` was not in the bundle.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are treated as hints and were located by construct in the triage.
+
+---
+
 BASE: 6909a7c  
 HEAD: 8daf393  
 packages/vault/test/stub.test.ts  

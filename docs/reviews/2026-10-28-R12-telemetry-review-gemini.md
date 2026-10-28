@@ -1,3 +1,19 @@
+# External review of R12, gemini, 2026-10-28
+
+The Gemini family's review of R12, telemetry export and the two record amendments it rests on. The triage of both reviews is `2026-10-28-R12-telemetry-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration. 57,070 input tokens ingested against a floor of 39,100; echo verified.
+- **Cross-family agreement:** codex raised findings 1 (no-read-back scan bypassed), 2 (model-controlled ids exported), and 3 (resource attributes unchecked) too. Findings 4–8 were raised by gemini alone.
+- **Date:** 2026-10-28
+- **Bundle:** `2026-10-28-R12-telemetry-review-bundle.txt`, SHA-256 `d05f562cd52968761cd0fb26d7ad068de2f86abd0c959d17955c475b79cb250e`, base `6909a7c` (`reviewed/R7`), head `8daf393` (the unit branch after the acceptance run, before review). It held 24 sections: every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/plan/`, and `docs/reviews/` were excluded. Prompt: `2026-10-28-R12-telemetry-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context and made no external lookups. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** the findings are not keyed to the prompt's numbered items. Item 6 is answered as a per-mechanism assessment, and item 7 as a framing assessment that called the framing correct. Item 5 (configuration satisfied without effect) has no finding of its own.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are treated as hints and were located by construct in the triage.
+
+---
+
 I have no prior context about this project, and I performed no external lookups during this review.
 
 BASE: 6909a7c
