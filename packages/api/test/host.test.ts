@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { containerUser, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
+import { ENDPOINT_CREDENTIAL } from '@olympus-ai/driver-openai-compatible';
+import { containerUser, endpointGrants, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
 
 describe('containerUser', () => {
   test('both absent or empty is no user, and both set is that user', () => {
@@ -48,6 +49,23 @@ describe('the endpoint file (R6, D-R6-07)', () => {
     expect(() => parseEndpointFile(file({ seats: ['reviewer'], temperature: 0 }), 'key')).toThrow(/temperature/u);
     expect(() => parseEndpointFile(file({ seats: ['reviewer'], family: undefined }), 'key')).toThrow(/family/u);
     expect(() => parseEndpointFile('{', 'key')).toThrow(/not JSON/u);
+  });
+
+  test('a local endpoint declaring no credential comes without a key, and a key beside it is refused (A-R21-04)', () => {
+    const local = { upstream: { local: 'docker-host', port: 11434 }, scheme: 'none', seats: ['reviewer'] };
+    const endpoint = parseEndpointFile(file(local), '');
+    expect(endpoint.key).toBeNull();
+    expect(endpointGrants(endpoint)).toStrictEqual({ credentials: {}, dockerHostPorts: [11434] });
+    expect(() => parseEndpointFile(file(local), 'key')).toThrow(/must not be set/u);
+    // A local endpoint that takes a key is given both.
+    const keyed = parseEndpointFile(file({ ...local, scheme: 'bearer' }), 'key');
+    expect(endpointGrants(keyed)).toStrictEqual({ credentials: { [ENDPOINT_CREDENTIAL]: 'key' }, dockerHostPorts: [11434] });
+    // No key is never inferred: an https endpoint without one is still refused, and so is the none scheme for it.
+    expect(() => parseEndpointFile(file({ seats: ['reviewer'] }), '')).toThrow(/no credential/u);
+    expect(() => parseEndpointFile(file({ seats: ['reviewer'], scheme: 'none' }), '')).toThrow(/scheme 'none'/u);
+    expect(() => parseEndpointFile(file({ ...local, upstream: 'http://localhost:11434' }), '')).toThrow(/upstream/u);
+    expect(endpointGrants(parseEndpointFile(file({ seats: ['reviewer'] }), 'key'))).toStrictEqual({ credentials: { [ENDPOINT_CREDENTIAL]: 'key' }, dockerHostPorts: [] });
+    expect(endpointGrants(null)).toStrictEqual({ credentials: {}, dockerHostPorts: [] });
   });
 
   test('the endpoint fills the seats it names and the default fills every other', () => {

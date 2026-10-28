@@ -9,20 +9,28 @@
  * bound nobody chose.
  */
 import type { ModelFamily, ModelTier } from '@olympus-ai/core';
-import type { ModelPrice, RelayScheme } from '@olympus-ai/sandbox';
+import type { LocalUpstream, ModelPrice, RelayScheme } from '@olympus-ai/sandbox';
 import { refuse } from './refusal.js';
 
 /** The request field a call's output ceiling is sent in. Newer OpenAI models take only the second. */
 export type CeilingField = 'max_tokens' | 'max_completion_tokens';
 
 export interface EndpointConfig {
-  /** An `https` origin with no path: `'https://api.example.com'`. The relay's only upstream. */
-  readonly upstream: string;
+  /**
+   * The relay's only upstream: an `https` origin with no path,
+   * `'https://api.example.com'`, or a model on the Docker host,
+   * `{ local: 'docker-host', port }` (A-R21-04). An `http` URL is never read as local.
+   */
+  readonly upstream: string | LocalUpstream;
   /** The chat-completions path, ending `/chat/completions`: `'/v1/chat/completions'`. The relay's only grant. */
   readonly path: string;
   /** The header the endpoint reads its credential from, such as `authorization` or `api-key`. */
   readonly header: string;
-  /** How the credential is written into it (A-R6-02). */
+  /**
+   * How the credential is written into it (A-R6-02), or `'none'`: the endpoint
+   * takes no credential, which only a local upstream may declare (A-R21-04).
+   * Under `'none'` the relay deletes whatever the sandbox sent in `header`.
+   */
   readonly scheme: RelayScheme;
   /** Who serves the model, as the run records it: `'openai'`, `'together'`, `'self-hosted'`. */
   readonly provider: string;
@@ -86,6 +94,39 @@ function count(config: Record<string, unknown>, field: keyof EndpointConfig): nu
 }
 
 /**
+ * The upstream as A-R21-04 takes one: an `https` origin with no path, or
+ * exactly `{ local: 'docker-host', port }`. An `http` URL is refused whatever
+ * host it names, so local is never inferred from one.
+ */
+function checkUpstream(value: unknown): string | LocalUpstream {
+  if (typeof value === 'string') {
+    let origin: URL | undefined;
+    try {
+      origin = new URL(value);
+    } catch {
+      origin = undefined;
+    }
+    if (origin?.protocol !== 'https:' || origin.origin !== value) {
+      refuse(
+        'configuration',
+        `upstream must be an https origin with no path, query, credentials, or trailing slash, not ${shown(value)}. ` +
+          "A model on the Docker host is { \"local\": \"docker-host\", \"port\": <port> }, never an http URL.",
+      );
+    }
+    return value;
+  }
+  if (!isRecord(value)) refuse('configuration', `upstream must be an https origin or { local: 'docker-host', port }, not ${shown(value)}`);
+  const extra = Object.keys(value).filter((key) => key !== 'local' && key !== 'port');
+  if (extra.length > 0) refuse('configuration', `upstream holds ${extra.map((k) => `'${k}'`).join(', ')}; a local upstream is the Docker host and a port`);
+  if (value.local !== 'docker-host') refuse('configuration', `upstream.local must be 'docker-host', not ${shown(value.local)}`);
+  const port = value.port;
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    refuse('configuration', `upstream.port must be an integer port from 1 to 65535, not ${shown(port)}`);
+  }
+  return Object.freeze({ local: 'docker-host', port });
+}
+
+/**
  * Accepts a configuration exactly as written or refuses it naming the field
  * (I5). Typed input is checked as strictly as parsed JSON: a caller arriving
  * from untyped code, or a file, gets the same answer.
@@ -97,16 +138,7 @@ export function checkConfig(input: unknown): CheckedConfig {
     refuse('configuration', `the endpoint configuration holds ${unknown.map((k) => `'${k}'`).join(', ')}, which the driver does not read; a field it ignored would be a setting that did nothing`);
   }
 
-  const upstream = text(input, 'upstream');
-  let origin: URL | undefined;
-  try {
-    origin = new URL(upstream);
-  } catch {
-    origin = undefined;
-  }
-  if (origin?.protocol !== 'https:' || origin.origin !== upstream) {
-    refuse('configuration', `upstream must be an https origin with no path, query, credentials, or trailing slash, not ${shown(upstream)}. A local endpoint over http is R21's.`);
-  }
+  const upstream = checkUpstream(input.upstream);
 
   const path = text(input, 'path');
   if (!PATH.test(path) || !path.endsWith('/chat/completions')) {
@@ -117,7 +149,10 @@ export function checkConfig(input: unknown): CheckedConfig {
   if (!HEADER.test(header)) refuse('configuration', `header ${shown(header)} is not an HTTP header name`);
 
   const scheme = input.scheme;
-  if (scheme !== 'raw' && scheme !== 'bearer') refuse('configuration', `scheme must be 'raw' or 'bearer', not ${shown(scheme)}`);
+  if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') refuse('configuration', `scheme must be 'raw', 'bearer', or 'none', not ${shown(scheme)}`);
+  if (scheme === 'none' && typeof upstream === 'string') {
+    refuse('configuration', "scheme 'none' declares an endpoint with no credential, which only a local upstream on the Docker host may be; an https endpoint takes a key (A-R21-04)");
+  }
 
   const provider = text(input, 'provider');
   const family = text(input, 'family');

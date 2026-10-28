@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import type { TaskId } from '@olympus-ai/core';
-import { DriverRefusal, ENDPOINT_CREDENTIAL, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
+import { LocalDockerProvider, checkRelay } from '@olympus-ai/sandbox';
+import { DriverRefusal, ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
 import { script } from './endpoint.js';
 import { BUDGET, CONFIG, withHarness } from './harness.js';
 
@@ -45,10 +46,36 @@ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () =>
     ['a fractional parallelism', { parallelism: 1.5 }, 'parallelism'],
     ['no turn bound', { maxTurns: undefined }, 'maxTurns'],
     ['a field the driver does not read', { temperature: 0 }, 'temperature'],
+    // A-R21-04: local is a declaration, never a URL, and only a local endpoint may take no credential.
+    ['localhost over http', { upstream: 'http://localhost:11434' }, 'upstream'],
+    ['the none scheme with an https endpoint', { scheme: 'none' }, "scheme 'none'"],
+    ['a local upstream on port 0', { upstream: { local: 'docker-host', port: 0 }, scheme: 'none' }, 'upstream.port'],
+    ['a local upstream with its port as text', { upstream: { local: 'docker-host', port: '11434' }, scheme: 'none' }, 'upstream.port'],
+    ['a local upstream other than the Docker host', { upstream: { local: 'lan', port: 11434 }, scheme: 'none' }, 'upstream.local'],
+    ['a local upstream naming a host', { upstream: { local: 'docker-host', port: 11434, host: 'gpu.lan' }, scheme: 'none' }, "'host'"],
   ])('%s is refused, naming the field', async (_label, change, field) => {
     const refused = await refusalOf(() => checkConfig({ ...CONFIG, ...change }));
     expect(refused.layer).toBe('configuration');
     expect(refused.message).toContain(field);
+  });
+
+  test('a local endpoint with no credential is accepted, and its relay request is one the relay takes with nothing held (A-R21-04)', async () => {
+    const local: EndpointConfig = { ...CONFIG, upstream: { local: 'docker-host', port: 11434 }, scheme: 'none' };
+    expect(checkConfig(local)).toStrictEqual(local);
+    // A key is still allowed to a local endpoint that asks for one.
+    expect(checkConfig({ ...local, scheme: 'bearer' }).scheme).toBe('bearer');
+    const provider = await LocalDockerProvider.create({ vaultPaths: [], dockerHostPorts: [11434] });
+    const request = new OpenAICompatibleDriver({ provider, endpoint: local }).relayRequest();
+    expect(request).toStrictEqual({
+      upstream: { local: 'docker-host', port: 11434 },
+      paths: [CONFIG.path],
+      header: 'authorization',
+      scheme: 'none',
+      credential: null,
+      urlVariable: RELAY_URL_VARIABLE,
+      meter: { dialect: 'openai-chat', prices: CONFIG.prices },
+    });
+    expect(checkRelay({ ...request, budget: { maxTokens: 1, maxCostUsd: 1 } }, new Set(), new Set([11434])).credential).toBeNull();
   });
 
   test('the relay request is the endpoint, its one path, the declared scheme, and the openai-chat meter', () => {

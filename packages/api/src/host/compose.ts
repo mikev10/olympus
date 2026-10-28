@@ -53,8 +53,12 @@ export type EndpointSeat = (typeof ENDPOINT_SEATS)[number];
 
 export interface HostEndpoint {
   readonly config: EndpointConfig;
-  /** The endpoint's credential. Held by the sandbox provider for its relays and given to no sandbox (A-P12-01). */
-  readonly key: string;
+  /**
+   * The endpoint's credential. Held by the sandbox provider for its relays and
+   * given to no sandbox (A-P12-01). `null` only where the configuration
+   * declared scheme `'none'`, for a local endpoint (A-R21-04).
+   */
+  readonly key: string | null;
   readonly seats: readonly EndpointSeat[];
 }
 
@@ -83,9 +87,32 @@ export function parseEndpointFile(text: string, key: string): HostEndpoint {
     if (named.includes(seat as EndpointSeat)) throw new Error(`factory-host: the endpoint file names the seat '${seat}' twice`);
     named.push(seat as EndpointSeat);
   }
-  if (key === '') throw new Error('factory-host: the endpoint has no credential; a local endpoint without one is R21');
   // The driver's own check, so the host refuses exactly what the driver would, naming the field.
-  return { config: checkConfig(config), key, seats: named };
+  const checked = checkConfig(config);
+  // A-R21-04: no key is the file's declaration, never the variable's absence, and a key beside it is a contradiction.
+  if (checked.scheme === 'none') {
+    if (key !== '') {
+      throw new Error("factory-host: the endpoint declares scheme 'none', so FACTORY_ENDPOINT_KEY must not be set; a key the endpoint never receives is a configuration that says two things");
+    }
+    return { config: checked, key: null, seats: named };
+  }
+  if (key === '') {
+    throw new Error("factory-host: the endpoint has no credential; set FACTORY_ENDPOINT_KEY, or declare scheme 'none' for a local endpoint on the Docker host");
+  }
+  return { config: checked, key, seats: named };
+}
+
+/**
+ * What the sandbox provider is given for an endpoint: its credential, where it
+ * has one, and the Docker host port its local upstream listens on, where it is
+ * local (A-R21-03, A-R21-04). Nothing for no endpoint.
+ */
+export function endpointGrants(endpoint: HostEndpoint | null): { credentials: Record<string, string>; dockerHostPorts: number[] } {
+  if (endpoint === null) return { credentials: {}, dockerHostPorts: [] };
+  return {
+    credentials: endpoint.key === null ? {} : { [ENDPOINT_CREDENTIAL]: endpoint.key },
+    dockerHostPorts: typeof endpoint.config.upstream === 'string' ? [] : [endpoint.config.upstream.port],
+  };
 }
 
 /** Each seat's driver: the endpoint's in the seats it names, the default in every other (D-R6-07). */
@@ -115,13 +142,15 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
   const docker = config.docker === undefined ? {} : { executable: config.docker };
   const endpoint = config.endpoint ?? null;
+  const grants = endpointGrants(endpoint);
   const sandbox = await LocalDockerProvider.create({
     ...docker,
     vaultPaths: [config.store, config.repository],
     credentials: {
       [MODEL_CREDENTIAL]: config.modelKey,
-      ...(endpoint === null ? {} : { [ENDPOINT_CREDENTIAL]: endpoint.key }),
+      ...grants.credentials,
     },
+    dockerHostPorts: grants.dockerHostPorts,
   });
   const claude = new ClaudeCodeDriver({ provider: sandbox });
   // The endpoint's driver, in the seats the operator named and no others (D-R6-07). Its family is the operator's

@@ -24,7 +24,9 @@
  * - `FACTORY_ENDPOINT_CONFIG` and `FACTORY_ENDPOINT_KEY`, both or neither: a
  *   JSON file outside the repository naming an OpenAI-compatible endpoint and
  *   the seats it fills, and that endpoint's credential, held by the sandbox
- *   provider for its relays and given to no sandbox (R6, D-R6-07)
+ *   provider for its relays and given to no sandbox (R6, D-R6-07). A file
+ *   declaring scheme `'none'`, for a local endpoint on the Docker host, comes
+ *   without the key, and one given with it stops the host (R21, A-R21-04)
  *
  * A missing variable stops the host before it listens (I5).
  */
@@ -44,8 +46,9 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factor
 const user = containerUser(process.env);
 const endpointFile = process.env.FACTORY_ENDPOINT_CONFIG ?? '';
 const endpointKey = process.env.FACTORY_ENDPOINT_KEY ?? '';
-if ((endpointFile === '') !== (endpointKey === '')) {
-  throw new Error('factory-host: FACTORY_ENDPOINT_CONFIG and FACTORY_ENDPOINT_KEY must both be set, or neither');
+// A key with no file is half a configuration. A file with no key is the file's to allow: only one declaring scheme 'none' does.
+if (endpointFile === '' && endpointKey !== '') {
+  throw new Error('factory-host: FACTORY_ENDPOINT_KEY is set without FACTORY_ENDPOINT_CONFIG');
 }
 const endpoint = endpointFile === '' ? null : parseEndpointFile(await readFile(endpointFile, 'utf8'), endpointKey);
 const components = await composeHost({
