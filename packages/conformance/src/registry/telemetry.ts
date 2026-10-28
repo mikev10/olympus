@@ -8,13 +8,15 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 import type { RunId, RunState } from '@olympus-ai/core';
 import type { MeterReading, SandboxHandle } from '@olympus-ai/sandbox';
 import type { UsageRecord, Vault } from '@olympus-ai/vault';
 import type { OtlpSpan as Span, TelemetryExport as Export } from '@olympus-ai/api';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
-import { walkFiles, workspaceRoot } from '../kit/workspace.js';
+import { moduleSpecifiers, walk } from '../kit/scan.js';
+import { walkFiles, workspacePackages, workspaceRoot } from '../kit/workspace.js';
 import { meteredProvider } from './line-assertions.js';
 import { readRecord, stubDriver, withLine } from './line.js';
 
@@ -192,8 +194,48 @@ export const TELEMETRY_GUESSES_NOTHING: LocalAssertion = runtime({
   },
 });
 
-/** Modules that may import the exporter: itself, the package's index, and the route that serves it. */
+/** Files that may name the exporter: itself, the api index that re-exports it, and the route that serves it. */
 const TELEMETRY_IMPORTERS: readonly string[] = ['packages/api/src/telemetry.ts', 'packages/api/src/index.ts', 'packages/api/src/http/server.ts'];
+
+/** Packages that may name it: the CLI, the client that fetches the export, and the suite that checks it. */
+const TELEMETRY_CLIENTS: readonly string[] = ['packages/cli', 'packages/conformance'];
+
+const EXPORTER = 'packages/api/src/telemetry.ts';
+
+/** Every name the exporter exports: whatever reaches it through an import, a barrel, or a namespace uses one. */
+function exporterNames(root: string): Set<string> {
+  const sf = ts.createSourceFile(EXPORTER, readFileSync(join(root, EXPORTER), 'utf8'), ts.ScriptTarget.Latest, true);
+  const names = new Set<string>();
+  for (const statement of sf.statements) {
+    // A name the module does not export cannot be reached from another module.
+    if (!ts.canHaveModifiers(statement) || ts.getModifiers(statement)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) !== true) continue;
+    if (ts.isVariableStatement(statement)) {
+      for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name)) names.add(d.name.text);
+    } else if ((ts.isFunctionDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name !== undefined) {
+      names.add(statement.name.text);
+    }
+  }
+  return names;
+}
+
+const TELEMETRY_MODULE = /(^|\/)telemetry(\.js)?$/;
+
+/**
+ * Where a source names the exporter: any identifier spelled as one of its
+ * declarations, whether imported directly, through a barrel, or read off a
+ * namespace, and any import of a module called `telemetry`, static or
+ * dynamic (codex-3, gemini-1). Lexical, so a name computed at run time evades
+ * it; the triage records that limit.
+ */
+export function telemetryReferences(file: string, text: string, names: ReadonlySet<string>): string[] {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const hits: string[] = [];
+  for (const m of moduleSpecifiers(sf)) if (TELEMETRY_MODULE.test(m.text)) hits.push(`imports ${m.text}`);
+  walk(sf, (node) => {
+    if (ts.isIdentifier(node) && names.has(node.text)) hits.push(`names ${node.text}`);
+  });
+  return hits;
+}
 
 export const TELEMETRY_EXPORTS_NO_TEXT: LocalAssertion = runtime({
   id: 'I7.telemetry-exports-no-text',
@@ -254,13 +296,30 @@ export const TELEMETRY_EXPORTS_NO_TEXT: LocalAssertion = runtime({
     });
 
     const root = workspaceRoot();
-    const readers: string[] = [];
-    for (const file of walkFiles(join(root, 'packages'))) {
-      const rel = file.slice(root.length + 1).replaceAll('\\', '/');
-      if (!/^packages\/[^/]+(\/[^/]+)?\/src\/.*\.ts$/.test(rel) || rel.startsWith('packages/conformance/')) continue;
-      if (TELEMETRY_IMPORTERS.includes(rel)) continue;
-      if (/from\s+['"][./]+(?:[^'"]*\/)?telemetry\.js['"]/.test(readFileSync(file, 'utf8'))) readers.push(rel);
+    const names = exporterNames(root);
+    if (!names.has('telemetryOf')) throw new Error('I7: the exporter declares no telemetryOf; the scan would look for nothing');
+
+    // The scan must catch each route around a direct import, and pass a clean source, or it proves nothing.
+    const fixtures: ReadonlyArray<readonly [string, string, boolean]> = [
+      ['barrel.ts', "import { telemetryOf } from './index.js';\nexport const gate = telemetryOf;", true],
+      ['package.ts', "import * as api from '@olympus-ai/api';\nexport const gate = api.telemetryOf;", true],
+      ['dynamic.ts', "export const gate = async () => (await import('./telemetry.js')).default;", true],
+      ['clean.ts', "import { outcomes } from './outcomes.js';\nexport const gate = outcomes;", false],
+    ];
+    for (const [file, text, reads] of fixtures) {
+      if ((telemetryReferences(file, text, names).length > 0) !== reads) throw new Error(`I7: the read-back scan ${reads ? 'misses' : 'flags'} the fixture ${file}`);
     }
-    if (readers.length > 0) throw new Error(`I7: telemetry is read back by ${readers.join(', ')}`);
+
+    const readers: string[] = [];
+    for (const pkg of workspacePackages(root)) {
+      if (TELEMETRY_CLIENTS.includes(pkg.relativeDir)) continue;
+      for (const file of walkFiles(join(pkg.dir, 'src'))) {
+        const rel = file.slice(root.length + 1).replaceAll('\\', '/');
+        if (TELEMETRY_IMPORTERS.includes(rel)) continue;
+        const hits = telemetryReferences(rel, readFileSync(file, 'utf8'), names);
+        if (hits.length > 0) readers.push(`${rel} (${hits.join(', ')})`);
+      }
+    }
+    if (readers.length > 0) throw new Error(`I7: telemetry is read back by ${readers.join('; ')}`);
   },
 });
