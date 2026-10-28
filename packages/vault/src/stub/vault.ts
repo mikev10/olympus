@@ -139,7 +139,11 @@ export class StubVault implements Vault {
 
   recordUsage(r: UsageRecord): Promise<VaultRef> {
     if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error("StubVault: a usage record is collected by the runtime, or it is not recorded"));
-    if (typeof r.timing !== 'object') return Promise.reject(new Error('StubVault: a usage record carries the times the runtime stamped on the call (A-R12-01)'));
+    // As the filesystem Vault refuses it: timing is a start, and an end or null, never null, {}, or a list (codex-7).
+    const timing: unknown = r.timing;
+    if (timing === null || typeof timing !== 'object' || Array.isArray(timing) || typeof (timing as { startedAt?: unknown }).startedAt !== 'string' || !('endedAt' in timing)) {
+      return Promise.reject(new Error('StubVault: a usage record carries the times the runtime stamped on the call (A-R12-01)'));
+    }
     const ref = this.store(r.runId, 'usage', r);
     const refs = this.usage.get(r.runId) ?? [];
     if (!refs.some((u) => u.hash === ref.hash)) refs.push(ref);
@@ -236,6 +240,10 @@ export class StubVault implements Vault {
     // As the filesystem Vault reads a state committed before R19: no drafts, and grants that name none;
     // and before R12: no station entries (A-R12-02).
     const read = structuredClone(state) as Omit<RunState, 'drafts' | 'approvals' | 'stations'> & { drafts?: RunState['drafts']; stations?: RunState['stations']; approvals: ReadonlyArray<Omit<RunState['approvals'][number], 'draft'> & { draft?: RunState['approvals'][number]['draft'] }> };
+    // Only an absent history is a legacy one; a present one that is not a list is refused, as the filesystem Vault refuses it (codex-7).
+    if (read.stations !== undefined && !Array.isArray(read.stations)) {
+      return Promise.reject(new Error(`StubVault: run ${runId} holds station entries that are not a list`));
+    }
     return Promise.resolve({ ...read, drafts: read.drafts ?? {}, stations: read.stations ?? [], approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
   }
 

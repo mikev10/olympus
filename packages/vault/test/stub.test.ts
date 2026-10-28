@@ -240,3 +240,32 @@ describe('run state', () => {
     expect(read.tasks[taskId]).toBe('pending');
   });
 });
+
+describe('the R12 fields, as the filesystem Vault takes them (codex-7)', () => {
+  const usage = {
+    runId,
+    taskId: 'hello' as TaskId,
+    station: 'build' as StationId,
+    attempt: 1,
+    model: { provider: 'p', family: 'f', model: 'm', version: '1' },
+    role: { id: 'builder', sha256: 'a'.repeat(64) },
+    reading: { kind: 'unmetered' },
+    collectedBy: 'runtime',
+  };
+
+  test('refuses a usage record whose timing is not a start and an end', async () => {
+    for (const timing of [null, {}, [], { endedAt: null }]) {
+      await expect(vault.recordUsage({ ...usage, timing } as never)).rejects.toThrow(/times/);
+    }
+    await expect(vault.recordUsage({ ...usage, timing: { startedAt: '2026-10-28T10:00:00.000Z', endedAt: '2026-10-28T10:01:00.000Z' } } as never)).resolves.toMatchObject({ kind: 'usage' });
+  });
+
+  test('reads an absent station history as none, and refuses one that is present and not a list', async () => {
+    const { stations: _absent, ...legacy } = state();
+    await vault.commitRunState(legacy as never, '0');
+    expect((await vault.readRunState(runId)).stations).toEqual([]);
+    const stored = await vault.readRunState(runId);
+    await vault.commitRunState({ ...stored, stations: null } as never, stored.version);
+    await expect(vault.readRunState(runId)).rejects.toThrow(/station/);
+  });
+});
