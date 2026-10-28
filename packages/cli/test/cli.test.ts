@@ -284,3 +284,28 @@ describe('telemetry (R12)', () => {
     }
   });
 });
+
+describe('a collector credential is never printed (codex-2)', () => {
+  test('an endpoint with user information, another scheme, or no parse is refused without echoing it; a failed send prints no error text', async () => {
+    for (const endpoint of ['https://user:url-secret@collector.example', 'ftp://user:url-secret@collector.example', 'http://[url-secret']) {
+      const ran = await cli(remote('telemetry', 'any-run', '--endpoint', endpoint));
+      expect(ran.code).toBe(2);
+      expect([...ran.out, ...ran.err].join('\n')).not.toContain('url-secret');
+    }
+    // A send that fails reports the run and the signal, never the error's own text, which a custom fetch could fill with the request.
+    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3')))).out.join('\n')) as CreatedRun;
+    await settle(run.runId);
+    await cli(remote('cancel', run.runId));
+    const out: string[] = [];
+    const err: string[] = [];
+    const failing: typeof fetch = (input, init) => {
+      const target = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url;
+      if (target.includes('collector.invalid')) return Promise.reject(new Error(`could not send header-secret to ${target}`));
+      return globalThis.fetch(input, init);
+    };
+    const code = await runCli(remote('telemetry', run.runId, '--endpoint', 'http://collector.invalid', '--header', 'x-key=header-secret'), { env: {}, fetch: failing, out: (l) => out.push(l), err: (l) => err.push(l) });
+    expect(code).toBe(1);
+    expect([...out, ...err].join('\n')).not.toContain('header-secret');
+    expect(err.join('\n')).toMatch(/traces: the collector could not be reached/);
+  });
+});

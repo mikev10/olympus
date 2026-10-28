@@ -294,12 +294,14 @@ async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode
   const raw = values.endpoint ?? io.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   let collector: URL | null = null;
   if (raw !== undefined && raw !== '') {
+    // Each refusal is a fixed message: the value may carry a credential, and nothing here prints it (codex-2).
     try {
       collector = new URL(raw);
     } catch {
-      throw new UsageError(`'${raw}' is not a collector URL`);
+      throw new UsageError('the collector endpoint is not a URL');
     }
-    if (collector.protocol !== 'http:' && collector.protocol !== 'https:') throw new UsageError(`'${raw}' is not an http or https collector URL`);
+    if (collector.protocol !== 'http:' && collector.protocol !== 'https:') throw new UsageError('the collector endpoint is not an http or https URL');
+    if (collector.username !== '' || collector.password !== '') throw new UsageError('the collector endpoint carries user information; pass a credential with --header');
   }
   const headers = collector === null ? {} : otlpHeaders(values.header ?? [], io.env.OTEL_EXPORTER_OTLP_HEADERS);
   let code: ExitCode = 0;
@@ -317,7 +319,15 @@ async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode
     }
     for (const [signal, body] of [['traces', exported.traces], ['metrics', exported.metrics]] as const) {
       const base = collector.href.endsWith('/') ? collector.href : `${collector.href}/`;
-      const sent = await io.fetch(new URL(`v1/${signal}`, base), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      let sent: Response;
+      try {
+        sent = await io.fetch(new URL(`v1/${signal}`, base), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      } catch {
+        // The error's own text is not printed: it may quote the request, headers included (codex-2).
+        io.err(`${runId} ${signal}: the collector could not be reached`);
+        code = 1;
+        continue;
+      }
       if (sent.ok) {
         io.out(`${runId} ${signal}: sent (${String(sent.status)})`);
       } else {
