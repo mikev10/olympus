@@ -58,7 +58,7 @@ async function startEndpoint(): Promise<{ port: number; seen: Seen[]; close: () 
     q.on('data', (c: Buffer) => parts.push(c));
     q.on('end', () => {
       seen.push({ method: q.method ?? '', url: q.url ?? '', headers: q.headers });
-      let model: unknown = null;
+      let model: unknown;
       try {
         model = (JSON.parse(Buffer.concat(parts).toString('utf8')) as { model?: unknown }).model;
       } catch {
@@ -81,7 +81,7 @@ async function startEndpoint(): Promise<{ port: number; seen: Seen[]; close: () 
     seen,
     close: () => new Promise<void>((done) => {
       server.closeAllConnections();
-      server.close(() => done());
+      server.close(() => { done(); });
     }),
   };
 }
@@ -185,7 +185,8 @@ export const MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED = runtime({
           if (hosts.length < 3) throw new Error('I4: the relay container resolved no address for the host gateway');
           const direct = await provider.exec(handle, ['node', '--eval', DIRECT, String(endpoint.port), JSON.stringify(hosts)]);
           const attempts = JSON.parse(direct.stdout) as string[];
-          if (attempts.length !== hosts.length || attempts.some((line) => line.includes(' reached ')) || endpoint.seen.length !== 1) {
+          // Read again, not narrowed: the endpoint records asynchronously, and a request from the sandbox would land here.
+          if (attempts.length !== hosts.length || attempts.some((line) => line.includes(' reached ')) || [...endpoint.seen].length !== 1) {
             throw new Error(`I4: the sandbox reached the Docker host's endpoint without the relay: ${direct.stdout}`);
           }
 
@@ -217,7 +218,7 @@ async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const { port } = server.address() as AddressInfo;
-  await new Promise<void>((done) => server.close(() => done()));
+  await new Promise<void>((done) => server.close(() => { done(); }));
   return port;
 }
 
