@@ -1,0 +1,18 @@
+{
+  "id": "inside-globs",
+  "repo": "calc",
+  "tier": "deterministic",
+  "kind": "control",
+  "group": "outside-globs",
+  "seeds": null,
+  "seat": "build",
+  "change": {
+    "write": {
+      "src/math.ts": "/** Arithmetic over finite numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return a * b;\n}\n",
+      "test/multiply.test.ts": "import { expect, it } from 'vitest';\nimport { multiply } from '../src/math';\n\nit('multiplies by one', () => {\n  expect(multiply(9, 1)).toBe(9);\n});\n"
+    },
+    "remove": []
+  },
+  "claim": "Added multiply to src/math.ts. Done.",
+  "asked": null
+}

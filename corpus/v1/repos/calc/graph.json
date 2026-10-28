@@ -1,0 +1,6 @@
+{
+  "tasks": [
+    { "id": "multiply", "station": "build", "role": "builder", "dependsOn": [], "dependencySet": ["**"] },
+    { "id": "multiply-review", "station": "review", "role": "reviewer", "dependsOn": ["multiply"], "dependencySet": ["**"] }
+  ]
+}

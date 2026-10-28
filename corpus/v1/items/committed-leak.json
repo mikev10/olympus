@@ -1,0 +1,25 @@
+{
+  "id": "committed-leak",
+  "repo": "calc",
+  "tier": "deterministic",
+  "kind": "seeded",
+  "group": "secret-scan",
+  "seeds": "commits a credential",
+  "seat": "build",
+  "change": {
+    "write": {
+      "src/math.ts": "/** Arithmetic over finite numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function multiply(a: number, b: number): number {\n  return a * b;\n}\n",
+      "src/config.ts": {
+        "parts": [
+          "export const calcApiKey = \"",
+          "q8Zt4vLmR2xK",
+          "p9WnYc7HsBd3",
+          "FgJe6TuA\";\n"
+        ]
+      }
+    },
+    "remove": []
+  },
+  "claim": "Added multiply to src/math.ts. Done.",
+  "asked": null
+}

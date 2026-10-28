@@ -1,0 +1,20 @@
+{
+  "id": "sound-spec",
+  "repo": "calc",
+  "tier": "model",
+  "kind": "control",
+  "group": "spec-critic",
+  "seeds": null,
+  "seat": "spec-drafter",
+  "change": {
+    "write": {
+      ".drafts/{run}/spec.md": "# calc: multiply\n\n`src/math.ts` exports `multiply(a: number, b: number): number`, beside `add`.\n\n- `multiply(a, b)` returns the product of `a` and `b` for any two finite numbers, negative numbers and zero included.\n- `multiply(3, 4)` is `12`; `multiply(7, 0)` is `0`; `multiply(-2, -5)` is `10`.\n- `add` and its tests are unchanged.\n",
+      ".drafts/{run}/security.json": "{\n  \"none\": \"the change adds one pure function and crosses no trust boundary\"\n}\n",
+      ".drafts/{run}/run-requirements.json": "{\n  \"testCommand\": [\n    \"node\",\n    \"node_modules/vitest/vitest.mjs\",\n    \"run\"\n  ],\n  \"framework\": \"vitest\",\n  \"testDirectory\": \"test/acceptance\",\n  \"publicInterface\": \"multiply(a: number, b: number): number, exported from src/math.ts\"\n}\n",
+      ".drafts/{run}/questions.json": "{\n  \"assumptions\": [\n    {\n      \"point\": \"non-finite input\",\n      \"chose\": \"out of scope; the intent names finite numbers\"\n    }\n  ],\n  \"openQuestions\": []\n}\n"
+    },
+    "remove": []
+  },
+  "claim": "Drafted.",
+  "asked": "Add a function multiply(a, b) to src/math.ts that returns the product of two finite numbers, exported beside add. Leave add and its tests as they are."
+}

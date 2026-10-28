@@ -1,0 +1,73 @@
+{
+  "version": "v1",
+  "repos": {
+    "calc": {
+      "builderGlobs": [
+        "src/**",
+        "test/**"
+      ]
+    }
+  },
+  "groups": {
+    "assertion-weakened": [
+      "violation:assertion-weakened"
+    ],
+    "gate-failed": [
+      "gate-failed:acceptance"
+    ],
+    "lock-tamper": [
+      "violation:lock-tamper",
+      "stop:lock-tamper"
+    ],
+    "outside-globs": [
+      "violation:capability-escape"
+    ],
+    "secret-scan": [
+      "gate-failed:secret-scan"
+    ],
+    "skip-marker": [
+      "violation:skip-marker"
+    ],
+    "spec-critic": [
+      "critic"
+    ],
+    "test-critic": [
+      "critic"
+    ]
+  },
+  "files": {
+    "items/acceptance-edited.json": "3cede1c0e0f589dfc349669c557dbb6b7d21a53968907bbb3af43f6e44582321",
+    "items/assertion-tightened.json": "c41b701146658f206b2eb0e79fb2b9fc4710671c2026cb9a073f45161fca8584",
+    "items/assertion-weakened.json": "bf34779059f28edb36ef4377c3d5c08a7fb2a39ef12f8937fad9a84f5d35b6b7",
+    "items/claim-honest.json": "38366fc547ce93280a8269dd014c1a08b8e23095ebf3692536ca1c0ca2c26cd7",
+    "items/clean.json": "f5014dbe4c5267f10ba1ada8e4db3e51b6d67466b27ef8abdd523547fd46150e",
+    "items/committed-leak.json": "7565e691e02b8030f12363f6848c9fdb1039682502363da08274a53578df563d",
+    "items/config-from-environment.json": "55907c89bfc07d1a76c455f9b668b85deb8253be3afc10f6c5deb0ba30bd245f",
+    "items/hard-coded-output.json": "a1ca7eecfc657deeb23764c9dff1eae137d67eb17424355195e06d8706fc4018",
+    "items/inside-globs.json": "3e4292b2f5e7ec3c9a19a933bf8ef30966b94c8399854311cde0642f1ff70592",
+    "items/outside-globs.json": "c22f9265391c9337579d6f460a36af05e2bced9e32692fafeadf856d5fec2ff8",
+    "items/overreaching-spec.json": "3fc776c5d3b2ef79627d871ee3a61409e3bd6ef23f910a7f32361b2ed65aa2cd",
+    "items/skip-marker.json": "5f563663184dcb136540d4d8b9bce9574a0f1f748beabc4567025db063d50e33",
+    "items/sound-spec.json": "298ca2734c6d2eafc937dd027546d5db16a183a1093badcba4c77e604ff58f8c",
+    "items/suite-not-run.json": "cf5c196f371e3a60dd31cf63bd6df2e66e4d06c430e4f702c86fde9cb941fbec",
+    "items/suppressed-leak.json": "b09272a2ea18500abd3422c7734031096138595d1ba23a7fbcf11dbe17554460",
+    "items/test-added.json": "0fd55f30650ca5419eb504dd559d536702364682185fe0b5dcc5c66e304016ba",
+    "items/tests-follow-spec.json": "98b23ff2200a9371ad13947355f4d2ddf8b3bcdb23e0522a8a13fa50da954a0a",
+    "items/tests-off-spec.json": "b0494df98b290e9c030177c97b4f31fdebd024cfc392ee607709a30d398fe1f4",
+    "items/vague-spec.json": "1eafc6a44e1c59729e65b46d794261336a04cbfcb35120bcfcff4aa6878be0cb",
+    "repos/calc/.gitignore": "4d56952b0fb13bf8f9b6c13a6d4c34a075bac3af447636a1df4335d7576e2f97",
+    "repos/calc/.npmrc": "5b0b6fea68d061be83a90185875eabffd461d472f6982950b1e5db5384134bae",
+    "repos/calc/graph.json": "84e6480824f89712e96c1cdadcc9a48b5328bfe7b7ac53f93ceca9dcf0c9da87",
+    "repos/calc/package-lock.json": "e6eb590b38ce2a96dd619991119dd9f50b2edf01e76fdbbda3c54985c613bc8e",
+    "repos/calc/package.json": "32fcc207dfa3efb44460396a618b049940b3387e9954f433d8099cc6562e3e64",
+    "repos/calc/run-requirements.json": "d42eec545f97bb65d0d6e36932614848f651e83dd4bebe79534276f1e2acda4b",
+    "repos/calc/security.json": "9565bb4a64539bf06848f079802e0e0ed3b5df695722479efc397e0346193d87",
+    "repos/calc/spec.md": "1ef530c0ea1a109ad50ac85a7eff084ce8a42129e1376c57f8b85fa0992eac11",
+    "repos/calc/src/math.ts": "85d5771c127940443bdd781edc4541004329c841fcddf20517e7a83aa786f407",
+    "repos/calc/test/acceptance/multiply.test.ts": "767dbcad9210376186d310d95f27accbf7068bf5c06dfd49b4fc284ec50873be",
+    "repos/calc/test/math.test.ts": "d10e87513ef4b8d5f7f1b02d57697c2f2b928e41aa3f7111efb82b404b1ae13c",
+    "repos/calc/verify-drafted.json": "4d848f9c2c850a418ed642c30f289ab2c856e16f45d1e7d49699f43d6b5229b1",
+    "repos/calc/verify.json": "9ab2adbde0aecf805ae206ad4688b61c90c6be18b597579f59a0165822b2eb7a",
+    "roles/done-checker.md": "97d889abe92f25309515078b6bec9602c23e2b3a4885100d324560124752c906"
+  }
+}

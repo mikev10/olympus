@@ -1,0 +1,6 @@
+{
+  "testCommand": ["node", "node_modules/vitest/vitest.mjs", "run"],
+  "framework": "vitest",
+  "testDirectory": "test/acceptance",
+  "publicInterface": "multiply(a: number, b: number): number, exported from src/math.ts"
+}

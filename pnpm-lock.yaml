@@ -199,6 +199,37 @@ importers:
         specifier: ^4.0.3
         version: 4.0.3
 
+  packages/benchmark:
+    dependencies:
+      '@olympus-ai/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@olympus-ai/api':
+        specifier: workspace:*
+        version: link:../api
+      '@olympus-ai/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@olympus-ai/driver-claude-code':
+        specifier: workspace:*
+        version: link:../drivers/claude-code
+      '@olympus-ai/integrity':
+        specifier: workspace:*
+        version: link:../integrity
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@olympus-ai/vault':
+        specifier: workspace:*
+        version: link:../vault
+    devDependencies:
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+
   packages/cli:
     devDependencies:
       '@olympus-ai/api':
