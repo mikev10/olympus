@@ -300,6 +300,14 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' } })).rejects.toThrow(/ended/);
   });
 
+  test('refuses a time with no zone, and a call that ended before it started (codex-6)', async () => {
+    // A zone-free time reads differently on every host; the runtime writes ISO 8601 in UTC.
+    await expect(vault.recordUsage({ ...record, timing: { startedAt: '2026-10-28T10:00:00', endedAt: record.timing.endedAt } })).rejects.toThrow(/started/);
+    await expect(vault.recordUsage({ ...record, timing: { startedAt: record.timing.startedAt, endedAt: '2026-10-28T10:01:00' } })).rejects.toThrow(/ended/);
+    await expect(vault.recordUsage({ ...record, timing: { startedAt: '2026-10-28T10:01:00.000Z', endedAt: '2026-10-28T10:00:00.000Z' } })).rejects.toThrow(/before/);
+    await expect(vault.recordUsage({ ...record, timing: { startedAt: '2026-10-28T12:00:00.000+02:00', endedAt: '2026-10-28T10:00:00.000Z' } })).resolves.toMatchObject({ kind: 'usage' });
+  });
+
   test('stores a lost reading that says why, and refuses one that does not', async () => {
     await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: 'the sandbox could not be read' } })).resolves.toMatchObject({ kind: 'usage' });
     await expect(vault.recordUsage({ ...record, reading: { kind: 'lost', detail: '' } })).rejects.toThrow(/lost/);
@@ -481,6 +489,11 @@ describe('station entries (A-R12-02)', () => {
     const { stations: _stations, ...legacy } = state('0');
     await vault.commitRunState(legacy as never, '0');
     expect((await vault.readRunState(runId)).stations).toEqual([]);
+  });
+
+  test('refuses to return a state whose station entry carries a time with no zone (codex-6)', async () => {
+    await vault.commitRunState({ ...state('0'), stations: [{ station: 'spec', enteredAt: '2026-10-28T10:00:00' }] }, '0').catch(() => undefined);
+    await expect(vault.readRunState(runId)).rejects.toThrow(/station entries|no run state/);
   });
 
   test('refuses to return a state whose station entries carry no time', async () => {

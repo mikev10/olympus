@@ -280,8 +280,15 @@ function rolesProblem(roles: unknown): string | undefined {
 }
 
 /** An ISO 8601 time the runtime stamped: a string `Date` parses. */
+/**
+ * An ISO 8601 date and time with a zone, which every host reads as the same
+ * instant: the form the runtime writes. A time with no zone is read in each
+ * host's own zone, so it is refused rather than read (codex-6).
+ */
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
 function isTime(value: unknown): boolean {
-  return typeof value === 'string' && value !== '' && !Number.isNaN(Date.parse(value));
+  return typeof value === 'string' && ISO_TIME.test(value) && !Number.isNaN(Date.parse(value));
 }
 
 function usageProblem(r: unknown): string | undefined {
@@ -302,6 +309,9 @@ function usageProblem(r: unknown): string | undefined {
   if (!isRecord(timing) || !isTime(timing.startedAt)) return 'it carries no time the call started (A-R12-01)';
   if (reading.kind === 'pending' ? timing.endedAt !== null : !isTime(timing.endedAt)) {
     return reading.kind === 'pending' ? 'a pending record carries a time the call ended' : 'it carries no time the call ended (A-R12-01)';
+  }
+  if (typeof timing.endedAt === 'string' && Date.parse(timing.endedAt) < Date.parse(timing.startedAt as string)) {
+    return 'it records a call that ended before it started (codex-6)';
   }
   if (reading.kind === 'unmetered' || reading.kind === 'pending') return undefined;
   if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
