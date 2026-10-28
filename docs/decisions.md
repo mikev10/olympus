@@ -5319,6 +5319,19 @@ The spec is `docs/plan/R21-local-endpoint.md`.
   credential, header, then the upstream's form. Each refusal names one cause,
   and the I5 assertion pins each cause by its message.
 
+### D-R21-07: the acceptance criteria, run locally
+
+- **Run:** `pnpm typecheck` and `pnpm lint`, clean. Every package but the
+  Claude Code driver and conformance, serially: all passed (sandbox 189, the
+  OpenAI-compatible driver 40, api 216, adapters 771, core 160, vault 94,
+  benchmark 47, compiler 38, readiness 18, cli 8). Both R21 assertions pass
+  under the conformance package's `vitest`, and both fail with
+  `packages/sandbox/src` reverted. The conformance kit tests pass (111).
+  `git ls-files -- .plan/` prints nothing.
+- **Pending CI:** `pnpm conformance` and the Claude Code driver's paid suite,
+  under `run-driver` (D-A-CI-05). They are not marked passed here.
+- **Reverse:** none.
+
 ## R21 amendments to the contracts
 
 ### A-R21-01: a local upstream
