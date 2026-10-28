@@ -156,7 +156,13 @@ if (upstream === null || upstream.pathname !== '/' || upstream.search !== '' ||
   fail(local === '' ? 'the upstream is not an https origin' : 'the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
 }
 if (local === '' && upstream.protocol !== 'https:') fail('the upstream is not an https origin');
-if (local !== '' && (upstream.protocol !== 'http:' || upstream.hostname !== '${LOCAL_UPSTREAM_ALIAS}' || upstream.port === '')) {
+// The local port is read as declared, never from the parsed URL, which drops a default port 80 and keeps a port 0.
+const LOCAL_PREFIX = 'http://${LOCAL_UPSTREAM_ALIAS}:';
+const declared = String(process.env.RELAY_UPSTREAM || '');
+const portText = declared.indexOf(LOCAL_PREFIX) === 0 ? declared.slice(LOCAL_PREFIX.length) : '';
+const localPort = String(Number(portText)) === portText ? Number(portText) : 0;
+if (local !== '' && (upstream.protocol !== 'http:' || upstream.hostname !== '${LOCAL_UPSTREAM_ALIAS}' ||
+    !Number.isInteger(localPort) || localPort < 1 || localPort > 65535)) {
   fail('the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
 }
 if (!Array.isArray(paths) || paths.length === 0 ||
@@ -410,7 +416,7 @@ function send(req, res, target, path, headers, body, done) {
   } : {
     protocol: 'http:',
     hostname: upstream.hostname,
-    port: Number(upstream.port),
+    port: localPort,
     method: req.method,
     path: target,
     headers: headers,

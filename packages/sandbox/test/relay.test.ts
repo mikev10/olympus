@@ -663,6 +663,12 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     expect(await start({ ...env, RELAY_SCHEME: 'raw' })).toMatch(/no credential/u);
     expect(await start({ ...env, RELAY_LOCAL: '', RELAY_UPSTREAM: 'https://api.example.com' })).toMatch(/only to a local endpoint/u);
     expect(await start({ ...env, RELAY_CREDENTIAL: 'k' })).toMatch(/under the none scheme/u);
+    // The declared port is read as written: a URL parser drops a default port 80 and keeps a port 0.
+    expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:80` })).toMatch(/listening/u);
+    expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:65535` })).toMatch(/listening/u);
+    for (const given of ['0', '65536', '080', '']) {
+      expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:${given}` })).toMatch(/local upstream is not/u);
+    }
   });
 
   test('a provider given a Docker host port that is not a port refuses to be built (A-R21-03)', async () => {
