@@ -5072,8 +5072,9 @@ The spec is `docs/plan/R12-telemetry.md`.
 - The runtime stamps `startedAt` before the driver is called and `endedAt` after
   the sandbox is torn down and read.
 - `endedAt` is null on a `pending` record only.
-- The Vault refuses to write a record without timing, and reads a record written
-  before R12 as `'not-recorded'`.
+- The Vault refuses to write a record without timing. A record written before
+  R12 is read as `'not-recorded'` by `readUsage` in `api`, which parses every
+  usage record the Vault returns as bytes (`packages/api/src/cost.ts`).
 
 The maintainer confirmed it on 2026-10-28.
 

@@ -78,6 +78,7 @@ function state(overrides: Partial<RunState> = {}): RunState {
     runId,
     admission: { runId, kind: 'admission', hash: '0'.repeat(64) },
     station: 'intake',
+    stations: [],
     phase: 'working',
     tasks: {},
     attempts: {},

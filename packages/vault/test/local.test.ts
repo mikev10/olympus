@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY_DOCUMENT, StrictPolicyEngine, StubDriver, type ModelFamily, type RoleId, type RunId, type RunState, type TaskId } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CriticRecord, type DraftRecord, type EvidenceBundle } from '../src/index.js';
+import { draftDigest, isNoRunState, LocalVault, StubVault, type AdmissionRecord, type CallTiming, type CriticRecord, type DraftRecord, type EvidenceBundle } from '../src/index.js';
 
 const runId = 'run-1' as RunId;
 const taskId = 'task-1' as TaskId;
@@ -84,6 +84,7 @@ function state(version: string): RunState {
     runId,
     admission: ADMISSION_REF,
     station: 'spec',
+    stations: [{ station: 'spec', enteredAt: '2026-10-28T10:00:00.000Z' }],
     phase: 'working',
     tasks: {},
     attempts: {},
@@ -253,8 +254,10 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     model: { provider: 'anthropic', family: 'claude' as ModelFamily, model: 'sonnet', version: '1' },
     role: { id: 'builder' as RoleId, sha256: 'a'.repeat(64) },
     reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
+    timing: { startedAt: '2026-10-28T10:00:00.000Z', endedAt: '2026-10-28T10:01:00.000Z' } as CallTiming,
     collectedBy: 'runtime' as const,
   };
+  const PENDING_TIMING = { startedAt: '2026-10-28T10:00:00.000Z', endedAt: null };
 
   test('stores a record the runtime collected, metered or unmetered, and reads it back as written', async () => {
     const ref = await vault.recordUsage(record);
@@ -284,7 +287,17 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
   });
 
   test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {
-    await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' } })).resolves.toMatchObject({ kind: 'usage' });
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' }, timing: PENDING_TIMING })).resolves.toMatchObject({ kind: 'usage' });
+  });
+
+  test('refuses a record without the times the runtime stamped on the call (A-R12-01)', async () => {
+    const { timing: _omitted, ...untimed } = record;
+    await expect(vault.recordUsage(untimed as never)).rejects.toThrow(/started/);
+    await expect(vault.recordUsage({ ...record, timing: 'not-recorded' })).rejects.toThrow(/started/);
+    await expect(vault.recordUsage({ ...record, timing: { startedAt: 'yesterday', endedAt: record.timing.endedAt } })).rejects.toThrow(/started/);
+    // A terminal reading has ended; a pending one has not.
+    await expect(vault.recordUsage({ ...record, timing: PENDING_TIMING })).rejects.toThrow(/ended/);
+    await expect(vault.recordUsage({ ...record, reading: { kind: 'pending' } })).rejects.toThrow(/ended/);
   });
 
   test('stores a lost reading that says why, and refuses one that does not', async () => {
@@ -454,6 +467,25 @@ describe('drafting records (R19)', () => {
     const read = await vault.readRunState(runId);
     expect(read.drafts).toEqual({});
     expect(read.approvals[0]?.draft).toBeNull();
+  });
+});
+
+describe('station entries (A-R12-02)', () => {
+  test('reads back the stations a state records, in order', async () => {
+    const stations = [{ station: 'intake' as const, enteredAt: '2026-10-28T10:00:00.000Z' }, { station: 'spec' as const, enteredAt: '2026-10-28T10:05:00.000Z' }];
+    await vault.commitRunState({ ...state('0'), stations }, '0');
+    expect((await vault.readRunState(runId)).stations).toEqual(stations);
+  });
+
+  test('a state committed before R12 reads with no station entries, which says they were not recorded', async () => {
+    const { stations: _stations, ...legacy } = state('0');
+    await vault.commitRunState(legacy as never, '0');
+    expect((await vault.readRunState(runId)).stations).toEqual([]);
+  });
+
+  test('refuses to return a state whose station entries carry no time', async () => {
+    await vault.commitRunState({ ...state('0'), stations: [{ station: 'spec', enteredAt: '' }] }, '0');
+    await expect(vault.readRunState(runId)).rejects.toThrow(/station entries/);
   });
 });
 

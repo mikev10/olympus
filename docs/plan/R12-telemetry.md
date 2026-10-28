@@ -46,8 +46,9 @@ three. Nothing is rescaled or estimated.
   the runtime's clock just before the driver is called. The terminal record
   carries the same `startedAt` and an `endedAt` stamped after the sandbox is torn
   down and its meter read. A `lost` record is stamped the same way. The Vault
-  refuses a record without `timing` and reads a pre-R12 record as
-  `timing: 'not-recorded'`, never as a guess.
+  refuses a record without `timing`. A pre-R12 record is read as
+  `timing: 'not-recorded'`, never as a guess, by `readUsage` in `api`, which
+  parses every usage record the Vault returns as bytes.
 - **Station entries, recorded (A-R12-02).** `RunState` gains `stations`: one
   `{ station, enteredAt }` for every station the run entered, in order. Admission
   writes the first entry, and the line appends one on every commit that changes

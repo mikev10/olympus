@@ -60,6 +60,7 @@ function state(): RunState {
     runId,
     admission: { runId, kind: 'admission', hash: 'c'.repeat(64) },
     station: 'spec',
+    stations: [],
     phase: 'working',
     tasks: { [taskId]: 'pending' },
     attempts: {},

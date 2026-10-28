@@ -175,6 +175,10 @@ describe('hello at L1', () => {
     });
     expect(state.evidenceRefs).toHaveLength(1);
     await expect(components.vault.readRunState(runId)).resolves.toEqual(state);
+    // Every station the run entered, in order, each by the runtime's clock, the first at admission (A-R12-02).
+    expect(state.stations.map((e) => e.station)).toEqual(['intake', 'spec', 'test-design', 'plan', 'build', 'verify', 'review', 'integrate']);
+    const entered = state.stations.map((e) => Date.parse(e.enteredAt));
+    expect(entered.every((t, i) => !Number.isNaN(t) && (i === 0 || t >= (entered[i - 1] ?? Infinity)))).toBe(true);
 
     const [ref] = state.evidenceRefs;
     if (ref === undefined) return;
@@ -692,6 +696,16 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
       [helloReview, 'review', 1],
     ]);
     for (const record of records) expect(record.collectedBy).toBe('runtime');
+    // Each call is timed by the runtime: the pending record before it, with no end, and its reading after it, with the same start (A-R12-01).
+    for (const [i, record] of vault.usage.entries()) {
+      if (record.timing === 'not-recorded') throw new Error('the line wrote a usage record without its times');
+      if (record.reading.kind === 'pending') {
+        expect(record.timing.endedAt).toBeNull();
+        expect(vault.usage[i + 1]?.timing).toMatchObject({ startedAt: record.timing.startedAt });
+      } else {
+        expect(Date.parse(record.timing.endedAt ?? '')).toBeGreaterThanOrEqual(Date.parse(record.timing.startedAt));
+      }
+    }
     // The driver reported zero for every call; each record carries what its sandbox's destroy returned.
     const results = await Promise.all(Object.values(state.results).map((ref) => read<TaskResult>(vault, ref)));
     for (const result of results) expect(result.usage.costUsd).toBe(0);
@@ -706,6 +720,22 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     expect(totals.byStation.review?.calls).toBe(1);
     expect(totals.byTask[hello]?.calls).toBe(2);
     expect(totals.byTask[helloReview]?.metered.inputTokens).toBe(readings[2]?.reading.kind === 'metered' ? readings[2].reading.inputTokens : -1);
+  });
+
+  test('a usage record written before R12 is read as untimed, never given a time (A-R12-01)', async () => {
+    const outcome = await startRun(runRequest(runId, workspace, { ...components, reviewer: new ChosenDriver({ family: 'other' }) }));
+    const state = outcome.ok ? outcome.state : refusedState(outcome);
+    const [ref] = state.usage;
+    if (ref === undefined) throw new Error('the run recorded no usage');
+    const { timing: _timing, ...legacy } = await read<UsageRecord>(components.vault, ref);
+    const legacyHash = ref.hash;
+    class LegacyVault extends CountingVault {
+      override read(r: VaultRef): Promise<Uint8Array> {
+        return r.hash === legacyHash ? Promise.resolve(new TextEncoder().encode(JSON.stringify(legacy))) : super.read(r);
+      }
+    }
+    const [first] = await readUsage(new LegacyVault(components.vault), state);
+    expect(first?.timing).toBe('not-recorded');
   });
 
   test('a driver call that failed is recorded before its retry', async () => {
@@ -785,6 +815,8 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     class DiesAfterUsage extends DelegatingVault {
       private stored = false;
       override async recordUsage(r: UsageRecord): Promise<VaultRef> {
+        // The pending record is written as it is; the reading after the call is lost, and the process dies committing it.
+        if (r.reading.kind === 'pending') return this.inner.recordUsage(r);
         const ref = await this.inner.recordUsage({ ...r, reading: { kind: 'lost', detail: 'test' } });
         this.stored = true;
         return ref;
@@ -798,7 +830,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     await expect(startRun(runRequest(runId, workspace, { ...components, vault }))).rejects.toThrow(/the process died/u);
     const state = await components.vault.readRunState(runId);
     expect(state.usage).toHaveLength(0);
-    expect(await readUsage(components.vault, state)).toHaveLength(1);
+    expect((await readUsage(components.vault, state)).map((r) => r.reading.kind).sort()).toStrictEqual(['lost', 'pending']);
     expect(await resumeRun({ runId, components: built(components) })).toMatchObject({ ok: false, reason: 'meter-lost' });
   });
 
@@ -847,7 +879,7 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
   });
 
   test('a call whose usage the relay could not read makes its total a lower bound, counted apart from exact calls (D-P13-19)', () => {
-    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, collectedBy: 'runtime' as const };
+    const base = { runId, taskId: hello, station: 'build' as const, attempt: 1, model: new ChosenDriver().resolveModel('standard'), role: { id: 'builder' as RoleId, sha256: '0'.repeat(64) }, timing: 'not-recorded' as const, collectedBy: 'runtime' as const };
     const exact = { kind: 'metered' as const, calls: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, exhausted: 'none' as const, refused: 0 };
     expect(costTotals([{ ...base, reading: exact }]).run).toMatchObject({ bound: 'exact', metered: { unreadable: 0 } });
     const totals = costTotals([{ ...base, reading: exact }, { ...base, attempt: 2, reading: { ...exact, exhausted: 'unreadable' } }]);

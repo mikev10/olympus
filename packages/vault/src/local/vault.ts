@@ -242,7 +242,12 @@ function requireRunState(value: unknown, file: string): RunState {
   const drafts = value.drafts === undefined ? {} : value.drafts;
   if (!isMap(drafts)) throw new Error(`LocalVault: ${file} holds drafts that are not a map; refusing to return a partial record`);
   const approvals = (value.approvals as unknown[]).map((grant) => (isRecord(grant) && grant.draft === undefined ? { ...grant, draft: null } : grant));
-  return { ...value, drafts, approvals } as unknown as RunState;
+  // A state committed before R12 records no station entries: read as none, which says they were not recorded (A-R12-02).
+  const stations = value.stations === undefined ? [] : value.stations;
+  if (!Array.isArray(stations) || !(stations as unknown[]).every((e) => isRecord(e) && hasString(e, 'station') && isTime(e.enteredAt))) {
+    throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
+  }
+  return { ...value, drafts, approvals, stations } as unknown as RunState;
 }
 
 const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd', 'refused'] as const;
@@ -274,6 +279,11 @@ function rolesProblem(roles: unknown): string | undefined {
   return undefined;
 }
 
+/** An ISO 8601 time the runtime stamped: a string `Date` parses. */
+function isTime(value: unknown): boolean {
+  return typeof value === 'string' && value !== '' && !Number.isNaN(Date.parse(value));
+}
+
 function usageProblem(r: unknown): string | undefined {
   if (!isRecord(r) || !hasString(r, 'runId') || !hasString(r, 'taskId') || !hasString(r, 'station')) return 'it names no run, task, and station';
   if (r.collectedBy !== 'runtime') return "collectedBy is not 'runtime'";
@@ -288,6 +298,11 @@ function usageProblem(r: unknown): string | undefined {
   }
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
+  const timing = r.timing;
+  if (!isRecord(timing) || !isTime(timing.startedAt)) return 'it carries no time the call started (A-R12-01)';
+  if (reading.kind === 'pending' ? timing.endedAt !== null : !isTime(timing.endedAt)) {
+    return reading.kind === 'pending' ? 'a pending record carries a time the call ended' : 'it carries no time the call ended (A-R12-01)';
+  }
   if (reading.kind === 'unmetered' || reading.kind === 'pending') return undefined;
   if (reading.kind === 'lost') return hasString(reading, 'detail') && reading.detail !== '' ? undefined : 'a lost reading does not say why it was lost';
   if (reading.kind !== 'metered') return `the reading's kind ${String(reading.kind)} is not metered, unmetered, pending, or lost`;

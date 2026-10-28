@@ -138,7 +138,20 @@ export interface UsageRecord {
    */
   role: RoleVersion;
   reading: UsageReading;
+  /**
+   * When the call ran, by the runtime's clock: `startedAt` before the driver
+   * was called, `endedAt` after its sandbox was torn down and read, null on a
+   * `pending` record alone (A-R12-01). `not-recorded` is how a record written
+   * before R12 is read; the Vault refuses to write one.
+   */
+  timing: CallTiming | 'not-recorded';
   collectedBy: 'runtime';
+}
+
+/** A driver call's start and end, by the runtime's clock (A-R12-01). */
+export interface CallTiming {
+  readonly startedAt: string;
+  readonly endedAt: string | null;
 }
 
 /** One role at one version: what a call ran under. */
