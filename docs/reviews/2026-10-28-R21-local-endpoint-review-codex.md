@@ -1,3 +1,19 @@
+# External review of R21, codex, 2026-10-28
+
+The Codex family's review of R21, a local model endpoint on the Docker host reached through the relay. The triage of both reviews is `2026-10-28-R21-local-endpoint-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`. 64,996 input tokens ingested against a floor of 40,283; echo verified.
+- **Cross-family agreement:** gemini raised both findings too: 1 (the sandbox reaches the host through its own bridge gateway) as gemini-1, and 2 (port 80 refused at relay start) as gemini-4. Codex raised nothing alone.
+- **Date:** 2026-10-28
+- **Bundle:** `2026-10-28-R21-local-endpoint-review-bundle.txt`, SHA-256 `2bc338f9e19c5a31f04cfd1d4c35a76e0f08a36e42e73ff87c56922e57174df4`, base `f99ea35` (`reviewed/R12`), head `7e52685` (the unit branch after the acceptance run, before review). It held 15 sections: both changesets, every new file in full, and every modified file as a function-context diff. `docs/decisions.md` and `docs/plan/` were excluded. Prompt: `2026-10-28-R21-local-endpoint-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context and made no external lookups, and that local command execution was blocked. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1 and 5 are answered through the two findings, item 2 (no tautological assertion found), item 4 (casts, `any`, and declaration merging do not bypass the checks), item 6 (a list of sound mechanisms), and item 7 (the closing paragraph) explicitly. Item 3 (fails open) gets no answer of its own. The reviewer said the bundle did not show the full request handler, header filtering, or metering, so it could not establish them.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are treated as hints and were located by construct in the triage.
+
+---
+
 BASE: f99ea35  
 HEAD: 7e52685  
 packages/sandbox/test/relay.test.ts  

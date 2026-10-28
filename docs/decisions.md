@@ -5332,6 +5332,24 @@ The spec is `docs/plan/R21-local-endpoint.md`.
   under `run-driver` (D-A-CI-05). They are not marked passed here.
 - **Reverse:** none.
 
+### D-R21-08: what the review triage decided
+
+- **Fixed:** codex-2/gemini-4 (`d42c56b`). The relay reads a local port from
+  `RELAY_UPSTREAM` as written, not from `URL.port`. A parser drops a default
+  80, which made a declared, granted port 80 fail at start.
+- **Rejected:** gemini-2. P12's fixed strip list already drops
+  `authorization` and `x-api-key` under every scheme, and R21's assertion
+  checks it under `'none'`.
+- **Held for the maintainer:** codex-1/gemini-1. On a Linux engine the sandbox
+  reaches a host service bound to `0.0.0.0` or the bridge address through its
+  own `--internal` network's gateway, bypassing the relay. This was reproduced in
+  Docker Desktop's VM. The fix is `gateway_mode_ipv4=isolated` on every
+  network a sandbox joins, with an engine-support refusal and a probe of the
+  sandbox network's own gateway. It changes the sandbox's egress, which R21
+  excludes, so it waits on a scope decision (working rule 6). Evidence:
+  `docs/reviews/2026-10-28-R21-local-endpoint-triage.md`.
+- **Reverse:** revert `d42c56b`; the other two change no code.
+
 ## R21 amendments to the contracts
 
 ### A-R21-01: a local upstream

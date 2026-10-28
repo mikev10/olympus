@@ -1,3 +1,19 @@
+# External review of R21, gemini, 2026-10-28
+
+The Gemini family's review of R21, a local model endpoint on the Docker host reached through the relay. The triage of both reviews is `2026-10-28-R21-local-endpoint-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration. 56,816 input tokens ingested against a floor of 40,283; echo verified. This is the second run. The first (`2026-10-28-R21-local-endpoint-review-gemini.attempt-1.run.json`) was `FAILED`: HTTP 402 from the API, with no reply.
+- **Cross-family agreement:** codex raised findings 1 (the sandbox reaches the host through the bridge gateway) as codex-1, and 4 (port 80 refused at relay start) as codex-2. Findings 2 (other authentication headers forwarded) and 3 (the framing) were raised by gemini alone.
+- **Date:** 2026-10-28
+- **Bundle:** `2026-10-28-R21-local-endpoint-review-bundle.txt`, SHA-256 `2bc338f9e19c5a31f04cfd1d4c35a76e0f08a36e42e73ff87c56922e57174df4`, base `f99ea35` (`reviewed/R12`), head `7e52685` (the unit branch after the acceptance run, before review). It held 15 sections: both changesets, every new file in full, and every modified file as a function-context diff. `docs/decisions.md` and `docs/plan/` were excluded. Prompt: `2026-10-28-R21-local-endpoint-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer stated it had no prior context and made no lookups. This is a self-report, not independently verifiable.
+- **Coverage, and any gap:** item 1 is answered through findings 1 and 2, item 5 arguably through finding 4, item 6 with a list of two sound mechanisms, and item 7 through finding 3. Items 2 (tautological checks), 3 (fails open), and 4 (language escape hatches) came back empty. That is silence, not a clearance.
+- **Citations:** line numbers refer to positions in the bundle, not the repository. They are treated as hints and were located by construct in the triage.
+
+---
+
 BASE: f99ea35
 HEAD: 7e52685
 packages/sandbox/test/relay.test.ts
