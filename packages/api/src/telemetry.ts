@@ -14,7 +14,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { RunId, RunState, StationEntry, StationId, TaskId, TaskResult } from '@olympus-ai/core';
-import type { EnforcementDecision, EvidenceBundle, UsageRecord, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, EnforcementDecision, EvidenceBundle, UsageRecord, Vault } from '@olympus-ai/vault';
 import { readRunRecords, type RunRecords } from './outcomes.js';
 
 /** The GenAI semantic conventions the names below are read from. */
@@ -52,6 +52,7 @@ export const TELEMETRY_ATTRIBUTES = [
   'factory.relay.exhausted',
   'factory.call.ended',
   'factory.check.id',
+  'factory.check.id_digest',
   'factory.check.exit_code',
   'factory.check.held',
   'factory.claim.tool_calls',
@@ -310,6 +311,10 @@ export async function telemetryOf(vault: Vault, runId: RunId): Promise<Telemetry
   }
 
   const state = await vault.readRunState(runId);
+  // A drafted acceptance manifest's check ids were chosen by a model: they leave as digests, never as text (I7, codex-1).
+  // A record admitted before drafting existed names no acceptance manifest, and its ids were a person's.
+  const admission = decode(await vault.read(state.admission)) as Partial<AdmissionRecord>;
+  const draftedChecks = (admission.artifacts as Partial<AdmissionRecord['artifacts']> | undefined)?.acceptanceManifest?.source === 'drafted';
   const bundles: EvidenceBundle[] = [];
   for (const ref of state.evidenceRefs) bundles.push(decode(await vault.read(ref)) as EvidenceBundle);
   const { calls, untimed } = callsOf(records.usage);
@@ -361,11 +366,15 @@ export async function telemetryOf(vault: Vault, runId: RunId): Promise<Telemetry
       const checkEnd = new Date(Date.parse(check.startedAt) + check.durationMs).toISOString();
       const group = groupOf(entryAt(stations, 'verify', check.startedAt), bundle.taskId);
       group.times.push(check.startedAt, checkEnd);
-      const attributes = [str('factory.check.id', check.checkId), int('factory.check.exit_code', check.exitCode), str('factory.task.id', bundle.taskId)];
+      const attributes = [
+        draftedChecks ? str('factory.check.id_digest', hex(`check ${check.checkId}`, 16)) : str('factory.check.id', check.checkId),
+        int('factory.check.exit_code', check.exitCode),
+        str('factory.task.id', bundle.taskId),
+      ];
       if (check.expectation !== null) attributes.push(bool('factory.check.held', check.expectation.held));
       group.children.push({
         traceId, spanId: spanId(`check\0${String(b)}\0${String(c)}`), parentSpanId: taskSpanId(group),
-        name: `check ${check.checkId}`, kind: SPAN_INTERNAL,
+        name: draftedChecks ? 'check' : `check ${check.checkId}`, kind: SPAN_INTERNAL,
         startTimeUnixNano: nanos(check.startedAt), endTimeUnixNano: nanos(checkEnd),
         attributes, events: [], status: { code: 0 },
       });

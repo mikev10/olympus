@@ -217,12 +217,40 @@ export const TELEMETRY_EXPORTS_NO_TEXT: LocalAssertion = runtime({
       if (outside.length > 0) throw new Error(`I7: the export carries attributes outside the allowlist: ${outside.join(', ')}`);
       const text = JSON.stringify(e);
       if (text.includes(NARRATIVE)) throw new Error("I7: a claim's narrative was exported");
+      const checkIds: string[] = [];
       for (const ref of state.evidenceRefs) {
-        const bundle = await readRecord<{ checks: Array<{ stdout: string; stderr: string }> }>(vault, ref);
+        const bundle = await readRecord<{ checks: Array<{ checkId: string; stdout: string; stderr: string }> }>(vault, ref);
         for (const c of bundle.checks) {
+          checkIds.push(c.checkId);
           for (const out of [c.stdout, c.stderr]) if (out.trim().length > 8 && text.includes(JSON.stringify(out).slice(1, -1))) throw new Error("I7: a check's output was exported");
         }
       }
+
+      // A drafted acceptance manifest's check ids are text a model chose: they leave only as digests (codex-1, gemini-2).
+      const drafted: Vault = new Proxy(vault, {
+        get(target, prop, receiver) {
+          if (prop === 'read') {
+            return async (ref: Parameters<Vault['read']>[0]) => {
+              const bytes = await target.read(ref);
+              if (ref.kind !== 'admission') return bytes;
+              const record = JSON.parse(new TextDecoder().decode(bytes)) as { artifacts: Record<string, unknown> };
+              return new TextEncoder().encode(JSON.stringify({ ...record, artifacts: { ...record.artifacts, acceptanceManifest: { source: 'drafted' } } }));
+            };
+          }
+          const value: unknown = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const fromDraft = await exported(drafted, runId);
+      const draftSpans = spansOf(fromDraft);
+      const checks = draftSpans.filter((s) => s.name === 'check' || s.name.startsWith('check '));
+      if (checkIds.length === 0 || checks.length !== checkIds.length) throw new Error('I7: the drafted run exported no check spans to inspect');
+      if (checks.some((s) => s.name !== 'check' || attr(s, 'factory.check.id') !== undefined || typeof attr(s, 'factory.check.id_digest') !== 'string')) {
+        throw new Error('I7: a drafted check id left the runtime as text');
+      }
+      const draftText = JSON.stringify(fromDraft);
+      const leaked = checkIds.filter((id) => draftText.includes(JSON.stringify(id)));
+      if (leaked.length > 0) throw new Error(`I7: drafted check ids appear in the export: ${leaked.join(', ')}`);
     });
 
     const root = workspaceRoot();
