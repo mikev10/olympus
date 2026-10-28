@@ -4900,3 +4900,189 @@ vocabulary line. No contract type changes. The maintainer confirmed it on
 readable-only rates and counted against the model in the every-trial rates
 (D-R7-17). No contract type changes. The maintainer confirmed it on
 2026-10-27.
+
+## R12: Telemetry export (OpenTelemetry)
+
+Built against `v2` at 6909a7c. The entry had no spec, no out-of-scope list and
+no acceptance criteria, and it claimed that the records hold the times its spans
+need. They do not. The session stopped and asked four questions. On 2026-10-28
+the maintainer took every recommendation:
+
+- record call and station times as contract amendments;
+- put the exporter in `api` with a CLI command;
+- write the OTLP/JSON by hand;
+- export on demand and idempotently.
+
+The spec is `docs/plan/R12-telemetry.md`.
+
+### D-R12-01: the boundary R12 was started on
+
+- **Deliverables:**
+  - call times recorded on usage records (A-R12-01);
+  - station entries recorded in run state (A-R12-02);
+  - `telemetryOf` in `api`, building OTLP/JSON traces and metrics for a finished
+    run;
+  - `GET /runs/:id/telemetry`;
+  - `olympus-ai telemetry <run id>... [--endpoint] [--header]`.
+- **Out of scope, verbatim from the spec:**
+  - live instrumentation of the line, or spans for a run still in flight;
+  - the server pushing to a collector, a background exporter, or a retry queue;
+  - any metric or attribute that is read back by a gate, a level, or a rate;
+  - prompt, completion, claim narrative, check stdout or stderr, event payloads,
+    or any opt-in to export them;
+  - the Claude Code CLI's own telemetry;
+  - a dashboard, local or hosted, or a reference dashboard definition;
+  - OTLP/protobuf or gRPC transport;
+  - listing every run over the API so that `telemetry` can export a window;
+  - re-timing records written before the amendments.
+- **Acceptance, as commands:**
+  - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm conformance` pass,
+    with the R12 assertions registered and `pending-baseline.json` unchanged;
+  - there are changesets for vault, api, the CLI, and conformance;
+  - `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - I2: times come from the runtime's clock, and the driver's tool-call count is
+    labelled as its claim.
+  - I5: an unfinished run is refused, and an absent time or reading is never
+    guessed or zeroed.
+  - I7: only allowlisted typed fields are exported.
+  - I8: every span kind and amendment has an assertion.
+  - I9: the export is a route, and the CLI fetches and posts.
+  - I10: the attribute namespace is `factory.`.
+- **Pending registry entries owed:** none. A grep for `R12` across
+  `packages/conformance/src/registry` and `pending-baseline.json` finds no
+  owner entry.
+
+**Assumptions, each verified:**
+
+- **Every dependency has shipped.** `git tag -l 'reviewed/*'` lists P9, P13, P14,
+  and R2. `git log origin/v2` shows their merges: 3528016, 9930590, 7fcb611, and
+  2dc1f11.
+- **No record times a station, task, or attempt.**
+  - `RunState` holds only the current `station` (`packages/core/src/run/types.ts`,
+    `RunState`).
+  - `UsageRecord` has no time (`packages/vault/src/types.ts`, `UsageRecord`), and
+    neither does `MeterReading`.
+  - Timed records are `CheckResult.startedAt` and `durationMs`
+    (`packages/integrity/src/types.ts`), `Run.createdAt`,
+    `EnforcementDecision.decidedAt`, `LockManifest.lockedAt`, and
+    `IntegrationMerged.mergedAt`.
+  - `TaskResult.usage.wallClockMs` is the driver's account
+    (`packages/core/src/driver/contract.ts`).
+- **The usage write sites can carry times.** The pending record is written
+  immediately before `driver.runTask`, and the terminal or lost record after
+  `sandbox.destroy` (`packages/api/src/line.ts`, `recordPending` and
+  `recordUsage`).
+- **Every station change has one commit path.** It goes through
+  `commit`/`apply` (`packages/api/src/line.ts`). The initial state is
+  written at admission (`packages/api/src/run.ts`, near `const now`).
+- **The Vault already normalises old states.** It reads a pre-R19 state's
+  `drafts` as `{}` (`packages/vault/src/local/vault.ts`, `requireRunState`), so
+  reading a pre-R12 `stations` as `[]` follows the same pattern.
+- **Input tokens must be summed.** The relay's `inputTokens` excludes cached
+  input in both dialects (`packages/sandbox/src/local/relay.ts`, where it
+  subtracts `prompt_tokens`' cached part). The convention's
+  `gen_ai.usage.input_tokens` includes cached tokens
+  (`docs/gen-ai/gen-ai-token-metrics.md` at
+  `open-telemetry/semantic-conventions-genai@51a0f58`). So the export sums input,
+  cache read, and cache write.
+- **The convention names, read from `docs/registry/attributes/gen-ai.md` and
+  `docs/gen-ai/gen-ai-agent-spans.md` at that commit.**
+  - `gen_ai.operation.name` with the value `invoke_agent`, span kind `CLIENT`;
+  - `gen_ai.provider.name` (required);
+  - `gen_ai.request.model`, `gen_ai.agent.name`, and `gen_ai.agent.version`;
+  - `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+    `gen_ai.usage.cache_read.input_tokens`, and
+    `gen_ai.usage.cache_write.input_tokens`;
+  - the metric `gen_ai.client.operation.duration`, a histogram in `s`.
+- **The CLI is a client of the HTTP API only.** It imports types from `api` and
+  no code (`packages/cli/src/cli.ts`, header comment, D-P9-07). So the export is
+  built by a route and the CLI does the posting.
+- **R2 already decides whether a run is finished.** `readRunRecords` returns
+  `ending` (`packages/api/src/outcomes.ts`), and the export reuses it rather than
+  deriving a second answer.
+
+**Where the code differs from the entry:**
+
+- The entry's spans for each station, task, and attempt have no times to come
+  from. A-R12-01 and A-R12-02 add them.
+- The "tool calls" the entry lists exist only in the driver's `TaskResult.events`,
+  which is its account of itself. They are exported only as the latest result's
+  count, named `factory.claim.tool_calls`.
+
+### D-R12-02: the four choices the maintainer took
+
+- **Times are recorded, not inferred** (A-R12-01, A-R12-02).
+  - **Rejected:** exporting only what is already timed. That shows neither where
+    time went nor what a station cost.
+  - **Reverse:** drop both amendments. The exporter would then emit run, check,
+    and decision events only.
+- **The exporter lives in `api` with a CLI command.**
+  - **Rejected:** a new `telemetry` package. It would change the spine's frozen
+    package list for a module the service already has every input for.
+  - **Reverse:** move `telemetry.ts` into a package and amend F1.
+- **OTLP/JSON is written by hand.**
+  - **Rejected:** the `@opentelemetry` SDK and exporter. They are built for live
+    instrumentation on the wall clock, back-dated spans are awkward to build
+    through them, and they add about ten packages to the supply chain.
+  - **Reverse:** swap the encoder for the SDK's; the span tree is unchanged.
+- **Export is on demand and idempotent.**
+  - **Rejected:** the service pushing at the end of a run. That adds a network
+    side effect and a failure path to the line, and lets a token holder point the
+    server at any host.
+  - **Reverse:** add a post-drive hook that calls `telemetryOf` and posts.
+
+### D-R12-03: metrics name tokens and cost under `factory.`, not the inference counters
+
+- **Ambiguous:** the convention's token counters are
+  `gen_ai.client.inference.usage.*`, defined for single inference operations. A
+  driver call is an agent invocation. The relay sums many inference calls inside
+  it, and records neither their count by operation nor their modality.
+- **Chosen:**
+  - Tokens and cost go on each `invoke_agent` span under the convention's
+    `gen_ai.usage.*` names, which the agent span defines.
+  - The metric for tokens is `factory.usage.tokens`, split by
+    `factory.token.kind`, and the metric for cost is `factory.usage.cost`.
+  - Duration uses `gen_ai.client.operation.duration`, which the convention
+    defines for operations other than inference.
+- **Why:** reporting an aggregate under a per-inference name would claim a
+  granularity the record does not have.
+- **Reverse:** rename the two counters once the conventions define agent-level
+  token metrics.
+
+### D-R12-04: an unfinished run is refused
+
+- **Chosen:** `telemetryOf` refuses a run whose R2 ending is `unfinished`, with
+  `409 not-finished`.
+- **Why:**
+  - A run's span ends at the latest time its records hold. Exporting an open run
+    would send the same span id twice with two different ends, which breaks
+    idempotency.
+  - A run still in flight is out of scope.
+- **Reverse:** export unfinished runs with the run span left open. The ids stay
+  stable, but backends would keep the first copy.
+
+## R12 amendments to the contracts
+
+### A-R12-01: a usage record carries the call's times
+
+`UsageRecord` gains
+`timing: { startedAt: string; endedAt: string | null } | 'not-recorded'`.
+
+- The runtime stamps `startedAt` before the driver is called and `endedAt` after
+  the sandbox is torn down and read.
+- `endedAt` is null on a `pending` record only.
+- The Vault refuses to write a record without timing, and reads a record written
+  before R12 as `'not-recorded'`.
+
+The maintainer confirmed it on 2026-10-28.
+
+### A-R12-02: run state records each station it entered
+
+`RunState` gains `stations: readonly { station: StationId; enteredAt: string }[]`.
+
+- Admission writes the first entry, and every commit that changes the station
+  appends one.
+- The Vault reads a state written before R12 as `[]`.
+
+The maintainer confirmed it on 2026-10-28.
