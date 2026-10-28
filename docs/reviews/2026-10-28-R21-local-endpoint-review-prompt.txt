@@ -1,0 +1,147 @@
+The code under review is in the file
+`2026-10-28-R21-local-endpoint-review-bundle.txt` (SHA-256 2bc338f9e19c5a31f04cfd1d4c35a76e0f08a36e42e73ff87c56922e57174df4) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the model relay's support for a local model endpoint, and the
+driver and host configuration that use it, in a TypeScript project. You have
+the source and nothing else — no design documents, no author reasoning, no
+prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime runs an agent's task inside a Docker sandbox on an internal network
+with no route out. The agent reaches its model only through a "relay": a
+separate container the runtime starts, which holds the model credential,
+forwards a granted set of paths to one fixed upstream, and meters and bounds
+spending. Until this change the relay accepted only an `https` upstream and
+refused to start without a credential. This change lets it reach a model
+listening over plain `http` on the Docker host with no credential. That is
+allowed only when the relay specification declares a local upstream as a
+structure (`{ local: 'docker-host', port }`), declares no credential as `null`
+together with a `'none'` scheme, and names a port the sandbox provider was
+given by its operator (`dockerHostPorts`). The route is a host name
+(`model-host`, mapped to the Docker host gateway) added to the relay container
+alone. The OpenAI-compatible driver's configuration and the host's endpoint
+file take the same declarations.
+
+It must hold against a capable, motivated party trying to reach the Docker host
+or an unauthenticated route out of the sandbox that the operator did not
+declare. That includes making the relay speak plain `http` to somewhere other
+than the declared host port, making it forward without a credential to a
+remote origin, reaching the host's services from inside the sandbox, or getting
+a key the task supplies to the endpoint. Assume no deceptive intent — only that
+the easiest path gets taken.
+
+That party controls everything the task does inside the sandbox: every process,
+file, and request it makes to the relay, including headers and request targets.
+A relay specification can also arrive from a driver's code, so assume it may be
+malformed or not match its TypeScript type. The party does not control the
+operator's configuration: the provider's `credentials` and `dockerHostPorts`,
+or the endpoint file and environment the host reads. It also does not control
+the components the runtime is wired with. The Vault, the sandbox provider, and
+the drivers are runtime-selected and trusted, even where a function takes one
+as an argument, and the party does not control code running inside the
+runtime's own process.
+
+The invariants at stake:
+
+- Default deny. A capability not granted in policy or by the operator is
+  unavailable. A route to the Docker host is a capability.
+- Fail closed. A missing or malformed declaration is a refusal, never a silent
+  degrade. In particular `http`, and the absence of a credential, are never
+  inferred from a URL or from an absent or empty value.
+- No agent reaches the model credential. It is held in the relay container and
+  appears in no sandbox process, file, environment, or argument vector.
+- Spending is metered and bounded by the relay for every upstream, local or
+  not, exactly as for a remote one.
+
+The mechanisms that matter most:
+
+- `checkRelay` and `checkLocalUpstream` in `packages/sandbox/src/local/relay.ts`:
+  the TypeScript-side validation of upstream, scheme, credential, and port.
+- The start checks and `send` inside `RELAY_SOURCE`, the relay's own program:
+  the second validation, the choice of `http` or `https`, and which headers
+  reach the endpoint.
+- `startRelay`'s argument vector: where `--add-host` and the credential
+  variable are added, and on which container.
+- `checkConfig`/`checkUpstream` in the driver, and `parseEndpointFile`,
+  `endpointGrants`, and `main.ts` in the host: how a keyless local endpoint is
+  read, and what the provider is given.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+- any address but the Docker host: a LAN machine, a named Docker network, a
+  container's name, or an `http` URL of any kind
+- an `https` endpoint with no credential
+- starting, stopping, pulling, or health-checking the local model server
+- binding the host's server for the operator, or detecting one bound to
+  loopback on a Linux engine; the relay's call fails, and the run says why
+- a price inferred from the endpoint being local. Its prices are the operator's
+  table; zero is a price the operator writes
+- any change to the sandbox's egress, the proxy, or the allowlist
+- a paid suite. Every assertion runs against a listener the test owns
+
+Absent work listed here is not a defect. Identifiers such as A-R21-01 or R6 in
+comments are references to the project's own records, which you do not have,
+and do not need resolving.
+
+THE QUESTION
+
+How would a task inside the sandbox, or a relay specification that does not
+match its type, get the relay to speak plain `http` to anything but the declared
+port on the Docker host? How would it get the relay to forward without a
+credential to anything but that endpoint, or to carry a task-supplied key to
+it? How would it reach the Docker host from the sandbox without the relay, or
+make a local call that is not metered and bounded as a remote one is? And where
+do the TypeScript-side check and the relay's own start check disagree, so that
+one accepts what the other was meant to refuse?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
