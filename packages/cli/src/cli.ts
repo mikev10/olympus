@@ -7,7 +7,7 @@
  * erased, so nothing of the runtime runs in this process (D-P9-07).
  */
 import { parseArgs } from 'node:util';
-import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody } from '@olympus-ai/api';
+import type { ApproveBody, CreateRunBody, ErrorBody, RejectBody, TelemetryExport } from '@olympus-ai/api';
 
 export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -38,6 +38,9 @@ const USAGE = [
   '  events   <run id>',
   '  report   <run id>      cost, cache-hit rate, gates, iterations, mismatches, refusals, and the merge, from the Vault',
   '  outcomes [--from <time>] [--to <time>]   safety and throughput rates over every run, each with its sample and bound',
+  '  telemetry <run id>... [--endpoint <otlp url>] [--header <name=value>]...',
+  '           a finished run as OTLP/JSON traces and metrics: printed one run per line, or sent to <endpoint>/v1/traces',
+  '           and /v1/metrics (or OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS)',
   '',
   'every command needs --url <api url> (or FACTORY_API_URL) and --token <token> (or FACTORY_API_TOKEN)',
 ].join('\n');
@@ -255,6 +258,77 @@ async function outcomes(io: CliIo, t: Target, args: string[]): Promise<ExitCode>
   return report(io, await call(io, t, 'GET', search === '' ? 'outcomes' : `outcomes?${search}`));
 }
 
+/** `name=value` pairs, from `--header` or from the comma-separated `OTEL_EXPORTER_OTLP_HEADERS`, whose values are percent-encoded. */
+function otlpHeaders(flags: readonly string[], env: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const pairs = [...(env === undefined || env === '' ? [] : env.split(',').map((p) => ({ pair: p.trim(), encoded: true }))), ...flags.map((pair) => ({ pair, encoded: false }))];
+  for (const { pair, encoded } of pairs) {
+    const at = pair.indexOf('=');
+    const name = at < 1 ? '' : pair.slice(0, at).trim();
+    if (name === '') throw new UsageError('a collector header is name=value; the name is not given');
+    let value = pair.slice(at + 1).trim();
+    if (encoded) {
+      try {
+        value = decodeURIComponent(value);
+      } catch {
+        throw new UsageError(`the collector header ${name} in OTEL_EXPORTER_OTLP_HEADERS is not percent-encoded`);
+      }
+    }
+    headers[name.toLowerCase()] = value;
+  }
+  return headers;
+}
+
+/**
+ * Each named run's telemetry, read from the service. With no collector it is
+ * printed; with one, this client sends it there. The service never makes the
+ * request, so a token holder cannot point the runtime at a host (D-R12-02).
+ * A header's value is never printed: it may be the collector's credential.
+ */
+async function telemetry(io: CliIo, t: Target, args: string[]): Promise<ExitCode> {
+  const { values, positionals } = parseArgs({
+    args, strict: true, allowPositionals: true,
+    options: { endpoint: { type: 'string' }, header: { type: 'string', multiple: true } },
+  });
+  if (positionals.length === 0) throw new UsageError('telemetry needs at least one <run id>');
+  const raw = values.endpoint ?? io.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  let collector: URL | null = null;
+  if (raw !== undefined && raw !== '') {
+    try {
+      collector = new URL(raw);
+    } catch {
+      throw new UsageError(`'${raw}' is not a collector URL`);
+    }
+    if (collector.protocol !== 'http:' && collector.protocol !== 'https:') throw new UsageError(`'${raw}' is not an http or https collector URL`);
+  }
+  const headers = collector === null ? {} : otlpHeaders(values.header ?? [], io.env.OTEL_EXPORTER_OTLP_HEADERS);
+  let code: ExitCode = 0;
+  for (const runId of positionals) {
+    const res = await call(io, t, 'GET', runPath(runId, 'telemetry'));
+    if (res.status < 200 || res.status >= 300) {
+      report(io, res);
+      code = 1;
+      continue;
+    }
+    const exported = res.body as TelemetryExport;
+    if (collector === null) {
+      io.out(JSON.stringify({ runId, ...exported }));
+      continue;
+    }
+    for (const [signal, body] of [['traces', exported.traces], ['metrics', exported.metrics]] as const) {
+      const base = collector.href.endsWith('/') ? collector.href : `${collector.href}/`;
+      const sent = await io.fetch(new URL(`v1/${signal}`, base), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (sent.ok) {
+        io.out(`${runId} ${signal}: sent (${String(sent.status)})`);
+      } else {
+        io.err(`${runId} ${signal}: the collector answered ${String(sent.status)}`);
+        code = 1;
+      }
+    }
+  }
+  return code;
+}
+
 export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCode> {
   try {
     const { values, positionals } = parseArgs({
@@ -314,6 +388,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
       }
       case 'outcomes':
         return await outcomes(io, t, own);
+      case 'telemetry':
+        return await telemetry(io, t, own);
       default:
         throw new UsageError(`unknown command '${command}'`);
     }

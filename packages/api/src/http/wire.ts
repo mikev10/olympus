@@ -86,6 +86,8 @@ export type ErrorCode =
   | 'too-large'
   | 'refused'
   | 'conflict'
+  /** A run whose records may still change is not exported (D-R12-04). */
+  | 'not-finished'
   | 'internal';
 
 /** Every non-2xx body. `refusal` carries the runtime's typed outcome where there is one, so a client reads fields, never prose. */

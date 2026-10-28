@@ -27,6 +27,7 @@ import {
 import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT } from './local-relay.js';
 import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
 import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
+import { TELEMETRY_GUESSES_NOTHING } from './telemetry.js';
 import { contendOnCommit, withVaultDirs } from './local-vault.js';
 import { assertPolicyLoadIsHardened } from './policy-file.js';
 import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './policy.js';
@@ -55,6 +56,8 @@ export const I5: InvariantEntry = {
     ...R4_I5,
     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
+    // R12: an unfinished run, an unrecorded time, and a lost reading are refused or marked, never guessed.
+    TELEMETRY_GUESSES_NOTHING,
     INDETERMINATE_PROBE_LOWERS,
     UNSUPPORTED_STACK_REFUSES,
     REFUSAL_NAMES_THE_BOUNDING_TERM,

@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { R20_I7 } from './roles.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
@@ -34,6 +35,8 @@ export const I7: InvariantEntry = {
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I7,
     ...R20_I7,
+    // R12: only allowlisted typed fields leave in telemetry, and nothing reads it back.
+    TELEMETRY_EXPORTS_NO_TEXT,
     compileError({
       id: 'I7.untrusted-text-is-not-a-string',
       title: 'UntrustedPayload.raw cannot reach a string-typed slot, a steer message, or a string method without a cast',
