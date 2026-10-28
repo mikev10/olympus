@@ -5090,26 +5090,30 @@ The maintainer confirmed it on 2026-10-28.
 
 ### D-R12-05: local acceptance, and what reconciles only in CI
 
-- **Found:** locally, `pnpm conformance` on 9b66e3e fails 27 tests, every one
-  of them through an external assertion. 25 are refused as
-  `I8.external-assertion-execution-reconciled: tree-changed`. The other two are
-  the registry checks that count those refusals (`I8.registry-complete`, and
-  seven driver claims whose only assertions are external).
-  - The reports behind them are local artifacts from earlier trees. The api
-    report is `packages/api/.conformance/run.json`, `treeHash` c5e28e7d58fd,
-    written 2026-10-19.
-  - The drivers' reports are written only by CI's labelled, paid steps
-    (`.github/workflows/ci.yml`, "Driver assertions, which write the conformance
-    run report").
-  - A local `pnpm test` does not rewrite them.
-- **What R12 owns passes.** All three R12 assertions pass, along with
-  `pnpm typecheck`, `pnpm lint`, the vault, api, and CLI suites, and every
-  other local assertion.
+- **Found, first:** `pnpm -r test` ran only `conformance` and `sandbox`, the
+  first topological level, and stopped once they failed. The driver and api
+  suites, whose runs write the reports conformance reconciles, never ran. So
+  every external assertion read a report from an earlier tree (`tree-changed`).
+- **Run instead:**
+  - every package but the Claude Code driver and conformance, serially, so that
+    concurrent Docker runs do not contend;
+  - then `pnpm conformance`.
+- **Result:** the openai-compatible driver's report refreshed and reconciled.
+  What still fails is the set `ship-unit` exempts:
+  - the Claude Code driver's externals;
+  - the api `test/paid/` externals;
+  - the two registry meta-tests that count them, whose `missing` lines are
+    `driver.*` claims.
+
+  Those reports are written only by CI's `run-driver` steps, which hold the
+  model credential.
+- **Found, second:** the serial run caught a real defect. An outcomes test
+  fixture built its usage records with a cast and no `timing`, and the Vault's
+  new refusal (A-R12-01) rejected them. The fixture was fixed.
 - **Also found:** one sandbox test, "a provision that fails after the relay
   started leaves no relay behind", failed under concurrent Docker load and
   passes when run alone. R12 does not change `packages/sandbox`.
-- **Chosen:** CI is the authority for the external assertions. No paid run was
-  started locally (only driver tests spend API credit, and only with the
-  maintainer's say).
-- **Reverse:** run the labelled driver steps, which spend API credit, to produce
-  fresh reports for this tree.
+- **Chosen:** the paid criteria are pending CI and are never marked passed here.
+  No paid run was started locally.
+- **Reverse:** none needed. The pull request's `run-driver` job produces the
+  fresh reports.
