@@ -485,20 +485,44 @@ describe('station entries (A-R12-02)', () => {
     expect((await vault.readRunState(runId)).stations).toEqual(stations);
   });
 
+  /** A state file as an earlier runtime wrote it, put on disk directly: the store no longer writes one. */
+  async function plant(version: string, body: unknown): Promise<void> {
+    const dir = join(store, 'runs', runId, 'state');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${version}.json`), JSON.stringify(body));
+  }
+
   test('a state committed before R12 reads with no station entries, which says they were not recorded', async () => {
-    const { stations: _stations, ...legacy } = state('0');
-    await vault.commitRunState(legacy as never, '0');
+    const { stations: _stations, ...legacy } = state('1');
+    await plant('1', legacy);
     expect((await vault.readRunState(runId)).stations).toEqual([]);
+    // A resume after R12 appends to the history it read, which was none.
+    const resumed = [{ station: 'build' as const, enteredAt: '2026-10-28T11:00:00.000Z' }];
+    await expect(vault.commitRunState({ ...state('1'), stations: resumed }, '1')).resolves.toMatchObject({ stations: resumed });
   });
 
   test('refuses to return a state whose station entry carries a time with no zone (codex-6)', async () => {
-    await vault.commitRunState({ ...state('0'), stations: [{ station: 'spec', enteredAt: '2026-10-28T10:00:00' }] }, '0').catch(() => undefined);
-    await expect(vault.readRunState(runId)).rejects.toThrow(/station entries|no run state/);
+    await plant('1', { ...state('1'), stations: [{ station: 'spec', enteredAt: '2026-10-28T10:00:00' }] });
+    await expect(vault.readRunState(runId)).rejects.toThrow(/station entries/);
   });
 
   test('refuses to return a state whose station entries carry no time', async () => {
-    await vault.commitRunState({ ...state('0'), stations: [{ station: 'spec', enteredAt: '' }] }, '0');
+    await plant('1', { ...state('1'), stations: [{ station: 'spec', enteredAt: '' }] });
     await expect(vault.readRunState(runId)).rejects.toThrow(/station entries/);
+  });
+
+  test('refuses to commit a state that drops, rewrites, or omits the history it replaces (codex-5)', async () => {
+    const intake = { station: 'intake' as const, enteredAt: '2026-10-28T10:00:00.000Z' };
+    const spec = { station: 'spec' as const, enteredAt: '2026-10-28T10:05:00.000Z' };
+    const first = await vault.commitRunState({ ...state('0'), stations: [intake, spec] }, '0');
+    const { stations: _omitted, ...without } = first;
+    await expect(vault.commitRunState(without as never, first.version)).rejects.toThrow(/station/);
+    await expect(vault.commitRunState({ ...first, stations: [] }, first.version)).rejects.toThrow(/station/);
+    await expect(vault.commitRunState({ ...first, stations: [intake] }, first.version)).rejects.toThrow(/station/);
+    await expect(vault.commitRunState({ ...first, stations: [intake, { ...spec, enteredAt: '2026-10-28T10:06:00.000Z' }] }, first.version)).rejects.toThrow(/station/);
+    await expect(vault.commitRunState({ ...first, stations: [intake, spec, { station: 'plan', enteredAt: '' }] }, first.version)).rejects.toThrow(/station/);
+    const plan = { station: 'plan' as const, enteredAt: '2026-10-28T10:09:00.000Z' };
+    await expect(vault.commitRunState({ ...first, stations: [intake, spec, plan] }, first.version)).resolves.toMatchObject({ version: '2' });
   });
 });
 

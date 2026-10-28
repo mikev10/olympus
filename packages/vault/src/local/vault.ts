@@ -227,6 +227,26 @@ function isRef(value: unknown): boolean {
   return isRecord(value) && hasString(value, 'runId') && hasString(value, 'kind') && hasString(value, 'hash');
 }
 
+/** A list of station entries, each a station and a time with a zone (A-R12-02). */
+function isStationHistory(value: unknown): value is RunState['stations'] {
+  return Array.isArray(value) && (value as unknown[]).every((e) => isRecord(e) && hasString(e, 'station') && e.station !== '' && isTime(e.enteredAt));
+}
+
+/**
+ * Why `next` may not replace the state holding `previous`, or undefined: a
+ * new state carries a station history, and it begins with every entry of the
+ * one it replaces, so an entry once recorded is never dropped or rewritten
+ * (codex-5).
+ */
+function stationsProblem(previous: RunState['stations'], next: unknown): string | undefined {
+  if (!isStationHistory(next)) return 'its station entries are not a list of stations, each with a time with a zone (A-R12-02)';
+  if (next.length < previous.length) return `it holds ${String(next.length)} station entries where the state it replaces holds ${String(previous.length)}`;
+  const pair = (e: RunState['stations'][number]): string => JSON.stringify([e.station, e.enteredAt]);
+  const kept = next.slice(0, previous.length).map(pair);
+  const changed = previous.findIndex((e, i) => kept[i] !== pair(e));
+  return changed === -1 ? undefined : `it rewrites station entry ${String(changed)} of the state it replaces`;
+}
+
 function requireRunState(value: unknown, file: string): RunState {
   const ok =
     isRecord(value) &&
@@ -244,7 +264,7 @@ function requireRunState(value: unknown, file: string): RunState {
   const approvals = (value.approvals as unknown[]).map((grant) => (isRecord(grant) && grant.draft === undefined ? { ...grant, draft: null } : grant));
   // A state committed before R12 records no station entries: read as none, which says they were not recorded (A-R12-02).
   const stations = value.stations === undefined ? [] : value.stations;
-  if (!Array.isArray(stations) || !(stations as unknown[]).every((e) => isRecord(e) && hasString(e, 'station') && isTime(e.enteredAt))) {
+  if (!isStationHistory(stations)) {
     throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
   }
   return { ...value, drafts, approvals, stations } as unknown as RunState;
@@ -946,6 +966,11 @@ export class LocalVault implements Vault {
       const at = held === null ? 'no committed state' : `version ${String(held)}`;
       throw new Error(`LocalVault: run ${s.runId} has ${at}, so version ${ifVersion} was never current; nothing stored`);
     }
+
+    // The history it replaces, read before anything is written: a commit may extend it and never shorten or rewrite it (codex-5).
+    const previous = current === 0 ? [] : requireRunState(await readJson(join(states, `${ifVersion}.json`)), `${ifVersion}.json`).stations;
+    const problem = stationsProblem(previous, (s as { stations?: unknown }).stations);
+    if (problem !== undefined) throw new Error(`LocalVault: refusing run ${s.runId}'s state: ${problem}; nothing stored`);
 
     const next = String(current + 1);
     const stored: RunState = { ...s, version: next };
