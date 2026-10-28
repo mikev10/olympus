@@ -194,6 +194,23 @@ export const TELEMETRY_GUESSES_NOTHING: LocalAssertion = runtime({
   },
 });
 
+/**
+ * The attribute keys an export may carry, written here rather than read from
+ * the exporter, so that widening the exporter's list does not widen what this
+ * assertion accepts: a new key is an edit to both (codex-4).
+ */
+const EXPORT_POLICY: readonly string[] = [
+  'service.name',
+  'gen_ai.operation.name', 'gen_ai.provider.name', 'gen_ai.request.model', 'gen_ai.agent.name', 'gen_ai.agent.version',
+  'gen_ai.usage.input_tokens', 'gen_ai.usage.output_tokens', 'gen_ai.usage.cache_read.input_tokens', 'gen_ai.usage.cache_write.input_tokens',
+  'error.type',
+  'factory.run.id', 'factory.run.ending', 'factory.run.requested_level', 'factory.stations.recorded', 'factory.calls.untimed',
+  'factory.station', 'factory.task.id', 'factory.task.status', 'factory.attempt',
+  'factory.usage.reading', 'factory.usage.cost_usd', 'factory.relay.calls', 'factory.relay.refused', 'factory.relay.exhausted', 'factory.call.ended',
+  'factory.check.id', 'factory.check.id_digest', 'factory.check.exit_code', 'factory.check.held',
+  'factory.claim.tool_calls', 'factory.decision.cause', 'factory.decision.decided_by', 'factory.token.kind',
+];
+
 /** Files that may name the exporter: itself, the api index that re-exports it, and the route that serves it. */
 const TELEMETRY_IMPORTERS: readonly string[] = ['packages/api/src/telemetry.ts', 'packages/api/src/index.ts', 'packages/api/src/http/server.ts'];
 
@@ -242,11 +259,13 @@ export const TELEMETRY_EXPORTS_NO_TEXT: LocalAssertion = runtime({
   title:
     "every attribute an export carries is on the exporter's allowlist, and neither a claim's narrative nor a check's output appears anywhere in it; no runtime module but the exporter's route imports it, so no gate, level, or rate reads telemetry back",
   run: async () => {
-    const { TELEMETRY_ATTRIBUTES } = await api();
+    const { readUsage } = await api();
     await finishedRun('r12-i7-', async (vault, runId, state) => {
       const e = await exported(vault, runId);
-      const allowed = new Set<string>(TELEMETRY_ATTRIBUTES);
+      const allowed = new Set<string>(EXPORT_POLICY);
       const keys = new Set<string>();
+      // Every attribute the export carries: on the resources of both signals, spans, span events, and metric points (codex-4, gemini-3).
+      for (const r of [...e.traces.resourceSpans, ...e.metrics.resourceMetrics]) for (const a of r.resource.attributes) keys.add(a.key);
       for (const span of spansOf(e)) {
         for (const a of span.attributes) keys.add(a.key);
         for (const ev of span.events) for (const a of ev.attributes) keys.add(a.key);
@@ -257,6 +276,21 @@ export const TELEMETRY_EXPORTS_NO_TEXT: LocalAssertion = runtime({
       }
       const outside = [...keys].filter((k) => !allowed.has(k));
       if (outside.length > 0) throw new Error(`I7: the export carries attributes outside the allowlist: ${outside.join(', ')}`);
+
+      // Every span name is one of the shapes the policy allows, each naming a station, task, or role the records hold.
+      const roles = new Set((await readUsage(vault, state)).map((r: UsageRecord) => r.role.id as string));
+      const tasks = new Set(Object.keys(state.tasks));
+      const stationNames = new Set(state.stations.map((s) => s.station as string));
+      const bundleChecks = new Set<string>();
+      for (const ref of state.evidenceRefs) for (const c of (await readRecord<{ checks: Array<{ checkId: string }> }>(vault, ref)).checks) bundleChecks.add(c.checkId);
+      const shaped = (name: string): boolean => {
+        const [kind, ...rest] = name.split(' ');
+        const of = rest.join(' ');
+        if (rest.length === 0) return kind === 'run' || kind === 'check';
+        return (kind === 'station' && stationNames.has(of)) || (kind === 'task' && tasks.has(of)) || (kind === 'invoke_agent' && roles.has(of)) || (kind === 'check' && bundleChecks.has(of));
+      };
+      const unshaped = spansOf(e).map((s) => s.name).filter((n) => !shaped(n));
+      if (unshaped.length > 0) throw new Error(`I7: span names outside the policy: ${unshaped.join(', ')}`);
       const text = JSON.stringify(e);
       if (text.includes(NARRATIVE)) throw new Error("I7: a claim's narrative was exported");
       const checkIds: string[] = [];
