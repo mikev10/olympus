@@ -5350,6 +5350,42 @@ The spec is `docs/plan/R21-local-endpoint.md`.
   `docs/reviews/2026-10-28-R21-local-endpoint-triage.md`.
 - **Reverse:** revert `d42c56b`; the other two change no code.
 
+### D-R21-09: R21's scope widens to the sandbox's networks (maintainer, 2026-10-28)
+
+- **Decided:** the maintainer took option A from D-R21-08: fix
+  codex-1/gemini-1 inside R21, before merge. This lifts one item from the
+  out-of-scope list ("any change to the sandbox's egress, the proxy") as far as
+  the networks a sandbox joins, and no further. The allowlist, the proxy's
+  behaviour, and the relay's behaviour are unchanged.
+- **Plan:** every network a sandbox joins (the relay's `relay-in-*` and the
+  proxy's `egress-in-*`) is created `--internal` with
+  `com.docker.network.bridge.gateway_mode_ipv4=isolated`, so the host holds no
+  address on it. After creation, the network is inspected. If it carries a
+  gateway, carries IPv6, or does not report the isolated mode, it is removed
+  and the provision is refused. That covers an engine that ignores the option
+  and one that rejects it, so nothing degrades to a routed bridge. A Docker
+  test and R21's runtime assertion each start a listener in the engine host's
+  own network namespace, bound to `0.0.0.0`. They probe it from the sandbox at
+  the network's gateway and at every IPv4 address the engine host holds.
+- **Assumptions, verified:** on Docker 29.8.0 the option leaves the IPAM config
+  with no gateway, and a container on such a network reaches none of the
+  engine host's 24 addresses. A plain `--internal` network reaches the
+  host-namespace listener at its gateway. Containers on one internal network
+  still reach each other, so the relay and the proxy are reached by alias as
+  before. This is to be confirmed by the existing relay and egress suites.
+  Engines older than 28.0 do not have the option. On them the check above
+  refuses: it does not warn.
+- **Rejected:** a `DOCKER-USER` iptables rule. It is host state outside the
+  runtime, it is shared across runs, and it does not exist on Docker
+  Desktop's VM in a form the runtime owns. A probe with no fix was also
+  rejected, because it passes only where the defect is not.
+- **Reverse:** drop the option and the post-create check from both network
+  creations, and the host-namespace probes.
+- **Built:** test-first. With the old `packages/sandbox/src`, the new sandbox
+  test and R21's assertion both fail: a real sandbox reached the engine-host
+  listener at `192.168.0.1`. With the fix, both pass, and so does the
+  plain-network control.
+
 ## R21 amendments to the contracts
 
 ### A-R21-01: a local upstream

@@ -72,7 +72,8 @@ for one; and the session writes this spec and takes every later decision.
   loopback on a Linux engine; the relay's call fails, and the run says why
 - a price inferred from the endpoint being local. Its prices are the operator's
   table; zero is a price the operator writes
-- any change to the sandbox's egress, the proxy, or the allowlist
+- any change to the sandbox's egress, the proxy, or the allowlist, beyond the
+  isolated gateway mode on every network a sandbox joins (D-R21-09)
 - a paid suite. Every assertion runs against a listener the test owns
 
 ## Conformance
