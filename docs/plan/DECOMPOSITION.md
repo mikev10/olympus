@@ -601,20 +601,21 @@ order between them is settled before any of them is picked up.
 | R5 | Goal decomposition | M3 | R4, R20 | — |
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
-| R8 | Observe: post-merge outcomes | M2 | I1, R2, M2 triggers | — |
+| R8 | Observe: post-merge outcomes | M2 | I1, R2, R22 | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
-| R10 | Trust ratchet | M2 | P12, P14, M2 triggers | — |
+| R10 | Trust ratchet | M2 | P12, P14, R22 | — |
 | R11 | Learning loop | M3 | R2, R7, R8, P14, R13, R20 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | `docs/plan/R12-telemetry.md` |
-| R13 | Nightly review | M2 | P14, R2, R9, R17, M2 triggers | — |
+| R13 | Nightly review | M2 | P14, R2, R9, R17, R22 | — |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
-| R16 | Bug-fix intake | M2 | R15, R19, P14, M2 triggers | — |
+| R16 | Bug-fix intake | M2 | R15, R19, P14, R22 | — |
 | R17 | Security at the gate | M2 | P6, P7, P8, P14, R1, R15 | — |
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
 | R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | `docs/plan/R19-drafting.md` |
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
 | R21 | Local model endpoint | M2 | R6 | `docs/plan/R21-local-endpoint.md` |
+| R22 | Trigger framework | M2 | P3, P9, P12, P14, R19 | `docs/plan/R22-triggers.md` |
 | R23 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
 | R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
@@ -1207,7 +1208,7 @@ declared `'fails'` is refused.
 
 **Depends on** the two I7 controls owed before any non-human trigger is
 enabled, `I7.extracted-field-schemas` and `I7.untrusted-sink-lint-rule`,
-through M2 triggers.
+through R22.
 
 ### R17 — Security at the gate
 
@@ -1675,7 +1676,7 @@ each reported behaviour on the pinned CLI before relying on it (D-A-DD-03).
 
 ### Recorded constraint: event subscriptions (M2 triggers)
 
-Not specified, and not a unit here. The M2 trigger framework may receive
+Binding on R22, which specifies the framework. The M2 trigger framework may receive
 events through webhooks or through MCP Events, a proposed extension to MCP
 that ChatGPT implements as webhook delivery. As of 2026-10-11 it is a draft,
 not part of the MCP specification, so no unit depends on it. Whichever
@@ -1698,14 +1699,53 @@ free-text field, and an event becomes a candidate a person reads. A later unit
 that seats one has it read only the extracted fields and choose only among the
 registered templates, and records its output as a claim (D-A-DD-04).
 
-### Recorded gap: the M2 trigger framework has no spec
+### R22 — Trigger framework
 
-R8, R10, R13, and R16 each depend on "M2 triggers", and R16 depends on the two
-I7 controls the framework owes (`I7.extracted-field-schemas` and
-`I7.untrusted-sink-lint-rule`). No unit in this document specifies that
-framework. It needs a spec before the second half of M2 can start, so it is
-written while R15 is being built, and it lands as a unit with an ID, a row in
-the table above, and a section here, in the shape of the units it unblocks.
+**Spec:** `docs/plan/R22-triggers.md`, written before the unit starts, checked
+against the code on `v2` at 89d8200 (D-A-TF-01 to D-A-TF-08). Where this
+entry and the spec differ, the spec is the one verified against the code.
+
+How work enters the factory from anywhere but a person. Today a run's trigger
+is a literal `human` (`packages/api/src/run.ts`), and the trigger policy is
+validated and read by nothing, so its autonomy caps, trust floors, depth
+limit, and budget bind no run. This unit makes admission read it for every
+kind, `human` included, and adds the first non-human path: a delivery a
+subscription in policy grants, verified by a secret the host holds, reduced to
+fields a schema in code bounds, and recorded as an `intake` candidate a person
+reads and may admit. Nothing a trigger delivers starts a build or becomes an
+intent (R19). Binding:
+
+- a subscription is a grant in policy, naming its kind, source, transport,
+  and the secret that verifies it, never the secret. An unnamed subscription is
+  refused before its body is read (I4, D-A-DD-02)
+- a delivery is signed, capped in size, checked in constant time before it is
+  parsed, and refused when replayed or stale. Its secret is resolved on the
+  host, as P12 holds credentials, and no sandbox spec can name it
+- the payload is an `UntrustedPayload`; an extractor is the only reader of
+  `raw`, and only fields the kind's schema declares go further, each within a
+  byte cap and a character class, never truncated to fit. No schema carries
+  free text (I7)
+- a template is chosen by the policy from a closed registry in code, never by
+  the payload. A non-human kind without an entry station, a registered
+  template, an autonomy cap, a trust floor, and a schema does not validate
+- every refusal names its cause in P14's record
+
+The unit ships the `intake-candidate` template, signed webhooks as the one
+transport, GitHub as the one source (`post-merge`, `ci-failure`, and a new
+`issue` kind), a daily `scheduled` event, and the type-aware sink lint rule. It
+discharges `I7.enabled-trigger-declares-a-template`,
+`I7.extracted-field-schemas`, and `I7.untrusted-sink-lint-rule`.
+
+**Not in this unit:** any template that starts a build; R13's jobs, R8's
+signal, and R16's bug-fix template; narrowing on untrusted input (R10);
+`review-feedback`; any source but GitHub; MCP Events; exposing the service to
+the internet.
+
+**Conformance and acceptance:** the spec's.
+
+**Why M2:** R8, R10, R13, and R16 each depend on it, and R16 on the two I7
+controls it owes before any non-human trigger is enabled. Without it the
+second half of M2 cannot start.
 
 ### R20 — Role compiler
 
