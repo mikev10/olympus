@@ -614,7 +614,7 @@ order between them is settled before any of them is picked up.
 | R18 | Stack recorded per run | M2 | R2, P8 | — |
 | R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | `docs/plan/R19-drafting.md` |
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
-| R21 | Local model endpoint | M2 | R6 | — |
+| R21 | Local model endpoint | M2 | R6 | `docs/plan/R21-local-endpoint.md` |
 | R22 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
 | R23 | Repository instructions as granted context | M2 | P1, P4, R20, R22; R10 above L2 | — |
 | R24 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
@@ -799,6 +799,10 @@ posture the way P10 did. Each loosens a rule the relay fails closed on today
 budget, and the family declaration are unchanged: a local endpoint reports
 its own usage, and cost recorded for it is zero only where its declared
 prices are.
+
+**Spec:** `docs/plan/R21-local-endpoint.md`, written when the unit started
+(D-R21-01). A local endpoint is the Docker host alone, and no credential is
+allowed only for one (D-R21-02).
 
 ### R7 — False-done benchmark
 

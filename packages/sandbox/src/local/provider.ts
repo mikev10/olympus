@@ -82,6 +82,14 @@ export interface LocalDockerOptions {
    */
   readonly relayTrust?: string;
   /**
+   * The ports on the Docker host a relay may reach, for a model endpoint
+   * listening there (A-R21-03). A spec's local upstream on any other port is
+   * refused at provisioning, and absent or empty refuses every local upstream
+   * (I4: a route not given is not available). The route is the relay
+   * container's alone; no sandbox is given it.
+   */
+  readonly dockerHostPorts?: readonly number[];
+  /**
    * The most bytes of stdout and stderr together one command or probe may
    * print. Past it the sandbox is ended and the call refused, never answered
    * with what was read so far (D-P8-15). Defaults to 64 MiB; a value that is
@@ -375,6 +383,15 @@ function heldCredentials(credentials: Readonly<Record<string, string>> | undefin
   return held;
 }
 
+/** The Docker host ports a provider was given, checked once at construction: each an integer port, or the provider is refused. */
+function heldPorts(ports: readonly number[] | undefined): ReadonlySet<number> {
+  if (ports === undefined) return new Set();
+  if (!Array.isArray(ports) || !ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535)) {
+    refuse('relay', `dockerHostPorts must be integer ports from 1 to 65535, not ${JSON.stringify(ports)}`);
+  }
+  return new Set(ports);
+}
+
 export class LocalDockerProvider implements SandboxProvider {
   readonly id = 'local-docker';
 
@@ -384,6 +401,7 @@ export class LocalDockerProvider implements SandboxProvider {
   readonly #proxyImage: string;
   readonly #credentials: ReadonlyMap<string, string>;
   readonly #relayTrust: string | undefined;
+  readonly #hostPorts: ReadonlySet<number>;
   /** Passed to `dockerCli` only when policy set one: the default lives there alone, where a test runs it (codex-2). */
   readonly #outputCap: { readonly maxOutputBytes?: number };
   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
@@ -395,6 +413,7 @@ export class LocalDockerProvider implements SandboxProvider {
     proxyImage: string,
     credentials: ReadonlyMap<string, string>,
     relayTrust: string | undefined,
+    hostPorts: ReadonlySet<number>,
     maxOutputBytes: number | undefined,
   ) {
     this.#executable = executable;
@@ -403,6 +422,7 @@ export class LocalDockerProvider implements SandboxProvider {
     this.#proxyImage = proxyImage;
     this.#credentials = credentials;
     this.#relayTrust = relayTrust;
+    this.#hostPorts = hostPorts;
     this.#outputCap = maxOutputBytes === undefined ? {} : { maxOutputBytes };
   }
 
@@ -427,13 +447,14 @@ export class LocalDockerProvider implements SandboxProvider {
     const executable = options.executable ?? 'docker';
     const daemon = await probeDaemon(executable);
     const credentials = heldCredentials(options.credentials);
+    const hostPorts = heldPorts(options.dockerHostPorts);
     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
     const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
     const maxOutputBytes = options.maxOutputBytes;
     if (maxOutputBytes !== undefined && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0)) {
       refuse('limits', `maxOutputBytes must be a positive integer; ${String(maxOutputBytes)} bounds nothing`);
     }
-    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, maxOutputBytes);
+    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, hostPorts, maxOutputBytes);
   }
 
   /** What the probe established about the daemon behind this provider. */
@@ -449,7 +470,7 @@ export class LocalDockerProvider implements SandboxProvider {
   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
     const plan = checkEgress(spec.egress);
-    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()));
+    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()), this.#hostPorts);
     if (plan.mode === 'allowlist' && relayPlan !== undefined && plan.hosts.includes(relayPlan.upstreamHost)) {
       // The proxy would be a second route to the host the relay exists to be the only route to.
       // Both are the runtime's to choose, and a spec that chose both contradicts itself (external review, codex-2).
@@ -532,7 +553,8 @@ export class LocalDockerProvider implements SandboxProvider {
    * already refused a name the map does not hold.
    */
   async #startRelay(id: string, plan: RelayPlan, shared: { internal: string; outbound: string } | undefined): Promise<AppliedRelay> {
-    const credential = this.#credentials.get(plan.credential);
+    // A declared null is none (A-R21-02); `checkRelay` allowed it only for a local upstream.
+    const credential = plan.credential === null ? null : this.#credentials.get(plan.credential);
     if (credential === undefined) refuse('relay', `the credential ${JSON.stringify(plan.credential)} is not held by this provider`);
     try {
       return await startRelay(id, plan, credential, this.#relayTrust, shared, this.#relayOptions);

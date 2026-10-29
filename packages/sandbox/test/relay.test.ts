@@ -10,8 +10,10 @@
  * These tests require Docker and `openssl`, and fail without either, for the
  * reason `local.test.ts` gives.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +21,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import {
   EGRESS_PROXY_IMAGE,
+  LOCAL_UPSTREAM_ALIAS,
   LocalDockerProvider,
   RELAY_ALIAS,
   RELAY_PORT,
@@ -33,12 +36,14 @@ import {
   type SandboxHandle,
   type SandboxSpec,
 } from '../src/index.js';
+import { createSandboxNetwork } from '../src/local/docker.js';
 import { startRelay, stopRelay } from '../src/local/relay.js';
 import { TEST_IMAGE } from './image.js';
 import {
   PROCESS_DUMP,
   TEST_BUDGET,
   TEST_METER,
+  TEST_OPENAI_METER,
   TEST_MODEL,
   UPSTREAM_HOST,
   UPSTREAM_MARKER,
@@ -59,6 +64,8 @@ const run = promisify(execFile);
 
 /** The name the specs use for the credential; what the provider holds under it is made fresh per test. */
 const CREDENTIAL = 'model';
+/** A provider given no Docker host port: every local upstream is refused (A-R21-03). */
+const NO_PORTS: ReadonlySet<number> = new Set();
 
 /** A metered request the meter can price. */
 const MESSAGE = JSON.stringify({ model: TEST_MODEL, max_tokens: 16, messages: [] });
@@ -166,6 +173,25 @@ async function exists(args: string[], notFound: string): Promise<boolean> {
 
 const containerExists = (name: string): Promise<boolean> => exists(['inspect', '--type', 'container', name], 'No such container');
 const networkExists = (name: string): Promise<boolean> => exists(['network', 'inspect', name], 'not found');
+
+/**
+ * A listener in the engine host's own network namespace, bound to every address, which is where a
+ * model server sits on a Linux engine. Its addresses are read after the sandbox exists, so the
+ * address a sandbox's bridge would give the host is among them.
+ */
+async function engineHostListener(): Promise<{ port: number; addresses: string[]; stop: () => Promise<void> }> {
+  const port = 20_000 + Math.floor(Math.random() * 10_000);
+  const name = `engine-host-listener-${randomUUID()}`;
+  const server = `require('node:net').createServer((s) => s.end('hi')).listen(${String(port)}, '0.0.0.0')`;
+  await run('docker', ['run', '--detach', '--rm', '--name', name, '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', server]);
+  const list = "console.log(Object.values(require('node:os').networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address).join(' '))";
+  const { stdout } = await run('docker', ['run', '--rm', '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', list]);
+  return {
+    port,
+    addresses: stdout.trim().split(/\s+/u).filter((a) => a !== ''),
+    stop: async () => { await run('docker', ['rm', '--force', name]).catch(() => undefined); },
+  };
+}
 
 /** A `docker` that cannot be run, for a teardown that has to go on without one. */
 const NO_DOCKER = { executable: join(tmpdir(), `no-docker-${randomUUID()}`), image: EGRESS_PROXY_IMAGE, timeoutMs: 10_000 };
@@ -432,6 +458,55 @@ describe('the relay is the only route to its upstream', () => {
     );
     expect(tunnel.stdout).toContain('403');
   });
+
+  // codex-1, gemini-1 (D-R21-09): an internal network still gives the host an address on its bridge,
+  // so a server bound to every address on a Linux engine's host would be one hop from the sandbox.
+  test('the host holds no address on any network a sandbox joins, so a listener on every host address is unreachable from it', async () => {
+    for (const spec of [specFor(), specFor({ egress: { mode: 'allowlist', allow: ['example.com'] } })]) {
+      const handle = await provisioned(spec);
+      const network = provider.appliedControls(handle).egress.network;
+      const { stdout: inspected } = await run('docker', ['network', 'inspect', '--format', '{{json .IPAM.Config}}', network]);
+      expect((JSON.parse(inspected) as Array<{ Gateway?: string }>).every((c) => (c.Gateway ?? '') === '')).toBe(true);
+
+      const listener = await engineHostListener();
+      try {
+        expect(listener.addresses.length).toBeGreaterThan(1);
+        const probe = listener.addresses.map((a) => `nc -z -w 2 ${a} ${String(listener.port)} && echo "${a} reached"`).join('; ');
+        const reached = await provider.exec(handle, ['sh', '-c', `${probe}; echo probed`]);
+        expect(reached.stdout).toContain('probed');
+        expect(reached.stdout).not.toContain('reached');
+      } finally {
+        await listener.stop();
+      }
+    }
+
+    // An engine that ignores the option, adds IPv6, or assigns a gateway anyway is refused, and the network it made is left for cleanup.
+    for (const shown of [
+      '[{"Subnet":"192.168.0.0/20","Gateway":"192.168.0.1"}]|false|isolated',
+      '[{"Subnet":"192.168.0.0/20"}]|false|<no value>',
+      '[{"Subnet":"192.168.0.0/20"}]|true|isolated',
+      'not json|false|isolated',
+    ]) {
+      const created: string[] = [];
+      const fake = (args: string[]): Promise<string> => Promise.resolve(args[1] === 'inspect' ? shown : '');
+      await expect(createSandboxNetwork(fake, 'n', created)).rejects.toThrow(/with the host on it/u);
+      expect(created).toStrictEqual(['n']);
+    }
+    await expect(createSandboxNetwork(() => Promise.resolve('[{"Subnet":"192.168.0.0/20"}]|false|isolated'), 'n', [])).resolves.toBeUndefined();
+
+    // The control: the same probe from a plain internal network reaches the listener, so its silence above is the network's.
+    const plain = `plain-internal-${randomUUID()}`;
+    const listener = await engineHostListener();
+    await run('docker', ['network', 'create', '--internal', '--driver', 'bridge', plain]);
+    try {
+      const { stdout: gateway } = await run('docker', ['network', 'inspect', '--format', '{{(index .IPAM.Config 0).Gateway}}', plain]);
+      const { stdout } = await run('docker', ['run', '--rm', '--network', plain, TEST_IMAGE, 'sh', '-c', `nc -z -w 2 ${gateway.trim()} ${String(listener.port)} && echo reached`]);
+      expect(stdout).toContain('reached');
+    } finally {
+      await listener.stop();
+      await run('docker', ['network', 'rm', plain]).catch(() => undefined);
+    }
+  });
 });
 
 describe('the relay lives and dies with its sandbox', () => {
@@ -488,7 +563,7 @@ describe('the relay lives and dies with its sandbox', () => {
   });
 
   test('a start that fails and cannot clean up after itself reports both, not only the first', async () => {
-    const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]));
+    const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]), NO_PORTS);
     const id = randomUUID();
     const failed = await startRelay(id, plan, secret, undefined, undefined, NO_DOCKER).then(
       () => undefined,
@@ -535,25 +610,25 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
       'api.example.com',
       '',
     ]) {
-      expect(() => checkRelay(relaySpec({ upstream }), held), upstream).toThrow(SandboxRefusal);
+      expect(() => checkRelay(relaySpec({ upstream }), held, NO_PORTS), upstream).toThrow(SandboxRefusal);
     }
-    expect(checkRelay(relaySpec({ upstream: 'https://api.example.com' }), held).upstreamHost).toBe('api.example.com');
+    expect(checkRelay(relaySpec({ upstream: 'https://api.example.com' }), held, NO_PORTS).upstreamHost).toBe('api.example.com');
   });
 
   test('an empty grant, or a path the relay could not match exactly, is refused rather than read as everything', () => {
     const held = new Set([CREDENTIAL]);
     for (const paths of [[], ['v1/messages'], ['/v1/messages/'], ['/v1/../files'], ['/v1/%2e'], ['/v1/messages?x'], ['/'], ['']]) {
-      expect(() => checkRelay(relaySpec({ paths }), held), JSON.stringify(paths)).toThrow(SandboxRefusal);
+      expect(() => checkRelay(relaySpec({ paths }), held, NO_PORTS), JSON.stringify(paths)).toThrow(SandboxRefusal);
     }
   });
 
   test('a header the credential cannot be written to, and a variable that would replace the proxy\'s, are refused', () => {
     const held = new Set([CREDENTIAL]);
     for (const header of ['host', 'Content-Length', 'connection', 'x api key', '']) {
-      expect(() => checkRelay(relaySpec({ header }), held), header).toThrow(SandboxRefusal);
+      expect(() => checkRelay(relaySpec({ header }), held, NO_PORTS), header).toThrow(SandboxRefusal);
     }
     for (const urlVariable of ['HTTPS_PROXY', 'no_proxy', '1URL', 'A=B', '']) {
-      expect(() => checkRelay(relaySpec({ urlVariable }), held), urlVariable).toThrow(SandboxRefusal);
+      expect(() => checkRelay(relaySpec({ urlVariable }), held, NO_PORTS), urlVariable).toThrow(SandboxRefusal);
     }
   });
 
@@ -561,13 +636,114 @@ describe('a relay that cannot be applied exactly is refused (I5)', () => {
     const held = new Set([CREDENTIAL]);
     const { scheme: _scheme, ...schemeless } = relaySpec();
     for (const spec of [schemeless, relaySpec({ scheme: 'basic' as RelaySpec['scheme'] })]) {
-      expect(() => checkRelay(spec as RelaySpec, held)).toThrow(/relay\.scheme/u);
+      expect(() => checkRelay(spec as RelaySpec, held, NO_PORTS)).toThrow(/relay\.scheme/u);
     }
-    expect(checkRelay(relaySpec({ scheme: 'bearer' }), held).scheme).toBe('bearer');
-    expect(() => checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'gemini-generate' as RelaySpec['meter']['dialect'] } }), held)).toThrow(
+    expect(checkRelay(relaySpec({ scheme: 'bearer' }), held, NO_PORTS).scheme).toBe('bearer');
+    expect(() => checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'gemini-generate' as RelaySpec['meter']['dialect'] } }), held, NO_PORTS)).toThrow(
       /relay\.meter\.dialect/u,
     );
-    expect(checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'openai-chat' } }), held).meter.dialect).toBe('openai-chat');
+    expect(checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'openai-chat' } }), held, NO_PORTS).meter.dialect).toBe('openai-chat');
+  });
+
+  test('a local upstream is the Docker host on a port the provider was given, and is planned as http to the relay alone (A-R21-01, A-R21-03)', () => {
+    const held = new Set([CREDENTIAL]);
+    const ports = new Set([11434]);
+    const keyless = relaySpec({ upstream: { local: 'docker-host', port: 11434 }, scheme: 'none', credential: null });
+    const plan = checkRelay(keyless, held, ports);
+    expect(plan).toMatchObject({ upstream: `http://${LOCAL_UPSTREAM_ALIAS}:11434`, upstreamHost: LOCAL_UPSTREAM_ALIAS, local: 'docker-host', credential: null, scheme: 'none' });
+    // A key is still allowed to a local endpoint that asks for one.
+    expect(checkRelay(relaySpec({ upstream: { local: 'docker-host', port: 11434 } }), held, ports).credential).toBe(CREDENTIAL);
+    expect(checkRelay(relaySpec(), held, ports).local).toBeNull();
+    expect(() => checkRelay(keyless, held, NO_PORTS)).toThrow(/port 11434.*dockerHostPorts/u);
+    expect(() => checkRelay(relaySpec({ upstream: { local: 'docker-host', port: 11435 }, scheme: 'none', credential: null }), held, ports)).toThrow(/11435/u);
+    for (const upstream of [
+      { local: 'docker-host', port: 0 },
+      { local: 'docker-host', port: 65536 },
+      { local: 'docker-host', port: 1.5 },
+      { local: 'docker-host', port: '11434' },
+      { local: 'lan', port: 11434 },
+      { local: 'docker-host', port: 11434, host: 'gpu.lan' },
+      { port: 11434 },
+      ['docker-host', 11434],
+      null,
+      'http://localhost:11434',
+      'http://host.docker.internal:11434',
+    ]) {
+      expect(() => checkRelay(relaySpec({ upstream: upstream as RelaySpec['upstream'], scheme: 'none', credential: null }), held, ports), JSON.stringify(upstream)).toThrow(
+        /relay\.upstream/u,
+      );
+    }
+  });
+
+  test('no credential is declared by null and the none scheme together, and only for a local upstream (A-R21-02)', () => {
+    const held = new Set([CREDENTIAL]);
+    const ports = new Set([11434]);
+    const local = { local: 'docker-host', port: 11434 } as const;
+    const { credential: _credential, ...absent } = relaySpec({ upstream: local, scheme: 'none' });
+    for (const [spec, cause] of [
+      [relaySpec({ upstream: local, scheme: 'raw', credential: null }), /null under the "raw" scheme/u],
+      [relaySpec({ upstream: local, scheme: 'bearer', credential: null }), /null under the "bearer" scheme/u],
+      [relaySpec({ scheme: 'none', credential: null }), /null with an https upstream/u],
+      [relaySpec({ upstream: local, scheme: 'none' }), /under the 'none' scheme/u],
+      [relaySpec({ upstream: local, scheme: 'none', credential: '' }), /never read as none/u],
+      [absent, /never read as none/u],
+    ] as const) {
+      expect(() => checkRelay(spec as RelaySpec, held, ports)).toThrow(cause);
+    }
+  });
+
+  test('the relay\'s own start refuses an undeclared http upstream or a missing credential, and starts on a declared local one', async () => {
+    const port = await new Promise<number>((done) => {
+      const probe = createServer().listen(0, '127.0.0.1', () => {
+        const { port: free } = probe.address() as AddressInfo;
+        probe.close(() => { done(free); });
+      });
+    });
+    const env = {
+      RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:11434`,
+      RELAY_LOCAL: 'docker-host',
+      RELAY_PATHS: JSON.stringify(['/v1/chat/completions']),
+      RELAY_HEADER: 'api-key',
+      RELAY_SCHEME: 'none',
+      RELAY_PORT: String(port),
+      RELAY_BUDGET: JSON.stringify({ maxTokens: 10, maxCostUsd: 1 }),
+      RELAY_METER: JSON.stringify(TEST_OPENAI_METER),
+    };
+    const start = (given: Record<string, string>): Promise<string> =>
+      new Promise((done) => {
+        const child = spawn(process.execPath, ['--eval', RELAY_SOURCE], { env: { PATH: process.env.PATH ?? '', ...given } });
+        let output = '';
+        const read = (c: Buffer): void => {
+          output += c.toString('utf8');
+          if (output.includes('listening')) child.kill();
+        };
+        child.stdout.on('data', read);
+        child.stderr.on('data', read);
+        const timer = setTimeout(() => child.kill(), 5000);
+        child.on('close', () => {
+          clearTimeout(timer);
+          done(output);
+        });
+      });
+    expect(await start(env)).toMatch(/listening/u);
+    expect(await start({ ...env, RELAY_LOCAL: '', RELAY_SCHEME: 'bearer', RELAY_CREDENTIAL: 'k' })).toMatch(/not an https origin/u);
+    expect(await start({ ...env, RELAY_UPSTREAM: 'http://gpu.lan:11434' })).toMatch(/local upstream is not/u);
+    expect(await start({ ...env, RELAY_LOCAL: 'lan' })).toMatch(/other than the docker host/u);
+    expect(await start({ ...env, RELAY_SCHEME: 'raw' })).toMatch(/no credential/u);
+    expect(await start({ ...env, RELAY_LOCAL: '', RELAY_UPSTREAM: 'https://api.example.com' })).toMatch(/only to a local endpoint/u);
+    expect(await start({ ...env, RELAY_CREDENTIAL: 'k' })).toMatch(/under the none scheme/u);
+    // The declared port is read as written: a URL parser drops a default port 80 and keeps a port 0.
+    expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:80` })).toMatch(/listening/u);
+    expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:65535` })).toMatch(/listening/u);
+    for (const given of ['0', '65536', '080', '']) {
+      expect(await start({ ...env, RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:${given}` })).toMatch(/local upstream is not/u);
+    }
+  });
+
+  test('a provider given a Docker host port that is not a port refuses to be built (A-R21-03)', async () => {
+    for (const dockerHostPorts of [[0], [65536], [1.5], ['11434'] as unknown as number[]]) {
+      expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], dockerHostPorts }))).message).toMatch(/dockerHostPorts/u);
+    }
   });
 
   test('a provider given a credential with no value, or under a name a spec could not match, refuses to be built', async () => {

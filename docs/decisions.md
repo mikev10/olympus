@@ -5138,6 +5138,287 @@ The maintainer confirmed it on 2026-10-28.
   CI's `run-driver` job writes those reports.
 - **Reverse:** none.
 
+## R21: Local model endpoint
+
+Built against `v2` at f99ea35. The entry had no spec, and two of its points
+decided the unit's scope: which addresses count as local, and whether a relay
+without a credential is allowed beside an `https` upstream. The session stopped
+and asked three questions. On 2026-10-28 the maintainer took every
+recommendation:
+
+- a local endpoint is the Docker host, and nothing else;
+- no credential is allowed only with a local upstream;
+- the session writes the spec, declares the amendments in scope, and takes every
+  later decision.
+
+The spec is `docs/plan/R21-local-endpoint.md`.
+
+### D-R21-01: the boundary R21 was started on
+
+- **Deliverables:**
+  - a local upstream, `{ local: 'docker-host', port }`, the relay's only route
+    to `http` (A-R21-01);
+  - a declared `null` credential and a `'none'` scheme, local only (A-R21-02);
+  - `LocalDockerOptions.dockerHostPorts`, without which every local upstream is
+    refused (A-R21-03);
+  - the relay's start checks for all three;
+  - the driver's configuration and the host taking them (A-R21-04).
+- **Out of scope, verbatim from the spec:**
+  - any address but the Docker host: a LAN machine, a named Docker network, a
+    container's name, or an `http` URL of any kind;
+  - an `https` endpoint with no credential;
+  - starting, stopping, pulling, or health-checking the local model server;
+  - binding the host's server for the operator, or detecting one bound to
+    loopback on a Linux engine; the relay's call fails, and the run says why;
+  - a price inferred from the endpoint being local;
+  - any change to the sandbox's egress, the proxy, or the allowlist;
+  - a paid suite.
+- **Acceptance, as commands:**
+  - `pnpm typecheck` and `pnpm lint` pass;
+  - `pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test`
+    passes, and the conformance package's `vitest` run of the two new
+    assertions passes locally;
+  - `pnpm conformance` and the Claude Code driver's paid suite pass in CI under
+    `run-driver`, with `I4.model-relay-reaches-the-docker-host-only-as-declared`
+    and `I5.model-relay-refuses-an-undeclared-local-endpoint` registered and
+    `pending-baseline.json` unchanged;
+  - changesets for sandbox, the driver, api, and conformance;
+  - `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - I4 (default deny): the route to the host is held by the provider, as a
+    credential is, so a spec cannot name a port the operator did not give.
+  - I5 (fail closed): `http` and no credential each come from a declaration,
+    never from a URL or an absent value; each is refused at `checkRelay` and
+    again at the relay's start.
+  - The sandbox boundary: the route is added to the relay container alone, and
+    an assertion shows the sandbox cannot use it.
+  - I6 (reviewer independence) is untouched: the family is still the
+    operator's declaration (R6).
+- **Pending registry entries owed:** none. `grep -rn R21` over
+  `packages/conformance/src/registry` and `pending-baseline.json` finds none.
+
+**Assumptions, each verified:**
+
+- **The dependency has shipped.** `reviewed/R6` exists; `git log origin/v2`
+  shows ed19c31, R6's merge.
+- **The relay refuses `http` and a missing credential twice.** `checkRelay`
+  requires `origin.protocol === 'https:'` and a held credential name
+  (`packages/sandbox/src/local/relay.ts`, `checkRelay`). `RELAY_SOURCE` exits on
+  `credential === ''` and on a non-`https:` upstream (same file, the start
+  checks).
+- **The relay drops the client's authentication headers.** `DROPPED` holds
+  `authorization`, `x-api-key`, and `proxy-authorization`; the configured
+  `header` is overwritten in `send`. Under `'none'` it has to be deleted
+  instead, or a custom header's client value would pass through.
+- **The relay forwards with `https.request` only.** `send` hard-codes it, with
+  `servername` and `ca`; an `http` upstream needs `http.request` and neither.
+- **The route can be the relay's alone.** Run on this daemon (Docker 29.8.0,
+  Docker Desktop): a container on a user-defined bridge, started with
+  `--add-host model-host:host-gateway`, reached a host listener bound to
+  `127.0.0.1` and one bound to `0.0.0.0`. A container on an `--internal`
+  network reached neither through `host.docker.internal`, `model-host`, or
+  `192.168.65.254` (timeout, reset, `ENETUNREACH`).
+- **Nothing outside the sandbox package reads a relay's credential or
+  upstream as a URL.** `grep` for `relay.upstream`, `.credential`, `.scheme`,
+  `RelaySpec`, and `AppliedRelay` outside `relay.ts` finds the provider, the two
+  drivers' `relayRequest`, and tests. `Omit<RelaySpec, 'budget'>` in
+  `core/src/driver/contract.ts` keeps both widened fields, as `RelaySpec` stays
+  one interface rather than a union.
+- **The host requires both variables.** `packages/api/src/host/main.ts` throws
+  unless `FACTORY_ENDPOINT_CONFIG` and `FACTORY_ENDPOINT_KEY` are both set or
+  both empty, and `parseEndpointFile` refuses an empty key naming R21.
+- **Changing `sandbox` changes the Claude Code driver's tree.**
+  `scripts/driver-report-key.ts` hashes the package and every workspace package
+  it depends on; the hash before this unit is `c01f3cb9…0002`. The paid suite
+  therefore reruns under `run-driver`.
+
+**Where the code differs from the entry:**
+
+- The entry says a route "from the relay's outbound network to the host". On a
+  bridge the relay could already reach the gateway's address; what it lacked is
+  a name that reaches the host's services on Docker Desktop, and a declaration
+  that permits `http` to it. The route is that name, on the relay alone.
+- The entry says the change alters the sandbox's network posture "the way P10
+  did". It does not: the sandbox's networks, egress, and proxy are unchanged,
+  and an assertion holds that.
+
+### D-R21-02: the three choices the maintainer took
+
+- **The Docker host only.**
+  - **Rejected:** an operator-named Docker network, which puts the relay on a
+    network with other containers; and any address the operator names as
+    local, which sends prompts and code over a LAN in plain text.
+  - **Reverse:** add a second `local` value to A-R21-01's union, with its own
+    provider grant and assertion.
+- **No credential only with a local upstream.**
+  - **Rejected:** a keyless `https` upstream, which makes the relay an
+    unauthenticated route to a remote origin.
+  - **Reverse:** drop the local requirement from `checkRelay` and the relay's
+    start check.
+- **The spec is written by the session, with the amendments in scope.**
+  - **Reverse:** none needed.
+
+### D-R21-03: the local upstream is a structure, not a URL
+
+- **Ambiguous:** the entry says `http` is allowed "only for an address the
+  operator names as local and never inferred from the URL".
+- **Chosen:** `RelaySpec.upstream` takes `{ local: 'docker-host', port }`. No
+  `http` URL is accepted anywhere, so there is no URL to infer from.
+- **Rejected:** a `local: true` flag beside an `http` URL. Two fields would have
+  to agree, and the URL could name a host other than the Docker host.
+- **Reverse:** accept an `http` URL under a flag, and check the two agree.
+
+### D-R21-04: no credential is `null` and `'none'`, together
+
+- **Chosen:** `credential: null` and `scheme: 'none'` must come together. Either
+  alone is refused. `header` stays required: under `'none'` it names a header
+  the relay deletes, so a placeholder key in the sandbox never reaches the
+  endpoint.
+- **Rejected:** a union of a keyed and a keyless `RelaySpec`. `Omit` does not
+  distribute over a union, so `Omit<RelaySpec, 'budget'>` in the driver
+  contract would lose both drivers' fields. Also rejected: reading an empty or
+  absent credential as none, which is the inference the entry forbids.
+- **Reverse:** make `RelaySpec` a union and give the contract a distributive
+  `Omit`.
+
+### D-R21-05: the provider holds the route as it holds a credential
+
+- **Chosen:** `LocalDockerOptions.dockerHostPorts`. A spec naming a port the
+  provider was not given is refused at the `relay` layer.
+- **Why:** the spec comes from a driver, and the provider is the operator's
+  trust root. The pattern is `credentials` (I4). A route to the host's services
+  is a capability, so it is granted rather than assumed.
+- **Rejected:** allowing any port once a spec declares local.
+- **Reverse:** drop the option and its check.
+
+### D-R21-06: what the build decided
+
+- **A key to a local endpoint is allowed.** A local upstream with `'raw'` or
+  `'bearer'` and a held credential is accepted, as for any upstream. A local
+  gateway may want a key, and refusing one would push the operator to `'none'`.
+  - **Reverse:** refuse a credential with a local upstream in `checkRelay` and
+    at the relay's start.
+- **A local upstream's host, for the allowlist contradiction check, is
+  `model-host`.** An allowlist naming it is refused as a second route, as it is
+  for any relay upstream. The proxy could not resolve the name anyway; the
+  refusal keeps the rule uniform.
+- **The route is added under both egress modes.** Under an allowlist the relay
+  joins the proxy's outbound network; `--add-host` is still on the relay
+  container alone.
+- **The host's grants are one exported function, `endpointGrants`,** so the
+  credential and the port a host hands its provider are unit-tested without a
+  daemon. `composeHost` calls it.
+- **The assertion's endpoint listens on every interface.** On a Linux engine
+  the host gateway is the bridge's address, so a loopback listener is
+  unreachable there. While the assertion runs, a random port on the developer's
+  machine answers a canned completion to anyone who can reach it. That port
+  holds nothing and is closed in a `finally`.
+  - **Reverse:** bind to the gateway's own address, which the test would have
+    to discover per platform.
+- **The relay's start checks run in a fixed order:** local value, scheme,
+  credential, header, then the upstream's form. Each refusal names one cause,
+  and the I5 assertion pins each cause by its message.
+
+### D-R21-07: the acceptance criteria, run locally
+
+- **Run:** `pnpm typecheck` and `pnpm lint`, clean. Every package but the
+  Claude Code driver and conformance, serially: all passed (sandbox 189, the
+  OpenAI-compatible driver 40, api 216, adapters 771, core 160, vault 94,
+  benchmark 47, compiler 38, readiness 18, cli 8). Both R21 assertions pass
+  under the conformance package's `vitest`, and both fail with
+  `packages/sandbox/src` reverted. The conformance kit tests pass (111).
+  `git ls-files -- .plan/` prints nothing.
+- **Pending CI:** `pnpm conformance` and the Claude Code driver's paid suite,
+  under `run-driver` (D-A-CI-05). They are not marked passed here.
+- **Reverse:** none.
+
+### D-R21-08: what the review triage decided
+
+- **Fixed:** codex-2/gemini-4 (`d42c56b`). The relay reads a local port from
+  `RELAY_UPSTREAM` as written, not from `URL.port`. A parser drops a default
+  80, which made a declared, granted port 80 fail at start.
+- **Rejected:** gemini-2. P12's fixed strip list already drops
+  `authorization` and `x-api-key` under every scheme, and R21's assertion
+  checks it under `'none'`.
+- **Held for the maintainer:** codex-1/gemini-1. On a Linux engine the sandbox
+  reaches a host service bound to `0.0.0.0` or the bridge address through its
+  own `--internal` network's gateway, bypassing the relay. This was reproduced in
+  Docker Desktop's VM. The fix is `gateway_mode_ipv4=isolated` on every
+  network a sandbox joins, with an engine-support refusal and a probe of the
+  sandbox network's own gateway. It changes the sandbox's egress, which R21
+  excludes, so it waits on a scope decision (working rule 6). Evidence:
+  `docs/reviews/2026-10-28-R21-local-endpoint-triage.md`.
+- **Reverse:** revert `d42c56b`; the other two change no code.
+
+### D-R21-09: R21's scope widens to the sandbox's networks (maintainer, 2026-10-28)
+
+- **Decided:** the maintainer took option A from D-R21-08: fix
+  codex-1/gemini-1 inside R21, before merge. This lifts one item from the
+  out-of-scope list ("any change to the sandbox's egress, the proxy") as far as
+  the networks a sandbox joins, and no further. The allowlist, the proxy's
+  behaviour, and the relay's behaviour are unchanged.
+- **Plan:** every network a sandbox joins (the relay's `relay-in-*` and the
+  proxy's `egress-in-*`) is created `--internal` with
+  `com.docker.network.bridge.gateway_mode_ipv4=isolated`, so the host holds no
+  address on it. After creation, the network is inspected. If it carries a
+  gateway, carries IPv6, or does not report the isolated mode, it is removed
+  and the provision is refused. That covers an engine that ignores the option
+  and one that rejects it, so nothing degrades to a routed bridge. A Docker
+  test and R21's runtime assertion each start a listener in the engine host's
+  own network namespace, bound to `0.0.0.0`. They probe it from the sandbox at
+  the network's gateway and at every IPv4 address the engine host holds.
+- **Assumptions, verified:** on Docker 29.8.0 the option leaves the IPAM config
+  with no gateway, and a container on such a network reaches none of the
+  engine host's 24 addresses. A plain `--internal` network reaches the
+  host-namespace listener at its gateway. Containers on one internal network
+  still reach each other, so the relay and the proxy are reached by alias as
+  before. This is to be confirmed by the existing relay and egress suites.
+  Engines older than 28.0 do not have the option. On them the check above
+  refuses: it does not warn.
+- **Rejected:** a `DOCKER-USER` iptables rule. It is host state outside the
+  runtime, it is shared across runs, and it does not exist on Docker
+  Desktop's VM in a form the runtime owns. A probe with no fix was also
+  rejected, because it passes only where the defect is not.
+- **Reverse:** drop the option and the post-create check from both network
+  creations, and the host-namespace probes.
+- **Built:** test-first. With the old `packages/sandbox/src`, the new sandbox
+  test and R21's assertion both fail: a real sandbox reached the engine-host
+  listener at `192.168.0.1`. With the fix, both pass, and so does the
+  plain-network control.
+
+## R21 amendments to the contracts
+
+### A-R21-01: a local upstream
+
+`RelaySpec.upstream` is `string | LocalUpstream`, and `LocalUpstream` is
+`{ local: 'docker-host'; port: number }`. A string is an `https` origin, as
+before. A local upstream is forwarded to over `http` at `model-host:<port>`, a
+name added to the relay container alone with `--add-host model-host:host-gateway`.
+`AppliedRelay.upstream` records the URL forwarded to, and `AppliedRelay.local`
+records `'docker-host'` or `null`.
+
+### A-R21-02: a declared absence of credential
+
+`RelaySpec.credential` is `string | null`, and `RelayScheme` gains `'none'`.
+`null` and `'none'` come together, and only with a local upstream. Under
+`'none'` no credential is written, and the client's value in `header` is
+deleted. `AppliedRelay.credential` is `string | null`.
+
+### A-R21-03: the provider's Docker host ports
+
+`LocalDockerOptions.dockerHostPorts?: readonly number[]` names the ports a relay
+may reach on the Docker host. A local upstream on any other port is refused at
+the `relay` layer, as is every local upstream when the option is absent or
+empty.
+
+### A-R21-04: the driver and the host take a local endpoint
+
+`EndpointConfig.upstream` is `string | LocalUpstream`, and `scheme` takes
+`'none'`. `relayRequest` sends a `null` credential under `'none'`.
+`HostEndpoint.key` is `string | null`. The host reads an endpoint file whose
+`scheme` is `'none'` without `FACTORY_ENDPOINT_KEY` and refuses one given with
+it. It passes a local upstream's port to `dockerHostPorts`.
+
 ## Amendment: workspace skills, repository instructions, property checks, and reachability review
 
 Gaps found on 2026-10-29 by checking the line against the week's announcements
@@ -5146,7 +5427,9 @@ Agentic AI Foundation. Anthropic published research on model-assisted formal
 verification and on reducing attack surface. OpenAI shipped a classification
 endpoint, and a Codex CLI release with credential masking. GitHub turned chat
 notifications into coding tasks. Each row was checked against the code on `v2`
-at f99ea35. No package changes: the amendment adds R22, R23, and R24, extends
+at f99ea35, and rechecked after R21 merged at 89d8200: R21 changes the R6
+driver's credential handling, not how it builds its messages, so R22's
+assertion for that driver stands as written. No package changes: the amendment adds R22, R23, and R24, extends
 R9 and R13, and adds dated notes to two recorded constraints. The vendor facts
 it cites come from public coverage of the announcements and are not checkable
 from this repository, except the CLI behaviour in D-A-WI-01, which was run.
