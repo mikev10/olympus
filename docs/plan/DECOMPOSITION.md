@@ -615,9 +615,9 @@ order between them is settled before any of them is picked up.
 | R19 | Drafting at `spec` and `test-design` | M2 | P4, P5, P9, P13, P14, R14, R15, R17, R20 | `docs/plan/R19-drafting.md` |
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
 | R21 | Local model endpoint | M2 | R6 | `docs/plan/R21-local-endpoint.md` |
-| R22 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
-| R23 | Repository instructions as granted context | M2 | P1, P4, R20, R22; R10 above L2 | — |
-| R24 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
+| R23 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
+| R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
+| R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 
 ### R1 — Readiness
 
@@ -1666,7 +1666,7 @@ reads is now an open standard under the Agentic AI Foundation that more than
 70 agent platforms are reported to implement. Inside the Olympus sandbox that
 working tree is the agent-writable workspace. The Codex driver therefore runs
 with every workspace instruction source off, or the session refuses, and it
-owes R22's assertion for its own CLI before it is registered. That covers
+owes R23's assertion for its own CLI before it is registered. That covers
 `AGENTS.md` at any depth, skill directories, and any configuration file the
 CLI reads from its working directory. The same release line adds credential
 masking in the CLI's own output. The line does not rely on it: no credential
@@ -1693,10 +1693,10 @@ reading it. Neither changes the rule. A message from a chat platform is an
 parameters it supplies come from its extracted fields, through
 `I7.extracted-field-schemas`, never from a model reading `raw`. A
 classification call is a model call, so `raw` never reaches one either,
-whatever the endpoint is called. A classifier the framework seats reads only
-the extracted fields. Its output is a claim, and it chooses only among the
-templates policy declares. The framework's spec states this as a binding
-(D-A-DD-04).
+whatever the endpoint is called. R22 seats no classifier: its schemas carry no
+free-text field, and an event becomes a candidate a person reads. A later unit
+that seats one has it read only the extracted fields and choose only among the
+registered templates, and records its output as a claim (D-A-DD-04).
 
 ### Recorded gap: the M2 trigger framework has no spec
 
@@ -1813,7 +1813,7 @@ carries no grant.
 assume roles with content, and a unit started on that assumption would invent
 the format inside its own scope.
 
-### R22 — Workspace skills and instruction discovery
+### R23 — Workspace skills and instruction discovery
 
 R20 keeps a seat's instructions out of the workspace, and
 `I3.workspace-instructions-not-loaded` proves it for the Claude Code driver.
@@ -1872,7 +1872,7 @@ Binding:
 `gate-change` label.
 
 **Not in this unit:** delivering the target repository's own instructions to
-a seat, which is R23's; the Codex driver and its entry; any change to what
+a seat, which is R24's; the Codex driver and its entry; any change to what
 policy can grant.
 
 **Conformance:** the Claude Code driver's assertion fails when either skill
@@ -1887,9 +1887,9 @@ next seat. A skill is the instruction format the ecosystem is standardising
 on, so the guarantee should be shown to hold for it before more target
 repositories carry them.
 
-### R23 — Repository instructions as granted context
+### R24 — Repository instructions as granted context
 
-After R20 and R22, no seat receives the target repository's own instructions
+After R20 and R23, no seat receives the target repository's own instructions
 on its own. `CLAUDE.md`, `AGENTS.md`, `.claude/rules`, and skill directories
 in the target are files a seat granted `base-repo-readonly`, or working in the
 workspace, can open with a tool, and nothing points it at them. Nobody chose
@@ -1965,11 +1965,11 @@ refuses admission and names it; a skill whose front matter declares
 grant, whatever policy says; and a run above L2 whose policy grants it is
 refused.
 
-**Why M2:** R22 closes the side door, and without this unit the line seats
+**Why M2:** R23 closes the side door, and without this unit the line seats
 agents that ignore the target's documented conventions. The cost of that
 shows up in R2's rework rate, under no cause the line can name.
 
-### R24 — Property checks
+### R25 — Property checks
 
 An acceptance check is examples: it asserts what the change does for the
 inputs its author chose. R7's corpus already holds the failure examples allow:
