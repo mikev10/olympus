@@ -223,7 +223,8 @@ export class OpenAICompatibleDriver implements Driver {
       paths: [this.#config.path],
       header: this.#config.header,
       scheme: this.#config.scheme,
-      credential: this.#credential,
+      // A-R21-02: an endpoint declared keyless gets a declared null, never a name the provider may not hold.
+      credential: this.#config.scheme === 'none' ? null : this.#credential,
       urlVariable: RELAY_URL_VARIABLE,
       meter: { dialect: 'openai-chat', prices: { ...this.#config.prices } },
     };

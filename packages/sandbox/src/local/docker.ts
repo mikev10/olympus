@@ -229,3 +229,43 @@ export async function probeDaemon(executable: string): Promise<DaemonFacts> {
 
   return { osType, serverVersion, endpoint };
 }
+
+/** The bridge option that leaves the host no address on a network (D-R21-09). */
+export const ISOLATED_GATEWAY = 'com.docker.network.bridge.gateway_mode_ipv4=isolated';
+
+/**
+ * Creates a network a sandbox joins, or refuses. `--internal` removes the route
+ * out, but on its own it leaves the host an address on the bridge, and a
+ * server bound to every address on a Linux engine's host would sit one hop
+ * from the sandbox, past every relay and proxy (codex-1, gemini-1). The
+ * isolated gateway mode removes that address.
+ *
+ * The network is then read back rather than trusted. An engine that ignores
+ * the option, one that adds IPv6, or one that assigns a gateway anyway is
+ * refused (I5), never left as a routed bridge with a warning. The name goes
+ * into `created` before the check, so a caller's cleanup removes a network
+ * that was made but refused.
+ */
+export async function createSandboxNetwork(run: (args: string[]) => Promise<string>, name: string, created: string[]): Promise<void> {
+  await run(['network', 'create', '--internal', '--driver', 'bridge', '--opt', ISOLATED_GATEWAY, name]);
+  created.push(name);
+  const shown = await run([
+    'network', 'inspect', '--format',
+    '{{json .IPAM.Config}}|{{.EnableIPv6}}|{{index .Options "com.docker.network.bridge.gateway_mode_ipv4"}}',
+    name,
+  ]);
+  const [config = '', ipv6 = '', mode = ''] = shown.split('|');
+  let gateways: string[];
+  try {
+    gateways = (JSON.parse(config) as Array<{ Gateway?: unknown }>).map((c) => (typeof c.Gateway === 'string' ? c.Gateway : ''));
+  } catch {
+    gateways = ['unreadable'];
+  }
+  if (mode !== 'isolated' || ipv6 !== 'false' || gateways.some((g) => g !== '')) {
+    throw new Error(
+      `the network ${name} was created with the host on it (isolated gateway mode: ${JSON.stringify(mode)}, IPv6: ${JSON.stringify(ipv6)}, ` +
+        `gateways: ${JSON.stringify(gateways)}); a sandbox on it could reach the host without its relay or proxy. ` +
+        'This needs a Docker engine of 28.0 or later.',
+    );
+  }
+}

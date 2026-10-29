@@ -31,10 +31,10 @@
  * Built the way the proxy is: source passed to `node --eval` in the same
  * pinned image, read-only, every capability dropped, nothing mounted.
  */
-import { dockerCli } from './docker.js';
+import { createSandboxNetwork, dockerCli } from './docker.js';
 import { normalizeHost } from './egress.js';
 import { refuse, withLeftovers } from './refusal.js';
-import type { MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
+import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
 
 /** The port the relay listens on, inside its own container. Nothing is published to the host. */
 export const RELAY_PORT = 8080;
@@ -45,6 +45,13 @@ export const RELAY_PORT = 8080;
  * container's generated id.
  */
 export const RELAY_ALIAS = 'model-relay';
+
+/**
+ * The name a relay to a local upstream reaches the Docker host by (A-R21-01).
+ * Added to that relay container alone, as `--add-host <name>:host-gateway`,
+ * so the sandbox, on its own internal network, has no such name and no route.
+ */
+export const LOCAL_UPSTREAM_ALIAS = 'model-host';
 
 /** The address the sandbox is given in `RelaySpec.urlVariable`. Plain HTTP: the network is the sandbox's own. */
 export const RELAY_URL = `http://${RELAY_ALIAS}:${String(RELAY_PORT)}`;
@@ -95,6 +102,11 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `completion_tokens`, from the body or from the stream chunk that carries it.
  * - The credential is written as the spec's scheme says: as it is, or as
  *   `Bearer <credential>` (A-R6-02).
+ * - Started local (A-R21-01), the upstream is `http://${LOCAL_UPSTREAM_ALIAS}:<port>`
+ *   and nothing else, and it is the only way the relay speaks `http`. Under
+ *   the `none` scheme (A-R21-02) it holds no credential, writes none, and
+ *   deletes what the client sent in its header; that is allowed only started
+ *   local, so a relay to a remote origin is never an unauthenticated route.
  * - On SIGTERM it stops taking requests, cuts off any call still in flight —
  *   which is then charged by the rules above — and writes a `closed` line, the
  *   provider's proof that the log it reads is complete.
@@ -115,6 +127,7 @@ function parsed(name) {
 }
 
 const credential = String(process.env.RELAY_CREDENTIAL || '');
+const local = String(process.env.RELAY_LOCAL || '');
 const header = String(process.env.RELAY_HEADER || '').toLowerCase();
 const scheme = String(process.env.RELAY_SCHEME || '');
 const port = Number(process.env.RELAY_PORT);
@@ -129,12 +142,28 @@ function positive(n) { return typeof n === 'number' && Number.isFinite(n) && n >
 function price(n) { return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
 const PRICE_FIELDS = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'];
 
-if (credential === '') fail('no credential; a relay that forwarded without one would be an unauthenticated route out');
+if (local !== '' && local !== 'docker-host') fail('a local upstream other than the docker host');
+if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') fail('no scheme to write the credential in');
+if (scheme === 'none') {
+  if (credential !== '') fail('a credential under the none scheme; a relay never holds a value it was told not to write');
+  if (local === '') fail('no credential; a relay forwards without one only to a local endpoint on the docker host');
+} else if (credential === '') {
+  fail('no credential; a relay that forwarded without one would be an unauthenticated route out');
+}
 if (header === '') fail('no header to write the credential to');
-if (scheme !== 'raw' && scheme !== 'bearer') fail('no scheme to write the credential in');
-if (upstream === null || upstream.protocol !== 'https:' || upstream.pathname !== '/' || upstream.search !== '' ||
+if (upstream === null || upstream.pathname !== '/' || upstream.search !== '' ||
     upstream.hash !== '' || upstream.username !== '' || upstream.password !== '') {
-  fail('the upstream is not an https origin');
+  fail(local === '' ? 'the upstream is not an https origin' : 'the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
+}
+if (local === '' && upstream.protocol !== 'https:') fail('the upstream is not an https origin');
+// The local port is read as declared, never from the parsed URL, which drops a default port 80 and keeps a port 0.
+const LOCAL_PREFIX = 'http://${LOCAL_UPSTREAM_ALIAS}:';
+const declared = String(process.env.RELAY_UPSTREAM || '');
+const portText = declared.indexOf(LOCAL_PREFIX) === 0 ? declared.slice(LOCAL_PREFIX.length) : '';
+const localPort = String(Number(portText)) === portText ? Number(portText) : 0;
+if (local !== '' && (upstream.protocol !== 'http:' || upstream.hostname !== '${LOCAL_UPSTREAM_ALIAS}' ||
+    !Number.isInteger(localPort) || localPort < 1 || localPort > 65535)) {
+  fail('the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
 }
 if (!Array.isArray(paths) || paths.length === 0 ||
     !paths.every(function (p) { return typeof p === 'string' && p.charAt(0) === '/'; })) {
@@ -369,10 +398,13 @@ const ca = trust === '' ? undefined : tls.rootCertificates.concat([trust]);
 
 function send(req, res, target, path, headers, body, done) {
   headers.host = upstream.host;
-  headers[header] = scheme === 'bearer' ? 'Bearer ' + credential : credential;
+  // Under none the client's value is deleted, never forwarded: the endpoint gets no key, and none of the task's.
+  if (scheme === 'none') delete headers[header];
+  else headers[header] = scheme === 'bearer' ? 'Bearer ' + credential : credential;
   headers['accept-encoding'] = 'identity';
   let answered = false;
-  const outbound = https.request({
+  // Plain http only to the local upstream the start checks pinned (A-R21-01); every other upstream is https, verified.
+  const outbound = (local === '' ? https : http).request(local === '' ? {
     protocol: 'https:',
     hostname: upstream.hostname,
     port: upstream.port === '' ? 443 : Number(upstream.port),
@@ -381,6 +413,13 @@ function send(req, res, target, path, headers, body, done) {
     path: target,
     headers: headers,
     ca: ca,
+  } : {
+    protocol: 'http:',
+    hostname: upstream.hostname,
+    port: localPort,
+    method: req.method,
+    path: target,
+    headers: headers,
   }, function (answer) {
     answered = true;
     record('forwarded', req.method, path, answer.statusCode);
@@ -598,12 +637,16 @@ server.listen(port, '0.0.0.0', function () {
  * and never stored beside the plan.
  */
 export interface RelayPlan {
+  /** The origin forwarded to: the spec's `https` origin, or the local upstream's `http` one. */
   readonly upstream: string;
   readonly upstreamHost: string;
+  /** `'docker-host'` for a local upstream (A-R21-01), `null` for an `https` origin. */
+  readonly local: LocalUpstream['local'] | null;
   readonly paths: readonly string[];
   readonly header: string;
   readonly scheme: RelayScheme;
-  readonly credential: string;
+  /** The credential's name, or `null` where the spec declared none (A-R21-02). */
+  readonly credential: string | null;
   readonly urlVariable: string;
   readonly budget: RelayBudget;
   readonly meter: RelayMeter;
@@ -614,13 +657,16 @@ export interface AppliedRelay {
   readonly containerId: string;
   /** The container name, so a leaked relay can be found by name after the run. */
   readonly name: string;
+  /** The origin the relay forwards to, `http://${LOCAL_UPSTREAM_ALIAS}:<port>` for a local upstream. */
   readonly upstream: string;
+  /** `'docker-host'` where the relay alone was given a route to the Docker host (A-R21-01), `null` otherwise. */
+  readonly local: LocalUpstream['local'] | null;
   readonly paths: readonly string[];
   readonly header: string;
   /** How the credential is written into `header` (A-R6-02). */
   readonly scheme: RelayScheme;
-  /** The name of the credential the relay holds. The value is in no field of this record. */
-  readonly credential: string;
+  /** The name of the credential the relay holds, or `null` where it holds none (A-R21-02). The value is in no field of this record. */
+  readonly credential: string | null;
   /** The variable the sandbox was given the relay's address in. */
   readonly urlVariable: string;
   /** The bounds the relay enforces for this sandbox's driver call. */
@@ -680,28 +726,43 @@ export const CREDENTIAL_NAME = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u;
  * naming any other is refused here: there is no value to put in the relay,
  * and a relay started without one would be a sandbox whose every model call
  * failed with an authentication error that says nothing about the provider.
+ * `hostPorts` is the Docker host ports it was given, and a local upstream on
+ * any other is refused the same way (A-R21-03).
  */
-export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPlan {
-  let origin: URL | undefined;
-  try {
-    origin = new URL(relay.upstream);
-  } catch {
-    origin = undefined;
-  }
-  const host = origin === undefined ? undefined : normalizeHost(origin.hostname);
-  if (
-    origin?.protocol !== 'https:' ||
-    origin.origin !== relay.upstream ||
-    host === undefined ||
-    host.includes(':') ||
-    /^[0-9.]+$/u.test(host)
-  ) {
-    refuse(
-      'relay',
-      `relay.upstream must be an https origin naming a host, with no path, query, credentials, or trailing slash — ` +
-        `'https://api.example.com' — not ${JSON.stringify(relay.upstream)}. The relay verifies the upstream's certificate against that name, ` +
-        'and anything else is a destination it cannot vouch for.',
-    );
+export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>, hostPorts: ReadonlySet<number>): RelayPlan {
+  // Read as unknown: a spec arriving from untyped code may carry anything here.
+  const declared: unknown = relay.upstream;
+  const local = typeof declared === 'string' ? null : checkLocalUpstream(declared, hostPorts);
+  let upstream: string;
+  let host: string;
+  if (local === null) {
+    upstream = declared as string;
+    let origin: URL | undefined;
+    try {
+      origin = new URL(upstream);
+    } catch {
+      origin = undefined;
+    }
+    const named = origin === undefined ? undefined : normalizeHost(origin.hostname);
+    if (
+      origin?.protocol !== 'https:' ||
+      origin.origin !== upstream ||
+      named === undefined ||
+      named.includes(':') ||
+      /^[0-9.]+$/u.test(named)
+    ) {
+      refuse(
+        'relay',
+        `relay.upstream must be an https origin naming a host, with no path, query, credentials, or trailing slash — ` +
+          `'https://api.example.com' — not ${JSON.stringify(upstream)}. The relay verifies the upstream's certificate against that name, ` +
+          'and anything else is a destination it cannot vouch for. A model on the Docker host is declared as ' +
+          "{ local: 'docker-host', port }, never by an http URL (A-R21-01).",
+      );
+    }
+    host = named;
+  } else {
+    upstream = `http://${LOCAL_UPSTREAM_ALIAS}:${String(local.port)}`;
+    host = LOCAL_UPSTREAM_ALIAS;
   }
 
   if (!Array.isArray(relay.paths) || relay.paths.length === 0) {
@@ -721,32 +782,77 @@ export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPl
   }
   // Read as unknown: a spec arriving from untyped code may carry no scheme, and none is refused rather than read as raw (A-R6-02).
   const scheme: unknown = (relay as { scheme?: unknown }).scheme;
-  if (scheme !== 'raw' && scheme !== 'bearer') {
-    refuse('relay', `relay.scheme must be 'raw' or 'bearer', not ${shown(scheme)}; a relay never guesses how its endpoint reads a credential`);
+  if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') {
+    refuse('relay', `relay.scheme must be 'raw', 'bearer', or 'none', not ${shown(scheme)}; a relay never guesses how its endpoint reads a credential`);
+  }
+  // A-R21-02: none is declared twice over, by a null credential and the none scheme, and only for a local upstream.
+  const credential: unknown = (relay as { credential?: unknown }).credential;
+  if (credential === null) {
+    if (scheme !== 'none') {
+      refuse('relay', `relay.credential is null under the ${shown(scheme)} scheme; a relay that takes no credential declares the 'none' scheme as well`);
+    }
+    if (local === null) {
+      refuse('relay', 'relay.credential is null with an https upstream; a relay forwards without a credential only to a local endpoint on the Docker host, never to a remote origin');
+    }
+  } else if (typeof credential !== 'string' || credential === '') {
+    refuse('relay', `relay.credential must name a credential the provider holds, or be null to declare none; ${shown(credential)} is neither, and an absent credential is never read as none`);
+  } else if (scheme === 'none') {
+    refuse('relay', `relay.credential names ${JSON.stringify(credential)} under the 'none' scheme; a relay is never handed a value it was told not to write`);
   }
   if (!ENV_NAME.test(relay.urlVariable) || RESERVED_VARIABLES.has(relay.urlVariable)) {
     refuse('relay', `relay.urlVariable ${JSON.stringify(relay.urlVariable)} is not a plain environment-variable name the provider leaves unset`);
   }
   const budget = checkBudget(relay.budget);
   const meter = checkMeter(relay.meter);
-  if (!held.has(relay.credential)) {
+  if (credential !== null && !held.has(credential)) {
     refuse(
       'relay',
-      `relay.credential names ${JSON.stringify(relay.credential)}, which this provider was not given. ` +
+      `relay.credential names ${JSON.stringify(credential)}, which this provider was not given. ` +
         'A credential reaches a relay only from LocalDockerOptions.credentials; a spec names one and never carries a value.',
     );
   }
   return {
-    upstream: relay.upstream,
+    upstream,
     upstreamHost: host,
+    local: local === null ? null : local.local,
     paths: [...new Set(relay.paths)],
     header: relay.header.toLowerCase(),
     scheme,
-    credential: relay.credential,
+    credential,
     urlVariable: relay.urlVariable,
     budget,
     meter,
   };
+}
+
+/**
+ * A local upstream exactly as A-R21-01 declares one: `{ local: 'docker-host', port }`,
+ * nothing more, on a port the provider was given. Anything else is refused,
+ * because a field the relay ignored would be a destination nobody checked.
+ */
+function checkLocalUpstream(declared: unknown, hostPorts: ReadonlySet<number>): LocalUpstream {
+  if (typeof declared !== 'object' || declared === null || Array.isArray(declared)) {
+    refuse('relay', `relay.upstream must be an https origin or { local: 'docker-host', port }, not ${shown(declared)}`);
+  }
+  const extra = Object.keys(declared).filter((key) => key !== 'local' && key !== 'port');
+  if (extra.length > 0) {
+    refuse('relay', `relay.upstream holds ${extra.map((k) => `'${k}'`).join(', ')}; a local upstream is the Docker host and a port, and names nothing else`);
+  }
+  const { local, port } = declared as { local?: unknown; port?: unknown };
+  if (local !== 'docker-host') {
+    refuse('relay', `relay.upstream.local must be 'docker-host', not ${shown(local)}; the Docker host is the only local endpoint a relay reaches`);
+  }
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    refuse('relay', `relay.upstream.port must be an integer port from 1 to 65535, not ${shown(port)}`);
+  }
+  if (!hostPorts.has(port)) {
+    refuse(
+      'relay',
+      `relay.upstream names port ${String(port)} on the Docker host, which this provider was not given. ` +
+        'A relay reaches the Docker host only on a port in LocalDockerOptions.dockerHostPorts (A-R21-03).',
+    );
+  }
+  return { local, port };
 }
 
 /** The dialects the relay's source reads. A closed set: a dialect not here is refused, never guessed at (D-P13-06). */
@@ -895,7 +1001,7 @@ function wait(ms: number): Promise<void> {
 export async function startRelay(
   id: string,
   plan: RelayPlan,
-  credential: string,
+  credential: string | null,
   trust: string | undefined,
   shared: SharedNetworks | undefined,
   options: RelayOptions,
@@ -916,19 +1022,21 @@ export async function startRelay(
   const outbound = shared?.outbound ?? names.outbound;
   try {
     if (shared === undefined) {
-      await run(['network', 'create', '--internal', '--driver', 'bridge', names.internal]);
-      created.push(names.internal);
+      await createSandboxNetwork(run, names.internal, created);
       await run(['network', 'create', '--driver', 'bridge', names.outbound]);
       created.push(names.outbound);
     }
 
-    const secrets: Record<string, string> = { RELAY_CREDENTIAL: credential };
+    // Under none there is no value, and no variable for one (A-R21-02).
+    const secrets: Record<string, string> = credential === null ? {} : { RELAY_CREDENTIAL: credential };
     if (trust !== undefined) secrets.RELAY_TRUST = trust;
     const runArgs = [
       'run', '--detach', '--init',
       '--name', names.container,
       '--network', internal,
       '--network-alias', RELAY_ALIAS,
+      // A-R21-01: the route to the Docker host, given to this container and to no sandbox.
+      ...(plan.local === null ? [] : ['--add-host', `${LOCAL_UPSTREAM_ALIAS}:host-gateway`, '--env', `RELAY_LOCAL=${plan.local}`]),
       '--env', `RELAY_UPSTREAM=${plan.upstream}`,
       '--env', `RELAY_PATHS=${JSON.stringify(plan.paths)}`,
       '--env', `RELAY_HEADER=${plan.header}`,
@@ -955,6 +1063,7 @@ export async function startRelay(
       containerId,
       name: names.container,
       upstream: plan.upstream,
+      local: plan.local,
       paths: Object.freeze([...plan.paths]),
       header: plan.header,
       scheme: plan.scheme,

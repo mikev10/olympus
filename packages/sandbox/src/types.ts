@@ -49,20 +49,31 @@ export interface EgressPolicy { mode: 'deny-all' | 'allowlist'; allow: string[];
  * naming the upstream's host (D-P12-11).
  */
 export interface RelaySpec {
-  /** An `https` origin with no path: `'https://api.example.com'`. The only origin the relay reaches. */
-  upstream: string;
+  /**
+   * The only origin the relay reaches: an `https` origin with no path,
+   * `'https://api.example.com'`, or a local endpoint on the Docker host
+   * (A-R21-01). The second is the only way a relay speaks `http`; a URL is
+   * never read as local, whatever host it names.
+   */
+  upstream: string | LocalUpstream;
   /** The path prefixes forwarded, each a segment boundary. Every other path is refused. Never empty (D-P12-04). */
   paths: string[];
   /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
   header: string;
   /**
    * How the credential is written into `header` (A-R6-02): `'raw'` as it is,
-   * `'bearer'` as `Bearer <credential>`. Required, so no relay writes a scheme
-   * its endpoint did not ask for; any other value is refused.
+   * `'bearer'` as `Bearer <credential>`, `'none'` not at all, with the
+   * client's value in `header` deleted (A-R21-02). Required, so no relay writes
+   * a scheme its endpoint did not ask for; any other value is refused.
    */
   scheme: RelayScheme;
-  /** The name of a credential the provider holds. Never a value. */
-  credential: string;
+  /**
+   * The name of a credential the provider holds, never a value; or `null`,
+   * declaring the endpoint takes none (A-R21-02). `null` comes with the
+   * `'none'` scheme and a local upstream, or the spec is refused. An absent
+   * credential is refused, never read as none.
+   */
+  credential: string | null;
   /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
   urlVariable: string;
   /**
@@ -76,8 +87,18 @@ export interface RelaySpec {
   meter: RelayMeter;
 }
 
-/** How a relay writes its credential into the header its grant names. */
-export type RelayScheme = 'raw' | 'bearer';
+/** How a relay writes its credential into the header its grant names. `'none'` writes nothing, and only with no credential (A-R21-02). */
+export type RelayScheme = 'raw' | 'bearer' | 'none';
+
+/**
+ * A model endpoint listening on the Docker host, reached over `http` on
+ * `port` (A-R21-01). The relay container alone is given the route; the
+ * sandbox never is. A provider reaches only the ports its operator gave it.
+ */
+export interface LocalUpstream {
+  local: 'docker-host';
+  port: number;
+}
 
 /** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
 export interface RelayBudget {

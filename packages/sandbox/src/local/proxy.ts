@@ -26,7 +26,7 @@
  * provider's, started with the sandbox and destroyed with it.
  */
 import type { EgressConnection, EgressLog } from '../types.js';
-import { dockerCli } from './docker.js';
+import { createSandboxNetwork, dockerCli } from './docker.js';
 
 /**
  * The image the proxy runs on, pinned by digest so the filter a reviewer gets
@@ -293,8 +293,9 @@ export function proxyNames(id: string): { readonly container: string; readonly i
 /**
  * Creates the two networks and starts the proxy on both.
  *
- * The internal network is created `--internal`, which is what removes the
- * default route from every container on it. The outbound network is an
+ * The internal network is created `--internal` with the isolated gateway mode
+ * (`createSandboxNetwork`, D-R21-09), which removes the default route and the
+ * host's address from every container on it. The outbound network is an
  * ordinary bridge — a dedicated one rather than Docker's shared default,
  * because the proxy is by design the one thing here allowed off the host, and
  * putting it on the network every other container shares would widen exactly
@@ -317,8 +318,7 @@ export async function startProxy(id: string, hosts: readonly string[], options: 
   };
 
   try {
-    await run(['network', 'create', '--internal', '--driver', 'bridge', names.internal]);
-    created.push(names.internal);
+    await createSandboxNetwork(run, names.internal, created);
     await run(['network', 'create', '--driver', 'bridge', names.outbound]);
     created.push(names.outbound);
 

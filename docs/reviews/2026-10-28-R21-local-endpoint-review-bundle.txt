@@ -1,0 +1,3568 @@
+BASE: f99ea35
+HEAD: 7e52685
+
+=== COMMITS ===
+7e52685 R21: the acceptance criteria, run locally (D-R21-07)
+7ceac5c R21: the judgement calls the build made (D-R21-06)
+b08206e R21: the local endpoint assertion passes lint
+502de17 R21: the driver and the host take a local endpoint declared keyless
+6afd4f2 R21: a relay reaches a local endpoint on the Docker host, by declaration alone
+a31097d R21: the spec, and the boundary the unit was started on
+
+=== CHANGED ===
+ .changeset/r21-local-endpoint.md                   |  17 ++
+ .changeset/r21-local-relay.md                      |  18 ++
+ docs/decisions.md                                  | 227 +++++++++++++++
+ docs/plan/DECOMPOSITION.md                         |   6 +-
+ docs/plan/R21-local-endpoint.md                    | 116 ++++++++
+ packages/api/src/host/compose.ts                   |  39 ++-
+ packages/api/src/host/main.ts                      |   9 +-
+ packages/api/test/host.test.ts                     |  20 +-
+ packages/conformance/src/registry/i4.ts            |   3 +
+ packages/conformance/src/registry/i5.ts            |   3 +
+ .../conformance/src/registry/local-endpoint.ts     | 324 +++++++++++++++++++++
+ packages/drivers/openai-compatible/src/config.ts   |  65 ++++-
+ packages/drivers/openai-compatible/src/driver.ts   |   3 +-
+ .../drivers/openai-compatible/test/driver.test.ts  |  29 +-
+ packages/sandbox/src/local/provider.ts             |  28 +-
+ packages/sandbox/src/local/relay.ts                | 182 +++++++++---
+ packages/sandbox/src/types.ts                      |  37 ++-
+ packages/sandbox/test/relay.test.ts                | 123 +++++++-
+ 18 files changed, 1161 insertions(+), 88 deletions(-)
+
+
+===== .changeset/r21-local-endpoint.md =====
+---
+"@olympus-ai/driver-openai-compatible": minor
+"@olympus-ai/api": minor
+---
+
+The OpenAI-compatible driver and the host take a local endpoint on the Docker
+host (R21, A-R21-04).
+
+- `EndpointConfig.upstream` takes `{ "local": "docker-host", "port": <port> }`,
+  and `scheme` takes `"none"`, for a local upstream only.
+- An endpoint file declaring `"scheme": "none"` comes without
+  `FACTORY_ENDPOINT_KEY`, and one given with it stops the host. A local
+  upstream's port is the one Docker host port the sandbox provider is given.
+
+On a Linux engine the host gateway is the bridge's address, so a model server
+bound to `127.0.0.1` alone is not reachable; bind it to an address the bridge
+reaches.
+
+===== .changeset/r21-local-relay.md =====
+---
+"@olympus-ai/sandbox": minor
+"@olympus-ai/conformance": minor
+---
+
+A model relay can reach a local endpoint on the Docker host (R21).
+
+- `RelaySpec.upstream` takes `{ local: 'docker-host', port }`, forwarded over
+  `http` to `model-host:<port>`, a name given to the relay container alone
+  (A-R21-01). An `http` URL is still refused, whatever host it names.
+- `RelaySpec.credential` takes `null` with the new `'none'` scheme, for a local
+  upstream only (A-R21-02). The relay writes no credential and deletes the
+  client's value in its header.
+- `LocalDockerOptions.dockerHostPorts` names the ports a relay may reach; a
+  local upstream on any other is refused (A-R21-03).
+
+Two assertions hold it: `I4.model-relay-reaches-the-docker-host-only-as-declared`
+and `I5.model-relay-refuses-an-undeclared-local-endpoint`.
+
+===== packages/api/src/host/compose.ts =====
+diff --git a/packages/api/src/host/compose.ts b/packages/api/src/host/compose.ts
+index 1a1d6f8..3317cc4 100644
+--- a/packages/api/src/host/compose.ts
++++ b/packages/api/src/host/compose.ts
+@@ -53,39 +53,66 @@ export type EndpointSeat = (typeof ENDPOINT_SEATS)[number];
+ 
+ export interface HostEndpoint {
+   readonly config: EndpointConfig;
+-  /** The endpoint's credential. Held by the sandbox provider for its relays and given to no sandbox (A-P12-01). */
+-  readonly key: string;
++  /**
++   * The endpoint's credential. Held by the sandbox provider for its relays and
++   * given to no sandbox (A-P12-01). `null` only where the configuration
++   * declared scheme `'none'`, for a local endpoint (A-R21-04).
++   */
++  readonly key: string | null;
+   readonly seats: readonly EndpointSeat[];
+ }
+ 
+ /**
+  * Reads the endpoint file `FACTORY_ENDPOINT_CONFIG` names: the driver's
+  * configuration and a `seats` list, nothing else. A file that does not parse
+  * exactly stops the host before it listens (I5): a seat that was misspelt
+  * would otherwise be a seat silently left to the other driver.
+  */
+ export function parseEndpointFile(text: string, key: string): HostEndpoint {
+   let parsed: unknown;
+   try {
+     parsed = JSON.parse(text);
+   } catch (error) {
+     throw new Error(`factory-host: the endpoint file is not JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+   }
+   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('factory-host: the endpoint file is not a JSON object');
+   const { seats, ...config } = parsed as Record<string, unknown>;
+   if (!Array.isArray(seats) || seats.length === 0) throw new Error('factory-host: the endpoint file names no seats; an endpoint that fills none has nothing to do');
+   const known = new Set<string>(ENDPOINT_SEATS);
+   const named: EndpointSeat[] = [];
+   for (const seat of seats as unknown[]) {
+     if (typeof seat !== 'string' || !known.has(seat)) {
+       throw new Error(`factory-host: the endpoint file names the seat ${JSON.stringify(seat)}; the seats are ${ENDPOINT_SEATS.join(', ')}`);
+     }
+     if (named.includes(seat as EndpointSeat)) throw new Error(`factory-host: the endpoint file names the seat '${seat}' twice`);
+     named.push(seat as EndpointSeat);
+   }
+-  if (key === '') throw new Error('factory-host: the endpoint has no credential; a local endpoint without one is R21');
+   // The driver's own check, so the host refuses exactly what the driver would, naming the field.
+-  return { config: checkConfig(config), key, seats: named };
++  const checked = checkConfig(config);
++  // A-R21-04: no key is the file's declaration, never the variable's absence, and a key beside it is a contradiction.
++  if (checked.scheme === 'none') {
++    if (key !== '') {
++      throw new Error("factory-host: the endpoint declares scheme 'none', so FACTORY_ENDPOINT_KEY must not be set; a key the endpoint never receives is a configuration that says two things");
++    }
++    return { config: checked, key: null, seats: named };
++  }
++  if (key === '') {
++    throw new Error("factory-host: the endpoint has no credential; set FACTORY_ENDPOINT_KEY, or declare scheme 'none' for a local endpoint on the Docker host");
++  }
++  return { config: checked, key, seats: named };
++}
++
++/**
++ * What the sandbox provider is given for an endpoint: its credential, where it
++ * has one, and the Docker host port its local upstream listens on, where it is
++ * local (A-R21-03, A-R21-04). Nothing for no endpoint.
++ */
++export function endpointGrants(endpoint: HostEndpoint | null): { credentials: Record<string, string>; dockerHostPorts: number[] } {
++  if (endpoint === null) return { credentials: {}, dockerHostPorts: [] };
++  return {
++    credentials: endpoint.key === null ? {} : { [ENDPOINT_CREDENTIAL]: endpoint.key },
++    dockerHostPorts: typeof endpoint.config.upstream === 'string' ? [] : [endpoint.config.upstream.port],
++  };
+ }
+ 
+ /** Each seat's driver: the endpoint's in the seats it names, the default in every other (D-R6-07). */
+@@ -114,33 +141,35 @@ export function containerUser(env: Readonly<Record<string, string | undefined>>)
+ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
+   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
+   const docker = config.docker === undefined ? {} : { executable: config.docker };
+   const endpoint = config.endpoint ?? null;
++  const grants = endpointGrants(endpoint);
+   const sandbox = await LocalDockerProvider.create({
+     ...docker,
+     vaultPaths: [config.store, config.repository],
+     credentials: {
+       [MODEL_CREDENTIAL]: config.modelKey,
+-      ...(endpoint === null ? {} : { [ENDPOINT_CREDENTIAL]: endpoint.key }),
++      ...grants.credentials,
+     },
++    dockerHostPorts: grants.dockerHostPorts,
+   });
+   const claude = new ClaudeCodeDriver({ provider: sandbox });
+   // The endpoint's driver, in the seats the operator named and no others (D-R6-07). Its family is the operator's
+   // declaration, so a reviewer or critic seated on it is graded against that declaration (I6).
+   const other = endpoint === null ? null : new OpenAICompatibleDriver({ provider: sandbox, endpoint: endpoint.config });
+   const seats = seatedDrivers<ClaudeCodeDriver | OpenAICompatibleDriver>(claude, other === null || endpoint === null ? null : { driver: other, seats: endpoint.seats });
+   const seat = (name: EndpointSeat): ClaudeCodeDriver | OpenAICompatibleDriver => seats[name];
+   const buildImage = await ensureImage(docker);
+   return buildGraph({
+     vault,
+     sandbox,
+     driver: seat('driver'),
+     // With no endpoint, one driver in both seats: below L3 the seat is filled and run state records its independence as its grade (I6).
+     reviewer: seat('reviewer'),
+     // And in every drafting seat: a critic of its drafter's family is not seated, the condition is recorded as
+     // failed, and every draft goes to a person (R19, D-A-DS-04). An endpoint of another family seats one.
+     drafting: { specDrafter: seat('specDrafter'), specCritic: seat('specCritic'), testDrafter: seat('testDrafter'), testCritic: seat('testCritic') },
+     workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
+     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
+     profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
+   });
+ }
+
+===== packages/api/src/host/main.ts =====
+diff --git a/packages/api/src/host/main.ts b/packages/api/src/host/main.ts
+index 8dbdb41..07f7142 100644
+--- a/packages/api/src/host/main.ts
++++ b/packages/api/src/host/main.ts
+@@ -1,30 +1,32 @@
+ /**
+  * The `factory-host` executable: the runtime as a service over the production
+  * composition. Configured from its environment and nothing else, it touches
+  * no terminal (I9); a client finds it at the address it was told to listen on.
+  *
+  * - `FACTORY_API_TOKEN`: the local token every request must bear
+  * - `FACTORY_POLICY_FILE`: the `policy.yaml` every run is admitted under
+  * - `FACTORY_ROLES_DIR`: the roles directory every run's seats are compiled
+  *   from, outside the repository and the trees (D-A-RC-01)
+  * - `FACTORY_RUBRICS_DIR` (optional): the rubrics directory a drafting run's
+  *   critics are given, outside the repository and the trees (R19). Unset, a
+  *   run that drafts is refused at admission
+  * - `FACTORY_VAULT_STORE`: what the Vault owns
+  * - `FACTORY_REPOSITORY`: the working copy runs are admitted from
+  * - `FACTORY_TREES`: where the runtime keeps each run's trees
+  * - `FACTORY_LISTEN_PORT`, and `FACTORY_LISTEN_HOST` (default `127.0.0.1`)
+  * - `ANTHROPIC_API_KEY`: held by the sandbox provider for its relays, given to no sandbox
+  * - `FACTORY_PRINCIPAL` (default `local`): who a request bearing the token is
+  * - `FACTORY_GIT_REPOSITORY` (`owner/name`), `FACTORY_GIT_BASE_BRANCH`, and
+  *   `FACTORY_GIT_TOKEN`: the remote a passed run merges into, and the token
+  *   that merges it, held by the host and given to no sandbox (D-I1b-06)
+  * - `FACTORY_CONTAINER_UID` and `FACTORY_CONTAINER_GID`, both or neither: who
+  *   sandboxes run as, required on a host with no uids (D-I1b-10)
+  * - `FACTORY_ENDPOINT_CONFIG` and `FACTORY_ENDPOINT_KEY`, both or neither: a
+  *   JSON file outside the repository naming an OpenAI-compatible endpoint and
+  *   the seats it fills, and that endpoint's credential, held by the sandbox
+- *   provider for its relays and given to no sandbox (R6, D-R6-07)
++ *   provider for its relays and given to no sandbox (R6, D-R6-07). A file
++ *   declaring scheme `'none'`, for a local endpoint on the Docker host, comes
++ *   without the key, and one given with it stops the host (R21, A-R21-04)
+  *
+  * A missing variable stops the host before it listens (I5).
+  */
+@@ -44,8 +46,9 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('factor
+ const user = containerUser(process.env);
+ const endpointFile = process.env.FACTORY_ENDPOINT_CONFIG ?? '';
+ const endpointKey = process.env.FACTORY_ENDPOINT_KEY ?? '';
+-if ((endpointFile === '') !== (endpointKey === '')) {
+-  throw new Error('factory-host: FACTORY_ENDPOINT_CONFIG and FACTORY_ENDPOINT_KEY must both be set, or neither');
++// A key with no file is half a configuration. A file with no key is the file's to allow: only one declaring scheme 'none' does.
++if (endpointFile === '' && endpointKey !== '') {
++  throw new Error('factory-host: FACTORY_ENDPOINT_KEY is set without FACTORY_ENDPOINT_CONFIG');
+ }
+ const endpoint = endpointFile === '' ? null : parseEndpointFile(await readFile(endpointFile, 'utf8'), endpointKey);
+ const components = await composeHost({
+
+===== packages/api/test/host.test.ts =====
+diff --git a/packages/api/test/host.test.ts b/packages/api/test/host.test.ts
+index 0195e6f..08b2e9b 100644
+--- a/packages/api/test/host.test.ts
++++ b/packages/api/test/host.test.ts
+@@ -1,5 +1,6 @@
+ import { describe, expect, test } from 'vitest';
+-import { containerUser, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
++import { ENDPOINT_CREDENTIAL } from '@olympus-ai/driver-openai-compatible';
++import { containerUser, endpointGrants, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
+ 
+ describe('containerUser', () => {
+   test('both absent or empty is no user, and both set is that user', () => {
+@@ -26,37 +27,54 @@ describe('containerUser', () => {
+ describe('the endpoint file (R6, D-R6-07)', () => {
+   const price = { inputPerMTok: 1, outputPerMTok: 1, cacheReadPerMTok: 1, cacheWritePerMTok: 0, cacheWrite1hPerMTok: 0 };
+   const config = {
+     upstream: 'https://models.example', path: '/v1/chat/completions', header: 'authorization', scheme: 'bearer',
+     provider: 'example', family: 'example-family', version: '1', models: { fast: 'm', standard: 'm', deep: 'm' }, prices: { m: price },
+     maxOutputTokens: 1024, ceilingField: 'max_tokens', parallelism: 1, maxTurns: 10,
+   };
+   const file = (extra: Record<string, unknown>): string => JSON.stringify({ ...config, ...extra });
+ 
+   test('a file naming the configuration and its seats is read as written', () => {
+     const endpoint = parseEndpointFile(file({ seats: ['reviewer', 'specCritic', 'testCritic'] }), 'key');
+     expect(endpoint.seats).toStrictEqual(['reviewer', 'specCritic', 'testCritic']);
+     expect(endpoint.config.family).toBe('example-family');
+     expect(endpoint.key).toBe('key');
+   });
+ 
+   test('no seats, an unknown seat, a seat twice, no key, a field the driver does not read, and a file that is not JSON are each refused', () => {
+     expect(() => parseEndpointFile(file({}), 'key')).toThrow(/no seats/u);
+     expect(() => parseEndpointFile(file({ seats: [] }), 'key')).toThrow(/no seats/u);
+     expect(() => parseEndpointFile(file({ seats: ['critic'] }), 'key')).toThrow(/the seats are/u);
+     expect(() => parseEndpointFile(file({ seats: ['reviewer', 'reviewer'] }), 'key')).toThrow(/twice/u);
+     expect(() => parseEndpointFile(file({ seats: ['reviewer'] }), '')).toThrow(/no credential/u);
+     expect(() => parseEndpointFile(file({ seats: ['reviewer'], temperature: 0 }), 'key')).toThrow(/temperature/u);
+     expect(() => parseEndpointFile(file({ seats: ['reviewer'], family: undefined }), 'key')).toThrow(/family/u);
+     expect(() => parseEndpointFile('{', 'key')).toThrow(/not JSON/u);
+   });
+ 
++  test('a local endpoint declaring no credential comes without a key, and a key beside it is refused (A-R21-04)', () => {
++    const local = { upstream: { local: 'docker-host', port: 11434 }, scheme: 'none', seats: ['reviewer'] };
++    const endpoint = parseEndpointFile(file(local), '');
++    expect(endpoint.key).toBeNull();
++    expect(endpointGrants(endpoint)).toStrictEqual({ credentials: {}, dockerHostPorts: [11434] });
++    expect(() => parseEndpointFile(file(local), 'key')).toThrow(/must not be set/u);
++    // A local endpoint that takes a key is given both.
++    const keyed = parseEndpointFile(file({ ...local, scheme: 'bearer' }), 'key');
++    expect(endpointGrants(keyed)).toStrictEqual({ credentials: { [ENDPOINT_CREDENTIAL]: 'key' }, dockerHostPorts: [11434] });
++    // No key is never inferred: an https endpoint without one is still refused, and so is the none scheme for it.
++    expect(() => parseEndpointFile(file({ seats: ['reviewer'] }), '')).toThrow(/no credential/u);
++    expect(() => parseEndpointFile(file({ seats: ['reviewer'], scheme: 'none' }), '')).toThrow(/scheme 'none'/u);
++    expect(() => parseEndpointFile(file({ ...local, upstream: 'http://localhost:11434' }), '')).toThrow(/upstream/u);
++    expect(endpointGrants(parseEndpointFile(file({ seats: ['reviewer'] }), 'key'))).toStrictEqual({ credentials: { [ENDPOINT_CREDENTIAL]: 'key' }, dockerHostPorts: [] });
++    expect(endpointGrants(null)).toStrictEqual({ credentials: {}, dockerHostPorts: [] });
++  });
++
+   test('the endpoint fills the seats it names and the default fills every other', () => {
+     expect(seatedDrivers('claude', null)).toStrictEqual({
+       driver: 'claude', reviewer: 'claude', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'claude',
+     });
+     expect(seatedDrivers('claude', { driver: 'other', seats: ['reviewer', 'testCritic'] })).toStrictEqual({
+       driver: 'claude', reviewer: 'other', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'other',
+     });
+     expect(ENDPOINT_SEATS).toHaveLength(6);
+   });
+ });
+
+===== packages/conformance/src/registry/i4.ts =====
+diff --git a/packages/conformance/src/registry/i4.ts b/packages/conformance/src/registry/i4.ts
+index 48faf54..f4ca094 100644
+--- a/packages/conformance/src/registry/i4.ts
++++ b/packages/conformance/src/registry/i4.ts
+@@ -4,6 +4,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
+ import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
+ import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
+ import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
++import { MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED } from './local-endpoint.js';
+ import { OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE, OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED } from './openai-compatible.js';
+ import {
+   FORBIDDEN_STATION, GRANTED_ROLE, GRANTED_STATIONS, GRANTED_TOOLS,
+@@ -18,304 +19,306 @@ import { R19_ASSERTIONS } from './drafting.js';
+ /** I4: Default deny. */
+ export const I4: InvariantEntry = {
+   title: INVARIANTS.I4,
+   assertions: [
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     ...R19_ASSERTIONS.I4,
+     ...R20_I4,
+     // R4: parallel task execution.
+     ...R4_I4,
+     READINESS_NEVER_RAISES_A_CAP,
+     ABSENT_SCAN_IS_NOT_A_PASS,
+     MERGE_TOKEN_REACHES_NO_SANDBOX,
+     GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
+     compileError({
+       id: 'I4.capability-scope-is-explicit',
+       title: 'CapabilityScope requires every grant to be stated, and egress is none or an explicit list',
+       fixture: 'i4/capability-scope-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I4.task-request-tools-are-required',
+       title: 'TaskRequest cannot be built without the policy-granted tool list or the sandbox',
+       fixture: 'i4/task-request-tools-are-required.ts',
+     }),
+     compileError({
+       id: 'I4.compiled-role-carries-no-grants',
+       title: 'CompiledRole has no field for tools, network, globs, or autonomy; policy is the only source of grants',
+       fixture: 'i4/compiled-role-carries-no-grants.ts',
+     }),
+     compileError({
+       id: 'I4.resolved-policy-is-total',
+       title: 'Policy.approvals requires all forty station:level keys; only PolicyDocument may be sparse',
+       fixture: 'i4/resolved-policy-is-total.ts',
+     }),
+     compileError({
+       id: 'I4.tool-grant-requires-an-inventory',
+       title:
+         'validateToolGrants cannot be called without the driver tool inventory: the parameter has no default and is not optional, so there is no path that validates nothing',
+       fixture: 'i4/tool-grant-requires-an-inventory.ts',
+     }),
+     runtime({
+       id: 'I4.unlisted-capability-refused',
+       title:
+         'the real engine refuses a role the policy does not define (capability-missing) and a station outside a defined role scope (station-forbidden); a granted station returns exactly the stated scope, so the refusals are rules rather than an empty policy',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const undefinedRole = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+         if (undefinedRole.ok) {
+           throw new Error('I4: a role the policy does not define resolved to a capability scope');
+         }
+         if (undefinedRole.reason !== 'capability-missing') {
+           throw new Error(`I4: an undefined role was refused as '${undefinedRole.reason}'; expected 'capability-missing'`);
+         }
+ 
+         const forbidden = engine.resolveCapabilities(GRANTED_ROLE, FORBIDDEN_STATION, policy);
+         if (forbidden.ok) {
+           throw new Error(`I4: role '${GRANTED_ROLE}' resolved a scope at '${FORBIDDEN_STATION}', which its policy does not list`);
+         }
+         if (forbidden.reason !== 'station-forbidden') {
+           throw new Error(`I4: a station outside the role scope was refused as '${forbidden.reason}'; expected 'station-forbidden'`);
+         }
+ 
+         // The control: an engine that refuses everything would satisfy both
+         // checks above while granting nothing, so a granted station must
+         // resolve, and to exactly what the document states.
+         for (const station of GRANTED_STATIONS) {
+           const granted = engine.resolveCapabilities(GRANTED_ROLE, station, policy);
+           if (!granted.ok) {
+             throw new Error(`I4: role '${GRANTED_ROLE}' was refused at '${station}', which its policy grants (${granted.reason})`);
+           }
+           if (granted.scope.tools.join(',') !== GRANTED_TOOLS.join(',')) {
+             throw new Error(`I4: the resolved scope at '${station}' carries tools [${granted.scope.tools.join(', ')}]; expected [${GRANTED_TOOLS.join(', ')}]`);
+           }
+           if (granted.scope.tools.includes(UNGRANTED_TOOL)) {
+             throw new Error(`I4: the resolved scope carries '${UNGRANTED_TOOL}', which no role in the document grants`);
+           }
+           if (granted.scope.network.egress !== 'none') {
+             throw new Error('I4: the resolved scope widened egress beyond what the document granted');
+           }
+         }
+ 
+         // A grant is not a handle on the policy: widening what came back must
+         // not widen what the next caller receives.
+         const held = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!held.ok) throw new Error('I4: the control resolution was refused');
+         try {
+           held.scope.tools.push(UNGRANTED_TOOL);
+         } catch {
+           // Frozen, which is the intended arrangement.
+         }
+         const next = engine.resolveCapabilities(GRANTED_ROLE, 'build', policy);
+         if (!next.ok) throw new Error('I4: the second resolution was refused');
+         if (next.scope.tools.includes(UNGRANTED_TOOL)) {
+           throw new Error(`I4: mutating a resolved scope added '${UNGRANTED_TOOL}' to what the policy grants`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.omitted-approval-is-human-required',
+       title:
+         'resolvePolicy fills every approval the document omits with human-required and never auto, while carrying a stated approval through unchanged, so the filling is a default rather than a rewrite',
+       run: async () => {
+         const { APPROVAL_KEYS, AUTONOMY_LEVELS, STATION_IDS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const stated = APPROVAL_KEYS.filter((key) => document.approvals[key] !== undefined);
+         if (stated.length !== 1) {
+           throw new Error(`I4: the fixture document must state exactly one approval for this assertion to mean anything; it states ${String(stated.length)}`);
+         }
+         const policy = engine.resolvePolicy(document);
+ 
+         const expected = STATION_IDS.length * AUTONOMY_LEVELS.length;
+         const keys = Object.keys(policy.approvals);
+         if (keys.length !== expected) {
+           throw new Error(`I4: the resolved policy carries ${String(keys.length)} approvals; the table must be total at ${String(expected)}`);
+         }
+         // Totality is proved by the count above; this loop is about what the
+         // omitted keys were filled with.
+         for (const key of APPROVAL_KEYS) {
+           if (stated.includes(key)) continue;
+           const outcome = policy.approvals[key];
+           if (outcome !== 'human-required') {
+             throw new Error(`I4: '${key}' was omitted by the document and resolved to '${outcome}'; an unconfigured approval must be human-required`);
+           }
+         }
+         // The stated entry survives: a resolver that overwrote everything with
+         // human-required would pass the loop above and be wrong.
+         const [statedKey] = stated;
+         if (statedKey === undefined) throw new Error('I4: the stated approval list has one entry and no entry in it');
+         if (policy.approvals[statedKey] !== document.approvals[statedKey]) {
+           throw new Error(`I4: the document stated '${statedKey}' and the resolved policy reports '${policy.approvals[statedKey]}'`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.empty-inventory-refuses-every-grant',
+       title:
+         'validateToolGrants against an empty inventory refuses every tool the policy grants, naming each with its role; an empty inventory is never read as allow-all',
+       run: async () => {
+         const { StrictPolicyEngine, validateToolGrants } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         const empty = validateToolGrants(policy, []);
+         if (empty.ok) {
+           throw new Error(`I4: an empty inventory admitted ${String(GRANTED_TOOLS.length)} granted tool(s); an inventory offering nothing grants nothing`);
+         }
+         if (empty.ungranted.length !== GRANTED_TOOLS.length) {
+           throw new Error(`I4: an empty inventory named ${String(empty.ungranted.length)} ungranted tool(s); expected all ${String(GRANTED_TOOLS.length)}`);
+         }
+         for (const tool of GRANTED_TOOLS) {
+           if (!empty.ungranted.some((u) => u.tool === tool && u.role === GRANTED_ROLE)) {
+             throw new Error(`I4: '${tool}' was granted to '${GRANTED_ROLE}' and the refusal does not name the pair`);
+           }
+         }
+ 
+         // The control: a full inventory passes, so the refusal above is the
+         // inventory doing work rather than the function refusing always.
+         const full = validateToolGrants(policy, [...GRANTED_TOOLS]);
+         if (!full.ok) {
+           throw new Error(`I4: an inventory covering every grant was still refused (${full.detail})`);
+         }
+         // And one short of the grants refuses exactly the missing one.
+         const [first] = GRANTED_TOOLS;
+         if (first === undefined) throw new Error('I4: the granted tool list is empty');
+         const partial = validateToolGrants(policy, [first]);
+         if (partial.ok) throw new Error('I4: an inventory missing a granted tool was accepted');
+         if (partial.ungranted.length !== GRANTED_TOOLS.length - 1) {
+           throw new Error(`I4: a partial inventory named ${String(partial.ungranted.length)} ungranted tool(s); expected ${String(GRANTED_TOOLS.length - 1)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.egress-entry-names-one-host',
+       title:
+         'an egress host list carrying a wildcard, a path, a prefix length, or whitespace is refused; a list of literal hosts is accepted, so the refusal is the entry being read and not the list being rejected',
+       run: async () => {
+         const { validatePolicyDocument } = await import('@olympus-ai/core');
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I4: the fixture document defines no granted role');
+ 
+         // Refusing the bare string 'all' while accepting ['*'] would leave the
+         // authored form reading as an explicit allowlist while denoting every
+         // host. Each of these denotes a set, or is not a host at all.
+         for (const entry of ['*', '*.example.com', '0.0.0.0/0', '::/0', 'https://example.com', 'exa mple.com']) {
+           const widened = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: [entry] } } } };
+           const outcome = validatePolicyDocument(widened);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: a policy granting egress to ${JSON.stringify(entry)} was accepted. An egress list admits no ` +
+                 'wildcard, so an entry that denotes a set makes a restrictive-looking policy unrestricted.',
+             );
+           }
+         }
+ 
+         // The control: literal hosts are accepted, so the check above is the
+         // entry being read rather than every list being refused.
+         const literal = { ...document, roles: { [GRANTED_ROLE]: { ...scope, network: { egress: ['registry.npmjs.org', '192.0.2.10'] } } } };
+         const accepted = validatePolicyDocument(literal);
+         if (!accepted.ok) {
+           throw new Error(`I4: a list of literal hosts was refused: ${accepted.defects.map((d) => d.problem).join('; ')}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I4.role-lookup-ignores-the-prototype-chain',
+       title:
+         'a role the policy does not define is refused with capability-missing even when Object.prototype carries a scope-shaped value under that name, and a role named for a prototype member refuses rather than throwing; the resolved role map has no prototype',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+         const prototype = Object.prototype as Record<string, unknown>;
+ 
+         if (Object.getPrototypeOf(policy.roles) !== null) {
+           throw new Error('I4: the resolved role map has a prototype, so an undefined role can be answered by it');
+         }
+ 
+         // Pollution somewhere else in the process must not become a grant here.
+         prototype[UNDEFINED_ROLE] = { stations: ['build'], tools: ['read'] };
+         try {
+           const outcome = engine.resolveCapabilities(UNDEFINED_ROLE, 'build', policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I4: role '${UNDEFINED_ROLE}' is defined nowhere in the policy and resolved to a grant because ` +
+                 'Object.prototype carried that name. Default deny has to be total, and a lookup that reads the ' +
+                 'prototype chain is not.',
+             );
+           }
+           if (outcome.reason !== 'capability-missing') {
+             throw new Error(`I4: the polluted role was refused as '${outcome.reason}'; expected 'capability-missing'`);
+           }
+           if (engine.resolveAutonomy(1, 'build', UNDEFINED_ROLE, policy).ok) {
+             throw new Error('I4: resolveAutonomy granted a level to a role that exists only on Object.prototype');
+           }
+         } finally {
+           Reflect.deleteProperty(prototype, UNDEFINED_ROLE);
+         }
+ 
+         // A role named for a prototype member must refuse, not throw: an
+         // exception is not the refusal the contract promises, and a caller that
+         // catches it has no reason recorded.
+         for (const name of ['__proto__', 'constructor', 'toString', 'valueOf']) {
+           const role = name as typeof UNDEFINED_ROLE;
+           let refused: string;
+           try {
+             const outcome = engine.resolveCapabilities(role, 'build', policy);
+             refused = outcome.ok ? 'granted' : outcome.reason;
+           } catch {
+             throw new Error(`I4: an ungranted role named '${name}' threw instead of refusing with capability-missing`);
+           }
+           if (refused !== 'capability-missing') {
+             throw new Error(`I4: an ungranted role named '${name}' resolved as '${refused}'`);
+           }
+         }
+ 
+         // The control: a real grant still resolves.
+         if (!engine.resolveCapabilities(GRANTED_ROLE, 'build', policy).ok) {
+           throw new Error('I4: the granted role was refused, so the guard is refusing everything');
+         }
+       },
+     }),
+     APPROVAL_OUTCOME_GATES_THE_STATION,
+     external({
+       id: 'I4.driver-tool-inventory-validated',
+       title:
+         'the CLI session offers exactly the tools the task granted and no wider set, every declared tool is one the CLI really has, '
+         + 'and a grant outside the declaration is refused before the task starts',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK,
+     WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF,
+     // Paid by P12. Surfaced by P5's external review, which read the credential out of a child of
+     // the CLI and, through /proc, out of a later exec given none (D-P5-20). The credential now
+     // lives in a relay the provider owns, and the assertion replays that exploit and finds nothing.
+     external({
+       id: 'I4.model-credential-not-readable-by-the-task',
+       title:
+         'the model credential never enters the sandbox: a child of the CLI, a later exec, a process left running, every file of the container, '
+         + 'its docker inspect, and the workspace hold no trace of it, while the task reaches the model through the relay that holds it; '
+         + 'the same search finds a value an exec was given, so it is not blind',
+       level: 'runtime',
+       package: '@olympus-ai/driver-claude-code',
+       file: 'test/invariants.test.ts',
+     }),
+     MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT,
+     // P13: spending is a capability, bounded where the task cannot reach it.
+     MODEL_RELAY_ENFORCES_BUDGET,
+     // R6: the second dialect and the second driver, under the same controls (A-R6-01, A-R6-02).
+     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
+     OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED,
+     OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE,
++    // R21: a route to the Docker host is the provider's to grant, and the relay's alone (A-R21-01..03).
++    MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED,
+     // R14: the tier a call runs at is policy's, per station, and escalation is a grant (A-R14-01).
+     TIER_PER_STATION_FOLLOWS_POLICY,
+     ESCALATION_ONLY_UNDER_A_GRANT,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/i5.ts =====
+diff --git a/packages/conformance/src/registry/i5.ts b/packages/conformance/src/registry/i5.ts
+index 1be0266..43a57b0 100644
+--- a/packages/conformance/src/registry/i5.ts
++++ b/packages/conformance/src/registry/i5.ts
+@@ -25,6 +25,7 @@ import {
+   withSandbox,
+ } from './local-sandbox.js';
+ import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT } from './local-relay.js';
++import { MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT } from './local-endpoint.js';
+ import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
+ import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
+ import { TELEMETRY_GUESSES_NOTHING } from './telemetry.js';
+@@ -45,448 +46,450 @@ const CONTENDERS = 8;
+ /** I5: Fail closed. */
+ export const I5: InvariantEntry = {
+   title: INVARIANTS.I5,
+   assertions: [
+     // R20: the role compiler.
+     // R19: drafting at spec and test-design.
+     ...R19_ASSERTIONS.I5,
+     ...R20_I5,
+     // R17: security at the gate.
+     ...R17_I5,
+     // R4: parallel task execution.
+     ...R4_I5,
+     // R2: a rate over nothing, a run refused at admission, and an estimate with no history each refuse to guess.
+     OUTCOMES_REFUSE_WITHOUT_A_SAMPLE,
+     // R12: an unfinished run, an unrecorded time, and a lost reading are refused or marked, never guessed.
+     TELEMETRY_GUESSES_NOTHING,
+     INDETERMINATE_PROBE_LOWERS,
+     UNSUPPORTED_STACK_REFUSES,
+     REFUSAL_NAMES_THE_BOUNDING_TERM,
+     INTEGRATE_MERGES_THE_VERIFIED_TREE,
+     FAILED_INTEGRATION_NEVER_REPORTS_DONE,
+     runtime({
+       id: 'I5.policy-document-load-is-hardened',
+       title: 'policy.yaml is read by a parser pinned to an exact version, and an alias, a document past the byte cap, and nesting past the depth limit are each refused by default and admitted only when that one setting is relaxed',
+       run: assertPolicyLoadIsHardened,
+     }),
+     compileError({
+       id: 'I5.transition-has-no-warn-and-continue',
+       title:
+         'StationTransition advances or refuses with a closed reason and the typed payload that reason names beside a message; there is no warned or degraded advance and no prose-only refusal',
+       fixture: 'i5/transition-has-no-warn-and-continue.ts',
+     }),
+     compileError({
+       id: 'I5.policy-refusal-is-explicit',
+       title: 'PolicyResolution and CapabilityResolution refuse with a reason and detail or succeed with the value; no downgrade marker',
+       fixture: 'i5/policy-refusal-is-explicit.ts',
+     }),
+     compileError({
+       id: 'I5.station-requires-declared-capabilities',
+       title: 'StationContract.requires accepts only keys of DriverCapabilities',
+       fixture: 'i5/station-requires-declared-capabilities.ts',
+     }),
+     compileError({
+       id: 'I5.adapter-set-declares-absent-controls',
+       title: 'AdapterSet slots are T | null, never optional, and unavailableControls() is required',
+       fixture: 'i5/adapter-set-declares-absent-controls.ts',
+     }),
+     compileError({
+       id: 'I5.check-result-declares-suite-count',
+       title: 'CheckResult.suiteCount is required: null is a declared unknown, omission is not representable',
+       fixture: 'i5/check-result-declares-suite-count.ts',
+     }),
+     compileOk({
+       id: 'I5.stubs-declare-unsafe',
+       title:
+         'StubVault, StubSandboxProvider, and StubDriver are each assignable to DeclaresUnsafe: the type shape, which a declare-only field would also satisfy; runtime existence is proved by I5.unsafe-component-refused-above-l1',
+       fixture: 'i5/stubs-declare-unsafe.ts',
+     }),
+     runtime({
+       id: 'I5.unsafe-component-refused-above-l1',
+       title:
+         'startRun with every stub wired is refused at L2 and L3, naming StubVault, StubSandboxProvider, StubDriver, its missing integrator, and its stand-in scanners in that order, before anything is recorded; at L1 the same graph is not refused as unsafe and carries the hello fixture through review to the integrate approval',
+       run: async () => {
+         await withLine('s1-hello-', async (rig) => {
+           const [api, core, sandbox, vault] = await Promise.all([
+             import('@olympus-ai/api'),
+             import('@olympus-ai/core'),
+             import('@olympus-ai/sandbox'),
+             import('@olympus-ai/vault'),
+           ]);
+           const stub = new core.StubDriver();
+           const stubSandbox = new sandbox.StubSandboxProvider();
+           const builder = doingTheWork(stub, stubSandbox);
+           const components = api.buildGraph({
+             vault: new vault.StubVault(rig.dirs.artifacts),
+             sandbox: stubSandbox,
+             driver: builder,
+             reviewer: builder,
+             workspaces: rig.workspaces,
+             scanners: api.STAND_IN_SCANNERS,
+           });
+ 
+           for (const level of [2, 3] as const) {
+             const outcome = await api.startRun(await rig.request(components, { requestedLevel: level }));
+             if (outcome.ok || outcome.reason !== 'unsafe-above-l1') {
+               const got = outcome.ok ? 'ok' : outcome.reason;
+               throw new Error(`I5: a run at L${String(level)} with every stub wired was not refused as unsafe-above-l1 (got ${got})`);
+             }
+             const names = outcome.unsafe.map((u) => u.component);
+             if (names.join(',') !== SKELETON_COMPONENTS.join(',')) {
+               throw new Error(`I5: the L${String(level)} refusal named [${names.join(', ')}]; expected [${SKELETON_COMPONENTS.join(', ')}]`);
+             }
+             for (const u of outcome.unsafe) {
+               if (u.cannotEnforce.length === 0) throw new Error(`I5: ${u.component} declares itself unsafe but names nothing it cannot enforce`);
+             }
+             let recorded = true;
+             try {
+               await components.vault.readRunState(rig.runId);
+             } catch {
+               recorded = false;
+             }
+             if (recorded) throw new Error(`I5: the L${String(level)} refusal left run state behind`);
+           }
+ 
+           const l1 = await api.startRun(await rig.request(components));
+           if (l1.ok || l1.reason !== 'refused' || l1.at !== 'integrate' || l1.transition.reason !== 'approval-required') {
+             const got = l1.ok ? 'a completed run' : l1.reason === 'refused' ? `${l1.at}: ${l1.transition.reason}` : l1.reason;
+             throw new Error(`I5: the hello fixture at L1 ended as ${got}, not at the integrate approval; a runtime that refuses everything does not satisfy this assertion`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.stale-commit-is-refused-under-contention',
+       title:
+         'concurrent commitRunState calls from separate processes against one ifVersion leave exactly one winner holding the whole record; every loser is refused with a reason rather than silently applied, and a stale commit afterwards stores nothing',
+       run: async () => {
+         await withVaultDirs('p1-i5-contend-', async (dirs, base) => {
+           const runId = 'i5-contend';
+           const outcomes = await contendOnCommit(dirs, base, runId, '0', CONTENDERS);
+ 
+           const winners = outcomes.filter((o) => o.ok);
+           if (winners.length !== 1) {
+             const detail = outcomes.map((o) => `${o.tag}: ${o.ok ? `stored ${String(o.version)}` : `refused (${o.message})`}`);
+             throw new Error(
+               `I5: ${String(CONTENDERS)} processes committed run state from version 0 and ${String(winners.length)} succeeded; ` +
+                 'exactly one may. A lost update is a silent degrade of the only record task status lives in.' +
+                 `\n  ${detail.join('\n  ')}`,
+             );
+           }
+           const [winner] = winners;
+           if (winner === undefined) throw new Error('I5: the winner list has one entry and no entry in it');
+           if (winner.version !== '1') {
+             throw new Error(`I5: the winning commit stored version ${String(winner.version)}, expected 1`);
+           }
+           for (const loser of outcomes.filter((o) => !o.ok)) {
+             if (loser.message === '') {
+               throw new Error(`I5: the refused commit from ${loser.tag} carries no reason; a refusal that says nothing is a silent failure`);
+             }
+           }
+ 
+           // The record that landed must be one writer's whole state, not a
+           // blend: each child tags its own `tasks`, so the stored state names
+           // exactly one of them.
+           const { LocalVault } = await import('@olympus-ai/vault');
+           const vault = new LocalVault(dirs);
+           const stored = await vault.readRunState(runId as RunId);
+           if (stored.version !== '1') throw new Error(`I5: the stored state is at version ${stored.version}, expected 1`);
+           const tags = Object.keys(stored.tasks);
+           if (tags.length !== 1 || tags[0] !== winner.tag) {
+             throw new Error(`I5: the stored state carries tasks [${tags.join(', ')}]; expected only the winner's ${winner.tag}`);
+           }
+ 
+           // The same refusal, uncontended: a commit from a version that has
+           // already been superseded stores nothing at all.
+           let stale = true;
+           try {
+             await vault.commitRunState({ ...stored, version: '0' }, '0');
+           } catch {
+             stale = false;
+           }
+           if (stale) throw new Error('I5: a commit from the superseded version 0 was accepted');
+           const after = await vault.readRunState(runId as RunId);
+           if (after.version !== '1' || Object.keys(after.tasks).join(',') !== winner.tag) {
+             throw new Error(`I5: the refused stale commit changed the store to version ${after.version} with tasks [${Object.keys(after.tasks).join(', ')}]`);
+           }
+         });
+       },
+     }),
+     runtime({
+       id: 'I5.over-request-refused',
+       title:
+         'the real engine refuses a level above the global cap, the station cap, or the role ceiling with reason exceeds-cap, carries no level on the refusal, and grants a request at or below the tightest bound at exactly the level asked for',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         // Three bounds, three different values, so each refusal names the one
+         // that actually bit. `build` is capped below the role ceiling, which is
+         // itself below the global cap.
+         const overRequests: Array<{ readonly level: AutonomyLevel; readonly station: StationId; readonly bound: string }> = [
+           { level: 2, station: 'build', bound: `the ${String(BUILD_CAP)} cap on build` },
+           { level: 3, station: 'verify', bound: `the role ceiling of ${String(ROLE_CEILING)}` },
+         ];
+         for (const { level, station, bound } of overRequests) {
+           const outcome = engine.resolveAutonomy(level, station, GRANTED_ROLE, policy);
+           if (outcome.ok) {
+             throw new Error(
+               `I5: L${String(level)} at '${station}' was granted at L${String(outcome.level)} against ${bound}. ` +
+                 'An over-request must be refused; a downgrade returns a level the caller never asked for and did not ' +
+                 'agree to, while reporting success.',
+             );
+           }
+           if (outcome.reason !== 'exceeds-cap') {
+             throw new Error(`I5: L${String(level)} at '${station}' was refused as '${outcome.reason}'; expected 'exceeds-cap'`);
+           }
+           if (Object.hasOwn(outcome, 'level')) {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries a level; there must be nothing on it to mistake for a grant`);
+           }
+           if (outcome.detail === '') {
+             throw new Error(`I5: the refusal for L${String(level)} at '${station}' carries no detail`);
+           }
+         }
+ 
+         // The global cap, which the fixture document sets to the maximum and
+         // so can never bite on its own. Lowered here, it must refuse a request
+         // the station cap and role ceiling would both have allowed.
+         const grounded = engine.resolvePolicy({ ...grantingDocument(), globalCap: 0, stationCaps: {} });
+         const global = engine.resolveAutonomy(1, 'verify', GRANTED_ROLE, grounded);
+         if (global.ok) {
+           throw new Error(`I5: L1 at 'verify' was granted at L${String(global.level)} under a global cap of L0`);
+         }
+         if (global.reason !== 'exceeds-cap') {
+           throw new Error(`I5: a request above the global cap was refused as '${global.reason}'; expected 'exceeds-cap'`);
+         }
+         if (!global.detail.includes('global L0')) {
+           throw new Error(`I5: the refusal does not name the bound that bit: ${global.detail}`);
+         }
+         if (!engine.resolveAutonomy(0, 'verify', GRANTED_ROLE, grounded).ok) {
+           throw new Error('I5: L0 under a global cap of L0 was refused; the cap is a ceiling, not an exclusion');
+         }
+ 
+         // The control: a request within every bound is granted, and granted at
+         // the level requested rather than raised or lowered to a cap. An engine
+         // that refused everything would satisfy the loop above.
+         for (const level of [0, 1] as const) {
+           const outcome = engine.resolveAutonomy(level, 'build', GRANTED_ROLE, policy);
+           if (!outcome.ok) {
+             throw new Error(`I5: L${String(level)} at 'build' is within every bound and was refused (${outcome.reason}: ${outcome.detail})`);
+           }
+           if (outcome.level !== level) {
+             throw new Error(`I5: L${String(level)} at 'build' resolved to L${String(outcome.level)}; a request inside the caps is granted as asked, never adjusted`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-document-refused-at-resolve',
+       title:
+         'resolvePolicy refuses a value that does not validate as a PolicyDocument, even though the parameter type says it is one, so a caller that asserts past the compiler cannot resolve a grant out of a malformed document; a genuine document still resolves',
+       run: async () => {
+         const { StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const document = grantingDocument();
+         const scope = document.roles[GRANTED_ROLE];
+         if (scope === undefined) throw new Error('I5: the fixture document defines no granted role');
+ 
+         // Each of these is what a caller produces by writing `value as
+         // PolicyDocument`. Without the guard, the first resolves a global cap
+         // of 99 and grants every level; the rest widen a scope the document
+         // never authorised.
+         const rogues: Array<{ readonly what: string; readonly value: unknown }> = [
+           { what: 'a global cap of 99', value: { ...document, globalCap: 99 } },
+           { what: 'a role ceiling of 99', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, autonomyCeiling: 99 } } } },
+           { what: 'a station id that is not one of the ten', value: { ...document, roles: { [GRANTED_ROLE]: { ...scope, stations: ['deploy'] } } } },
+           { what: 'an unknown top-level key', value: { ...document, backdoor: true } },
+         ];
+         for (const { what, value } of rogues) {
+           let refused = false;
+           try {
+             engine.resolvePolicy(value as never);
+           } catch {
+             refused = true;
+           }
+           if (!refused) {
+             throw new Error(
+               `I5: resolvePolicy accepted ${what}. The parameter type is a compiler claim, and a control that holds ` +
+                 'only while every caller remembers to validate first is not closed.',
+             );
+           }
+         }
+ 
+         // The control: a genuine document resolves. A guard that threw on
+         // everything would satisfy the loop above and break the engine.
+         const policy = engine.resolvePolicy(document);
+         if (policy.globalCap !== document.globalCap) {
+           throw new Error(`I5: a valid document resolved to globalCap ${String(policy.globalCap)}, expected ${String(document.globalCap)}`);
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.malformed-autonomy-level-refused',
+       title:
+         'resolveAutonomy refuses a requested level that is not one of the four, rather than comparing it against the cap: NaN, a negative, and a fraction all survive a numeric comparison and would otherwise be answered with success carrying a level that is not a level',
+       run: async () => {
+         const { AUTONOMY_LEVELS, StrictPolicyEngine } = await import('@olympus-ai/core');
+         const engine = new StrictPolicyEngine();
+         const policy = engine.resolvePolicy(grantingDocument());
+ 
+         for (const [label, level] of [
+           ['NaN', Number.NaN], ['-1', -1], ['2.5', 2.5], ['4', 4],
+         ] as const) {
+           let refused = false;
+           try {
+             const outcome = engine.resolveAutonomy(level as never, 'verify', GRANTED_ROLE, policy);
+             if (outcome.ok) {
+               throw new Error(
+                 `I5: resolveAutonomy answered ${label} with success at level ${String(outcome.level)}. ` +
+                   'An unsupported input is a refusal, and success is the one answer a caller must never get for a ' +
+                   'level nobody can honour.',
+               );
+             }
+           } catch (error) {
+             if (error instanceof Error && error.message.startsWith('I5:')) throw error;
+             refused = true;
+           }
+           if (!refused) throw new Error(`I5: resolveAutonomy returned a refusal rather than refusing ${label} outright`);
+         }
+ 
+         // The control: every real level is still answered normally.
+         for (const level of AUTONOMY_LEVELS) {
+           const outcome = engine.resolveAutonomy(level, 'verify', GRANTED_ROLE, policy);
+           const allowed = level <= ROLE_CEILING;
+           if (outcome.ok !== allowed) {
+             throw new Error(`I5: level ${String(level)} at 'verify' was ${outcome.ok ? 'granted' : 'refused'}, expected the opposite`);
+           }
+         }
+       },
+     }),
+     runtime({
+       id: 'I5.sandbox-egress-allowlist-enforced',
+       title:
+         'a sandbox provisioned with egress mode allowlist reaches the one host it names and no other, by name and by address; ' +
+         'the direct route does not exist, so unsetting every proxy variable reaches nothing; an empty allow list is refused rather ' +
+         'than read as deny-all or allow-all; and deny-all is unchanged, with --network none, no proxy, and no network created',
+       run: async () => {
+         await withProvider('i5-egress-allowlist-', async (provider, dirs) => {
+           // An allowlist that names nothing is refused. It is not deny-all wearing the wrong
+           // name, and it is not permission to reach everything; either reading would be the
+           // silent degrade this invariant exists to refuse (D-P2-07, reversed by P10).
+           const empty = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [] } })));
+           if (empty.layer !== 'egress') {
+             throw new Error(`I5: an empty allowlist was refused at the ${empty.layer} layer, not the egress layer`);
+           }
+ 
+           // deny-all is untouched by the allowlist existing: no proxy is started beside a
+           // sandbox entitled to no egress, and no network is created for it.
+           await withSandbox(provider, specFor(dirs), async (handle) => {
+             const controls = provider.appliedControls(handle);
+             if (controls.egress.mode !== 'deny-all') {
+               throw new Error(`I5: a deny-all spec was applied as ${controls.egress.mode}`);
+             }
+             // `network: 'none'` is the type's guarantee once the mode is deny-all, so what is
+             // read here is what Docker was actually told and what the container actually got.
+             if (!controls.runArgs.join(' ').includes('--network none')) {
+               throw new Error(`I5: a deny-all sandbox was not started with --network none: ${controls.runArgs.join(' ')}`);
+             }
+             const interfaces = await provider.exec(handle, ['ls', '/sys/class/net']);
+             if (interfaces.stdout.trim().split(/\s+/).join(',') !== 'lo') {
+               throw new Error(`I5: a deny-all sandbox has interfaces [${interfaces.stdout.trim()}]; expected loopback alone`);
+             }
+           });
+ 
+           const name = originName();
+           const handle = await provider.provision(specFor(dirs, 'rw', { egress: { mode: 'allowlist', allow: [name] } }));
+           const { egress } = allowlistControls(provider, handle);
+           try {
+             await withOrigin(egress.proxy.outboundNetwork, name, async (origin) => {
+               // The grant. The body proves the origin answered, not the proxy on its behalf.
+               const reached = await provider.exec(handle, [
+                 'sh', '-c', `wget -T 8 -O - http://${origin.name}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (!reached.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was not reached: ${reached.stdout}${reached.stderr}`);
+               }
+ 
+               // Refused by name, and by address. The second is the one that matters: a refusal
+               // that only ever fires on a name is a DNS failure wearing an allowlist's clothes.
+               for (const host of [BLOCKED_NAME, BLOCKED_ADDRESS]) {
+                 const answer = await throughProxy(provider, handle, `GET http://${host}/ HTTP/1.0`);
+                 if (!answer.includes('403') || !answer.includes(host)) {
+                   throw new Error(`I5: ${host} is not on the allowlist and was not refused by name in the answer: ${answer}`);
+                 }
+               }
+ 
+               // The strongest form: the origin's own address, which the proxy demonstrably
+               // reaches, refused for the one reason under test — the address is not on the list.
+               const sameHost = await throughProxy(provider, handle, `GET http://${origin.address}:${String(ORIGIN_PORT)}/ HTTP/1.0`);
+               if (!sameHost.includes('403') || sameHost.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: a reachable host was allowed by address although only its name was granted: ${sameHost}`);
+               }
+ 
+               // There is nothing to bypass. The internal network carries no default route, so a
+               // process that unsets every proxy variable is left with no second path to take.
+               const routes = await provider.exec(handle, ['sh', '-c', 'ip route']);
+               if (routes.stdout.includes('default')) {
+                 throw new Error(`I5: the sandbox has a default route, so the proxy is a convention rather than the only way out: ${routes.stdout}`);
+               }
+               const bypass = await provider.exec(handle, [
+                 'sh', '-c',
+                 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; ' +
+                   `wget -T 4 -O - http://${origin.address}:${String(ORIGIN_PORT)}/ 2>&1`,
+               ]);
+               if (bypass.exitCode === 0 || bypass.stdout.includes(ORIGIN_BODY)) {
+                 throw new Error(`I5: the allowlisted host was reached with every proxy variable unset: ${bypass.stdout}`);
+               }
+             });
+           } finally {
+             await provider.destroy(handle);
+           }
+ 
+           // The proxy is the sandbox's, and goes with it. One left running is a route off the
+           // host with no workload behind it and nobody watching it.
+           for (const [kind, leaked] of [
+             ['container', egress.proxy.name],
+             ['network', egress.proxy.internalNetwork],
+             ['network', egress.proxy.outboundNetwork],
+           ] as const) {
+             if (await dockerHas(kind, leaked)) throw new Error(`I5: the ${kind} ${leaked} outlived the sandbox it served`);
+           }
+         });
+       },
+     }),
+     STATION_MISSING_CAPABILITY_REFUSED,
+     TASK_ATTEMPTS_ARE_BOUNDED,
+     OVER_REQUEST_REFUSED_AT_ADMISSION,
+     UNSUPPORTED_STACK_IS_LOUD,
+     // P11: a provider with no probe is named, never trusted to observe the product from inside it.
+     HTTP_PROBE_ABSENT_IS_NAMED,
+     ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION,
+     CHECK_COMMAND_HAS_A_GRAMMAR,
+     MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES,
+     WORKSPACE_IS_WRITABLE_BY_THE_TASK,
+     // P13: what the relay cannot count, it charges or refuses; it never forwards it free.
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
+     // R6: the same, under the openai-chat dialect (A-R6-01).
+     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT,
++    // R21: http and no credential are each a declaration, never an inference (A-R21-01, A-R21-02).
++    MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT,
+     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
+     UNSAFE_DECLARATION_SURVIVES_COMPOSITION,
+     ADAPTER_REFUSAL_REFUSES_L3_END_TO_END,
+     UNANALYSED_TESTS_ESCALATE_THE_APPROVAL,
+     external({
+       id: 'I5.unanalysed-tests-are-not-reported-clean',
+       title:
+         'an L2 run on the composed host over a repository with no vitest or jest stops at the integrate approval for the unanalysed suite, which escalates an exit that would otherwise advance; paid, one build and one review call',
+       level: 'runtime',
+       package: '@olympus-ai/api',
+       file: 'test/paid/line.paid.test.ts',
+     }),
+     // R15: no default declaration, nothing to reproduce is refused, and a check that did not start is not a failure.
+     BASE_DECLARATION_HAS_NO_DEFAULT,
+     NOTHING_FAILING_ON_THE_BASE_IS_REFUSED,
+     UNSTARTED_BASE_CHECK_REFUSES,
+     SUITE_CHECK_RUNS_WHAT_IT_NAMES,
+   ],
+   pending: [],
+ };
+
+===== packages/conformance/src/registry/local-endpoint.ts =====
+/**
+ * The registry's assertions over a relay to a local model endpoint (R21),
+ * against a real daemon.
+ *
+ * Hermetic: the endpoint is a plain `http` listener this assertion starts on
+ * the host, on a port the operating system picks, and nothing is sent to a
+ * model. Its properties are about which declarations open the route to the
+ * host, what reaches the endpoint along it, and who else can use it.
+ *
+ * Requires a Docker daemon, and fails without one, for the reason
+ * `local-sandbox.ts` gives.
+ */
+import { execFile, spawn } from 'node:child_process';
+import { createServer, type IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { promisify } from 'node:util';
+import type { LocalDockerProvider, RelayMeter, RelaySpec, SandboxHandle } from '@olympus-ai/sandbox';
+import { runtime } from '../kit/assert.js';
+import { dockerHas, refusalFrom, specFor, withSandboxDirs } from './local-sandbox.js';
+
+const docker = promisify(execFile);
+
+const CHAT_PATH = '/v1/chat/completions';
+const LOCAL_MODEL = 'local-model';
+const METER: RelayMeter = {
+  dialect: 'openai-chat',
+  prices: { [LOCAL_MODEL]: { inputPerMTok: 0, outputPerMTok: 0, cacheReadPerMTok: 0, cacheWritePerMTok: 0, cacheWrite1hPerMTok: 0 } },
+};
+
+/** A keyless relay to `port` on the Docker host (A-R21-01, A-R21-02). */
+function localRelay(port: number): RelaySpec {
+  return {
+    upstream: { local: 'docker-host', port },
+    paths: [CHAT_PATH],
+    header: 'api-key',
+    scheme: 'none',
+    credential: null,
+    urlVariable: 'MODEL_BASE_URL',
+    budget: { maxTokens: 1_000_000, maxCostUsd: 1 },
+    meter: METER,
+  };
+}
+
+interface Seen {
+  readonly method: string;
+  readonly url: string;
+  readonly headers: IncomingHttpHeaders;
+}
+
+/**
+ * An endpoint on the host that records every request and answers a chat call
+ * as the chat API does, naming the request's model and reporting usage.
+ */
+async function startEndpoint(): Promise<{ port: number; seen: Seen[]; close: () => Promise<void> }> {
+  const seen: Seen[] = [];
+  const server = createServer((q, s) => {
+    const parts: Buffer[] = [];
+    q.on('data', (c: Buffer) => parts.push(c));
+    q.on('end', () => {
+      seen.push({ method: q.method ?? '', url: q.url ?? '', headers: q.headers });
+      let model: unknown;
+      try {
+        model = (JSON.parse(Buffer.concat(parts).toString('utf8')) as { model?: unknown }).model;
+      } catch {
+        model = null;
+      }
+      const answer = JSON.stringify({
+        id: 'chat', object: 'chat.completion', model,
+        choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      });
+      s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
+      s.end(answer);
+    });
+  });
+  // Every interface: on a Linux engine the host gateway is the bridge's address, not loopback.
+  await new Promise<void>((done) => server.listen(0, '0.0.0.0', done));
+  const { port } = server.address() as AddressInfo;
+  return {
+    port,
+    seen,
+    close: () => new Promise<void>((done) => {
+      server.closeAllConnections();
+      server.close(() => { done(); });
+    }),
+  };
+}
+
+/** One chat call to the relay from inside the sandbox, carrying a key of the task's own in every header a key could go in. */
+const CLIENT = `
+const http = require('node:http');
+const base = new URL(process.env.MODEL_BASE_URL);
+const bytes = Buffer.from(JSON.stringify({ model: '${LOCAL_MODEL}', max_tokens: 16, messages: [] }));
+const q = http.request({ host: base.hostname, port: base.port, method: 'POST', path: '${CHAT_PATH}', agent: false,
+  headers: { 'content-type': 'application/json', 'content-length': String(bytes.length),
+    authorization: 'Bearer the-tasks-own', 'x-api-key': 'the-tasks-own', 'api-key': 'the-tasks-own' } }, function (s) {
+  let text = '';
+  s.on('data', function (c) { text += c; });
+  s.on('end', function () { process.stdout.write(JSON.stringify({ status: s.statusCode, body: text })); });
+});
+q.on('error', function (e) { process.stdout.write(JSON.stringify({ status: 0, body: String(e.message) })); });
+q.end(bytes);
+`;
+
+/** Tries the endpoint directly from inside the sandbox at each address, and prints what each attempt came to. */
+const DIRECT = `
+const http = require('node:http');
+const port = Number(process.argv[1]);
+const hosts = JSON.parse(process.argv[2]);
+Promise.all(hosts.map(function (host) {
+  return new Promise(function (resolve) {
+    const q = http.get({ host: host, port: port, path: '/direct', timeout: 3000, agent: false }, function (s) {
+      s.resume();
+      resolve(host + ' reached ' + String(s.statusCode));
+    });
+    q.on('timeout', function () { q.destroy(new Error('timeout')); });
+    q.on('error', function (e) { resolve(host + ' failed ' + String(e.code || e.message)); });
+  });
+})).then(function (lines) { process.stdout.write(JSON.stringify(lines)); });
+`;
+
+/** Every address the relay container resolves `model-host` to: the host gateway, as the daemon set it. */
+async function gatewayAddresses(relayContainer: string, alias: string): Promise<string[]> {
+  const { stdout } = await docker('docker', [
+    'exec', relayContainer, 'node', '--eval',
+    `require('node:dns').lookup('${alias}', { all: true }, function (e, a) { process.stdout.write(JSON.stringify(e ? [] : a.map(function (x) { return x.address; }))); });`,
+  ]);
+  return JSON.parse(stdout) as string[];
+}
+
+export const MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED = runtime({
+  id: 'I4.model-relay-reaches-the-docker-host-only-as-declared',
+  title:
+    'a relay declared local reaches its endpoint on the Docker host over http, on a port the provider was given, with no credential and none of the task\'s, ' +
+    'metered as any relay is; the route is the relay container\'s alone, so the sandbox reaches the endpoint by no name or address; ' +
+    'a port the provider was not given, or a provider given none, is refused at provisioning; and the relay goes with the sandbox (A-R21-01..03)',
+  run: async () => {
+    const endpoint = await startEndpoint();
+    try {
+      await withSandboxDirs('i4-local-endpoint-', async (dirs) => {
+        const { EGRESS_PROXY_IMAGE, LOCAL_UPSTREAM_ALIAS, LocalDockerProvider: Provider, relayOf } = await import('@olympus-ai/sandbox');
+
+        // I4: the route is the provider's to grant. None given, or another port given, refuses the spec naming the port.
+        const ungranted = await Provider.create({ vaultPaths: [dirs.vault] });
+        const none = await refusalFrom(() => ungranted.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: localRelay(endpoint.port) })));
+        const provider: LocalDockerProvider = await Provider.create({ vaultPaths: [dirs.vault], dockerHostPorts: [endpoint.port] });
+        const other = endpoint.port === 65535 ? endpoint.port - 1 : endpoint.port + 1;
+        const elsewhere = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: localRelay(other) })));
+        for (const [what, refusal, port] of [['a provider given no port', none, endpoint.port], ['a port not given', elsewhere, other]] as const) {
+          if (refusal.layer !== 'relay' || !refusal.message.includes(String(port))) {
+            throw new Error(`I4: ${what} was refused at the ${refusal.layer} layer with: ${refusal.message}`);
+          }
+        }
+
+        const handle: SandboxHandle = await provider.provision(specFor(dirs, 'rw', { image: EGRESS_PROXY_IMAGE, relay: localRelay(endpoint.port) }));
+        const applied = relayOf(provider.appliedControls(handle).egress);
+        let destroyed = false;
+        try {
+          if (applied === undefined) throw new Error('I4: a spec with a local relay was provisioned without one');
+          const route = `${LOCAL_UPSTREAM_ALIAS}:host-gateway`;
+          if (
+            applied.local !== 'docker-host' ||
+            applied.credential !== null ||
+            applied.upstream !== `http://${LOCAL_UPSTREAM_ALIAS}:${String(endpoint.port)}` ||
+            applied.runArgs.filter((arg) => arg === route).length !== 1 ||
+            applied.runArgs.some((arg, i) => applied.runArgs[i - 1] === '--env' && arg.split('=')[0] === 'RELAY_CREDENTIAL')
+          ) {
+            throw new Error(`I4: the local relay was applied as ${JSON.stringify({ ...applied, runArgs: applied.runArgs.filter((a) => !a.includes('\n')) })}`);
+          }
+
+          // The granted call reaches the endpoint, and nothing the task sent as a key goes with it.
+          const call = await provider.exec(handle, ['node', '--eval', CLIENT]);
+          const answer = JSON.parse(call.stdout) as { status: number; body: string };
+          if (answer.status !== 200 || (JSON.parse(answer.body) as { model?: unknown }).model !== LOCAL_MODEL) {
+            throw new Error(`I4: the granted call through the local relay was answered ${call.stdout} ${call.stderr}`);
+          }
+          if (endpoint.seen.length !== 1 || endpoint.seen[0]?.method !== 'POST' || endpoint.seen[0].url !== CHAT_PATH) {
+            throw new Error(`I4: the endpoint received ${JSON.stringify(endpoint.seen.map((s) => `${s.method} ${s.url}`))}`);
+          }
+          const leaked = ['authorization', 'x-api-key', 'api-key', 'proxy-authorization'].filter((h) => endpoint.seen[0]?.headers[h] !== undefined);
+          if (leaked.length > 0) throw new Error(`I4: the endpoint received the task's ${leaked.join(', ')}`);
+
+          // The route is the relay's: from the sandbox, the endpoint is reachable by no name and no address.
+          const hosts = [LOCAL_UPSTREAM_ALIAS, 'host.docker.internal', ...(await gatewayAddresses(applied.containerId, LOCAL_UPSTREAM_ALIAS))];
+          if (hosts.length < 3) throw new Error('I4: the relay container resolved no address for the host gateway');
+          const direct = await provider.exec(handle, ['node', '--eval', DIRECT, String(endpoint.port), JSON.stringify(hosts)]);
+          const attempts = JSON.parse(direct.stdout) as string[];
+          // Read again, not narrowed: the endpoint records asynchronously, and a request from the sandbox would land here.
+          if (attempts.length !== hosts.length || attempts.some((line) => line.includes(' reached ')) || [...endpoint.seen].length !== 1) {
+            throw new Error(`I4: the sandbox reached the Docker host's endpoint without the relay: ${direct.stdout}`);
+          }
+
+          destroyed = true;
+          const reading = (await provider.destroy(handle)).meter;
+          if (reading.kind !== 'metered' || reading.calls !== 1 || reading.inputTokens !== 100 || reading.outputTokens !== 10) {
+            throw new Error(`I4: the local relay's call was read as ${JSON.stringify(reading)}`);
+          }
+        } finally {
+          if (!destroyed) await provider.destroy(handle).catch(() => undefined);
+        }
+
+        for (const [kind, name] of [
+          ['container', applied.name],
+          ['network', applied.internalNetwork],
+          ['network', applied.outboundNetwork],
+        ] as const) {
+          if (await dockerHas(kind, name)) throw new Error(`I4: the ${kind} ${name} outlived the sandbox its local relay served`);
+        }
+      });
+    } finally {
+      await endpoint.close();
+    }
+  },
+});
+
+/** A port nothing is listening on, for the relay's start to bind. */
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((done) => server.close(() => { done(); }));
+  return port;
+}
+
+/** Runs the relay's own source on the host with `env`, and returns how it ended within a few seconds and what it wrote. */
+async function relayStart(source: string, env: Record<string, string>): Promise<{ code: number | null; output: string }> {
+  const child = spawn(process.execPath, ['--eval', source], { env: { PATH: process.env.PATH ?? '', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', (c: Buffer) => (output += c.toString('utf8')));
+  child.stderr.on('data', (c: Buffer) => (output += c.toString('utf8')));
+  return new Promise((done) => {
+    const timer = setTimeout(() => {
+      child.kill();
+    }, 5000);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      done({ code, output });
+    });
+    child.stdout.on('data', () => {
+      if (output.includes('listening')) child.kill();
+    });
+  });
+}
+
+export const MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT = runtime({
+  id: 'I5.model-relay-refuses-an-undeclared-local-endpoint',
+  title:
+    'http and an absent credential are each reached only by declaration: an http URL, localhost included, is refused; a null credential is refused ' +
+    'without the none scheme, the none scheme without a null credential, and either with an https upstream; an absent credential is refused, never read as none; ' +
+    'a local upstream with a bad port, another host, or another field is refused; and the relay\'s own start refuses the same when handed them (A-R21-01, A-R21-02)',
+  run: async () => {
+    const { checkRelay, LOCAL_UPSTREAM_ALIAS, RELAY_SOURCE, SandboxRefusal } = await import('@olympus-ai/sandbox');
+    const held = new Set(['model']);
+    const ports = new Set([11434]);
+    const base = localRelay(11434);
+    const keyed = { ...base, upstream: 'https://models.example', scheme: 'bearer', credential: 'model' } as const;
+    // The declared case is accepted, so every refusal below is the one change it names.
+    const plan = checkRelay(base, held, ports);
+    if (plan.credential !== null || plan.local !== 'docker-host' || plan.upstream !== `http://${LOCAL_UPSTREAM_ALIAS}:11434`) {
+      throw new Error(`I5: a declared local relay was planned as ${JSON.stringify(plan)}`);
+    }
+    checkRelay(keyed, held, ports);
+
+    const cases: ReadonlyArray<readonly [string, Record<string, unknown>, RegExp]> = [
+      ['an http URL', { ...keyed, upstream: 'http://models.example' }, /relay\.upstream/u],
+      ['localhost over http', { ...base, upstream: 'http://localhost:11434' }, /relay\.upstream/u],
+      ['host.docker.internal over http', { ...keyed, upstream: `http://host.docker.internal:11434` }, /relay\.upstream/u],
+      ['a null credential with an https upstream', { ...keyed, scheme: 'none', credential: null }, /local/u],
+      ['a null credential under raw', { ...base, scheme: 'raw' }, /relay\.credential/u],
+      ['a null credential under bearer', { ...base, scheme: 'bearer' }, /relay\.credential/u],
+      ['the none scheme with a credential', { ...base, credential: 'model' }, /relay\.credential/u],
+      ['no credential at all', { ...base, credential: undefined }, /relay\.credential/u],
+      ['an empty credential under none', { ...base, credential: '' }, /relay\.credential/u],
+      ['port 0', { ...base, upstream: { local: 'docker-host', port: 0 } }, /port/u],
+      ['port 65536', { ...base, upstream: { local: 'docker-host', port: 65536 } }, /port/u],
+      ['a fractional port', { ...base, upstream: { local: 'docker-host', port: 80.5 } }, /port/u],
+      ['a port as text', { ...base, upstream: { local: 'docker-host', port: '11434' } }, /port/u],
+      ['another local host', { ...base, upstream: { local: 'lan', port: 11434 } }, /docker-host/u],
+      ['a port the provider was not given', { ...base, upstream: { local: 'docker-host', port: 11435 } }, /11435/u],
+      ['a local upstream naming a host', { ...base, upstream: { local: 'docker-host', port: 11434, host: 'gpu.lan' } }, /relay\.upstream/u],
+    ];
+    for (const [what, spec, cause] of cases) {
+      let refused: unknown;
+      try {
+        checkRelay(spec as unknown as RelaySpec, held, ports);
+      } catch (error) {
+        refused = error;
+      }
+      if (!(refused instanceof SandboxRefusal) || refused.layer !== 'relay' || !cause.test(refused.message)) {
+        throw new Error(`I5: ${what} was not refused at the relay layer for its cause: ${refused instanceof Error ? refused.message : 'accepted'}`);
+      }
+    }
+
+    // The relay's own start: handed what checkRelay refuses, it exits before it listens.
+    const env = {
+      RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:11434`,
+      RELAY_LOCAL: 'docker-host',
+      RELAY_PATHS: JSON.stringify([CHAT_PATH]),
+      RELAY_HEADER: 'api-key',
+      RELAY_SCHEME: 'none',
+      RELAY_PORT: String(await freePort()),
+      RELAY_BUDGET: JSON.stringify({ maxTokens: 1000, maxCostUsd: 1 }),
+      RELAY_METER: JSON.stringify(METER),
+    };
+    const started = await relayStart(RELAY_SOURCE, env);
+    if (!started.output.includes('listening')) {
+      throw new Error(`I5: the relay's start refused a declared local endpoint: ${started.output}`);
+    }
+    const starts: ReadonlyArray<readonly [string, Record<string, string>, RegExp]> = [
+      ['an http upstream not started local', { ...env, RELAY_LOCAL: '', RELAY_SCHEME: 'bearer', RELAY_CREDENTIAL: 'model' }, /https origin/u],
+      ['a local upstream naming another host', { ...env, RELAY_UPSTREAM: 'http://gpu.lan:11434' }, /local upstream/u],
+      ['a local upstream over https', { ...env, RELAY_UPSTREAM: `https://${LOCAL_UPSTREAM_ALIAS}:11434` }, /local upstream/u],
+      ['no credential under raw', { ...env, RELAY_SCHEME: 'raw' }, /no credential/u],
+      ['no credential with an https upstream', { ...env, RELAY_LOCAL: '', RELAY_UPSTREAM: 'https://models.example' }, /no credential/u],
+      ['a credential under none', { ...env, RELAY_CREDENTIAL: 'model' }, /none/u],
+    ];
+    for (const [what, given, cause] of starts) {
+      const ended = await relayStart(RELAY_SOURCE, given);
+      if (ended.code === 0 || ended.code === null || ended.output.includes('listening') || !cause.test(ended.output)) {
+        throw new Error(`I5: the relay started with ${what}, or refused it for another cause (exit ${String(ended.code)}): ${ended.output}`);
+      }
+    }
+  },
+});
+
+===== packages/drivers/openai-compatible/src/config.ts =====
+diff --git a/packages/drivers/openai-compatible/src/config.ts b/packages/drivers/openai-compatible/src/config.ts
+index 0fbd9fb..53b2c14 100644
+--- a/packages/drivers/openai-compatible/src/config.ts
++++ b/packages/drivers/openai-compatible/src/config.ts
+@@ -9,38 +9,46 @@
+  * bound nobody chose.
+  */
+ import type { ModelFamily, ModelTier } from '@olympus-ai/core';
+-import type { ModelPrice, RelayScheme } from '@olympus-ai/sandbox';
++import type { LocalUpstream, ModelPrice, RelayScheme } from '@olympus-ai/sandbox';
+ import { refuse } from './refusal.js';
+ 
+ /** The request field a call's output ceiling is sent in. Newer OpenAI models take only the second. */
+ export type CeilingField = 'max_tokens' | 'max_completion_tokens';
+ 
+ export interface EndpointConfig {
+-  /** An `https` origin with no path: `'https://api.example.com'`. The relay's only upstream. */
+-  readonly upstream: string;
++  /**
++   * The relay's only upstream: an `https` origin with no path,
++   * `'https://api.example.com'`, or a model on the Docker host,
++   * `{ local: 'docker-host', port }` (A-R21-04). An `http` URL is never read as local.
++   */
++  readonly upstream: string | LocalUpstream;
+   /** The chat-completions path, ending `/chat/completions`: `'/v1/chat/completions'`. The relay's only grant. */
+   readonly path: string;
+   /** The header the endpoint reads its credential from, such as `authorization` or `api-key`. */
+   readonly header: string;
+-  /** How the credential is written into it (A-R6-02). */
++  /**
++   * How the credential is written into it (A-R6-02), or `'none'`: the endpoint
++   * takes no credential, which only a local upstream may declare (A-R21-04).
++   * Under `'none'` the relay deletes whatever the sandbox sent in `header`.
++   */
+   readonly scheme: RelayScheme;
+   /** Who serves the model, as the run records it: `'openai'`, `'together'`, `'self-hosted'`. */
+   readonly provider: string;
+   /** The model family, as the operator declares it (I6). Lower-case letters, digits, `.`, `_`, `-`. */
+   readonly family: string;
+   /** A label for what the endpoint serves, recorded on every result: a date, a deployment, a server version. */
+   readonly version: string;
+   /** The exact model id each tier sends, never an alias (D-R6-03, D-R14-01). */
+   readonly models: Readonly<Record<ModelTier, string>>;
+   /** A price for every model in `models`, in US dollars per million tokens. Zero is a price; absent is not. */
+   readonly prices: Readonly<Record<string, ModelPrice>>;
+   /** The most output one call may generate, sent on every request in `ceilingField`. */
+   readonly maxOutputTokens: number;
+   readonly ceilingField: CeilingField;
+   /** The most tasks this driver runs at once, each on its own sandbox (A-R4-04). */
+   readonly parallelism: number;
+   /** The most model calls one task may make before it is refused. */
+   readonly maxTurns: number;
+ }
+ 
+ /** The configuration as the driver holds it: checked, frozen, and with the family branded once. */
+@@ -80,113 +88,140 @@ function text(config: Record<string, unknown>, field: keyof EndpointConfig): str
+ function count(config: Record<string, unknown>, field: keyof EndpointConfig): number {
+   const value = config[field];
+   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+     refuse('configuration', `${field} must be a positive integer, not ${shown(value)}`);
+   }
+   return value;
+ }
+ 
++/**
++ * The upstream as A-R21-04 takes one: an `https` origin with no path, or
++ * exactly `{ local: 'docker-host', port }`. An `http` URL is refused whatever
++ * host it names, so local is never inferred from one.
++ */
++function checkUpstream(value: unknown): string | LocalUpstream {
++  if (typeof value === 'string') {
++    let origin: URL | undefined;
++    try {
++      origin = new URL(value);
++    } catch {
++      origin = undefined;
++    }
++    if (origin?.protocol !== 'https:' || origin.origin !== value) {
++      refuse(
++        'configuration',
++        `upstream must be an https origin with no path, query, credentials, or trailing slash, not ${shown(value)}. ` +
++          "A model on the Docker host is { \"local\": \"docker-host\", \"port\": <port> }, never an http URL.",
++      );
++    }
++    return value;
++  }
++  if (!isRecord(value)) refuse('configuration', `upstream must be an https origin or { local: 'docker-host', port }, not ${shown(value)}`);
++  const extra = Object.keys(value).filter((key) => key !== 'local' && key !== 'port');
++  if (extra.length > 0) refuse('configuration', `upstream holds ${extra.map((k) => `'${k}'`).join(', ')}; a local upstream is the Docker host and a port`);
++  if (value.local !== 'docker-host') refuse('configuration', `upstream.local must be 'docker-host', not ${shown(value.local)}`);
++  const port = value.port;
++  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
++    refuse('configuration', `upstream.port must be an integer port from 1 to 65535, not ${shown(port)}`);
++  }
++  return Object.freeze({ local: 'docker-host', port });
++}
++
+ /**
+  * Accepts a configuration exactly as written or refuses it naming the field
+  * (I5). Typed input is checked as strictly as parsed JSON: a caller arriving
+  * from untyped code, or a file, gets the same answer.
+  */
+ export function checkConfig(input: unknown): CheckedConfig {
+   if (!isRecord(input)) refuse('configuration', 'the endpoint configuration is not an object');
+   const unknown = Object.keys(input).filter((key) => !(FIELDS as readonly string[]).includes(key));
+   if (unknown.length > 0) {
+     refuse('configuration', `the endpoint configuration holds ${unknown.map((k) => `'${k}'`).join(', ')}, which the driver does not read; a field it ignored would be a setting that did nothing`);
+   }
+ 
+-  const upstream = text(input, 'upstream');
+-  let origin: URL | undefined;
+-  try {
+-    origin = new URL(upstream);
+-  } catch {
+-    origin = undefined;
+-  }
+-  if (origin?.protocol !== 'https:' || origin.origin !== upstream) {
+-    refuse('configuration', `upstream must be an https origin with no path, query, credentials, or trailing slash, not ${shown(upstream)}. A local endpoint over http is R21's.`);
+-  }
++  const upstream = checkUpstream(input.upstream);
+ 
+   const path = text(input, 'path');
+   if (!PATH.test(path) || !path.endsWith('/chat/completions')) {
+     refuse('configuration', `path must be a plain path ending /chat/completions, such as '/v1/chat/completions', not ${shown(path)}`);
+   }
+ 
+   const header = text(input, 'header');
+   if (!HEADER.test(header)) refuse('configuration', `header ${shown(header)} is not an HTTP header name`);
+ 
+   const scheme = input.scheme;
+-  if (scheme !== 'raw' && scheme !== 'bearer') refuse('configuration', `scheme must be 'raw' or 'bearer', not ${shown(scheme)}`);
++  if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') refuse('configuration', `scheme must be 'raw', 'bearer', or 'none', not ${shown(scheme)}`);
++  if (scheme === 'none' && typeof upstream === 'string') {
++    refuse('configuration', "scheme 'none' declares an endpoint with no credential, which only a local upstream on the Docker host may be; an https endpoint takes a key (A-R21-04)");
++  }
+ 
+   const provider = text(input, 'provider');
+   const family = text(input, 'family');
+   if (!FAMILY.test(family)) {
+     refuse('configuration', `family ${shown(family)} must be lower-case letters, digits, '.', '_', and '-'; it is the operator's declaration and is compared as written (I6)`);
+   }
+   const version = text(input, 'version');
+ 
+   const models = input.models;
+   if (!isRecord(models)) refuse('configuration', 'models must map every tier to a model id');
+   const extraTiers = Object.keys(models).filter((tier) => !(TIERS as readonly string[]).includes(tier));
+   if (extraTiers.length > 0) refuse('configuration', `models names ${extraTiers.map((t) => `'${t}'`).join(', ')}, which is not a tier`);
+   const tiers: Partial<Record<ModelTier, string>> = {};
+   for (const tier of TIERS) {
+     const model = models[tier];
+     if (typeof model !== 'string' || model.trim() === '' || model !== model.trim()) {
+       refuse('configuration', `models.${tier} must be the exact model id that tier sends, not ${shown(model)}`);
+     }
+     tiers[tier] = model;
+   }
+ 
+   const prices = input.prices;
+   if (!isRecord(prices)) refuse('configuration', 'prices must give a price for every model');
+   const table: Record<string, ModelPrice> = {};
+   for (const [model, price] of Object.entries(prices)) {
+     if (!isRecord(price)) refuse('configuration', `prices[${shown(model)}] is not a price`);
+     const extra = Object.keys(price).filter((key) => !(PRICE_FIELDS as readonly string[]).includes(key));
+     if (extra.length > 0) refuse('configuration', `prices[${shown(model)}] holds ${extra.join(', ')}, which is not a price field`);
+     const at = (field: keyof ModelPrice): number => {
+       const value = price[field];
+       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+         refuse('configuration', `prices[${shown(model)}].${field} must be a non-negative finite number, not ${shown(value)}`);
+       }
+       return value;
+     };
+     table[model] = Object.freeze({
+       inputPerMTok: at('inputPerMTok'),
+       outputPerMTok: at('outputPerMTok'),
+       cacheReadPerMTok: at('cacheReadPerMTok'),
+       cacheWritePerMTok: at('cacheWritePerMTok'),
+       cacheWrite1hPerMTok: at('cacheWrite1hPerMTok'),
+     });
+   }
+   for (const tier of TIERS) {
+     const model = tiers[tier] ?? '';
+     if (!Object.hasOwn(table, model)) {
+       refuse('configuration', `models.${tier} is ${shown(model)}, which prices does not name; a call whose cost cannot be counted is not made (I5)`);
+     }
+   }
+ 
+   const ceilingField = input.ceilingField;
+   if (ceilingField !== 'max_tokens' && ceilingField !== 'max_completion_tokens') {
+     refuse('configuration', `ceilingField must be 'max_tokens' or 'max_completion_tokens', not ${shown(ceilingField)}`);
+   }
+ 
+   return Object.freeze({
+     upstream,
+     path,
+     header,
+     scheme,
+     provider,
+     // I6: the one place the family is branded. It is the operator's string, checked for shape and nothing else.
+     family: family as ModelFamily,
+     version,
+     models: Object.freeze(tiers as Record<ModelTier, string>),
+     prices: Object.freeze(table),
+     maxOutputTokens: count(input, 'maxOutputTokens'),
+     ceilingField,
+     parallelism: count(input, 'parallelism'),
+     maxTurns: count(input, 'maxTurns'),
+   });
+ }
+
+===== packages/drivers/openai-compatible/src/driver.ts =====
+diff --git a/packages/drivers/openai-compatible/src/driver.ts b/packages/drivers/openai-compatible/src/driver.ts
+index 721d5f5..25e4bc5 100644
+--- a/packages/drivers/openai-compatible/src/driver.ts
++++ b/packages/drivers/openai-compatible/src/driver.ts
+@@ -159,290 +159,291 @@ function argumentsOf(call: ToolCall): Record<string, unknown> | string {
+ export class OpenAICompatibleDriver implements Driver {
+   readonly id = 'openai-compatible';
+   readonly contractVersion = DRIVER_CONTRACT_VERSION;
+ 
+   readonly #provider: SandboxProvider;
+   readonly #config: CheckedConfig;
+   readonly #workdir: string;
+   readonly #credential: string;
+   /** One task per sandbox at a time, whatever `parallelism` says (A-R4-04). */
+   readonly #inFlight = new Map<SandboxHandle, Promise<unknown>>();
+   /** Tasks running now across sandboxes, and those waiting for a slot, in arrival order. */
+   #running = 0;
+   readonly #waiting: Array<() => void> = [];
+   readonly #handlers = new Map<DriverEvent['kind'], Array<(e: DriverEvent) => void>>();
+   readonly #cancelled = new Set<TaskId>();
+   /** Every request body each task sent, kept so a caller — and a conformance assertion — can read what the model was offered. */
+   readonly #requests = new Map<TaskId, Array<Record<string, unknown>>>();
+ 
+   constructor(options: OpenAICompatibleDriverOptions) {
+     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the type requires a provider, but a missing one means running tools on the host (I1). A caller arriving from untyped code is refused, not trusted.
+     if (options.provider === undefined || options.provider === null) {
+       refuse('provider', 'OpenAICompatibleDriver needs the SandboxProvider that provisioned the handle; there is no host fallback (I1)');
+     }
+     if (typeof options.provider.relayCall !== 'function') {
+       refuse(
+         'provider',
+         `the provider '${options.provider.id}' cannot call the model relay from outside the sandbox; a model call made from inside it is answered by whatever the task left there (A-R6-05)`,
+       );
+     }
+     this.#provider = options.provider;
+     this.#config = checkConfig(options.endpoint);
+     this.#workdir = options.workdir ?? '/workspace';
+     this.#credential = options.credential ?? ENDPOINT_CREDENTIAL;
+   }
+ 
+   provenanceId(): string {
+     return `${this.id}@${DRIVER_VERSION} ${this.#config.provider}/${this.#config.version}`;
+   }
+ 
+   /**
+    * Every feature is false, and each is proven absent (D-R6-06): an endpoint
+    * the driver has not measured backs no `true`. `parallelism` is the
+    * operator's number, and `#bounded` is what makes it true.
+    */
+   capabilities(): DriverCapabilities {
+     return {
+       subagents: false,
+       hooks: false,
+       mcp: false,
+       parallelism: this.#config.parallelism,
+       computerUse: false,
+       steering: false,
+       stablePrefixCaching: false,
+     };
+   }
+ 
+   declaredTools(): readonly string[] {
+     return DECLARED_TOOLS;
+   }
+ 
+   /** The relay every sandbox this driver runs in is provisioned with: the endpoint's origin, its one path, and the `openai-chat` meter (A-R6-01). */
+   relayRequest(): Omit<RelaySpec, 'budget'> {
+     return {
+       upstream: this.#config.upstream,
+       paths: [this.#config.path],
+       header: this.#config.header,
+       scheme: this.#config.scheme,
+-      credential: this.#credential,
++      // A-R21-02: an endpoint declared keyless gets a declared null, never a name the provider may not hold.
++      credential: this.#config.scheme === 'none' ? null : this.#credential,
+       urlVariable: RELAY_URL_VARIABLE,
+       meter: { dialect: 'openai-chat', prices: { ...this.#config.prices } },
+     };
+   }
+ 
+   /** I6: the family is the operator's declaration, branded once in the constructor. Nothing here derives it. */
+   resolveModel(tier: ModelTier): ModelIdentity {
+     const model = this.#config.models[tier];
+     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ModelTier is a union, but a tier arriving from parsed configuration can be outside it.
+     if (model === undefined) refuse('capability', `no model is mapped to tier '${tier}'`);
+     return { provider: this.#config.provider, family: this.#config.family, model, version: this.#config.version };
+   }
+ 
+   runTask(req: TaskRequest): Promise<TaskResult> {
+     return this.#serialized(req.sandbox, () => this.#runTask(req));
+   }
+ 
+   /**
+    * `spawnSubagent` and `steer` are deliberately absent, because
+    * `capabilities()` declares both false. A method that threw would be a
+    * capability declared false and present.
+    */
+ 
+   /** Stops a task at its next turn. The sandbox is the run's, so nothing here destroys it. */
+   cancel(taskId: TaskId): Promise<void> {
+     this.#cancelled.add(taskId);
+     return Promise.resolve();
+   }
+ 
+   /**
+    * There is no artifact format: the role is rendered on each request and
+    * nowhere else (D-R6-06), so there is nothing to write and no hook to point
+    * at. Refused rather than a no-op, which would read as roles written.
+    */
+   emitArtifacts(roles: CompiledRole[], targetDir: string): Promise<void> {
+     return Promise.reject(
+       new DriverRefusal(
+         'capability',
+         `OpenAICompatibleDriver has no artifact format; ${String(roles.length)} role(s) for ${targetDir} were not written. ` +
+           'A role reaches this driver on each request, never as a file (D-R6-06).',
+       ),
+     );
+   }
+ 
+   on(kind: DriverEvent['kind'], handler: (e: DriverEvent) => void): void {
+     const existing = this.#handlers.get(kind);
+     if (existing === undefined) this.#handlers.set(kind, [handler]);
+     else existing.push(handler);
+   }
+ 
+   /** Every request body a task sent to the endpoint, in order. */
+   requestsFor(taskId: TaskId): ReadonlyArray<Readonly<Record<string, unknown>>> {
+     return this.#requests.get(taskId) ?? [];
+   }
+ 
+   async #serialized<T>(handle: SandboxHandle, body: () => Promise<T>): Promise<T> {
+     // Checked again after every wait: another follower may have claimed the handle first.
+     for (let held = this.#inFlight.get(handle); held !== undefined; held = this.#inFlight.get(handle)) {
+       await held.catch(() => undefined);
+     }
+     const running = this.#bounded(body);
+     this.#inFlight.set(handle, running);
+     try {
+       return await running;
+     } finally {
+       if (this.#inFlight.get(handle) === running) this.#inFlight.delete(handle);
+     }
+   }
+ 
+   async #bounded<T>(body: () => Promise<T>): Promise<T> {
+     if (this.#running >= this.#config.parallelism) await new Promise<void>((admit) => this.#waiting.push(admit));
+     else this.#running += 1;
+     try {
+       return await body();
+     } finally {
+       // A slot passes straight to the next caller waiting, so a newcomer never jumps the queue.
+       const next = this.#waiting.shift();
+       if (next === undefined) this.#running -= 1;
+       else next();
+     }
+   }
+ 
+   #emit(event: DriverEvent): void {
+     for (const handler of this.#handlers.get(event.kind) ?? []) handler(event);
+   }
+ 
+   /**
+    * I4: a granted tool this driver does not declare is refused before the
+    * task starts, so a caller that bypassed the policy engine gets no wider
+    * session than policy would have allowed.
+    */
+   #refuseUngrantedTools(req: TaskRequest): void {
+     const declared = new Set(DECLARED_TOOLS);
+     const undeclared = req.tools.filter((tool) => !declared.has(tool));
+     if (undeclared.length > 0) {
+       refuse(
+         'grant',
+         `the task grants ${undeclared.map((t) => `'${t}'`).join(', ')}, which this driver does not declare. ` +
+           'The task was not started: a grant this driver cannot honour is a policy that means something other than what it says (I4).',
+       );
+     }
+   }
+ 
+   async #runTask(req: TaskRequest): Promise<TaskResult> {
+     this.#refuseUngrantedTools(req);
+     this.#cancelled.delete(req.taskId);
+     const identity = this.resolveModel(req.tier);
+     const granted = new Set(req.tools);
+     const tools = definitionsFor(req.tools);
+     const started = Date.now();
+     const deadline = started + req.timeoutMs;
+     const exec = (argv: string[], options?: ExecOptions): Promise<ExecResult> => this.#provider.exec(req.sandbox, argv, options);
+ 
+     // The role and the run's stable material form the system message, and this task's own text the user
+     // message, as the Claude Code driver renders them (D-A-RC-03): instructions first, never a file.
+     const messages: ChatMessage[] = [
+       { role: 'system', content: `${req.role.instructions}\n\n${req.stablePrefix}` },
+       { role: 'user', content: req.variableSuffix },
+     ];
+     const events: DriverEvent[] = [];
+     const written = new Set<string>();
+     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+     const sent: Array<Record<string, unknown>> = [];
+     this.#requests.set(req.taskId, sent);
+     const price = this.#config.prices[identity.model];
+     // checkConfig refuses a tier model with no price; the table is a record, so the index is checked again here.
+     if (price === undefined) refuse('configuration', `the model ${identity.model} has no price`);
+ 
+     for (let turn = 1; ; turn += 1) {
+       if (this.#cancelled.has(req.taskId)) refuse('invocation', `task ${req.taskId} was cancelled`);
+       if (Date.now() >= deadline) refuse('invocation', `task ${req.taskId} ran past its ${String(req.timeoutMs)} ms bound`);
+       if (turn > this.#config.maxTurns) {
+         refuse('invocation', `task ${req.taskId} did not finish in ${String(this.#config.maxTurns)} model calls, the configured maxTurns`);
+       }
+ 
+       const body: Record<string, unknown> = {
+         model: identity.model,
+         messages,
+         [this.#config.ceilingField]: this.#config.maxOutputTokens,
+         stream: false,
+         ...(tools.length === 0 ? {} : { tools }),
+       };
+       sent.push(JSON.parse(JSON.stringify(body)) as Record<string, unknown>);
+       const answer = await this.#call(req.sandbox, body);
+       const reply = readTurn(answer);
+       if (reply.model !== identity.model) {
+         refuse(
+           'identity',
+           `the endpoint answered as ${JSON.stringify(reply.model)} when ${JSON.stringify(identity.model)} was requested. ` +
+             `The family '${identity.family}' was declared for the model requested, so the answer is not one the run can attribute (I6, D-R6-03).`,
+         );
+       }
+       const input = reply.promptTokens - reply.cachedTokens;
+       usage.inputTokens += input;
+       usage.cacheReadTokens += reply.cachedTokens;
+       usage.outputTokens += reply.completionTokens;
+       usage.costUsd += (input * price.inputPerMTok + reply.cachedTokens * price.cacheReadPerMTok + reply.completionTokens * price.outputPerMTok) / 1e6;
+ 
+       if (reply.toolCalls.length === 0) {
+         const result: TaskResult = {
+           taskId: req.taskId,
+           claim: { narrative: reply.content ?? '', filesChanged: [...written].map((path) => this.#claimed(path)) },
+           events,
+           usage: { ...usage, wallClockMs: Date.now() - started } satisfies Usage,
+           model: identity,
+           contractVersion: this.contractVersion,
+         };
+         return result;
+       }
+ 
+       messages.push({ role: 'assistant', content: reply.content, tool_calls: reply.toolCalls });
+       for (const call of reply.toolCalls) {
+         const name = call.function.name;
+         let output: string;
+         if (!granted.has(name)) {
+           // Never run, and recorded: the model asked for a tool policy did not give it (I4).
+           output = `error: the tool '${name}' is not granted to this task`;
+           const refused: DriverEvent = { at: new Date().toISOString(), kind: 'tool-call', detail: { tool: name, refused: true } };
+           events.push(refused);
+           this.#emit(refused);
+         } else {
+           const args = argumentsOf(call);
+           const outcome: ToolOutcome =
+             typeof args === 'string'
+               ? { output: args, event: { at: new Date().toISOString(), kind: 'tool-call' as const, detail: { tool: name, error: args } } }
+               : await runTool(name, args, exec, this.#workdir);
+           output = outcome.output;
+           events.push(outcome.event);
+           this.#emit(outcome.event);
+           if (outcome.written !== undefined) written.add(outcome.written);
+         }
+         messages.push({ role: 'tool', tool_call_id: call.id, content: output });
+       }
+     }
+   }
+ 
+   /** One model call through the relay, made from the relay's own container (A-R6-05). Returns the body of a success; refuses on anything else. */
+   async #call(sandbox: SandboxHandle, body: Record<string, unknown>): Promise<string> {
+     const provider = this.#provider;
+     // The constructor refused a provider without relayCall; the field is optional in the type, so it is checked again here.
+     if (provider.relayCall === undefined) refuse('provider', `the provider '${provider.id}' cannot call the model relay (A-R6-05)`);
+     let answer: { readonly status: number; readonly body: string };
+     try {
+       answer = await provider.relayCall(sandbox, { path: this.#config.path, body: JSON.stringify(body) });
+     } catch (error) {
+       // The sandbox's own refusals (its wall clock, its output cap) are reported as the sandbox's.
+       if (error instanceof DriverRefusal || error instanceof SandboxRefusal) throw error;
+       refuse('invocation', `the model call through the relay failed: ${error instanceof Error ? error.message : String(error)}`);
+     }
+     if (answer.status === 402) refuse('budget', `the relay refused the call: ${quoted(answer.body)}`);
+     if (answer.status < 200 || answer.status >= 300) {
+       refuse('endpoint', `the endpoint answered ${String(answer.status)}: ${quoted(answer.body)}`);
+     }
+     return answer.body;
+   }
+ 
+   /** A written path as the claim names it: relative to the working directory when inside it. */
+   #claimed(path: string): string {
+     const relative = posix.relative(this.#workdir, path);
+     return relative.startsWith('..') || posix.isAbsolute(relative) ? path : relative;
+   }
+ }
+
+===== packages/drivers/openai-compatible/test/driver.test.ts =====
+diff --git a/packages/drivers/openai-compatible/test/driver.test.ts b/packages/drivers/openai-compatible/test/driver.test.ts
+index db12b37..9e19d10 100644
+--- a/packages/drivers/openai-compatible/test/driver.test.ts
++++ b/packages/drivers/openai-compatible/test/driver.test.ts
+@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import { describe, expect, test } from 'vitest';
+ import type { TaskId } from '@olympus-ai/core';
+-import { DriverRefusal, ENDPOINT_CREDENTIAL, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
++import { LocalDockerProvider, checkRelay } from '@olympus-ai/sandbox';
++import { DriverRefusal, ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, RELAY_URL_VARIABLE, checkConfig, type EndpointConfig } from '../src/index.js';
+ import { script } from './endpoint.js';
+ import { BUDGET, CONFIG, withHarness } from './harness.js';
+ 
+@@ -25,44 +26,70 @@ async function refusalOf(action: () => unknown): Promise<DriverRefusal> {
+ describe('the configuration is the operator\'s, stated in full (D-R6-02)', () => {
+   test('a complete configuration is accepted as written and frozen', () => {
+     const checked = checkConfig(CONFIG);
+     expect(checked).toStrictEqual(CONFIG);
+     expect(Object.isFrozen(checked)).toBe(true);
+   });
+ 
+   test.each<[string, Partial<Record<keyof EndpointConfig, unknown>> | Record<string, unknown>, string]>([
+     ['an http origin', { upstream: 'http://endpoint.test' }, 'upstream'],
+     ['an origin with a path', { upstream: 'https://endpoint.test/v1' }, 'upstream'],
+     ['a path that is not chat completions', { path: '/v1/completions' }, 'path'],
+     ['a path with a dot segment', { path: '/v1/../chat/completions' }, 'path'],
+     ['an unknown scheme', { scheme: 'basic' }, 'scheme'],
+     ['a header that is not one', { header: 'x api key' }, 'header'],
+     ['a tier with no model', { models: { fast: 'test-fast', standard: 'test-standard' } }, 'models.deep'],
+     ['a tier that is not one', { models: { ...CONFIG.models, huge: 'x' } }, 'huge'],
+     ['a model with no price', { prices: { 'test-fast': CONFIG.prices['test-fast'], 'test-standard': CONFIG.prices['test-standard'] } }, 'models.deep'],
+     ['a negative price', { prices: { ...CONFIG.prices, 'test-deep': { ...CONFIG.prices['test-deep'], outputPerMTok: -1 } } }, 'outputPerMTok'],
+     ['a zero ceiling', { maxOutputTokens: 0 }, 'maxOutputTokens'],
+     ['an unknown ceiling field', { ceilingField: 'max_output_tokens' }, 'ceilingField'],
+     ['a fractional parallelism', { parallelism: 1.5 }, 'parallelism'],
+     ['no turn bound', { maxTurns: undefined }, 'maxTurns'],
+     ['a field the driver does not read', { temperature: 0 }, 'temperature'],
++    // A-R21-04: local is a declaration, never a URL, and only a local endpoint may take no credential.
++    ['localhost over http', { upstream: 'http://localhost:11434' }, 'upstream'],
++    ['the none scheme with an https endpoint', { scheme: 'none' }, "scheme 'none'"],
++    ['a local upstream on port 0', { upstream: { local: 'docker-host', port: 0 }, scheme: 'none' }, 'upstream.port'],
++    ['a local upstream with its port as text', { upstream: { local: 'docker-host', port: '11434' }, scheme: 'none' }, 'upstream.port'],
++    ['a local upstream other than the Docker host', { upstream: { local: 'lan', port: 11434 }, scheme: 'none' }, 'upstream.local'],
++    ['a local upstream naming a host', { upstream: { local: 'docker-host', port: 11434, host: 'gpu.lan' }, scheme: 'none' }, "'host'"],
+   ])('%s is refused, naming the field', async (_label, change, field) => {
+     const refused = await refusalOf(() => checkConfig({ ...CONFIG, ...change }));
+     expect(refused.layer).toBe('configuration');
+     expect(refused.message).toContain(field);
+   });
+ 
++  test('a local endpoint with no credential is accepted, and its relay request is one the relay takes with nothing held (A-R21-04)', async () => {
++    const local: EndpointConfig = { ...CONFIG, upstream: { local: 'docker-host', port: 11434 }, scheme: 'none' };
++    expect(checkConfig(local)).toStrictEqual(local);
++    // A key is still allowed to a local endpoint that asks for one.
++    expect(checkConfig({ ...local, scheme: 'bearer' }).scheme).toBe('bearer');
++    const provider = await LocalDockerProvider.create({ vaultPaths: [], dockerHostPorts: [11434] });
++    const request = new OpenAICompatibleDriver({ provider, endpoint: local }).relayRequest();
++    expect(request).toStrictEqual({
++      upstream: { local: 'docker-host', port: 11434 },
++      paths: [CONFIG.path],
++      header: 'authorization',
++      scheme: 'none',
++      credential: null,
++      urlVariable: RELAY_URL_VARIABLE,
++      meter: { dialect: 'openai-chat', prices: CONFIG.prices },
++    });
++    expect(checkRelay({ ...request, budget: { maxTokens: 1, maxCostUsd: 1 } }, new Set(), new Set([11434])).credential).toBeNull();
++  });
++
+   test('the relay request is the endpoint, its one path, the declared scheme, and the openai-chat meter', () => {
+     return withHarness((h) => {
+       expect(h.driver.relayRequest()).toStrictEqual({
+         upstream: CONFIG.upstream,
+         paths: [CONFIG.path],
+         header: 'authorization',
+         scheme: 'bearer',
+         credential: ENDPOINT_CREDENTIAL,
+         urlVariable: RELAY_URL_VARIABLE,
+         meter: { dialect: 'openai-chat', prices: CONFIG.prices },
+       });
+       return Promise.resolve();
+     });
+   });
+ });
+
+===== packages/sandbox/src/local/provider.ts =====
+diff --git a/packages/sandbox/src/local/provider.ts b/packages/sandbox/src/local/provider.ts
+index 92529dc..fe2afde 100644
+--- a/packages/sandbox/src/local/provider.ts
++++ b/packages/sandbox/src/local/provider.ts
+@@ -50,49 +50,57 @@ const LIFECYCLE_TIMEOUT_MS = 120_000;
+ export interface LocalDockerOptions {
+   /**
+    * Host directories the Vault owns. No mount may be one, sit inside one, or
+    * contain one, at any mode. Required and not defaulted: a provider that
+    * defaulted this to an empty list would enforce I1 against nothing, and the
+    * caller that forgot would never find out.
+    */
+   readonly vaultPaths: readonly string[];
+   /** The Docker executable. Defaults to `docker` on PATH. */
+   readonly executable?: string;
+   /**
+    * The image the egress proxy runs on. Defaults to the digest this package
+    * pins. Overridable so an air-gapped host can name a mirror of the same
+    * image, not so a different filter can be substituted: the proxy's behaviour
+    * is `PROXY_SOURCE`, which this image is handed and runs.
+    */
+   readonly proxyImage?: string;
+   /**
+    * The credentials this provider may hand to a model relay, by name. A
+    * `SandboxSpec` names one in `relay.credential` and never carries a value;
+    * a name that is not here is refused at provisioning. Absent means no
+    * credentials, and every spec that asks for a relay is refused (I4: a
+    * credential not given is not available).
+    *
+    * The values go to relay containers and nowhere else: never to a sandbox,
+    * never into an argument vector, and never into `appliedControls()`.
+    */
+   readonly credentials?: Readonly<Record<string, string>>;
+   /**
+    * Extra root certificates, PEM, a relay trusts beside the public ones, for
+    * an upstream a private authority signed. Not a way to turn verification
+    * off: the upstream's certificate is always checked against its name.
+    */
+   readonly relayTrust?: string;
++  /**
++   * The ports on the Docker host a relay may reach, for a model endpoint
++   * listening there (A-R21-03). A spec's local upstream on any other port is
++   * refused at provisioning, and absent or empty refuses every local upstream
++   * (I4: a route not given is not available). The route is the relay
++   * container's alone; no sandbox is given it.
++   */
++  readonly dockerHostPorts?: readonly number[];
+   /**
+    * The most bytes of stdout and stderr together one command or probe may
+    * print. Past it the sandbox is ended and the call refused, never answered
+    * with what was read so far (D-P8-15). Defaults to 64 MiB; a value that is
+    * not a positive integer is refused at construction.
+    */
+   readonly maxOutputBytes?: number;
+ }
+ 
+ /**
+  * What the provider applied for egress. A discriminated union, so the mode
+  * that was asked for and the evidence that it was applied cannot drift apart:
+  * `deny-all` can only carry `network: 'none'`, and `allowlist` cannot exist
+  * without the proxy that enforces it.
+  */
+@@ -375,486 +383,500 @@ function heldCredentials(credentials: Readonly<Record<string, string>> | undefin
+   return held;
+ }
+ 
++/** The Docker host ports a provider was given, checked once at construction: each an integer port, or the provider is refused. */
++function heldPorts(ports: readonly number[] | undefined): ReadonlySet<number> {
++  if (ports === undefined) return new Set();
++  if (!Array.isArray(ports) || !ports.every((port) => Number.isInteger(port) && port >= 1 && port <= 65535)) {
++    refuse('relay', `dockerHostPorts must be integer ports from 1 to 65535, not ${JSON.stringify(ports)}`);
++  }
++  return new Set(ports);
++}
++
+ export class LocalDockerProvider implements SandboxProvider {
+   readonly id = 'local-docker';
+ 
+   readonly #executable: string;
+   readonly #vaultPaths: readonly string[];
+   readonly #daemon: DaemonFacts;
+   readonly #proxyImage: string;
+   readonly #credentials: ReadonlyMap<string, string>;
+   readonly #relayTrust: string | undefined;
++  readonly #hostPorts: ReadonlySet<number>;
+   /** Passed to `dockerCli` only when policy set one: the default lives there alone, where a test runs it (codex-2). */
+   readonly #outputCap: { readonly maxOutputBytes?: number };
+   readonly #sandboxes = new Map<SandboxHandle, Sandbox>();
+ 
+   private constructor(
+     executable: string,
+     vaultPaths: readonly string[],
+     daemon: DaemonFacts,
+     proxyImage: string,
+     credentials: ReadonlyMap<string, string>,
+     relayTrust: string | undefined,
++    hostPorts: ReadonlySet<number>,
+     maxOutputBytes: number | undefined,
+   ) {
+     this.#executable = executable;
+     this.#vaultPaths = vaultPaths;
+     this.#daemon = daemon;
+     this.#proxyImage = proxyImage;
+     this.#credentials = credentials;
+     this.#relayTrust = relayTrust;
++    this.#hostPorts = hostPorts;
+     this.#outputCap = maxOutputBytes === undefined ? {} : { maxOutputBytes };
+   }
+ 
+   /** The relay runs on the proxy's image: both are Node source handed to `node --eval`. */
+   get #relayOptions(): RelayOptions {
+     return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+   }
+ 
+   /** The options the proxy's own lifecycle commands run under. */
+   get #proxyOptions(): ProxyOptions {
+     return { executable: this.#executable, image: this.#proxyImage, timeoutMs: LIFECYCLE_TIMEOUT_MS };
+   }
+ 
+   /**
+    * The only way to build one. The daemon is probed first and the provider is
+    * not constructed unless it is there, runs Linux containers, and is local —
+    * the three things `capabilities()` goes on to claim. A provider that
+    * existed without a daemon would have to answer `capabilities()` with a
+    * guess, and every assertion built on it would be asserting the guess.
+    */
+   static async create(options: LocalDockerOptions): Promise<LocalDockerProvider> {
+     const executable = options.executable ?? 'docker';
+     const daemon = await probeDaemon(executable);
+     const credentials = heldCredentials(options.credentials);
++    const hostPorts = heldPorts(options.dockerHostPorts);
+     const vaultPaths = options.vaultPaths.map((path) => resolvePath(path));
+     const trust = options.relayTrust === undefined || options.relayTrust.trim() === '' ? undefined : options.relayTrust;
+     const maxOutputBytes = options.maxOutputBytes;
+     if (maxOutputBytes !== undefined && (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0)) {
+       refuse('limits', `maxOutputBytes must be a positive integer; ${String(maxOutputBytes)} bounds nothing`);
+     }
+-    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, maxOutputBytes);
++    return new LocalDockerProvider(executable, vaultPaths, daemon, options.proxyImage ?? EGRESS_PROXY_IMAGE, credentials, trust, hostPorts, maxOutputBytes);
+   }
+ 
+   /** What the probe established about the daemon behind this provider. */
+   daemon(): DaemonFacts {
+     return this.#daemon;
+   }
+ 
+   /** What was applied to one sandbox. Throws for a handle this provider did not issue. */
+   appliedControls(h: SandboxHandle): AppliedControls {
+     return this.#require(h).controls;
+   }
+ 
+   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
+     if (spec.image.trim() === '') refuse('image', 'SandboxSpec.image is empty; there is no image to run');
+     const plan = checkEgress(spec.egress);
+-    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()));
++    const relayPlan = spec.relay === undefined ? undefined : checkRelay(spec.relay, new Set(this.#credentials.keys()), this.#hostPorts);
+     if (plan.mode === 'allowlist' && relayPlan !== undefined && plan.hosts.includes(relayPlan.upstreamHost)) {
+       // The proxy would be a second route to the host the relay exists to be the only route to.
+       // Both are the runtime's to choose, and a spec that chose both contradicts itself (external review, codex-2).
+       refuse(
+         'relay',
+         `egress.allow names ${relayPlan.upstreamHost}, the relay's upstream host. The relay is the sandbox's only route to its upstream, ` +
+           'and an allowlist that also reaches it is a route around the grant; the spec is refused rather than half-applied.',
+       );
+     }
+     checkLimits(spec.limits);
+     checkUser(spec.user);
+ 
+     // Re-validated rather than trusted: the table may have been built by a cast, parsed from a
+     // document, or handed over by JavaScript, in which case the type-level guarantee never ran.
+     const table = mountTable({ workspace: spec.mounts.workspace, others: spec.mounts.others });
+     const mounts = await resolveMounts(table, this.#vaultPaths);
+     const workspace = mounts.find((mount) => mount.target === table.workspace.target);
+     // resolveMounts returns one entry per table entry, the workspace among them.
+     if (workspace === undefined) refuse('mount', 'the resolved mount table has no workspace');
+     await checkWorkspaceWritable(workspace, spec.user);
+ 
+     // I10: no Greek name in code, container names included. This one reaches `docker ps`.
+     const id = randomUUID();
+     const name = `sandbox-${id}`;
+     const egress = await this.#applyEgress(id, plan, relayPlan);
+     try {
+       return await this.#start(spec, mounts, name, egress);
+     } catch (error) {
+       // Whatever refused, the proxy, the relay, and their networks were created for a sandbox that
+       // does not exist. They go with it: a leaked route out is worse than the failure that caused it,
+       // and one that would not go is reported beside that failure, never instead of it or not at all.
+       const failed = withLeftovers(error, await this.#stopSidecars(egress));
+       throw failed instanceof SandboxRefusal ? new SandboxRefusal(failed.layer, failed.message, name) : failed;
+     }
+   }
+ 
+   /**
+    * Starts the proxy an allowlist needs and the relay a spec asked for, or
+    * nothing at all.
+    *
+    * `deny-all` without a relay is untouched: no network is created, nothing is
+    * started, and the container is given `--network none` exactly as before.
+    * `deny-all` with a relay puts the sandbox on an internal network that
+    * carries the relay alone (D-P12-02). Starting a proxy beside a sandbox
+    * entitled to no egress would put a route out next to the one policy that
+    * asked for none, and nothing here does.
+    */
+   async #applyEgress(id: string, plan: EgressPlan, relayPlan: RelayPlan | undefined): Promise<AppliedEgress> {
+     if (plan.mode === 'deny-all') {
+       if (relayPlan === undefined) return { mode: 'deny-all', network: 'none' };
+       const relay = await this.#startRelay(id, relayPlan, undefined);
+       return { mode: 'deny-all', network: relay.internalNetwork, relay };
+     }
+     let proxy: AppliedProxy;
+     try {
+       proxy = await startProxy(id, plan.hosts, this.#proxyOptions);
+     } catch (error) {
+       // I5: an allowlist this provider could not stand up is a refusal. There is no fallback to
+       // deny-all, which breaks the run silently, and none to a routed network, which hands the
+       // whole of it to a policy that asked for a subset.
+       refuse(
+         'egress',
+         'the egress allowlist could not be enforced, so no sandbox was provisioned: ' +
+           (error instanceof Error ? error.message : String(error)),
+       );
+     }
+     if (relayPlan === undefined) return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy };
+     let relay: AppliedRelay;
+     try {
+       relay = await this.#startRelay(id, relayPlan, { internal: proxy.internalNetwork, outbound: proxy.outboundNetwork });
+     } catch (error) {
+       throw withLeftovers(error, await stopProxy(proxy, this.#proxyOptions));
+     }
+     return { mode: 'allowlist', network: proxy.internalNetwork, allow: plan.hosts, proxy, relay };
+   }
+ 
+   /**
+    * Starts a relay, or refuses. The credential is read from this provider's
+    * own map here and handed to the relay container alone; `checkRelay` has
+    * already refused a name the map does not hold.
+    */
+   async #startRelay(id: string, plan: RelayPlan, shared: { internal: string; outbound: string } | undefined): Promise<AppliedRelay> {
+-    const credential = this.#credentials.get(plan.credential);
++    // A declared null is none (A-R21-02); `checkRelay` allowed it only for a local upstream.
++    const credential = plan.credential === null ? null : this.#credentials.get(plan.credential);
+     if (credential === undefined) refuse('relay', `the credential ${JSON.stringify(plan.credential)} is not held by this provider`);
+     try {
+       return await startRelay(id, plan, credential, this.#relayTrust, shared, this.#relayOptions);
+     } catch (error) {
+       refuse(
+         'relay',
+         'the model relay could not be started, so no sandbox was provisioned: ' + (error instanceof Error ? error.message : String(error)),
+       );
+     }
+   }
+ 
+   /** Removes the relay and then the proxy, in that order: the proxy's networks cannot go while the relay is on them. */
+   async #stopSidecars(egress: AppliedEgress): Promise<Error | undefined> {
+     const relay = relayOf(egress);
+     const relayFailure = relay === undefined ? undefined : await stopRelay(relay, this.#relayOptions);
+     const proxyFailure = egress.mode === 'allowlist' ? await stopProxy(egress.proxy, this.#proxyOptions) : undefined;
+     return relayFailure ?? proxyFailure;
+   }
+ 
+   async #start(spec: SandboxSpec, mounts: readonly ResolvedMount[], name: string, egress: AppliedEgress): Promise<SandboxHandle> {
+     const args = runArgsFor(spec, mounts, name, egress);
+     const started = await dockerCli(this.#executable, args, { timeoutMs: LIFECYCLE_TIMEOUT_MS });
+     if (started.exitCode !== 0) {
+       refuse('image', `docker run exited ${String(started.exitCode)} for image ${spec.image}: ${started.stderr.trim() || started.stdout.trim()}`);
+     }
+     const containerId = started.stdout.trim();
+     if (containerId === '') refuse('image', 'docker run reported no container id, so there is no sandbox to hand back');
+ 
+     // A container that exits immediately — a shell-less image, a bad entrypoint — would otherwise
+     // hand back a handle whose every exec fails obscurely.
+     const running = await dockerCli(this.#executable, ['inspect', '--format', '{{.State.Running}}', containerId], {
+       timeoutMs: LIFECYCLE_TIMEOUT_MS,
+     });
+     if (running.stdout.trim() !== 'true') {
+       // Best effort: the refusal below is the reason the caller needs, and a container that
+       // never started is not one this provider is handing out a handle to.
+       await this.#remove(containerId);
+       refuse('image', `the container from image ${spec.image} was not running after start; it needs a POSIX shell at \`sh\` to hold itself open`);
+     }
+ 
+     const handle = containerId as SandboxHandle;
+     const sandbox: Sandbox = {
+       controls: {
+         containerId,
+         mounts,
+         egress,
+         limits: { ...spec.limits },
+         deadline: performance.now() + spec.limits.wallClockMs,
+         runArgs: Object.freeze([...args]),
+       },
+       probes: new Set(),
+     };
+     this.#sandboxes.set(handle, sandbox);
+ 
+     // The budget has to be enforced by something that runs on its own. Checking it inside `exec`
+     // bounds only sandboxes somebody keeps calling: a task that starts a background process and
+     // is never exec'd again would outlive its limit entirely, which is the whole thing the limit
+     // exists to prevent. Review finding 2.
+     const timer = setTimeout(() => {
+       void this.#expire(sandbox, spec.limits.wallClockMs);
+     }, spec.limits.wallClockMs);
+     // The runtime is a service (I9), and a pending timer must never be the reason its process
+     // stays alive. An unref'd timer still fires for as long as the process is running.
+     timer.unref();
+     sandbox.timer = timer;
+     return handle;
+   }
+ 
+   async exec(h: SandboxHandle, cmd: string[], options: ExecOptions = {}): Promise<ExecResult>  {
+     const sandbox = this.#require(h);
+     if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+     if (cmd.length === 0) refuse('handle', 'the command is empty; there is nothing to run');
+     const detach = options.detach === true;
+     if (detach && options.stdin !== undefined) refuse('probe', 'a detached command cannot be handed stdin; it would run without it');
+     const passthrough = environmentPassthrough(options.env);
+ 
+     const remaining = await this.#remaining(sandbox, h);
+     try {
+       const result = await dockerCli(
+         this.#executable,
+         // `--interactive` keeps the container process's stdin attached to the one `docker` is given
+         // (A-P8-02). Without it the bytes would reach the CLI and stop there, and the command would
+         // run as if it had been handed nothing.
+         ['exec', ...(detach ? ['--detach'] : []), ...(options.stdin === undefined ? [] : ['--interactive']), ...passthrough.flags, sandbox.controls.containerId, ...cmd],
+         {
+           timeoutMs: remaining,
+           ...this.#outputCap,
+           ...(passthrough.values === undefined ? {} : { env: passthrough.values }),
+           ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+         },
+       );
+       return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, durationMs: result.durationMs };
+     } catch (error) {
+       return await this.#overBudget(sandbox, h, error);
+     }
+   }
+ 
+   /**
+    * Sends a scenario's requests from a probe container in the sandbox's
+    * network namespace (A-P11-01, D-P11-01). The probe is started for this
+    * call and removed when it returns; the time it takes is the sandbox's, so a
+    * probe that outlives the budget ends the sandbox as a command would.
+    */
+   async probe(h: SandboxHandle, request: ProbeRequest): Promise<ProbeResult> {
+     const sandbox = this.#require(h);
+     if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+     checkProbeRequest(request);
+     const remaining = await this.#remaining(sandbox, h);
+     const name = `probe-${randomUUID()}`;
+     sandbox.probes.add(name);
+     try {
+       const result = await dockerCli(this.#executable, probeRunArgs(name, sandbox.controls.containerId, this.#proxyImage), {
+         timeoutMs: remaining,
+         ...this.#outputCap,
+         stdin: JSON.stringify(request),
+       });
+       if (result.exitCode !== 0) {
+         throw new Error(`the probe exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+       }
+       return readProbeOutput(result.stdout, request.exchanges.length);
+     } catch (error) {
+       return await this.#overBudget(sandbox, h, error);
+     } finally {
+       sandbox.probes.delete(name);
+     }
+   }
+ 
+   /**
+    * Posts one request to the sandbox's relay from inside the relay container
+    * (A-R6-05): read-only, with no capabilities, and out of the sandbox's
+    * filesystem and process tree, so nothing the task wrote answers in the
+    * relay's place. The time it takes is the sandbox's, as an `exec`'s is.
+    */
+   async relayCall(h: SandboxHandle, request: RelayCallRequest): Promise<RelayCallResult> {
+     const sandbox = this.#require(h);
+     if (sandbox.ended !== undefined) refuse('lifetime', `sandbox ${h} has ended: ${sandbox.ended}`);
+     const relay = relayOf(sandbox.controls.egress);
+     if (relay === undefined) refuse('relay', `sandbox ${h} was provisioned without a model relay; there is nothing to call`);
+     if (!request.path.startsWith('/')) refuse('relay', `the relay call's path ${JSON.stringify(request.path)} does not begin with /`);
+     const remaining = await this.#remaining(sandbox, h);
+     try {
+       const result = await dockerCli(
+         this.#executable,
+         ['exec', '--interactive', relay.containerId, 'node', '--eval', RELAY_CALL_SOURCE, request.path],
+         { timeoutMs: remaining, ...this.#outputCap, stdin: request.body },
+       );
+       if (result.exitCode !== 0) {
+         throw new Error(`the relay call exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+       }
+       let answer: unknown;
+       try {
+         answer = JSON.parse(result.stdout);
+       } catch {
+         answer = undefined;
+       }
+       if (typeof answer !== 'object' || answer === null) {
+         throw new Error(`the relay call printed ${JSON.stringify(result.stdout.slice(0, 200))}, not a status and a body`);
+       }
+       const { status, body } = answer as { status?: unknown; body?: unknown };
+       if (typeof status !== 'number' || typeof body !== 'string') {
+         throw new Error(`the relay call printed ${JSON.stringify(result.stdout.slice(0, 200))}, not a status and a body`);
+       }
+       return { status, body };
+     } catch (error) {
+       return await this.#overBudget(sandbox, h, error);
+     }
+   }
+ 
+   /** What is left of the sandbox's wall clock, or a refusal that ends it when nothing is. */
+   async #remaining(sandbox: Sandbox, h: SandboxHandle): Promise<number> {
+     const remaining = sandbox.controls.deadline - performance.now();
+     if (remaining <= 0) {
+       const budget = String(sandbox.controls.limits.wallClockMs);
+       await this.#end(sandbox, `its wall-clock budget of ${budget}ms was already spent`);
+       refuse('lifetime', `sandbox ${h} is past its wall-clock limit of ${budget}ms; the command was not started`);
+     }
+     return remaining;
+   }
+ 
+   /**
+    * Rethrows anything but a timeout or an output overrun; either ends the
+    * sandbox and refuses. Killing the `docker exec` client does not stop the
+    * command inside the container, so the container goes, and with it the
+    * command (D-P8-15).
+    */
+   async #overBudget(sandbox: Sandbox, h: SandboxHandle, error: unknown): Promise<never> {
+     if (error instanceof CliOutputExceeded) {
+       const cap = String(error.maxOutputBytes);
+       const { removal } = await this.#end(sandbox, `a command printed more than ${cap} bytes`);
+       if (removal !== undefined) {
+         refuse('output', `sandbox ${h} ran a command that printed more than ${cap} bytes, and could not be destroyed: ${removal.message}`);
+       }
+       refuse('output', `sandbox ${h} ran a command that printed more than ${cap} bytes; it was killed with its sandbox, and none of its output is returned`);
+     }
+     if (!(error instanceof CliTimeout)) throw error;
+     const budget = String(sandbox.controls.limits.wallClockMs);
+     // The budget is the sandbox's, not the command's: the container goes with it, so nothing
+     // left running inside outlives the limit that was supposed to bound it.
+     const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${budget}ms`);
+     if (removal !== undefined) {
+       // The breach is still the headline, but a container that outlived its budget *and*
+       // could not be removed is worse than one that was, and must not be reported as less.
+       refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and could not be destroyed: ${removal.message}`);
+     }
+     refuse('lifetime', `sandbox ${h} exceeded its wall-clock limit of ${budget}ms and was destroyed`);
+   }
+ 
+   /**
+    * Ends the sandbox and returns what its relay counted (D-P13-07). A sandbox
+    * its wall clock already ended returns the reading taken then: the call it
+    * served spent money whether or not it finished in time, and the runtime
+    * records it either way (D-P13-14).
+    */
+   async destroy(h: SandboxHandle): Promise<Teardown> {
+     const sandbox = this.#require(h);
+     if (sandbox.destroyed === true) refuse('lifetime', `sandbox ${h} has already ended: ${sandbox.ended ?? 'it was destroyed'}`);
+     sandbox.destroyed = true;
+     const { removal, reading, egress } = await this.#end(sandbox, 'it was destroyed');
+     if (removal !== undefined) throw removal;
+     if (reading instanceof Error) throw reading;
+     if (egress instanceof Error) throw egress;
+     return { meter: reading, egress };
+   }
+ 
+   /**
+    * Each value is asserted against a provisioned container by the conformance
+    * registry (I8), so flipping one here without changing what the provider
+    * does fails the suite. `persistent` is true because one container serves
+    * every exec; the others are false or `linux` because `create()` refused to
+    * build a provider for which they were not.
+    */
+   capabilities(): SandboxCapabilities {
+     return { computerUse: false, gpu: false, os: this.#daemon.osType, persistent: true, remote: false };
+   }
+ 
+   #require(h: SandboxHandle): Sandbox {
+     const sandbox = this.#sandboxes.get(h);
+     if (sandbox === undefined) refuse('handle', `${h} is not a handle this provider issued`);
+     return sandbox;
+   }
+ 
+   /**
+    * Ends a sandbox and keeps its record. The record is not deleted, for two
+    * reasons: a later call then says the sandbox ended and why, instead of
+    * "unknown handle" for a container the runtime itself destroyed; and
+    * `appliedControls()` keeps answering afterwards, so what was enforced on a
+    * sandbox outlives the sandbox and can still be read when the run is
+    * audited. Returns the removal failure rather than throwing it, so a caller
+    * that is already refusing for a better reason can decide which to report.
+    */
+   async #end(sandbox: Sandbox, why: string): Promise<Ended> {
+     // Whoever gets here second awaits the first removal rather than starting another, and so
+     // does not return until the container is actually gone.
+     if (sandbox.ending !== undefined) return sandbox.ending;
+     sandbox.ended = why;
+     if (sandbox.timer !== undefined) {
+       clearTimeout(sandbox.timer);
+       sandbox.timer = undefined;
+     }
+     sandbox.ending = this.#dismantle(sandbox.controls, sandbox.probes);
+     return sandbox.ending;
+   }
+ 
+   /**
+    * Removes everything one sandbox was given: the container, its relay, and
+    * under an allowlist the proxy container, and the networks either created.
+    *
+    * The proxy goes with the sandbox it serves and with nothing else. A proxy
+    * that outlived its sandbox would be a route out with no workload behind it
+    * and nobody watching it, and the assertion that counts leaked containers is
+    * there to make that a failing test rather than a thing somebody notices in
+    * `docker ps` a week later.
+    */
+   async #dismantle(controls: AppliedControls, probes: ReadonlySet<string>): Promise<Ended> {
+     // Probes first: each is in the container's namespace, and none may outlive it (D-P11-02).
+     // A probe that already finished removed itself, so a failure here is not reported.
+     await Promise.all([...probes].map((name) => this.#remove(name)));
+     // Then the container: a network still holding an endpoint cannot be removed, and a meter read
+     // while the sandbox runs can be overtaken by a process still calling the relay (D-P13-07).
+     const container = await this.#remove(controls.containerId);
+     const relay = relayOf(controls.egress);
+     let reading: MeterReading | Error = { kind: 'unmetered' };
+     if (relay !== undefined) {
+       try {
+         reading = await readMeter(relay, this.#relayOptions);
+       } catch (error) {
+         // Kept, not thrown: the relay is still torn down below, and `destroy` reports this.
+         reading = new Error(`the model relay's meter could not be read: ${error instanceof Error ? error.message : String(error)}`);
+       }
+     }
+     let egress: EgressLog | Error = { kind: 'none' };
+     if (controls.egress.mode === 'allowlist') {
+       try {
+         egress = await readEgress(controls.egress.proxy, this.#proxyOptions);
+       } catch (error) {
+         // Kept, not thrown, as the meter's is: the proxy is still torn down below, and `destroy` reports this.
+         egress = new Error(`the egress proxy's decisions could not be read: ${error instanceof Error ? error.message : String(error)}`);
+       }
+     }
+     const sidecars = await this.#stopSidecars(controls.egress);
+     return { removal: container ?? sidecars, reading, egress };
+   }
+ 
+   /**
+    * The wall-clock timer firing. Nothing is waiting on this call, so a removal
+    * failure has no caller to refuse: it is recorded on the sandbox, where the
+    * next `exec` or `destroy` reports it, rather than raised as an unhandled
+    * rejection.
+    */
+   async #expire(sandbox: Sandbox, budgetMs: number): Promise<void> {
+     if (sandbox.ending !== undefined) return;
+     const { removal } = await this.#end(sandbox, `it exceeded its wall-clock limit of ${String(budgetMs)}ms`);
+     if (removal !== undefined) {
+       sandbox.ended = `it exceeded its wall-clock limit of ${String(budgetMs)}ms and could not be destroyed: ${removal.message}`;
+     }
+   }
+ 
+   async #remove(containerId: string): Promise<Error | undefined> {
+     const removed = await dockerCli(this.#executable, ['rm', '--force', '--volumes', containerId], {
+       timeoutMs: LIFECYCLE_TIMEOUT_MS,
+     });
+     if (removed.exitCode === 0) return undefined;
+     return new Error(`docker rm exited ${String(removed.exitCode)} for container ${containerId}: ${removed.stderr.trim()}`);
+   }
+ }
+
+===== packages/sandbox/src/local/relay.ts =====
+diff --git a/packages/sandbox/src/local/relay.ts b/packages/sandbox/src/local/relay.ts
+index c86d7b9..31d7c0b 100644
+--- a/packages/sandbox/src/local/relay.ts
++++ b/packages/sandbox/src/local/relay.ts
+@@ -34,7 +34,7 @@
+ import { dockerCli } from './docker.js';
+ import { normalizeHost } from './egress.js';
+ import { refuse, withLeftovers } from './refusal.js';
+-import type { MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
++import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
+ 
+ /** The port the relay listens on, inside its own container. Nothing is published to the host. */
+ export const RELAY_PORT = 8080;
+@@ -42,10 +42,17 @@ export const RELAY_PORT = 8080;
+ /**
+  * The name the sandbox reaches the relay by. A network alias rather than the
+  * container name, so the address the sandbox is given does not change with the
+  * container's generated id.
+  */
+ export const RELAY_ALIAS = 'model-relay';
+ 
++/**
++ * The name a relay to a local upstream reaches the Docker host by (A-R21-01).
++ * Added to that relay container alone, as `--add-host <name>:host-gateway`,
++ * so the sandbox, on its own internal network, has no such name and no route.
++ */
++export const LOCAL_UPSTREAM_ALIAS = 'model-host';
++
+ /** The address the sandbox is given in `RelaySpec.urlVariable`. Plain HTTP: the network is the sandbox's own. */
+ export const RELAY_URL = `http://${RELAY_ALIAS}:${String(RELAY_PORT)}`;
+ 
+@@ -52,50 +59,55 @@ export const RELAY_URL = `http://${RELAY_ALIAS}:${String(RELAY_PORT)}`;
+ /**
+  * What a relay writes for each metered event, one line each, to its own
+  * stdout. Only the provider reads it, with `docker logs` after the sandbox
+  * stopped (D-P13-07). Every value on the line is `JSON.stringify`'d, the path
+  * lines in `record` included, so nothing a client sends can begin a line of its own.
+  */
+ export const METER_PREFIX = 'model-relay-meter ';
+ 
+ /**
+  * The relay itself. Passed to `node --eval` as one argv element, so there is
+  * no shell, no mount, and no image build between this source and what runs.
+  *
+  * It fails closed at start: no credential, no header, an upstream that is not
+  * an `https` origin, an empty grant, no budget, a meter for a dialect it does
+  * not read, a price table it cannot charge from, or no port each exit non-zero
+  * rather than start a server, so a misconfigured relay is a sandbox that never
+  * comes up rather than one whose model calls fail later for a reason nothing
+  * recorded.
+  *
+  * Metering (P13), for the `anthropic-messages` dialect:
+  *
+  * - `POST /v1/messages` is metered. The request body is buffered to read its
+  *   `model` and `max_tokens`, and forwarded byte for byte; a model the price
+  *   table does not name is refused before anything is sent (D-P13-04). The
+  *   response is streamed back unchanged while a copy is read for its usage.
+  * - `POST /v1/messages/count_tokens`, `GET`, and `HEAD` cost nothing upstream
+  *   and are forwarded unmetered. Every other request is refused: a write whose
+  *   cost the meter cannot count is spend the budget cannot see (D-P13-12).
+  * - One metered call is in flight at a time, so a call begun under budget ends
+  *   over it by at most one call, as D-P13-03 states (D-P13-13).
+  * - After each response the totals are updated; once the tokens (all four
+  *   classes, D-P13-05) or the dollars reach their bound, every later request is
+  *   refused with 402 and `x-should-retry: false`, naming the bound.
+  * - A successful response with its input usage and no final output usage is
+  *   charged `max_tokens` as output; one with no readable usage at all is
+  *   charged `max_tokens` as output, marks the budget `unreadable`, and stops
+  *   the relay forwarding. A response in a content encoding the relay did not
+  *   ask for is unreadable. A response that is not a success is charged nothing.
+  * - Under the `openai-chat` dialect (A-R6-01) the same rules hold with that
+  *   API's names: a `POST` to a granted path ending `/chat/completions` is
+  *   metered and a `GET` is free; the ceiling is the larger of
+  *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
+  *   `prompt_tokens` (less its cached part, counted as cache reads) and
+  *   `completion_tokens`, from the body or from the stream chunk that carries it.
+  * - The credential is written as the spec's scheme says: as it is, or as
+  *   `Bearer <credential>` (A-R6-02).
++ * - Started local (A-R21-01), the upstream is `http://${LOCAL_UPSTREAM_ALIAS}:<port>`
++ *   and nothing else, and it is the only way the relay speaks `http`. Under
++ *   the `none` scheme (A-R21-02) it holds no credential, writes none, and
++ *   deletes what the client sent in its header; that is allowed only started
++ *   local, so a relay to a remote origin is never an unauthenticated route.
+  * - On SIGTERM it stops taking requests, cuts off any call still in flight —
+  *   which is then charged by the rules above — and writes a `closed` line, the
+  *   provider's proof that the log it reads is complete.
+  */
+@@ -115,6 +127,7 @@ function parsed(name) {
+ }
+ 
+ const credential = String(process.env.RELAY_CREDENTIAL || '');
++const local = String(process.env.RELAY_LOCAL || '');
+ const header = String(process.env.RELAY_HEADER || '').toLowerCase();
+ const scheme = String(process.env.RELAY_SCHEME || '');
+ const port = Number(process.env.RELAY_PORT);
+@@ -129,12 +142,22 @@ function positive(n) { return typeof n === 'number' && Number.isFinite(n) && n >
+ function price(n) { return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
+ const PRICE_FIELDS = ['inputPerMTok', 'outputPerMTok', 'cacheReadPerMTok', 'cacheWritePerMTok', 'cacheWrite1hPerMTok'];
+ 
+-if (credential === '') fail('no credential; a relay that forwarded without one would be an unauthenticated route out');
++if (local !== '' && local !== 'docker-host') fail('a local upstream other than the docker host');
++if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') fail('no scheme to write the credential in');
++if (scheme === 'none') {
++  if (credential !== '') fail('a credential under the none scheme; a relay never holds a value it was told not to write');
++  if (local === '') fail('no credential; a relay forwards without one only to a local endpoint on the docker host');
++} else if (credential === '') {
++  fail('no credential; a relay that forwarded without one would be an unauthenticated route out');
++}
+ if (header === '') fail('no header to write the credential to');
+-if (scheme !== 'raw' && scheme !== 'bearer') fail('no scheme to write the credential in');
+-if (upstream === null || upstream.protocol !== 'https:' || upstream.pathname !== '/' || upstream.search !== '' ||
++if (upstream === null || upstream.pathname !== '/' || upstream.search !== '' ||
+     upstream.hash !== '' || upstream.username !== '' || upstream.password !== '') {
+-  fail('the upstream is not an https origin');
++  fail(local === '' ? 'the upstream is not an https origin' : 'the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
++}
++if (local === '' && upstream.protocol !== 'https:') fail('the upstream is not an https origin');
++if (local !== '' && (upstream.protocol !== 'http:' || upstream.hostname !== '${LOCAL_UPSTREAM_ALIAS}' || upstream.port === '')) {
++  fail('the local upstream is not http://${LOCAL_UPSTREAM_ALIAS}:<port>');
+ }
+ if (!Array.isArray(paths) || paths.length === 0 ||
+     !paths.every(function (p) { return typeof p === 'string' && p.charAt(0) === '/'; })) {
+@@ -369,46 +392,56 @@ const ca = trust === '' ? undefined : tls.rootCertificates.concat([trust]);
+ 
+ function send(req, res, target, path, headers, body, done) {
+   headers.host = upstream.host;
+-  headers[header] = scheme === 'bearer' ? 'Bearer ' + credential : credential;
++  // Under none the client's value is deleted, never forwarded: the endpoint gets no key, and none of the task's.
++  if (scheme === 'none') delete headers[header];
++  else headers[header] = scheme === 'bearer' ? 'Bearer ' + credential : credential;
+   headers['accept-encoding'] = 'identity';
+   let answered = false;
+-  const outbound = https.request({
++  // Plain http only to the local upstream the start checks pinned (A-R21-01); every other upstream is https, verified.
++  const outbound = (local === '' ? https : http).request(local === '' ? {
+     protocol: 'https:',
+     hostname: upstream.hostname,
+     port: upstream.port === '' ? 443 : Number(upstream.port),
+     servername: upstream.hostname,
+     method: req.method,
+     path: target,
+     headers: headers,
+     ca: ca,
++  } : {
++    protocol: 'http:',
++    hostname: upstream.hostname,
++    port: Number(upstream.port),
++    method: req.method,
++    path: target,
++    headers: headers,
+   }, function (answer) {
+     answered = true;
+     record('forwarded', req.method, path, answer.statusCode);
+     // A redirect is passed back, never followed: following one would send the
+     // credential to wherever the upstream pointed.
+     res.writeHead(answer.statusCode || 502, forwarded(answer.headers, HOP));
+     // The client going away does not stop the read: the upstream bills what it
+     // generates, so the meter reads to the end whether or not anyone listens.
+     res.on('error', function () {});
+     answer.on('data', function (chunk) { if (!res.destroyed) res.write(chunk); });
+     let ended = false;
+     answer.on('end', function () { ended = true; res.end(); done(answer, true); });
+     answer.on('close', function () { if (!ended) { res.destroy(); done(answer, false); } });
+     answer.on('error', function () {});
+     if (done.watch !== undefined) done.watch(answer);
+   });
+   outbound.on('error', function (error) {
+     // Once an answer arrived, its own close settles the call.
+     if (answered) return;
+     record('failed', req.method, path);
+     if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
+     res.end('model-relay: upstream failed: ' + String(error.code || error.message) + '\\n');
+     done(null, false);
+   });
+   if (done.outbound !== undefined) done.outbound(outbound);
+   if (body === null) req.pipe(outbound); else outbound.end(body);
+ }
+ 
+ // The most an openai-chat request can generate: the larger of its two ceiling
+ // fields, times the choices it asks for. A field present and not a positive
+ // integer, or no ceiling at all, is no ceiling, and the request is refused (A-R6-01).
+@@ -595,53 +628,60 @@ server.listen(port, '0.0.0.0', function () {
+ /**
+  * A relay request as the provider will apply it: validated, normalised, and
+  * carrying the credential's name alone. The value is looked up at start time
+  * and never stored beside the plan.
+  */
+ export interface RelayPlan {
++  /** The origin forwarded to: the spec's `https` origin, or the local upstream's `http` one. */
+   readonly upstream: string;
+   readonly upstreamHost: string;
++  /** `'docker-host'` for a local upstream (A-R21-01), `null` for an `https` origin. */
++  readonly local: LocalUpstream['local'] | null;
+   readonly paths: readonly string[];
+   readonly header: string;
+   readonly scheme: RelayScheme;
+-  readonly credential: string;
++  /** The credential's name, or `null` where the spec declared none (A-R21-02). */
++  readonly credential: string | null;
+   readonly urlVariable: string;
+   readonly budget: RelayBudget;
+   readonly meter: RelayMeter;
+ }
+ 
+ /** What one sandbox's relay was applied with, and the evidence for it. Holds the credential's name and never its value. */
+ export interface AppliedRelay {
+   readonly containerId: string;
+   /** The container name, so a leaked relay can be found by name after the run. */
+   readonly name: string;
++  /** The origin the relay forwards to, `http://${LOCAL_UPSTREAM_ALIAS}:<port>` for a local upstream. */
+   readonly upstream: string;
++  /** `'docker-host'` where the relay alone was given a route to the Docker host (A-R21-01), `null` otherwise. */
++  readonly local: LocalUpstream['local'] | null;
+   readonly paths: readonly string[];
+   readonly header: string;
+   /** How the credential is written into `header` (A-R6-02). */
+   readonly scheme: RelayScheme;
+-  /** The name of the credential the relay holds. The value is in no field of this record. */
+-  readonly credential: string;
++  /** The name of the credential the relay holds, or `null` where it holds none (A-R21-02). The value is in no field of this record. */
++  readonly credential: string | null;
+   /** The variable the sandbox was given the relay's address in. */
+   readonly urlVariable: string;
+   /** The bounds the relay enforces for this sandbox's driver call. */
+   readonly budget: RelayBudget;
+   /** The dialect it reads usage in, and the prices it charges. */
+   readonly meter: RelayMeter;
+   /** `host:port`, as the sandbox reaches it. */
+   readonly endpoint: string;
+   /** The internal network the relay shares with the sandbox. */
+   readonly internalNetwork: string;
+   /** The relay's own outbound network. The sandbox is never on it. */
+   readonly outboundNetwork: string;
+   /**
+    * Whether the relay created the two networks and removes them. True under
+    * `deny-all`, where the relay is the only thing beside the sandbox; false
+    * under an allowlist, where it joins the proxy's networks and the proxy
+    * removes them.
+    */
+   readonly ownsNetworks: boolean;
+   /** The exact argv `docker run` was given for the relay, so a reviewer can reproduce it. No value in it is secret. */
+   readonly runArgs: readonly string[];
+ }
+ 
+ /** How the relay's own lifecycle commands run. */
+@@ -672,83 +712,143 @@ const RESERVED_VARIABLES = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ht
+ /** A credential's name: lower-case letters, digits, and interior hyphens. */
+ export const CREDENTIAL_NAME = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u;
+ 
+ /**
+  * Checks a relay request before any container starts, and refuses every one
+  * the provider could not apply exactly as written (I5).
+  *
+  * `held` is the names of the credentials the provider was given. A request
+  * naming any other is refused here: there is no value to put in the relay,
+  * and a relay started without one would be a sandbox whose every model call
+  * failed with an authentication error that says nothing about the provider.
++ * `hostPorts` is the Docker host ports it was given, and a local upstream on
++ * any other is refused the same way (A-R21-03).
+  */
+-export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>): RelayPlan {
+-  let origin: URL | undefined;
+-  try {
+-    origin = new URL(relay.upstream);
+-  } catch {
+-    origin = undefined;
+-  }
+-  const host = origin === undefined ? undefined : normalizeHost(origin.hostname);
+-  if (
+-    origin?.protocol !== 'https:' ||
+-    origin.origin !== relay.upstream ||
+-    host === undefined ||
+-    host.includes(':') ||
+-    /^[0-9.]+$/u.test(host)
+-  ) {
+-    refuse(
+-      'relay',
+-      `relay.upstream must be an https origin naming a host, with no path, query, credentials, or trailing slash — ` +
+-        `'https://api.example.com' — not ${JSON.stringify(relay.upstream)}. The relay verifies the upstream's certificate against that name, ` +
+-        'and anything else is a destination it cannot vouch for.',
+-    );
++export function checkRelay(relay: RelaySpec, held: ReadonlySet<string>, hostPorts: ReadonlySet<number>): RelayPlan {
++  // Read as unknown: a spec arriving from untyped code may carry anything here.
++  const declared: unknown = relay.upstream;
++  const local = typeof declared === 'string' ? null : checkLocalUpstream(declared, hostPorts);
++  let upstream: string;
++  let host: string;
++  if (local === null) {
++    upstream = declared as string;
++    let origin: URL | undefined;
++    try {
++      origin = new URL(upstream);
++    } catch {
++      origin = undefined;
++    }
++    const named = origin === undefined ? undefined : normalizeHost(origin.hostname);
++    if (
++      origin?.protocol !== 'https:' ||
++      origin.origin !== upstream ||
++      named === undefined ||
++      named.includes(':') ||
++      /^[0-9.]+$/u.test(named)
++    ) {
++      refuse(
++        'relay',
++        `relay.upstream must be an https origin naming a host, with no path, query, credentials, or trailing slash — ` +
++          `'https://api.example.com' — not ${JSON.stringify(upstream)}. The relay verifies the upstream's certificate against that name, ` +
++          'and anything else is a destination it cannot vouch for. A model on the Docker host is declared as ' +
++          "{ local: 'docker-host', port }, never by an http URL (A-R21-01).",
++      );
++    }
++    host = named;
++  } else {
++    upstream = `http://${LOCAL_UPSTREAM_ALIAS}:${String(local.port)}`;
++    host = LOCAL_UPSTREAM_ALIAS;
+   }
+ 
+   if (!Array.isArray(relay.paths) || relay.paths.length === 0) {
+     refuse('relay', 'relay.paths is empty. A relay that forwarded every path would hand the task the whole credential, so an empty grant is refused rather than read as everything.');
+   }
+   const bad = relay.paths.filter((p) => typeof p !== 'string' || !PATH_PREFIX.test(p));
+   if (bad.length > 0) {
+     refuse(
+       'relay',
+       `relay.paths must each be a path prefix of plain segments — no dot segment, no percent-encoding, no query, no trailing slash. ` +
+         `Refused: ${bad.map((p) => JSON.stringify(p)).join(', ')}.`,
+     );
+   }
+ 
+   if (!HEADER_NAME.test(relay.header) || RESERVED_HEADERS.has(relay.header.toLowerCase())) {
+     refuse('relay', `relay.header ${JSON.stringify(relay.header)} is not a header a credential can be written to`);
+   }
+   // Read as unknown: a spec arriving from untyped code may carry no scheme, and none is refused rather than read as raw (A-R6-02).
+   const scheme: unknown = (relay as { scheme?: unknown }).scheme;
+-  if (scheme !== 'raw' && scheme !== 'bearer') {
+-    refuse('relay', `relay.scheme must be 'raw' or 'bearer', not ${shown(scheme)}; a relay never guesses how its endpoint reads a credential`);
++  if (scheme !== 'raw' && scheme !== 'bearer' && scheme !== 'none') {
++    refuse('relay', `relay.scheme must be 'raw', 'bearer', or 'none', not ${shown(scheme)}; a relay never guesses how its endpoint reads a credential`);
++  }
++  // A-R21-02: none is declared twice over, by a null credential and the none scheme, and only for a local upstream.
++  const credential: unknown = (relay as { credential?: unknown }).credential;
++  if (credential === null) {
++    if (scheme !== 'none') {
++      refuse('relay', `relay.credential is null under the ${shown(scheme)} scheme; a relay that takes no credential declares the 'none' scheme as well`);
++    }
++    if (local === null) {
++      refuse('relay', 'relay.credential is null with an https upstream; a relay forwards without a credential only to a local endpoint on the Docker host, never to a remote origin');
++    }
++  } else if (typeof credential !== 'string' || credential === '') {
++    refuse('relay', `relay.credential must name a credential the provider holds, or be null to declare none; ${shown(credential)} is neither, and an absent credential is never read as none`);
++  } else if (scheme === 'none') {
++    refuse('relay', `relay.credential names ${JSON.stringify(credential)} under the 'none' scheme; a relay is never handed a value it was told not to write`);
+   }
+   if (!ENV_NAME.test(relay.urlVariable) || RESERVED_VARIABLES.has(relay.urlVariable)) {
+     refuse('relay', `relay.urlVariable ${JSON.stringify(relay.urlVariable)} is not a plain environment-variable name the provider leaves unset`);
+   }
+   const budget = checkBudget(relay.budget);
+   const meter = checkMeter(relay.meter);
+-  if (!held.has(relay.credential)) {
++  if (credential !== null && !held.has(credential)) {
+     refuse(
+       'relay',
+-      `relay.credential names ${JSON.stringify(relay.credential)}, which this provider was not given. ` +
++      `relay.credential names ${JSON.stringify(credential)}, which this provider was not given. ` +
+         'A credential reaches a relay only from LocalDockerOptions.credentials; a spec names one and never carries a value.',
+     );
+   }
+   return {
+-    upstream: relay.upstream,
++    upstream,
+     upstreamHost: host,
++    local: local === null ? null : local.local,
+     paths: [...new Set(relay.paths)],
+     header: relay.header.toLowerCase(),
+     scheme,
+-    credential: relay.credential,
++    credential,
+     urlVariable: relay.urlVariable,
+     budget,
+     meter,
+   };
+ }
+ 
++/**
++ * A local upstream exactly as A-R21-01 declares one: `{ local: 'docker-host', port }`,
++ * nothing more, on a port the provider was given. Anything else is refused,
++ * because a field the relay ignored would be a destination nobody checked.
++ */
++function checkLocalUpstream(declared: unknown, hostPorts: ReadonlySet<number>): LocalUpstream {
++  if (typeof declared !== 'object' || declared === null || Array.isArray(declared)) {
++    refuse('relay', `relay.upstream must be an https origin or { local: 'docker-host', port }, not ${shown(declared)}`);
++  }
++  const extra = Object.keys(declared).filter((key) => key !== 'local' && key !== 'port');
++  if (extra.length > 0) {
++    refuse('relay', `relay.upstream holds ${extra.map((k) => `'${k}'`).join(', ')}; a local upstream is the Docker host and a port, and names nothing else`);
++  }
++  const { local, port } = declared as { local?: unknown; port?: unknown };
++  if (local !== 'docker-host') {
++    refuse('relay', `relay.upstream.local must be 'docker-host', not ${shown(local)}; the Docker host is the only local endpoint a relay reaches`);
++  }
++  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
++    refuse('relay', `relay.upstream.port must be an integer port from 1 to 65535, not ${shown(port)}`);
++  }
++  if (!hostPorts.has(port)) {
++    refuse(
++      'relay',
++      `relay.upstream names port ${String(port)} on the Docker host, which this provider was not given. ` +
++        'A relay reaches the Docker host only on a port in LocalDockerOptions.dockerHostPorts (A-R21-03).',
++    );
++  }
++  return { local, port };
++}
++
+ /** The dialects the relay's source reads. A closed set: a dialect not here is refused, never guessed at (D-P13-06). */
+ const DIALECTS: ReadonlySet<string> = new Set<RelayDialect>(['anthropic-messages', 'openai-chat']);
+ 
+@@ -876,99 +976,103 @@ function wait(ms: number): Promise<void> {
+ /**
+  * Starts the relay for one sandbox.
+  *
+  * With `shared`, the relay joins networks the proxy created. Without it, the
+  * relay creates its own — an internal network with no default route, which the
+  * sandbox will join, and an outbound bridge the sandbox never joins — exactly
+  * as the proxy does, and removes them when it goes.
+  *
+  * The credential reaches the container as `--env RELAY_CREDENTIAL` with the
+  * value set on the `docker` process, so it is in no argument vector on the
+  * host. The daemon does keep the value in the relay container's own
+  * configuration, readable with `docker inspect` on the host: the host is the
+  * runtime's and inside the trust boundary, and the sandbox has no Docker
+  * socket to ask. `trust` is extra root certificates, PEM, for an upstream a private
+  * authority signed; it is not secret and travels the same way only because a
+  * PEM block is unreadable in an argv.
+  *
+  * Anything that fails takes the whole attempt down with it.
+  */
+ export async function startRelay(
+   id: string,
+   plan: RelayPlan,
+-  credential: string,
++  credential: string | null,
+   trust: string | undefined,
+   shared: SharedNetworks | undefined,
+   options: RelayOptions,
+ ): Promise<AppliedRelay> {
+   const names = relayNames(id);
+   const created: string[] = [];
+   let containerId = '';
+ 
+   const run = async (args: string[], env?: Record<string, string>): Promise<string> => {
+     const result = await dockerCli(options.executable, args, { timeoutMs: options.timeoutMs, ...(env === undefined ? {} : { env }) });
+     if (result.exitCode !== 0) {
+       throw new Error(`docker ${args[0] ?? ''} exited ${String(result.exitCode)}: ${result.stderr.trim() || result.stdout.trim()}`);
+     }
+     return result.stdout.trim();
+   };
+ 
+   const internal = shared?.internal ?? names.internal;
+   const outbound = shared?.outbound ?? names.outbound;
+   try {
+     if (shared === undefined) {
+       await run(['network', 'create', '--internal', '--driver', 'bridge', names.internal]);
+       created.push(names.internal);
+       await run(['network', 'create', '--driver', 'bridge', names.outbound]);
+       created.push(names.outbound);
+     }
+ 
+-    const secrets: Record<string, string> = { RELAY_CREDENTIAL: credential };
++    // Under none there is no value, and no variable for one (A-R21-02).
++    const secrets: Record<string, string> = credential === null ? {} : { RELAY_CREDENTIAL: credential };
+     if (trust !== undefined) secrets.RELAY_TRUST = trust;
+     const runArgs = [
+       'run', '--detach', '--init',
+       '--name', names.container,
+       '--network', internal,
+       '--network-alias', RELAY_ALIAS,
++      // A-R21-01: the route to the Docker host, given to this container and to no sandbox.
++      ...(plan.local === null ? [] : ['--add-host', `${LOCAL_UPSTREAM_ALIAS}:host-gateway`, '--env', `RELAY_LOCAL=${plan.local}`]),
+       '--env', `RELAY_UPSTREAM=${plan.upstream}`,
+       '--env', `RELAY_PATHS=${JSON.stringify(plan.paths)}`,
+       '--env', `RELAY_HEADER=${plan.header}`,
+       '--env', `RELAY_SCHEME=${plan.scheme}`,
+       '--env', `RELAY_PORT=${String(RELAY_PORT)}`,
+       '--env', `RELAY_BUDGET=${JSON.stringify(plan.budget)}`,
+       '--env', `RELAY_METER=${JSON.stringify(plan.meter)}`,
+       // Names only: the values are on the `docker` process, never in this argv.
+       ...Object.keys(secrets).flatMap((name) => ['--env', name]),
+       '--read-only',
+       '--cap-drop', 'ALL',
+       options.image,
+       'node', '--eval', RELAY_SOURCE,
+     ];
+     containerId = await run(runArgs, secrets);
+     if (containerId === '') throw new Error('docker run reported no container id for the model relay');
+ 
+     // Attached after the container exists, so the relay is never briefly on a network the sandbox can reach.
+     await run(['network', 'connect', outbound, containerId]);
+ 
+     await requireListening(containerId, options);
+ 
+     return {
+       containerId,
+       name: names.container,
+       upstream: plan.upstream,
++      local: plan.local,
+       paths: Object.freeze([...plan.paths]),
+       header: plan.header,
+       scheme: plan.scheme,
+       credential: plan.credential,
+       urlVariable: plan.urlVariable,
+       budget: plan.budget,
+       meter: plan.meter,
+       endpoint: `${RELAY_ALIAS}:${String(RELAY_PORT)}`,
+       internalNetwork: internal,
+       outboundNetwork: outbound,
+       ownsNetworks: shared === undefined,
+       runArgs: Object.freeze([...runArgs]),
+     };
+   } catch (error) {
+     throw withLeftovers(error, await teardown(options, containerId === '' ? names.container : containerId, created));
+   }
+ }
+
+===== packages/sandbox/src/types.ts =====
+diff --git a/packages/sandbox/src/types.ts b/packages/sandbox/src/types.ts
+index 5fee11e..b23f951 100644
+--- a/packages/sandbox/src/types.ts
++++ b/packages/sandbox/src/types.ts
+@@ -28,56 +28,77 @@ export interface EgressPolicy { mode: 'deny-all' | 'allowlist'; allow: string[];
+ /**
+  * A model relay: a provider-owned endpoint that holds a credential the sandbox
+  * never does, and forwards the sandbox's requests to one upstream with it
+  * (A-P12-01).
+  *
+  * The spec names the credential and never carries it, because a `SandboxSpec`
+  * is a record the runtime may keep and a secret in it is a secret in the
+  * record. An implementation resolves `credential` against the credentials it
+  * was constructed with.
+  *
+  * Implementations MUST keep the credential out of the sandbox — out of its
+  * environment, its mounts, and every process it runs — and MUST refuse a relay
+  * whose credential they were not given, whose `upstream` is not an `https`
+  * origin, or whose `paths` is empty, rather than provision a sandbox whose
+  * model calls fail later for a reason nothing recorded (I5). An implementation
+  * that cannot keep a credential out of a process it runs MUST refuse every
+  * spec that carries a relay.
+  *
+  * A relay is independent of `egress` (D-P12-02): under `deny-all` the sandbox
+  * reaches the relay and nothing else. Under `allowlist` the relay is still the
+  * only route to its upstream, so implementations MUST refuse an `egress.allow`
+  * naming the upstream's host (D-P12-11).
+  */
+ export interface RelaySpec {
+-  /** An `https` origin with no path: `'https://api.example.com'`. The only origin the relay reaches. */
+-  upstream: string;
++  /**
++   * The only origin the relay reaches: an `https` origin with no path,
++   * `'https://api.example.com'`, or a local endpoint on the Docker host
++   * (A-R21-01). The second is the only way a relay speaks `http`; a URL is
++   * never read as local, whatever host it names.
++   */
++  upstream: string | LocalUpstream;
+   /** The path prefixes forwarded, each a segment boundary. Every other path is refused. Never empty (D-P12-04). */
+   paths: string[];
+   /** The one request header the credential is written into. Every authentication header the client sent is discarded. */
+   header: string;
+   /**
+    * How the credential is written into `header` (A-R6-02): `'raw'` as it is,
+-   * `'bearer'` as `Bearer <credential>`. Required, so no relay writes a scheme
+-   * its endpoint did not ask for; any other value is refused.
++   * `'bearer'` as `Bearer <credential>`, `'none'` not at all, with the
++   * client's value in `header` deleted (A-R21-02). Required, so no relay writes
++   * a scheme its endpoint did not ask for; any other value is refused.
+    */
+   scheme: RelayScheme;
+-  /** The name of a credential the provider holds. Never a value. */
+-  credential: string;
++  /**
++   * The name of a credential the provider holds, never a value; or `null`,
++   * declaring the endpoint takes none (A-R21-02). `null` comes with the
++   * `'none'` scheme and a local upstream, or the spec is refused. An absent
++   * credential is refused, never read as none.
++   */
++  credential: string | null;
+   /** The environment variable the provider sets in the sandbox to the relay's address, so no caller hard-codes it. */
+   urlVariable: string;
+   /**
+    * What one driver call may spend through this relay (A-P13-01). The relay
+    * counts what each response used and refuses every request once either
+    * bound is reached, so a call begun under budget may end over it by at most
+    * one call (D-P13-03). Each bound MUST be a positive finite number.
+    */
+   budget: RelayBudget;
+   /** How the relay reads what a call used and prices it. A dialect the implementation does not know is refused (D-P13-06). */
+   meter: RelayMeter;
+ }
+ 
+-/** How a relay writes its credential into the header its grant names. */
+-export type RelayScheme = 'raw' | 'bearer';
++/** How a relay writes its credential into the header its grant names. `'none'` writes nothing, and only with no credential (A-R21-02). */
++export type RelayScheme = 'raw' | 'bearer' | 'none';
++
++/**
++ * A model endpoint listening on the Docker host, reached over `http` on
++ * `port` (A-R21-01). The relay container alone is given the route; the
++ * sandbox never is. A provider reaches only the ports its operator gave it.
++ */
++export interface LocalUpstream {
++  local: 'docker-host';
++  port: number;
++}
+ 
+ /** One driver call's spending bounds. `maxTokens` sums all four token classes (D-P13-05). */
+ export interface RelayBudget {
+
+===== packages/sandbox/test/relay.test.ts =====
+diff --git a/packages/sandbox/test/relay.test.ts b/packages/sandbox/test/relay.test.ts
+index 49d0111..2368cc2 100644
+--- a/packages/sandbox/test/relay.test.ts
++++ b/packages/sandbox/test/relay.test.ts
+@@ -1,17 +1,19 @@
+ /**
+  * The model relay, against a real daemon (P12).
+  *
+  * The relay holds a credential the sandbox never does, and forwards the
+  * sandbox's requests to one upstream with it, for a granted set of paths. Every
+  * property is observed from inside a real sandbox against a real TLS upstream
+  * this suite owns, and the credential here is a canary made for the run: the
+  * suite proves where a value goes, and a real key would prove nothing more.
+  *
+  * These tests require Docker and `openssl`, and fail without either, for the
+  * reason `local.test.ts` gives.
+  */
+-import { execFile } from 'node:child_process';
++import { execFile, spawn } from 'node:child_process';
+ import { randomUUID } from 'node:crypto';
++import { createServer } from 'node:http';
++import type { AddressInfo } from 'node:net';
+ import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+@@ -19,17 +21,18 @@ import { promisify } from 'node:util';
+ import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+ import {
+   EGRESS_PROXY_IMAGE,
++  LOCAL_UPSTREAM_ALIAS,
+   LocalDockerProvider,
+   RELAY_ALIAS,
+   RELAY_PORT,
+   RELAY_SOURCE,
+   RELAY_URL,
+   SandboxRefusal,
+   StubSandboxProvider,
+   checkRelay,
+   relayOf,
+   type AppliedRelay,
+   type RelaySpec,
+   type SandboxHandle,
+   type SandboxSpec,
+ } from '../src/index.js';
+@@ -38,19 +41,20 @@ import { TEST_IMAGE } from './image.js';
+ import {
+   PROCESS_DUMP,
+   TEST_BUDGET,
+   TEST_METER,
++  TEST_OPENAI_METER,
+   TEST_MODEL,
+   UPSTREAM_HOST,
+   UPSTREAM_MARKER,
+   UPSTREAM_ORIGIN,
+   UPSTREAM_PORT,
+   bodyOf,
+   exportContains,
+   inspectText,
+   makeCertificate,
+   rawRequest,
+   startUpstream,
+   statusOf,
+   upstreamLog,
+   type Certificate,
+ } from './upstream.js';
+@@ -59,6 +63,8 @@ const run = promisify(execFile);
+ 
+ /** The name the specs use for the credential; what the provider holds under it is made fresh per test. */
+ const CREDENTIAL = 'model';
++/** A provider given no Docker host port: every local upstream is refused (A-R21-03). */
++const NO_PORTS: ReadonlySet<number> = new Set();
+ 
+ /** A metered request the meter can price. */
+ const MESSAGE = JSON.stringify({ model: TEST_MODEL, max_tokens: 16, messages: [] });
+@@ -437,67 +443,67 @@ describe('the relay is the only route to its upstream', () => {
+ describe('the relay lives and dies with its sandbox', () => {
+   test('under deny-all the relay and both its networks are destroyed with the sandbox', async () => {
+     const handle = await provisioned();
+     const relay = relayFor(handle);
+     expect(await containerExists(relay.name)).toBe(true);
+ 
+     await provider.destroy(handle);
+     expect(await containerExists(relay.name)).toBe(false);
+     expect(await networkExists(relay.internalNetwork)).toBe(false);
+     expect(await networkExists(relay.outboundNetwork)).toBe(false);
+   });
+ 
+   test('beside an allowlist the relay, the proxy, and their networks are all destroyed with the sandbox', async () => {
+     const handle = await provisioned(specFor({ egress: { mode: 'allowlist', allow: ['example.com'] } }));
+     const controls = provider.appliedControls(handle);
+     if (controls.egress.mode !== 'allowlist') throw new Error('expected an allowlist sandbox');
+     const relay = relayFor(handle);
+     expect(await containerExists(relay.name)).toBe(true);
+     expect(await containerExists(controls.egress.proxy.name)).toBe(true);
+     expect(await networkExists(controls.egress.proxy.internalNetwork)).toBe(true);
+     expect(await networkExists(controls.egress.proxy.outboundNetwork)).toBe(true);
+ 
+     await provider.destroy(handle);
+     expect(await containerExists(relay.name)).toBe(false);
+     expect(await containerExists(controls.egress.proxy.name)).toBe(false);
+     expect(await networkExists(controls.egress.proxy.internalNetwork)).toBe(false);
+     expect(await networkExists(controls.egress.proxy.outboundNetwork)).toBe(false);
+   });
+ 
+   test('a provision that fails after the relay started leaves no relay behind', async () => {
+     const before = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
+     const relaysBefore = before.stdout.split(/\r?\n/).filter((n) => n.startsWith('model-relay-'));
+ 
+     // An image with no shell starts and exits, so the provision is refused after the relay is up.
+     const refused = await refusal(() => provider.provision(specFor({ image: EGRESS_PROXY_IMAGE.replace(/@.*/u, '@sha256:' + '0'.repeat(64)) })));
+     expect(refused.layer).toBe('image');
+ 
+     const after = await run('docker', ['ps', '--all', '--format', '{{.Names}}']);
+     expect(after.stdout.split(/\r?\n/).filter((n) => n.startsWith('model-relay-'))).toStrictEqual(relaysBefore);
+   });
+ 
+   test('a teardown whose docker fails attempts every step and reports each thing it left behind', async () => {
+     const relay = relayFor(await provisioned());
+ 
+     // Each step fails without a docker to run. The teardown goes on past the first and names all three.
+     const failure = await stopRelay(relay, NO_DOCKER);
+     expect(failure?.message).toContain(relay.containerId);
+     expect(failure?.message).toContain(relay.internalNetwork);
+     expect(failure?.message).toContain(relay.outboundNetwork);
+     // The real relay is still there, which is what the report says; afterEach removes it.
+     expect(await containerExists(relay.name)).toBe(true);
+   });
+ 
+   test('a start that fails and cannot clean up after itself reports both, not only the first', async () => {
+-    const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]));
++    const plan = checkRelay(relaySpec(), new Set([CREDENTIAL]), NO_PORTS);
+     const id = randomUUID();
+     const failed = await startRelay(id, plan, secret, undefined, undefined, NO_DOCKER).then(
+       () => undefined,
+       (error: unknown) => error,
+     );
+     expect(failed).toBeInstanceOf(Error);
+     const message = (failed as Error).message;
+     expect(message).toContain('cleaning up after it failed');
+     expect(message).toContain(`model-relay-${id}`);
+     expect(message).not.toContain(secret);
+   });
+ });
+@@ -505,119 +511,214 @@ describe('the relay lives and dies with its sandbox', () => {
+ describe('a relay that cannot be applied exactly is refused (I5)', () => {
+   test('a credential the provider was not given is refused, naming it and never a value', async () => {
+     const refused = await refusal(() => provider.provision(specFor({ relay: relaySpec({ credential: 'nobody-gave-me-this' }) })));
+     expect(refused.layer).toBe('relay');
+     expect(refused.message).toContain('nobody-gave-me-this');
+     expect(refused.message).not.toContain(secret);
+ 
+     const bare = await LocalDockerProvider.create({ vaultPaths: [] });
+     expect((await refusal(() => bare.provision(specFor()))).layer).toBe('relay');
+   });
+ 
+   test("an allowlist naming the relay's upstream host is refused, since the proxy would be a second route to it", async () => {
+     for (const allow of [[UPSTREAM_HOST], ['example.com', UPSTREAM_HOST.toUpperCase()]]) {
+       // Through `provisioned`, so a sandbox the provider wrongly hands back is still destroyed.
+       const refused = await refusal(() => provisioned(specFor({ egress: { mode: 'allowlist', allow } })));
+       expect(refused.layer, JSON.stringify(allow)).toBe('relay');
+       expect(refused.message).toContain(UPSTREAM_HOST);
+     }
+   });
+ 
+   test('an upstream that is not an https origin naming a host is refused', () => {
+     const held = new Set([CREDENTIAL]);
+     for (const upstream of [
+       'http://api.example.com',
+       'https://api.example.com/',
+       'https://api.example.com/v1',
+       'https://api.example.com?x=1',
+       'https://user:pass@api.example.com',
+       'https://192.0.2.10',
+       'https://[::1]',
+       'api.example.com',
+       '',
+     ]) {
+-      expect(() => checkRelay(relaySpec({ upstream }), held), upstream).toThrow(SandboxRefusal);
++      expect(() => checkRelay(relaySpec({ upstream }), held, NO_PORTS), upstream).toThrow(SandboxRefusal);
+     }
+-    expect(checkRelay(relaySpec({ upstream: 'https://api.example.com' }), held).upstreamHost).toBe('api.example.com');
++    expect(checkRelay(relaySpec({ upstream: 'https://api.example.com' }), held, NO_PORTS).upstreamHost).toBe('api.example.com');
+   });
+ 
+   test('an empty grant, or a path the relay could not match exactly, is refused rather than read as everything', () => {
+     const held = new Set([CREDENTIAL]);
+     for (const paths of [[], ['v1/messages'], ['/v1/messages/'], ['/v1/../files'], ['/v1/%2e'], ['/v1/messages?x'], ['/'], ['']]) {
+-      expect(() => checkRelay(relaySpec({ paths }), held), JSON.stringify(paths)).toThrow(SandboxRefusal);
++      expect(() => checkRelay(relaySpec({ paths }), held, NO_PORTS), JSON.stringify(paths)).toThrow(SandboxRefusal);
+     }
+   });
+ 
+   test('a header the credential cannot be written to, and a variable that would replace the proxy\'s, are refused', () => {
+     const held = new Set([CREDENTIAL]);
+     for (const header of ['host', 'Content-Length', 'connection', 'x api key', '']) {
+-      expect(() => checkRelay(relaySpec({ header }), held), header).toThrow(SandboxRefusal);
++      expect(() => checkRelay(relaySpec({ header }), held, NO_PORTS), header).toThrow(SandboxRefusal);
+     }
+     for (const urlVariable of ['HTTPS_PROXY', 'no_proxy', '1URL', 'A=B', '']) {
+-      expect(() => checkRelay(relaySpec({ urlVariable }), held), urlVariable).toThrow(SandboxRefusal);
++      expect(() => checkRelay(relaySpec({ urlVariable }), held, NO_PORTS), urlVariable).toThrow(SandboxRefusal);
+     }
+   });
+ 
+   test('a spec with no scheme, or one the relay does not write, is refused; an unknown dialect is refused and openai-chat is not', () => {
+     const held = new Set([CREDENTIAL]);
+     const { scheme: _scheme, ...schemeless } = relaySpec();
+     for (const spec of [schemeless, relaySpec({ scheme: 'basic' as RelaySpec['scheme'] })]) {
+-      expect(() => checkRelay(spec as RelaySpec, held)).toThrow(/relay\.scheme/u);
++      expect(() => checkRelay(spec as RelaySpec, held, NO_PORTS)).toThrow(/relay\.scheme/u);
+     }
+-    expect(checkRelay(relaySpec({ scheme: 'bearer' }), held).scheme).toBe('bearer');
+-    expect(() => checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'gemini-generate' as RelaySpec['meter']['dialect'] } }), held)).toThrow(
++    expect(checkRelay(relaySpec({ scheme: 'bearer' }), held, NO_PORTS).scheme).toBe('bearer');
++    expect(() => checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'gemini-generate' as RelaySpec['meter']['dialect'] } }), held, NO_PORTS)).toThrow(
+       /relay\.meter\.dialect/u,
+     );
+-    expect(checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'openai-chat' } }), held).meter.dialect).toBe('openai-chat');
++    expect(checkRelay(relaySpec({ meter: { ...TEST_METER, dialect: 'openai-chat' } }), held, NO_PORTS).meter.dialect).toBe('openai-chat');
++  });
++
++  test('a local upstream is the Docker host on a port the provider was given, and is planned as http to the relay alone (A-R21-01, A-R21-03)', () => {
++    const held = new Set([CREDENTIAL]);
++    const ports = new Set([11434]);
++    const keyless = relaySpec({ upstream: { local: 'docker-host', port: 11434 }, scheme: 'none', credential: null });
++    const plan = checkRelay(keyless, held, ports);
++    expect(plan).toMatchObject({ upstream: `http://${LOCAL_UPSTREAM_ALIAS}:11434`, upstreamHost: LOCAL_UPSTREAM_ALIAS, local: 'docker-host', credential: null, scheme: 'none' });
++    // A key is still allowed to a local endpoint that asks for one.
++    expect(checkRelay(relaySpec({ upstream: { local: 'docker-host', port: 11434 } }), held, ports).credential).toBe(CREDENTIAL);
++    expect(checkRelay(relaySpec(), held, ports).local).toBeNull();
++    expect(() => checkRelay(keyless, held, NO_PORTS)).toThrow(/port 11434.*dockerHostPorts/u);
++    expect(() => checkRelay(relaySpec({ upstream: { local: 'docker-host', port: 11435 }, scheme: 'none', credential: null }), held, ports)).toThrow(/11435/u);
++    for (const upstream of [
++      { local: 'docker-host', port: 0 },
++      { local: 'docker-host', port: 65536 },
++      { local: 'docker-host', port: 1.5 },
++      { local: 'docker-host', port: '11434' },
++      { local: 'lan', port: 11434 },
++      { local: 'docker-host', port: 11434, host: 'gpu.lan' },
++      { port: 11434 },
++      ['docker-host', 11434],
++      null,
++      'http://localhost:11434',
++      'http://host.docker.internal:11434',
++    ]) {
++      expect(() => checkRelay(relaySpec({ upstream: upstream as RelaySpec['upstream'], scheme: 'none', credential: null }), held, ports), JSON.stringify(upstream)).toThrow(
++        /relay\.upstream/u,
++      );
++    }
++  });
++
++  test('no credential is declared by null and the none scheme together, and only for a local upstream (A-R21-02)', () => {
++    const held = new Set([CREDENTIAL]);
++    const ports = new Set([11434]);
++    const local = { local: 'docker-host', port: 11434 } as const;
++    const { credential: _credential, ...absent } = relaySpec({ upstream: local, scheme: 'none' });
++    for (const [spec, cause] of [
++      [relaySpec({ upstream: local, scheme: 'raw', credential: null }), /null under the "raw" scheme/u],
++      [relaySpec({ upstream: local, scheme: 'bearer', credential: null }), /null under the "bearer" scheme/u],
++      [relaySpec({ scheme: 'none', credential: null }), /null with an https upstream/u],
++      [relaySpec({ upstream: local, scheme: 'none' }), /under the 'none' scheme/u],
++      [relaySpec({ upstream: local, scheme: 'none', credential: '' }), /never read as none/u],
++      [absent, /never read as none/u],
++    ] as const) {
++      expect(() => checkRelay(spec as RelaySpec, held, ports)).toThrow(cause);
++    }
++  });
++
++  test('the relay\'s own start refuses an undeclared http upstream or a missing credential, and starts on a declared local one', async () => {
++    const port = await new Promise<number>((done) => {
++      const probe = createServer().listen(0, '127.0.0.1', () => {
++        const { port: free } = probe.address() as AddressInfo;
++        probe.close(() => { done(free); });
++      });
++    });
++    const env = {
++      RELAY_UPSTREAM: `http://${LOCAL_UPSTREAM_ALIAS}:11434`,
++      RELAY_LOCAL: 'docker-host',
++      RELAY_PATHS: JSON.stringify(['/v1/chat/completions']),
++      RELAY_HEADER: 'api-key',
++      RELAY_SCHEME: 'none',
++      RELAY_PORT: String(port),
++      RELAY_BUDGET: JSON.stringify({ maxTokens: 10, maxCostUsd: 1 }),
++      RELAY_METER: JSON.stringify(TEST_OPENAI_METER),
++    };
++    const start = (given: Record<string, string>): Promise<string> =>
++      new Promise((done) => {
++        const child = spawn(process.execPath, ['--eval', RELAY_SOURCE], { env: { PATH: process.env.PATH ?? '', ...given } });
++        let output = '';
++        const read = (c: Buffer): void => {
++          output += c.toString('utf8');
++          if (output.includes('listening')) child.kill();
++        };
++        child.stdout.on('data', read);
++        child.stderr.on('data', read);
++        const timer = setTimeout(() => child.kill(), 5000);
++        child.on('close', () => {
++          clearTimeout(timer);
++          done(output);
++        });
++      });
++    expect(await start(env)).toMatch(/listening/u);
++    expect(await start({ ...env, RELAY_LOCAL: '', RELAY_SCHEME: 'bearer', RELAY_CREDENTIAL: 'k' })).toMatch(/not an https origin/u);
++    expect(await start({ ...env, RELAY_UPSTREAM: 'http://gpu.lan:11434' })).toMatch(/local upstream is not/u);
++    expect(await start({ ...env, RELAY_LOCAL: 'lan' })).toMatch(/other than the docker host/u);
++    expect(await start({ ...env, RELAY_SCHEME: 'raw' })).toMatch(/no credential/u);
++    expect(await start({ ...env, RELAY_LOCAL: '', RELAY_UPSTREAM: 'https://api.example.com' })).toMatch(/only to a local endpoint/u);
++    expect(await start({ ...env, RELAY_CREDENTIAL: 'k' })).toMatch(/under the none scheme/u);
++  });
++
++  test('a provider given a Docker host port that is not a port refuses to be built (A-R21-03)', async () => {
++    for (const dockerHostPorts of [[0], [65536], [1.5], ['11434'] as unknown as number[]]) {
++      expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], dockerHostPorts }))).message).toMatch(/dockerHostPorts/u);
++    }
+   });
+ 
+   test('a provider given a credential with no value, or under a name a spec could not match, refuses to be built', async () => {
+     expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], credentials: { model: '' } }))).layer).toBe('relay');
+     expect((await refusal(() => LocalDockerProvider.create({ vaultPaths: [], credentials: { 'Not A Name': 'x' } }))).layer).toBe('relay');
+   });
+ 
+   test('the stub provider, which runs commands on the host, refuses every relay', async () => {
+     const stub = new StubSandboxProvider();
+     expect((await refusal(() => stub.provision(specFor()))).layer).toBe('relay');
+   });
+ 
+   test('the relay itself refuses to start without a credential or a grant', async () => {
+     const valid: Record<string, string> = {
+       RELAY_CREDENTIAL: 'x', RELAY_UPSTREAM: UPSTREAM_ORIGIN, RELAY_PATHS: '["/v1/messages"]', RELAY_HEADER: 'x-api-key', RELAY_SCHEME: 'raw', RELAY_PORT: '8080',
+       RELAY_BUDGET: JSON.stringify(TEST_BUDGET), RELAY_METER: JSON.stringify(TEST_METER),
+     };
+     const flagsFor = (env: Record<string, string>): string[] => Object.entries(env).flatMap(([name, value]) => ['--env', `${name}=${value}`]);
+ 
+     // The control: the same image, program, and flags with nothing missing start a relay that stays up.
+     // Without it, the refusals below could be an image or a daemon that runs nothing (external review, codex-4).
+     const control = `relay-start-control-${randomUUID()}`;
+     upstreams.push(control);
+     await run('docker', ['run', '--detach', '--name', control, ...flagsFor(valid), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]);
+     await new Promise((resolve) => setTimeout(resolve, 2_000));
+     expect((await run('docker', ['inspect', '--format', '{{.State.Running}}', control])).stdout.trim()).toBe('true');
+ 
+     const uncredentialed = Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_CREDENTIAL'));
+     const attempts: Array<[Record<string, string>, string]> = [
+       [uncredentialed, 'no credential'],
+       [{ ...valid, RELAY_PATHS: '[]' }, 'no path grant'],
+       [{ ...valid, RELAY_UPSTREAM: 'http://api.example.com', RELAY_PATHS: '["/v1"]' }, 'not an https origin'],
+       // P13: a relay nothing bounds, or that cannot price what it forwards, does not start either.
+       [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_BUDGET')), 'no budget'],
+       [{ ...valid, RELAY_BUDGET: JSON.stringify({ maxTokens: 0, maxCostUsd: 1 }) }, 'no budget'],
+       [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, dialect: 'gemini-generate' }) }, 'no meter'],
+       // A-R6-02: a relay that does not know how to write its credential does not guess.
+       [Object.fromEntries(Object.entries(valid).filter(([name]) => name !== 'RELAY_SCHEME')), 'no scheme'],
+       [{ ...valid, RELAY_SCHEME: 'basic' }, 'no scheme'],
+       [{ ...valid, RELAY_METER: JSON.stringify({ ...TEST_METER, prices: { m: { ...TEST_METER.prices[TEST_MODEL], outputPerMTok: -1 } } }) }, 'no price table'],
+     ];
+     for (const [env, named] of attempts) {
+       const outcome = await run('docker', ['run', '--rm', ...flagsFor(env), EGRESS_PROXY_IMAGE, 'node', '--eval', RELAY_SOURCE]).then(
+         () => ({ code: 0, stderr: '' }),
+         (error: unknown) => ({ code: (error as { code?: unknown }).code, stderr: stderrOf(error) }),
+       );
+       // The relay's own refusal, naming what it lacks: not merely some non-zero exit.
+       expect(outcome.code, JSON.stringify(env)).toBe(1);
+       expect(outcome.stderr, JSON.stringify(env)).toContain('model-relay: ');
+       expect(outcome.stderr, JSON.stringify(env)).toContain(named);
+     }
+   });
+ });
+
+=== BUNDLE END === 441c5309a1463aba5a0511143c5cd253
