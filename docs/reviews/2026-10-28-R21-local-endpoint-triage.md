@@ -22,7 +22,7 @@ raised priority. It was not taken as verification.
 
 | Finding | One line | Raised by | Verdict | Outcome |
 |---|---|---|---|---|
-| codex-1, gemini-1 | The sandbox reaches a host service through its own network's gateway, bypassing the relay | both | holds on a Linux engine; the gap predates R21, and R21's assertion does not probe it | held for the maintainer (out of scope), who widened the scope (D-R21-09); fix (F2) |
+| codex-1, gemini-1 | The sandbox reaches a host service through its own network's gateway, bypassing the relay | both | holds on a Linux engine; the gap predates R21, and R21's assertion does not probe it | held for the maintainer (out of scope), who widened the scope (D-R21-09); fix (F2, `c421196`) |
 | codex-2, gemini-4 | A declared, granted port 80 makes the relay refuse to start | both | holds (port 80); the port-0 direction holds in part: no caller can produce it | fix (F1, `d42c56b`) |
 | gemini-2 | Under `'none'`, `Authorization` and `x-api-key` reach the endpoint | gemini | does not hold | reject |
 | gemini-3 | The framing asks how to trick the relay, not whether the sandbox can route around it | gemini | holds in part: the missing question is codex-1/gemini-1; "moot" overreaches | folds into the held finding |
@@ -78,7 +78,7 @@ not only a local relay, would meet. Under working rule 6 that is a scope
 change, and it is the maintainer's to take. A probe added alone would pass on
 Desktop and fail only where the defect is real, so it is held with the fix.
 
-**Decided and fixed (F2).** The maintainer took the fix into R21 (D-R21-09).
+**Decided and fixed (F2, `c421196`).** The maintainer took the fix into R21 (D-R21-09).
 `createSandboxNetwork` (`packages/sandbox/src/local/docker.ts`) now makes both
 the relay's and the proxy's internal networks. It creates each with the
 isolated gateway mode and reads it back. A network that has a gateway, has
