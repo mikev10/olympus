@@ -5418,3 +5418,71 @@ empty.
 `HostEndpoint.key` is `string | null`. The host reads an endpoint file whose
 `scheme` is `'none'` without `FACTORY_ENDPOINT_KEY` and refuses one given with
 it. It passes a local upstream's port to `dockerHostPorts`.
+
+## Amendment: trigger framework (R22)
+
+Replaces the recorded gap "the M2 trigger framework has no spec". Spec:
+`docs/plan/R22-triggers.md`, checked against `v2` at 89d8200. Every entry below
+was confirmed by the maintainer on 2026-10-29.
+
+### D-A-TF-01: a trigger records a candidate or runs a job; it never starts a build
+
+- **Found:** R8 needs a signal recorded against a run, R13 a scheduled job, R16 an event a person reads; none needs a trigger to start the line. R19 forbids a trigger supplying an intent (`Intent.from: 'principal'`, `packages/api/src/run.ts`), so a triggered run that drafts a spec has nothing to draft from.
+- **Chosen:** a closed template registry in code. R22 ships `intake-candidate`: the event is recorded, and a person may admit a run from it through `POST /runs`, writing the intent. Job templates are later units' (R8, R13), take extracted fields only, and never enter the build.
+- **Rejected:** a template that starts the line from extracted fields alone. It needs a spec no person wrote, which R19 and R16 both refuse.
+- **Reverse:** a later amendment adds a build-starting template and names what supplies its spec.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-02: admission reads the trigger policy for every kind, `human` included
+
+- **Found:** `TriggerPolicy` and `CapabilityScope.triggerKinds` are validated and read by nothing; the run's trigger is a literal (`run.ts:865`). Every policy in the tree lists `human` in each role's `triggerKinds`, and the benchmark's `maxAutonomy.human` is 1 (to be verified against the levels it requests when the unit starts).
+- **Chosen:** admission refuses a kind not enabled, a level over the kind's cap (refused, never clamped), an author below the floor, a depth past the limit, and a role that does not list the kind. The human principal is `owner`.
+- **Rejected:** enforcing only non-human kinds. It leaves the shipped `maxAutonomy: { human: 2 }` a claim nothing checks (I5).
+- **Reverse:** scope the checks to non-human kinds in admission.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-03: a non-human kind is enabled only with its whole route
+
+- **Found:** `I7.enabled-trigger-declares-a-template` (pending, owner M2); D-P3-13 left the relational check to admission because no template registry existed.
+- **Chosen:** the registry now exists (D-A-TF-01), so the validator refuses a non-human kind in `enabled` without an entry station, a registered template, an autonomy cap, a trust floor, and a schema in code. `human` keeps D-P3-05's route.
+- **Reverse:** move the check back to admission, as D-P3-13 recorded.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-04: field schemas are code, per kind, and carry no free text
+
+- **Found:** `TriggerEvent.extracted` is `Record<string, string>`; `I7.extracted-field-schemas` is pending, owner M2.
+- **Chosen:** a closed field set per kind, each field with a byte cap and character class checked whole; an unknown, missing, or out-of-class value refuses the event, never truncated. Schemas for `scheduled`, `post-merge`, `ci-failure`, and `issue`; none for `review-feedback`, so it cannot be enabled.
+- **Rejected:** schemas declared in policy. A policy-declared schema could widen a field to carry free text by a single edit; a schema in code changes only through a reviewed pull request.
+- **Reverse:** read schemas from policy, with a validator capping what a field may declare.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-05: a subscription is a grant in policy and names its secret
+
+- **Found:** the constraint in `DECOMPOSITION.md` (D-A-DD-02); host secrets come from the environment (`FACTORY_ENDPOINT_KEY`, `packages/api/src/host/main.ts`), and `RelaySpec.credential` names a credential without carrying it.
+- **Chosen:** `TriggerPolicy.subscriptions`, each with an id, kind, source, transport, and the name of its secret. The host resolves it; no sandbox spec can name it. A delivery for an unnamed id is refused before its body is read.
+- **Reverse:** none short of dropping the constraint, which binds this unit.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-06: signed webhooks are the one transport
+
+- **Found:** MCP Events is a draft outside the MCP specification (D-A-DD-02). Every route requires the local token (`http/server.ts:417`); the service listens on `127.0.0.1`.
+- **Chosen:** `POST /events/<subscription>`, the one route without the local token: size-capped before reading, HMAC-SHA256 over the exact bytes checked in constant time before parsing, replayed delivery ids and timestamps outside five minutes refused. Exposure to the internet is the operator's.
+- **Rejected:** polling a provider's API. It needs a credential with read scope on the target, held for no gain the signature does not give.
+- **Reverse:** add a transport to the closed set; the three constraints apply to it unchanged.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-07: GitHub is the one source
+
+- **Found:** the repository is hosted on GitHub; R8 needs `post-merge` and `ci-failure`, and R16 a tracker trigger, which `TriggerKind` has no kind for.
+- **Chosen:** GitHub extractors for a default-branch push, a failed check run, and an issue opened or labelled; `TriggerKind` gains `'issue'` (A-R22-01). Author trust from `author_association`, capped by a ceiling the subscription declares, `anonymous` when absent.
+- **Rejected:** a framework with a fixture source only. The outside path would be specified and never proven against a real payload shape until R8.
+- **Reverse:** drop the GitHub module; the framework and schemas stand without it.
+- **Confirmed** by the maintainer, 2026-10-29.
+
+### D-A-TF-08: a schedule fires once a day at a UTC time, and a missed firing is recorded
+
+- **Found:** R13 is the only `scheduled` consumer, and its jobs are nightly.
+- **Chosen:** `TriggerPolicy.schedules`, each with an id, a template, and a daily UTC time. A firing missed while the service was down is recorded as missed, never run late.
+- **Rejected:** a cron grammar, more surface than one consumer needs; catching up missed firings, which bursts the budget on restart.
+- **Reverse:** widen the schedule shape; existing entries stay valid.
+- **Confirmed** by the maintainer, 2026-10-29.
