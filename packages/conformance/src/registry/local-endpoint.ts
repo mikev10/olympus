@@ -128,11 +128,31 @@ async function gatewayAddresses(relayContainer: string, alias: string): Promise<
   return JSON.parse(stdout) as string[];
 }
 
+/**
+ * An http listener in the engine host's own network namespace, bound to every address, which is
+ * where a model server sits on a Linux engine (D-R21-09). On Docker Desktop the endpoint above is
+ * on Windows, past the VM, so only this listener stands where a Linux host's server would. Its
+ * addresses are read after the sandbox exists, so any address the sandbox's bridge gave the host is among them.
+ */
+async function engineHostEndpoint(image: string): Promise<{ port: number; addresses: string[]; stop: () => Promise<void> }> {
+  const port = 20_000 + Math.floor(Math.random() * 10_000);
+  const name = `engine-host-endpoint-${String(process.pid)}-${String(port)}`;
+  const server = `require('node:http').createServer((q, s) => s.end('engine host')).listen(${String(port)}, '0.0.0.0')`;
+  await docker('docker', ['run', '--detach', '--rm', '--name', name, '--network', 'host', image, 'node', '--eval', server]);
+  const list = "console.log(Object.values(require('node:os').networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address).join(' '))";
+  const { stdout } = await docker('docker', ['run', '--rm', '--network', 'host', image, 'node', '--eval', list]);
+  return {
+    port,
+    addresses: stdout.trim().split(/\s+/u).filter((a) => a !== ''),
+    stop: async () => { await docker('docker', ['rm', '--force', name]).catch(() => undefined); },
+  };
+}
+
 export const MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED = runtime({
   id: 'I4.model-relay-reaches-the-docker-host-only-as-declared',
   title:
     'a relay declared local reaches its endpoint on the Docker host over http, on a port the provider was given, with no credential and none of the task\'s, ' +
-    'metered as any relay is; the route is the relay container\'s alone, so the sandbox reaches the endpoint by no name or address; ' +
+    'metered as any relay is; the route is the relay container\'s alone, so the sandbox reaches the endpoint by no name or address, nor a listener at any of the engine host\'s addresses; ' +
     'a port the provider was not given, or a provider given none, is refused at provisioning; and the relay goes with the sandbox (A-R21-01..03)',
   run: async () => {
     const endpoint = await startEndpoint();
@@ -188,6 +208,18 @@ export const MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED = runtime({
           // Read again, not narrowed: the endpoint records asynchronously, and a request from the sandbox would land here.
           if (attempts.length !== hosts.length || attempts.some((line) => line.includes(' reached ')) || [...endpoint.seen].length !== 1) {
             throw new Error(`I4: the sandbox reached the Docker host's endpoint without the relay: ${direct.stdout}`);
+          }
+          // Nor by the host's own addresses, its bridge on the sandbox's network included (D-R21-09).
+          const engine = await engineHostEndpoint(EGRESS_PROXY_IMAGE);
+          try {
+            if (engine.addresses.length < 2) throw new Error(`I4: the engine host reported ${JSON.stringify(engine.addresses)} as its addresses`);
+            const around = await provider.exec(handle, ['node', '--eval', DIRECT, String(engine.port), JSON.stringify(engine.addresses)]);
+            const lines = JSON.parse(around.stdout) as string[];
+            if (lines.length !== engine.addresses.length || lines.some((line) => line.includes(' reached '))) {
+              throw new Error(`I4: the sandbox reached a listener on the engine host without the relay: ${around.stdout}`);
+            }
+          } finally {
+            await engine.stop();
           }
 
           destroyed = true;

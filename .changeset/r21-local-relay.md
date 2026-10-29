@@ -13,6 +13,10 @@ A model relay can reach a local endpoint on the Docker host (R21).
   client's value in its header.
 - `LocalDockerOptions.dockerHostPorts` names the ports a relay may reach; a
   local upstream on any other is refused (A-R21-03).
+- Every network a sandbox joins, the relay's and the egress proxy's, is created
+  with the isolated gateway mode, so the host holds no address on it. A network
+  that comes back with a gateway or IPv6 is refused, which needs Docker Engine
+  28.0 or later (D-R21-09).
 
 Two assertions hold it: `I4.model-relay-reaches-the-docker-host-only-as-declared`
 and `I5.model-relay-refuses-an-undeclared-local-endpoint`.

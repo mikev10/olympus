@@ -36,6 +36,7 @@ import {
   type SandboxHandle,
   type SandboxSpec,
 } from '../src/index.js';
+import { createSandboxNetwork } from '../src/local/docker.js';
 import { startRelay, stopRelay } from '../src/local/relay.js';
 import { TEST_IMAGE } from './image.js';
 import {
@@ -172,6 +173,25 @@ async function exists(args: string[], notFound: string): Promise<boolean> {
 
 const containerExists = (name: string): Promise<boolean> => exists(['inspect', '--type', 'container', name], 'No such container');
 const networkExists = (name: string): Promise<boolean> => exists(['network', 'inspect', name], 'not found');
+
+/**
+ * A listener in the engine host's own network namespace, bound to every address, which is where a
+ * model server sits on a Linux engine. Its addresses are read after the sandbox exists, so the
+ * address a sandbox's bridge would give the host is among them.
+ */
+async function engineHostListener(): Promise<{ port: number; addresses: string[]; stop: () => Promise<void> }> {
+  const port = 20_000 + Math.floor(Math.random() * 10_000);
+  const name = `engine-host-listener-${randomUUID()}`;
+  const server = `require('node:net').createServer((s) => s.end('hi')).listen(${String(port)}, '0.0.0.0')`;
+  await run('docker', ['run', '--detach', '--rm', '--name', name, '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', server]);
+  const list = "console.log(Object.values(require('node:os').networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address).join(' '))";
+  const { stdout } = await run('docker', ['run', '--rm', '--network', 'host', EGRESS_PROXY_IMAGE, 'node', '--eval', list]);
+  return {
+    port,
+    addresses: stdout.trim().split(/\s+/u).filter((a) => a !== ''),
+    stop: async () => { await run('docker', ['rm', '--force', name]).catch(() => undefined); },
+  };
+}
 
 /** A `docker` that cannot be run, for a teardown that has to go on without one. */
 const NO_DOCKER = { executable: join(tmpdir(), `no-docker-${randomUUID()}`), image: EGRESS_PROXY_IMAGE, timeoutMs: 10_000 };
@@ -437,6 +457,55 @@ describe('the relay is the only route to its upstream', () => {
       ['sh', '-c', `printf 'CONNECT ${UPSTREAM_HOST}:${String(UPSTREAM_PORT)} HTTP/1.1\\r\\n\\r\\n' | nc -w 4 egress-proxy 3128`],
     );
     expect(tunnel.stdout).toContain('403');
+  });
+
+  // codex-1, gemini-1 (D-R21-09): an internal network still gives the host an address on its bridge,
+  // so a server bound to every address on a Linux engine's host would be one hop from the sandbox.
+  test('the host holds no address on any network a sandbox joins, so a listener on every host address is unreachable from it', async () => {
+    for (const spec of [specFor(), specFor({ egress: { mode: 'allowlist', allow: ['example.com'] } })]) {
+      const handle = await provisioned(spec);
+      const network = provider.appliedControls(handle).egress.network;
+      const { stdout: inspected } = await run('docker', ['network', 'inspect', '--format', '{{json .IPAM.Config}}', network]);
+      expect((JSON.parse(inspected) as Array<{ Gateway?: string }>).every((c) => (c.Gateway ?? '') === '')).toBe(true);
+
+      const listener = await engineHostListener();
+      try {
+        expect(listener.addresses.length).toBeGreaterThan(1);
+        const probe = listener.addresses.map((a) => `nc -z -w 2 ${a} ${String(listener.port)} && echo "${a} reached"`).join('; ');
+        const reached = await provider.exec(handle, ['sh', '-c', `${probe}; echo probed`]);
+        expect(reached.stdout).toContain('probed');
+        expect(reached.stdout).not.toContain('reached');
+      } finally {
+        await listener.stop();
+      }
+    }
+
+    // An engine that ignores the option, adds IPv6, or assigns a gateway anyway is refused, and the network it made is left for cleanup.
+    for (const shown of [
+      '[{"Subnet":"192.168.0.0/20","Gateway":"192.168.0.1"}]|false|isolated',
+      '[{"Subnet":"192.168.0.0/20"}]|false|<no value>',
+      '[{"Subnet":"192.168.0.0/20"}]|true|isolated',
+      'not json|false|isolated',
+    ]) {
+      const created: string[] = [];
+      const fake = (args: string[]): Promise<string> => Promise.resolve(args[1] === 'inspect' ? shown : '');
+      await expect(createSandboxNetwork(fake, 'n', created)).rejects.toThrow(/with the host on it/u);
+      expect(created).toStrictEqual(['n']);
+    }
+    await expect(createSandboxNetwork(() => Promise.resolve('[{"Subnet":"192.168.0.0/20"}]|false|isolated'), 'n', [])).resolves.toBeUndefined();
+
+    // The control: the same probe from a plain internal network reaches the listener, so its silence above is the network's.
+    const plain = `plain-internal-${randomUUID()}`;
+    const listener = await engineHostListener();
+    await run('docker', ['network', 'create', '--internal', '--driver', 'bridge', plain]);
+    try {
+      const { stdout: gateway } = await run('docker', ['network', 'inspect', '--format', '{{(index .IPAM.Config 0).Gateway}}', plain]);
+      const { stdout } = await run('docker', ['run', '--rm', '--network', plain, TEST_IMAGE, 'sh', '-c', `nc -z -w 2 ${gateway.trim()} ${String(listener.port)} && echo reached`]);
+      expect(stdout).toContain('reached');
+    } finally {
+      await listener.stop();
+      await run('docker', ['network', 'rm', plain]).catch(() => undefined);
+    }
   });
 });
 

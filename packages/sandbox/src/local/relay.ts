@@ -31,7 +31,7 @@
  * Built the way the proxy is: source passed to `node --eval` in the same
  * pinned image, read-only, every capability dropped, nothing mounted.
  */
-import { dockerCli } from './docker.js';
+import { createSandboxNetwork, dockerCli } from './docker.js';
 import { normalizeHost } from './egress.js';
 import { refuse, withLeftovers } from './refusal.js';
 import type { LocalUpstream, MeterReading, ModelPrice, RelayBudget, RelayDialect, RelayMeter, RelayScheme, RelaySpec } from '../types.js';
@@ -1022,8 +1022,7 @@ export async function startRelay(
   const outbound = shared?.outbound ?? names.outbound;
   try {
     if (shared === undefined) {
-      await run(['network', 'create', '--internal', '--driver', 'bridge', names.internal]);
-      created.push(names.internal);
+      await createSandboxNetwork(run, names.internal, created);
       await run(['network', 'create', '--driver', 'bridge', names.outbound]);
       created.push(names.outbound);
     }
