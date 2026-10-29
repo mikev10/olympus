@@ -1895,11 +1895,11 @@ keep their conventions in exactly those files. A builder that never reads
 them makes changes the person at `integrate` rejects for reasons no check
 measures, and R2 counts the cost as ordinary rework.
 
-**Pending a choice (D-A-RI-01).** Option A records the status quo as a
-decision and builds nothing. Option B is the unit below. The recommendation is
-B. Nothing below is built until the maintainer chooses.
+**Chosen: delivery from the base (D-A-RI-01).** The alternative, recording
+the status quo and building nothing, was rejected: it leaves the cost of
+ignored conventions in R2's rework rate, under no cause the line can name.
 
-Binding, under B:
+Binding:
 
 - **Read from the base, never from the workspace.** At admission the runtime
   reads a fixed list of paths from the base commit the run is admitted on:

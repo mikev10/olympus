@@ -5168,7 +5168,7 @@ Vendor-side defaults for agent features are I4.
 - **Must hold:** I3: an agent cannot rewrite what instructs the next seat through the tree it hands on. I5: a control that cannot see its plant fails rather than passes.
 - **Rejected:** removing `Skill` from `DECLARED_TOOLS`. It closes the question by narrowing what policy can grant, which is a policy decision, not a test's.
 - **Reverse:** drop the skill plants and the control; the three existing plants stand alone.
-- **Awaiting confirmation** by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-29.
 
 ### D-A-RI-01: whether a seat receives the target repository's own instructions
 
@@ -5176,9 +5176,9 @@ Vendor-side defaults for agent features are I4.
 - **Option A:** record the status quo as the decision. A seat reads the target's instructions only if its role tells it to open them, and the line delivers nothing. This costs nothing, and conventions the target documents are followed only by chance.
 - **Option B:** R23. The runtime reads a fixed list of instruction paths from the base commit at admission, under R20's compiler rules, and pins each by hash in the admission record. It delivers them as a new granted context, `'repo-instructions'`, off by default and never at `test-design`. Front matter is dropped, so no target file widens a grant, and only `SKILL.md` bodies are delivered. Above L2 the grant waits on R10.
 - **Must hold under B:** I3, because the files come from the base and not the workspace, and are pinned before any driver call. I4, because the grant is policy's and a skill's `allowed-tools` changes nothing. I5, because a file the reader refuses refuses admission and is named. I7 is not engaged: the files are the target's content, not an event payload. Their author is still not the line, which is why the grant above L2 waits on R10.
-- **Recommended: B.** The claim is about whether work is really done, and work that ignores the target's documented conventions is rejected at `integrate` for reasons no check names. A lets that cost hide in R2's rework rate.
+- **Chosen: B**, with the maintainer. The claim is about whether work is really done, and work that ignores the target's documented conventions is rejected at `integrate` for reasons no check names. A lets that cost hide in R2's rework rate.
 - **Reverse:** remove the grant from the station contracts; the admission record's set can stay, unused.
-- **Awaiting the maintainer's choice.** R23 is not started until it is made.
+- **Confirmed** by the maintainer, 2026-10-29.
 
 ### D-A-PC-01: property checks are a check kind locked at `test-design`, as R24 in M3
 
@@ -5189,7 +5189,7 @@ Vendor-side defaults for agent features are I4.
 - **Measured by:** R7, through `hard-coded-output`, which is a measured miss today, and a new `edge-case-only` item. No claim waits on anything else.
 - **Why M3:** it needs R7, R15, and R19 in place, and M2's claim does not need it.
 - **Reverse:** drop the kind; nothing else depends on it.
-- **Awaiting confirmation** by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-29.
 
 ### D-A-EX-01: the reachability question is reviewer content, in R9's role and R13's fourth job
 
@@ -5198,7 +5198,7 @@ Vendor-side defaults for agent features are I4.
 - **Must hold:** I2, because findings are claims recorded beside a verdict and never read as one until the M3 panel. I6, because the reviewer's family differs from the authors' or reduced independence is recorded. I7, because the reviewer's text does not enter a later prompt; only the typed fields do.
 - **Rejected:** a deterministic "new exposure" check, built from routes and entry points extracted per stack. It needs a per-stack extractor for every framework a target uses, and R17's static analysis already pins rules for known sinks. It can be added to an adapter later if the reviewer's findings show a pattern a rule can catch.
 - **Reverse:** drop the paragraph from R9 and the fourth job from R13.
-- **Awaiting confirmation** by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-29.
 
 ### D-A-DD-03: the Codex driver turns off workspace instruction discovery, and owes R22's assertion
 
@@ -5206,7 +5206,7 @@ Vendor-side defaults for agent features are I4.
 - **Chosen:** a dated note on the recorded constraint. The driver runs with every workspace instruction source off, or the session refuses, and it is not registered without its own R22 assertion. Masking is noted as not relied on, because P12 keeps credentials out of the sandbox.
 - **Why:** a second family is what R9 waits on, and the first driver to read workspace instructions by default should meet the rule before it is built, not in its review.
 - **Reverse:** drop the note; it binds nothing until the driver is picked up.
-- **Awaiting confirmation** by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-29.
 
 ### D-A-DD-04: no model classifies a raw payload, whatever the endpoint is called
 
@@ -5214,4 +5214,4 @@ Vendor-side defaults for agent features are I4.
 - **Chosen:** a dated note on the event-subscription constraint, for the trigger framework's spec to state as a binding. A chat message is an `UntrustedPayload`. The template and its parameters come from extracted fields only. A classifier, if one is seated, reads only the extracted fields, chooses only among the templates policy declares, and returns a claim.
 - **Must hold:** I7. A classification call is a model call, so `UntrustedPayload.raw` never reaches one.
 - **Reverse:** drop the note; it binds nothing until the framework's spec is written.
-- **Awaiting confirmation** by the maintainer.
+- **Confirmed** by the maintainer, 2026-10-29.
