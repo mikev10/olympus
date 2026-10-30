@@ -704,6 +704,12 @@ describe('reading a recorded stream', () => {
     expect(parsed.result?.usage.outputTokens).toBe(0);
   });
 
+  test('the skills a session lists are read from its init line, and a line without them lists none (R23)', () => {
+    const listed = parseStream('{"type":"system","subtype":"init","tools":["Skill"],"skills":["probe-alpha","loop"]}');
+    expect(listed.init?.skills).toEqual(['probe-alpha', 'loop']);
+    expect(parseStream('{"type":"system","subtype":"init","tools":[]}').init?.skills).toEqual([]);
+  });
+
   test('a tool use becomes the events its kind implies', () => {
     const parsed = parseStream(
       '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}',

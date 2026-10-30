@@ -18,6 +18,7 @@ import { LOCKED_PATH_IN_DIFF_IS_TAMPER } from './verification.js';
 import { COMPOSED_HOST_LOCKED_TEST_CHANGE_FAILS } from './composition.js';
 import { DEPENDENCY_TREES_ARE_THE_BASES, PASSING_ON_THE_BASE_REFUSES } from './base-run.js';
 import { R20_I3 } from './roles.js';
+import { R23_I3 } from './workspace-instructions.js';
 import { R19_ASSERTIONS } from './drafting.js';
 
 /** The entry for `path`, or a failure naming what the manifest holds instead. */
@@ -48,6 +49,8 @@ export const I3: InvariantEntry = {
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I3,
     ...R20_I3,
+    // R23: workspace instructions, per driver.
+    ...R23_I3,
     // R17: security at the gate.
     ...R17_I3,
     // R4: parallel task execution.

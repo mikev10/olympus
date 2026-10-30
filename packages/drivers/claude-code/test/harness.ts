@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, expect } from 'vitest';
 import type { Budget, CompiledRole, RoleId, TaskId, TaskRequest } from '@olympus-ai/core';
-import type { ExecOptions, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { ExecOptions, ExecResult, LocalDockerProvider, MeterReading, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import { MODEL_CREDENTIAL, MODEL_RELAY, ClaudeCodeDriver, ensureImage, parseStream, type ClaudeCodeDriverOptions } from '../src/index.js';
 
 /**
@@ -155,6 +155,14 @@ export interface Harness {
   observeExec(enter: (sandbox: SandboxHandle) => () => void): void;
   /** `count` more sandboxes like `handle`, each over a workspace of its own, torn down with the harness. */
   provisionMore(count: number): Promise<SandboxHandle[]>;
+  /** Every exec the driver made, in order, with the argv and environment it passed. */
+  readonly execs: ReadonlyArray<{ readonly cmd: readonly string[]; readonly env: Readonly<Record<string, string>> | undefined }>;
+  /**
+   * An exec through the provider the driver was given, so a model call it makes
+   * is metered beside the driver's and `I2.relay-meter-agrees-with-session`
+   * still compares like with like.
+   */
+  exec(sandbox: SandboxHandle, cmd: string[], options?: ExecOptions): Promise<ExecResult>;
 }
 
 function spec(image: string, workspaceDir: string): SandboxSpec {
@@ -235,6 +243,7 @@ export async function withDriver<T>(
     return c;
   };
   const test = expect.getState().currentTestName ?? '(outside a test)';
+  const execs: Array<{ cmd: readonly string[]; env: Readonly<Record<string, string>> | undefined }> = [];
   const watched: SandboxProvider = {
     id: provider.id,
     provision: (s: SandboxSpec) => provider.provision(s),
@@ -242,6 +251,7 @@ export async function withDriver<T>(
     capabilities: () => provider.capabilities(),
     exec: async (h: SandboxHandle, cmd: string[], o?: ExecOptions) => {
       const leave = watcher?.(h);
+      execs.push({ cmd: [...cmd], env: o?.env });
       try {
         const result = await provider.exec(h, cmd, o);
         recordCost(result.stdout);
@@ -289,6 +299,8 @@ export async function withDriver<T>(
       }
       return extra.slice(-count);
     },
+    execs,
+    exec: (sandbox, cmd, options) => watched.exec(sandbox, cmd, options),
   };
 
   try {

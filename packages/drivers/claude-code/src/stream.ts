@@ -22,6 +22,12 @@ export interface SessionInit {
   readonly mcpServers: ReadonlyArray<{ readonly name: string; readonly status: string }>;
   /** Subagent types actually available, by name. */
   readonly agents: readonly string[];
+  /**
+   * Skills the session lists to the model, by name: the CLI's bundled ones, and any it
+   * loaded from a settings source. Read by `I3.workspace-instructions-not-loaded`, which
+   * requires no workspace skill here (R23).
+   */
+  readonly skills: readonly string[];
   readonly model: string;
   readonly sessionId: string;
   /** Where the CLI found its key. `ANTHROPIC_API_KEY`, carrying the placeholder, is the only one this driver arranges. */
@@ -99,6 +105,7 @@ function readInit(message: Record<string, unknown>): SessionInit {
     tools: stringsIn(message.tools),
     mcpServers: servers,
     agents: stringsIn(message.agents),
+    skills: stringsIn(message.skills),
     model: asString(message.model) ?? '',
     sessionId: asString(message.session_id) ?? '',
     apiKeySource: asString(message.apiKeySource) ?? '',

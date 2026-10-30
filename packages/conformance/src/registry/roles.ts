@@ -17,7 +17,7 @@ import type { RunOutcome } from '@olympus-ai/api';
 import type { CompiledRole, RoleId, RunId, TaskId, TaskRequest } from '@olympus-ai/core';
 import type { ExecResult, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { AdmissionRecord, UsageRecord } from '@olympus-ai/vault';
-import { compileError, external, runtime } from '../kit/assert.js';
+import { compileError, runtime } from '../kit/assert.js';
 import type { Assertion, LocalAssertion } from '../kit/types.js';
 import { workspaceRoot } from '../kit/workspace.js';
 import { HELLO_REVIEW, HELLO_TASK, lineScope, linePolicy, readRecord, stubDriver, withLine, type LineRig } from './line.js';
@@ -386,16 +386,6 @@ export const R20_I2: readonly LocalAssertion[] = [ATTEMPT_RECORDS_ITS_ROLE_VERSI
 export const R20_I3: readonly Assertion[] = [
   ADMISSION_PINS_EVERY_ROLE,
   DRIVER_RENDERS_THE_ROLE_ON_THE_INVOCATION,
-  // Paid: a real container on the pinned image and a real model call. Raised by R20's external review (codex-1, D-R20-12).
-  external({
-    id: 'I3.workspace-instructions-not-loaded',
-    title:
-      'a CLAUDE.md, a rules file, and an agent definition named for the role, planted in the workspace, reach none of the session\'s instructions: '
-      + 'the task runs under its role alone, so the agent cannot rewrite what instructs the next seat through the tree it hands on',
-    level: 'runtime',
-    package: '@olympus-ai/driver-claude-code',
-    file: 'test/invariants.test.ts',
-  }),
 ];
 export const R20_I4: readonly LocalAssertion[] = [REVIEW_SEAT_RUNS_AS_REVIEWER];
 export const R20_I5: readonly LocalAssertion[] = [SEAT_WITHOUT_A_ROLE_IS_REFUSED, BROKEN_ROLE_ENTRY_REFUSES_ADMISSION];

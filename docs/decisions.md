@@ -6171,3 +6171,24 @@ the code the unit touches and ran the pinned CLI before writing this.
   (F1). A driver anywhere else is already wrong.
 - **Reverse:** drop the file and the assertion. Move the external entry back
   to `roles.ts`.
+
+### D-R23-06: what each assertion was shown failing against
+
+- `I3.openai-compatible-workspace-instructions-not-loaded`: red against
+  the driver with `cat /workspace/AGENTS.md` appended to its system
+  message. The planted run's requests carried the `AGENTS.md` token, and
+  the bare run's did not.
+- `I3.every-driver-has-a-workspace-instruction-assertion`: red with a
+  `packages/drivers/phantom/package.json` on disk, naming the phantom as a
+  driver with no row. The assertion also refuses a phantom in its own
+  self-test on every run.
+- The `skills` parse: its unit test was red before `readInit` read the
+  field.
+- `I3.workspace-instructions-not-loaded` is paid, and no key is set
+  here. It runs under the pull request's `run-driver` job (D-A-CI-05). The
+  free half is already observed on the pinned image (D-R23-01): without
+  `--setting-sources ''` the `init` line lists `probe-alpha`, and the
+  assertion requires it absent from the driver's sessions. Deleting the
+  flag from the argv therefore fails the `init` check before the reply is
+  read. The reply half, and the control's token, are first seen in that
+  run.
