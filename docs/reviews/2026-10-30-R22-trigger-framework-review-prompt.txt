@@ -1,0 +1,95 @@
+The code under review is in the file
+`2026-10-30-R22-trigger-framework-review-bundle.txt` (SHA-256 a5f725b70b458b7ef63a28b7242ed07ecb1c7493d552dfc5c101a365e5dd3d4d) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the trigger framework of a TypeScript project: the code by which events from outside — a signed GitHub webhook, or a daily schedule — enter a software-factory runtime, and the policy checks that admit or refuse a run. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime drives agent-written code through a fixed line of stations. Until this change, every run was started by a person, and the trigger section of the policy was validated but read by nothing. This change makes admission read the trigger policy for every run, a person's included, and adds one outside path: `POST /events/<subscription>` accepts a webhook delivery that a subscription in policy grants. The delivery is verified by an HMAC under a secret the host holds, reduced to a few fields a per-kind schema in code bounds, and recorded in the Vault as an intake candidate. Nothing runs from a candidate until a person admits a run from it through the authenticated API, writing the run's intent themselves. A daily schedule records candidates the same way. Code lives in `packages/core/src/trigger/` and the policy validator, `packages/triggers/src/` (signature and GitHub extractor), the Vault's intake store (`packages/vault/src/`), `packages/api/src/intake.ts`, `schedule.ts`, `run.ts`, `http/server.ts`, and the host. A type-aware ESLint rule lives in `packages/conformance/lint/untrusted-sink.js`, and the conformance assertions are in `packages/conformance/src/registry/triggers.ts`.
+
+It must hold against a capable, motivated party trying to get its text in front of a model, to start or shape a run it was not granted, or to make the line act on an event the policy does not admit — and against a conformance suite that would pass while any of that holds. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the bytes of any HTTP request sent to the events route: its path, headers, and body, including a body it captured from a real delivery and sends again, late or repeatedly. It controls the content of GitHub objects a real signed delivery describes — an issue's title, body, and labels, a branch name, a check's name, an author association it holds — but not the subscription's secret. It controls the code an agent writes in a workspace. It does not control the components the runtime is wired with — the Vault, the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process, the policy file, the host's environment, or the person holding the local API token.
+
+The invariants at stake:
+
+- Event payloads are data, never instructions. Untrusted text enters inside an envelope (`UntrustedPayload`, whose `raw` is an opaque `UntrustedText`) and is never concatenated into a system or role prompt. Triggers select pre-declared templates; payloads supply parameters only. Only a trigger extractor may read `raw`.
+- Default deny. A capability not granted in policy is unavailable: a delivery for a subscription the policy does not name is refused before its body is read.
+- Fail closed. A missing check, a missing timestamp, an unverified signature, an over-cap value, or an exhausted budget is a refusal — never a silent degrade, a truncation, a clamp, or a warning that lets the run continue. A requested autonomy level above a cap is refused, never lowered.
+- The runtime derives status; the model and the payload never report it. Expiry and the budget window run on the runtime's clock.
+- No agent writes to the Vault. Candidates and decisions are written by the host runtime only.
+
+The mechanisms that matter most:
+
+- The delivery pipeline in `api/src/intake.ts` and `http/server.ts`: the order of the subscription check, the byte cap, the constant-time HMAC check, the replay check on the body's SHA-256 (stored in the same write as the outcome), the staleness check on the body's own timestamp, and the budget.
+- The GitHub extractor (`triggers/src/github.ts`) and `checkFields` with `FIELD_SCHEMAS` and `CHAR_CLASSES` (`core/src/trigger/schemas.ts`): whether anything other than bounded, non-free-text fields can leave a payload.
+- Admission (`core/src/trigger/admission.ts`, `api/src/run.ts`): the trigger checks for every kind, admission from a candidate exactly once, expiry, and the relational policy validation in `core/src/policy/validation.ts`.
+- The sink lint rule and the conformance assertions that claim to prove each of the above.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+The identifiers in parentheses below (R8, R10, R13, R16) name later units of work; they mean nothing in this code, and work they own is not a defect here.
+
+- any template that starts a build, and every job template: R13's jobs, R8's signal, R16's bug-fix template
+- narrowing a task's capability on untrusted input (R10)
+- `review-feedback`'s schema and extractor, and any source but GitHub
+- MCP Events, polling a provider's API, and writing back to a tracker
+- exposing the service to the internet: the tunnel, TLS, and the provider's webhook settings are the operator's
+- a CLI for candidates beyond what the API returns
+- a cron grammar; one daily time per schedule
+
+THE QUESTION
+
+How would you get text you wrote into a model's input, get a run admitted or a candidate recorded that the policy does not grant, or make the line act on a delivery it should refuse — and how would you make the conformance suite pass while one of those holds?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
