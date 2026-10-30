@@ -335,6 +335,26 @@ const DELIVERY_REFUSED_BEFORE_IT_IS_READ = runtime({
       } finally {
         await server.close();
       }
+      // The replay is refused on the digest alone: the write's own exclusive create is a backstop, never reached.
+      let writes = 0;
+      const counted = new Proxy(vault, {
+        get(target, key, receiver) {
+          if (key === 'recordTriggerDecision') {
+            return (d: TriggerDecision, c: CandidateRecord | null) => {
+              writes += 1;
+              return target.recordTriggerDecision(d, c);
+            };
+          }
+          const value: unknown = Reflect.get(target, key, receiver);
+          return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const again = Buffer.from(`${MARKER} another body {`);
+      await deliver(counted, policy, again);
+      const replay = await deliver(counted, policy, again);
+      if (replay.outcome !== 'refused' || replay.cause !== 'replayed' || writes !== 1) {
+        throw new Error(`I4: a replay came to ${JSON.stringify(replay)} after ${String(writes)} write attempts, not refused before the parse with one`);
+      }
     });
   },
 });
