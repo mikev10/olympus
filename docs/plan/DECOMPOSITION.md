@@ -602,7 +602,7 @@ order between them is settled before any of them is picked up.
 | R6 | Driver: any OpenAI-compatible endpoint | M2 | P5, P10, P12 | `docs/plan/R6-openai-compatible.md` |
 | R7 | False-done benchmark | M2 | P6, P7, I1, R17, R19 | `docs/plan/R7-benchmark.md` |
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, R22 | — |
-| R9 | Separation of duties across every seat | M2 | P6, P9, Codex driver, R17 | — |
+| R9 | Separation of duties across every seat | M2 | P6, P9, R17, R26 | — |
 | R10 | Trust ratchet | M2 | P12, P14, R22 | — |
 | R11 | Learning loop | M3 | R2, R7, R8, P14, R13, R20 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | `docs/plan/R12-telemetry.md` |
@@ -619,6 +619,7 @@ order between them is settled before any of them is picked up.
 | R23 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
 | R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
+| R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
 
 ### R1 — Readiness
 
@@ -1652,8 +1653,8 @@ and the record says why.
 
 ### Recorded constraint: the Codex driver (M2)
 
-Not specified, and not a unit here. It is recorded so the choice is settled
-before anyone picks up the driver. The Codex driver runs the Codex CLI inside
+Binding on R26, which builds the driver (D-A-DD-05). It was recorded first so
+the choice was settled before anyone picked up the driver. The Codex driver runs the Codex CLI inside
 the Olympus sandbox, as P5 runs Claude Code, and not a vendor-hosted agent
 harness. The mount-layer Vault protection, the egress allowlist (P10), and the
 credential held at the egress layer (P12) all require the agent to run in a
@@ -2078,6 +2079,60 @@ item is caught by a property check where its acceptance check misses.
 **Why M3:** it needs R7's corpus to show it works, R19's drafter to write
 properties at scale, and R15's base run. M2 does not need it to make its
 claim.
+
+### R26 — Driver: Codex
+
+R9 needs a reviewer of a family other than the author's at every seat, and the
+only agent-CLI driver today is Claude Code's (P5). R6 can seat a second family
+through an OpenAI-compatible endpoint, but its agent loop is the driver's own,
+not a vendor's. This unit adds a driver that runs the Codex CLI inside the
+Olympus sandbox, as P5 runs Claude Code, so the line has a second vendor
+harness with a family of its own. The recorded constraint below binds it in
+full. Binding:
+
+- **In the sandbox, never vendor-hosted.** The CLI runs in the container
+  Olympus provisions, with the Vault outside its mounts (I1), the egress
+  allowlist (P10), and the model credential held at the egress layer (P12).
+  A build that cannot meet one declares it in `unavailableControls()` and is
+  refused above L1.
+- **Family is declared, never inferred.** `ModelIdentity.family` is stated in
+  the driver's configuration (I6). The run records it beside the model the
+  vendor reported, and a mismatch the driver can see refuses.
+- **Metered like P5.** Every model call goes through the relay, the budget
+  holds at the relay (P13), and usage the relay cannot meter fails closed.
+- **Tools are declared and granted.** `declaredTools()` names the CLI's tools,
+  and the session offers exactly the granted set or refuses, as P5's does
+  (I4). Approval prompts are off and the sandbox mode is the container's, so
+  nothing in the session can ask for more.
+- **Workspace instructions off.** Every instruction source the CLI reads from
+  its working tree is off, or the session refuses, and the driver registers
+  its own R23 assertion (D-A-DD-03). The plant includes `AGENTS.md` at the
+  root and below it, both skill locations, and any configuration file the
+  pinned CLI reads from its working directory, with a control that shows the
+  CLI would read the plant without the driver's settings.
+- **Verified on the pinned CLI.** Each reported behaviour the driver relies
+  on is run on the pinned version and recorded, together with the harness's
+  licence and source (D-A-DD-01). A behaviour that cannot be verified is a
+  stop, not an assumption.
+
+**Contract amendments:** none expected. `DriverCapabilities`, `declaredTools()`,
+and `RelaySpec` already name nothing vendor-specific. If the CLI needs one, it
+is an amendment raised and confirmed before it is built.
+
+**Not in this unit:** R9's matrix and the seats that use the second family;
+a vendor-hosted Codex harness or the Agents API; computer use; Codex's own
+multi-agent features; and credential masking in the CLI's output, which the
+line does not rely on (P12).
+
+**Conformance:** the driver's paid suite runs once in CI under `run-driver`,
+cached as P5's is. Its entries fail when the Vault is mounted, when a
+credential is readable inside the sandbox, when a tool outside the grant is
+offered, when the declared family is removed, and when a planted
+`AGENTS.md` or skill token reaches a reply. The registry report names R23's
+entry for this driver.
+
+**Why M2:** it is the second family R9, and so R13, wait on. One driver
+proves the contract is neutral, and two prove reviewer independence.
 
 ---
 

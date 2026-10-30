@@ -5580,6 +5580,17 @@ Vendor-side defaults for agent features are I4.
 - **Reverse:** drop the note; R22 holds without it.
 - **Confirmed** by the maintainer, 2026-10-29.
 
+## Amendment: Codex driver (R26)
+
+### D-A-DD-05: the Codex driver becomes R26
+
+- **Found:** R9 listed "Codex driver" as a dependency, and the plan had no unit for it, only the recorded constraint. So R9 and R13 could never start.
+- **Chosen:** R26, Driver: Codex, in M2. It depends on P5 (the driver contract and `declaredTools()`), P10 (the egress allowlist), P12 (the credential at the egress layer), P13 (metering and the budget at the relay), and R23 (the workspace-instruction assertion it owes, D-A-DD-03). R9 now depends on R26. The recorded constraint stays, and it now binds R26.
+- **Rejected:** depending on R6. R6's agent loop is its own, and nothing in R26 builds on it.
+- **Must hold:** I1, I4, I5, and I6, as the section states. The model never runs outside the sandbox Olympus provisions, and family is declared, never inferred.
+- **Reverse:** remove the row and the section, and put "Codex driver" back in R9's dependencies.
+- **Requested** by the maintainer, 2026-10-30.
+
 ## R22: Trigger framework
 
 Built against `v2` at cd7eff3. The spec is `docs/plan/R22-triggers.md`. The
