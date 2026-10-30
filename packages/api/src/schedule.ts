@@ -55,19 +55,23 @@ export interface Scheduler {
   stop(): void;
 }
 
+/** How often the policy is read for schedules added since the last read. */
+export const RECONCILE_MS = 60_000;
+
 /**
- * Records what was missed, then sets a timer per schedule for its next
- * firing. The policy is read again at each firing, so a schedule removed from
- * it stops firing and one whose kind is disabled is refused and recorded.
+ * Records what was missed, then keeps one timer per schedule in the current
+ * policy (codex-4). The policy is read again at each firing and every
+ * `RECONCILE_MS`: a schedule added is armed within that interval, one retimed
+ * fires at its new time and not its old, one removed stops, and one whose kind
+ * is disabled is refused and recorded.
  */
 export async function startSchedules(
   policy: () => Promise<Policy | null>, vault: Vault, intake: Intake, now: () => number = Date.now,
 ): Promise<Scheduler> {
-  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const armed = new Map<string, ReturnType<typeof setTimeout>>();
   let stopped = false;
   const current = await policy();
-  const schedules = current?.triggers.schedules ?? [];
-  for (const schedule of schedules) {
+  for (const schedule of current?.triggers.schedules ?? []) {
     const missed = missedDates(schedule, await lastCovered(vault, schedule), now());
     if (missed !== null) await intake.missed(schedule, missed.first, missed.last);
   }
@@ -77,22 +81,32 @@ export async function startSchedules(
     const today = firingTime(schedule, at);
     const next = today > at ? today : firingTime(schedule, at + DAY_MS);
     const timer = setTimeout(() => {
-      timers.delete(timer);
+      armed.delete(schedule.id);
       void (async () => {
         const latest = await policy();
         const still = latest?.triggers.schedules?.find((s) => s.id === schedule.id);
-        if (latest !== null && still !== undefined) await intake.fire(latest, still, utcDate(next));
-      })().finally(() => { arm(schedule); });
+        if (latest === null || still === undefined) return;
+        // Retimed since it was armed: this was the old time, so arm the new one and fire nothing now.
+        if (still.at === schedule.at) await intake.fire(latest, still, utcDate(next));
+        if (!armed.has(still.id)) arm(still);
+      })();
     }, next - at);
     timer.unref();
-    timers.add(timer);
+    armed.set(schedule.id, timer);
   };
-  for (const schedule of schedules) arm(schedule);
+  const reconcile = async (): Promise<void> => {
+    const latest = await policy();
+    for (const schedule of latest?.triggers.schedules ?? []) if (!armed.has(schedule.id)) arm(schedule);
+  };
+  for (const schedule of current?.triggers.schedules ?? []) arm(schedule);
+  const sweep = setInterval(() => { void reconcile(); }, RECONCILE_MS);
+  sweep.unref();
   return {
     stop: () => {
       stopped = true;
-      for (const timer of timers) clearTimeout(timer);
-      timers.clear();
+      clearInterval(sweep);
+      for (const timer of armed.values()) clearTimeout(timer);
+      armed.clear();
     },
   };
 }
