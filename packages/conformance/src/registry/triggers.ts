@@ -10,7 +10,7 @@
  */
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AdmissionOutcome, RunOutcome } from '@olympus-ai/api';
+import type { AdmissionOutcome } from '@olympus-ai/api';
 import type {
   CandidateId, CapabilityScope, Policy, PolicyDocument, RoleId, RunId, TriggerKind, TriggerPolicy, TriggerSubscription,
 } from '@olympus-ai/core';
@@ -274,7 +274,7 @@ const CANDIDATE_PAYLOAD_REACHES_NO_DRIVER = runtime({
       const ended = await outcome.admitted.drive();
       if (driver.requests.length === 0) throw new Error(`I7: the line called no driver (it ended ${ended.ok ? 'ok' : ended.reason}), so nothing was checked`);
       const sent = JSON.stringify(driver.requests);
-      const body = entry?.candidate?.body?.base64 ?? '';
+      const body = entry.candidate?.body?.base64 ?? '';
       if (sent.includes(MARKER) || (body !== '' && sent.includes(body))) throw new Error('I7: a driver request carries the delivery body');
     });
   },
@@ -305,18 +305,18 @@ const DELIVERY_REFUSED_BEFORE_IT_IS_READ = runtime({
       try {
         // Not JSON, so a body that were parsed would be refused as `schema`, and one refused before it is never is.
         const junk = Buffer.from(`${MARKER} not json {`);
-        const expect = async (status: number, wanted: number, what: string): Promise<void> => {
+        const expect = (status: number, wanted: number, what: string): void => {
           if (status !== wanted) throw new Error(`I4: ${what} answered ${String(status)}, not ${String(wanted)}`);
         };
-        await expect(await post('no-such-subscription', junk, signBody(junk, SECRET)), 404, 'an unnamed subscription');
-        await expect(await post(ISSUES, junk), 401, 'an unsigned body');
-        await expect(await post(ISSUES, junk, signBody(junk, 'another secret')), 401, 'a wrongly signed body');
+        expect(await post('no-such-subscription', junk, signBody(junk, SECRET)), 404, 'an unnamed subscription');
+        expect(await post(ISSUES, junk), 401, 'an unsigned body');
+        expect(await post(ISSUES, junk, signBody(junk, 'another secret')), 401, 'a wrongly signed body');
         const big = Buffer.alloc(MAX_DELIVERY_BYTES + 1, 0x20);
-        await expect(await post(ISSUES, big, signBody(big, SECRET)), 413, 'an oversized body');
+        expect(await post(ISSUES, big, signBody(big, SECRET)), 413, 'an oversized body');
         if ((await vault.readTriggerDecisions()).length !== 0) throw new Error('I4: a refusal before verification wrote a record of its own');
         // Verified and parsed once: a schema refusal, recorded. Sent again: a replay, refused before the parse and only counted.
-        await expect(await post(ISSUES, junk, signBody(junk, SECRET)), 422, 'a verified body that is not JSON');
-        await expect(await post(ISSUES, junk, signBody(junk, SECRET)), 409, 'the same body sent again');
+        expect(await post(ISSUES, junk, signBody(junk, SECRET)), 422, 'a verified body that is not JSON');
+        expect(await post(ISSUES, junk, signBody(junk, SECRET)), 409, 'the same body sent again');
         const decisions = await vault.readTriggerDecisions();
         if (decisions.length !== 1 || decisions[0]?.decision.outcome.kind !== 'refused') throw new Error(`I4: the store holds ${String(decisions.length)} decisions, not the one schema refusal`);
         const counts = await vault.readRefusedDeliveryCounts();
@@ -410,7 +410,7 @@ const TRIGGER_POLICY_BINDS_HUMAN_RUNS = runtime({
       await withLine('r22-human-', async (rig) => {
         const { outcome, driver, components } = await admitWith(rig, policy);
         const got = refused(outcome, reason, what);
-        const named = got.reason === 'trigger-refused' ? got.cause : (got as Extract<RunOutcome, { reason: 'policy-refused' }>).refusal.reason;
+        const named = got.reason === 'trigger-refused' ? got.cause : got.refusal.reason;
         if (named !== cause) throw new Error(`I5: ${what} was refused for ${named}, not ${cause}`);
         if (driver.requests.length > 0) throw new Error(`I5: ${what} reached the driver`);
         const decisions = await components.vault.readDecisions(rig.runId);
@@ -458,7 +458,7 @@ const CANDIDATE_ADMITS_ONE_RUN = runtime({
       const candidate = await issueCandidate(rig, policy);
       const first = await admitWith(rig, policy, { candidate });
       if (!first.outcome.ok) throw new Error(`I5: the first run from the candidate was refused as ${first.outcome.reason}`);
-      const again = await admitWith(rig, policy, { candidate, runId: 'r22-second-run' as RunId });
+      const again = await admitWith(rig, policy, { candidate, runId: 'r22-second-run' });
       const got = refused(again.outcome, 'invalid-request', 'a second run from one candidate');
       if (!got.problems.some((p) => p.path === 'candidate' && p.code === 'already-admitted')) throw new Error(`I5: the second run was refused for ${JSON.stringify(got.problems)}`);
     });

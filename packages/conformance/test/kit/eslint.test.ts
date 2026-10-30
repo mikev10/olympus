@@ -170,6 +170,7 @@ describe('against the workspace configuration', () => {
         '@typescript-eslint/restrict-plus-operands',
         '@typescript-eslint/restrict-template-expressions',
         '@typescript-eslint/no-base-to-string',
+        'i7/no-untrusted-sink',
       ]),
     );
   });
