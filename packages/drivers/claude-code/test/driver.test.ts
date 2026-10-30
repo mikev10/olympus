@@ -704,10 +704,11 @@ describe('reading a recorded stream', () => {
     expect(parsed.result?.usage.outputTokens).toBe(0);
   });
 
-  test('the skills a session lists are read from its init line, and a line without them lists none (R23)', () => {
+  test('the skills a session lists are read from its init line, and a line without them reports no list rather than an empty one (R23, codex-3)', () => {
     const listed = parseStream('{"type":"system","subtype":"init","tools":["Skill"],"skills":["probe-alpha","loop"]}');
     expect(listed.init?.skills).toEqual(['probe-alpha', 'loop']);
-    expect(parseStream('{"type":"system","subtype":"init","tools":[]}').init?.skills).toEqual([]);
+    expect(parseStream('{"type":"system","subtype":"init","tools":[],"skills":[]}').init?.skills).toEqual([]);
+    expect(parseStream('{"type":"system","subtype":"init","tools":[]}').init?.skills).toBeUndefined();
   });
 
   test('a tool use becomes the events its kind implies', () => {

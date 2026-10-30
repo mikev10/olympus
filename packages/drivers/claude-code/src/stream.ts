@@ -25,9 +25,10 @@ export interface SessionInit {
   /**
    * Skills the session lists to the model, by name: the CLI's bundled ones, and any it
    * loaded from a settings source. Read by `I3.workspace-instructions-not-loaded`, which
-   * requires no workspace skill here (R23).
+   * requires no workspace skill here (R23). Undefined when the line carries no list, so a
+   * CLI that stops reporting one is not read as one that loaded nothing (codex-3).
    */
-  readonly skills: readonly string[];
+  readonly skills: readonly string[] | undefined;
   readonly model: string;
   readonly sessionId: string;
   /** Where the CLI found its key. `ANTHROPIC_API_KEY`, carrying the placeholder, is the only one this driver arranges. */
@@ -105,7 +106,7 @@ function readInit(message: Record<string, unknown>): SessionInit {
     tools: stringsIn(message.tools),
     mcpServers: servers,
     agents: stringsIn(message.agents),
-    skills: stringsIn(message.skills),
+    skills: asArray(message.skills) === undefined ? undefined : stringsIn(message.skills),
     model: asString(message.model) ?? '',
     sessionId: asString(message.session_id) ?? '',
     apiKeySource: asString(message.apiKeySource) ?? '',
