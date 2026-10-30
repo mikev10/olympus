@@ -68,6 +68,14 @@ export function around(inner: Vault, hooks: { beforeLock?: (by: string) => Promi
     recordDraftLock: (r) => inner.recordDraftLock(r),
     readLocks: (runId) => inner.readLocks(runId),
     listRuns: () => inner.listRuns(),
+    recordTriggerDecision: (d, c) => inner.recordTriggerDecision(d, c),
+    readTriggerDecisions: () => inner.readTriggerDecisions(),
+    hasTriggerDecision: (source, key) => inner.hasTriggerDecision(source, key),
+    readCandidate: (id) => inner.readCandidate(id),
+    markCandidateAdmitted: (id, runId) => inner.markCandidateAdmitted(id, runId),
+    markCandidateExpired: (id, at) => inner.markCandidateExpired(id, at),
+    countRefusedDelivery: (bucket, hour, cause) => inner.countRefusedDelivery(bucket, hour, cause),
+    readRefusedDeliveryCounts: () => inner.readRefusedDeliveryCounts(),
     readRunState: (runId) => inner.readRunState(runId),
     commitRunState: async (s, ifVersion) => {
       hooks.beforeCommit?.(s);

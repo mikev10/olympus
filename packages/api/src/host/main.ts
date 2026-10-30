@@ -34,10 +34,10 @@
  *
  * A missing variable stops the host before it listens (I5).
  */
-import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
+
 import { createApiServer } from '../http/server.js';
 import { readFile } from 'node:fs/promises';
-import { composeHost, containerUser, parseEndpointFile } from './compose.js';
+import { composeHost, containerUser, parseEndpointFile, webhookSecrets } from './compose.js';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -76,7 +76,7 @@ const server = createApiServer({
   policyFile: required('FACTORY_POLICY_FILE'),
   rolesDirectory: required('FACTORY_ROLES_DIR'),
   // Only a name with the webhook prefix is ever read here, so a policy cannot name another host secret as one.
-  secrets: (name) => (name.startsWith(WEBHOOK_SECRET_PREFIX) ? process.env[name] : undefined),
+  secrets: webhookSecrets(process.env),
   rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');

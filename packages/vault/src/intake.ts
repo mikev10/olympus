@@ -14,13 +14,13 @@ export function intakeId(source: string, key: string): CandidateId {
 
 /** Why a decision and candidate may not be written together, or undefined when they may. */
 export function intakeProblem(d: TriggerDecision, candidate: CandidateRecord | null): string | undefined {
-  if (d.collectedBy !== 'runtime') return 'a trigger decision is collected by the runtime';
+  if ((d.collectedBy as string) !== 'runtime') return 'a trigger decision is collected by the runtime';
   if (d.source === '' || d.key === '') return 'a trigger decision names its source and key';
   const id = intakeId(d.source, d.key);
   if (d.outcome.kind === 'candidate') {
     if (candidate === null) return 'a candidate outcome is written with its candidate';
     if (d.outcome.candidate !== id || candidate.id !== id) return 'a candidate is named by its source and key';
-    if (candidate.collectedBy !== 'runtime') return 'a candidate is collected by the runtime';
+    if ((candidate.collectedBy as string) !== 'runtime') return 'a candidate is collected by the runtime';
     if (candidate.body !== null) {
       const bytes = Buffer.from(candidate.body.base64, 'base64');
       if (createHash('sha256').update(bytes).digest('hex') !== candidate.body.sha256) return "a candidate's body hash is the hash of its body";

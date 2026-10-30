@@ -195,6 +195,20 @@ function createBody(value: unknown): CreateRunBody {
 }
 
 /**
+ * Lets a refused delivery's bytes pass without buffering or parsing any of
+ * them, so the sender reads the answer rather than a reset; past `cap` more
+ * bytes the connection is cut, so a sender cannot hold it open.
+ */
+function discard(req: IncomingMessage, cap: number): void {
+  let seen = 0;
+  req.on('data', (chunk: Buffer) => {
+    seen += chunk.byteLength;
+    if (seen > cap) req.destroy();
+  });
+  req.resume();
+}
+
+/**
  * Reads a delivery's body, held to `cap` while it is read: a body over it is
  * never buffered past the cap, and is refused as oversize (D-A-TF-06).
  */
@@ -484,12 +498,12 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     let outcome: DeliveryOutcome;
     if (subscription === null) {
       outcome = await intake.count(UNSUBSCRIBED_BUCKET, 'not-subscribed');
-      res.setHeader('connection', 'close');
+      discard(req, MAX_DELIVERY_BYTES);
     } else {
       const body = await readCapped(req, MAX_DELIVERY_BYTES);
       if (body === 'oversize') {
         outcome = await intake.count(subscription.id, 'oversize');
-        res.setHeader('connection', 'close');
+        discard(req, MAX_DELIVERY_BYTES);
       } else {
         const signature = req.headers['x-hub-signature-256'];
         outcome = await intake.deliver(policy.policy, subscription, typeof signature === 'string' ? signature : undefined, body);

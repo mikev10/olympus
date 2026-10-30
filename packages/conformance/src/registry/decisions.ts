@@ -24,6 +24,7 @@ import { workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { around } from './line-assertions.js';
 import { realComponents, realPolicy } from './real-line.js';
 import { failingRun } from './tier.js';
+import { expiredCandidateRun } from './triggers.js';
 import { conflictScenario } from './parallel.js';
 import { draftingDecision, draftsRejectedPark } from './drafting.js';
 import { inTask, runHello, writes } from './verification.js';
@@ -373,6 +374,16 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
     await cp(rig.roles, roles, { recursive: true });
     await rm(join(roles, 'reviewer.md'));
     await startRun(await rig.request(await rig.components(), { roles }));
+  }),
+  // R22: the trigger policy refuses a person's run when `human` is not enabled.
+  'admission:trigger-refused': admissionRow('admission:trigger-refused', 'p14-trigger-', async (rig) => {
+    const { startRun } = await api();
+    const base = await linePolicy();
+    await startRun(await rig.request(await rig.components(), { policy: { ...base, triggers: { ...base.triggers, enabled: [] } } }));
+  }),
+  // R22: a candidate past its window, on the runtime's clock.
+  'admission:candidate-expired': admissionRow('admission:candidate-expired', 'p14-expired-', async (rig) => {
+    await expiredCandidateRun(rig);
   }),
   'admission:refused': admissionRow('admission:refused', 'p14-capability-', async (rig) => {
     const { startRun } = await api();

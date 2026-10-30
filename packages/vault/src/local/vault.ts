@@ -1035,7 +1035,7 @@ export class LocalVault implements Vault {
       for (const name of await readdir(join(root, hour))) {
         const read = await readJson(join(root, hour, name));
         if (!isRecord(read) || typeof read.bucket !== 'string' || !isRecord(read.counts)) throw new Error(`LocalVault: ${join(root, hour, name)} is not a refused-delivery count`);
-        rows.push({ bucket: read.bucket, hour, counts: read.counts as RefusedDeliveryCount['counts'] });
+        rows.push({ bucket: read.bucket, hour, counts: read.counts });
       }
       out.push(...rows.sort((a, b) => a.bucket.localeCompare(b.bucket)));
     }

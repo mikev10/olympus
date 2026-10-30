@@ -4,6 +4,7 @@
  * can enforce (D-A-I1-05). The CLI composes nothing; it is a client of the
  * service this graph is served by (I9).
  */
+import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
 import { BASE_IMAGE, ClaudeCodeDriver, ensureImage, MODEL_CREDENTIAL } from '@olympus-ai/driver-claude-code';
 import { checkConfig, ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, type EndpointConfig } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
@@ -138,6 +139,25 @@ export function containerUser(env: Readonly<Record<string, string | undefined>>)
   return { uid: Number(uid), gid: Number(gid) };
 }
 
+/**
+ * Every credential the sandbox provider is given, by the name a relay spec
+ * names it with: the model key and the endpoint's, and nothing else. A
+ * subscription's secret is not among them, so no sandbox spec can name one
+ * and have it resolve (D-A-TF-05).
+ */
+export function providerCredentials(modelKey: string, endpoint: HostEndpoint | null): Record<string, string> {
+  return { [MODEL_CREDENTIAL]: modelKey, ...endpointGrants(endpoint).credentials };
+}
+
+/**
+ * Where the API server reads a subscription's secret: the host's own
+ * environment, and only a variable with the webhook prefix, so a policy
+ * cannot name the model key or any other host secret as one (D-A-TF-05).
+ */
+export function webhookSecrets(env: Readonly<Record<string, string | undefined>>): (name: string) => string | undefined {
+  return (name) => (name.startsWith(WEBHOOK_SECRET_PREFIX) && name.length > WEBHOOK_SECRET_PREFIX.length ? env[name] : undefined);
+}
+
 export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
   const docker = config.docker === undefined ? {} : { executable: config.docker };
@@ -146,10 +166,7 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const sandbox = await LocalDockerProvider.create({
     ...docker,
     vaultPaths: [config.store, config.repository],
-    credentials: {
-      [MODEL_CREDENTIAL]: config.modelKey,
-      ...grants.credentials,
-    },
+    credentials: providerCredentials(config.modelKey, endpoint),
     dockerHostPorts: grants.dockerHostPorts,
   });
   const claude = new ClaudeCodeDriver({ provider: sandbox });

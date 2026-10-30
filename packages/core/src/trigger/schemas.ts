@@ -34,13 +34,12 @@ export function isTemplateId(value: unknown): value is TemplateId {
 
 /**
  * The character classes a field may be in. Each is anchored and admits no
- * newline. `check-name` is the one that admits a space: a check's name is
- * written by whoever wrote the repository's CI configuration, it is capped at
- * 100 bytes, and refusing every check name with a space would refuse most
- * real failures (D-R22-11).
+ * whitespace, so no field can hold a sentence. A failed check is named by
+ * its run's id, never by its name, which is text a repository's CI
+ * configuration chose (D-R22-11).
  */
 export type CharClass =
-  | 'identifier' | 'repository' | 'branch-ref' | 'commit-sha' | 'check-name'
+  | 'identifier' | 'repository' | 'branch-ref' | 'commit-sha'
   | 'failure-conclusion' | 'decimal' | 'label-list' | 'author-trust';
 
 export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
@@ -49,9 +48,8 @@ export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   // A branch, never a tag; no `..`, no component starting with a dot.
   'branch-ref': /^refs\/heads\/(?!.*\.\.)(?!.*\/\.)(?!\.)[A-Za-z0-9._/-]+$/u,
   'commit-sha': /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u,
-  'check-name': /^[A-Za-z0-9._:/()-]+(?: [A-Za-z0-9._:/()-]+)*$/u,
   'failure-conclusion': /^(?:failure|timed_out|action_required|startup_failure)$/u,
-  decimal: /^[1-9][0-9]{0,9}$/u,
+  decimal: /^[1-9][0-9]{0,18}$/u,
   // Labels from the subscription's allowlist, comma-joined; empty when none matched.
   'label-list': /^(?:[A-Za-z0-9._:/-]+(?:,[A-Za-z0-9._:/-]+)*)?$/u,
   'author-trust': /^(?:owner|collaborator|outside|anonymous)$/u,
@@ -82,7 +80,7 @@ export const FIELD_SCHEMAS = Object.freeze({
   'ci-failure': Object.freeze({
     repository: { maxBytes: 140, charClass: 'repository' },
     commit: { maxBytes: 64, charClass: 'commit-sha' },
-    check: { maxBytes: 100, charClass: 'check-name' },
+    checkRun: { maxBytes: 19, charClass: 'decimal' },
     conclusion: { maxBytes: 20, charClass: 'failure-conclusion' },
   }),
   issue: Object.freeze({
@@ -96,7 +94,7 @@ export const FIELD_SCHEMAS = Object.freeze({
 export type SchemaKind = keyof typeof FIELD_SCHEMAS;
 export type FieldName<K extends SchemaKind> = keyof (typeof FIELD_SCHEMAS)[K] & string;
 /** The typed record an extractor yields for a kind: exactly the schema's fields (A-R22-03). */
-export type ExtractedFields<K extends SchemaKind> = { readonly [F in FieldName<K>]: string };
+export type ExtractedFields<K extends SchemaKind> = Readonly<Record<FieldName<K>, string>>;
 
 export function hasFieldSchema(kind: TriggerKind): kind is SchemaKind {
   return Object.hasOwn(FIELD_SCHEMAS, kind);

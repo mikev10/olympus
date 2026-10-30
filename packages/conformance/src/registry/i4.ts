@@ -14,6 +14,7 @@ import { ESCALATION_ONLY_UNDER_A_GRANT, TIER_PER_STATION_FOLLOWS_POLICY } from '
 import { TASK_CAPABILITIES_DO_NOT_OUTLIVE_THE_TASK, WRITABLE_GLOBS_ENFORCED_ON_THE_DIFF } from './verification.js';
 import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readiness.js';
 import { R20_I4 } from './roles.js';
+import { R22_I4 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 
 /** I4: Default deny. */
@@ -24,6 +25,8 @@ export const I4: InvariantEntry = {
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I4,
     ...R20_I4,
+    // R22: the trigger framework.
+    ...R22_I4,
     // R4: parallel task execution.
     ...R4_I4,
     READINESS_NEVER_RAISES_A_CAP,

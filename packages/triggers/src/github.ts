@@ -146,7 +146,9 @@ export function extractGithub(
         return { ok: false, outcome: 'ignored', why: 'a check run that did not fail' };
       }
       const sha = at(run, 'head_sha');
-      fields = { repository, commit: sha, check: at(run, 'name'), conclusion };
+      const runId = at(run, 'id');
+      // The check is named by its run's id, never by its name, which is text the CI configuration chose (D-R22-11).
+      fields = { repository, commit: sha, checkRun: typeof runId === 'number' && Number.isSafeInteger(runId) ? String(runId) : runId, conclusion };
       commit = typeof sha === 'string' ? sha : null;
       break;
     }
