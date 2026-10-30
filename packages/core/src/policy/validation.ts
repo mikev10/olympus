@@ -564,6 +564,12 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
     if (missing.length > 0) {
       defects.push({ path: child(path, 'enabled'), problem: `'${kind}' is enabled without ${missing.join(', ')}; a non-human kind is enabled only with its whole route` });
     }
+    // The one registered template records a candidate at intake, and a run admitted from it starts there; any
+    // other station would validate and route nothing (codex-5). A template that enters elsewhere widens this.
+    const station = Object.hasOwn(triggers.entryStation, kind) ? triggers.entryStation[kind] : undefined;
+    if (station !== undefined && station !== 'intake') {
+      defects.push({ path: child(child(path, 'entryStation'), kind), problem: `'${kind}' enters at '${station}', but every registered template enters at intake` });
+    }
   }
   if (nonHuman.length > 0) {
     for (const key of ['maxDeliveryAgeMs', 'candidateExpiryMs'] as const) {

@@ -155,7 +155,7 @@ async function admitWith(rig: LineRig, policy: Policy, extra: Record<string, unk
 
 const ENABLED_TRIGGER_DECLARES_A_TEMPLATE = runtime({
   id: 'I7.enabled-trigger-declares-a-template',
-  title: 'the policy validator refuses a non-human kind enabled without an entry station, a registered template, a cap, a floor, and a schema in code, and refuses a template the registry does not name',
+  title: 'the policy validator refuses a non-human kind enabled without an entry station of intake, a registered template, a cap, a floor, and a schema in code, and refuses a template the registry does not name',
   run: async () => {
     const { DEFAULT_POLICY_DOCUMENT, validatePolicyDocument } = await core();
     const withTriggers = (t: Partial<TriggerPolicy>): PolicyDocument => ({ ...DEFAULT_POLICY_DOCUMENT, triggers: { ...DEFAULT_POLICY_DOCUMENT.triggers, ...t } });
@@ -176,6 +176,11 @@ const ENABLED_TRIGGER_DECLARES_A_TEMPLATE = runtime({
     for (const key of ['entryStation', 'taskTemplate', 'maxAutonomy', 'minAuthorTrust'] as const) {
       const without = { ...route, [key]: Object.fromEntries(Object.entries(route[key]).filter(([kind]) => kind !== 'ci-failure')) };
       if (validatePolicyDocument(withTriggers(without)).ok) throw new Error(`I7: ci-failure validated with no ${key}`);
+    }
+    // An entry station other than intake would validate and route nothing: every run starts at intake (codex-5).
+    const elsewhere = validatePolicyDocument(withTriggers({ ...route, entryStation: { ...route.entryStation, 'ci-failure': 'integrate' } }));
+    if (elsewhere.ok || !elsewhere.defects.some((d) => d.path === 'triggers.entryStation.ci-failure')) {
+      throw new Error('I7: ci-failure validated with an entry station admission never reads');
     }
     // A kind with no schema in code cannot be enabled, whatever the policy declares for it.
     const feedback = validatePolicyDocument(withTriggers({
