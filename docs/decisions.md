@@ -6192,3 +6192,40 @@ the code the unit touches and ran the pinned CLI before writing this.
   flag from the argv therefore fails the `init` check before the reply is
   read. The reply half, and the control's token, are first seen in that
   run.
+
+### D-R23-07: what the external review changed
+
+Both families counted. The record is
+`docs/reviews/2026-10-30-R23-workspace-skills-triage.md`.
+
+- **codex-2, gemini-1:** a driver's row must name an id ending
+  `workspace-instructions-not-loaded`, and no two rows may share one.
+- **codex-1, in part:** the Claude Code sessions must not list the probe
+  role in `init.agents`, and the control must.
+- **codex-3:** `SessionInit.skills` is undefined when the CLI reports no
+  list.
+- **gemini-3, in part:** a package named `@olympus-ai/driver-*` outside
+  `packages/drivers/` is refused.
+- **Rejected:** codex-4 (no message cache exists) and gemini-4 (the driver
+  can set no header and vary no path).
+- **Reverse:** revert the four review-fix commits.
+
+### D-R23-08: known limits the review found and this unit does not close
+
+- **Memory and rules files are checked by the reply alone (codex-1).** The
+  CLI's `init` line names no loaded memory or rules file, so a CLI that
+  loaded `CLAUDE.md` while the model left its token out would pass. Closing
+  it means observing the system prompt the relay forwards.
+- **The plant list is fixed (gemini-2).** A new instruction file name a CLI
+  or driver starts reading passes until it is planted. The Claude Code CLI
+  is pinned exactly, so this arrives only with a `CLI_VERSION` bump, and
+  the plant list is rechecked then.
+- **An external entry is bound to its metadata, not its behaviour
+  (codex-2).** True of every external entry. Review of the test is the
+  check.
+- **A driver neither named nor placed by convention is not found
+  (gemini-3).**
+- **Owner:** the first two are filed as one issue, #85, linked from the pull
+  request: the relay's view of the forwarded system prompt would close
+  both. The last two are standing properties of the registry, recorded
+  rather than owed.

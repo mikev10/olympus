@@ -1,3 +1,19 @@
+# External review of R23, codex, 2026-10-30
+
+The OpenAI family's review of R23, workspace skills and instruction discovery: the drivers' workspace-instruction assertions and the per-driver registry check. Triage: `2026-10-30-R23-workspace-skills-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-2 (a table row can borrow an unrelated pending id) was also raised by gemini-1. codex-1, codex-3, and codex-4 were raised by this family alone.
+- **Date:** 2026-10-30
+- **Bundle:** `2026-10-30-R23-workspace-skills-review-bundle.txt`, SHA-256 `ad5f28ceaab04b8df3c1684f02cbda0365be1e20ef77cdbad8c57f470aedeef3`, base `178d62a` (`reviewed/R22`), head `7188bcb` (the unit's work commit). Ten files: new files whole, modified files as function-context diffs; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-10-30-R23-workspace-skills-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context, performed no external lookups, and that a local directory listing was blocked. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 2 (the phantom check "is not tautological"), 3, 4, 6, and 7 were answered. Item 5 is answered through codex-2's second construction. Nothing was left empty.
+- **Citations:** line numbers refer to positions in the bundle's new-side hunks, not the repository; treated as hints and located by construct.
+
+---
+
 BASE: 178d62a
 HEAD: 7188bcb
 packages/drivers/openai-compatible/test/invariants.test.ts

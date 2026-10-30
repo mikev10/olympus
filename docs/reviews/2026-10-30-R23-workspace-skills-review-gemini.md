@@ -1,3 +1,19 @@
+# External review of R23, gemini, 2026-10-30
+
+The Google family's review of R23, workspace skills and instruction discovery: the drivers' workspace-instruction assertions and the per-driver registry check. Triage: `2026-10-30-R23-workspace-skills-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 (the pending check matches by id only) was also raised by codex-2. gemini-2, gemini-3, and gemini-4 were raised by this family alone.
+- **Date:** 2026-10-30
+- **Bundle:** `2026-10-30-R23-workspace-skills-review-bundle.txt`, SHA-256 `ad5f28ceaab04b8df3c1684f02cbda0365be1e20ef77cdbad8c57f470aedeef3`, base `178d62a` (`reviewed/R22`), head `7188bcb` (the unit's work commit). Ten files: new files whole, modified files as function-context diffs; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` excluded. Prompt: `2026-10-30-R23-workspace-skills-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer said it had no prior context and performed no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** items 1, 3, 5, 6, and 7 were answered. Item 2 (tautological checks) and item 4 (language escape hatches) came back empty: no finding and no statement that none was found.
+- **Citations:** line numbers refer to positions in the bundle's new-side hunks, not the repository; treated as hints and located by construct.
+
+---
+
 I had no prior context about this project, and I performed no external lookups.
 
 BASE: 178d62a
