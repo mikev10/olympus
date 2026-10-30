@@ -828,6 +828,16 @@ function seatedScopes(graph: TaskGraph, policy: Policy, drafted: readonly DraftS
 }
 
 /**
+ * Whether `candidate` has waited past the policy's window at `now`, on the
+ * runtime's clock (D-R22-04). No window means no non-human kind is enabled;
+ * the trigger check refuses that kind, so the candidate is not expired here.
+ */
+function pastWindow(candidate: { recordedAt: string }, policy: Policy, now: number): boolean {
+  const window = policy.triggers.candidateExpiryMs;
+  return window !== undefined && now - Date.parse(candidate.recordedAt) > window;
+}
+
+/**
  * The candidate a run is asked from, read and checked: one that exists, has
  * not admitted a run, and has not waited past the policy's window on the
  * runtime's clock. An expired candidate is recorded as expired before the
@@ -841,9 +851,7 @@ async function candidateFor(
   if (entry.admittedAs !== null) {
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${id} admitted run ${entry.admittedAs}; a candidate admits one run` }] };
   }
-  const window = policy.triggers.candidateExpiryMs;
-  // No window means no non-human kind is enabled; the trigger check refuses that kind, so the candidate is not expired here.
-  if (entry.expiredAt !== null || (window !== undefined && now - Date.parse(entry.candidate.recordedAt) > window)) {
+  if (entry.expiredAt !== null || pastWindow(entry.candidate, policy, now)) {
     await vault.markCandidateExpired(id, new Date(now).toISOString());
     return { ok: false, reason: 'candidate-expired', candidate: id };
   }
@@ -990,6 +998,13 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   }
   // Taken last, before the record: a candidate admits one run, and the exclusive mark is what makes it once (A-R22-04).
   // A record that then fails to write leaves the candidate spent, which refuses a second run rather than admitting one.
+  // The window is read again on a fresh clock at the moment the candidate is spent: admission's own work can outlast it (codex-3).
+  const spentAt = Date.now();
+  if (candidate !== null && pastWindow(candidate.candidate, policy.policy, spentAt)) {
+    await vault.markCandidateExpired(candidate.candidate.id, new Date(spentAt).toISOString());
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'candidate-expired', candidate: candidate.candidate.id };
+  }
   if (candidate !== null && !(await vault.markCandidateAdmitted(candidate.candidate.id, req.runId))) {
     await discardRun(workspaces, req.runId);
     return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${candidate.candidate.id} admitted another run first` }] };

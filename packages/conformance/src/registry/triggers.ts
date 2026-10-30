@@ -474,6 +474,36 @@ const CANDIDATE_ADMITS_ONE_RUN = runtime({
       const kept = await vault.readCandidate(candidate);
       if (kept?.expiredAt == null || kept.candidate === null) throw new Error('I5: the expired candidate was not recorded as expired, or was not kept');
     });
+    await withLine('r22-crossing-', async (rig) => {
+      // Inside the window when admission reads it, past it before admission spends it: the first Vault call after
+      // the candidate is read waits out the deadline, as slow admission work would (codex-3).
+      const vault = await localVault(rig.dirs);
+      const window = policy.triggers.candidateExpiryMs ?? 0;
+      const recordedAt = Date.now() - window + 2_000;
+      const candidate = await plantCandidate(vault, 'crossing', { recordedAt: new Date(recordedAt).toISOString() });
+      const { admitRun } = await api();
+      const components = await rig.components({ driver: await stubDriver(), reviewer: await stubDriver({ family: 'other' }) });
+      let read = false;
+      const slowed = new Proxy(components.vault, {
+        get(target, key, receiver) {
+          const value: unknown = Reflect.get(target, key, receiver);
+          if (typeof value !== 'function') return value;
+          return async (...args: unknown[]) => {
+            if (key === 'readCandidate') read = true;
+            else if (read) {
+              read = false;
+              await new Promise((resolve) => setTimeout(resolve, Math.max(0, recordedAt + window + 100 - Date.now())));
+            }
+            return (value as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        },
+      });
+      const outcome = await admitRun(await rig.request({ ...components, vault: slowed }, { policy, candidate }));
+      const got = refused(outcome, 'candidate-expired', 'a candidate whose window passed during admission');
+      if (got.candidate !== candidate) throw new Error('I5: the expiry named another candidate');
+      const kept = await vault.readCandidate(candidate);
+      if (kept?.admittedAs != null || kept?.expiredAt == null) throw new Error('I5: a candidate past its window when spent was admitted, or not recorded as expired');
+    });
   },
 });
 
