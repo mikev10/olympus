@@ -24,6 +24,9 @@ export const WORKSPACE_INSTRUCTION_ASSERTIONS: Readonly<Record<string, Assertion
   [OPENAI_COMPATIBLE]: 'I3.openai-compatible-workspace-instructions-not-loaded',
 };
 
+/** How every workspace-instruction assertion id ends: the property, after an optional driver prefix. */
+const ID_SUFFIX = 'workspace-instructions-not-loaded';
+
 /** Where the workspace keeps its drivers (F1's package list: `drivers/*`). */
 const DRIVERS_DIR = 'packages/drivers/';
 
@@ -45,8 +48,13 @@ export function workspaceInstructionProblems(
     const owed = entry.pending.some((p) => p.id === id);
     if (!registered && !owed) problems.push(`${driver}: ${id} is neither an I3 assertion in that package nor pending under I3`);
   }
-  for (const named of Object.keys(table)) {
+  for (const [named, id] of Object.entries(table)) {
     if (!drivers.includes(named)) problems.push(`${named} is in the table but is not a package under ${DRIVERS_DIR}`);
+    // An id is one driver's obligation and names the property, so a row cannot borrow an unrelated
+    // pending entry or another driver's assertion to stand in for its own (codex-2, gemini-1).
+    if (!id.endsWith(ID_SUFFIX)) problems.push(`${named}: ${id} does not name the workspace-instruction property (expected an id ending '${ID_SUFFIX}')`);
+    const sharing = Object.entries(table).filter(([other, otherId]) => other !== named && otherId === id).map(([other]) => other);
+    if (sharing.length > 0) problems.push(`${named}: ${id} is also the row of ${sharing.join(', ')}; each driver owes its own`);
   }
   return problems;
 }
@@ -89,6 +97,18 @@ export const R23_I3 = [
       const refused = workspaceInstructionProblems([...drivers, phantom], WORKSPACE_INSTRUCTION_ASSERTIONS, I3);
       if (!refused.some((p) => p.startsWith(`${phantom} has no workspace-instruction assertion`))) {
         throw new Error('I3: a driver package with no workspace-instruction assertion was not refused');
+      }
+      // A row cannot borrow another obligation: an unrelated pending id, or another driver's id (codex-2, gemini-1).
+      const unrelated = I3.pending.map((p) => p.id).find((id): id is AssertionId => id.startsWith('I3.'));
+      if (unrelated === undefined) throw new Error('I3: no pending entry to borrow, so the borrowing check is not exercised');
+      const borrowing: Array<[string, Readonly<Record<string, AssertionId>>]> = [
+        ['an unrelated pending id', { ...WORKSPACE_INSTRUCTION_ASSERTIONS, [phantom]: unrelated }],
+        ["another driver's id", { ...WORKSPACE_INSTRUCTION_ASSERTIONS, [phantom]: WORKSPACE_INSTRUCTION_ASSERTIONS[CLAUDE_CODE] ?? unrelated }],
+      ];
+      for (const [label, table] of borrowing) {
+        if (!workspaceInstructionProblems([...drivers, phantom], table, I3).some((p) => p.startsWith(phantom))) {
+          throw new Error(`I3: a driver row naming ${label} was not refused`);
+        }
       }
     },
   }),
