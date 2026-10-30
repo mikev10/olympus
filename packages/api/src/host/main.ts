@@ -28,8 +28,13 @@
  *   declaring scheme `'none'`, for a local endpoint on the Docker host, comes
  *   without the key, and one given with it stops the host (R21, A-R21-04)
  *
+ * - `FACTORY_WEBHOOK_*`: each subscription's secret, named by the policy and
+ *   read here on the host, never by a sandbox (D-A-TF-05). A subscription
+ *   whose variable is unset verifies no delivery (I5)
+ *
  * A missing variable stops the host before it listens (I5).
  */
+import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
 import { createApiServer } from '../http/server.js';
 import { readFile } from 'node:fs/promises';
 import { composeHost, containerUser, parseEndpointFile } from './compose.js';
@@ -70,6 +75,8 @@ const server = createApiServer({
   principal: process.env.FACTORY_PRINCIPAL ?? 'local',
   policyFile: required('FACTORY_POLICY_FILE'),
   rolesDirectory: required('FACTORY_ROLES_DIR'),
+  // Only a name with the webhook prefix is ever read here, so a policy cannot name another host secret as one.
+  secrets: (name) => (name.startsWith(WEBHOOK_SECRET_PREFIX) ? process.env[name] : undefined),
   rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');

@@ -23,6 +23,7 @@
     "@olympus-ai/driver-openai-compatible": "workspace:*",
     "@olympus-ai/integrity": "workspace:*",
     "@olympus-ai/sandbox": "workspace:*",
+    "@olympus-ai/triggers": "workspace:*",
     "@olympus-ai/vault": "workspace:*",
     "picomatch": "4.0.7",
     "yaml": "2.9.1"

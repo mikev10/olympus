@@ -10,6 +10,7 @@
 import type {
   AgentClaim, ApprovalKey, AutonomyLevel, BaseRefusalPart, CompiledRole, DraftCondition, DraftRef, DraftStation, IndependenceGrade, ModelIdentity, ModelTier, Policy, PolicyRefusal,
   RejectionReason, RoleId, Run, RunId, RunState, StationId, StationRefusal, TaskId, TaskResult, VaultRef,
+  AuthorTrust, CandidateId, FieldDefect, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
 import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
@@ -193,7 +194,11 @@ export type AdmissionRefusal =
   | { readonly reason: 'roles-refused'; readonly refused: ReadonlyArray<{ readonly entry: string; readonly code: string }> }
   /** A seat with no role: every role the task graph names, and `reviewer`, that the directory does not define (D-A-RC-06). */
   | { readonly reason: 'role-undefined'; readonly roles: readonly RoleId[] }
-  | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal };
+  | { readonly reason: 'refused'; readonly at: StationId; readonly refusal: StationRefusal }
+  /** The trigger policy refused the run's trigger, for any kind, `human` included (A-R22-05, D-R22-06). */
+  | { readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause }
+  /** The candidate the run was asked from waited past the policy's window, and is recorded as expired (D-R22-04). */
+  | { readonly reason: 'candidate-expired'; readonly candidate: CandidateId };
 
 /**
  * The admission checks a resume repeats before the line runs, refused there
@@ -539,6 +544,102 @@ export interface AdmissionRecord {
    * without one was written before R18, and is reported as `unrecorded`.
    */
   readonly stack: string;
+  /**
+   * The candidate the run was admitted from, and the SHA-256 of the stored
+   * trigger decision that recorded it, so a run traces back to the delivery
+   * that prompted it (A-R22-04, D-R22-03). Null for a person's own run;
+   * absent on a record written before R22.
+   */
+  readonly candidate?: { readonly id: CandidateId; readonly decisionSha256: string } | null;
+}
+
+/**
+ * Every cause a trigger refusal names (A-R22-05, D-R22-02). Admission's three
+ * (`not-enabled`, `trust`, `depth`) are in the run's own P14 record as
+ * `trigger-refused`; the others are a delivery's, kept beside the runs.
+ */
+export type TriggerRefusalCause =
+  | 'not-subscribed' | 'unverified' | 'replayed' | 'stale' | 'oversize'
+  | 'schema' | 'not-enabled' | 'depth' | 'budget' | 'trust';
+
+/**
+ * The causes counted rather than written one by one: a request refused before
+ * its signature verified, and a verified body sent again. Anyone on the
+ * internet can send the first three and anyone holding a captured body the
+ * fourth, so none of them writes a record of its own (D-R22-03).
+ */
+export type CountedRefusalCause = Extract<TriggerRefusalCause, 'not-subscribed' | 'unverified' | 'oversize' | 'replayed'>;
+
+/** The bucket every unnamed subscription shares, so a path a sender chose never names a record (D-R22-03). */
+export const UNSUBSCRIBED_BUCKET = '(unsubscribed)';
+
+/**
+ * An event recorded for a person to read (D-A-TF-01). Nothing runs from it
+ * until a person admits a run through the API, writing the intent. Its id is
+ * the runtime's: the SHA-256 of its source and replay key.
+ *
+ * `body` is the exact bytes the route verified, base64, beside their hash,
+ * readable by the principal through the API and never by a driver; a
+ * scheduled firing has none. `extracted` is the kind's schema record, checked
+ * whole (I7).
+ */
+export interface CandidateRecord {
+  readonly id: CandidateId;
+  readonly kind: SchemaKind;
+  readonly template: TemplateId;
+  readonly extracted: Readonly<Record<string, string>>;
+  readonly authorTrust: AuthorTrust;
+  readonly lineage: TriggerLineage;
+  /** The body's own time; null for a scheduled firing, whose time is the runtime's. */
+  readonly signedAt: string | null;
+  readonly body: { readonly sha256: string; readonly base64: string } | null;
+  /** The runtime's clock when it was recorded. Expiry runs from here, never from `signedAt` (D-R22-04, I2). */
+  readonly recordedAt: string;
+  readonly collectedBy: 'runtime';
+}
+
+/**
+ * The outcome of one verified delivery or one schedule's firing, written once
+ * under its replay key in the same write as the candidate it records, if any
+ * (D-R22-02, D-R22-03). A write that fails leaves no key, so a retry is
+ * admitted; a second write under the same key is refused as a duplicate.
+ *
+ * `source` is a subscription id, or `schedule:<id>`. `key` is the body's
+ * SHA-256, or `<UTC date>` for a firing. Nothing in it is the payload's text:
+ * a refusal names its cause and, for a schema refusal, each field and rule.
+ */
+export interface TriggerDecision {
+  readonly source: string;
+  readonly key: string;
+  readonly decidedAt: string;
+  readonly outcome:
+    | { readonly kind: 'candidate'; readonly candidate: CandidateId }
+    /** Verified, and not the kind's event: a push to another branch, a check that passed. */
+    | { readonly kind: 'ignored' }
+    | { readonly kind: 'refused'; readonly cause: 'schema'; readonly defects: readonly FieldDefect[] }
+    | { readonly kind: 'refused'; readonly cause: 'stale'; readonly signedAt: string }
+    | { readonly kind: 'refused'; readonly cause: 'budget' | 'not-enabled' }
+    /** Firings a stopped service missed, recorded and never run late (D-A-TF-08). */
+    | { readonly kind: 'missed'; readonly first: string; readonly last: string };
+  readonly collectedBy: 'runtime';
+}
+
+/** A decision as stored: the decision, the candidate it recorded, and the SHA-256 of the stored bytes. */
+export interface IntakeEntry {
+  readonly decision: TriggerDecision;
+  readonly candidate: CandidateRecord | null;
+  readonly sha256: string;
+  /** The run admitted from the candidate, once; null until then. */
+  readonly admittedAs: RunId | null;
+  /** When the candidate was recorded as expired, by the runtime's clock; null if it has not been. */
+  readonly expiredAt: string | null;
+}
+
+/** One hour's counted refusals for one bucket (D-R22-03). `hour` is the UTC hour, `YYYY-MM-DDTHH`. */
+export interface RefusedDeliveryCount {
+  readonly bucket: string;
+  readonly hour: string;
+  readonly counts: Readonly<Partial<Record<CountedRefusalCause, number>>>;
 }
 
 /**
@@ -614,6 +715,28 @@ export interface Vault {
    * caller: a rate over runs a caller picked is a rate over a chosen sample.
    */
   listRuns(): Promise<readonly RunId[]>;
+  /**
+   * A trigger decision and the candidate it records, in one write under the
+   * decision's source and key (A-R22-04, D-R22-02). `false` where that key
+   * was written before: the delivery is a replay, and nothing is written.
+   * Refused unless `collectedBy` is `'runtime'`, and unless a candidate is
+   * given exactly when the outcome names one, under that id.
+   */
+  recordTriggerDecision(d: TriggerDecision, candidate: CandidateRecord | null): Promise<boolean>;
+  /** Every trigger decision, sorted by source then key; kept beside the runs, so `listRuns` never names one. */
+  readTriggerDecisions(): Promise<readonly IntakeEntry[]>;
+  /** Whether a decision was written under this source and key: a replay is refused on it before its body is parsed (D-R22-02). */
+  hasTriggerDecision(source: string, key: string): Promise<boolean>;
+  /** The decision that recorded a candidate, or null where no candidate has the id. */
+  readCandidate(id: CandidateId): Promise<IntakeEntry | null>;
+  /** Marks a candidate admitted as a run, once; `false` where it already was (A-R22-04). */
+  markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean>;
+  /** Records a candidate as expired, on the runtime's clock; never deletes it. A second call keeps the first time (D-R22-04). */
+  markCandidateExpired(id: CandidateId, at: string): Promise<void>;
+  /** Adds one to a bucket's count for an hour and a cause (D-R22-03). */
+  countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void>;
+  /** Every bucket's counts, sorted by hour then bucket. */
+  readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]>;
   /** Rejects with a `NoRunState` where the store holds no state for the run, and with anything else only on a fault. */
   readRunState(runId: RunId): Promise<RunState>;
   commitRunState(s: RunState, ifVersion: string): Promise<RunState>;

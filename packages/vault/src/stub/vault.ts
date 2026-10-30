@@ -9,10 +9,11 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
+import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef } from '@olympus-ai/core';
+import { intakeId, intakeProblem } from '../intake.js';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
-  AdmissionRecord, BaseRunRecord, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, RefusedDeliveryCount, TriggerDecision,
   LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
@@ -57,6 +58,9 @@ export class StubVault implements Vault {
   private readonly draftLocks = new Map<string, string>();
   /** Every run any record was written for, so `listRuns` names a run refused at admission too (A-R2-02). */
   private readonly runs = new Set<RunId>();
+  /** Trigger decisions by id, kept beside the runs (D-R22-03). */
+  private readonly intake = new Map<CandidateId, IntakeEntry>();
+  private readonly refusedCounts = new Map<string, Partial<Record<CountedRefusalCause, number>>>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -230,6 +234,64 @@ export class StubVault implements Vault {
     return Promise.resolve(manifest === undefined ? null : structuredClone(manifest));
   }
 
+
+  recordTriggerDecision(d: TriggerDecision, candidate: CandidateRecord | null): Promise<boolean> {
+    const problem = intakeProblem(d, candidate);
+    if (problem !== undefined) return Promise.reject(new Error(`StubVault: ${problem}`));
+    const id = intakeId(d.source, d.key);
+    if (this.intake.has(id)) return Promise.resolve(false);
+    const bytes = new TextEncoder().encode(JSON.stringify({ decision: d, candidate }));
+    this.intake.set(id, { decision: structuredClone(d), candidate: structuredClone(candidate), sha256: sha256(bytes), admittedAs: null, expiredAt: null });
+    return Promise.resolve(true);
+  }
+
+
+  hasTriggerDecision(source: string, key: string): Promise<boolean> {
+    return Promise.resolve(this.intake.has(intakeId(source, key)));
+  }
+  readTriggerDecisions(): Promise<readonly IntakeEntry[]> {
+    return Promise.resolve(
+      [...this.intake.values()]
+        .map((entry) => structuredClone(entry))
+        .sort((a, b) => (a.decision.source === b.decision.source ? a.decision.key.localeCompare(b.decision.key) : a.decision.source.localeCompare(b.decision.source))),
+    );
+  }
+
+  readCandidate(id: CandidateId): Promise<IntakeEntry | null> {
+    const entry = this.intake.get(id);
+    return Promise.resolve(entry?.candidate == null ? null : structuredClone(entry));
+  }
+
+  markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
+    const entry = this.intake.get(id);
+    if (entry?.candidate == null) return Promise.reject(new Error(`StubVault: no candidate ${id}`));
+    if (entry.admittedAs !== null) return Promise.resolve(false);
+    this.intake.set(id, { ...entry, admittedAs: runId });
+    return Promise.resolve(true);
+  }
+
+  markCandidateExpired(id: CandidateId, at: string): Promise<void> {
+    const entry = this.intake.get(id);
+    if (entry?.candidate == null) return Promise.reject(new Error(`StubVault: no candidate ${id}`));
+    if (entry.expiredAt === null) this.intake.set(id, { ...entry, expiredAt: at });
+    return Promise.resolve();
+  }
+
+  countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void> {
+    const key = `${hour}\0${bucket}`;
+    const counts = this.refusedCounts.get(key) ?? {};
+    this.refusedCounts.set(key, { ...counts, [cause]: (counts[cause] ?? 0) + 1 });
+    return Promise.resolve();
+  }
+
+  readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]> {
+    return Promise.resolve(
+      [...this.refusedCounts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, counts]) => {
+        const [hour = '', bucket = ''] = key.split('\0');
+        return { bucket, hour, counts: { ...counts } };
+      }),
+    );
+  }
   listRuns(): Promise<readonly RunId[]> {
     return Promise.resolve([...this.runs].sort());
   }

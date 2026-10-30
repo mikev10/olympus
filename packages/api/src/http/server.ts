@@ -3,6 +3,8 @@
  * create, status, approve, cancel, and an event stream — and nothing it does
  * reads a terminal, argv, or the process's streams: its host constructs it,
  * hands it the components and the local token, and tells it where to listen.
+ * Every route needs the local token except `POST /events/<subscription>`,
+ * which a delivery's signature authenticates instead (R22).
  *
  * The components are the host's (D-P9-01). The policy is read from the file
  * the host names, through the hardened loader, on every create. Run state is
@@ -12,15 +14,19 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { isAbsolute } from 'node:path';
-import { isApprovalKey, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
-import { isNoRunState } from '@olympus-ai/vault';
+import { isApprovalKey, type CandidateId, type RunCancellation, type RunId, type RunState } from '@olympus-ai/core';
+import { MAX_DELIVERY_BYTES } from '@olympus-ai/triggers';
+import { UNSUBSCRIBED_BUCKET, isNoRunState, type CandidateRecord, type IntakeEntry } from '@olympus-ai/vault';
+import { Intake, type DeliveryOutcome, type SecretSource } from '../intake.js';
+import { startSchedules, type Scheduler } from '../schedule.js';
+
 import { loadPolicyFile } from '../policy-file.js';
 import { admitRun, approveStation, cancelRun, rejectDraft, resumeRun, runStanding, type DriveHooks, type RunOutcome } from '../run.js';
 import type { BuiltGraph } from '../graph.js';
 import { runReport, type RunReport } from '../report.js';
 import { outcomes, type OutcomeWindow } from '../outcomes.js';
 import { telemetryOf, type TelemetryExport } from '../telemetry.js';
-import type { ApproveBody, CreateRunBody, CreatedRun, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
+import type { ApproveBody, CandidateSummary, CandidateView, CreateRunBody, CreatedRun, DeliveryAnswer, DriveEnd, ErrorBody, ErrorCode, RejectBody, RunEvent, RunView } from './wire.js';
 
 export interface ApiServerOptions {
   readonly components: BuiltGraph;
@@ -34,6 +40,11 @@ export interface ApiServerOptions {
   readonly rolesDirectory: string;
   /** The rubrics directory a drafting run's critics are given, read at each such run's admission (R19); null where the server drafts nothing. */
   readonly rubricsDirectory?: string | null;
+  /**
+   * Where a subscription's secret is read from, on the host (D-A-TF-05). Only
+   * a name with the webhook prefix is asked for; absent, no delivery verifies.
+   */
+  readonly secrets?: SecretSource;
 }
 
 export interface ApiServer {
@@ -126,8 +137,9 @@ function isStringArray(value: unknown): value is string[] {
 
 function createBody(value: unknown): CreateRunBody {
   if (!isRecord(value)) throw new HttpError(400, 'bad-request', 'the body must be an object');
-  // `intent` is the one optional key at the top: the person's text a drafted spec is drafted from (R19).
-  const { intent, ...required } = value;
+  // `intent` is the person's text a drafted spec is drafted from (R19); `candidate`, the intake candidate the run is admitted from (R22).
+  const { intent, candidate, ...required } = value;
+  if (candidate !== undefined && (typeof candidate !== 'string' || !/^[0-9a-f]{64}$/.test(candidate))) throw new HttpError(400, 'bad-request', 'candidate is the id of an intake candidate');
   exactKeys(required, ['workspace', 'baseCommit', 'requestedLevel', 'artifacts', 'approvedCostUsd'], '');
   if (intent !== undefined && (typeof intent !== 'string' || intent.trim() === '')) throw new HttpError(400, 'bad-request', 'intent is the text a drafted spec is drafted from');
   const { workspace, baseCommit, requestedLevel, artifacts, approvedCostUsd } = required;
@@ -178,6 +190,49 @@ function createBody(value: unknown): CreateRunBody {
     },
     approvedCostUsd,
     ...(typeof intent === 'string' ? { intent } : {}),
+    ...(typeof candidate === 'string' ? { candidate: candidate as CandidateId } : {}),
+  };
+}
+
+/**
+ * Reads a delivery's body, held to `cap` while it is read: a body over it is
+ * never buffered past the cap, and is refused as oversize (D-A-TF-06).
+ */
+async function readCapped(req: IncomingMessage, cap: number): Promise<Buffer | 'oversize'> {
+  const declared = Number(req.headers['content-length'] ?? '0');
+  if (Number.isFinite(declared) && declared > cap) return 'oversize';
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of req) {
+    const buffer = chunk as Buffer;
+    length += buffer.byteLength;
+    if (length > cap) return 'oversize';
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+/** A delivery's answer: 202 for what was recorded, and the cause's status for a refusal. */
+function deliveryStatus(outcome: DeliveryOutcome): number {
+  if (outcome.outcome !== 'refused') return 202;
+  switch (outcome.cause) {
+    case 'not-subscribed': return 404;
+    case 'unverified': return 401;
+    case 'oversize': return 413;
+    case 'replayed': return 409;
+    case 'budget': return 429;
+    case 'stale':
+    case 'schema':
+    case 'not-enabled':
+      return 422;
+  }
+}
+
+function summary(entry: IntakeEntry & { candidate: CandidateRecord }): CandidateSummary {
+  const c = entry.candidate;
+  return {
+    id: c.id, kind: c.kind, template: c.template, extracted: c.extracted, authorTrust: c.authorTrust,
+    lineage: c.lineage, recordedAt: c.recordedAt, admittedAs: entry.admittedAs, expiredAt: entry.expiredAt,
   };
 }
 
@@ -220,6 +275,8 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   const { components, principal } = options;
   const runs = new Map<RunId, Tracked>();
   const open = new Set<ServerResponse>();
+  const intake = new Intake({ vault: components.vault, secrets: options.secrets ?? (() => undefined) });
+  let scheduler: Scheduler | null = null;
 
   const tracked = (runId: RunId): Tracked => {
     let entry = runs.get(runId);
@@ -413,12 +470,62 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
     });
   };
 
+  /**
+   * `POST /events/<subscription>`, the one route outside the local token: a
+   * delivery authenticates by its signature (D-A-TF-06). The subscription is
+   * checked before the body is read, and nothing a refusal answers with is
+   * the body's text.
+   */
+  const deliver = async (req: IncomingMessage, res: ServerResponse, id: string): Promise<void> => {
+    const policy = await loadPolicyFile(options.policyFile);
+    // A policy that does not load grants no subscription; nothing is read or recorded against it (I5).
+    if (!policy.ok) throw new HttpError(503, 'refused', 'the server has no policy that loads, so no subscription is granted');
+    const subscription = intake.subscription(policy.policy, id);
+    let outcome: DeliveryOutcome;
+    if (subscription === null) {
+      outcome = await intake.count(UNSUBSCRIBED_BUCKET, 'not-subscribed');
+      res.setHeader('connection', 'close');
+    } else {
+      const body = await readCapped(req, MAX_DELIVERY_BYTES);
+      if (body === 'oversize') {
+        outcome = await intake.count(subscription.id, 'oversize');
+        res.setHeader('connection', 'close');
+      } else {
+        const signature = req.headers['x-hub-signature-256'];
+        outcome = await intake.deliver(policy.policy, subscription, typeof signature === 'string' ? signature : undefined, body);
+      }
+    }
+    send(res, deliveryStatus(outcome), outcome satisfies DeliveryAnswer);
+  };
+
+  const listIntake = async (): Promise<CandidateSummary[]> => {
+    const entries = await components.vault.readTriggerDecisions();
+    return entries.flatMap((entry) => (entry.candidate === null ? [] : [summary({ ...entry, candidate: entry.candidate })]));
+  };
+
+  const readIntake = async (id: string): Promise<CandidateView> => {
+    const entry = /^[0-9a-f]{64}$/.test(id) ? await components.vault.readCandidate(id as CandidateId) : null;
+    if (entry?.candidate == null) throw new HttpError(404, 'not-found', `no intake candidate ${id}`);
+    const c = entry.candidate;
+    return { ...summary({ ...entry, candidate: c }), body: c.body, signedAt: c.signedAt, decisionSha256: entry.sha256 };
+  };
+
   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const presented = digest(req.headers.authorization ?? '');
-    if (!timingSafeEqual(presented, expected)) throw new HttpError(401, 'unauthorized', 'a valid local token is required');
     const url = new URL(req.url ?? '/', 'http://server.invalid');
     const parts = url.pathname.split('/').filter((p) => p !== '');
     const method = req.method ?? 'GET';
+    if (parts[0] === 'events') {
+      if (parts.length !== 2 || method !== 'POST') throw new HttpError(404, 'not-found', `no route ${url.pathname}`);
+      await deliver(req, res, decodeURIComponent(parts[1] ?? ''));
+      return;
+    }
+    const presented = digest(req.headers.authorization ?? '');
+    if (!timingSafeEqual(presented, expected)) throw new HttpError(401, 'unauthorized', 'a valid local token is required');
+    if (parts[0] === 'intake' && parts.length <= 2) {
+      if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
+      send(res, 200, parts.length === 1 ? await listIntake() : await readIntake(decodeURIComponent(parts[1] ?? '')));
+      return;
+    }
     if (parts[0] === 'outcomes' && parts.length === 1) {
       if (method !== 'GET') throw new HttpError(405, 'method-not-allowed', `${method} ${url.pathname}`);
       send(res, 200, await outcomes(components.vault, outcomeWindow(url.searchParams)));
@@ -474,20 +581,29 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
   });
 
   return {
-    listen: (port, host) => new Promise((resolveUrl, reject) => {
-      server.once('error', reject);
-      server.listen(port, host, () => {
-        server.off('error', reject);
-        const address = server.address();
-        if (address === null || typeof address === 'string') {
-          reject(new Error('api server: listening on something other than a TCP port'));
-          return;
-        }
-        const shown = address.family === 'IPv6' ? `[${address.address}]` : address.address;
-        resolveUrl(`http://${shown}:${String(address.port)}`);
+    listen: async (port, host) => {
+      // The schedule is the service's: what a stop missed is recorded before the first request is taken (D-A-TF-08).
+      scheduler ??= await startSchedules(async () => {
+        const loaded = await loadPolicyFile(options.policyFile);
+        return loaded.ok ? loaded.policy : null;
+      }, components.vault, intake);
+      return new Promise((resolveUrl, reject) => {
+        server.once('error', reject);
+        server.listen(port, host, () => {
+          server.off('error', reject);
+          const address = server.address();
+          if (address === null || typeof address === 'string') {
+            reject(new Error('api server: listening on something other than a TCP port'));
+            return;
+          }
+          const shown = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+          resolveUrl(`http://${shown}:${String(address.port)}`);
+        });
       });
-    }),
+    },
     close: async () => {
+      scheduler?.stop();
+      scheduler = null;
       for (const res of open) res.end();
       open.clear();
       await new Promise<void>((done) => {

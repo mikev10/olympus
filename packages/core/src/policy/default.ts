@@ -55,14 +55,20 @@ export const DEFAULT_POLICY_DOCUMENT: PolicyDocument = {
     enabled: ['human'],
     entryStation: { human: 'intake' },
     // I7: a template is pre-declared here and a payload can never name one.
-    // Empty because no template registry exists yet — the compiler is M2, and
-    // naming a template nothing declares would be a fiction that reads as
-    // wiring.
+    // `human` has none: a person's run is admitted through the API with its
+    // own artifacts, and the registry's templates are for events (D-A-TF-01).
     taskTemplate: {},
     maxAutonomy: { human: 2 },
     minAuthorTrust: { human: 'owner' },
     maxTriggerDepth: 2,
     budgetPerWindow: { runs: 20, windowMs: 3_600_000 },
+    // No subscription and no schedule: an event source is a grant a person adds (I4).
+    subscriptions: [],
+    schedules: [],
+    // Six hours, for a delivery GitHub held during an outage or a person redelivered by hand (D-R22-02).
+    maxDeliveryAgeMs: 6 * 3_600_000,
+    // Seven days for a person to read a candidate and act (D-R22-04).
+    candidateExpiryMs: 7 * 24 * 3_600_000,
   },
   concurrency: { maxParallelTasks: 4, maxConflictRetries: 3 },
 };

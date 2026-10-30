@@ -30,7 +30,11 @@ import {
 } from './constants.js';
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
+  TriggerSchedule, TriggerSubscription,
 } from './types.js';
+import {
+  CHAR_CLASSES, LABEL_CLASS, TEMPLATE_IDS, hasFieldSchema, isTemplateId, type TemplateId,
+} from '../trigger/schemas.js';
 
 /** One thing wrong, at the path it is wrong at. */
 export interface PolicyDefect {
@@ -78,7 +82,23 @@ const BUDGET_KEYS: Readonly<Record<keyof Budget, true>> = {
 const TRIGGER_KEYS: Readonly<Record<keyof TriggerPolicy, true>> = {
   enabled: true, entryStation: true, taskTemplate: true, maxAutonomy: true,
   minAuthorTrust: true, maxTriggerDepth: true, budgetPerWindow: true,
+  subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true,
 };
+
+const SUBSCRIPTION_KEYS: Readonly<Record<keyof TriggerSubscription, true>> = {
+  id: true, kind: true, source: true, transport: true, secret: true, trustCeiling: true, labels: true,
+};
+
+const SCHEDULE_KEYS: Readonly<Record<keyof TriggerSchedule, true>> = { id: true, template: true, at: true };
+
+/** The bounds D-R22-02 and D-R22-04 set: a delivery at most seven days old, a candidate waiting at most thirty. */
+export const MAX_DELIVERY_AGE_CAP_MS = 7 * 24 * 3_600_000;
+export const CANDIDATE_EXPIRY_CAP_MS = 30 * 24 * 3_600_000;
+
+/** A subscription's secret is a host variable with this prefix, so no other host secret can be named as one (D-A-TF-05). */
+export const WEBHOOK_SECRET_PREFIX = 'FACTORY_WEBHOOK_';
+const SECRET_NAME = /^FACTORY_WEBHOOK_[A-Z0-9_]+$/u;
+const DAILY_TIME = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/u;
 
 const WINDOW_KEYS: Readonly<Record<keyof TriggerPolicy['budgetPerWindow'], true>> = {
   runs: true, windowMs: true,
@@ -403,9 +423,9 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const entryStation = readPartialMap<TriggerKind, StationId>(
     record, 'entryStation', path, 'a trigger kind', isTriggerKind, 'a station id', isStationId, defects,
   );
-  // I7: a template name is pre-declared here; a payload can never name one.
-  const taskTemplate = readPartialMap<TriggerKind, string>(
-    record, 'taskTemplate', path, 'a trigger kind', isTriggerKind, 'a non-empty template name', isNonEmptyString, defects,
+  // I7: a template is one the closed registry in code names; a payload can never name one (A-R22-02).
+  const taskTemplate = readPartialMap<TriggerKind, TemplateId>(
+    record, 'taskTemplate', path, 'a trigger kind', isTriggerKind, `a registered template (${TEMPLATE_IDS.join(', ')})`, isTemplateId, defects,
   );
   const maxAutonomy = readPartialMap<TriggerKind, AutonomyLevel>(
     record, 'maxAutonomy', path, 'a trigger kind', isTriggerKind, 'an autonomy level 0-3', isAutonomyLevel, defects,
@@ -427,15 +447,148 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
   const windowMs = window === undefined
     ? undefined
     : read(window, 'windowMs', windowPath, 'a positive integer', isPositiveInteger, defects);
+  const subscriptions = Object.hasOwn(record, 'subscriptions')
+    ? readList(record, 'subscriptions', path, validateSubscription, defects)
+    : [];
+  const schedules = Object.hasOwn(record, 'schedules')
+    ? readList(record, 'schedules', path, validateSchedule, defects)
+    : [];
+  const maxDeliveryAgeMs = optionalBounded(record, 'maxDeliveryAgeMs', path, MAX_DELIVERY_AGE_CAP_MS, '7 days', defects);
+  const candidateExpiryMs = optionalBounded(record, 'candidateExpiryMs', path, CANDIDATE_EXPIRY_CAP_MS, '30 days', defects);
   if (
     enabled === undefined || entryStation === undefined || taskTemplate === undefined
     || maxAutonomy === undefined || minAuthorTrust === undefined || maxTriggerDepth === undefined
-    || runs === undefined || windowMs === undefined
+    || runs === undefined || windowMs === undefined || subscriptions === undefined || schedules === undefined
+    || maxDeliveryAgeMs === null || candidateExpiryMs === null
   ) return undefined;
-  return {
+  const triggers: TriggerPolicy = {
     enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust,
-    maxTriggerDepth, budgetPerWindow: { runs, windowMs },
+    maxTriggerDepth, budgetPerWindow: { runs, windowMs }, subscriptions, schedules,
+    ...(maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs }),
+    ...(candidateExpiryMs === undefined ? {} : { candidateExpiryMs }),
   };
+  const before = defects.length;
+  routeDefects(triggers, path, defects);
+  return defects.length === before ? triggers : undefined;
+}
+
+/**
+ * An optional positive integer at most `cap`: undefined when absent, null
+ * when present and wrong (the defect already reported).
+ */
+function optionalBounded(
+  record: Readonly<Record<string, unknown>>, key: string, path: string, cap: number, capText: string, defects: PolicyDefect[],
+): number | undefined | null {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = read(record, key, path, `a positive integer of milliseconds, at most ${capText}`, isPositiveInteger, defects);
+  if (value === undefined) return null;
+  if (value > cap) {
+    defects.push({ path: child(path, key), problem: `at most ${String(cap)} (${capText}); found ${String(value)}` });
+    return null;
+  }
+  return value;
+}
+
+/** An array whose every element a validator accepts, or undefined with each element's defects reported. */
+function readList<T>(
+  record: Readonly<Record<string, unknown>>, key: string, path: string,
+  validate: (value: unknown, path: string, defects: PolicyDefect[]) => T | undefined, defects: PolicyDefect[],
+): T[] | undefined {
+  const raw = read(record, key, path, 'an array', isArray, defects);
+  if (raw === undefined) return undefined;
+  const out: T[] = [];
+  let ok = true;
+  for (const [index, entry] of raw.entries()) {
+    const value = validate(entry, `${child(path, key)}[${String(index)}]`, defects);
+    if (value === undefined) ok = false;
+    else out.push(value);
+  }
+  return ok ? out : undefined;
+}
+
+function isIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 64 && CHAR_CLASSES.identifier.test(value);
+}
+
+function validateSubscription(value: unknown, path: string, defects: PolicyDefect[]): TriggerSubscription | undefined {
+  const record = shape(value, path, keysOf(SUBSCRIPTION_KEYS), defects);
+  if (record === undefined) return undefined;
+  const id = read(record, 'id', path, 'a lowercase identifier of at most 64 characters', isIdentifier, defects);
+  const kind = read<TriggerKind>(record, 'kind', path, 'a trigger kind', isTriggerKind, defects);
+  const source = read(record, 'source', path, `'github'`, (v): v is 'github' => v === 'github', defects);
+  const transport = read(record, 'transport', path, `'signed-webhook'`, (v): v is 'signed-webhook' => v === 'signed-webhook', defects);
+  const secret = read(record, 'secret', path, `the name of a host variable starting ${WEBHOOK_SECRET_PREFIX}`, (v): v is string => typeof v === 'string' && SECRET_NAME.test(v), defects);
+  const trustCeiling = read<AuthorTrust>(record, 'trustCeiling', path, 'an author trust level', isAuthorTrust, defects);
+  const labels = readArray<string>(record, 'labels', path, 'a label of at most 50 characters with no space or comma', (v): v is string => typeof v === 'string' && LABEL_CLASS.test(v), defects);
+  if (
+    id === undefined || kind === undefined || source === undefined || transport === undefined
+    || secret === undefined || trustCeiling === undefined || labels === undefined
+  ) return undefined;
+  if (kind === 'human' || kind === 'scheduled') {
+    defects.push({ path: child(path, 'kind'), problem: `'${kind}' is not delivered by a webhook; a subscription is for a kind a source sends` });
+    return undefined;
+  }
+  if (labels.length > 0 && kind !== 'issue') {
+    defects.push({ path: child(path, 'labels'), problem: `only an 'issue' subscription carries labels` });
+    return undefined;
+  }
+  return { id, kind, source, transport, secret, trustCeiling, labels };
+}
+
+function validateSchedule(value: unknown, path: string, defects: PolicyDefect[]): TriggerSchedule | undefined {
+  const record = shape(value, path, keysOf(SCHEDULE_KEYS), defects);
+  if (record === undefined) return undefined;
+  const id = read(record, 'id', path, 'a lowercase identifier of at most 64 characters', isIdentifier, defects);
+  const template = read<TemplateId>(record, 'template', path, `a registered template (${TEMPLATE_IDS.join(', ')})`, isTemplateId, defects);
+  const at = read(record, 'at', path, `a UTC time 'HH:MM'`, (v): v is string => typeof v === 'string' && DAILY_TIME.test(v), defects);
+  if (id === undefined || template === undefined || at === undefined) return undefined;
+  return { id, template, at };
+}
+
+/**
+ * What the trigger policy means together (D-A-TF-03, the relational check
+ * D-P3-13 left to admission until a registry existed). A non-human kind in
+ * `enabled` needs its whole route; a subscription or schedule needs its kind
+ * enabled; ids are unique. `human` keeps D-P3-05's route: an entry station,
+ * a cap, and a floor, and no template.
+ */
+function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefect[]): void {
+  const nonHuman = triggers.enabled.filter((kind) => kind !== 'human');
+  for (const kind of nonHuman) {
+    const missing: string[] = [];
+    if (!Object.hasOwn(triggers.entryStation, kind)) missing.push('an entryStation');
+    if (!Object.hasOwn(triggers.taskTemplate, kind)) missing.push('a registered taskTemplate');
+    if (!Object.hasOwn(triggers.maxAutonomy, kind)) missing.push('a maxAutonomy');
+    if (!Object.hasOwn(triggers.minAuthorTrust, kind)) missing.push('a minAuthorTrust');
+    if (!hasFieldSchema(kind)) missing.push('a field schema in code, which this kind does not have');
+    if (missing.length > 0) {
+      defects.push({ path: child(path, 'enabled'), problem: `'${kind}' is enabled without ${missing.join(', ')}; a non-human kind is enabled only with its whole route` });
+    }
+  }
+  if (nonHuman.length > 0) {
+    for (const key of ['maxDeliveryAgeMs', 'candidateExpiryMs'] as const) {
+      if (triggers[key] === undefined) defects.push({ path: child(path, key), problem: 'required while a non-human kind is enabled' });
+    }
+  }
+  const unique = (ids: readonly string[], at: string): void => {
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) defects.push({ path: at, problem: `the id '${id}' appears more than once` });
+      seen.add(id);
+    }
+  };
+  const subscriptions = triggers.subscriptions ?? [];
+  const schedules = triggers.schedules ?? [];
+  unique(subscriptions.map((s) => s.id), child(path, 'subscriptions'));
+  unique(schedules.map((s) => s.id), child(path, 'schedules'));
+  subscriptions.forEach((s, i) => {
+    if (!triggers.enabled.includes(s.kind)) {
+      defects.push({ path: `${child(path, 'subscriptions')}[${String(i)}].kind`, problem: `'${s.kind}' is not enabled, so this subscription grants nothing` });
+    }
+  });
+  if (schedules.length > 0 && !triggers.enabled.includes('scheduled')) {
+    defects.push({ path: child(path, 'schedules'), problem: `'scheduled' is not enabled, so no schedule fires` });
+  }
 }
 
 function validateRoles(

@@ -115,6 +115,11 @@ function cloneTriggers(triggers: TriggerPolicy): TriggerPolicy {
     minAuthorTrust: frozen({ ...triggers.minAuthorTrust }),
     maxTriggerDepth: triggers.maxTriggerDepth,
     budgetPerWindow: frozen({ ...triggers.budgetPerWindow }),
+    // An absent list is an empty one (D-R22-10), so the resolved policy always carries both.
+    subscriptions: frozenCopy((triggers.subscriptions ?? []).map((s) => frozen({ ...s, labels: frozenCopy(s.labels) }))),
+    schedules: frozenCopy((triggers.schedules ?? []).map((s) => frozen({ ...s }))),
+    ...(triggers.maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs: triggers.maxDeliveryAgeMs }),
+    ...(triggers.candidateExpiryMs === undefined ? {} : { candidateExpiryMs: triggers.candidateExpiryMs }),
   });
 }
 

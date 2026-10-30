@@ -31,10 +31,10 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
-import type { RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
+import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
-  AdmissionRecord, BaseRunRecord, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, RefusedDeliveryCount, TriggerDecision,
   LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
@@ -618,9 +618,40 @@ async function storeObject(store: string, runId: RunId, kind: VaultRefKind, reco
   return ref;
 }
 
+/** A trigger decision's id: the SHA-256 of its source and key. Repeated from `../intake.ts`, which this module cannot import as a value. */
+function intakeIdOf(source: string, key: string): string {
+  return createHash('sha256').update(`${source}\0${key}`, 'utf8').digest('hex');
+}
+
+/** As `intakeProblem` in `../intake.ts`, repeated for the same reason. */
+function intakeRecordProblem(d: TriggerDecision, candidate: CandidateRecord | null): string | undefined {
+  if ((d.collectedBy as string) !== 'runtime') return 'a trigger decision is collected by the runtime';
+  if (d.source === '' || d.key === '') return 'a trigger decision names its source and key';
+  const id = intakeIdOf(d.source, d.key);
+  if (d.outcome.kind === 'candidate') {
+    if (candidate === null) return 'a candidate outcome is written with its candidate';
+    if (d.outcome.candidate !== id || candidate.id !== id) return 'a candidate is named by its source and key';
+    if ((candidate.collectedBy as string) !== 'runtime') return 'a candidate is collected by the runtime';
+    if (candidate.body !== null && sha256(Buffer.from(candidate.body.base64, 'base64')) !== candidate.body.sha256) return "a candidate's body hash is the hash of its body";
+    return undefined;
+  }
+  return candidate === null ? undefined : 'only a candidate outcome carries a candidate';
+}
+
+async function readJsonOrNull(file: string): Promise<unknown> {
+  try {
+    return await readJson(file);
+  } catch (error) {
+    if (isAbsent(error)) return null;
+    throw error;
+  }
+}
+
 export class LocalVault implements Vault {
   readonly #store: string;
   readonly #artifacts: string;
+  /** Each refused-delivery count file's pending write, so this process never loses its own increment. */
+  readonly #counting = new Map<string, Promise<void>>();
 
   constructor(roots: VaultRoots) {
     const store = resolve(roots.store);
@@ -915,6 +946,125 @@ export class LocalVault implements Vault {
       .sort();
   }
 
+
+  /**
+   * One exclusive create under `intake/decisions/<id>.json` holds the
+   * decision and its candidate, so the replay key and the outcome are one
+   * write (D-R22-02): a failed write leaves no key, and a second one loses
+   * the race to `EEXIST`. Kept under `intake/`, beside `runs/`, so
+   * `listRuns` never names one (D-R22-03).
+   */
+  async recordTriggerDecision(d: TriggerDecision, candidate: CandidateRecord | null): Promise<boolean> {
+    const problem = intakeRecordProblem(d, candidate);
+    if (problem !== undefined) throw new Error(`LocalVault: ${problem}`);
+    return createExclusive(join(this.#store, 'intake', 'decisions', `${intakeIdOf(d.source, d.key)}.json`), encode({ decision: d, candidate }));
+  }
+
+
+  async hasTriggerDecision(source: string, key: string): Promise<boolean> {
+    return pathExists(join(this.#store, 'intake', 'decisions', `${intakeIdOf(source, key)}.json`));
+  }
+  async readTriggerDecisions(): Promise<readonly IntakeEntry[]> {
+    let names: string[];
+    try {
+      names = await readdir(join(this.#store, 'intake', 'decisions'));
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const entries: IntakeEntry[] = [];
+    for (const name of names) {
+      const id = /^([0-9a-f]{64})\.json$/.exec(name)?.[1];
+      if (id === undefined) continue;
+      const entry = await this.#intakeEntry(id as CandidateId);
+      if (entry !== null) entries.push(entry);
+    }
+    return entries.sort((a, b) => (a.decision.source === b.decision.source ? a.decision.key.localeCompare(b.decision.key) : a.decision.source.localeCompare(b.decision.source)));
+  }
+
+  async readCandidate(id: CandidateId): Promise<IntakeEntry | null> {
+    if (!/^[0-9a-f]{64}$/.test(id)) return null;
+    const entry = await this.#intakeEntry(id);
+    return entry?.candidate == null ? null : entry;
+  }
+
+  async markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
+    if ((await this.readCandidate(id)) === null) throw new Error(`LocalVault: no candidate ${id}`);
+    return createExclusive(join(this.#store, 'intake', 'admitted', `${id}.json`), encode({ runId: requireRunId(runId) }));
+  }
+
+  async markCandidateExpired(id: CandidateId, at: string): Promise<void> {
+    if ((await this.readCandidate(id)) === null) throw new Error(`LocalVault: no candidate ${id}`);
+    // A second call loses the exclusive create and keeps the first time.
+    await createExclusive(join(this.#store, 'intake', 'expired', `${id}.json`), encode({ at }));
+  }
+
+  /**
+   * One file per bucket and hour, rewritten under a per-file chain in this
+   * process. Two processes counting into one store can lose an increment; a
+   * count is a rate for the nightly review, not a control, and a lost one
+   * understates junk traffic rather than admitting any (D-R22-03).
+   */
+  async countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void> {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(hour)) throw new Error(`LocalVault: '${hour}' is not a UTC hour`);
+    const file = join(this.#store, 'intake', 'counts', hour, `${sha256(new TextEncoder().encode(bucket))}.json`);
+    const previous = this.#counting.get(file) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      const read = await readJsonOrNull(file);
+      const counts: Record<string, number> = isRecord(read) && isRecord(read.counts) ? { ...(read.counts as Record<string, number>) } : {};
+      counts[cause] = (counts[cause] ?? 0) + 1;
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, encode({ bucket, hour, counts }));
+    });
+    this.#counting.set(file, next.catch(() => undefined));
+    await next;
+  }
+
+  async readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]> {
+    const root = join(this.#store, 'intake', 'counts');
+    let hours: string[];
+    try {
+      hours = await readdir(root);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const out: RefusedDeliveryCount[] = [];
+    for (const hour of hours.sort()) {
+      const rows: RefusedDeliveryCount[] = [];
+      for (const name of await readdir(join(root, hour))) {
+        const read = await readJson(join(root, hour, name));
+        if (!isRecord(read) || typeof read.bucket !== 'string' || !isRecord(read.counts)) throw new Error(`LocalVault: ${join(root, hour, name)} is not a refused-delivery count`);
+        rows.push({ bucket: read.bucket, hour, counts: read.counts as RefusedDeliveryCount['counts'] });
+      }
+      out.push(...rows.sort((a, b) => a.bucket.localeCompare(b.bucket)));
+    }
+    return out;
+  }
+
+  async #intakeEntry(id: CandidateId): Promise<IntakeEntry | null> {
+    const file = join(this.#store, 'intake', 'decisions', `${id}.json`);
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(file);
+    } catch (error) {
+      if (isAbsent(error)) return null;
+      throw error;
+    }
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!isRecord(parsed) || !isRecord(parsed.decision) || intakeIdOf(String(parsed.decision.source), String(parsed.decision.key)) !== id) {
+      throw new Error(`LocalVault: ${file} is not the trigger decision its name says`);
+    }
+    const admitted = await readJsonOrNull(join(this.#store, 'intake', 'admitted', `${id}.json`));
+    const expired = await readJsonOrNull(join(this.#store, 'intake', 'expired', `${id}.json`));
+    return {
+      decision: parsed.decision as unknown as TriggerDecision,
+      candidate: (parsed.candidate ?? null) as CandidateRecord | null,
+      sha256: sha256(bytes),
+      admittedAs: isRecord(admitted) && typeof admitted.runId === 'string' ? (admitted.runId as RunId) : null,
+      expiredAt: isRecord(expired) && typeof expired.at === 'string' ? expired.at : null,
+    };
+  }
   async #objects(runId: RunId, kind: 'decision' | 'usage' | 'integration'): Promise<readonly VaultRef[]> {
     const dir = join(runDir(this.#store, runId), 'objects', kind);
     let names: string[];

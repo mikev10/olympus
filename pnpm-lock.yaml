@@ -182,6 +182,9 @@ importers:
       '@olympus-ai/sandbox':
         specifier: workspace:*
         version: link:../sandbox
+      '@olympus-ai/triggers':
+        specifier: workspace:*
+        version: link:../triggers
       '@olympus-ai/vault':
         specifier: workspace:*
         version: link:../vault

@@ -5,6 +5,7 @@
  * changing what the stub is. Test code only; nothing in src knows them.
  */
 import type {
+  CandidateId,
   CompiledRole,
   Driver,
   DriverCapabilities,
@@ -22,7 +23,7 @@ import type {
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type { ExecOptions, ExecResult, SandboxCapabilities, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type {
-  AdmissionRecord, BaseRunRecord, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, RubricRecord, UsageRecord, Vault,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, LockManifest, LockVerdict, RefusedDeliveryCount, RubricRecord, TriggerDecision, UsageRecord, Vault,
 } from '@olympus-ai/vault';
 
 export class DelegatingVault implements Vault {
@@ -112,6 +113,38 @@ export class DelegatingVault implements Vault {
     return this.inner.readLocks(runId);
   }
 
+
+  recordTriggerDecision(d: TriggerDecision, candidate: CandidateRecord | null): Promise<boolean> {
+    return this.inner.recordTriggerDecision(d, candidate);
+  }
+
+  readTriggerDecisions(): Promise<readonly IntakeEntry[]> {
+    return this.inner.readTriggerDecisions();
+  }
+
+  hasTriggerDecision(source: string, key: string): Promise<boolean> {
+    return this.inner.hasTriggerDecision(source, key);
+  }
+
+  readCandidate(id: CandidateId): Promise<IntakeEntry | null> {
+    return this.inner.readCandidate(id);
+  }
+
+  markCandidateAdmitted(id: CandidateId, runId: RunId): Promise<boolean> {
+    return this.inner.markCandidateAdmitted(id, runId);
+  }
+
+  markCandidateExpired(id: CandidateId, at: string): Promise<void> {
+    return this.inner.markCandidateExpired(id, at);
+  }
+
+  countRefusedDelivery(bucket: string, hour: string, cause: CountedRefusalCause): Promise<void> {
+    return this.inner.countRefusedDelivery(bucket, hour, cause);
+  }
+
+  readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]> {
+    return this.inner.readRefusedDeliveryCounts();
+  }
   listRuns(): Promise<readonly RunId[]> {
     return this.inner.listRuns();
   }
