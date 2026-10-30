@@ -1,3 +1,33 @@
+# External review of R22, codex, 2026-10-30
+
+The Codex family's adversarial review of R22, the trigger framework: the
+webhook delivery path, the GitHub extractor and field schemas, admission from
+a candidate, the daily schedule, and the sink lint rule. The triage is in
+`2026-10-30-R22-trigger-framework-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. A headless `codex exec` run under
+  a read-only sandbox with recorded approval policy `never`. It ran in an
+  empty scratch working directory, with a scratch config home holding only
+  `auth.json` and an environment of `CODEX_HOME` alone. The manifest's
+  `cleanRoom` holds the pre-run listing of both.
+- **Cross-family agreement:** codex-1 was raised by Gemini too (gemini-1).
+  codex-2 to codex-7 were raised by Codex alone.
+- **Date:** 2026-10-30
+- **Bundle:** `2026-10-30-R22-trigger-framework-review-bundle.txt`, SHA-256 `a5f725b70b458b7ef63a28b7242ed07ecb1c7493d552dfc5c101a365e5dd3d4d`, base `reviewed/R21`, head `d71b5fb` (R22's tip after the first review attempt's outputs were committed; those outputs are excluded). It holds every file new since the base in full and every modified file as a function-context diff. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` (D-TOOLING-10). Prompt: `2026-10-30-R22-trigger-framework-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer reported no prior context and
+  no external lookups. It also reported one local file-listing attempt, which
+  the sandbox blocked. This is a self-report and cannot be verified
+  independently.
+- **Coverage, and any gap:** items 1, 4, 6, and 7 are answered directly.
+  Items 2 and 3 are answered in one closing sentence: no wholly tautological
+  assertion and no exception-to-pass path were found. Item 5 is folded into
+  codex-5.
+- **Citations:** line numbers refer to positions in the bundle's files, not the repository. They are hints, and each finding was located by its construct.
+
+---
+
 BASE: reviewed/R21  
 HEAD: d71b5fb  
 packages/vault/src/types.ts  

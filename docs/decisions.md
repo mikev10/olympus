@@ -5957,3 +5957,50 @@ does not pass when no run is admitted from a candidate. No mutant was built
 that copies the body into a driver request, so the assertion's search for the
 body is unproven against a leak. Proving it would mean planting a leak in the
 line, which this unit does not touch.
+
+The planted-marker control in the codex-2 fix narrows this. A marker placed in
+the reviewer's recorded requests fails the assertion. That proves the search
+finds a leak in what it reads, but not that the line itself can produce one.
+
+### D-R22-16: what the external review changed
+
+Both families counted on the bundle rebuilt without the lockfile
+(D-TOOLING-10). Seven of nine findings held in whole or in part. Five fixes
+were made, each shown failing before the change:
+
+- **codex-1, gemini-1:** the sink rule searches properties, elements, and
+  type arguments. It also reports an argument that fills a call's own type
+  parameter which the return type drops.
+- **codex-2:** the payload assertion reads the reviewer's requests as well
+  as the builder's.
+- **codex-3:** admission reads the candidate's window again, on a fresh
+  clock, just before it spends the candidate.
+- **codex-4:** schedule timers follow the current policy. A retimed schedule
+  fires at its new time, one added is armed within a minute, and one removed
+  stops.
+- **codex-5:** a non-human kind's `entryStation` must be `intake`.
+
+The record is `docs/reviews/2026-10-30-R22-trigger-framework-triage.md`.
+
+- **Reverse:** revert the five review-fix commits.
+
+### D-R22-17: known limits the review found and this unit does not close
+
+- **One service per store (codex-6).** The budget and the turn chain are
+  serialized within one `Intake`. Two services writing one Vault store can
+  each read the budget as open and each record a candidate, so the overrun is
+  bounded by the number of services. Each candidate still waits for a person
+  to admit it.
+  - Today, one service per store is an operating assumption. The runtime does
+    not enforce it, and the same assumption already holds for the
+    refused-delivery counts (D-R22-03).
+  - Enforcing it needs a store-ownership lock or an atomic budget
+    reservation in the Vault, which is a contract change.
+  - **Owner:** the unit that deploys more than one service against a store.
+    Until then, the operator runs one.
+- **`human`'s entry station is not read.** A person's run starts at intake,
+  whatever `entryStation.human` says. D-P3-05 requires the key, and R22 adds
+  no meaning to it. Requiring `intake` there could refuse an existing policy
+  that loads today, which R22 promised not to do (D-R22-10).
+  - **Owner:** the first template that enters at another station. It must
+    make admission read the entry station for every kind.

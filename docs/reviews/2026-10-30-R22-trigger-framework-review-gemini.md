@@ -1,3 +1,27 @@
+# External review of R22, gemini, 2026-10-30
+
+The Gemini family's adversarial review of R22, the trigger framework. The
+triage is in `2026-10-30-R22-trigger-framework-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. A direct
+  `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools.
+  `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 was raised by Codex too (codex-1).
+  gemini-2 was raised by Gemini alone.
+- **Date:** 2026-10-30
+- **Bundle:** `2026-10-30-R22-trigger-framework-review-bundle.txt`, SHA-256 `a5f725b70b458b7ef63a28b7242ed07ecb1c7493d552dfc5c101a365e5dd3d4d`, base `reviewed/R21`, head `d71b5fb` (R22's tip after the first review attempt's outputs were committed; those outputs are excluded). It holds every file new since the base in full and every modified file as a function-context diff. Excluded: `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` (D-TOOLING-10). Prompt: `2026-10-30-R22-trigger-framework-review-prompt.txt`.
+- **Prior context and lookups:** the reviewer reported no prior context and
+  no external lookups. This is a self-report.
+- **Coverage, and any gap:** items 1, 4, 5, and 6 are answered. Items 2, 3,
+  and 7 came back empty: the reply names no tautological check and no
+  fail-open path, and it does not address whether the framing is right.
+  Silence on those is not endorsement.
+- **Citations:** line numbers refer to positions in the bundle's files, not the repository. They are hints, and each finding was located by its construct.
+
+---
+
 BASE: reviewed/R21
 HEAD: d71b5fb
 packages/vault/src/types.ts
