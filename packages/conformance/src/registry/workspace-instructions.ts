@@ -30,6 +30,9 @@ const ID_SUFFIX = 'workspace-instructions-not-loaded';
 /** Where the workspace keeps its drivers (F1's package list: `drivers/*`). */
 const DRIVERS_DIR = 'packages/drivers/';
 
+/** How a driver package is named. One named so anywhere but `DRIVERS_DIR` is refused. */
+const DRIVER_NAME_PREFIX = '@olympus-ai/driver-';
+
 /** Every problem with the table against `drivers` and the I3 entry, or none. */
 export function workspaceInstructionProblems(
   drivers: readonly string[],
@@ -87,10 +90,13 @@ export const R23_I3 = [
       + 'no row names anything else, and a driver package added without one is refused',
     run: async () => {
       const { I3 } = await import('./i3.js');
-      const drivers = workspacePackages()
-        .filter((p) => p.relativeDir.startsWith(DRIVERS_DIR))
-        .map((p) => p.name);
-      const problems = workspaceInstructionProblems(drivers, WORKSPACE_INSTRUCTION_ASSERTIONS, I3);
+      const packages = workspacePackages();
+      const drivers = packages.filter((p) => p.relativeDir.startsWith(DRIVERS_DIR)).map((p) => p.name);
+      // A package named as a driver and kept anywhere else would be found by nothing above (gemini-3).
+      const misplaced = packages
+        .filter((p) => p.name.startsWith(DRIVER_NAME_PREFIX) && !p.relativeDir.startsWith(DRIVERS_DIR))
+        .map((p) => `${p.name} is named as a driver but lives at ${p.relativeDir}, outside ${DRIVERS_DIR}`);
+      const problems = [...misplaced, ...workspaceInstructionProblems(drivers, WORKSPACE_INSTRUCTION_ASSERTIONS, I3)];
       if (problems.length > 0) throw new Error(`I3: a driver is missing its workspace-instruction assertion\n  ${problems.join('\n  ')}`);
       // The check must bite, not merely pass: a driver package with no row is refused.
       const phantom = '@olympus-ai/driver-phantom';
