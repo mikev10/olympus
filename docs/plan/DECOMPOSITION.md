@@ -616,6 +616,9 @@ order between them is settled before any of them is picked up.
 | R20 | Role compiler | M2 | P1, P4, P5, P9 | — |
 | R21 | Local model endpoint | M2 | R6 | `docs/plan/R21-local-endpoint.md` |
 | R22 | Trigger framework | M2 | P3, P9, P12, P14, R19 | `docs/plan/R22-triggers.md` |
+| R23 | Workspace skills and instruction discovery | M2 | P5, R6, R20 | — |
+| R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
+| R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 
 ### R1 — Readiness
 
@@ -875,7 +878,15 @@ rules: read-only, its family checked against every author as `seatReviewer`
 checks it (refused at L3, reduced independence recorded below), and granted
 what the review contract grants, `locked-spec` (with R17's security part),
 `diff`, and `evidence-bundle`, where R17's findings arrive, never the author's
-narrative. This unit needs a second driver, because one family can only ever
+narrative. The unit writes the security reviewer's role, in R20's format, and
+the role asks two questions of every change: what it makes vulnerable, and
+what it makes reachable that need not be — an entry point, route, or code path
+reachable before authentication, an administrative, debug, or legacy surface
+the spec does not name, a default configuration that turns a control off, a
+combination of settings that weakens one. Every finding the role asks for
+names a file and line in the diff or the base. The findings are the
+reviewer's claim, recorded beside the verdict and never read as one (I2,
+D-A-EX-01). This unit needs a second driver, because one family can only ever
 record reduced independence. A review whose verdict gates the line is the M3
 panel's, not this unit's: until then a verdict is recorded and not interpreted
 (D-P4-07), and the human at `integrate` reads it. R19's critics are the one
@@ -951,6 +962,19 @@ policy.
 A finding becomes an `intake` candidate carrying its scanner, rule, and
 location as typed fields, which a human admits like any other; the job never
 opens a change or drafts a fix (D-A-SC-03).
+
+A fourth job asks R9's reachability question of the whole tree rather than one
+change. Over the same head of the default branch, it seats a read-only
+reviewer under R9's security reviewer role, in a sandbox with `deny-all`
+egress and the tree as its only mount. The reviewer's family differs from the
+family of every author whose merged work the tree holds since the job's last
+run (I6), and where that cannot hold the job records reduced independence, as
+`seatReviewer` does. Each finding must name a file and line, and one that does
+not is refused by the runtime rather than recorded. A finding becomes an
+`intake` candidate carrying its location and category as typed fields, with
+the reviewer's text kept as its claim and never entering a later prompt (I7).
+A human admits it like any other. The job never opens a change or drafts a
+fix, and it narrows nothing on its own (D-A-EX-01).
 
 ### R14 — Model tier per station and escalation
 
@@ -1637,6 +1661,19 @@ it holds, makes the in-sandbox driver this constraint asks for cheaper to
 build. Whoever picks up the driver verifies the harness's licence and source
 before relying on it (D-A-DD-01).
 
+Added 2026-10-29: the Codex CLI is reported to read `AGENTS.md` and skill
+directories from its working tree by design, and the Agent Skills format it
+reads is now an open standard under the Agentic AI Foundation that more than
+70 agent platforms are reported to implement. Inside the Olympus sandbox that
+working tree is the agent-writable workspace. The Codex driver therefore runs
+with every workspace instruction source off, or the session refuses, and it
+owes R23's assertion for its own CLI before it is registered. That covers
+`AGENTS.md` at any depth, skill directories, and any configuration file the
+CLI reads from its working directory. The same release line adds credential
+masking in the CLI's own output. The line does not rely on it: no credential
+enters the sandbox to be masked (P12). Whoever picks up the driver verifies
+each reported behaviour on the pinned CLI before relying on it (D-A-DD-03).
+
 ### Recorded constraint: event subscriptions (M2 triggers)
 
 Binding on R22, which specifies the framework. The M2 trigger framework may receive
@@ -1648,6 +1685,19 @@ transport carries an event, three things hold: its payload is an
 subscription is a capability granted in policy, not configuration a trigger
 carries (I4); and the secret that verifies a delivery is held where P12 holds
 credentials, never inside a sandbox (D-A-DD-02).
+
+Added 2026-10-29: chat platforms now turn a notification into a coding task
+directly, and vendors sell model endpoints built to classify, choose, and
+score. Both make it tempting to have a model triage an incoming event by
+reading it. Neither changes the rule. A message from a chat platform is an
+`UntrustedPayload` like a webhook's. The template a payload selects and the
+parameters it supplies come from its extracted fields, through
+`I7.extracted-field-schemas`, never from a model reading `raw`. A
+classification call is a model call, so `raw` never reaches one either,
+whatever the endpoint is called. R22 seats no classifier: its schemas carry no
+free-text field, and an event becomes a candidate a person reads. A later unit
+that seats one has it read only the extracted fields and choose only among the
+registered templates, and records its output as a claim (D-A-DD-04).
 
 ### R22 — Trigger framework
 
@@ -1802,6 +1852,223 @@ carries no grant.
 **Why M2:** R19's drafters and critics, R5's planner, and R11's proposals all
 assume roles with content, and a unit started on that assumption would invent
 the format inside its own scope.
+
+### R23 — Workspace skills and instruction discovery
+
+R20 keeps a seat's instructions out of the workspace, and
+`I3.workspace-instructions-not-loaded` proves it for the Claude Code driver.
+The assertion plants a `CLAUDE.md`, a `.claude/rules` file, and an agent
+definition named for the role. It runs the task with no tools, and it passes
+when none of their tokens reaches the reply. It does not cover skills, and
+with no tools it could not. Observed on CLI 2.1.312 in a scratch repository
+(D-A-WI-01):
+
+- With `Skill` offered and no `--setting-sources`, a skill planted at
+  `.claude/skills/<id>/SKILL.md` is listed to the model.
+- Under `--setting-sources ''` it is not.
+- With no tools offered, it is listed in neither case.
+
+So a skill planted under the assertion as written passes whatever the flag
+does, and `Skill` is in `DECLARED_TOOLS`, so policy can grant it. A skill
+planted at `.agents/skills/<id>/SKILL.md` was read in neither case. That is
+the location the Agent Skills standard names for tools other than Claude
+Code, and nothing would notice a CLI upgrade that starts reading it. The
+assertion is also the Claude Code driver's alone: nothing requires a driver
+to have one, and the Codex CLI reads `AGENTS.md` and skills from its working
+tree by design.
+
+Binding:
+
+- **Skills are planted, and the session can see them.** The assertion plants
+  `.claude/skills/<id>/SKILL.md` and `.agents/skills/<id>/SKILL.md`, each with
+  its own token, beside the three files it plants today. It runs once with no
+  tools, as now, and once with `Skill` granted, so the CLI lists skills if it
+  loads any. A token in either reply fails it.
+- **The plant is shown to be visible.** In the same pinned image, a control
+  invokes the CLI directly, without `--setting-sources ''`, with `Skill`
+  offered. It requires the `.claude/skills` token to reach the reply. A plant
+  the CLI cannot see proves nothing, so a control that does not see it fails
+  the assertion rather than passing it. `.agents/skills` has no control,
+  because the pinned CLI does not read it. The record says so, and the
+  assertion still requires its token to be absent.
+- **`--disable-slash-commands` is verified, then chosen.** The CLI describes
+  it as disabling all skills and commands. The unit runs it on the pinned
+  image and records whether the session still offers `Skill` when `Skill` is
+  granted. If it does, the driver passes the flag. If it does not, a session
+  under it offers less than a request granting `Skill` asked for, and
+  `#refuseSessionUnlikeGrant` would refuse it, so the driver does not pass the
+  flag and the assertion is the control. `DECLARED_TOOLS` is not narrowed to
+  make the flag fit; that is a policy question, not this unit's.
+- **Every driver owes one.** The registry names the assertion per driver.
+  `I3.workspace-instructions-not-loaded` becomes the Claude Code driver's
+  entry. The R6 driver gains a local one: its system message is built from
+  the `TaskRequest` alone, and a workspace holding every planted file leaves
+  the messages it sends byte-identical. A driver registered later without its
+  entry is a pending registry entry owned by that driver's unit, which the
+  committed baseline ratchets (D-A-DD-03).
+
+**Contract amendments:** none expected. The registry is under
+`packages/conformance/`, a protected path, so the pull request takes the
+`gate-change` label.
+
+**Not in this unit:** delivering the target repository's own instructions to
+a seat, which is R24's; the Codex driver and its entry; any change to what
+policy can grant.
+
+**Conformance:** the Claude Code driver's assertion fails when either skill
+token reaches a reply under `Skill`, and fails when its control cannot see the
+`.claude/skills` plant; deleting `--setting-sources ''` from the argv turns it
+red; the R6 driver's assertion fails if a planted file changes one byte of
+the messages it sends; and the registry report names one entry per registered
+driver.
+
+**Why M2:** R20's guarantee is that an agent cannot rewrite what instructs the
+next seat. A skill is the instruction format the ecosystem is standardising
+on, so the guarantee should be shown to hold for it before more target
+repositories carry them.
+
+### R24 — Repository instructions as granted context
+
+After R20 and R23, no seat receives the target repository's own instructions
+on its own. `CLAUDE.md`, `AGENTS.md`, `.claude/rules`, and skill directories
+in the target are files a seat granted `base-repo-readonly`, or working in the
+workspace, can open with a tool, and nothing points it at them. Nobody chose
+this. It follows from `--setting-sources ''`, which was chosen so that a
+workspace file configures nothing (D-A-RC-03). More target repositories now
+keep their conventions in exactly those files. A builder that never reads
+them makes changes the person at `integrate` rejects for reasons no check
+measures, and R2 counts the cost as ordinary rework.
+
+**Chosen: delivery from the base (D-A-RI-01).** The alternative, recording
+the status quo and building nothing, was rejected: it leaves the cost of
+ignored conventions in R2's rework rate, under no cause the line can name.
+
+Binding:
+
+- **Read from the base, never from the workspace.** At admission the runtime
+  reads a fixed list of paths from the base commit the run is admitted on:
+  `CLAUDE.md` and `AGENTS.md` at the root, `.claude/rules/*.md`, and the
+  `SKILL.md` of each directory under `.claude/skills/` and `.agents/skills/`.
+  It applies R20's compiler rules to each: a byte cap checked before decoding,
+  UTF-8, no non-regular entries, and a refusal that names the file (I5). The
+  admission record carries each file's path and SHA-256. A run keeps the set
+  it was admitted with, and a later commit changes only later runs. The agent
+  being judged cannot write what it receives (I3).
+- **A granted context, off by default.** `ContextGrant` gains
+  `'repo-instructions'`. A station receives it only where its contract allows
+  it and policy grants it (I4). The contracts allow it at `spec`, `plan`,
+  `build`, and `review`. They never allow it at `test-design`, whose seat
+  sees only the locked spec, so the acceptance oracle is written from the
+  spec alone.
+- **Text, never grants.** A skill's front matter is not read: no
+  `allowed-tools`, model, or other field in a target's file widens or narrows
+  a grant, and the admission record names each file whose front matter was
+  dropped. Only the `SKILL.md` body is delivered. A skill's `scripts/`,
+  `references/`, and `assets/` are not, since a script is code the line did
+  not pin, and a reference is open-ended. A seat that needs them reads them
+  through `base-repo-readonly`.
+- **Rendered after the role, before the granted context.** The driver renders
+  the set inside `stablePrefix`, after `CompiledRole.instructions` and marked
+  as the target's text, so a role the maintainer wrote comes first and two
+  tasks under one role and one base still share a cacheable prefix.
+- **Who wrote it is policy's question.** These files reached the base through
+  the target's own merge process, not the line's. Policy may grant
+  `'repo-instructions'` at L0 to L2. Above L2 the grant needs R10, under which
+  a file policy classifies as sensitive narrows the run before it reaches a
+  model. Until R10 lands, admission refuses a run whose level is above L2 and
+  whose policy grants it, and R10's pull request lifts that refusal as one of
+  its own amendments. The unit recommends that targets classify these paths as
+  protected, so a change to them escalates at `integrate` like any protected
+  path.
+- **Nothing that judges.** The set never includes the locked spec,
+  acceptance tests, rubrics, or R7's corpus. A target file that contains
+  judging content is the target's own text. It is recorded like any other,
+  as R20's known limits say of role files.
+
+**Contract amendments, owed by the unit's pull request:** `ContextGrant`
+gains `'repo-instructions'`; `AdmissionRecord` gains the repository
+instruction set with each file's path and hash; station contracts allow the
+grant where listed above; and an admission refusal for a file the reader
+refuses, and for a run above L2 whose policy grants it.
+
+**Not in this unit:** a skill's scripts or references; any file outside the
+fixed list; reading instruction files from the workspace; measuring whether
+delivery reduces rework, which is R2's rates compared by R11; and any change
+to what `test-design` sees.
+
+**Conformance:** a run admitted with the grant records every delivered file's
+path and hash; a commit to the base after admission does not change what the
+run's tasks receive; a planted workspace copy that differs from the base copy
+is not what is delivered; an oversized, non-UTF-8, or non-regular entry
+refuses admission and names it; a skill whose front matter declares
+`allowed-tools` changes no grant; `test-design`'s seat never receives the
+grant, whatever policy says; and a run above L2 whose policy grants it is
+refused.
+
+**Why M2:** R23 closes the side door, and without this unit the line seats
+agents that ignore the target's documented conventions. The cost of that
+shows up in R2's rework rate, under no cause the line can name.
+
+### R25 — Property checks
+
+An acceptance check is examples: it asserts what the change does for the
+inputs its author chose. R7's corpus already holds the failure examples allow:
+`hard-coded-output` returns the expected values for exactly the inputs the
+acceptance test uses, and R7 records it as a miss that is measured, not
+hidden. A property states what must hold for every input in a domain: an
+output is sorted, a round trip is the identity, a principal without a grant
+never reads a resource. A property-based framework then checks it against
+inputs it generates. This unit adds that as a check the runtime runs. It is
+the practical end of a wider shift towards verifying properties rather than
+examples. Machine-checked proof is not in it.
+
+Binding:
+
+- **A new check kind, locked with the others.** `CheckKind` gains
+  `'property'`. Property checks are written at `test-design`, by R19's test
+  drafter or a person, and locked and hashed with the acceptance tests before
+  `build` (I3). They declare `'fails'` or `'passes'` over the base as
+  acceptance checks do, and R15's base run includes them.
+- **A per-stack slot.** `AdapterSet` gains a nullable `property` slot, naming
+  the framework and how a run is counted (fast-check for TypeScript). A set
+  without one cannot pin a property check, and a manifest that pins one is
+  refused at admission (I5). Policy may require a property check for each
+  authorization rule R17's security part names, beside the denial check
+  locked for it today.
+- **Reproducible, and counted.** The locked manifest pins each property
+  check's seed and number of cases. The runtime runs them at `verify` in a
+  fresh sandbox with `deny-all` egress, as every check runs. The evidence
+  records the seed, the cases run, and any shrunk counterexample, so a rerun
+  reaches the same verdict (I2). A check that runs fewer cases than pinned,
+  or none, is a refusal (I5). So is one whose locked file registers no
+  property with the framework, which the adapter detects at admission.
+- **Measured before it is claimed.** R7 gains an `edge-case-only` item: an
+  implementation that is right on the acceptance test's inputs and wrong on a
+  boundary the spec states. The unit reports R7's detection on that item and
+  on `hard-coded-output`, with and without property checks, and the
+  false-refusal rate on R7's controls. No claim that properties reduce
+  false-done is made until those numbers exist.
+
+**Contract amendments, owed by the unit's pull request:** `CheckKind` gains
+`'property'`; `CheckSpec` gains a property spec with a seed and a case count;
+`AdapterSet` gains the `property` slot; `CheckResult` gains the seed, the
+cases run, and the counterexample; and R7's corpus gains `edge-case-only`.
+
+**Not in this unit:** machine-checked proof of any property, which would be a
+later check kind with its own spec; properties a model writes outside
+`test-design`; property checks for a stack without an adapter slot; and a
+property requirement for every spec, which is policy's to set.
+
+**Conformance:** a manifest pinning a property check on a set without the
+slot is refused; a property check that runs zero cases, or fewer than
+pinned, refuses; a locked property file that registers no property is refused
+at admission; the same seed reproduces the same verdict; a property check
+edited after `test-design` is `lock-tamper`; and R7's `hard-coded-output`
+item is caught by a property check where its acceptance check misses.
+
+**Why M3:** it needs R7's corpus to show it works, R19's drafter to write
+properties at scale, and R15's base run. M2 does not need it to make its
+claim.
 
 ---
 
