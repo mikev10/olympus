@@ -8,8 +8,13 @@
 // string without a cast. The conformance registry asserts, per file, that the
 // resolved configuration keeps them at 'error' and that they fire on a
 // fixture; turning one off here fails CI.
+//
+// The fourth, i7/no-untrusted-sink, is the workspace's own: it reports
+// UntrustedText or UntrustedPayload passed to JSON.stringify or widened to
+// unknown, any, or object (packages/conformance/lint/untrusted-sink.js).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import untrustedSink from './packages/conformance/lint/untrusted-sink.js';
 
 export default tseslint.config(
   {
@@ -36,6 +41,7 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    plugins: { i7: untrustedSink },
     linterOptions: {
       // A disable comment that no longer suppresses anything is an error, so
       // a lint fixture whose rule stopped firing is caught twice over.
@@ -68,6 +74,7 @@ export default tseslint.config(
         },
       ],
       '@typescript-eslint/no-base-to-string': 'error',
+      'i7/no-untrusted-sink': 'error',
       // Conventions: no `any`, no non-null assertion without a named invariant.
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
@@ -88,5 +95,7 @@ export default tseslint.config(
   {
     files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
+    // A plain script has no types to read; the rule refuses to run without them rather than pass.
+    rules: { ...tseslint.configs.disableTypeChecked.rules, 'i7/no-untrusted-sink': 'off' },
   },
 );

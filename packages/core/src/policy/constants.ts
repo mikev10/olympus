@@ -45,7 +45,7 @@ export function tierRank(tier: ModelTier): number {
 }
 
 const TRIGGER_KIND_SET: Readonly<Record<TriggerKind, true>> = {
-  human: true, 'ci-failure': true, 'review-feedback': true, 'post-merge': true, scheduled: true,
+  human: true, 'ci-failure': true, 'review-feedback': true, 'post-merge': true, scheduled: true, issue: true,
 };
 
 const AUTHOR_TRUST_SET: Readonly<Record<AuthorTrust, true>> = {

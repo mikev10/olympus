@@ -35,6 +35,7 @@ import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './polic
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
 import { R20_I5 } from './roles.js';
+import { R22_I5 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 
 /** The declaration order the graph builder promises: vault, sandbox, driver, then the integrator a stub graph lacks (D-I1b-05). */
@@ -51,6 +52,8 @@ export const I5: InvariantEntry = {
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I5,
     ...R20_I5,
+    // R22: the trigger framework.
+    ...R22_I5,
     // R17: security at the gate.
     ...R17_I5,
     // R4: parallel task execution.

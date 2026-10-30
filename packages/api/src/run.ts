@@ -37,6 +37,12 @@ import {
   tierFor,
   transition,
   validatePolicyDocument,
+  admitTrigger,
+  type AdmittedTrigger,
+  type CandidateId,
+  type CapabilityScope,
+  type TriggerAdmissionCause,
+  type TriggerRef,
 } from '@olympus-ai/core';
 import type {
   ApprovalKey,
@@ -64,7 +70,7 @@ import { adapterAdmission, buildAdapterSet, missingControls, type AdapterSet } f
 import { compileRoles, type RoleFileRefusal } from '@olympus-ai/compiler';
 import type { CheckSpec } from '@olympus-ai/integrity';
 import type { SandboxProvider } from '@olympus-ai/sandbox';
-import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
+import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManifest, AdmittedSet, CriticRecord, DraftLockRecord, DraftRecord, EvidenceBundle, IntakeEntry, IntentRecord, ResumeRefusal, RubricRecord, RubricVersion, Vault } from '@olympus-ai/vault';
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
@@ -192,6 +198,14 @@ export interface RunRequest {
    * anything is written; the refusal carries the figure to approve (D-P9-03).
    */
   readonly approvedCostUsd: number | null;
+  /**
+   * The intake candidate this run is admitted from, or absent or null for a
+   * person's own run (A-R22-04). The run is admitted under the candidate's
+   * kind, author trust, and lineage, so that kind's cap and floor bind it,
+   * and a candidate admits one run. The intent is still the person's: a
+   * candidate supplies none (R19, I7).
+   */
+  readonly candidate?: CandidateId | null;
 }
 
 /** What a caller of the line may observe and ask of it while it drives. Neither can change what is committed. */
@@ -278,6 +292,10 @@ export type RunOutcome =
       readonly transition: StationRefusal;
       readonly state: RunState | null;
     }
+  /** The trigger policy refused the run's trigger: its kind is not enabled, its author is below the floor, or its lineage is too deep (D-R22-06). */
+  | { readonly ok: false; readonly reason: 'trigger-refused'; readonly cause: TriggerAdmissionCause; readonly detail: string }
+  /** The candidate waited past the policy's window, on the runtime's clock, and is recorded as expired (D-R22-04). */
+  | { readonly ok: false; readonly reason: 'candidate-expired'; readonly candidate: CandidateId }
   | {
       readonly ok: false;
       /** A resume only: a call was made and what it cost was lost, so the run is not driven on top of it (A-I1a-06). */
@@ -779,7 +797,65 @@ function admissionRefusalOf(outcome: Exclude<AdmissionOutcome, { ok: true }>): A
       return { reason: 'role-undefined', roles: [...outcome.roles] };
     case 'refused':
       return { reason: 'refused', at: outcome.at, refusal: outcome.transition };
+    case 'trigger-refused':
+      return { reason: 'trigger-refused', cause: outcome.cause };
+    case 'candidate-expired':
+      return { reason: 'candidate-expired', candidate: outcome.candidate };
   }
+}
+
+/**
+ * Every role the run seats, with the scope policy grants it, as
+ * `policyRefusal` resolves them: a role the policy does not define is that
+ * check's refusal and is left out here.
+ */
+function seatedScopes(graph: TaskGraph, policy: Policy, drafted: readonly DraftStation[]): Array<readonly [RoleId, CapabilityScope]> {
+  const roles = new Set<RoleId>();
+  for (const station of M1_STATIONS) {
+    if (isDraftStation(station)) {
+      if (!drafted.includes(station)) continue;
+      roles.add(DRAFT_ROLES[station].drafter);
+      roles.add(DRAFT_ROLES[station].critic);
+      continue;
+    }
+    if (!isAgentStation(station)) continue;
+    for (const task of graph.tasks) if (task.station === station) roles.add(task.role);
+  }
+  return [...roles].flatMap((role) => {
+    const scope = Object.hasOwn(policy.roles, role) ? policy.roles[role] : undefined;
+    return scope === undefined ? [] : [[role, scope] as const];
+  });
+}
+
+/**
+ * Whether `candidate` has waited past the policy's window at `now`, on the
+ * runtime's clock (D-R22-04). No window means no non-human kind is enabled;
+ * the trigger check refuses that kind, so the candidate is not expired here.
+ */
+function pastWindow(candidate: { recordedAt: string }, policy: Policy, now: number): boolean {
+  const window = policy.triggers.candidateExpiryMs;
+  return window !== undefined && now - Date.parse(candidate.recordedAt) > window;
+}
+
+/**
+ * The candidate a run is asked from, read and checked: one that exists, has
+ * not admitted a run, and has not waited past the policy's window on the
+ * runtime's clock. An expired candidate is recorded as expired before the
+ * refusal, and never deleted (D-R22-04).
+ */
+async function candidateFor(
+  vault: Vault, id: CandidateId, policy: Policy, now: number,
+): Promise<{ ok: true; entry: IntakeEntry & { candidate: NonNullable<IntakeEntry['candidate']> } } | Extract<AdmissionOutcome, { reason: 'invalid-request' | 'candidate-expired' }>> {
+  const entry = await vault.readCandidate(id);
+  if (entry?.candidate == null) return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'unknown-candidate', message: `no intake candidate ${id}` }] };
+  if (entry.admittedAs !== null) {
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${id} admitted run ${entry.admittedAs}; a candidate admits one run` }] };
+  }
+  if (entry.expiredAt !== null || pastWindow(entry.candidate, policy, now)) {
+    await vault.markCandidateExpired(id, new Date(now).toISOString());
+    return { ok: false, reason: 'candidate-expired', candidate: id };
+  }
+  return { ok: true, entry: { ...entry, candidate: entry.candidate } };
 }
 
 /** Every check admission makes, in order; `admitRun` records whichever refuses. */
@@ -809,6 +885,23 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
   if (remote.length > 0) return { ok: false, reason: 'invalid-request', problems: remote };
   const refused = policyRefusal(req.requestedLevel, admitted.admitted.graph, policy.policy, drafted);
   if (refused !== undefined) return refused;
+  // The trigger policy binds every run, a person's own included (D-A-TF-02): a person's run is `human`, by
+  // the owner, at depth 0; a candidate's is its kind, its author's trust, and its lineage.
+  const admittedAt = Date.now();
+  let candidate: (IntakeEntry & { candidate: NonNullable<IntakeEntry['candidate']> }) | null = null;
+  if (req.candidate != null) {
+    const read = await candidateFor(req.components.vault, req.candidate, policy.policy, admittedAt);
+    if (!read.ok) return read;
+    candidate = read.entry;
+  }
+  const trigger: AdmittedTrigger = candidate === null
+    ? { kind: 'human', authorTrust: 'owner', depth: 0 }
+    : { kind: candidate.candidate.kind, authorTrust: candidate.candidate.authorTrust, depth: candidate.candidate.lineage.depth };
+  const triggerVerdict = admitTrigger(trigger, req.requestedLevel, seatedScopes(admitted.admitted.graph, policy.policy, drafted), policy.policy.triggers);
+  if (!triggerVerdict.ok) {
+    if (triggerVerdict.reason === 'trigger-refused') return { ok: false, reason: 'trigger-refused', cause: triggerVerdict.cause, detail: triggerVerdict.detail };
+    return { ok: false, reason: 'policy-refused', station: 'intake', role: triggerVerdict.role, refusal: triggerVerdict.refusal };
+  }
   const rolesAt = await rolesProblems(req);
   if (rolesAt.length > 0) return { ok: false, reason: 'invalid-request', problems: rolesAt };
   const roles = await admitRoles(req.roles, admitted.admitted.graph, drafted);
@@ -862,7 +955,9 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     id: req.runId,
     repo: req.workspace,
     baseCommit: req.baseCommit,
-    trigger: { kind: 'human', eventId: req.runId, lineage: { depth: 0, chain: [], windowStart: now } },
+    trigger: candidate === null
+      ? { kind: 'human', eventId: req.runId, lineage: { depth: 0, chain: [], windowStart: now } }
+      : ({ kind: candidate.candidate.kind, eventId: candidate.candidate.id, lineage: candidate.candidate.lineage } satisfies TriggerRef),
     requestedLevel: req.requestedLevel,
     station: 'intake',
     graph: null,
@@ -893,11 +988,26 @@ async function admission(req: RunRequest): Promise<AdmissionOutcome> {
     unavailableControls: controls,
     // The same detection the controls and the security checks were read from (R18).
     stack: set.stack,
+    // The delivery the run came from, by the stored decision's hash (D-R22-03).
+    candidate: candidate === null ? null : { id: candidate.candidate.id, decisionSha256: candidate.sha256 },
   };
   const refusedControls = admissionRefusal(unrecorded);
   if (refusedControls !== undefined) {
     await discardRun(workspaces, req.runId);
     return refusedControls;
+  }
+  // Taken last, before the record: a candidate admits one run, and the exclusive mark is what makes it once (A-R22-04).
+  // A record that then fails to write leaves the candidate spent, which refuses a second run rather than admitting one.
+  // The window is read again on a fresh clock at the moment the candidate is spent: admission's own work can outlast it (codex-3).
+  const spentAt = Date.now();
+  if (candidate !== null && pastWindow(candidate.candidate, policy.policy, spentAt)) {
+    await vault.markCandidateExpired(candidate.candidate.id, new Date(spentAt).toISOString());
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'candidate-expired', candidate: candidate.candidate.id };
+  }
+  if (candidate !== null && !(await vault.markCandidateAdmitted(candidate.candidate.id, req.runId))) {
+    await discardRun(workspaces, req.runId);
+    return { ok: false, reason: 'invalid-request', problems: [{ path: 'candidate', code: 'already-admitted', message: `candidate ${candidate.candidate.id} admitted another run first` }] };
   }
   const record: AdmissionRecord = { ...unrecorded, ...(await draftingRecords()) };
   const admission = await vault.recordAdmission(record);

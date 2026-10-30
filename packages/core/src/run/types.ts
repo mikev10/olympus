@@ -38,7 +38,7 @@ export interface VaultRef { runId: RunId; kind: VaultRefKind; hash: string; }
 // untrusted input lives; a run records only which kind of trigger started it
 // and its lineage.
 
-export type TriggerKind = 'human' | 'ci-failure' | 'review-feedback' | 'post-merge' | 'scheduled';
+export type TriggerKind = 'human' | 'ci-failure' | 'review-feedback' | 'post-merge' | 'scheduled' | 'issue';
 export type AuthorTrust = 'owner' | 'collaborator' | 'outside' | 'anonymous';
 
 export interface TriggerLineage {
@@ -48,6 +48,9 @@ export interface TriggerLineage {
 }
 
 export interface TriggerRef { kind: TriggerKind; eventId: string; lineage: TriggerLineage; }
+
+/** A recorded intake candidate, by the id the runtime gave it (A-R22-04). */
+export type CandidateId = string & { readonly __brand: 'CandidateId' };
 
 export interface Run {
   id: RunId;

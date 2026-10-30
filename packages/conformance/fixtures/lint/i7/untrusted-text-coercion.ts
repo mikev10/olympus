@@ -12,5 +12,5 @@ declare const payload: UntrustedPayload;
 export const concatenated = 'system prompt: ' + payload.raw; // expect-lint @typescript-eslint/restrict-plus-operands
 // eslint-disable-next-line @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-base-to-string -- I7 fixture
 export const interpolated = `system prompt: ${payload.raw}`; // expect-lint @typescript-eslint/restrict-template-expressions
-// eslint-disable-next-line @typescript-eslint/no-base-to-string -- I7 fixture
+// eslint-disable-next-line @typescript-eslint/no-base-to-string, i7/no-untrusted-sink -- I7 fixture
 export const coerced = String(payload.raw); // expect-lint @typescript-eslint/no-base-to-string

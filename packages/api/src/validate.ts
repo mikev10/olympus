@@ -74,7 +74,9 @@ export type RequestProblemCode =
   | 'unreviewed'
   /** The policy does not validate. */
   | 'invalid-policy'
-  /** The run already has state: it was admitted once, and is resumed, not started again. */
+  /** No intake candidate has the id a run was asked from (A-R22-04). */
+  | 'unknown-candidate'
+  /** The run already has state: it was admitted once, and is resumed, not started again. A candidate that admitted a run already, too. */
   | 'already-admitted'
   /** The workspace store and the workspace lie one inside the other. */
   | 'overlaps'

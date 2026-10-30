@@ -8,6 +8,7 @@
  * from one to the other.
  */
 import type { Budget } from '../driver/contract.js';
+import type { TemplateId } from '../trigger/schemas.js';
 import type {
   AuthorTrust, AutonomyLevel, ModelTier, RoleId, StationId, TriggerKind,
 } from '../run/types.js';
@@ -47,15 +48,58 @@ export type ApprovalOutcome = 'auto' | 'human-required' | 'blocked';
 /** One key per station and level: ten stations, four levels, forty keys. */
 export type ApprovalKey = `${StationId}:${AutonomyLevel}`;
 
-/** I7: a trigger selects a pre-declared template; the payload cannot name one. */
+/**
+ * I7: a trigger selects a pre-declared template; the payload cannot name one.
+ *
+ * A non-human kind in `enabled` validates only with its whole route: an entry
+ * station, a registered template, an autonomy cap, a trust floor, and a field
+ * schema in code (D-A-TF-03); and then `maxDeliveryAgeMs` and
+ * `candidateExpiryMs` are required (D-R22-02, D-R22-04). The four keys R22
+ * added are optional in a document, so a policy that enables only `human`
+ * still validates; an absent list resolves to empty (D-R22-10).
+ */
 export interface TriggerPolicy {
   enabled: TriggerKind[];             // ships as ['human'] only
   entryStation: Partial<Record<TriggerKind, StationId>>;
-  taskTemplate: Partial<Record<TriggerKind, string>>;   // pre-declared; payload cannot name it
+  taskTemplate: Partial<Record<TriggerKind, TemplateId>>;   // from the closed registry; payload cannot name it (A-R22-02)
   maxAutonomy: Partial<Record<TriggerKind, AutonomyLevel>>;
   minAuthorTrust: Partial<Record<TriggerKind, AuthorTrust>>;
   maxTriggerDepth: number;
+  /** Candidates recorded, across non-human kinds, in a sliding window; a person's own runs do not count (D-R22-07). */
   budgetPerWindow: { runs: number; windowMs: number };
+  /** Each a grant: a delivery for an id not here is refused before its body is read (D-A-TF-05). */
+  subscriptions?: TriggerSubscription[];
+  /** Daily firings of the `scheduled` kind (D-A-TF-08). */
+  schedules?: TriggerSchedule[];
+  /** How old a delivery's own signed timestamp may be; at most seven days (D-R22-02). */
+  maxDeliveryAgeMs?: number;
+  /** How long a recorded candidate may wait to be admitted, on the runtime's clock; at most thirty days (D-R22-04). */
+  candidateExpiryMs?: number;
+}
+
+/**
+ * One subscription: a grant naming where deliveries come from and the
+ * secret that verifies them, never the secret (D-A-TF-05). `secret` is the
+ * name of a host environment variable, prefixed `FACTORY_WEBHOOK_`; the host
+ * resolves it and no sandbox spec can name it.
+ */
+export interface TriggerSubscription {
+  id: string;
+  kind: TriggerKind;
+  source: 'github';
+  transport: 'signed-webhook';
+  secret: string;
+  /** The highest trust a delivery's author association can reach here (D-A-TF-07). */
+  trustCeiling: AuthorTrust;
+  /** For an `issue` subscription, the labels an event may carry through; every other label is not extracted. */
+  labels: string[];
+}
+
+/** One daily firing at a UTC time, `HH:MM`, of a registered template (D-A-TF-08). */
+export interface TriggerSchedule {
+  id: string;
+  template: TemplateId;
+  at: string;
 }
 
 /**

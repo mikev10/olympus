@@ -7,7 +7,9 @@
  * what the runtime derived and recorded (I2); nothing a model wrote is
  * presented as status, and nothing here is ever placed in a prompt (I7).
  */
-import type { ApprovalKey, AutonomyLevel, RejectionReason, RunId, RunState } from '@olympus-ai/core';
+import type { ApprovalKey, AutonomyLevel, CandidateId, RejectionReason, RunId, RunState } from '@olympus-ai/core';
+import type { CandidateRecord } from '@olympus-ai/vault';
+import type { DeliveryOutcome } from '../intake.js';
 import type { WorstCaseCost } from '../cost.js';
 import type { RequestedArtifacts, RunOutcome, RunStanding } from '../run.js';
 
@@ -26,6 +28,8 @@ export interface CreateRunBody {
    * through (I7).
    */
   readonly intent?: string;
+  /** The intake candidate the run is admitted from (R22): the person writes the intent, and the candidate supplies the trigger. */
+  readonly candidate?: CandidateId;
 }
 
 /** `POST /runs/:id/approve`. Who approved is the token's principal, never a field (D-P9-06). */
@@ -96,3 +100,30 @@ export interface ErrorBody {
   readonly message: string;
   readonly refusal?: unknown;
 }
+
+/**
+ * One candidate on `GET /intake`, with no body: the kind, the schema's fields,
+ * and where it stands (R22). Every field is the runtime's or the schema's;
+ * nothing here is the payload's free text (I7).
+ */
+export interface CandidateSummary {
+  readonly id: CandidateId;
+  readonly kind: CandidateRecord['kind'];
+  readonly template: CandidateRecord['template'];
+  readonly extracted: CandidateRecord['extracted'];
+  readonly authorTrust: CandidateRecord['authorTrust'];
+  readonly lineage: CandidateRecord['lineage'];
+  readonly recordedAt: string;
+  readonly admittedAs: RunId | null;
+  readonly expiredAt: string | null;
+}
+
+/** `GET /intake/:id`: the candidate, its raw body for the principal to read, and the hash of the decision that recorded it. */
+export interface CandidateView extends CandidateSummary {
+  readonly body: CandidateRecord['body'];
+  readonly signedAt: string | null;
+  readonly decisionSha256: string;
+}
+
+/** 202 from `POST /events/:subscription`: what the delivery came to. A refusal is a 4xx with the cause, and no body text. */
+export type DeliveryAnswer = DeliveryOutcome;

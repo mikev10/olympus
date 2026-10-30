@@ -1,21 +1,25 @@
-import { castFixture, compileError, lintFixture, pending, runtime } from '../kit/assert.js';
+import { castFixture, compileError, lintFixture, runtime } from '../kit/assert.js';
 import { inlineSuppressions, resolvedRuleSeverity, workspaceEslint } from '../kit/eslint.js';
 import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { R20_I7 } from './roles.js';
+import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
 
 /**
  * The typed lint rules I7 depends on. The type system stops UntrustedText
- * from reaching a string-typed slot; these three stop the coercions the type
- * system allows (`+`, template interpolation, String()).
+ * from reaching a string-typed slot; the first three stop the coercions the
+ * type system allows (`+`, template interpolation, String()), and the
+ * workspace's own sink rule stops JSON.stringify and widening to unknown, any,
+ * or object (R22, D-R22-09).
  */
 export const I7_LINT_RULES: readonly string[] = [
   '@typescript-eslint/restrict-plus-operands',
   '@typescript-eslint/restrict-template-expressions',
   '@typescript-eslint/no-base-to-string',
+  'i7/no-untrusted-sink',
 ];
 
 const UNTRUSTED_TYPES: ReadonlySet<string> = new Set(['UntrustedText', 'UntrustedPayload']);
@@ -23,14 +27,16 @@ const UNTRUSTED_TYPES: ReadonlySet<string> = new Set(['UntrustedText', 'Untruste
 /**
  * Files permitted to cast UntrustedText or UntrustedPayload, as
  * workspace-relative POSIX paths. The trigger extractor is the only
- * legitimate reader and it does not exist yet (M2), so the list is empty.
+ * legitimate reader (R22).
  */
-const CAST_ALLOWLIST: readonly string[] = [];
+const CAST_ALLOWLIST: readonly string[] = ['packages/triggers/src/github.ts'];
 
 /** I7: Event payloads are data, never instructions. */
 export const I7: InvariantEntry = {
   title: INVARIANTS.I7,
   assertions: [
+    // R22: the trigger framework, which registers the three entries M2 owed.
+    ...R22_I7,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I7,
@@ -69,7 +75,7 @@ export const I7: InvariantEntry = {
     }),
     runtime({
       id: 'I7.lint-rules-active',
-      title: 'the resolved ESLint configuration keeps restrict-plus-operands, restrict-template-expressions, and no-base-to-string at error for every TypeScript file in every package',
+      title: 'the resolved ESLint configuration keeps restrict-plus-operands, restrict-template-expressions, no-base-to-string, and i7/no-untrusted-sink at error for every TypeScript file in every package',
       run: async () => {
         const files = workspacePackages()
           .flatMap((pkg) => walkFiles(pkg.dir))
@@ -96,7 +102,7 @@ export const I7: InvariantEntry = {
     runtime({
       id: 'I7.lint-rules-not-suppressed-inline',
       title:
-        'no package source outside fixtures/ carries an eslint-disable or inline eslint configuration comment that names one of the three rules, or a bare disable that silences every rule',
+        'no package source outside fixtures/ carries an eslint-disable or inline eslint configuration comment that names one of the four rules, or a bare disable that silences every rule',
       run: () => {
         // The ordinary lint run honours inline configuration, so a disable
         // comment in a package source would silence a rule while the resolved
@@ -109,37 +115,5 @@ export const I7: InvariantEntry = {
       },
     }),
   ],
-  pending: [
-    pending({
-      id: 'I7.enabled-trigger-declares-a-template',
-      owner: 'M2',
-      reason:
-        'TriggerPolicy validates its fields independently, not relationally: `enabled: ["ci-failure"]` with empty '
-        + '`taskTemplate`, `entryStation`, `maxAutonomy` and `minAuthorTrust` maps is a valid document, and the '
-        + 'shipped default itself enables `human` with an empty `taskTemplate` (D-P3-05, deliberately, because no '
-        + 'template registry exists yet). I7 holds only while a trigger selects a pre-declared template, so an '
-        + 'enabled kind with no declared template is a hole for admission to fill permissively — the payload is then '
-        + 'the only thing left that could name one. Trigger admission is M2 and out of scope for P3, so the '
-        + 'obligation lands there: refuse to admit an enabled kind that has no pre-declared template and no entry '
-        + 'station, and assert the refusal. Surfaced by the second P3 external review, finding 5. Whether the '
-        + 'relational check belongs in the validator instead is recorded in D-P3-13.',
-    }),
-    pending({
-      id: 'I7.extracted-field-schemas',
-      owner: 'M2',
-      reason:
-        'TriggerEvent.extracted is the only path from a payload into a run and it is an unconstrained ' +
-        'Record<string, string>. Per-kind field schemas with length caps and character-class validation ' +
-        'must exist, and be asserted, before any non-human trigger is enabled. The trigger framework is M2.',
-    }),
-    pending({
-      id: 'I7.untrusted-sink-lint-rule',
-      owner: 'M2',
-      reason:
-        'JSON.stringify(raw), and widening raw to unknown by annotation or parameter before casting, both compile, pass ' +
-        'lint, and contain no cast from UntrustedText for the scan to see. A type-aware custom ESLint rule that rejects ' +
-        'an UntrustedText- or UntrustedPayload-typed value at those sinks closes them (TypeScript 6.0.3 supports ' +
-        'type-aware custom rules). Deferred to M2 with the trigger framework; see D-F3-06 in docs/decisions.md.',
-    }),
-  ],
+  pending: [],
 };
