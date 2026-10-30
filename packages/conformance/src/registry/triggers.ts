@@ -140,13 +140,14 @@ export async function expiredCandidateRun(rig: LineRig): Promise<AdmissionOutcom
   return (await admitWith(rig, await issuePolicy(), { candidate })).outcome;
 }
 
-/** Admits a run of the hello fixture under `policy`, through a driver that records every request, and drives nothing. */
+/** Admits a run of the hello fixture under `policy`, through a builder and a reviewer that record every request, and drives nothing. */
 async function admitWith(rig: LineRig, policy: Policy, extra: Record<string, unknown> = {}) {
   const { admitRun } = await api();
   const driver = await stubDriver();
-  const components = await rig.components({ driver, reviewer: await stubDriver({ family: 'other' }) });
+  const reviewer = await stubDriver({ family: 'other' });
+  const components = await rig.components({ driver, reviewer });
   const outcome = await admitRun(await rig.request(components, { policy, ...extra }));
-  return { outcome, driver, components };
+  return { outcome, driver, reviewer, components };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,13 +259,13 @@ const UNTRUSTED_SINK_LINT_RULE = lintFixture({
 
 const CANDIDATE_PAYLOAD_REACHES_NO_DRIVER = runtime({
   id: 'I7.candidate-payload-reaches-no-driver',
-  title: 'a run admitted from a candidate runs under its kind and lineage, names the decision that recorded it, and no driver request carries any byte of the delivery body',
+  title: 'a run admitted from a candidate runs under its kind and lineage, names the decision that recorded it, and no request to the builder or the reviewer carries any byte of the delivery body',
   timeoutMs: 120_000,
   run: async () => {
     await withLine('r22-payload-', async (rig) => {
       const policy = await issuePolicy();
       const candidate = await issueCandidate(rig, policy);
-      const { driver, outcome } = await admitWith(rig, policy, { candidate });
+      const { driver, reviewer, outcome } = await admitWith(rig, policy, { candidate });
       if (!outcome.ok) throw new Error(`I7: the run from a candidate was refused as ${outcome.reason}`);
       const vault = await localVault(rig.dirs);
       const entry = await vault.readCandidate(candidate);
@@ -273,7 +274,8 @@ const CANDIDATE_PAYLOAD_REACHES_NO_DRIVER = runtime({
       if (record.candidate?.id !== candidate || record.candidate.decisionSha256 !== entry?.sha256) throw new Error('I2: the admission record does not name the decision the run came from');
       const ended = await outcome.admitted.drive();
       if (driver.requests.length === 0) throw new Error(`I7: the line called no driver (it ended ${ended.ok ? 'ok' : ended.reason}), so nothing was checked`);
-      const sent = JSON.stringify(driver.requests);
+      // Every seated driver, the reviewer's included: a leak into review alone is still a leak (codex-2).
+      const sent = JSON.stringify([driver.requests, reviewer.requests]);
       const body = entry.candidate?.body?.base64 ?? '';
       if (sent.includes(MARKER) || (body !== '' && sent.includes(body))) throw new Error('I7: a driver request carries the delivery body');
     });
