@@ -94,7 +94,7 @@ whole class.
   echo "=== CHANGED ==="; git diff --stat <base>..HEAD; echo
   git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
     [ -f "$f" ] || continue
-    case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
+    case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
     printf '\n===== %s =====\n' "$f"
     if git cat-file -e "<base>:$f" 2>/dev/null; then
       git diff --no-color --no-ext-diff -W <base>..HEAD -- "$f"
@@ -139,6 +139,10 @@ reasoning and prior review outcomes — a reviewer reading it inherits
 conclusions already reached and stops questioning them. `docs/reviews/` holds
 what earlier reviewers found. `docs/plan/` is the spec the code is judged
 against; the reviewer gets the invariants restated in the prompt instead.
+`pnpm-lock.yaml` is generated, and the `package.json` diffs beside it show
+every dependency change a reviewer can judge. Because it sorts after
+`packages/`, it was the bundle's final section, and Gemini twice echoed the
+last code file in its place, so R22's review never counted (D-TOOLING-10).
 
 **The hash is the authority, the tracked copy is the convenience.** A copy can
 be edited and a hash cannot; with the base and head in the bundle's header,
@@ -165,7 +169,7 @@ absent raises nothing anywhere:
 ```bash
 sections=$(grep -cE '^===== .* =====$' docs/reviews/<date>-<UNIT>-<slug>-review-bundle.txt)
 expected=$(git diff -z --name-only --diff-filter=ACMR <base>..HEAD | while IFS= read -r -d '' f; do
-  case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*) continue ;; esac
+  case "$f" in docs/decisions.md|docs/reviews/*|docs/plan/*|pnpm-lock.yaml) continue ;; esac
   echo x
 done | wc -l)
 [ "$sections" -eq "$expected" ] || echo "FAIL: $sections sections for $expected changed files"

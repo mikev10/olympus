@@ -2249,6 +2249,13 @@ its decisions carry a `TOOLING` id rather than a unit's. The design is
 - **Rejected:** (a) the session merging and tagging once four conditions check out, as step 7 previously read. That rested on the maintainer having confirmed the triage, and with that confirmation gone it would leave no human read of the unit at all. (b) Triage proceeding on one counted review after two failures. That would let a unit merge with no cross-family check, and a repeated `INTEGRITY_FAILED` can mean a reviewer followed an instruction planted in the bundle. (c) Keeping the boundary confirmation and chaining only the rest. That gate is where most units waited longest, and what it guarded is now a committed, reviewed record.
 - **Reverse:** restore rule 6's confirm-before-building text in `CLAUDE.md` and `DECOMPOSITION.md`, the waits in `start-unit` §4 and `triage-review` §7, and the stops at the end of `review-request` and `run-review`. Then revert `WORKFLOW.md` and `WORKFLOW-DIAGRAM.md` to the five touch points.
 
+### D-TOOLING-10: review bundles leave out `pnpm-lock.yaml`
+
+- **Problem:** R22's Gemini review failed integrity twice on the same bundle. Both times the nonce was right and ingestion cleared the floor (108,430 tokens against 75,376). The missing marker was the final section: the bundle's last `=====` header was `pnpm-lock.yaml`, 253 lines of generated YAML that sorted after `packages/`, and Gemini echoed `packages/vault/src/types.ts`, the last code file, instead. Codex counted on the same bundle.
+- **Chosen:** `review-request` excludes `pnpm-lock.yaml` in both `case` lists, the generator's and the section count's. A lockfile is generated, and a reviewer can judge every dependency change from the `package.json` diffs, which stay in. The final section is then a source file again.
+- **Rejected:** (a) proceeding on Codex alone, which D-TOOLING-09 rejects for a family that fails twice; (b) changing the runner's final-section marker, which would weaken a check to fit one reply; (c) a third run on the same bundle, which `run-review` forbids.
+- **Reverse:** drop `pnpm-lock.yaml` from both `case` lists. A lockfile change then needs a review of its own.
+
 ## P6: Verification + evidence
 
 ### D-P6-01: The unit spec was completed before the code, after a contradiction in the ledger was resolved
