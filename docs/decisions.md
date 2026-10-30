@@ -6022,3 +6022,152 @@ The record is `docs/reviews/2026-10-30-R22-trigger-framework-triage.md`.
   that loads today, which R22 promised not to do (D-R22-10).
   - **Owner:** the first template that enters at another station. It must
     make admission read the entry station for every kind.
+
+## R23: Workspace skills and instruction discovery
+
+Built against `v2` at 437944a. The spec is R23's entry in
+`docs/plan/DECOMPOSITION.md`, with D-A-WI-01 and D-A-DD-03. The session read
+the code the unit touches and ran the pinned CLI before writing this.
+
+### D-R23-01: the boundary R23 was started on
+
+- **Deliverables:**
+  - the Claude Code driver's `I3.workspace-instructions-not-loaded` plants
+    `.claude/skills/<id>/SKILL.md` and `.agents/skills/<id>/SKILL.md` beside
+    its three plants, and runs once with no tools and once with `Skill`;
+  - a control in the same sandbox and image reruns the `Skill` session
+    without `--setting-sources ''` and must see the `.claude/skills` plant;
+  - `--disable-slash-commands` run on the pinned image, and the choice
+    recorded (D-R23-02);
+  - the R6 driver's own assertion, that every planted file leaves the
+    requests it sends byte-identical;
+  - a registry table naming the workspace-instruction assertion per driver,
+    and a local assertion that every package under `packages/drivers/` has
+    one, registered or pending.
+- **Out of scope, verbatim from the spec:** delivering the target
+  repository's own instructions to a seat, which is R24's; the Codex driver
+  and its entry; any change to what policy can grant.
+- **Acceptance, as commands:**
+  - `pnpm typecheck`, `pnpm lint`, `pnpm typecheck:tooling` pass.
+  - `pnpm --filter @olympus-ai/driver-openai-compatible test` passes, and its
+    new assertion is shown red against a driver that reads a planted file.
+  - `pnpm conformance` passes apart from the driver's stale report, under
+    the D-A-CI-05 rule. The report lists one workspace-instruction entry per
+    driver package. The new meta-assertion is shown red against a phantom
+    driver package.
+  - The Claude Code assertion runs under the pull request's `run-driver`
+    job, which the maintainer applies (D-A-CI-05). It is not run locally:
+    there is no key here, and paid runs wait for the maintainer.
+  - Changesets for `conformance`, `driver-claude-code`, and
+    `driver-openai-compatible`. `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - An agent may not be judged by an artifact it can write (I3). The failure
+    it stops: an agent plants a skill in the tree it hands on, and the next
+    seat runs under it.
+  - Fail closed (I5). A control that cannot see its plant fails the
+    assertion rather than letting it pass vacuously.
+  - Every claim maps to an assertion that fails when the capability is
+    deleted (I8). Deleting `--setting-sources ''` turns the Claude Code
+    assertion red.
+- **Pending registry entries owed:** none. I3's baseline stays 3; R23 adds
+  no pending entry.
+- **Gate paths:** `packages/conformance/`, declared by the spec. The pull
+  request takes `gate-change`, and the squash merge carries
+  `Gate-Change: acknowledged`.
+
+**Assumptions, each verified:**
+
+- P5, R6, and R20 have shipped: each has a `reviewed/<id>` tag
+  (`git tag -l 'reviewed/*'`).
+- The assertion plants three files and runs with `tools: []`:
+  `packages/drivers/claude-code/test/invariants.test.ts:217` and `:238`.
+- `Skill` is declared: `packages/drivers/claude-code/src/tools.ts:33`.
+- The driver passes `--setting-sources ''` on the task argv
+  (`driver.ts:748`), and `#refuseSessionUnlikeGrant` refuses a session
+  missing a granted tool (`driver.ts:850`).
+- The pinned image runs 2.1.277 (`image.ts:26`). Run on it, in a scratch
+  tree with both skill plants, with a placeholder key. The CLI prints its
+  `init` line before any model call, so nothing was spent:
+  - `--tools Skill`: `init.tools` is `["Skill"]`, and `init.skills` lists
+    `probe-alpha` beside the CLI's bundled skills.
+  - `--tools Skill --setting-sources ''`: `probe-alpha` is absent.
+  - `.agents/skills/probe-beta` is listed in neither.
+  - With `--disable-slash-commands`, with or without the flag above,
+    `init.tools` is `[]` and `init.skills` is `[]`.
+- `SessionInit` does not parse `skills` today (`stream.ts:18`).
+- The R6 driver builds its system message from the request alone
+  (`openai-compatible/src/driver.ts:344`), and its source opens no
+  workspace file outside a tool call.
+- The R6 suite calls no model, and its test endpoint logs every body as
+  base64 (`openai-compatible/test/endpoint.ts:14`).
+- Assertion titles must equal the test's: `kit/reconcile.ts:170`.
+- No session has a key here: `ANTHROPIC_API_KEY` is unset, and the Claude
+  Code suite refuses without one (`test/harness.ts:128`).
+
+**Where the code differs from the entry:**
+
+- The entry says the control requires the token to reach the reply. The
+  pinned CLI also names every loaded skill in its `init` line. That is the
+  CLI's own report, not the model's, so it is a second check, not a
+  replacement (D-R23-03).
+- The entry has the control invoke the CLI directly. The harness meters
+  each sandbox's relay against the execs it watched
+  (`test/harness.ts:299`), and an exec past the harness would make
+  `I2.relay-meter-agrees-with-session` fail. The control runs through the
+  harness's watched provider (D-R23-04).
+
+### D-R23-02: the driver does not pass `--disable-slash-commands`
+
+- **Run:** on 2.1.277, `--tools Skill --disable-slash-commands` starts a
+  session whose `init.tools` is `[]`.
+- **Chosen:** the driver does not pass the flag. A request granting `Skill`
+  would get a session without it, and `#refuseSessionUnlikeGrant` refuses
+  that, as the spec says. The assertion is the control.
+- **Rejected:** passing the flag only when `Skill` is not granted. With
+  `Skill` absent the CLI lists no skills either way (D-A-WI-01), so the flag
+  would change nothing there.
+- **Reverse:** a CLI where the flag keeps `Skill` reopens this. The
+  observation holds for this image only, so it is rerun when `CLI_VERSION`
+  changes.
+
+### D-R23-03: the assertion also reads the session's own skill list
+
+- **Ambiguous:** the entry checks the reply. A model asked to list its
+  skills may still leave one out, so a missing token is evidence about the
+  model as well as the CLI.
+- **Chosen:** `SessionInit` gains `skills`, parsed from the `init` line. The
+  assertion requires neither planted id in the driver's sessions, and the
+  planted `.claude/skills` id in the control's. The reply checks stay as the
+  entry binds them.
+- **Rejected:** a runtime refusal of any session that lists a workspace
+  skill. `init` does not say where a skill came from, and the bundled list
+  changes with the CLI version. Refusing would need the driver to know the
+  bundled set, which is a second inventory to keep honest. The assertion
+  already fails on a CLI that loads workspace skills.
+- **Reverse:** drop the `skills` field and the two `init` checks.
+
+### D-R23-04: the control reruns the driver's own argv, less one flag
+
+- **Chosen:** the harness records the argv and environment of each exec it
+  watches. The control takes the driver's `Skill` invocation, removes
+  `--setting-sources ''`, gives it a fresh session id, and runs it through
+  the watched provider. The two sessions differ only in that flag, so a
+  control that sees the plant shows the flag is what hides it.
+- **Rejected:** a hand-built argv. It would have to copy the driver's
+  environment, which is not exported, and a copy can drift from it.
+- **Reverse:** build the control's argv by hand.
+
+### D-R23-05: the per-driver table lives in the registry
+
+- **Chosen:** `packages/conformance/src/registry/workspace-instructions.ts`
+  maps each driver package to its assertion id. The existing external entry
+  moves there from `roles.ts`, keeping its id. A local assertion,
+  `I3.every-driver-has-a-workspace-instruction-assertion`, finds every
+  package under `packages/drivers/`. Each needs a table row, and its row
+  needs an I3 entry: an external assertion in that package, or a pending one.
+  A row naming no driver package also fails. The assertion then adds a
+  phantom driver package and must be refused, so it is shown to bite.
+- **Why a directory:** `packages/drivers/*` is the frozen package layout
+  (F1). A driver anywhere else is already wrong.
+- **Reverse:** drop the file and the assertion. Move the external entry back
+  to `roles.ts`.
