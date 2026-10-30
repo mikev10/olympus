@@ -5572,3 +5572,301 @@ Vendor-side defaults for agent features are I4.
 - **Must hold:** I7. A classification call is a model call, so `UntrustedPayload.raw` never reaches one.
 - **Reverse:** drop the note; R22 holds without it.
 - **Confirmed** by the maintainer, 2026-10-29.
+
+## R22: Trigger framework
+
+Built against `v2` at cd7eff3. The spec is `docs/plan/R22-triggers.md`. The
+session read the code the unit touches and checked GitHub's webhook shapes. It
+stopped on one contradiction and two gaps, asked three questions, and on
+2026-10-29 the maintainer took every recommendation with refinements, recorded
+in D-R22-02 to D-R22-04. The spec is amended in the unit's first commit to
+match.
+
+### D-R22-01: the boundary R22 was started on
+
+- **Deliverables:** as the spec lists them, amended by D-R22-02 to D-R22-04:
+  - admission reads the trigger policy for every kind, `human` included;
+  - a non-human kind validates only with its whole route;
+  - per-kind field schemas in code, with the `issue` kind;
+  - subscriptions and schedules granted in policy;
+  - `POST /events/<subscription>`, signed by HMAC-SHA256 over the body;
+  - GitHub extractors for `post-merge`, `ci-failure`, and `issue`;
+  - a daily schedule that records a firing it missed;
+  - lineage, the budget, and every refusal recorded;
+  - the type-aware sink lint rule;
+  - `GET /intake`, `GET /intake/<id>`, and `POST /runs` with `candidate`.
+- **Out of scope, verbatim from the spec:**
+  - any template that starts a build, and every job template: R13's jobs,
+    R8's signal, R16's bug-fix template
+  - narrowing a task's capability on untrusted input (R10)
+  - `review-feedback`'s schema and extractor, and any source but GitHub
+  - MCP Events, polling a provider's API, and writing back to a tracker
+  - exposing the service to the internet: the tunnel, TLS, and the provider's
+    webhook settings are the operator's
+  - a CLI for candidates beyond what the API returns
+  - a cron grammar; one daily time per schedule
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+  `pnpm conformance`, and `pnpm typecheck:tooling` pass. The three I7 pending
+  entries are registered, and `pending-baseline.json` lowers I7 from 3 to 0.
+  The new assertions are in `packages/conformance/src/registry/triggers.ts`,
+  each shown failing against the code before it. Changesets cover `core`,
+  `triggers`, `vault`, `api`, and `conformance`. `git ls-files -- .plan/`
+  prints nothing.
+- **Invariants touched:**
+  - Event payloads are data, never instructions (I7). Only schema-checked
+    fields leave the extractor, and no schema carries free text. The payload
+    can never name a template, and the sink rule closes `JSON.stringify` and
+    widening to `unknown`. The failure it stops: a webhook body written by
+    anyone on the internet reaching a prompt.
+  - Default deny (I4). A delivery for a subscription the policy does not name
+    is refused before its body is read.
+  - Fail closed (I5). Each check refuses; nothing is clamped, truncated, or
+    treated as fresh when its timestamp is missing.
+  - The runtime derives status (I2). The runtime's clock decides expiry, and
+    the payload's clock never does.
+  - No agent writes to the Vault (I1). Candidates and decisions are written
+    by the host, and no sandbox can name a subscription's secret.
+- **Pending registry entries owed:** `I7.enabled-trigger-declares-a-template`,
+  `I7.extracted-field-schemas`, and `I7.untrusted-sink-lint-rule`
+  (`packages/conformance/src/registry/i7.ts`). The baseline's I7 count is 3
+  (`packages/conformance/pending-baseline.json`).
+- **Gate paths this unit changes, all declared by the spec:**
+  - `eslint.config.js`, for the sink rule;
+  - `packages/conformance/`;
+  - the contract `types.ts` files in `core`, `triggers`, and `vault`;
+  - the triggers manifest, for its new dependencies.
+  The squash merge carries `Gate-Change: acknowledged`.
+
+**Assumptions, each verified:**
+
+- The dependencies have shipped: P3, P9, P12, P14, and R19 each have a
+  `reviewed/<id>` tag (`git tag -l 'reviewed/*'`).
+- `TriggerPolicy` and `CapabilityScope.triggerKinds` are read by nothing but
+  the validator and the clone. Verified: `validateTriggers`
+  (`core/src/policy/validation.ts:375`), `cloneTriggers`
+  (`core/src/policy/engine.ts:110`), and a grep for `triggers.` in `api/src`
+  finds no reader.
+- The run's trigger is a literal: `run.ts:865`.
+- `TriggerEvent.extracted` is `Record<string, string>`, and the cast allowlist
+  is empty: `triggers/src/types.ts`, and `CAST_ALLOWLIST` in `i7.ts`.
+- The benchmark requests no level above its human cap. Its policy has
+  `maxAutonomy: { human: 1 }` (`benchmark/src/line.ts:173`), and both its call
+  sites request level 1 (`line.ts:222`, `critic.ts:145`). Enforcing the cap
+  changes none of its runs.
+- Every policy in the tree enables only `human` and lists it in each role's
+  `triggerKinds`. Verified with `grep -rln "enabled: \["`, which finds only
+  test and default policies, each `['human']`.
+- P14's record is per run. `EnforcementDecision.runId` is required
+  (`vault/src/types.ts:311`), and `listRuns` names every run holding any
+  record, which R2's rates read. A delivery refusal has no run, so it gets a
+  record of its own (D-R22-03).
+- Integration records name the merge commit and the pull request:
+  `IntegrationMerged.mergeCommit` and `pullRequest` (`vault/src/types.ts:346`,
+  `:353`). That is what lineage reads.
+- GitHub's webhook facts:
+  - `X-Hub-Signature-256` is an HMAC over the body alone. No timestamp header
+    is sent, and `X-GitHub-Delivery` and `X-GitHub-Event` are unsigned
+    (docs.github.com, "Webhook events and payloads", delivery headers).
+  - `repository.pushed_at` is a Unix integer in a push payload and an ISO
+    string in a check-run payload.
+  - `check_run` has `completed_at`, `conclusion`, `name`, and `head_sha`, and
+    no `author_association`.
+  - `issues` has `issue.number`, `issue.updated_at`,
+    `issue.author_association`, and `issue.labels[].name`.
+  Read from octokit/webhooks' payload examples (`push/payload.json`,
+  `check_run/completed.payload.json`, `issues/labeled.payload.json`).
+- The service listens on `127.0.0.1` by default, and every route checks the
+  local token first: `host/main.ts:75` and `http/server.ts:417`.
+
+**Where the code or the facts differ from the spec:**
+
+- The spec has a signed timestamp and an unsigned delivery id refused "before
+  it is parsed". GitHub signs no timestamp and leaves the delivery id
+  unsigned, so a captured body replays under a fresh id. Resolved by
+  D-R22-02.
+- The spec names nine causes "in P14's record", and P14's record cannot hold
+  a decision without a run. Resolved by D-R22-03.
+- The spec names "the window the policy names" for candidate expiry. The only
+  window in the policy is the budget's, one hour by default. Resolved by
+  D-R22-04.
+
+### D-R22-02: replay is the body's digest, and staleness is the body's own time
+
+- **Found:** GitHub signs the body alone, and sends no signed timestamp or
+  delivery id (D-R22-01).
+- **Chosen, confirmed by the maintainer on 2026-10-29 with four refinements:**
+  - **Replay.** A delivery whose signature verifies is refused as `replayed`
+    when the Vault already holds the SHA-256 of its exact body under the same
+    subscription. The check comes after the signature and before the parse.
+  - **One write.** The digest is stored in the same write as the delivery's
+    outcome, never ahead of it. A write that fails leaves no digest, so
+    GitHub's own retry is admitted. A retry after a write that succeeded is
+    refused as a duplicate.
+  - **Staleness.** A delivery is refused as `stale` when the timestamp in its
+    signed body is older than `TriggerPolicy.maxDeliveryAgeMs`, or later than
+    the runtime's clock by more than that age. `stale` is a cause of its own,
+    so a late delivery after an outage never reads as an attack. The P14 cause
+    set is ten, not nine.
+  - **The window.** `maxDeliveryAgeMs` is set in policy. It is required when a
+    non-human kind is enabled, and capped by the validator at 7 days. The
+    shipped default is 6 hours.
+  - **The timestamp, per kind:**
+    - a push uses `repository.pushed_at` as a Unix integer, and never
+      `head_commit.timestamp`, because whoever pushes sets the commit time;
+    - a check run uses `check_run.completed_at` as an ISO string;
+    - an issue uses `issue.updated_at` as an ISO string.
+    A timestamp that is missing, of the wrong type, or unparseable is refused
+    as `schema`. It is never read as fresh.
+- **Consequence for the conformance paragraph:** stale is refused after the
+  parse and before extraction. Every other delivery refusal comes before the
+  parse.
+- **Also:** no unsigned header is read for a decision. The kind comes from
+  the subscription, never from `X-GitHub-Event`, and the extractor refuses a
+  body whose shape is not the kind's.
+- **Rejected:**
+  - Following the spec literally with `X-GitHub-Delivery`. Changing one header
+    defeats it.
+  - The digest alone. A captured body that was never delivered could still be
+    delivered late.
+- **Reverse:** add a source that signs a timestamp, and check it before the
+  parse for that source alone.
+
+### D-R22-03: a delivery's refusals are a record of their own, and only verified ones are written one by one
+
+- **Found:** P14's record is keyed by run, and a refused delivery has none
+  (D-R22-01).
+- **Chosen, confirmed by the maintainer on 2026-10-29 with three
+  refinements:**
+  - **The record.** A new Vault record, `TriggerDecision`, stored under
+    intake and not under runs, so `listRuns` and R2's rates are unchanged. A
+    verified delivery is written once, by its digest, as one decision: a
+    candidate, or a refusal naming its cause. The body never goes into a
+    refusal; it stays only in a candidate.
+  - **Before verification.** A request refused before its signature verifies
+    is never written alone. Those refusals are `not-subscribed`, `unverified`,
+    and `oversize`. They are counted per subscription and per hour, by cause,
+    in one count record per bucket. Every unnamed subscription shares one
+    bucket, `(unsubscribed)`, so a path an attacker chose cannot create
+    records. The set of buckets is the policy's subscriptions plus that one,
+    so the record grows by at most that many entries an hour, whatever the
+    traffic. No body, header, or path is kept.
+  - **At admission.** A refusal at a run's admission (`not-enabled`, `trust`,
+    `depth`) stays in the run's own P14 record, as `trigger-refused`.
+  - **Tracing back.** A run admitted from a candidate names the candidate and
+    its `TriggerDecision` in its admission record, so the run traces back to
+    the delivery that prompted it.
+  - **Nightly review.** R13's re-hash job and its review of the day's
+    refusals read the new record and the counts. `DECOMPOSITION.md`'s R13
+    entry says so.
+  - **A known limit, owned by R12:** telemetry export does not yet carry
+    trigger decisions or counts.
+- **Rejected:** a nullable `EnforcementDecision.runId`. Every reader of the
+  record would have to handle a decision with no run.
+- **Reverse:** move delivery decisions into P14's record under a synthetic
+  run id, and filter it out of `listRuns`.
+
+### D-R22-04: a candidate expires on the runtime's clock, and the expiry is recorded
+
+- **Chosen, confirmed by the maintainer on 2026-10-29 with three
+  refinements:**
+  - **The field.** `TriggerPolicy.candidateExpiryMs` is required only when a
+    non-human kind is enabled, so a policy that enables only `human` still
+    loads. The validator caps it at 30 days, and the shipped default is
+    7 days.
+  - **The clock.** Expiry runs from the time the runtime recorded the
+    candidate. The time in the body is staleness's (D-R22-02), so a late
+    delivery that was accepted still gets the full window (I2).
+  - **Recorded, not deleted.** An admission that comes too late records the
+    candidate as expired and is refused as `candidate-expired`. The candidate
+    and its evidence stay.
+- **Rejected:** reusing `budgetPerWindow.windowMs`. One hour is too short for
+  a person to read a candidate and act on it.
+- **Reverse:** drop the field and read the budget's window.
+
+### D-R22-05: the template registry and the field schemas live in `core`
+
+- **Ambiguous:** the spec puts schemas "in code" and has the policy validator
+  refuse a kind with no schema or a template not in the registry. The
+  validator is in `core`, and `core` cannot import `triggers`, which depends
+  on it.
+- **Chosen:** the registry (`TemplateId`, which is `'intake-candidate'`) and
+  each kind's field schema, as data, live in `core/src/trigger/`. The
+  validator reads them there. `triggers` owns the envelope, the signature
+  check, the extractors, and the one function that checks an extracted record
+  against its schema. `TriggerEvent.extracted` is typed from core's schema.
+- **Rejected:** passing the registry into `validatePolicyDocument` as an
+  argument. Every caller could pass a wider one, and the shipped validator
+  would no longer be the rule.
+- **Reverse:** move the schemas into `triggers`, and have core take only a
+  list of kinds with schemas, kept in step by an assertion.
+
+### D-R22-06: which admission refusal each trigger check gives
+
+- **Chosen:**
+  - **Over the cap.** A level over the kind's `maxAutonomy`, or a kind with no
+    entry, is `policy-refused` with `exceeds-cap`. A role that does not list
+    the kind is `policy-refused` with `capability-missing`. Both are the
+    engine's existing reasons, so a reader already counts them.
+  - **Trigger causes.** A kind not enabled, an author below `minAuthorTrust`
+    (or a kind with no entry), and a depth past `maxTriggerDepth` are
+    `trigger-refused`, naming `not-enabled`, `trust`, or `depth`.
+  - **The human trigger.** It is checked first, with author trust `owner` and
+    depth 0.
+- **Rejected:** a `trigger-refused` arm for every check. It would count one
+  over-request two ways.
+- **Reverse:** move the cap and the role checks under `trigger-refused`.
+
+### D-R22-07: the budget counts candidates, not human runs
+
+- **Ambiguous:** "`budgetPerWindow` counts admitted events across kinds".
+- **Chosen:**
+  - **What counts.** Every candidate recorded counts, from every non-human
+    kind, scheduled firings included, in a sliding window. An event over the
+    budget is refused as `budget` and recorded, never queued.
+  - **What does not.** A run a person starts through `POST /runs` is not an
+    event and does not count. A run admitted from a candidate does not count
+    again.
+- **Why:** a person's runs are already bounded by cost approval. Counting
+  them would let a burst of webhooks starve the person, or the person starve
+  the webhooks.
+- **Reverse:** count human admissions in the same window.
+
+### D-R22-08: author trust per kind
+
+- **Chosen:**
+  - **Issues.** `issue.author_association` maps `OWNER` to `owner`, `MEMBER`
+    and `COLLABORATOR` to `collaborator`, and `CONTRIBUTOR`,
+    `FIRST_TIME_CONTRIBUTOR`, and `FIRST_TIMER` to `outside`. Anything else,
+    or absent, is `anonymous`.
+  - **Pushes and check runs.** They carry no association (D-R22-01), so they
+    are `anonymous`. A policy that enables `post-merge` or `ci-failure` sets
+    its floor to `anonymous` deliberately. The signature, not the author, is
+    what admits them.
+  - **The ceiling.** Each subscription's `trustCeiling` caps the result.
+- **Reverse:** read a push's pusher against a policy allowlist.
+
+### D-R22-09: where the sink rule lives
+
+- **Chosen:** `packages/conformance/lint/untrusted-sink.js`, a plain ES module
+  the workspace `eslint.config.js` loads as a local plugin. The conformance
+  package is a protected path, so weakening the rule needs the gate label, as
+  turning off a rule in the config does.
+- **Rejected:** a root `eslint-rules/` directory, which is not protected.
+- **Reverse:** move the file and update the import.
+
+### D-R22-10: the contract shapes the amendments take
+
+- **Chosen:**
+  - **TriggerPolicy.** `subscriptions`, `schedules`, `maxDeliveryAgeMs`, and
+    `candidateExpiryMs` are optional keys in a document. An absent list
+    resolves to empty, so every policy written before R22 still validates.
+  - **RunRequest.** `candidate` is optional and defaults to null, as `intent`
+    is.
+  - **Body cap.** The delivery body is capped at 1 MiB before it is read. A
+    push payload lists at most twenty commits, so a real one stays far below
+    the cap.
+  - **Scheduled firings.** A firing is keyed by its schedule id and UTC date,
+    which is its replay key. On start, the service records missed firings as
+    one `missed` entry per schedule, naming the first and last dates missed,
+    and never fires them.
+- **Reverse:** make the keys required and update every policy in the tree.

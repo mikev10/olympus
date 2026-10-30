@@ -14,6 +14,12 @@ untrusted and only extracted fields go further (I7), a subscription is a grant
 in policy (I4), and the secret that verifies a delivery is held where P12
 holds credentials, never inside a sandbox.
 
+Amended when the unit started, confirmed by the maintainer on 2026-10-29
+(D-R22-02 to D-R22-04). GitHub signs neither a timestamp nor a delivery id,
+so replay is refused by the body's digest and staleness by the body's own
+time. A refused delivery has no run, so its outcome is a record kept beside
+the runs. A candidate expires after a window of its own.
+
 ---
 
 ## What the code holds, verified against it
@@ -100,8 +106,12 @@ must say what supplies the spec when no person wrote an intent.
 - **One transport, signed webhooks** (D-A-TF-06). `POST /events/<subscription>`
   is the one route outside the local token. The body is capped in bytes
   before it is read; its HMAC-SHA256 over the exact bytes is checked against
-  the named secret in constant time before it is parsed; a delivery id seen
-  before, or a signed timestamp outside a five-minute window, is refused. The
+  the named secret in constant time before it is parsed; a body whose digest
+  the Vault already holds for the subscription is refused as replayed, the
+  digest stored in the same write as the delivery's outcome; and a body whose
+  own signed timestamp is older than the policy's `maxDeliveryAgeMs` is
+  refused as stale, after the parse and before extraction. GitHub signs no
+  timestamp and no delivery id, so neither is read (D-R22-02). The
   host resolves the secret from its environment, as it does
   `FACTORY_ENDPOINT_KEY`, and no sandbox spec can name it. MCP Events is not a
   transport here; it is a draft.
@@ -120,10 +130,14 @@ must say what supplies the spec when no person wrote an intent.
   request an Olympus run produced carries that run's chain plus the run, and
   its depth is one more. `budgetPerWindow` counts admitted events across kinds
   in a sliding window; an event over it is refused and recorded, never queued.
-  Every refusal names its cause in P14's record: `not-subscribed`,
-  `unverified`, `replayed`, `oversize`, `schema`, `not-enabled`, `depth`,
-  `budget`, or `trust`. A candidate stores the raw payload in the Vault beside
-  its hash, readable by the principal through the API and never by a driver.
+  Every refusal names its cause: `not-subscribed`, `unverified`, `replayed`,
+  `stale`, `oversize`, `schema`, `not-enabled`, `depth`, `budget`, or
+  `trust`. A refusal at a run's admission is in that run's P14 record. A
+  verified delivery's outcome is a trigger decision kept beside the runs, not
+  under them; a request refused before its signature verifies is counted per
+  subscription and hour, by cause, and never written alone (D-R22-03). A
+  candidate stores the raw payload in the Vault beside its hash, readable by
+  the principal through the API and never by a driver.
 - **The sink rule** (`I7.untrusted-sink-lint-rule`). A type-aware ESLint rule
   in the workspace configuration rejects a value typed `UntrustedText` or
   `UntrustedPayload` as an argument to `JSON.stringify` and as the source of an
@@ -132,19 +146,26 @@ must say what supplies the spec when no person wrote an intent.
   `-not-suppressed-inline`.
 - **The API.** `GET /intake` lists candidates; `GET /intake/<id>` returns one
   with its raw payload; `POST /runs` takes `candidate`, admitting the run under
-  the candidate's trigger, once. A candidate admitted, or older than the
-  window the policy names, cannot be admitted again.
+  the candidate's trigger, once, and the admission record names the candidate
+  and its trigger decision. A candidate admitted cannot be admitted again; one
+  older than the policy's `candidateExpiryMs`, on the runtime's clock from
+  when it was recorded, is recorded as expired and refused (D-R22-04).
 
 ## Contract amendments, owed by the unit's pull request
 
 - **A-R22-01:** `TriggerKind` gains `'issue'`
-- **A-R22-02:** `TriggerPolicy` gains `subscriptions` and `schedules`;
-  `taskTemplate` values are a `TemplateId` from the registry, not a string
+- **A-R22-02:** `TriggerPolicy` gains `subscriptions`, `schedules`,
+  `maxDeliveryAgeMs`, and `candidateExpiryMs`, the last two required when a
+  non-human kind is enabled; `taskTemplate` values are a `TemplateId` from
+  the registry, not a string
 - **A-R22-03:** `TriggerEvent.extracted` is the kind's typed field record
 - **A-R22-04:** `RunRequest` gains `candidate: CandidateId | null`; the Vault
-  gains the candidate record and its operations
-- **A-R22-05:** admission's refusal union gains `trigger-refused`, and P14's
-  cause union the nine causes above
+  gains the candidate record, the trigger decision, the refused-delivery
+  counts, and their operations; `AdmissionRecord` gains the candidate it was
+  admitted from
+- **A-R22-05:** admission's refusal union gains `trigger-refused` and
+  `candidate-expired`; the trigger decision's cause union is the ten causes
+  above
 
 ## Out of scope
 
@@ -165,9 +186,11 @@ past the limit, and a role that does not list the kind each refuse admission,
 for `human` as for any other; a non-human kind enabled without its whole route
 does not validate; an extracted value outside its schema refuses the event and
 nothing is truncated; no schema carries free text; a delivery for an unnamed
-subscription, unsigned, wrongly signed, replayed, stale, or oversized is
-refused before it is parsed, and its body reaches no record but the refusal's
-hash; no sandbox spec can name a subscription's secret; no driver request in a
+subscription, unsigned, wrongly signed, replayed, or oversized is refused
+before it is parsed, and one stale or with no readable timestamp before it is
+extracted; a refused body reaches no record but the refusal's hash, and a
+request refused before verification is only counted; a failed write leaves
+no digest, so a retry is admitted; no sandbox spec can name a subscription's secret; no driver request in a
 run admitted from a candidate contains any byte of the raw payload; an event
 over the budget is refused, not queued; a candidate admits one run; the sink
 rule rejects each sink it names.

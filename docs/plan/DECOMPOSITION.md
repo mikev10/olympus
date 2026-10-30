@@ -941,6 +941,10 @@ within the agent's reach, and would need an egress grant (D-A-LC-09). A
 reference dashboard definition may ship with the unit; a hosted dashboard is
 the control plane's.
 
+**Known limit, owned here:** R22's trigger decisions and refused-delivery
+counts are not exported yet, so a refused-delivery rate is not on a dashboard
+(D-R22-03).
+
 ### R13 — Nightly review
 
 Three jobs on the `scheduled` trigger. The first involves no model: it re-hashes
@@ -975,6 +979,11 @@ not is refused by the runtime rather than recorded. A finding becomes an
 the reviewer's text kept as its claim and never entering a later prompt (I7).
 A human admits it like any other. The job never opens a change or drafts a
 fix, and it narrows nothing on its own (D-A-EX-01).
+
+The first job's re-hash and the second job's day of refusals include R22's
+trigger decisions and its per-hour counts of deliveries refused before their
+signature verified, which are kept beside the runs and not under them
+(D-R22-03).
 
 ### R14 — Model tier per station and escalation
 
