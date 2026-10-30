@@ -260,8 +260,11 @@ invariantTest(
         // The session answered, so its silence on the tokens is the instructions' and not a session that never ran.
         expect(result.claim.narrative, taskId).toContain('READY');
         for (const { path, token } of PLANTED) expect(result.claim.narrative, `${taskId}: ${path} was loaded`).not.toContain(token);
-        // The CLI's own account of the skills it listed, which does not depend on the model mentioning them.
-        const listed = h.driver.sessionFor(taskId as TaskId)?.skills;
+        // The CLI's own account of the skills and agents it listed, which does not depend on the model mentioning them.
+        // The agent definition is the one plant besides the skills that the init line can show (codex-1).
+        const session = h.driver.sessionFor(taskId as TaskId);
+        expect(session?.agents, `${taskId}: the workspace agent definition was listed`).not.toContain(PROBE_ROLE.role);
+        const listed = session?.skills;
         expect(listed, taskId).toBeDefined();
         expect(listed, `${taskId}: a workspace skill was listed`).not.toContain(SKILL.id);
         expect(listed, `${taskId}: a workspace skill was listed`).not.toContain(OTHER_SKILL.id);
@@ -279,6 +282,7 @@ invariantTest(
       const control = parseStream((await h.exec(h.handle, cmd, { env: invocation.env })).stdout);
       expect(control.init?.skills, 'the control did not list the .claude/skills plant, so the assertion cannot see what it guards').toContain(SKILL.id);
       expect(control.result?.narrative, 'the control listed the plant but its token did not reach the reply').toContain(SKILL.token);
+      expect(control.init?.agents, 'the control did not list the planted agent definition, so the agents check above cannot see it').toContain(PROBE_ROLE.role);
     });
   },
 );
