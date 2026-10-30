@@ -1,0 +1,90 @@
+The code under review is in the file
+`2026-10-30-R23-workspace-skills-review-bundle.txt` (SHA-256 ad5f28ceaab04b8df3c1684f02cbda0365be1e20ef77cdbad8c57f470aedeef3) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the conformance assertions that prove two model drivers do not load instruction files from the working tree, of a
+TypeScript project. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs coding agents in a sequence of seats over one repository working tree, inside a Docker sandbox. Each seat must run under the instructions its role supplies and nothing else, because an agent can write files into the tree the next seat runs over. Two drivers exist: one runs the Claude Code CLI inside the sandbox, the other runs its own agent loop against an OpenAI-compatible endpoint. This change extends the Claude Code driver's assertion to cover skills (`.claude/skills/<id>/SKILL.md` and `.agents/skills/<id>/SKILL.md`) with and without the `Skill` tool granted, adds a control that reruns the driver's own invocation without the `--setting-sources ''` flag and must see the planted skill, adds an equivalent assertion for the OpenAI-compatible driver (requests sent over a planted workspace must be byte-identical to those over an empty one), and adds a registry check that every package under `packages/drivers/` owns such an assertion.
+
+The Claude Code assertion makes real model calls and runs only in CI with a credential. The OpenAI-compatible assertion calls no model; its endpoint is a scripted test server that logs every request body. Assertions are registered in `packages/conformance/src/registry`; an `external` entry counts only when the owning package's own test run reports the test with that exact id and title passing.
+
+It must hold against a capable, motivated party trying to make these assertions pass while a driver does load an instruction file from the working tree. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the files in the working tree (the workspace mount), what the model writes in its reply, and, for future work, the source of a new driver package. It does not control the components the runtime is wired with — the sandbox provider, the relay that holds the model credential, the CLI version pinned in the image, and the conformance kit's reconciliation of test reports are trusted — and it does not control code running inside the test runner's own process.
+
+The invariants at stake:
+
+- An agent may not be judged by, or instructed by, an artifact it can write. Instruction files planted in the working tree must not reach the next seat's session.
+- Fail closed. A missing check, a control that cannot see what it guards, or a session that did not run is a refusal, never a pass.
+- Every capability claim maps to an executable assertion that fails when the capability is deleted. Removing `--setting-sources ''` from the Claude Code driver's command line must turn its assertion red.
+
+The mechanisms that matter most:
+
+- The Claude Code assertion: two driver sessions (no tools; `Skill` granted), checked on the reply text and on the CLI's own `init` skill list, and the control that reruns the recorded `Skill` invocation with one flag removed.
+- The test harness's recording of each exec's argv and environment, and the exec it exposes for the control, which must stay metered beside the driver's calls.
+- The OpenAI-compatible assertion's byte comparison of request bodies between a bare and a planted workspace.
+- `workspaceInstructionProblems` and `I3.every-driver-has-a-workspace-instruction-assertion`: discovery of driver packages and the table check.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Delivering the target repository's own instructions to a seat, which is R24's; the Codex driver and its entry; any change to what policy can grant.
+
+(R24 is a later unit that may deliver a repository's instruction files to a seat deliberately, from the base commit rather than the working tree. The Codex driver does not exist yet. Unit ids mean nothing outside the project's plan; read them as "later work".)
+
+THE QUESTION
+
+How would a driver load an instruction file from the working tree, or a CLI upgrade start doing so, while every one of these assertions still passes — and how would a new driver package avoid owing one?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
