@@ -29,6 +29,26 @@ export const held: Record<string, unknown> = { raw }; // expect-lint i7/no-untru
 // eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
 export const listed: unknown[] = [raw]; // expect-lint i7/no-untrusted-sink
 
+// Wrapped: the untrusted value inside a container the rule must look into.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- I7 fixture: the erasure under test
+declare function erase<T>(value: T): unknown;
+interface Wrapper { readonly inner: { readonly payload: UntrustedPayload } }
+declare const wrapper: Wrapper;
+// eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
+export const wrapped = JSON.stringify({ payload }); // expect-lint i7/no-untrusted-sink
+// eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
+export const nested = JSON.stringify(wrapper); // expect-lint i7/no-untrusted-sink
+// eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
+sink({ payload }); // expect-lint i7/no-untrusted-sink
+// eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
+sink(wrapper); // expect-lint i7/no-untrusted-sink
+// Generic erasure: a type parameter the return type drops.
+// eslint-disable-next-line i7/no-untrusted-sink -- I7 fixture
+export const erased = erase(payload); // expect-lint i7/no-untrusted-sink
+
 // Not reported: the envelope kept at its own type, and a trusted string widened.
 export const kept: UntrustedPayload = payload;
 export const trusted: unknown = 'a trusted string';
+// A generic that keeps its type parameter in what it returns erases nothing.
+export const frozen = Object.freeze(payload);
+export const lists: UntrustedPayload[][] = [[payload]];

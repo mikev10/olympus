@@ -252,7 +252,7 @@ const EXTRACTED_FIELD_SCHEMAS = runtime({
 
 const UNTRUSTED_SINK_LINT_RULE = lintFixture({
   id: 'I7.untrusted-sink-lint-rule',
-  title: 'i7/no-untrusted-sink reports UntrustedText and UntrustedPayload passed to JSON.stringify, and widened to unknown, any, or object by annotation, argument, return, property, or array element',
+  title: 'i7/no-untrusted-sink reports UntrustedText and UntrustedPayload passed to JSON.stringify, and widened to unknown, any, or object by annotation, argument, return, property, or array element, including when held inside a container or erased through a generic',
   fixture: 'i7/untrusted-sink.ts',
 });
 
