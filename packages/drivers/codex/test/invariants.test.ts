@@ -18,7 +18,7 @@ import type { TaskId } from '@olympus-ai/core';
 import { SandboxRefusal, type SandboxProvider } from '@olympus-ai/sandbox';
 import { CATALOG_WITH_PATCH, CATALOG_WITHOUT_PATCH, CodexDriver, DECLARED_TOOLS, DriverRefusal, FAMILY, KEY_PLACEHOLDER, TIER_MODELS } from '../src/index.js';
 import { PROCESS_DUMP, WORKDIR, credential, dockerOut, meteredSessions, spec, withDriver, type Harness } from './harness.js';
-import { controlRequestBody, plantAll, plants } from './plants.js';
+import { plantAll, plants, plantsAreLiveAndAbsent } from './plants.js';
 
 const MARKER = 'i1-inside-the-sandbox.txt';
 
@@ -160,7 +160,7 @@ invariantTest(
 invariantTest(
   'I3.codex-workspace-instructions-not-loaded',
   'an AGENTS.md, an AGENTS.override.md, a nested AGENTS.md, a skill under .agents/skills, .codex/skills, and a nested .agents/skills, and a .codex/config.toml, planted in the workspace, '
-    + "reach neither the session's request nor its reply with no tools or with every declared tool, while the same invocation without the driver's instruction settings carries the plants: "
+    + "reach neither the session's request nor its reply with no tools or with every declared tool, nor the request of a session started in the nested directory, while the same invocation without the driver's instruction settings carries every plant but the config: "
     + 'the task runs under its role alone',
   async () => {
     await withDriver({ relay: true }, async (h) => {
@@ -177,9 +177,12 @@ invariantTest(
         }
         expect(result.claim.narrative.toLowerCase()).toContain('ready');
       }
-      const control = await controlRequestBody(h, [...DECLARED_TOOLS]);
-      const seen = set.filter((p) => control.includes(p.token)).map((p) => p.path);
-      expect(seen).toEqual(expect.arrayContaining(['AGENTS.override.md', '.agents/skills/plant/SKILL.md', '.codex/skills/plant-codex/SKILL.md']));
+      // Each plant live in a control and absent from the driver, from the root and from sub/ (codex-5). The inspection calls no model.
+      let n = 0;
+      await plantsAreLiveAndAbsent(h, set, [...DECLARED_TOOLS], async (driver) => {
+        n += 1;
+        return (await driver.inspect(h.request({ taskId: `i3-live-${String(n)}` as TaskId, tools: [...DECLARED_TOOLS] }))).body;
+      });
     });
   },
 );

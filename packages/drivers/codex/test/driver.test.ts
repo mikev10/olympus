@@ -29,7 +29,7 @@ import {
   tomlString,
 } from '../src/index.js';
 import { PROBE_ROLE, withDriver } from './harness.js';
-import { controlRequestBody, plantAll, plants } from './plants.js';
+import { plantAll, plants, plantsAreLiveAndAbsent } from './plants.js';
 
 /** A provider that records every exec and runs none, for refusals that must happen before anything starts. */
 function inertProvider(): { provider: SandboxProvider; execs: number } {
@@ -263,16 +263,15 @@ describe('the inspection reads the request the session would send (D-R26-02)', (
     });
   });
 
-  test('no planted instruction source reaches the request, while the same invocation without the driver settings reads them', async () => {
+  test('no planted instruction source reaches the request from the root or from a subdirectory, while the same invocation without the driver settings reads each one it can (codex-5)', async () => {
     await withDriver({ relay: false }, async (h) => {
       const set = plants();
       await plantAll(h, set);
-      const inspection = await h.driver.inspect(h.request({ taskId: 'plants' as TaskId, tools: [...DECLARED_TOOLS] }));
-      for (const p of set) expect(inspection.body, p.path).not.toContain(p.token);
-      // The control: the plants are where the pinned CLI reads (R23).
-      const control = await controlRequestBody(h, [...DECLARED_TOOLS]);
-      const seen = set.filter((p) => control.includes(p.token)).map((p) => p.path);
-      expect(seen).toEqual(expect.arrayContaining(['AGENTS.override.md', '.agents/skills/plant/SKILL.md', '.codex/skills/plant-codex/SKILL.md']));
+      let n = 0;
+      await plantsAreLiveAndAbsent(h, set, [...DECLARED_TOOLS], async (driver) => {
+        n += 1;
+        return (await driver.inspect(h.request({ taskId: `plants-${String(n)}` as TaskId, tools: [...DECLARED_TOOLS] }))).body;
+      });
     });
   });
 });

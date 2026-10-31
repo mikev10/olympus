@@ -65,7 +65,7 @@ export const CODEX_RELAY_METER_AGREES_WITH_SESSION = external({
 
 /** The title of the workspace-instruction assertion R23's table names for this driver (D-A-DD-03). */
 export const CODEX_WORKSPACE_INSTRUCTIONS_NOT_LOADED_TITLE =
-  "an AGENTS.md, an AGENTS.override.md, a nested AGENTS.md, a skill under .agents/skills, .codex/skills, and a nested .agents/skills, and a .codex/config.toml, planted in the workspace, reach neither the session's request nor its reply with no tools or with every declared tool, while the same invocation without the driver's instruction settings carries the plants: the task runs under its role alone";
+  "an AGENTS.md, an AGENTS.override.md, a nested AGENTS.md, a skill under .agents/skills, .codex/skills, and a nested .agents/skills, and a .codex/config.toml, planted in the workspace, reach neither the session's request nor its reply with no tools or with every declared tool, nor the request of a session started in the nested directory, while the same invocation without the driver's instruction settings carries every plant but the config: the task runs under its role alone";
 
 /** The claim titles, by key, for `claims.ts` (D-R26-07). */
 export const CODEX_CLAIM_TITLES = {
