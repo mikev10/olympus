@@ -6541,3 +6541,37 @@ Responses stream. No model was called.
   and the container is the sandbox, as the spec requires. The CLI's own
   sandbox is a second layer the line does not rely on, so it is not
   configured. The probe ran a command this way, as uid 1001.
+
+### D-R26-12: what each assertion was shown failing against
+
+- **The inspection refuses a wider session.** The free test and
+  `I4.codex-driver-tool-inventory-validated` run an empty grant through a
+  provider that swaps the catalog without `apply_patch` for the one with it.
+  With the tool comparison in `#inspect` replaced by `if (false)`, the free
+  test went red; restored, it passes.
+- **The inspection caught a real gap before any review did.** The first run
+  of the free suite was refused: an empty grant's session offered
+  `multi_agent_v1`, because the driver passed the catalog override without
+  `--disable multi_agent`. The record above was corrected in its own commit.
+- **The plants are where the CLI reads.** The control reruns the driver's
+  argv less its four instruction settings, through the same capture, and
+  must see the `AGENTS.override.md`, `.agents/skills`, and `.codex/skills`
+  plants. It does, so their absence from the driver's request is not a
+  plant the CLI never looked at.
+- **The meter.** Each new `openai-responses` test failed against the relay
+  before the dialect existed (eight red, then 41 of 41 green).
+
+### D-R26-13: the paid suite, and what CI runs without it
+
+- Every claim assertion reads the session's request through the inspection
+  and calls no model, so `claims.test.ts` joins `driver.test.ts` in the
+  free step. The paid file is `invariants.test.ts` alone.
+- The paid suite is not run here. The only OpenAI key is CI's, and a paid
+  run waits for the maintainer's `run-driver` label (D-A-CI-05). The full
+  `runTask` path was smoke-tested here against a canned Responses endpoint
+  inside the container: the inspection, the run, the events, the usage, and
+  the identity came back as expected. That smoke test is not committed; it
+  proves nothing a reviewer can rerun.
+- The `verify` job's timeout goes from 20 to 35 minutes, for a second image
+  build and suite. The recursive test step excludes this driver as it
+  excludes P5's, so its paid file is never run twice.
