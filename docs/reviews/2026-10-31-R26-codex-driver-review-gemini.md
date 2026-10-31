@@ -1,3 +1,19 @@
+# External review of R26, gemini, 2026-10-31
+
+The gemini review of R26, Driver: Codex: the Codex CLI driver and the relay's Responses meter. Its findings are verified and decided in `2026-10-31-R26-codex-driver-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini. a direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 was raised by Codex too (codex-1), and gemini-2 too (codex-3).
+- **Date:** 2026-10-31
+- **Bundle:** `2026-10-31-R26-codex-driver-review-bundle.txt`, SHA-256 `901475a10ff11eb1b6783be8551afba916d69e26aceeecce2c9d27bebb7f05ec`, base `reviewed/R23`, head `fcd1cca` (the unit branch as shipped). Every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-10-31-R26-codex-driver-review-prompt.txt`.
+- **Prior context and lookups:** It said it had no prior context and made no lookups. This is a self-report and cannot be checked independently.
+- **Coverage, and any gap:** It answered item 1 alone. Items 2 to 7 came back empty, item 7 (the framing) included, and that silence is not an endorsement.
+- **Citations:** line numbers refer to positions in the bundle, not the repository, and are treated as hints.
+
+---
+
 BASE: reviewed/R23
 HEAD: fcd1cca
 packages/sandbox/test/upstream.ts

@@ -1,3 +1,19 @@
+# External review of R26, codex, 2026-10-31
+
+The codex review of R26, Driver: Codex: the Codex CLI driver and the relay's Responses meter. Its findings are verified and decided in `2026-10-31-R26-codex-driver-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex. a headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory and a scratch config home holding only `auth.json`, with an environment of `CODEX_HOME` alone. The pre-run listing of both is the manifest's `cleanRoom`.
+- **Cross-family agreement:** codex-1 was raised by Gemini too (gemini-1), and codex-3 too (gemini-2). codex-2, codex-4, and codex-5 were raised by Codex alone.
+- **Date:** 2026-10-31
+- **Bundle:** `2026-10-31-R26-codex-driver-review-bundle.txt`, SHA-256 `901475a10ff11eb1b6783be8551afba916d69e26aceeecce2c9d27bebb7f05ec`, base `reviewed/R23`, head `fcd1cca` (the unit branch as shipped). Every new file in full and every modified file as a function-context diff. `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-10-31-R26-codex-driver-review-prompt.txt`.
+- **Prior context and lookups:** It said it had no prior context and made no lookups, and that local command execution was blocked. This is a self-report and cannot be checked independently.
+- **Coverage, and any gap:** It answered items 1 to 7. Item 7 says the framing is right and that the boundary is wider than the advertised tools.
+- **Citations:** line numbers refer to positions in the bundle, not the repository, and are treated as hints.
+
+---
+
 BASE: reviewed/R23
 HEAD: fcd1cca
 packages/sandbox/test/upstream.ts
