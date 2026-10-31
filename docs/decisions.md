@@ -6400,9 +6400,12 @@ Responses stream. No model was called.
     config key does (`spec_plan.rs:1426`);
   - `features.view_image=false` removes `view_image`;
   - `features.goals=false` removes the three goal tools together;
-  - `multi_agent_version: null` in the catalog removes the
-    `multi_agent_v1` namespace that `tool_mode: "direct"` exposes.
-    `--disable multi_agent` and `agent_max_depth=0` did not;
+  - `multi_agent_version: null` in the catalog, together with
+    `--disable multi_agent`, removes the `multi_agent_v1` namespace that
+    `tool_mode: "direct"` exposes. Neither does it alone, and
+    `agent_max_depth=0` does not. Corrected after the driver's own
+    inspection refused a session that held the namespace with only the
+    catalog override: the probe this line first cited had passed both;
   - `supports_search_tool: false` removes `tool_search`;
   - `web_search="disabled"` removes `web_search`;
   - `tools.experimental_request_user_input.enabled=false` removes
