@@ -516,6 +516,25 @@ describe('the openai-responses dialect is metered by the same rules (A-R26-01)',
     expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 3, inputTokens: 3000, outputTokens: 96 + 96 + 500, refused: 2, exhausted: 'none' });
   });
 
+  test('a hosted tool, a service tier other than the default, and a stored prompt are refused unsent: each is billed outside the usage the meter reads (codex-1, gemini-1)', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+    const usage = { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 };
+    const fn = { type: 'function', name: 'f', parameters: { type: 'object', properties: {} } };
+    const answers = await send(handle, [
+      respond(usage, { tools: [{ type: 'web_search' }] }),
+      respond(usage, { tools: [fn, { type: 'mcp', server_label: 'x', server_url: 'https://example.invalid' }] }),
+      respond(usage, { tools: 'web_search' }),
+      respond(usage, { service_tier: 'priority' }),
+      respond(usage, { service_tier: 'auto' }),
+      respond(usage, { prompt: { id: 'pmpt_x' } }),
+      respond(usage, { tools: [fn, { type: 'custom', name: 'apply_patch' }], service_tier: 'default' }),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 400, 400, 400, 400, 400, 200]);
+    expect(answers[0]?.body).toContain('web_search');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, refused: 6, exhausted: 'none' });
+  });
+
   test('an unpriced model is refused unsent, a stream cut before response.completed stops the relay, and only the responses path is metered', async () => {
     const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
     const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };

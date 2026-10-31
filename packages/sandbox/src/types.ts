@@ -143,7 +143,10 @@ export interface ModelPrice {
  * cache reads) and `output_tokens`, from the body or from a stream's
  * `response.completed` event. The ceiling is the larger of the model's
  * `maxOutputTokens`, which every priced model must name, and the request's
- * `max_output_tokens`. It reports no cache writes.
+ * `max_output_tokens`. It reports no cache writes. A request offering a tool
+ * the API runs itself, naming a service tier other than `default`, or naming a
+ * stored prompt is refused unsent: each is billed outside the token usage the
+ * meter reads (D-P13-12).
  */
 export interface RelayMeter {
   dialect: RelayDialect;

@@ -221,6 +221,12 @@ describe('the inspection reads the request the session would send (D-R26-02)', (
         expect([...inspection.tools].sort((a, b) => a.localeCompare(b))).toStrictEqual([...tools].sort((a, b) => a.localeCompare(b)));
         expect(inspection.model).toBe(TIER_MODELS.fast);
         expect(inspection.authorization).toBe(`Bearer ${KEY_PLACEHOLDER}`);
+        // Every tool the CLI offers is one it runs itself, and it names no service tier or stored prompt,
+        // so the relay's refusal of hosted tools never refuses this driver's own calls (codex-1, gemini-1).
+        const body = JSON.parse(inspection.body) as { tools?: Array<{ type?: unknown }>; service_tier?: unknown; prompt?: unknown };
+        for (const tool of body.tools ?? []) expect(['function', 'custom']).toContain(tool.type);
+        expect(body.service_tier ?? null).toBeNull();
+        expect(body.prompt ?? null).toBeNull();
       }
       // Each tier's model is the one the request names.
       for (const tier of ['standard', 'deep'] as const) {

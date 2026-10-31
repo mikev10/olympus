@@ -504,6 +504,28 @@ function responsesCeiling(request, model) {
   return Math.max(prices[model].maxOutputTokens, cap);
 }
 
+// What an openai-responses request asks for that costs more than its tokens, or null.
+// A tool the API runs itself (web search, a remote MCP server, a file search, ...) is
+// billed per call, a service tier other than the default is billed at another rate, and
+// a stored prompt can carry either. The meter reads tokens alone, so each is spend the
+// budget cannot see, and is refused as P13 refuses any cost it cannot count (D-P13-12).
+// Only tools the client runs, function and custom, are let through (codex-1, gemini-1).
+const CLIENT_TOOLS = ['function', 'custom'];
+function responsesUnmeterable(request) {
+  if (Object.prototype.hasOwnProperty.call(request, 'prompt') && request.prompt !== null) return 'the request names a stored prompt';
+  const tier = request.service_tier;
+  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+  const tools = request.tools;
+  if (tools === undefined || tools === null) return null;
+  if (!Array.isArray(tools)) return 'the request names tools that are not a list';
+  for (let i = 0; i < tools.length; i += 1) {
+    const t = tools[i];
+    const type = t !== null && typeof t === 'object' ? t.type : undefined;
+    if (CLIENT_TOOLS.indexOf(type) === -1) return 'the request offers the hosted tool ' + JSON.stringify(String(type).slice(0, 40));
+  }
+  return null;
+}
+
 // One metered call at a time (D-P13-13).
 let busy = false;
 const waiting = [];
@@ -555,6 +577,12 @@ function metered(req, res, target, path) {
           (openai ? 'the request names no positive max_completion_tokens or max_tokens, or an n that is not a positive integer'
             : responses ? 'the request names a max_output_tokens that is not a positive integer' : 'the request names no max_tokens') +
           ', so an unreadable answer has no ceiling to charge', 'unreadable-request');
+        release();
+        return;
+      }
+      const unmeterable = responses ? responsesUnmeterable(request) : null;
+      if (unmeterable !== null) {
+        refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
         release();
         return;
       }

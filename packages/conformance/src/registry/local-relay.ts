@@ -600,7 +600,7 @@ export const MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES = runtime({
 export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runtime({
   id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-responses',
   title:
-    "under the openai-responses dialect a model with no price and a malformed max_output_tokens are refused before the upstream sees them, an answer with no output_tokens is charged the model's maxOutputTokens, " +
+    "under the openai-responses dialect a model with no price, a malformed max_output_tokens, and a hosted tool billed outside the token usage are refused before the upstream sees them, an answer with no output_tokens is charged the model's maxOutputTokens, " +
     'an answer with no readable usage stops the relay forwarding, and a meter whose model names no maxOutputTokens is refused at provisioning',
   run: async () => {
     const certificate = await makeCertificate();
@@ -620,9 +620,9 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runt
           certificate,
           AMPLE,
           async (handle, upstreamLog) => {
-            const unsent = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model'), { ...message(10, 1), max_output_tokens: 0 }], 'openai-responses');
-            if (unsent.map((a) => a.status).join(',') !== '400,400' || (await upstreamLog()).length !== 0) {
-              throw new Error(`I5: an unpriced or malformed openai-responses request was answered ${JSON.stringify(unsent)} or reached the upstream`);
+            const unsent = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model'), { ...message(10, 1), max_output_tokens: 0 }, { ...message(10, 1), tools: [{ type: 'web_search' }] }], 'openai-responses');
+            if (unsent.map((a) => a.status).join(',') !== '400,400,400' || (await upstreamLog()).length !== 0) {
+              throw new Error(`I5: an unpriced, malformed, or hosted-tool openai-responses request was answered ${JSON.stringify(unsent)} or reached the upstream`);
             }
             // Charged the model's maximum output, not the 7 the upstream never reported.
             const partial = await sendAll(provider, handle, [message(1000, 7, 'final')], 'openai-responses');
@@ -634,7 +634,7 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runt
         ),
         'I5',
       );
-      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== MAX_OUTPUT * 2 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
+      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== MAX_OUTPUT * 2 || reading.exhausted !== 'unreadable' || reading.refused !== 4) {
         throw new Error(`I5: the openai-responses destroy read ${JSON.stringify(reading)}`);
       }
     });
