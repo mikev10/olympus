@@ -107,7 +107,7 @@ export interface RelayBudget {
 }
 
 /** The usage dialects a relay reads. Closed: one not here is refused (D-P13-06). */
-export type RelayDialect = 'anthropic-messages' | 'openai-chat';
+export type RelayDialect = 'anthropic-messages' | 'openai-chat' | 'openai-responses';
 
 /** US dollars per million tokens of each class. Each MUST be a non-negative finite number. */
 export interface ModelPrice {
@@ -118,6 +118,12 @@ export interface ModelPrice {
   cacheWritePerMTok: number;
   /** A cache write held an hour. A write whose duration the response does not report is charged at this price. */
   cacheWrite1hPerMTok: number;
+  /**
+   * The most output tokens the model can generate in one response: a positive
+   * integer. Required for every model under `'openai-responses'`, where it is
+   * the ceiling an unreadable answer is charged (A-R26-01). Ignored otherwise.
+   */
+  maxOutputTokens?: number;
 }
 
 /**
@@ -130,6 +136,17 @@ export interface ModelPrice {
  * ending `/chat/completions` is metered, and its usage is `prompt_tokens`,
  * `completion_tokens`, and `prompt_tokens_details.cached_tokens`. The cache
  * write prices are never charged under it, as the dialect reports no writes.
+ *
+ * `'openai-responses'` is OpenAI's Responses API (A-R26-01): a `POST` to a
+ * granted path ending `/responses` is metered and a `GET` is free. Its usage
+ * is `input_tokens` (less `input_tokens_details.cached_tokens`, counted as
+ * cache reads) and `output_tokens`, from the body or from a stream's
+ * `response.completed` event. The ceiling is the larger of the model's
+ * `maxOutputTokens`, which every priced model must name, and the request's
+ * `max_output_tokens`. It reports no cache writes. A request offering a tool
+ * the API runs itself, naming a service tier other than `default`, or naming a
+ * stored prompt is refused unsent: each is billed outside the token usage the
+ * meter reads (D-P13-12).
  */
 export interface RelayMeter {
   dialect: RelayDialect;

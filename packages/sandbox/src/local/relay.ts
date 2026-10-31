@@ -100,6 +100,12 @@ export const METER_PREFIX = 'model-relay-meter ';
  *   `max_completion_tokens` and `max_tokens`, times `n`; the usage is
  *   `prompt_tokens` (less its cached part, counted as cache reads) and
  *   `completion_tokens`, from the body or from the stream chunk that carries it.
+ * - Under the `openai-responses` dialect (A-R26-01) the same rules hold with
+ *   that API's names: a `POST` to a granted path ending `/responses` is
+ *   metered and a `GET` is free; the ceiling is the larger of the model's
+ *   `maxOutputTokens` and the request's `max_output_tokens`; the usage is
+ *   `input_tokens` (less its cached part, counted as cache reads) and
+ *   `output_tokens`, from the body or from the `response.completed` event.
  * - The credential is written as the spec's scheme says: as it is, or as
  *   `Bearer <credential>` (A-R6-02).
  * - Started local (A-R21-01), the upstream is `http://${LOCAL_UPSTREAM_ALIAS}:<port>`
@@ -172,15 +178,17 @@ if (!Array.isArray(paths) || paths.length === 0 ||
 if (budget === null || typeof budget !== 'object' || !positive(budget.maxTokens) || !positive(budget.maxCostUsd)) {
   fail('no budget; a relay that forwarded without one would be a route to unbounded spend');
 }
-if (meter === null || typeof meter !== 'object' || (meter.dialect !== 'anthropic-messages' && meter.dialect !== 'openai-chat')) {
+if (meter === null || typeof meter !== 'object' || (meter.dialect !== 'anthropic-messages' && meter.dialect !== 'openai-chat' && meter.dialect !== 'openai-responses')) {
   fail('no meter for a dialect this relay reads');
 }
 const openai = meter.dialect === 'openai-chat';
+const responses = meter.dialect === 'openai-responses';
 const prices = meter.prices;
 if (prices === null || typeof prices !== 'object' || Array.isArray(prices) || Object.keys(prices).length === 0 ||
     !Object.keys(prices).every(function (m) {
       const p = prices[m];
-      return p !== null && typeof p === 'object' && PRICE_FIELDS.every(function (f) { return price(p[f]); });
+      return p !== null && typeof p === 'object' && PRICE_FIELDS.every(function (f) { return price(p[f]); }) &&
+        (!responses || (Number.isInteger(p.maxOutputTokens) && p.maxOutputTokens > 0));
     })) {
   fail('no price table the relay can charge from');
 }
@@ -201,6 +209,11 @@ function granted(path) {
 // chat-completions path is metered, a GET (a model list) is free, and every
 // other request is a cost the meter cannot count (A-R6-01).
 function kindOf(method, path) {
+  if (responses) {
+    if (method === 'POST' && (path === '/responses' || /\\/responses$/.test(path))) return 'metered';
+    if (method === 'GET' || method === 'HEAD') return 'free';
+    return 'unmeterable';
+  }
   if (openai) {
     if (method === 'POST' && (path === '/chat/completions' || /\\/chat\\/completions$/.test(path))) return 'metered';
     if (method === 'GET' || method === 'HEAD') return 'free';
@@ -305,6 +318,21 @@ function usageReader() {
     const output = count(usage.completion_tokens);
     if (output !== null) { u.output = output; u.final = true; }
   };
+  // openai-responses: input_tokens counts the cached input too, so the cached part
+  // is taken out of the input and counted as cache reads. It reports no writes (A-R26-01).
+  u.takeResponses = function (usage) {
+    if (usage === null || typeof usage !== 'object') return;
+    const input = count(usage.input_tokens);
+    if (input !== null) {
+      const details = usage.input_tokens_details;
+      const cached = details !== null && typeof details === 'object' ? count(details.cached_tokens) : null;
+      u.cacheRead = cached === null ? 0 : Math.min(cached, input);
+      u.input = input - u.cacheRead;
+      u.any = true;
+    }
+    const output = count(usage.output_tokens);
+    if (output !== null) { u.output = output; u.final = true; }
+  };
   return u;
 }
 
@@ -323,6 +351,11 @@ function streamParser(u) {
     if (event === null || typeof event !== 'object') return;
     // openai-chat: the usage arrives on one chunk, the last before [DONE], which does not parse and is skipped.
     if (openai) { if (event.usage !== null && typeof event.usage === 'object') u.takeOpenai(event.usage); return; }
+    // openai-responses: the usage is the response.completed event's, and no other event's (A-R26-01).
+    if (responses) {
+      if (event.type === 'response.completed' && event.response !== null && typeof event.response === 'object') u.takeResponses(event.response.usage);
+      return;
+    }
     if (event.type === 'message_start' && event.message !== null && typeof event.message === 'object') u.take(event.message.usage, false);
     else if (event.type === 'message_delta') u.take(event.usage, true);
   }
@@ -354,7 +387,7 @@ function bodyParser(u) {
       let body = null;
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { return; }
       if (body !== null && typeof body === 'object') {
-        if (openai) u.takeOpenai(body.usage); else u.take(body.usage, true);
+        if (openai) u.takeOpenai(body.usage); else if (responses) u.takeResponses(body.usage); else u.take(body.usage, true);
       }
     },
   };
@@ -459,6 +492,40 @@ function openaiCeiling(request) {
   return Math.max.apply(null, fields) * n;
 }
 
+// The most an openai-responses request can generate: the model's maxOutputTokens, or
+// the request's max_output_tokens where that is larger. A cap present and not a positive
+// integer is no ceiling, and the request is refused (A-R26-01, D-R26-10). An unpriced
+// model has no ceiling either; it is refused as unpriced first.
+function responsesCeiling(request, model) {
+  if (model === null || !Object.prototype.hasOwnProperty.call(prices, model)) return undefined;
+  const cap = request.max_output_tokens;
+  if (cap === undefined || cap === null) return prices[model].maxOutputTokens;
+  if (!Number.isInteger(cap) || cap <= 0) return undefined;
+  return Math.max(prices[model].maxOutputTokens, cap);
+}
+
+// What an openai-responses request asks for that costs more than its tokens, or null.
+// A tool the API runs itself (web search, a remote MCP server, a file search, ...) is
+// billed per call, a service tier other than the default is billed at another rate, and
+// a stored prompt can carry either. The meter reads tokens alone, so each is spend the
+// budget cannot see, and is refused as P13 refuses any cost it cannot count (D-P13-12).
+// Only tools the client runs, function and custom, are let through (codex-1, gemini-1).
+const CLIENT_TOOLS = ['function', 'custom'];
+function responsesUnmeterable(request) {
+  if (Object.prototype.hasOwnProperty.call(request, 'prompt') && request.prompt !== null) return 'the request names a stored prompt';
+  const tier = request.service_tier;
+  if (tier !== undefined && tier !== null && tier !== 'default') return 'the request asks for the service tier ' + JSON.stringify(String(tier).slice(0, 40));
+  const tools = request.tools;
+  if (tools === undefined || tools === null) return null;
+  if (!Array.isArray(tools)) return 'the request names tools that are not a list';
+  for (let i = 0; i < tools.length; i += 1) {
+    const t = tools[i];
+    const type = t !== null && typeof t === 'object' ? t.type : undefined;
+    if (CLIENT_TOOLS.indexOf(type) === -1) return 'the request offers the hosted tool ' + JSON.stringify(String(type).slice(0, 40));
+  }
+  return null;
+}
+
 // One metered call at a time (D-P13-13).
 let busy = false;
 const waiting = [];
@@ -495,7 +562,9 @@ function metered(req, res, target, path) {
       let request = null;
       try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = null; }
       const model = request !== null && typeof request === 'object' && typeof request.model === 'string' ? request.model : null;
-      const maxTokens = request !== null && typeof request === 'object' ? (openai ? openaiCeiling(request) : request.max_tokens) : undefined;
+      const maxTokens = request !== null && typeof request === 'object'
+        ? (openai ? openaiCeiling(request) : responses ? responsesCeiling(request, model) : request.max_tokens)
+        : undefined;
       if (model === null || !Object.prototype.hasOwnProperty.call(prices, model)) {
         refuseWith(res, 400, 'invalid_request_error',
           (model === null ? 'the request names no model' : 'the model ' + JSON.stringify(model.slice(0, 200)) + ' has no price') +
@@ -505,8 +574,15 @@ function metered(req, res, target, path) {
       }
       if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
         refuseWith(res, 400, 'invalid_request_error',
-          (openai ? 'the request names no positive max_completion_tokens or max_tokens, or an n that is not a positive integer' : 'the request names no max_tokens') +
+          (openai ? 'the request names no positive max_completion_tokens or max_tokens, or an n that is not a positive integer'
+            : responses ? 'the request names a max_output_tokens that is not a positive integer' : 'the request names no max_tokens') +
           ', so an unreadable answer has no ceiling to charge', 'unreadable-request');
+        release();
+        return;
+      }
+      const unmeterable = responses ? responsesUnmeterable(request) : null;
+      if (unmeterable !== null) {
+        refuseWith(res, 400, 'invalid_request_error', unmeterable + ', which is billed outside the usage this meter reads, so it is not sent', 'unmeterable');
         release();
         return;
       }
@@ -856,7 +932,7 @@ function checkLocalUpstream(declared: unknown, hostPorts: ReadonlySet<number>): 
 }
 
 /** The dialects the relay's source reads. A closed set: a dialect not here is refused, never guessed at (D-P13-06). */
-const DIALECTS: ReadonlySet<string> = new Set<RelayDialect>(['anthropic-messages', 'openai-chat']);
+const DIALECTS: ReadonlySet<string> = new Set<RelayDialect>(['anthropic-messages', 'openai-chat', 'openai-responses']);
 
 function isDialect(value: unknown): value is RelayDialect {
   return typeof value === 'string' && DIALECTS.has(value);
@@ -911,13 +987,28 @@ function checkMeter(meter: unknown): RelayMeter {
       }
       return value;
     };
-    table[model] = Object.freeze({
+    const checked: ModelPrice = {
       inputPerMTok: at('inputPerMTok'),
       outputPerMTok: at('outputPerMTok'),
       cacheReadPerMTok: at('cacheReadPerMTok'),
       cacheWritePerMTok: at('cacheWritePerMTok'),
       cacheWrite1hPerMTok: at('cacheWrite1hPerMTok'),
-    });
+    };
+    // A-R26-01: under the Responses dialect a request carries no ceiling of its own, so the
+    // model's maximum output is what an unreadable answer is charged. Without one there is
+    // nothing to charge, and the relay is refused rather than started blind.
+    const ceiling = price.maxOutputTokens;
+    if (dialect === 'openai-responses' || ceiling !== undefined) {
+      if (typeof ceiling !== 'number' || !Number.isInteger(ceiling) || ceiling <= 0) {
+        refuse(
+          'relay',
+          `relay.meter.prices[${JSON.stringify(model)}].maxOutputTokens must be a positive integer, not ${shown(ceiling)}` +
+            (dialect === 'openai-responses' ? '; under openai-responses it is the ceiling an unreadable answer is charged (A-R26-01)' : ''),
+        );
+      }
+      checked.maxOutputTokens = ceiling;
+    }
+    table[model] = Object.freeze(checked);
   }
   return { dialect, prices: Object.freeze(table) };
 }

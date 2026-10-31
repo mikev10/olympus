@@ -39,10 +39,12 @@ import {
 } from '../src/index.js';
 import {
   OPENAI_PATH,
+  RESPONSES_PATH,
   TEST_BUDGET,
   TEST_METER,
   TEST_MODEL,
   TEST_OPENAI_METER,
+  TEST_RESPONSES_METER,
   UPSTREAM_ORIGIN,
   makeCertificate,
   startUpstream,
@@ -456,6 +458,100 @@ describe('the openai-chat dialect is metered by the same rules (A-R6-01)', () =>
   });
 });
 
+describe('the openai-responses dialect is metered by the same rules (A-R26-01)', () => {
+  /** A relay for OpenAI's Responses API, writing its credential as a bearer token. Every price names a maxOutputTokens of 96. */
+  const RESPONSES: Partial<RelaySpec> = { paths: [RESPONSES_PATH], header: 'authorization', scheme: 'bearer', meter: TEST_RESPONSES_METER };
+
+  /** A Responses request. It names no output cap unless `extra` adds one, as the pinned Codex CLI sends none. */
+  function respond(usage: Usage, extra: Record<string, unknown> = {}, test: Record<string, unknown> = {}): Sent {
+    return { path: RESPONSES_PATH, body: { model: TEST_MODEL, input: 'x', ...extra, relay_test: { usage, ...test } } };
+  }
+
+  test('a crossing call is forwarded and every later one refused naming the bound; cached input tokens are cache reads, not input', async () => {
+    const { handle, upstream } = await metered({ maxTokens: 1_000_000_000, maxCostUsd: 0.003 }, {}, RESPONSES);
+    const usage = { input: 800, output: 100, cacheRead: 200, cacheWrite: 0 };
+    const answers = await send(handle, [respond(usage), respond(usage), respond(usage)]);
+
+    expect(answers.map((a) => a.status)).toStrictEqual([200, 200, 402]);
+    expect(answers[2]?.body).toContain('maxCostUsd');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(2);
+    // The relay wrote the provider's credential as a bearer token, and the client's own header never arrived.
+    const response = JSON.parse(answers[0]?.body ?? '{}') as { output: Array<{ content: Array<{ text: string }> }> };
+    expect(JSON.parse(response.output[0]?.content[0]?.text ?? '{}')).toMatchObject({ bearerMatches: true });
+    const reading = meteredReading(await destroyed(handle));
+    expect(reading).toMatchObject({ calls: 2, inputTokens: 1600, outputTokens: 200, cacheReadTokens: 400, cacheWriteTokens: 0, exhausted: 'cost', refused: 1 });
+    expect(reading.costUsd).toBeCloseTo(2 * priced(usage), 12);
+  });
+
+  test('a streamed answer and a whole one are metered identically, from the response.completed event', async () => {
+    const usage = { input: 1000, output: 100, cacheRead: 200, cacheWrite: 0 };
+    const readings: MeterReading[] = [];
+    for (const stream of [true, false]) {
+      const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+      const [answer] = await send(handle, [respond(usage, { stream })]);
+      const [digest] = await upstreamDigests(upstream);
+      expect(answer?.status).toBe(200);
+      expect(digest?.received).toBe(answer?.sent);
+      expect(digest?.sent).toBe(answer?.received);
+      readings.push(await destroyed(handle));
+    }
+    expect(readings[0]).toStrictEqual(readings[1]);
+    expect(meteredReading(readings[0] ?? { kind: 'unmetered' })).toMatchObject({ calls: 1, inputTokens: 1000, outputTokens: 100, cacheReadTokens: 200, exhausted: 'none' });
+  });
+
+  test("the ceiling is the larger of the model's maxOutputTokens and the request's max_output_tokens, and a malformed cap is refused unsent", async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const answers = await send(handle, [
+      respond(usage, { max_output_tokens: 0 }),
+      respond(usage, { max_output_tokens: 1.5 }),
+      respond(usage, {}, { omit: 'final' }),
+      respond(usage, { max_output_tokens: 32 }, { omit: 'final' }),
+      respond(usage, { max_output_tokens: 500 }, { omit: 'final' }),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 400, 200, 200, 200]);
+    expect(answers[0]?.body).toContain('max_output_tokens');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(3);
+    // No cap and a smaller cap are each charged the model's 96; a larger cap is charged its own 500.
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 3, inputTokens: 3000, outputTokens: 96 + 96 + 500, refused: 2, exhausted: 'none' });
+  });
+
+  test('a hosted tool, a service tier other than the default, and a stored prompt are refused unsent: each is billed outside the usage the meter reads (codex-1, gemini-1)', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+    const usage = { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 };
+    const fn = { type: 'function', name: 'f', parameters: { type: 'object', properties: {} } };
+    const answers = await send(handle, [
+      respond(usage, { tools: [{ type: 'web_search' }] }),
+      respond(usage, { tools: [fn, { type: 'mcp', server_label: 'x', server_url: 'https://example.invalid' }] }),
+      respond(usage, { tools: 'web_search' }),
+      respond(usage, { service_tier: 'priority' }),
+      respond(usage, { service_tier: 'auto' }),
+      respond(usage, { prompt: { id: 'pmpt_x' } }),
+      respond(usage, { tools: [fn, { type: 'custom', name: 'apply_patch' }], service_tier: 'default' }),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 400, 400, 400, 400, 400, 200]);
+    expect(answers[0]?.body).toContain('web_search');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, refused: 6, exhausted: 'none' });
+  });
+
+  test('an unpriced model is refused unsent, a stream cut before response.completed stops the relay, and only the responses path is metered', async () => {
+    const { handle, upstream } = await metered(TEST_BUDGET, {}, RESPONSES);
+    const usage = { input: 1000, output: 7, cacheRead: 0, cacheWrite: 0 };
+    const unpriced = respond(usage);
+    const answers = await send(handle, [
+      { ...unpriced, body: { ...(unpriced.body as Record<string, unknown>), model: 'unpriced-model' } },
+      { method: 'DELETE', path: `${RESPONSES_PATH}/resp_test`, body: {} },
+      respond(usage, { stream: true }, { omit: 'cut' }),
+      respond(usage),
+    ]);
+    expect(answers.map((a) => a.status)).toStrictEqual([400, 403, 200, 402]);
+    expect(answers[0]?.body).toContain('unpriced-model');
+    expect(postsTo(await upstreamLog(upstream))).toHaveLength(1);
+    expect(meteredReading(await destroyed(handle))).toMatchObject({ calls: 1, outputTokens: 96, exhausted: 'unreadable', refused: 3 });
+  });
+});
+
 describe('destroy reads the meter after the sandbox stopped', () => {
   test('every call a process left running completed is in the reading, and none the upstream answered is missing from it', async () => {
     const { handle, upstream } = await metered();
@@ -520,6 +616,18 @@ describe('a relay nothing bounds is refused at provisioning, naming the field', 
     ['a non-finite bound', { budget: { maxTokens: Number.POSITIVE_INFINITY, maxCostUsd: 1 } }, /relay\.budget\.maxTokens/u],
     ['a NaN bound', { budget: { maxTokens: 1, maxCostUsd: Number.NaN } }, /relay\.budget\.maxCostUsd/u],
     ['an unknown dialect', { meter: { ...TEST_METER, dialect: 'gemini-generate' } }, /relay\.meter\.dialect/u],
+    ['a responses meter whose model names no maxOutputTokens', { meter: { ...TEST_METER, dialect: 'openai-responses' } }, /maxOutputTokens/u],
+    [
+      'a maxOutputTokens that is not a positive integer',
+      { meter: { dialect: 'openai-responses', prices: { [TEST_MODEL]: { ...TEST_METER.prices[TEST_MODEL], maxOutputTokens: 0 } } } },
+      /maxOutputTokens/u,
+    ],
+    ['a responses meter whose model names no maxOutputTokens', { meter: { ...TEST_METER, dialect: 'openai-responses' } }, /maxOutputTokens/u],
+    [
+      'a maxOutputTokens that is not a positive integer',
+      { meter: { dialect: 'openai-responses', prices: { [TEST_MODEL]: { ...TEST_METER.prices[TEST_MODEL], maxOutputTokens: 0 } } } },
+      /maxOutputTokens/u,
+    ],
     ['an empty price table', { meter: { ...TEST_METER, prices: {} } }, /relay\.meter\.prices/u],
     [
       'a negative price',

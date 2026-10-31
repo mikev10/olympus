@@ -1,0 +1,138 @@
+The code under review is in the file
+`2026-10-31-R26-codex-driver-review-bundle.txt` (SHA-256 901475a10ff11eb1b6783be8551afba916d69e26aceeecce2c9d27bebb7f05ec) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing a driver that runs a vendor's coding-agent CLI inside a
+container, and the metering proxy that bounds what it spends, in a TypeScript
+project. You have the source and nothing else — no design documents, no author
+reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The project runs AI coding agents on a fixed line of stations and judges their
+work from evidence the runtime collects itself. This change adds a second
+agent driver, `packages/drivers/codex`, which runs the OpenAI Codex CLI
+(pinned to 0.166.0) inside a Docker sandbox the runtime provisions. The model
+credential is held by a separate relay container that forwards the CLI's
+requests to the API and meters each one against a per-task budget; this change
+teaches that relay a third API dialect, OpenAI's Responses API
+(`packages/sandbox/src/local/relay.ts`, `packages/sandbox/src/types.ts`).
+Before every task the driver runs the same CLI invocation once against a
+capture endpoint on the sandbox's loopback, reads the request the session would
+send, and refuses unless its tools equal the task's grant, its model is the one
+the runtime chose, and its credential is the placeholder; then it runs the task
+for real through the relay. Every source of instructions the CLI reads from its
+working tree is meant to be off. The conformance registry
+(`packages/conformance/src/registry/`) names assertions in the driver's test
+files that must pass for each capability the driver claims.
+
+It must hold against a capable, motivated party trying to obtain a capability
+it was not granted, or to spend more than its budget unnoticed, or to change
+what instructs a later task, from inside a task. Assume no deceptive intent —
+only that the easiest path gets taken.
+
+That party controls what the model returns, every command the model runs inside
+the sandbox while the task runs (as the sandbox's uid, with the workspace
+writable), every file in the workspace — including files an earlier task left
+there for a later one — and anything it can leave running in the container.
+It does not control the components the runtime is wired with — the sandbox
+provider, the relay's code and configuration, the image's root-owned files,
+and the driver itself are runtime-selected and trusted, even where a function
+takes one as an argument — and it does not control code running inside the
+runtime's own process. The vendor's API is trusted to report usage honestly.
+
+The invariants at stake:
+
+- No agent writes to the Vault (the runtime's record store). It is kept out of
+  the sandbox at the mount layer.
+- An agent may not be judged by, or instructed by, an artifact it can write. No
+  file in the workspace may reach a later task's instructions.
+- Default deny. A tool or capability not granted to the task is unavailable to
+  the model, not merely unused.
+- Fail closed. A missing check, an unreadable result, usage that cannot be
+  counted, or an unsupported configuration is a refusal, never a silent degrade.
+- Reviewers never share the author's model family. A driver's family is a value
+  it states explicitly, never inferred from a model name.
+- Every capability claim maps to an executable assertion that fails when the
+  capability is removed.
+
+The mechanisms that matter most:
+
+- The inspection (`packages/drivers/codex/src/capture.ts`, `#inspect` and
+  `inspectionFrom` in `src/driver.ts`): what it compares, and whether the run
+  that follows is the session it inspected.
+- The CLI argv (`cliArgs`, `runArgv`, `inspectArgv` in `src/driver.ts`), the
+  root-owned catalogs (`image/catalog.js`, `image/Dockerfile`), and the tool
+  groups (`src/tools.ts`).
+- The relay's `openai-responses` dialect: which requests are metered, how the
+  ceiling for an unreadable answer is derived, and how usage is read.
+- The event reader (`src/events.ts`) and the refusals in `refuseUnusable`.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+R9's matrix and the seats that use the second family; a vendor-hosted Codex
+harness or the Agents API; computer use; Codex's own multi-agent features; and
+credential masking in the CLI's output, which the line does not rely on (P12).
+
+Identifiers such as R9 and P12 name other units of work and mean nothing you
+need to resolve: the sentence says that seating the second family on reviews,
+a vendor-hosted harness, computer use, the CLI's multi-agent features, and the
+CLI's own masking of credentials in its output are not part of this change.
+
+THE QUESTION
+
+From inside a task — through the model's output, the commands it runs, the
+files it leaves in the workspace, or processes it leaves running — how would I
+end up with a tool the task was not granted, with the credential, with spend
+the relay does not count, or with my words in the instructions of a later task,
+while the driver and the relay report that everything held?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
