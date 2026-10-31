@@ -3,7 +3,7 @@ import { R4_I4 } from './parallel.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX, MERGE_TOKEN_REACHES_NO_SANDBOX } from './integration.js';
 import { APPROVAL_OUTCOME_GATES_THE_STATION } from './line-assertions.js';
-import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
+import { MODEL_RELAY_ENFORCES_BUDGET, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT, MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES, MODEL_RELAY_FORWARDS_ONLY_ITS_GRANT } from './local-relay.js';
 import { MODEL_RELAY_REACHES_THE_DOCKER_HOST_ONLY_AS_DECLARED } from './local-endpoint.js';
 import { OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE, OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED } from './openai-compatible.js';
 import {
@@ -315,6 +315,8 @@ export const I4: InvariantEntry = {
     MODEL_RELAY_ENFORCES_BUDGET,
     // R6: the second dialect and the second driver, under the same controls (A-R6-01, A-R6-02).
     MODEL_RELAY_ENFORCES_BUDGET_OPENAI_CHAT,
+    // R26: the third dialect, for the Codex CLI (A-R26-01).
+    MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES,
     OPENAI_COMPATIBLE_TOOL_INVENTORY_VALIDATED,
     OPENAI_COMPATIBLE_CREDENTIAL_NOT_READABLE,
     // R21: a route to the Docker host is the provider's to grant, and the relay's alone (A-R21-01..03).

@@ -77,6 +77,22 @@ require('node:https').createServer({ key: process.env.UPSTREAM_KEY, cert: proces
       s.end(answer);
       return;
     }
+    // A-R26-01: the Responses API, with its own usage names, saying whether the bearer credential arrived.
+    if (q.method === 'POST' && q.url.split('?')[0] === '/v1/responses') {
+      let request = {};
+      try { request = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { request = {}; }
+      const t = request.relay_test || {};
+      const response = { id: 'resp', object: 'response', model: request.model, status: 'completed', output: [],
+        bearer: q.headers.authorization === 'Bearer ' + expected, usage: null };
+      if (t.omit !== 'all') {
+        response.usage = { input_tokens: t.input, input_tokens_details: { cached_tokens: 0 } };
+        if (t.omit !== 'final') response.usage.output_tokens = t.output;
+      }
+      const answer = JSON.stringify(response);
+      s.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(answer) });
+      s.end(answer);
+      return;
+    }
     if (q.method === 'POST' && q.url.split('?')[0] === '/v1/messages') {
       let request = {};
       try { request = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch (error) { request = {}; }
@@ -240,11 +256,21 @@ const METER: RelayMeter = {
 const AMPLE: RelayBudget = { maxTokens: 1_000_000_000, maxCostUsd: 100 };
 
 /** The path each dialect's calls are sent to and granted. */
-const DIALECT_PATH: Readonly<Record<RelayMeter['dialect'], string>> = { 'anthropic-messages': '/v1/messages', 'openai-chat': '/v1/chat/completions' };
+const DIALECT_PATH: Readonly<Record<RelayMeter['dialect'], string>> = {
+  'anthropic-messages': '/v1/messages',
+  'openai-chat': '/v1/chat/completions',
+  'openai-responses': '/v1/responses',
+};
 
-/** A relay for `dialect`: the Messages API with its key written raw, or the chat API with a bearer token (A-R6-01, A-R6-02). */
+/** The most a model generates in one response, as the Responses meter requires every price to name (A-R26-01). */
+const MAX_OUTPUT = 96;
+
+/** A relay for `dialect`: the Messages API with its key written raw, or an OpenAI API with a bearer token (A-R6-01, A-R6-02, A-R26-01). */
 function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'] = 'anthropic-messages'): RelaySpec {
-  const openai = dialect === 'openai-chat';
+  const openai = dialect !== 'anthropic-messages';
+  const prices = dialect === 'openai-responses'
+    ? Object.fromEntries(Object.entries(METER.prices).map(([model, price]) => [model, { ...price, maxOutputTokens: MAX_OUTPUT }]))
+    : METER.prices;
   return {
     upstream: UPSTREAM_ORIGIN,
     paths: [DIALECT_PATH[dialect]],
@@ -253,7 +279,7 @@ function meteredRelay(budget: RelayBudget = AMPLE, dialect: RelayMeter['dialect'
     credential: CREDENTIAL,
     urlVariable: 'MODEL_BASE_URL',
     budget,
-    meter: { ...METER, dialect },
+    meter: { dialect, prices },
   };
 }
 
@@ -517,6 +543,99 @@ export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT = runtime({
       );
       if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== 64 + 64 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
         throw new Error(`I5: the openai-chat destroy read ${JSON.stringify(reading)}`);
+      }
+    });
+  },
+});
+
+/** The budget, under OpenAI's Responses API (A-R26-01): the same bounds, read from that API's usage names. */
+export const MODEL_RELAY_ENFORCES_BUDGET_OPENAI_RESPONSES = runtime({
+  id: 'I4.model-relay-enforces-budget-openai-responses',
+  title:
+    "under the openai-responses dialect a sandbox's relay counts input_tokens and output_tokens and, once its budget's dollars or tokens are spent, refuses every later call naming the bound, " +
+    'for calls made from inside the sandbox by node; every forwarded call carries the credential as a bearer token, and destroy returns what was counted',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i4-relay-budget-responses-', async (dirs) => {
+      const secret = `canary-${randomUUID()}`;
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: secret }, relayTrust: certificate.cert });
+      // Each call costs 1000 * $1 + 100 * $10 per million: $0.002. The second crosses $0.003.
+      for (const [bound, budget] of [
+        ['maxCostUsd', { maxTokens: 1_000_000_000, maxCostUsd: 0.003 }],
+        ['maxTokens', { maxTokens: 2000, maxCostUsd: 100 }],
+      ] as const) {
+        const reading = metered(
+          await withMeteredSandbox(
+            provider,
+            dirs,
+            certificate,
+            budget,
+            async (handle, upstreamLog) => {
+              const answers = await sendAll(provider, handle, [message(1000, 100), message(1000, 100), message(1000, 100)], 'openai-responses');
+              const statuses = answers.map((a) => a.status).join(',');
+              if (statuses !== '200,200,402') throw new Error(`I4: under ${bound} the openai-responses calls were answered ${statuses}, expected 200,200,402`);
+              if (!(answers[2]?.body ?? '').includes(bound)) throw new Error(`I4: the refusal does not name ${bound}: ${answers[2]?.body ?? ''}`);
+              for (const answer of answers.slice(0, 2)) {
+                if (!answer.body.includes('"bearer":true')) throw new Error(`I4: a forwarded call did not carry the credential as a bearer token: ${answer.body}`);
+              }
+              const reached = await upstreamLog();
+              if (reached.length !== 2) throw new Error(`I4: the upstream received ${String(reached.length)} calls under ${bound}; the refused one must not reach it`);
+            },
+            'openai-responses',
+            secret,
+          ),
+          'I4',
+        );
+        const exhausted = bound === 'maxCostUsd' ? 'cost' : 'tokens';
+        if (reading.calls !== 2 || reading.inputTokens !== 2000 || reading.outputTokens !== 200 || reading.refused !== 1 || reading.exhausted !== exhausted) {
+          throw new Error(`I4: under ${bound} the openai-responses destroy read ${JSON.stringify(reading)}`);
+        }
+      }
+    });
+  },
+});
+
+/** What the relay cannot count under the Responses dialect it does not forgive, with the model's maximum output as the ceiling (A-R26-01). */
+export const MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES = runtime({
+  id: 'I5.model-relay-fails-closed-on-unmetered-usage-openai-responses',
+  title:
+    "under the openai-responses dialect a model with no price and a malformed max_output_tokens are refused before the upstream sees them, an answer with no output_tokens is charged the model's maxOutputTokens, " +
+    'an answer with no readable usage stops the relay forwarding, and a meter whose model names no maxOutputTokens is refused at provisioning',
+  run: async () => {
+    const certificate = await makeCertificate();
+    await withSandboxDirs('i5-relay-unmetered-responses-', async (dirs) => {
+      const { LocalDockerProvider: Provider } = await import('@olympus-ai/sandbox');
+      const provider = await Provider.create({ vaultPaths: [dirs.vault], credentials: { [CREDENTIAL]: `canary-${randomUUID()}` }, relayTrust: certificate.cert });
+      // A meter with no ceiling for a model is refused before any container starts.
+      const uncapped: RelaySpec = { ...meteredRelay(AMPLE, 'openai-responses'), meter: { dialect: 'openai-responses', prices: METER.prices } };
+      const refusal = await refusalFrom(() => provider.provision(specFor(dirs, 'rw', { relay: uncapped })));
+      if (refusal.layer !== 'relay' || !refusal.message.includes('maxOutputTokens')) {
+        throw new Error(`I5: a responses meter with no maxOutputTokens was not refused at the relay layer: ${refusal.message}`);
+      }
+      const reading = metered(
+        await withMeteredSandbox(
+          provider,
+          dirs,
+          certificate,
+          AMPLE,
+          async (handle, upstreamLog) => {
+            const unsent = await sendAll(provider, handle, [message(10, 1, undefined, 'unpriced-model'), { ...message(10, 1), max_output_tokens: 0 }], 'openai-responses');
+            if (unsent.map((a) => a.status).join(',') !== '400,400' || (await upstreamLog()).length !== 0) {
+              throw new Error(`I5: an unpriced or malformed openai-responses request was answered ${JSON.stringify(unsent)} or reached the upstream`);
+            }
+            // Charged the model's maximum output, not the 7 the upstream never reported.
+            const partial = await sendAll(provider, handle, [message(1000, 7, 'final')], 'openai-responses');
+            if (partial[0]?.status !== 200) throw new Error(`I5: an openai-responses call with partial usage was answered ${JSON.stringify(partial)}`);
+            const blind = await sendAll(provider, handle, [message(1000, 7, 'all'), message(10, 1)], 'openai-responses');
+            if (blind.map((a) => a.status).join(',') !== '200,402') throw new Error(`I5: after an unreadable openai-responses answer the relay answered ${JSON.stringify(blind)}`);
+          },
+          'openai-responses',
+        ),
+        'I5',
+      );
+      if (reading.calls !== 2 || reading.inputTokens !== 1000 || reading.outputTokens !== MAX_OUTPUT * 2 || reading.exhausted !== 'unreadable' || reading.refused !== 3) {
+        throw new Error(`I5: the openai-responses destroy read ${JSON.stringify(reading)}`);
       }
     });
   },

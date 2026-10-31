@@ -40,6 +40,15 @@ export const TEST_METER: RelayMeter = {
 /** `TEST_METER`'s prices, read as the OpenAI-compatible chat API reports usage (A-R6-01). */
 export const TEST_OPENAI_METER: RelayMeter = { dialect: 'openai-chat', prices: TEST_METER.prices };
 
+/** The Responses API meter (A-R26-01): every priced model names the most it can generate. */
+export const TEST_RESPONSES_METER: RelayMeter = {
+  dialect: 'openai-responses',
+  prices: Object.fromEntries(Object.entries(TEST_METER.prices).map(([model, price]) => [model, { ...price, maxOutputTokens: 96 }])),
+};
+
+/** The Responses path the `openai-responses` suites are granted. */
+export const RESPONSES_PATH = '/v1/responses';
+
 /** The chat-completions path the `openai-chat` suites are granted. */
 export const OPENAI_PATH = '/v1/chat/completions';
 
@@ -150,6 +159,46 @@ function chat(q, s, body, echo) {
   s.writeHead(status, { 'content-type': type });
   s.end(bytes);
 }
+// OpenAI's Responses API (A-R26-01): usage is input_tokens (cached part
+// included), input_tokens_details.cached_tokens, and output_tokens. A stream
+// carries it on its response.completed event, and on no other.
+function responses(q, s, body, echo) {
+  let request = {};
+  try { request = JSON.parse(body.toString('utf8')); } catch (error) { request = {}; }
+  const t = request.relay_test || {};
+  if (t.hangup === true) { s.socket.destroy(); return; }
+  const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
+  const status = t.status || 200;
+  const usage = t.omit === 'all' ? null : {
+    input_tokens: counts.input + counts.cacheRead,
+    input_tokens_details: { cached_tokens: counts.cacheRead },
+  };
+  if (usage !== null && t.omit !== 'final') usage.output_tokens = counts.output;
+  const response = { id: 'resp_test', object: 'response', model: request.model, status: 'completed',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(echo) }] }], usage: usage };
+  let payload;
+  let type;
+  if (status !== 200) {
+    type = 'application/json';
+    payload = JSON.stringify({ error: { type: 'server_error', message: 'test upstream' } });
+  } else if (request.stream === true) {
+    type = 'text/event-stream';
+    const events = [
+      ['response.created', { type: 'response.created', response: Object.assign({}, response, { status: 'in_progress', output: [], usage: null }) }],
+      ['response.output_text.delta', { type: 'response.output_text.delta', delta: JSON.stringify(echo) }],
+    ];
+    // 'cut' ends the stream before its final event, as a dropped connection does.
+    if (t.omit !== 'cut') events.push(['response.completed', { type: 'response.completed', response: response }]);
+    payload = events.map(function (e) { return 'event: ' + e[0] + '\\ndata: ' + JSON.stringify(e[1]) + '\\n\\n'; }).join('');
+  } else {
+    type = 'application/json';
+    payload = JSON.stringify(response);
+  }
+  const bytes = Buffer.from(payload, 'utf8');
+  console.log('UPSTREAM_BODY ' + sha(body) + ' UPSTREAM_SENT ' + sha(bytes));
+  s.writeHead(status, { 'content-type': type });
+  s.end(bytes);
+}
 function answer(s, request, t, body, echo) {
   const counts = t.usage || { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 };
   const status = t.status || 200;
@@ -230,6 +279,7 @@ https.createServer({ key: process.env.UPSTREAM_KEY, cert: process.env.UPSTREAM_C
     const path = q.url.split('?')[0];
     if (q.method === 'POST' && path === '/v1/messages') { messages(q, s, body, echo); return; }
     if (q.method === 'POST' && path === '${OPENAI_PATH}') { chat(q, s, body, echo); return; }
+    if (q.method === 'POST' && path === '${RESPONSES_PATH}') { responses(q, s, body, echo); return; }
     s.writeHead(200, { 'content-type': 'application/json' });
     s.end(JSON.stringify(echo));
   });

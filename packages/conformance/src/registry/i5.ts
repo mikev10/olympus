@@ -24,7 +24,7 @@ import {
   withProvider,
   withSandbox,
 } from './local-sandbox.js';
-import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT } from './local-relay.js';
+import { MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT, MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES } from './local-relay.js';
 import { MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT } from './local-endpoint.js';
 import { BASE_DECLARATION_HAS_NO_DEFAULT, NOTHING_FAILING_ON_THE_BASE_IS_REFUSED, SUITE_CHECK_RUNS_WHAT_IT_NAMES, UNSTARTED_BASE_CHECK_REFUSES } from './base-run.js';
 import { OUTCOMES_REFUSE_WITHOUT_A_SAMPLE } from './outcomes.js';
@@ -474,6 +474,7 @@ export const I5: InvariantEntry = {
     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE,
     // R6: the same, under the openai-chat dialect (A-R6-01).
     MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_CHAT,
+    MODEL_RELAY_FAILS_CLOSED_ON_UNMETERED_USAGE_OPENAI_RESPONSES,
     // R21: http and no credential are each a declaration, never an inference (A-R21-01, A-R21-02).
     MODEL_RELAY_REFUSES_AN_UNDECLARED_LOCAL_ENDPOINT,
     // I1a: what the walking skeleton's own declaration stood in for, each now refusing on its own.
