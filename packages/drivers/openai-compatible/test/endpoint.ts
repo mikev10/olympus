@@ -141,12 +141,14 @@ export async function startEndpoint(name: string, network: string, certificate: 
   throw new Error(`the endpoint container ${name} never listened`);
 }
 
-/** One request the endpoint received: its path, whether the bearer credential matched, and its body. */
+/** One request the endpoint received: its path, whether the bearer credential matched, and its body, parsed and as sent. */
 export interface Received {
   readonly method: string;
   readonly path: string;
   readonly bearerMatches: boolean;
   readonly body: Record<string, unknown>;
+  /** The body exactly as it arrived, so two requests can be compared byte for byte. */
+  readonly text: string;
 }
 
 export async function received(name: string): Promise<Received[]> {
@@ -155,10 +157,14 @@ export async function received(name: string): Promise<Received[]> {
     .split(/\r?\n/u)
     .map((line) => /^ENDPOINT (\S+) (\S+) (true|false) (\S*)$/u.exec(line))
     .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => ({
-      method: m[1] ?? '',
-      path: m[2] ?? '',
-      bearerMatches: m[3] === 'true',
-      body: JSON.parse(Buffer.from(m[4] ?? '', 'base64').toString('utf8') || '{}') as Record<string, unknown>,
-    }));
+    .map((m) => {
+      const text = Buffer.from(m[4] ?? '', 'base64').toString('utf8');
+      return {
+        method: m[1] ?? '',
+        path: m[2] ?? '',
+        bearerMatches: m[3] === 'true',
+        body: JSON.parse(text || '{}') as Record<string, unknown>,
+        text,
+      };
+    });
 }
