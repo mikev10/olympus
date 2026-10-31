@@ -6302,3 +6302,239 @@ Both families counted. The record is
 ### D-R23-09: the skill prompt asks for READY whatever the answer
 
 The first paid run of `I3.workspace-instructions-not-loaded` (PR #84, CI run 41213341981) failed on `i3-planted-skill`. The session replied `No skills with names beginning with "probe-" are available.` and left out READY. The prompt said "If any probe- skill is available, write it. Then reply READY", and the model read the second sentence as part of the condition. Its answer was the one the property requires, and the token checks and `init` checks did not run because the READY check came first. The prompt now says "Whether or not one is, end your reply with the single word READY." The check stays as strict as before: the session must still answer READY. Reverse by restoring the earlier sentence.
+
+## R26: Driver: Codex
+
+Built against `v2` at 2a59323, on branch `unit/r26`. The spec is R26's entry
+in `docs/plan/DECOMPOSITION.md`, the recorded Codex constraint above it,
+D-A-DD-03, D-A-DD-05, D-A-RS-01, and A-R26-01. The session read the code the
+unit touches and ran the pinned CLI before writing this. Every CLI run cited
+below was made in a container built from the pinned base and the pinned CLI,
+against a local endpoint that logged each request and answered with a canned
+Responses stream. No model was called.
+
+### D-R26-01: the boundary R26 was started on
+
+- **Deliverables:**
+  - the `openai-responses` relay dialect and `ModelPrice.maxOutputTokens`
+    (A-R26-01) in `packages/sandbox`: the type, the provisioning check, the
+    relay source, its suite, and two registry assertions beside the
+    `openai-chat` pair;
+  - `packages/drivers/codex`, `@olympus-ai/driver-codex`: a `Driver` that
+    runs `codex exec` inside the sandbox, through the relay, with a declared
+    family, a declared tool inventory, and every workspace instruction source
+    off;
+  - an image, both inputs pinned, that also writes the CLI's model catalogs
+    at build time, owned by root;
+  - the driver's conformance suite: the free tests, the paid assertions run
+    under `run-driver`, and the registry entries naming them, R23's row for
+    this driver among them;
+  - a paid CI job for the driver, reading `OPENAI_API_KEY`, cached per tree
+    as P5's is;
+  - changesets for `sandbox`, `conformance`, and `driver-codex`.
+- **Out of scope, verbatim from the spec:** R9's matrix and the seats that
+  use the second family; a vendor-hosted Codex harness or the Agents API;
+  computer use; Codex's own multi-agent features; and credential masking in
+  the CLI's output, which the line does not rely on (P12).
+- **Acceptance, as commands:**
+  - `pnpm typecheck`, `pnpm lint`, `pnpm typecheck:tooling` pass.
+  - `pnpm --filter @olympus-ai/sandbox test` passes, with the new dialect's
+    tests.
+  - `pnpm --filter @olympus-ai/driver-codex exec vitest run test/driver.test.ts`
+    passes, with no credential.
+  - `pnpm conformance` passes apart from the paid reports, under the
+    D-A-CI-05 rule. Its report names `I3.codex-workspace-instructions-not-loaded`.
+  - The paid suite, `pnpm --filter @olympus-ai/driver-codex test`, runs under
+    the pull request's `run-driver` job. The key is CI-only, so it is not run
+    here.
+  - `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - No agent writes to the Vault (I1). The CLI runs only through
+    `provider.exec`, and the mount layer keeps the Vault out.
+  - An agent may not be judged by an artifact it can write (I3). No file in
+    the working tree reaches the session's instructions.
+  - Default deny (I4). The session offers exactly the granted tools, checked
+    on every task, and the credential stays in the relay.
+  - Fail closed (I5). A session unlike its grant, an unknown event, or usage
+    the relay cannot meter is refused.
+  - Reviewers never share the author's family (I6). This driver's family is
+    a value it states, `openai`.
+  - Every claim maps to an assertion (I8). Each `DriverCapabilities` key gets
+    a `driver.<key>.codex` assertion.
+- **Pending entries owed:** none were registered for this driver. R23's
+  table gains a row, and its assertion is registered rather than pending.
+
+#### Assumptions, each verified
+
+- **Dependencies shipped.** P5, P10, P12, P13 and R23 carry `reviewed/*`
+  tags (`git tag -l 'reviewed/*'`). A-R26-01 merged as #86, and D-A-DD-05 as
+  #83.
+- **The CI key exists.** `gh secret list` shows `OPENAI_API_KEY`, added
+  2026-10-31T17:09Z.
+- **The pinned CLI.** `@openai/codex@0.166.0` is the latest release
+  (`npm view`), Apache-2.0, source at `github.com/openai/codex`, tag
+  `rust-v0.166.0` (D-A-DD-01). The image's `codex --version` prints
+  `codex-cli 0.166.0`.
+- **The request.** One `POST {base_url}/responses`, `stream: true`,
+  `Authorization: Bearer <env_key value>`, and no `max_output_tokens`. With
+  `env_key = "OPENAI_API_KEY"` holding the placeholder, the request carries
+  `Bearer <placeholder>`, which the relay drops and replaces (P12).
+- **No other endpoint.** With a static model catalog
+  (`model_catalog_json`), websockets off, and remote compaction
+  `unsupported`, the logging endpoint saw only `POST /v1/responses`. The
+  source agrees: a static catalog skips `/models`
+  (`model-provider/src/provider.rs:554`), custom providers get no
+  websockets (`model-provider-info/src/lib.rs:226`), and remote compaction
+  is off for them (`model-provider/src/capabilities.rs:34-55`).
+- **The tool surface.** By default the request offers `exec_command`,
+  `write_stdin`, `request_user_input`, `apply_patch`, `view_image`,
+  `get_goal`, `create_goal`, `update_goal`, `tool_search`, and
+  `web_search`. With the bundled `gpt-5.6-*` catalog entries it offers
+  something else: they set `tool_mode: "code_mode_only"`, and the request
+  then carries one JavaScript `exec` tool and `wait`, with the real tools
+  named in prose. Each lever below was run, and the request's `tools` array
+  read:
+  - `features.shell_tool=false` removes `exec_command` and `write_stdin`,
+    which come together (`core/src/tools/spec_plan.rs:1247`, `:1265`);
+  - `apply_patch_tool_type: null` in the catalog removes `apply_patch`. No
+    config key does (`spec_plan.rs:1426`);
+  - `features.view_image=false` removes `view_image`;
+  - `features.goals=false` removes the three goal tools together;
+  - `multi_agent_version: null` in the catalog removes the
+    `multi_agent_v1` namespace that `tool_mode: "direct"` exposes.
+    `--disable multi_agent` and `agent_max_depth=0` did not;
+  - `supports_search_tool: false` removes `tool_search`;
+  - `web_search="disabled"` removes `web_search`;
+  - `tools.experimental_request_user_input.enabled=false` removes
+    `request_user_input`;
+  - with all of them, the request carries `tools: []`.
+- **Workspace instructions.** A workspace holding `AGENTS.md`,
+  `AGENTS.override.md`, `sub/AGENTS.md`, skills under `.agents/skills`,
+  `.codex/skills`, and `sub/.agents/skills`, a `.codex/config.toml` naming
+  `developer_instructions`, and a `.codex/hooks.json`:
+  - with no settings (the control), the root `AGENTS.md` and both root skill
+    plants reach the request;
+  - with `project_doc_max_bytes=0` the `AGENTS.md` stops and the skills
+    still reach it;
+  - with the driver's settings (below), no planted token reaches it;
+  - the project config never took effect: a project layer is loaded
+    disabled unless trusted (`config/src/loader/mod.rs:1126-1143`), and
+    disabled layers contribute no config, hooks, or rules
+    (`config/src/state.rs:675-677`). The driver also marks the working
+    directory `untrusted`, which skips repository `AGENTS.md` outright
+    (`core/src/agents_md.rs:64`).
+- **The home directory.** A `CODEX_HOME` under `/tmp` makes the CLI warn
+  that it refuses to create its helper binaries there. A fresh directory
+  under a `1777` directory outside `/tmp` gives no warning, and a task run
+  as uid 1001 writes there and runs its commands as 1001.
+- **What the CLI reports.** `exec --json` emits `thread.started`,
+  `turn.started`, `turn.completed` with the turn's usage summed over its
+  calls, `turn.failed`, `item.*`, and `error`
+  (`exec/src/exec_events.rs:11-37`). It reports neither the tool list nor
+  the model the API answered with. The one model it names is a reroute,
+  emitted as an error item (`exec/src/event_processor_with_jsonl_output.rs:496-503`).
+- **Prices.** OpenAI's pricing page, read 2026-10-31, gives US dollars per
+  million tokens: `gpt-5.6-luna` 0.20 input, 0.02 cached, 1.20 output;
+  `gpt-5.6-terra` 2, 0.20, 12; `gpt-5.6-sol` 4, 0.40, 20. Each model page
+  gives a maximum output of 128,000 tokens. Sol's page bills a prompt over
+  272K input tokens at 2x input and 1.5x output for the whole request. Web
+  search costs $10 per thousand calls plus its content tokens.
+
+#### Where the code or the spec differs from the entry
+
+- The entry says the driver "records [the family] beside the model the
+  vendor reported". This CLI never reports one (above). What a mismatch the
+  driver can see looks like is a reroute item, and that refuses. Otherwise
+  the result names the model the runtime resolved, which is the only model
+  the relay prices, so a request naming another is refused unsent (D-P13-04).
+- "The session offers exactly the granted set or refuses, as P5's does":
+  P5 reads the session's own tool list. This CLI prints none, so the driver
+  gets the same fact another way (D-R26-02).
+
+#### Choices the spec leaves open
+
+- **D-R26-02, how the driver sees what the session offers.** Chosen: before
+  every task, the driver runs the same invocation once against a capture
+  endpoint it starts on the sandbox's loopback, in the same exec. The
+  endpoint records the request and answers a completed response with no
+  output, so no model is called and no token is spent. The driver then
+  refuses unless the captured `tools` equal the grant, the request names the
+  resolved model, and it carries `Bearer <placeholder>`, the counterpart of
+  P5's `apiKeySource` check. Only then does the real run start, with the
+  base URL the relay's and every other argument the same. Rejected:
+  *trusting the flags alone*, because nothing would catch a CLI that offers
+  a tool its configuration did not; *the relay checking `tools`*, which is a
+  `RelaySpec` change and an amendment. To reverse, drop the inspection and
+  accept the flags.
+- **D-R26-03, the declared inventory.** `apply_patch`, `create_goal`,
+  `exec_command`, `get_goal`, `update_goal`, `view_image`, `write_stdin`.
+  Two groups go together because one lever governs each: `exec_command`
+  with `write_stdin`, and the three goal tools. A grant holding part of a
+  group is refused (I4: the CLI would offer the rest). Not declared, and
+  always off:
+  - `web_search` runs on OpenAI's servers and is billed per call outside the
+    token usage the relay reads. That is spend the budget cannot see, so it
+    is refused (P13, I5);
+  - `request_user_input` asks a person, and none is there to answer;
+  - `tool_search` and the multi-agent tools are out of scope, the second
+    verbatim.
+
+  Reverse by adding a name to `DECLARED_TOOLS` with its lever.
+- **D-R26-04, the catalog.** The image runs `codex debug models --bundled`
+  at build time and writes two catalogs, owned by root and readable by all:
+  the three `gpt-5.6-*` entries with `tool_mode: "direct"`,
+  `use_responses_lite: false`, `multi_agent_version: null`,
+  `supports_search_tool: false`, `prefer_websockets: false`, and no
+  upgrade, one with the bundled `apply_patch_tool_type` and one with
+  `null`. The task's grant picks which one. The CLI's own text is never
+  copied into this repository, and the agent cannot write either file.
+  Rejected: *code mode*, whose real tools are a JavaScript program's
+  globals and not a list the driver can compare to a grant; and *a catalog
+  written per task*, which the agent could rewrite between the inspection
+  and the run. To reverse, read the bundled catalog and drop the overrides.
+- **D-R26-05, tiers.** `fast` is `gpt-5.6-luna`, `standard` is
+  `gpt-5.6-terra`, and `deep` is `gpt-5.6-sol`: the three API models the
+  pinned CLI's catalog ships, cheapest to strongest. The paid suite runs
+  `fast`.
+- **D-R26-06, prices at their ceiling.** Each price is the long-context
+  rate: 2x the input and cached rates, 1.5x the output rate. The meter
+  cannot see a prompt's length before pricing, and charging the list rate
+  would under-count any request over 272K input tokens, which would break
+  the budget. The dollar figure is then too high, by a stated factor, for
+  shorter prompts, which P13 accepts as a price wrong in a stated
+  direction. `maxOutputTokens` is 128,000 for each. Rejected: *list rates
+  and a context window held under 272K*, because a bound on the CLI's
+  context is the CLI's promise, not the meter's. To reverse, once the
+  relay can price by prompt length, return to list rates.
+- **D-R26-07, capabilities.** `subagents`, `hooks`, `mcp`, `computerUse`,
+  and `steering` are `false`, and the methods are absent. The multi-agent
+  tools and computer use are out of scope, and hooks are off with
+  `--disable hooks`, so none can arrive from a file. `mcp` is false
+  because this unit configures no server: a grant naming `mcp__*` is
+  refused. `stablePrefixCaching` is `false`: the CLI keys the prompt cache
+  by thread id, which differs per task, so a second task reading the first
+  one's prefix is not something the driver can promise. `parallelism` is
+  P5's: four sandboxes at once, one task per sandbox. Each is asserted
+  under `driver.<key>.codex`.
+- **D-R26-08, the role and the context.** The role's instructions and
+  `stablePrefix` go on the argv as `developer_instructions`, a TOML string,
+  never a file in the workspace (I3). `variableSuffix` is the prompt.
+- **D-R26-09, the home directory.** Each invocation gets a fresh
+  `CODEX_HOME` (also `HOME`) from `mktemp -d` under `/codex-homes`, a
+  `1777` directory the image creates, so no file an earlier task left
+  configures a later one. `--ignore-user-config` and `--ignore-rules` are
+  passed anyway.
+- **D-R26-10, the Responses dialect where A-R26-01 is silent.**
+  - A `max_output_tokens` that is present and not a positive integer is
+    refused unsent, as `openai-chat` refuses a malformed ceiling.
+  - Cached tokens above `input_tokens` are clamped to it, as `openai-chat`
+    clamps.
+  - Only `response.completed` is read in a stream, as the amendment says.
+    A stream ending in `response.incomplete` or `response.failed` is then
+    charged its ceiling and stops the relay, which over-charges and never
+    under-counts.
+- **D-R26-11, approvals and the CLI's own sandbox.** The CLI runs with
+  `--dangerously-bypass-approvals-and-sandbox`: no prompt can ask for more,
+  and the container is the sandbox, as the spec requires. The CLI's own
+  sandbox is a second layer the line does not rely on, so it is not
+  configured. The probe ran a command this way, as uid 1001.
