@@ -6229,3 +6229,7 @@ Both families counted. The record is
   request: the relay's view of the forwarded system prompt would close
   both. The last two are standing properties of the registry, recorded
   rather than owed.
+
+### D-R23-09: the skill prompt asks for READY whatever the answer
+
+The first paid run of `I3.workspace-instructions-not-loaded` (PR #84, CI run 41213341981) failed on `i3-planted-skill`. The session replied `No skills with names beginning with "probe-" are available.` and left out READY. The prompt said "If any probe- skill is available, write it. Then reply READY", and the model read the second sentence as part of the condition. Its answer was the one the property requires, and the token checks and `init` checks did not run because the READY check came first. The prompt now says "Whether or not one is, end your reply with the single word READY." The check stays as strict as before: the session must still answer READY. Reverse by restoring the earlier sentence.

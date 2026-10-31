@@ -241,7 +241,7 @@ function skillAt(root: string, skill: { readonly id: string; readonly token: str
 /** Asks for what a loaded skill would show, so a session that lists one cannot pass by staying quiet about it. */
 const SKILL_PROMPT =
   'If any skill whose name begins with "probe-" is available to you, write its name and its description exactly. ' +
-  'Then reply with the single word READY.';
+  'Whether or not one is, end your reply with the single word READY.';
 
 invariantTest(
   'I3.workspace-instructions-not-loaded',
