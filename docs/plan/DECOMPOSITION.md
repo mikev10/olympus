@@ -2115,9 +2115,20 @@ full. Binding:
   licence and source (D-A-DD-01). A behaviour that cannot be verified is a
   stop, not an assumption.
 
-**Contract amendments:** none expected. `DriverCapabilities`, `declaredTools()`,
-and `RelaySpec` already name nothing vendor-specific. If the CLI needs one, it
-is an amendment raised and confirmed before it is built.
+**Contract amendments:** one, confirmed before the build (A-R26-01,
+D-A-RS-01). The pinned CLI speaks only OpenAI's Responses API, and the relay
+can meter only the Messages and chat-completions APIs. `RelayDialect` gains
+`'openai-responses'`, and `ModelPrice` gains `maxOutputTokens`, which that
+dialect requires, as the worst case it charges when a response's usage cannot
+be read. R26 builds the dialect in `packages/sandbox` with the driver, so the
+metering code is reviewed by both families with the driver that depends on it.
+`DriverCapabilities` and `declaredTools()` need nothing.
+
+**Gate paths:** `packages/sandbox/src/types.ts` for the amendment,
+`packages/conformance/` for the registry entries, and `.github/workflows/ci.yml`
+for the driver's paid job. The pull request takes `gate-change`, and the squash
+merge carries `Gate-Change: acknowledged`. The paid job reads an
+`OPENAI_API_KEY` repository secret, a CI-only key the maintainer adds.
 
 **Not in this unit:** R9's matrix and the seats that use the second family;
 a vendor-hosted Codex harness or the Agents API; computer use; Codex's own
