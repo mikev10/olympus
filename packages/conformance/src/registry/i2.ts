@@ -12,6 +12,7 @@ import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTAR
 import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
 import { ADMISSION_RECORDS_THE_DETECTED_STACK } from './outcomes.js';
+import { CODEX_RELAY_METER_AGREES_WITH_SESSION } from './codex.js';
 import { TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS } from './telemetry.js';
 import { BASE_RESULTS_ARE_THE_RUNTIMES, RESUME_READS_THE_BASE_RECORD } from './base-run.js';
 import { R20_I2 } from './roles.js';
@@ -84,6 +85,8 @@ export const I2: InvariantEntry = {
     ADMISSION_RECORDS_THE_DETECTED_STACK,
     // R12: every span is drawn from a record the runtime wrote and timed by its clock.
     TELEMETRY_IS_DRAWN_FROM_RUNTIME_RECORDS,
+    // R26: the Responses meter agrees with the Codex session it counted (A-R26-01).
+    CODEX_RELAY_METER_AGREES_WITH_SESSION,
     // P13's paid control: the meter counts what the session used, so a reading of zero is not a meter that looked nowhere (I8).
     external({
       id: 'I2.relay-meter-agrees-with-session',

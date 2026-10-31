@@ -4,6 +4,7 @@ import { REVIEW_SEAT_FAMILY_CHECK, REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL } from '
 import { EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR } from './tier.js';
 import { REVIEW_SEAT_READS_ONLY_ITS_GRANTS } from './verification.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { CODEX_FAMILY_IS_DECLARED } from './codex.js';
 import { OPENAI_COMPATIBLE_FAMILY_IS_DECLARED } from './openai-compatible.js';
 
 /** I6: Reviewers never share the author's model family. */
@@ -29,6 +30,8 @@ export const I6: InvariantEntry = {
     EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR,
     // R6: a family the driver cannot see is the operator's declaration, and an answer from another model is refused.
     OPENAI_COMPATIBLE_FAMILY_IS_DECLARED,
+    // R26: the second vendor harness states a family of its own.
+    CODEX_FAMILY_IS_DECLARED,
   ],
   pending: [],
 };

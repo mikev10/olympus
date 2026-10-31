@@ -290,6 +290,19 @@ importers:
         specifier: workspace:*
         version: link:../../conformance
 
+  packages/drivers/codex:
+    dependencies:
+      '@olympus-ai/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@olympus-ai/sandbox':
+        specifier: workspace:*
+        version: link:../../sandbox
+    devDependencies:
+      '@olympus-ai/conformance':
+        specifier: workspace:*
+        version: link:../../conformance
+
   packages/drivers/openai-compatible:
     dependencies:
       '@olympus-ai/core':

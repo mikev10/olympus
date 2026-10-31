@@ -1,5 +1,6 @@
 import { external, runtime } from '../kit/assert.js';
 import type { ClaimEntry, ClaimId } from '../kit/types.js';
+import { CODEX_CLAIM_TITLES, CODEX_PACKAGE } from './codex.js';
 import { specFor, withProvider, withSandbox } from './local-sandbox.js';
 
 /**
@@ -51,6 +52,8 @@ function driverClaim(key: DriverClaimKey, title: string, openaiCompatible: strin
       assertions: [
         external({ id, title, level: 'runtime', package: DRIVER_PACKAGE, file: DRIVER_CLAIMS_FILE }),
         external({ id: `driver.${key}.openai-compatible`, title: openaiCompatible, level: 'runtime', package: OPENAI_COMPATIBLE_PACKAGE, file: DRIVER_CLAIMS_FILE }),
+        // R26: the Codex driver declares every key too, and owes its own assertion under each (D-R26-07).
+        external({ id: `driver.${key}.codex`, title: CODEX_CLAIM_TITLES[key], level: 'runtime', package: CODEX_PACKAGE, file: DRIVER_CLAIMS_FILE }),
       ],
       pending: [],
     },

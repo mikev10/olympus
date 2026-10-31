@@ -5,6 +5,7 @@ import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { ADAPTERS_EXECUTE_NOTHING_ON_THE_HOST } from './adapters.js';
 import { COMPOSED_HOST_MOUNTS_NO_VAULT } from './composition.js';
 import { DIR_NAMES, ESCAPE_MECHANISM, linkTo, refusalFrom, specFor, withProvider, withSandbox } from './local-sandbox.js';
+import { CODEX_EXECUTES_INSIDE_THE_SANDBOX } from './codex.js';
 import { OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX } from './openai-compatible.js';
 import { R20_I1 } from './roles.js';
 
@@ -190,6 +191,8 @@ export const I1: InvariantEntry = {
     COMPOSED_HOST_MOUNTS_NO_VAULT,
     // R6: the second driver's loop is on the host, and every tool and model call it makes is in the sandbox (D-R6-01).
     OPENAI_COMPATIBLE_EXECUTES_INSIDE_THE_SANDBOX,
+    // R26: the Codex CLI runs in the sandbox, and the mount layer keeps the Vault out of it.
+    CODEX_EXECUTES_INSIDE_THE_SANDBOX,
   ],
   pending: [],
 };

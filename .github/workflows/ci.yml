@@ -23,7 +23,8 @@ jobs:
   verify:
     name: typecheck, lint, test, conformance
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20 by R26: the job now builds a second driver image and runs its suite.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
 
@@ -188,6 +189,91 @@ jobs:
           include-hidden-files: true
           retention-days: 30
 
+      # The Codex driver's paid assertions (R26), under the same rules as the
+      # Claude Code driver's above: the run-driver label, one run per tree, a
+      # merge reusing the pull request's report. They read OPENAI_API_KEY, a
+      # CI-only key (A-R26-01), and the free tests still run without the label.
+      # The free step runs every file that calls no model: the inspection and
+      # the claims read the session's request on the sandbox's loopback.
+      - name: Codex driver tree hash
+        id: codex-tree
+        run: echo "hash=$(node scripts/driver-report-key.ts packages/drivers/codex)" >> "$GITHUB_OUTPUT"
+
+      - name: Codex driver report from an earlier run of the same tree
+        id: codex-report
+        uses: actions/cache/restore@v6
+        with:
+          path: packages/drivers/codex/.conformance/run.json
+          key: codex-report-${{ steps.codex-tree.outputs.hash }}
+
+      - name: Reused Codex driver report
+        if: steps.codex-report.outputs.cache-hit == 'true'
+        run: |
+          echo "::notice::driver assertions not re-run; reusing the report for tree ${{ steps.codex-tree.outputs.hash }}"
+          grep -E '"(treeHash|generatedAt)"' packages/drivers/codex/.conformance/run.json
+
+      # A push to v2 cannot see a pull request's cache, so a merge would pay
+      # again for the tree its pull request already proved (D-A-CI-06). The
+      # pull request's run keeps its report as an artifact too, and a push
+      # reuses it when the hash matches. Only an artifact from a run of this
+      # repository counts: a fork's run executes the fork's own workflow file.
+      # The registry still refuses a report for other bytes as tree-changed.
+      - name: Codex driver report from the merged pull request's run
+        id: codex-pr-report
+        if: github.event_name == 'push' && steps.codex-report.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HASH: ${{ steps.codex-tree.outputs.hash }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/${{ github.repository }}/actions/artifacts?name=codex-report-${HASH}&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_repository_id == .workflow_run.repository_id)] | first | .id // empty')"
+          if [ -z "$id" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api "repos/${{ github.repository }}/actions/artifacts/${id}/zip" > "$RUNNER_TEMP/report.zip"
+          mkdir -p packages/drivers/codex/.conformance
+          unzip -o "$RUNNER_TEMP/report.zip" -d packages/drivers/codex/.conformance
+          echo "::notice::driver assertions not re-run; reusing the merged pull request's report for tree ${HASH}"
+          grep -E '"(treeHash|generatedAt)"' packages/drivers/codex/.conformance/run.json
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+      - name: Codex driver assertions, which write the conformance run report
+        if: steps.codex-report.outputs.cache-hit != 'true' && steps.codex-pr-report.outputs.found != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: pnpm --filter @olympus-ai/driver-codex test
+
+      # Until the label is added, the driver's tests that call no model still
+      # run, and with no credential, so one that starts to call a model fails.
+      - name: Codex driver tests that call no model
+        if: steps.codex-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        run: pnpm --filter @olympus-ai/driver-codex exec vitest run test/driver.test.ts test/claims.test.ts
+
+      # Only after the step above passed: a failing run's report stays out of
+      # the cache, so the next run of the same tree calls the model again. On
+      # a push this also caches a report reused from the pull request, so
+      # later pushes and pull requests on the same tree find it.
+      - name: Keep the Codex driver report for the next run of the same tree
+        if: steps.codex-report.outputs.cache-hit != 'true' && (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        uses: actions/cache/save@v6
+        with:
+          path: packages/drivers/codex/.conformance/run.json
+          key: codex-report-${{ steps.codex-tree.outputs.hash }}
+
+      # The same report, where the push that merges this pull request can find it.
+      - name: Keep the Codex driver report for the merge
+        if: github.event_name == 'pull_request' && steps.codex-report.outputs.cache-hit != 'true' && contains(github.event.pull_request.labels.*.name, 'run-driver')
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-report-${{ steps.codex-tree.outputs.hash }}
+          path: packages/drivers/codex/.conformance/run.json
+          # The report lives under a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          retention-days: 30
+
+
       # The composed line's paid assertions (D-I1a-07): one L2 run on the
       # production composition, under the same rules as the driver's above —
       # the run-driver label, one run per tree, a merge reusing the pull
@@ -245,7 +331,7 @@ jobs:
           include-hidden-files: true
           retention-days: 30
 
-      # Every package but the driver, which the step above already ran: its
+      # Every package but the two drivers, which the steps above already ran: their
       # assertions call a real model, and a second pass bills every one of
       # them again to prove nothing the first did not. The report it wrote is
       # bound to the package's tree hash, which nothing between the two steps
@@ -257,7 +343,7 @@ jobs:
       # it first and its registry would find no report from a package whose
       # tests this step runs (D-R6-08).
       - name: Test
-        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/conformance' test
+        run: pnpm -r --filter '!@olympus-ai/driver-claude-code' --filter '!@olympus-ai/driver-codex' --filter '!@olympus-ai/conformance' test
 
       - name: Conformance package tests
         run: pnpm --filter @olympus-ai/conformance test
@@ -275,13 +361,19 @@ jobs:
       # thing in the log: every invariant's state, every pending entry, and
       # the unit that owes it. A `missing` invariant fails this step.
       - name: Conformance registry
-        if: (steps.driver-report.outputs.cache-hit == 'true' && steps.line-report.outputs.cache-hit == 'true') || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        if: (steps.driver-report.outputs.cache-hit == 'true' && steps.codex-report.outputs.cache-hit == 'true' && steps.line-report.outputs.cache-hit == 'true') || (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: pnpm conformance
 
       - name: Driver suite not yet run for this tree
         if: steps.driver-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
         run: |
           echo "::error::the driver's real-model assertions have not run for tree ${{ steps.driver-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge; that run calls the model once."
+          exit 1
+
+      - name: Codex driver suite not yet run for this tree
+        if: steps.codex-report.outputs.cache-hit != 'true' && !(github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-driver'))
+        run: |
+          echo "::error::the Codex driver's real-model assertions have not run for tree ${{ steps.codex-tree.outputs.hash }}, so the conformance registry was not evaluated. Add the run-driver label to this pull request when it is ready to merge."
           exit 1
 
       - name: Line suite not yet run for this tree

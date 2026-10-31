@@ -14,6 +14,7 @@
 import { external, runtime } from '../kit/assert.js';
 import type { AssertionId, InvariantEntry } from '../kit/types.js';
 import { workspacePackages } from '../kit/workspace.js';
+import { CODEX_PACKAGE, CODEX_WORKSPACE_INSTRUCTIONS_NOT_LOADED_TITLE } from './codex.js';
 
 const CLAUDE_CODE = '@olympus-ai/driver-claude-code';
 const OPENAI_COMPATIBLE = '@olympus-ai/driver-openai-compatible';
@@ -22,6 +23,7 @@ const OPENAI_COMPATIBLE = '@olympus-ai/driver-openai-compatible';
 export const WORKSPACE_INSTRUCTION_ASSERTIONS: Readonly<Record<string, AssertionId>> = {
   [CLAUDE_CODE]: 'I3.workspace-instructions-not-loaded',
   [OPENAI_COMPATIBLE]: 'I3.openai-compatible-workspace-instructions-not-loaded',
+  [CODEX_PACKAGE]: 'I3.codex-workspace-instructions-not-loaded',
 };
 
 /** How every workspace-instruction assertion id ends: the property, after an optional driver prefix. */
@@ -81,6 +83,14 @@ export const R23_I3 = [
       + 'leaves every request the driver sends byte-identical to the same task over an empty workspace: the session runs under its role alone',
     level: 'runtime',
     package: OPENAI_COMPATIBLE,
+    file: 'test/invariants.test.ts',
+  }),
+  // R26: paid, and its control runs the same invocation without the driver's instruction settings (D-A-DD-03).
+  external({
+    id: 'I3.codex-workspace-instructions-not-loaded',
+    title: CODEX_WORKSPACE_INSTRUCTIONS_NOT_LOADED_TITLE,
+    level: 'runtime',
+    package: CODEX_PACKAGE,
     file: 'test/invariants.test.ts',
   }),
   runtime({
