@@ -5591,6 +5591,75 @@ Vendor-side defaults for agent features are I4.
 - **Reverse:** remove the row and the section, and put "Codex driver" back in R9's dependencies.
 - **Requested** by the maintainer, 2026-10-30.
 
+## Amendment: the Responses API meter (R26)
+
+R26 was started on `v2` at 074f916 and stopped before any code. The pinned
+CLI needs a relay dialect the contract does not have, and a contract change is
+an amendment confirmed before it is built.
+
+### D-A-RS-01: the relay meters the Responses API, and the model's maximum output is its ceiling
+
+- **Found**, on `@openai/codex@0.166.0` (Apache-2.0, `github.com/openai/codex`),
+  run against a local endpoint that logged each request and answered 400, so
+  no model was called:
+  - `-c model_providers.<id>.wire_api="chat"` is refused at config load:
+    "`wire_api = "chat"` is no longer supported". The CLI speaks only the
+    Responses API.
+  - Under `wire_api="responses"` the one request is `POST /v1/responses`, with
+    `Authorization: Bearer <OPENAI_API_KEY>` and `"stream": true`. The body
+    carries no `max_output_tokens`, and `-c model_max_output_tokens=4096` does
+    not add one.
+  - `RelayDialect` is `'anthropic-messages' | 'openai-chat'`
+    (`packages/sandbox/src/types.ts:110`). A dialect the relay does not know is
+    refused (D-P13-06), so the relay cannot meter this CLI, and P13's budget
+    cannot hold for it.
+  - The relay charges a response whose usage it cannot read, or whose stream
+    ends before the final usage, at the request's output ceiling
+    (`packages/sandbox/src/local/relay.ts:92`, `:378`). This CLI's requests
+    carry no ceiling.
+- **Chosen** by the maintainer, 2026-10-31, as A-R26-01 below: a third
+  dialect, and a per-model maximum output as its ceiling.
+- **Rejected:**
+  - *Charge the call's whole remaining budget.* It fails closed, but it ends
+    the task every time a stream drops. The other dialects charge a true upper
+    bound and let the task continue if budget remains, and the model's maximum
+    output is also a true upper bound.
+  - *The relay writes `max_output_tokens` into each request.* The relay would
+    start rewriting request bodies, which it does nowhere today.
+  - *Refuse a request with no ceiling, as `openai-chat` does.* Every call this
+    CLI makes would be refused.
+  - *Building the dialect in this amendment's pull request.* The metering
+    code enforces the budget. R26 builds it, so the external review of both
+    families covers it with the driver that depends on it, as A-R6-01 was
+    built by R6.
+- **Must hold:** P13's rules as written. Every metered call is counted, an
+  unpriced model is refused before its request is sent, and an unreadable
+  answer stops the relay forwarding.
+- **Reverse:** drop A-R26-01 and the R26 entry's amendment paragraph. R26
+  then cannot meter its CLI and stays blocked.
+
+### A-R26-01: the `openai-responses` meter dialect
+
+`RelayDialect` gains `'openai-responses'`. Under it, a `POST` to a granted
+path ending `/responses` is metered, a `GET` is free, and anything else is
+refused as unmeterable. Usage is read from a JSON body's `usage`, or from the
+`response.usage` of a stream's `response.completed` event. Input is
+`input_tokens` less `input_tokens_details.cached_tokens`, the cached count is
+cache reads, `output_tokens` is output, and there are no cache writes.
+
+`ModelPrice` gains an optional `maxOutputTokens`, a positive integer. Under
+`openai-responses` every priced model requires one, or the spec is refused at
+the `relay` layer. It is the request's ceiling: the larger of it and any
+`max_output_tokens` the request carries. A response with no readable usage,
+or a stream that ends before its final usage, is charged that ceiling as
+output, as the other dialects charge theirs. Every other P13 rule holds as
+written.
+
+The paid suite needs an OpenAI API key in CI. It is a repository secret,
+`OPENAI_API_KEY`, holding a CI-only key, which the maintainer adds. The
+maintainer's ChatGPT sign-in, which the review runner uses, is not a key the
+relay can hold.
+
 ## R22: Trigger framework
 
 Built against `v2` at cd7eff3. The spec is `docs/plan/R22-triggers.md`. The
