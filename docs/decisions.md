@@ -6575,3 +6575,42 @@ Responses stream. No model was called.
 - The `verify` job's timeout goes from 20 to 35 minutes, for a second image
   build and suite. The recursive test step excludes this driver as it
   excludes P5's, so its paid file is never run twice.
+
+### D-R26-14: what the external review changed
+
+- **The Responses meter refuses spend it cannot count (codex-1, gemini-1).**
+  A process in the sandbox can POST to the relay directly, so the CLI's
+  configuration bounds nothing about such a request. Under
+  `openai-responses` the relay now refuses unsent a request that offers a
+  tool the API runs itself (anything but `function` or `custom`), names a
+  `service_tier` other than `default`, or names a stored `prompt`: each is
+  billed outside the token usage the meter reads (D-P13-12). The free suite
+  asserts the CLI's own requests use only client tools and name neither.
+  Rejected: *the relay holding the task's tool grant*, which is a
+  `RelaySpec` change. Client tools run nothing on the vendor's side, so they
+  need no grant at the relay. The same gap in `openai-chat` is issue #88.
+- **The event reader is closed on usage too (codex-4).** A `thread.started`
+  with no id, and a `turn.completed` without integer `input_tokens` and
+  `output_tokens`, are unreadable, so the task is refused.
+- **The plants are each shown live (codex-5).** A control from `sub/` under
+  a project-root marker reads the nested plants, and a control with the
+  override removed reads the root `AGENTS.md`. A driver started in `sub/`
+  carries none of them. The project-config plant has no control: on the
+  pinned CLI neither `developer_instructions` nor `model_instructions_file`
+  in `.codex/config.toml` reached a request, even with the directory
+  trusted. Its absence is evidence of nothing, and the assertion's title
+  says the control carries every plant but that one.
+
+### D-R26-15: known limits the review found and this unit does not close
+
+- **A process left running by one task, in a sandbox reused for another
+  (codex-2, codex-3, gemini-2).** It can act during the later task and
+  rewrite the later inspection's capture file, since both run as the
+  sandbox's uid. The line never reuses a sandbox: every task gets its own,
+  which `I4.task-capabilities-do-not-outlive-the-task` asserts in real
+  containers. The driver itself serves any handle it is given, and a caller
+  that reuses one gets no process boundary from the driver. Killing
+  processes the driver did not start would end a check the runtime
+  started, so the boundary stays the runtime's.
+- **A call begun under budget can end over it by one call (codex, note).**
+  That is P13's stated rule (D-P13-03), not this unit's to change.
