@@ -55,6 +55,10 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
+function isCount(value: unknown): boolean {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
 function count(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
@@ -95,9 +99,23 @@ export function parseEvents(stdout: string): ParsedEvents {
       continue;
     }
     if (type === 'thread.started') {
-      threadId = text(event.thread_id);
+      // A session with no id is not a session this reader can name (codex-4).
+      const id = text(event.thread_id);
+      if (id === '') {
+        unreadable.push(line);
+        continue;
+      }
+      threadId = id;
     } else if (type === 'turn.completed') {
       const u = record(event.usage);
+      // The two counts the meter is held to must be there and be counts; a completed turn
+      // without them is unreadable, never a turn that used nothing (codex-4). The cached and
+      // cache-write counts stay optional, and an invalid one is refused the same way.
+      const optional = [u?.cached_input_tokens, u?.cache_write_input_tokens].filter((v) => v !== undefined);
+      if (!isCount(u?.input_tokens) || !isCount(u?.output_tokens) || !optional.every(isCount)) {
+        unreadable.push(line);
+        continue;
+      }
       usage ??= { inputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
       usage.inputTokens += count(u?.input_tokens);
       usage.cachedInputTokens += count(u?.cached_input_tokens);

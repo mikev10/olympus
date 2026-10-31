@@ -167,6 +167,25 @@ describe('the event reader is closed', () => {
     expect(parsed.unknown).toStrictEqual([]);
   });
 
+  test('a session with no thread id, or a turn with absent or invalid usage, is unreadable rather than a completed zero-usage turn (codex-4)', () => {
+    const cases = [
+      [line({ type: 'thread.started' }), line({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } })],
+      [line({ type: 'thread.started', thread_id: '' }), line({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } })],
+      [line({ type: 'thread.started', thread_id: 't' }), line({ type: 'turn.completed' })],
+      [line({ type: 'thread.started', thread_id: 't' }), line({ type: 'turn.completed', usage: { input_tokens: 'many', output_tokens: 1 } })],
+      [line({ type: 'thread.started', thread_id: 't' }), line({ type: 'turn.completed', usage: { input_tokens: 1 } })],
+      [line({ type: 'thread.started', thread_id: 't' }), line({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: -1 } })],
+    ];
+    for (const lines of cases) {
+      const parsed = parseEvents(lines.join('\n'));
+      expect(parsed.unreadable.length, lines.join(' ')).toBe(1);
+    }
+    // Optional counts the CLI may omit stay optional; the two the meter is held to do not.
+    const minimal = parseEvents([line({ type: 'thread.started', thread_id: 't' }), line({ type: 'turn.completed', usage: { input_tokens: 3, output_tokens: 2 } })].join('\n'));
+    expect(minimal.unreadable).toStrictEqual([]);
+    expect(minimal.usage).toStrictEqual({ inputTokens: 3, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 2 });
+  });
+
   test('an item from a tool nobody granted, an unnamed event, an unreadable line, and a reroute are each recorded', () => {
     const parsed = parseEvents(
       [
