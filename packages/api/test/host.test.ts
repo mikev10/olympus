@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { ENDPOINT_CREDENTIAL } from '@olympus-ai/driver-openai-compatible';
-import { containerUser, endpointGrants, ENDPOINT_SEATS, parseEndpointFile, seatedDrivers } from '../src/host/compose.js';
+import { containerUser, endpointGrants, ENDPOINT_SEATS, parseCodexSeats, parseEndpointFile, providerCredentials, seatedDrivers } from '../src/host/compose.js';
 
 describe('containerUser', () => {
   test('both absent or empty is no user, and both set is that user', () => {
@@ -76,5 +76,26 @@ describe('the endpoint file (R6, D-R6-07)', () => {
       driver: 'claude', reviewer: 'other', specDrafter: 'claude', specCritic: 'claude', testDrafter: 'claude', testCritic: 'other',
     });
     expect(ENDPOINT_SEATS).toHaveLength(6);
+  });
+
+  test('Codex fills the seats it names, and a seat the endpoint also names stops the host (R9, D-R9-06)', () => {
+    expect(seatedDrivers('claude', { driver: 'other', seats: ['testCritic'] }, { driver: 'codex', seats: ['reviewer', 'specCritic'] })).toStrictEqual({
+      driver: 'claude', reviewer: 'codex', specDrafter: 'claude', specCritic: 'codex', testDrafter: 'claude', testCritic: 'other',
+    });
+    expect(() => seatedDrivers('claude', { driver: 'other', seats: ['reviewer'] }, { driver: 'codex', seats: ['reviewer'] })).toThrow(/both/u);
+  });
+
+  test('the Codex seats and key are both set or neither, and every seat is one the host has (R9)', () => {
+    expect(parseCodexSeats('', '')).toBeNull();
+    expect(parseCodexSeats('reviewer, testCritic', 'k')).toStrictEqual({ key: 'k', seats: ['reviewer', 'testCritic'] });
+    expect(() => parseCodexSeats('reviewer', '')).toThrow(/both be set/u);
+    expect(() => parseCodexSeats('', 'k')).toThrow(/both be set/u);
+    expect(() => parseCodexSeats('critic', 'k')).toThrow(/the seats are/u);
+    expect(() => parseCodexSeats('reviewer,reviewer', 'k')).toThrow(/twice/u);
+  });
+
+  test("the Codex key is given to the sandbox provider under the Codex driver's credential name, and none is given without it", () => {
+    expect(providerCredentials('model', null, { key: 'codex-key', seats: ['reviewer'] })).toStrictEqual({ anthropic: 'model', openai: 'codex-key' });
+    expect(providerCredentials('model', null)).toStrictEqual({ anthropic: 'model' });
   });
 });
