@@ -1,3 +1,20 @@
+# External review of R9, gemini, 2026-11-02
+
+The Gemini family's review of R9, separation of duties across every seat. The triage of both reviews is `2026-11-02-R9-separation-of-duties-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** none of gemini-1 to gemini-3 was raised by codex as a finding. gemini-2 (the identity check is unreachable through the line) bears on the same mechanism as codex's closing framing remark.
+- **Date:** 2026-11-02
+- **Bundle:** `2026-11-02-R9-separation-of-duties-review-bundle.txt`, SHA-256 `bbfa4cd5fc9da44506447b77bd627ad7dd1c92ea0d2d1374689d0cf815cd6ab5` (the manifest's `bundleSha256`), base `4dee3f1` (`reviewed/R26`), head `e695015` (the unit branch tip when the bundle was built). It held every new file in full and every modified file as a function-context diff; `docs/decisions.md`, `docs/reviews/`, `docs/plan/`, and `pnpm-lock.yaml` were excluded. Prompt: `2026-11-02-R9-separation-of-duties-review-prompt.txt`.
+- **Citations:** line numbers are positions in the bundle's new-side diff hunks, not repository lines; each was located against the code at triage.
+- **Prior context and lookups:** it states it had no prior context and performed no external lookups. A self-report, not independently verifiable.
+- **Coverage, and any gap:** it numbers its sections by the prompt's items and answers items 1, 2, 4, and 6. Items 3 (fail-open), 5 (configuration), and 7 (framing) came back empty; that silence is not an endorsement. Findings here are cited gemini-1 (item 1), gemini-2 (item 2), gemini-3 (item 4).
+
+---
+
 BASE: reviewed/R26
 HEAD: e695015
 packages/vault/test/stub.test.ts
