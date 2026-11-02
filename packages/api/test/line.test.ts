@@ -741,6 +741,25 @@ describe('cost is what the relay counted, recorded per driver call (I2)', () => 
     expect(first?.timing).toBe('not-recorded');
   });
 
+  test('a usage record before R9 reads with its driver not recorded, and one whose driver is not a name is refused (A-R9-01, gemini-3)', async () => {
+    const outcome = await startRun(runRequest(runId, workspace, { ...components, reviewer: new ChosenDriver({ family: 'other' }) }));
+    const state = outcome.ok ? outcome.state : refusedState(outcome);
+    const [ref] = state.usage;
+    if (ref === undefined) throw new Error('the run recorded no usage');
+    const legacyHash = ref.hash;
+    const { driver: _driver, ...legacy } = await read<UsageRecord>(components.vault, ref);
+    const reading = (record: unknown) => {
+      class Planted extends CountingVault {
+        override read(r: VaultRef): Promise<Uint8Array> {
+          return r.hash === legacyHash ? Promise.resolve(new TextEncoder().encode(JSON.stringify(record))) : super.read(r);
+        }
+      }
+      return readUsage(new Planted(components.vault), state);
+    };
+    expect((await reading(legacy))[0]?.driver).toBeNull();
+    for (const driver of [5, '', null, { id: 'x' }]) await expect(reading({ ...legacy, driver })).rejects.toThrow(/driver/);
+  });
+
   test('a driver call that failed is recorded before its retry', async () => {
     const driver = new FailsFirstCall({ narrative: 'built' });
     const vault = new CountingVault(components.vault);
