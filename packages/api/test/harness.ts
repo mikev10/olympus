@@ -24,7 +24,7 @@ import {
   type PolicyDocument,
   type RoleId,
   type RunId,
-  type TaskGraph,
+
   type TaskRequest,
   type TaskResult,
 } from '@olympus-ai/core';
@@ -32,7 +32,7 @@ import { STAND_IN_SECRET_SCAN_IMAGE, STAND_IN_SECRET_SCANNER, STAND_IN_STATIC_AN
 import type { OtherCheckSpec } from '@olympus-ai/integrity';
 import { StubSandboxProvider, type SandboxProvider } from '@olympus-ai/sandbox';
 import { StubVault } from '@olympus-ai/vault';
-import { buildGraph, isBuilt, localWorkspaceStore, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
+import { buildGraph, isBuilt, localWorkspaceStore, parseGraph, worstCaseCost, type BuiltGraph, type GraphParts, type RunRequest, type WorkspaceStore } from '../src/index.js';
 import { DelegatingDriver } from './wrappers.js';
 
 export const HELLO = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hello');
@@ -288,8 +288,9 @@ function working(graph: BuiltGraph): BuiltGraph {
 
 function approvedFigure(req: RunRequest): number | null {
   try {
-    const parsed = JSON.parse(readFileSync(join(req.workspace, req.artifacts.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
-    return worstCaseCost({ tasks: parsed.tasks, edges: [] }, req.policy).usd;
+    // Bound as admission binds it, so the security seats it derives are in the figure (R9).
+    const parsed = parseGraph(JSON.parse(readFileSync(join(req.workspace, req.artifacts.taskGraph), 'utf8')), { runId: req.runId, baseCommit: req.baseCommit, workspace: req.workspace });
+    return parsed.ok ? worstCaseCost(parsed.graph, req.policy).usd : null;
   } catch {
     return null;
   }

@@ -89,10 +89,12 @@ beforeAll(async () => {
     components,
     approvedCostUsd: null,
   };
-  const { worstCaseCost } = await import('../../src/index.js');
+  const { parseGraph, worstCaseCost } = await import('../../src/index.js');
   const { readFile } = await import('node:fs/promises');
-  const graph = JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')) as Parameters<typeof worstCaseCost>[0];
-  outcome = await startRun({ ...request, approvedCostUsd: worstCaseCost({ tasks: graph.tasks, edges: [] }, request.policy).usd });
+  // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+  const graph = parseGraph(JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')), { runId, baseCommit: request.baseCommit, workspace: request.workspace });
+  if (!graph.ok) throw new Error(`the paid line's graph does not parse: ${JSON.stringify(graph.problems)}`);
+  outcome = await startRun({ ...request, approvedCostUsd: worstCaseCost(graph.graph, request.policy).usd });
   state = await components.vault.readRunState(runId);
   usage = await readUsage(components.vault, state);
 }, 1_200_000);

@@ -12,6 +12,7 @@ function usage(runId: string, taskId: string, station: StationId, attempt: numbe
     station,
     attempt,
     model,
+    driver: 'stub@1',
     reading: { kind: 'metered', inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, refused: 0, exhausted: null },
     timing: { startedAt: '2026-10-01T00:00:00.000Z', endedAt: '2026-10-01T00:01:00.000Z' },
     collectedBy: 'runtime',

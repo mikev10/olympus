@@ -8,6 +8,7 @@ import { UNMET_EXPECTATION_FAILS_THE_GATE } from './adapters.js';
 import { HTTP_VERDICT_JUDGED_OUTSIDE_THE_PRODUCT, HTTP_PROBE_SHARES_NETWORK_NOT_FILESYSTEM } from './http.js';
 import { CALL_RECORDED_BEFORE_IT_IS_MADE, COST_IS_RUNTIME_METERED, RESUME_DERIVES_STATE_FROM_THE_VAULT } from './line-assertions.js';
 import { ESCALATION_DECIDED_FROM_FAILED_GATES, RELAY_BOUND_TO_TIER_MODEL } from './tier.js';
+import { SEAT_IDENTITY_IN_RUN_STATE } from './separation.js';
 import { STATUS_DERIVED_FROM_CHECK_RESULTS, TASK_RESULT_KEY_SET_ENFORCED, UNSTARTED_CHECK_IS_IN_THE_EVIDENCE } from './verification.js';
 import { READINESS_OUTCOME_IS_RUNTIME_DERIVED } from './readiness.js';
 import { VAULT_LISTS_EVERY_RUN } from './local-vault.js';
@@ -77,6 +78,8 @@ export const I2: InvariantEntry = {
     ENFORCEMENT_DECISIONS_RECORDED,
     // R14: the tier rises only from the failed gates run state counts, and the relay serves only the tier's model.
     ESCALATION_DECIDED_FROM_FAILED_GATES,
+    // R9: every seat's identity, role, driver, and model, is the runtime's record.
+    SEAT_IDENTITY_IN_RUN_STATE,
     RELAY_BOUND_TO_TIER_MODEL,
     // R2: a rate over every run reads the set the store names, never one a caller chose.
     VAULT_LISTS_EVERY_RUN,

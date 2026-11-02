@@ -253,6 +253,7 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     attempt: 1,
     model: { provider: 'anthropic', family: 'claude' as ModelFamily, model: 'sonnet', version: '1' },
     role: { id: 'builder' as RoleId, sha256: 'a'.repeat(64) },
+    driver: 'stub@1',
     reading: { kind: 'metered' as const, calls: 2, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.001, exhausted: 'none' as const, refused: 0 },
     timing: { startedAt: '2026-10-28T10:00:00.000Z', endedAt: '2026-10-28T10:01:00.000Z' } as CallTiming,
     collectedBy: 'runtime' as const,
@@ -284,6 +285,13 @@ describe('usage records (A-P13-03, A-I1a-01, A-I1a-04, A-I1a-05)', () => {
     await expect(vault.recordUsage(roleless as never)).rejects.toThrow(/role/);
     await expect(vault.recordUsage({ ...record, role: { ...record.role, sha256: 'not-a-hash' } })).rejects.toThrow(/role/);
     await expect(vault.recordUsage({ ...record, role: { ...record.role, id: '' as RoleId } })).rejects.toThrow(/role/);
+  });
+
+  test('refuses a record that names no driver the call was made through (A-R9-01)', async () => {
+    const { driver: _omitted, ...driverless } = record;
+    await expect(vault.recordUsage(driverless as never)).rejects.toThrow(/driver/);
+    await expect(vault.recordUsage({ ...record, driver: null })).rejects.toThrow(/driver/);
+    await expect(vault.recordUsage({ ...record, driver: '' })).rejects.toThrow(/driver/);
   });
 
   test('stores a pending reading, written before the call it stands for (D-I1a-12)', async () => {
@@ -499,6 +507,16 @@ describe('station entries (A-R12-02)', () => {
     // A resume after R12 appends to the history it read, which was none.
     const resumed = [{ station: 'build' as const, enteredAt: '2026-10-28T11:00:00.000Z' }];
     await expect(vault.commitRunState({ ...state('1'), stations: resumed }, '1')).resolves.toMatchObject({ stations: resumed });
+  });
+
+  test('a review seat committed before R9 reads as a review seat whose roles and drivers were not recorded (A-R9-01)', async () => {
+    const model = { provider: 'anthropic', family: 'claude', model: 'sonnet', version: '1' };
+    const old = { task: 'r', authors: [model], reviewer: { ...model, family: 'gpt' }, independence: 'different-family' };
+    const current = { task: 's', kind: 'security', authors: [{ role: { id: 'builder', sha256: 'a'.repeat(64) }, driver: 'stub@1', model }], reviewer: { role: null, driver: 'stub@1', model }, independence: 'same-model' };
+    await plant('1', { ...state('1'), reviews: [old, current] });
+    const [legacy, recent] = (await vault.readRunState(runId)).reviews;
+    expect(legacy).toEqual({ task: 'r', kind: 'review', authors: [{ role: null, driver: null, model }], reviewer: { role: null, driver: null, model: { ...model, family: 'gpt' } }, independence: 'different-family' });
+    expect(recent).toEqual(current);
   });
 
   test('refuses to return a state whose station entry carries a time with no zone (codex-6)', async () => {

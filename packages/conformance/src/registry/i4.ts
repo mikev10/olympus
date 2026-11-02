@@ -17,6 +17,7 @@ import { READINESS_NEVER_RAISES_A_CAP, ABSENT_SCAN_IS_NOT_A_PASS } from './readi
 import { R20_I4 } from './roles.js';
 import { R22_I4 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
+import { LOCAL_TOKEN_REACHES_NO_SANDBOX, SECURITY_SEAT_READS_ONLY_ITS_GRANTS } from './separation.js';
 
 /** I4: Default deny. */
 export const I4: InvariantEntry = {
@@ -33,6 +34,9 @@ export const I4: InvariantEntry = {
     READINESS_NEVER_RAISES_A_CAP,
     ABSENT_SCAN_IS_NOT_A_PASS,
     MERGE_TOKEN_REACHES_NO_SANDBOX,
+    // R9: the approval's token stays the server's, and the security seat holds its grants alone.
+    LOCAL_TOKEN_REACHES_NO_SANDBOX,
+    SECURITY_SEAT_READS_ONLY_ITS_GRANTS,
     GIT_REMOTE_UNREACHABLE_FROM_EVERY_SANDBOX,
     compileError({
       id: 'I4.capability-scope-is-explicit',

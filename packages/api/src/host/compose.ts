@@ -6,6 +6,7 @@
  */
 import { WEBHOOK_SECRET_PREFIX } from '@olympus-ai/core';
 import { BASE_IMAGE, ClaudeCodeDriver, ensureImage, MODEL_CREDENTIAL } from '@olympus-ai/driver-claude-code';
+import { CodexDriver, ensureImage as ensureCodexImage, MODEL_CREDENTIAL as CODEX_CREDENTIAL } from '@olympus-ai/driver-codex';
 import { checkConfig, ENDPOINT_CREDENTIAL, OpenAICompatibleDriver, type EndpointConfig } from '@olympus-ai/driver-openai-compatible';
 import { LocalDockerProvider } from '@olympus-ai/sandbox';
 import { LocalVault } from '@olympus-ai/vault';
@@ -46,6 +47,37 @@ export interface HostConfig {
    * Absent or null composes the Claude Code driver in every seat.
    */
   readonly endpoint?: HostEndpoint | null;
+  /**
+   * The Codex driver, its credential, and the seats it fills (R9, D-R9-06):
+   * the second family a reviewer can be seated on. Absent or null seats it
+   * nowhere. A seat it and the endpoint both name stops the host.
+   */
+  readonly codex?: HostCodex | null;
+}
+
+/** The Codex driver's seats and the key its relay is given, held by the sandbox provider and given to no sandbox (A-P12-01). */
+export interface HostCodex {
+  readonly key: string;
+  readonly seats: readonly EndpointSeat[];
+}
+
+/**
+ * Reads `FACTORY_CODEX_SEATS`, a comma-separated list of the seats the
+ * endpoint file names, and `FACTORY_CODEX_KEY`: both, or neither, which seats
+ * Codex nowhere. A misspelt or repeated seat stops the host before it listens
+ * (I5), as the endpoint file's does.
+ */
+export function parseCodexSeats(seats: string, key: string): HostCodex | null {
+  if (seats === '' && key === '') return null;
+  if (seats === '' || key === '') throw new Error('factory-host: FACTORY_CODEX_SEATS and FACTORY_CODEX_KEY must both be set, or neither');
+  const known = new Set<string>(ENDPOINT_SEATS);
+  const named: EndpointSeat[] = [];
+  for (const seat of seats.split(',').map((s) => s.trim())) {
+    if (!known.has(seat)) throw new Error(`factory-host: FACTORY_CODEX_SEATS names the seat ${JSON.stringify(seat)}; the seats are ${ENDPOINT_SEATS.join(', ')}`);
+    if (named.includes(seat as EndpointSeat)) throw new Error(`factory-host: FACTORY_CODEX_SEATS names the seat '${seat}' twice`);
+    named.push(seat as EndpointSeat);
+  }
+  return { key, seats: named };
 }
 
 /** The seats an endpoint can fill: the build seat, the review seat, and the four drafting seats (R19). */
@@ -116,10 +148,23 @@ export function endpointGrants(endpoint: HostEndpoint | null): { credentials: Re
   };
 }
 
-/** Each seat's driver: the endpoint's in the seats it names, the default in every other (D-R6-07). */
-export function seatedDrivers<D>(fallback: D, endpoint: { readonly driver: D; readonly seats: readonly EndpointSeat[] } | null): Record<EndpointSeat, D> {
+/**
+ * Each seat's driver: the endpoint's in the seats it names, Codex's in the
+ * seats it names, the default in every other (D-R6-07, D-R9-06). A seat both
+ * name is a configuration that says two things, and throws.
+ */
+export function seatedDrivers<D>(
+  fallback: D,
+  endpoint: { readonly driver: D; readonly seats: readonly EndpointSeat[] } | null,
+  codex: { readonly driver: D; readonly seats: readonly EndpointSeat[] } | null = null,
+): Record<EndpointSeat, D> {
   const out = {} as Record<EndpointSeat, D>;
-  for (const name of ENDPOINT_SEATS) out[name] = endpoint?.seats.includes(name) === true ? endpoint.driver : fallback;
+  for (const name of ENDPOINT_SEATS) {
+    const byEndpoint = endpoint?.seats.includes(name) === true ? endpoint : null;
+    const byCodex = codex?.seats.includes(name) === true ? codex : null;
+    if (byEndpoint !== null && byCodex !== null) throw new Error(`factory-host: the seat '${name}' is named by both the endpoint file and FACTORY_CODEX_SEATS`);
+    out[name] = (byEndpoint ?? byCodex)?.driver ?? fallback;
+  }
   return out;
 }
 
@@ -145,8 +190,8 @@ export function containerUser(env: Readonly<Record<string, string | undefined>>)
  * subscription's secret is not among them, so no sandbox spec can name one
  * and have it resolve (D-A-TF-05).
  */
-export function providerCredentials(modelKey: string, endpoint: HostEndpoint | null): Record<string, string> {
-  return { [MODEL_CREDENTIAL]: modelKey, ...endpointGrants(endpoint).credentials };
+export function providerCredentials(modelKey: string, endpoint: HostEndpoint | null, codex: HostCodex | null = null): Record<string, string> {
+  return { [MODEL_CREDENTIAL]: modelKey, ...endpointGrants(endpoint).credentials, ...(codex === null ? {} : { [CODEX_CREDENTIAL]: codex.key }) };
 }
 
 /**
@@ -162,20 +207,30 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
   const vault = new LocalVault({ store: config.store, artifacts: config.repository });
   const docker = config.docker === undefined ? {} : { executable: config.docker };
   const endpoint = config.endpoint ?? null;
+  const codexSeats = config.codex ?? null;
   const grants = endpointGrants(endpoint);
   const sandbox = await LocalDockerProvider.create({
     ...docker,
     vaultPaths: [config.store, config.repository],
-    credentials: providerCredentials(config.modelKey, endpoint),
+    credentials: providerCredentials(config.modelKey, endpoint, codexSeats),
     dockerHostPorts: grants.dockerHostPorts,
   });
   const claude = new ClaudeCodeDriver({ provider: sandbox });
   // The endpoint's driver, in the seats the operator named and no others (D-R6-07). Its family is the operator's
   // declaration, so a reviewer or critic seated on it is graded against that declaration (I6).
   const other = endpoint === null ? null : new OpenAICompatibleDriver({ provider: sandbox, endpoint: endpoint.config });
-  const seats = seatedDrivers<ClaudeCodeDriver | OpenAICompatibleDriver>(claude, other === null || endpoint === null ? null : { driver: other, seats: endpoint.seats });
-  const seat = (name: EndpointSeat): ClaudeCodeDriver | OpenAICompatibleDriver => seats[name];
+  // Codex, in the seats the operator named: a second family a reviewer or critic can be seated on (R9, D-R9-06).
+  const codex = codexSeats === null ? null : new CodexDriver({ provider: sandbox });
+  type Seated = ClaudeCodeDriver | OpenAICompatibleDriver | CodexDriver;
+  const seats = seatedDrivers<Seated>(
+    claude,
+    other === null || endpoint === null ? null : { driver: other, seats: endpoint.seats },
+    codex === null || codexSeats === null ? null : { driver: codex, seats: codexSeats.seats },
+  );
+  const seat = (name: EndpointSeat): Seated => seats[name];
   const buildImage = await ensureImage(docker);
+  // The Codex CLI is in its own image, so a task Codex runs is provisioned from it (D-R9-06).
+  const driverImages = codex === null ? {} : { [codex.provenanceId()]: await ensureCodexImage(docker) };
   return buildGraph({
     vault,
     sandbox,
@@ -187,6 +242,6 @@ export async function composeHost(config: HostConfig): Promise<BuiltGraph> {
     drafting: { specDrafter: seat('specDrafter'), specCritic: seat('specCritic'), testDrafter: seat('testDrafter'), testCritic: seat('testCritic') },
     workspaces: localWorkspaceStore(config.containerUser === undefined ? { root: config.trees } : { root: config.trees, user: config.containerUser }),
     integrator: config.git === null ? null : new GitHubIntegrator(config.git),
-    profile: { buildImage, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
+    profile: { buildImage, driverImages, checkImage: config.checkImage ?? BASE_IMAGE, limits: config.limits ?? DEFAULT_LIMITS },
   });
 }

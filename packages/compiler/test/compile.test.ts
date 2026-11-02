@@ -154,7 +154,7 @@ describe('isRoleId', () => {
 
 describe('the shipped roles', () => {
   test('are builder, reviewer, and the four drafting seats (R19), and compile', async () => {
-    const roles = ['builder', 'reviewer', 'spec-critic', 'spec-drafter', 'test-critic', 'test-drafter'];
+    const roles = ['builder', 'reviewer', 'security-reviewer', 'spec-critic', 'spec-drafter', 'test-critic', 'test-drafter'];
     expect((await readdir(DEFAULT_ROLES_DIRECTORY)).sort()).toEqual(roles.map((r) => `${r}.md`));
     const outcome = await compileRoles(DEFAULT_ROLES_DIRECTORY);
     if (!outcome.ok) throw new Error(JSON.stringify(outcome.refused));

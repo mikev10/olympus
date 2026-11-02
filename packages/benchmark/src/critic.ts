@@ -23,12 +23,11 @@ import {
   type PolicyDocument,
   type RoleId,
   type RunId,
-  type TaskGraph,
 } from '@olympus-ai/core';
 import { BASE_IMAGE } from '@olympus-ai/driver-claude-code';
 import { LocalVault, type CriticRecord, type DraftRecord } from '@olympus-ai/vault';
 import type { Corpus, Item } from './corpus.js';
-import { benchPolicyDocument, installed, type Bench } from './line.js';
+import { benchPolicyDocument, boundGraph, installed, type Bench } from './line.js';
 import { ScriptedSeat } from './seats.js';
 
 export interface CriticOutcome {
@@ -137,7 +136,8 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
   });
   const policy = draftingPolicy(corpus, item, critic);
   const artifacts = draftedArtifacts(station);
-  const graph = JSON.parse(await readFile(join(repository, artifacts.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
+  // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+  const graph = boundGraph(JSON.parse(await readFile(join(repository, artifacts.taskGraph), 'utf8')), { runId, baseCommit: source.commit, workspace: repository });
   if (item.asked === null) throw new Error(`benchmark: drafted item '${item.id}' carries no request`);
   const outcome = await startRun({
     runId,
@@ -150,7 +150,7 @@ export async function throughTheCritic(bench: Bench, corpus: Corpus, item: Item,
     components,
     intent: station === 'spec' ? { text: item.asked, from: 'principal' } : null,
     rubrics: DEFAULT_RUBRICS_DIRECTORY,
-    approvedCostUsd: worstCaseCost({ tasks: graph.tasks, edges: [] }, policy, [station]).usd,
+    approvedCostUsd: worstCaseCost(graph, policy, [station]).usd,
   });
   if (!outcome.ok && outcome.reason !== 'refused') {
     throw new Error(`benchmark: the drafted run was refused before the line started (${outcome.reason}); the corpus or the bench is broken: ${JSON.stringify(outcome)}`);

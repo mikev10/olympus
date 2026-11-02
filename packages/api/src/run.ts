@@ -19,6 +19,8 @@ import {
   CRITIC_CONTRACTS,
   criticContractProblems,
   DRAFT_ROLES,
+  REVIEWER_ROLE,
+  SECURITY_REVIEWER_ROLE,
   DRAFT_STATIONS,
   effectiveApproval,
   grantClears,
@@ -74,7 +76,7 @@ import type { AdmissionRecord, AdmissionRefusal, AdmittedArtifact, AdmittedManif
 import { readUsage, unsettledCalls, worstCaseCost, type WorstCaseCost } from './cost.js';
 import { estimateCost, type CostEstimate, type EstimateCell } from './outcomes.js';
 import { problemCodes, recordDecision } from './decisions.js';
-import { integrateEscalations, readIntegration, REVIEWER_ROLE, runLine, type LineArtifacts, type LineContext } from './line.js';
+import { integrateEscalations, readIntegration, runLine, type LineArtifacts, type LineContext } from './line.js';
 import { draftFloorOf, lockedArtifacts, NOT_DRAFTING, seatDriver, settleArtifactRoot, settleBase, type DraftingContext, type DraftingDrivers } from './drafting.js';
 import { readRubrics, rubricsProblems, type ReadRubric } from './rubrics.js';
 import { DRAFT_DIR, parseQuestions, parseRunRequirements, type RunRequirements } from './spec-parts.js';
@@ -625,7 +627,8 @@ async function admitRoles(
   const defined = new Set<string>(compiled.roles.map((r) => r.role));
   // Each seat a drafting station holds runs under its fixed role, or the run is refused (D-A-RC-06, R19).
   const seats = drafted.flatMap((station) => [DRAFT_ROLES[station].drafter, DRAFT_ROLES[station].critic]);
-  const needed = [...new Set([...graph.tasks.map((t) => t.role), REVIEWER_ROLE, ...seats])].sort();
+  // `security-reviewer` too: every review task has a security seat beside it, which runs under it (R9).
+  const needed = [...new Set([...graph.tasks.map((t) => t.role), REVIEWER_ROLE, SECURITY_REVIEWER_ROLE, ...seats])].sort();
   const missing = needed.filter((role) => !defined.has(role));
   if (missing.length > 0) return { ok: false, reason: 'role-undefined', roles: missing };
   return { ok: true, roles: compiled.roles };
@@ -1162,6 +1165,8 @@ function rolesProblem(roles: unknown): string | undefined {
     if (createHash('sha256').update(r.instructions, 'utf8').digest('hex') !== r.sha256) return `the pinned role ${r.role}'s instructions do not hash to its version`;
   }
   if (!(roles as Array<{ role?: unknown }>).some((r) => r.role === REVIEWER_ROLE)) return 'the admission record pins no reviewer role';
+  // A run admitted before R9 pinned none, and its security seats would have no instructions (R9, D-R9-03).
+  if (!(roles as Array<{ role?: unknown }>).some((r) => r.role === SECURITY_REVIEWER_ROLE)) return 'the admission record pins no security-reviewer role';
   return undefined;
 }
 

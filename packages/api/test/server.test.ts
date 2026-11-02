@@ -47,6 +47,8 @@ function createBody(overrides: Record<string, unknown> = {}): Record<string, unk
     { tasks: [
       { id: 'hello', station: 'build', role: BUILDER } as never,
       { id: 'hello-review', station: 'review', role: 'reviewer' } as never,
+      // The security seat parseGraph derives beside the review task (R9).
+      { id: 'hello-review.security', station: 'review', role: 'reviewer' } as never,
     ], edges: [] },
     policy(),
   ).usd;
@@ -138,11 +140,11 @@ describe('the run lifecycle over HTTP', () => {
 describe('the worst-case cost, approved before a run starts (D-P9-03)', () => {
   test('above L0, a create without the exact figure is refused with the figure, and nothing is recorded', async () => {
     await serve();
-    for (const approvedCostUsd of [null, 0, 11.99, 12.01, 1e9]) {
+    for (const approvedCostUsd of [null, 0, 14.99, 15.01, 1e9]) {
       const res = await call('POST', '/runs', createBody({ approvedCostUsd }));
       expect(res).toMatchObject({
         status: 422,
-        body: { refusal: { reason: 'cost-unapproved', approvedCostUsd, worstCase: { usd: 12, calls: 12 } } },
+        body: { refusal: { reason: 'cost-unapproved', approvedCostUsd, worstCase: { usd: 15, calls: 15 } } },
       });
     }
   });

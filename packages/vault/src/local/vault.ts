@@ -247,6 +247,25 @@ function stationsProblem(previous: RunState['stations'], next: unknown): string 
   return changed === -1 ? undefined : `it rewrites station entry ${String(changed)} of the state it replaces`;
 }
 
+/**
+ * A review seat committed before R9 holds model identities and no kind: read
+ * as a `review` seat whose every identity has its role and driver not
+ * recorded, never as recorded and empty. A seat written since is returned as
+ * it is.
+ */
+export function seatBeforeR9(seat: unknown): unknown {
+  if (typeof seat !== 'object' || seat === null || Array.isArray(seat)) return seat;
+  const record = seat as Record<string, unknown>;
+  if (record.kind !== undefined) return seat;
+  const identity = (model: unknown): unknown => ({ role: null, driver: null, model });
+  return {
+    ...record,
+    kind: 'review',
+    authors: Array.isArray(record.authors) ? (record.authors as unknown[]).map(identity) : record.authors,
+    reviewer: identity(record.reviewer),
+  };
+}
+
 function requireRunState(value: unknown, file: string): RunState {
   const ok =
     isRecord(value) &&
@@ -267,8 +286,9 @@ function requireRunState(value: unknown, file: string): RunState {
   if (!isStationHistory(stations)) {
     throw new Error(`LocalVault: ${file} holds station entries that are not a station and a time each; refusing to return a partial record`);
   }
-  return { ...value, drafts, approvals, stations } as unknown as RunState;
+  return { ...value, drafts, approvals, stations, reviews: (value.reviews as unknown[]).map(seatBeforeR9) } as unknown as RunState;
 }
+
 
 const READING_COUNTS = ['calls', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd', 'refused'] as const;
 const EXHAUSTED = new Set(['none', 'tokens', 'cost', 'unreadable']);
@@ -323,6 +343,7 @@ function usageProblem(r: unknown): string | undefined {
   if (!isRecord(role) || !hasString(role, 'id') || role.id === '' || typeof role.sha256 !== 'string' || !SHA256_HEX.test(role.sha256)) {
     return 'it names no role and version the call ran under (D-A-RC-04)';
   }
+  if (typeof r.driver !== 'string' || r.driver === '') return 'it names no driver the call was made through (A-R9-01)';
   const reading = r.reading;
   if (!isRecord(reading)) return 'it carries no reading';
   const timing = r.timing;

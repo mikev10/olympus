@@ -6,6 +6,7 @@
  * says so. The store is a Map that dies with the process. P1 replaces this
  * file.
  */
+import { seatBeforeR9 } from '../local/vault.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -148,6 +149,8 @@ export class StubVault implements Vault {
     if (timing === null || typeof timing !== 'object' || Array.isArray(timing) || typeof (timing as { startedAt?: unknown }).startedAt !== 'string' || !('endedAt' in timing)) {
       return Promise.reject(new Error('StubVault: a usage record carries the times the runtime stamped on the call (A-R12-01)'));
     }
+    // As the filesystem Vault refuses it: the line never writes a call with no driver (A-R9-01).
+    if (typeof r.driver !== 'string' || r.driver === '') return Promise.reject(new Error('StubVault: a usage record names the driver the call was made through (A-R9-01)'));
     const ref = this.store(r.runId, 'usage', r);
     const refs = this.usage.get(r.runId) ?? [];
     if (!refs.some((u) => u.hash === ref.hash)) refs.push(ref);
@@ -306,7 +309,7 @@ export class StubVault implements Vault {
     if (read.stations !== undefined && !Array.isArray(read.stations)) {
       return Promise.reject(new Error(`StubVault: run ${runId} holds station entries that are not a list`));
     }
-    return Promise.resolve({ ...read, drafts: read.drafts ?? {}, stations: read.stations ?? [], approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
+    return Promise.resolve({ ...read, reviews: read.reviews.map((seat) => seatBeforeR9(seat) as RunState['reviews'][number]), drafts: read.drafts ?? {}, stations: read.stations ?? [], approvals: read.approvals.map((g) => ({ ...g, draft: g.draft ?? null })) });
   }
 
   /**

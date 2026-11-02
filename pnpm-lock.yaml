@@ -173,6 +173,9 @@ importers:
       '@olympus-ai/driver-claude-code':
         specifier: workspace:*
         version: link:../drivers/claude-code
+      '@olympus-ai/driver-codex':
+        specifier: workspace:*
+        version: link:../drivers/codex
       '@olympus-ai/driver-openai-compatible':
         specifier: workspace:*
         version: link:../drivers/openai-compatible

@@ -6,6 +6,7 @@ import { REVIEW_SEAT_READS_ONLY_ITS_GRANTS } from './verification.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { CODEX_FAMILY_IS_DECLARED } from './codex.js';
 import { OPENAI_COMPATIBLE_FAMILY_IS_DECLARED } from './openai-compatible.js';
+import { AUTHOR_IDENTITY_NEVER_REVIEWS, SECURITY_SEAT_FAMILY_CHECKED } from './separation.js';
 
 /** I6: Reviewers never share the author's model family. */
 export const I6: InvariantEntry = {
@@ -32,6 +33,9 @@ export const I6: InvariantEntry = {
     OPENAI_COMPATIBLE_FAMILY_IS_DECLARED,
     // R26: the second vendor harness states a family of its own.
     CODEX_FAMILY_IS_DECLARED,
+    // R9: identity, not family alone, at every review seat, and a security seat graded as the reviewer is.
+    AUTHOR_IDENTITY_NEVER_REVIEWS,
+    SECURITY_SEAT_FAMILY_CHECKED,
   ],
   pending: [],
 };

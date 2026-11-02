@@ -65,14 +65,22 @@ test('every task spending every start it may, and passing on its last, makes exa
   expect(outcome).toMatchObject({ ok: false, transition: { reason: 'approval-required', key: 'integrate:1' } });
 
   const figure = worstCaseCost(
-    { tasks: [{ id: 'hello', station: 'build', role: BUILDER } as never, { id: 'hello-review', station: 'review', role: REVIEWER } as never], edges: [] },
+    {
+      tasks: [
+        { id: 'hello', station: 'build', role: BUILDER } as never,
+        { id: 'hello-review', station: 'review', role: REVIEWER } as never,
+        // The security seat parseGraph derives beside the review task (R9).
+        { id: 'hello-review.security', station: 'review', role: REVIEWER } as never,
+      ],
+      edges: [],
+    },
     policy(),
   );
-  expect(figure.calls).toBe(maxStarts(STATION_CONTRACTS.build, 0) + maxStarts(STATION_CONTRACTS.review, 0));
+  expect(figure.calls).toBe(maxStarts(STATION_CONTRACTS.build, 0) + 2 * maxStarts(STATION_CONTRACTS.review, 0));
   expect(driver.calls).toBe(figure.calls);
   const state = await components.vault.readRunState(runId);
   expect(state.usage).toHaveLength(figure.calls);
-  expect(state.tasks).toEqual({ hello: 'passed', 'hello-review': 'passed' });
+  expect(state.tasks).toEqual({ hello: 'passed', 'hello-review': 'passed', 'hello-review.security': 'passed' });
   expect(figure.usd).toBe(figure.calls * 1);
 });
 

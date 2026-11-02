@@ -4,7 +4,7 @@
  */
 import type { DriverCapability, ModelFamily, ModelIdentity } from '../driver/contract.js';
 import type { ApprovalKey, ApprovalOutcome } from '../policy/types.js';
-import type { ModelTier, StationId, TaskId, VaultRef } from '../run/types.js';
+import type { ModelTier, RoleId, StationId, TaskId, VaultRef } from '../run/types.js';
 
 /**
  * `intent` is the person's text a spec-less run was admitted with, `draft`
@@ -65,17 +65,45 @@ export interface FailedCheck {
 export type IndependenceGrade = 'different-family' | 'different-model' | 'same-model';
 
 /**
- * One review seat as the runtime assembled it (I6). `authors` are the model
- * identities recorded with the results of the tasks under review, read from
- * the Vault; `reviewer` is the identity recorded with the review task's own
- * result. `independence` is the weakest grade between the reviewer and any
- * author. Anything but `different-family` is reportable at L0-L2, and refused
- * at L3 where the reviewer shares an author's family.
+ * The role a seat ran under, as admission pinned it: its id and the hash of
+ * its instructions, the shape of the Vault's `RoleVersion`, declared here
+ * because `core` cannot import the Vault's types (A-R9-01).
+ */
+export interface SeatRole {
+  readonly id: RoleId;
+  readonly sha256: string;
+}
+
+/**
+ * Who filled a seat, recorded by the runtime (A-R9-01, I2): the role it ran
+ * under, the `provenanceId()` of the driver it was called through, and the
+ * model the runtime resolved or the result named. `null` means not recorded,
+ * and only a record committed before R9 holds it; the line never writes one,
+ * and a seat check that meets one refuses rather than reading it as different.
+ */
+export interface SeatIdentity {
+  readonly role: SeatRole | null;
+  readonly driver: string | null;
+  readonly model: ModelIdentity;
+}
+
+/** The two seats at `review`: the reviewer, and the security reviewer beside it (R9). */
+export type ReviewSeatKind = 'review' | 'security';
+
+/**
+ * One review seat as the runtime assembled it (I6). `authors` are the
+ * identities the tasks under review ran as, read from the Vault; `reviewer`
+ * is the identity the seat ran as. `independence` is the weakest grade
+ * between the reviewer's model and any author's. Anything but
+ * `different-family` is reportable at L0-L2, and refused at L3 where the
+ * reviewer shares an author's family. An author's identity never fills the
+ * seat (R9).
  */
 export interface ReviewSeat {
   readonly task: TaskId;
-  readonly authors: readonly ModelIdentity[];
-  readonly reviewer: ModelIdentity;
+  readonly kind: ReviewSeatKind;
+  readonly authors: readonly SeatIdentity[];
+  readonly reviewer: SeatIdentity;
   readonly independence: IndependenceGrade;
 }
 

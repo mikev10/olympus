@@ -63,7 +63,11 @@ import {
   maxStarts,
   nextStep,
   parkRefusal,
+  isSecuritySeat,
+  REVIEWER_ROLE,
   seatReviewer,
+  SECURITY_REVIEWER_ROLE,
+  securitySeatContract,
   STATION_CONTRACTS,
   StrictPolicyEngine,
   tierFor,
@@ -90,7 +94,9 @@ import type {
   Run,
   RunId,
   RunState,
+  SeatIdentity,
   StationId,
+  StationContract,
   StationRefusal,
   TamperedPath,
   Task,
@@ -114,7 +120,7 @@ import type { EgressPolicy, RelayMeter, SandboxHandle, SandboxSpec, Teardown } f
 import type { AdmissionRecord, AdmittedArtifact, BaseRunRecord, CallTiming, DiffEntry, EvidenceBundle, IntegrationOpened, IntegrationRecord, UnstartedCheck, UsageReading, UsageRecord, Vault } from '@olympus-ai/vault';
 import { draftFloorOf, draftStation, isDrafted, lockApproved, testDraftOf, type DraftingContext } from './drafting.js';
 import type { RunRequirements } from './spec-parts.js';
-import type { BuiltGraph } from './graph.js';
+import { imageFor, type BuiltGraph } from './graph.js';
 import type { RunOutcome } from './run.js';
 import { acceptedEscalations, analyzeTamper, notCarriedFindings, tamperFindings } from './tamper.js';
 import { claimEvidenceDiff, commandOf, runnerMissing, suiteRunner, suitesRun, taskResultProblems, writesOutsideGrant } from './verification.js';
@@ -188,8 +194,8 @@ export interface LineContext {
 
 const engine = new StrictPolicyEngine();
 
-/** The role every review seat runs under, whatever role its task names (D-A-RC-06). */
-export const REVIEWER_ROLE = 'reviewer' as RoleId;
+/** The role every review seat runs under, whatever role its task names (D-A-RC-06). Declared in `core` since R9. */
+export { REVIEWER_ROLE } from '@olympus-ai/core';
 
 const NO_ESCALATIONS = { protectedPathsTouched: [], tamperFindings: [] } as const;
 
@@ -751,10 +757,10 @@ export function egressFor(network: { egress: 'none' | string[] }): EgressPolicy 
  * (D-I1a-01); a graph built with none — the stub sandbox's — names no image,
  * and a provider that runs images refuses it.
  */
-function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy, image: 'build' | 'check', wallClockMs: number): SandboxSpec {
+function workspaceOnly(ctx: LineContext, source: string, mode: 'rw' | 'ro', egress: EgressPolicy, image: Driver | 'check', wallClockMs: number): SandboxSpec {
   const { profile } = ctx.components;
   return {
-    image: profile === null ? 'none' : image === 'build' ? profile.buildImage : profile.checkImage,
+    image: profile === null ? 'none' : image === 'check' ? profile.checkImage : imageFor(profile, image),
     mounts: { workspace: { source, target: '/workspace', mode }, others: [] },
     egress,
     limits: profile === null ? { cpus: 0, memoryMb: 0, pids: 0, wallClockMs } : { ...profile.limits, wallClockMs },
@@ -802,7 +808,7 @@ export async function runTask(
   try {
     // The runtime's resolution of that tier, taken before the call: the record's model is never the driver's account (I2, A-I1a-01).
     model = driver.resolveModel(tier);
-    const spec = workspaceOnly(ctx, workspace, mode, egressFor(scope.network), 'build', scope.budget.maxWallClockMs);
+    const spec = workspaceOnly(ctx, workspace, mode, egressFor(scope.network), driver, scope.budget.maxWallClockMs);
     // The relay the driver asks for, bounded by the budget policy grants the role, never the driver's (I4, A-I1a-02),
     // and priced for the resolved model alone, so a request naming any other is refused before it is sent (D-R14-01).
     const relay = driver.relayRequest();
@@ -817,7 +823,7 @@ export async function runTask(
   // Its start is the runtime's clock, never the driver's account of how long it took (I2, A-R12-01).
   const startedAt = new Date().toISOString();
   try {
-    await recordPending(ctx, task, model, role, startedAt);
+    await recordPending(ctx, task, model, role, driver.provenanceId(), startedAt);
   } catch (error) {
     await sandbox.destroy(handle).catch(() => undefined);
     throw error;
@@ -847,7 +853,7 @@ export async function runTask(
     teardown = await sandbox.destroy(handle);
   } catch (error) {
     // The call was made and what it cost is unknown: recorded as lost before the run stops, so a resume finds it and refuses (D-P13-20).
-    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model, role, ended(startedAt));
+    await recordUsage(ctx, task, { kind: 'lost', detail: `the sandbox could not be destroyed and read: ${describe(error)}` }, model, role, driver.provenanceId(), ended(startedAt));
     throw new Error(
       `line: the sandbox task ${task.id} ran in could not be destroyed and its cost read, so the call is unaccounted and the run stops: ${describe(error)}`,
       { cause: error },
@@ -856,7 +862,7 @@ export async function runTask(
   const site = { vault: ctx.components.vault, runId: ctx.run.id, taskId: task.id, station: ctx.state.station };
   await recordEgress(site, teardown.egress);
   const { meter } = teardown;
-  const usage = await recordUsage(ctx, task, meter, model, role, ended(startedAt));
+  const usage = await recordUsage(ctx, task, meter, model, role, driver.provenanceId(), ended(startedAt));
   // A call whose relay refused anything is a decision the relay made, recorded as a count against its usage record (D-P14-05).
   if (meter.kind === 'metered' && meter.refused > 0) {
     await recordDecision(site, { cause: 'relay-refused', decidedBy: 'model-relay', usage, refused: meter.refused, exhausted: meter.exhausted });
@@ -880,8 +886,8 @@ export function boundTo(meter: RelayMeter, model: string): RelayMeter {
 }
 
 /** One driver call's cost, as the relay counted it, written through the Vault's named operation and referenced from run state. */
-async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, timing: CallTiming): Promise<VaultRef> {
-  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model, role, timing));
+async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, timing: CallTiming): Promise<VaultRef> {
+  const ref = await ctx.components.vault.recordUsage(usageRecord(ctx, task, reading, model, role, driver, timing));
   await commit(ctx, { usage: ref });
   return ref;
 }
@@ -891,8 +897,8 @@ async function recordUsage(ctx: LineContext, task: Task, reading: UsageReading, 
  * Vault lists it by run (A-I1a-05), and a state a resume can start from never
  * holds a call that has not begun (D-I1a-12).
  */
-async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity, role: CompiledRole, startedAt: string): Promise<void> {
-  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model, role, { startedAt, endedAt: null }));
+async function recordPending(ctx: LineContext, task: Task, model: ModelIdentity, role: CompiledRole, driver: string, startedAt: string): Promise<void> {
+  await ctx.components.vault.recordUsage(usageRecord(ctx, task, { kind: 'pending' }, model, role, driver, { startedAt, endedAt: null }));
 }
 
 /** A call that started at `startedAt` and has ended now: its sandbox was torn down, or could not be (A-R12-01). */
@@ -900,7 +906,7 @@ function ended(startedAt: string): CallTiming {
   return { startedAt, endedAt: new Date().toISOString() };
 }
 
-function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, timing: CallTiming): UsageRecord {
+function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model: ModelIdentity, role: CompiledRole, driver: string, timing: CallTiming): UsageRecord {
   return {
     runId: ctx.run.id,
     taskId: task.id,
@@ -909,6 +915,8 @@ function usageRecord(ctx: LineContext, task: Task, reading: UsageReading, model:
     model,
     // The version the run was admitted with, beside the model, from the record the runtime pinned (D-A-RC-04).
     role: { id: role.role, sha256: role.sha256 },
+    // The driver the call was made through, from the one the runtime called, so the seat's identity is in the record (A-R9-01).
+    driver,
     reading,
     timing,
     collectedBy: 'runtime',
@@ -1447,15 +1455,17 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
 }
 
 /**
- * The review seat's tree: the files its grants cover and nothing else. The
- * contract grants the locked spec, the acceptance tests, and the diff, so the
- * view holds those files as the accepted tree has them; the task graph, the
- * manifest, and every file the diff does not carry are absent, so a reviewer
- * with a read tool cannot open what its contract denies it (I6).
+ * A review seat's tree: the files its contract's grants cover and nothing
+ * else. The review contract grants the locked spec, the acceptance tests, and
+ * the diff, so the view holds those files as the accepted tree has them; the
+ * security seat's contract does not grant the acceptance tests, so its view
+ * holds none (R9, codex-3). The task graph, the manifest, and every file the
+ * diff does not carry are absent, so a reviewer with a read tool cannot open
+ * what its contract denies it (I6).
  */
-async function reviewView(ctx: LineContext, task: Task): Promise<string> {
+async function reviewView(ctx: LineContext, task: Task, contract: StationContract): Promise<string> {
   const { workspaces } = ctx.components;
-  const grants: readonly ContextGrant[] = STATION_CONTRACTS.review.allowedContext;
+  const grants: readonly ContextGrant[] = contract.allowedContext;
   const keep = new Set<string>();
   if (grants.includes('locked-spec')) for (const a of specArtifacts(ctx)) keep.add(a.path);
   if (grants.includes('acceptance-tests')) for (const a of ctx.artifacts.acceptanceTests) keep.add(a.path);
@@ -1479,10 +1489,23 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
     const bundle = JSON.parse(decode(await ctx.components.vault.read(ref))) as EvidenceBundle;
     if (tasks.includes(bundle.taskId)) latest.set(bundle.taskId, bundle);
   }
+  return evidenceFactsOf([...latest.values()]);
+}
+
+/** The runtime's facts of each bundle, as a review seat is given them under its `evidence-bundle` grant. */
+export function evidenceFactsOf(bundles: readonly EvidenceBundle[]): string {
   return JSON.stringify(
-    [...latest.values()].map((b) => ({
+    bundles.map((b) => ({
       taskId: b.taskId,
-      checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })),
+      checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation, findings }) => ({
+        checkId,
+        exitCode,
+        suiteCount,
+        expectationHeld: expectation === null ? null : expectation.held,
+        // A security check's findings as the runtime parsed them, rule and location, where the security seat
+        // reads what the checks found (R9, codex-2); null for every other kind and for a report never read.
+        findings: findings === null ? null : findings.map((f) => ({ rule: f.rule, path: f.location.path, line: f.location.line })),
+      })),
       unstarted: b.unstarted.map((u) => u.checkId),
       // How many ways the claim and the diff disagree, and not the paths: a claimed path is a
       // string the author wrote, and the seat is given no author material (D-P6-03).
@@ -1495,15 +1518,20 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
 }
 
 /**
- * `review`: one seat. The authors' families come from their recorded results;
- * the seat is checked before the reviewer runs, from the model it resolves, and
- * again after, from the model its result reports, so a driver that runs another
- * model than it resolved is held to the one that ran (I6). The stricter seat is
- * the one committed.
+ * `review`: one seat, the reviewer's or, for the task `parseGraph` derived
+ * beside it, the security reviewer's (R9). The authors' identities come from
+ * their recorded calls and results; the seat is checked before the reviewer
+ * runs, from the model it resolves, and again after, from the model its result
+ * reports, so a driver that runs another model than it resolved is held to the
+ * one that ran (I6). The stricter seat is the one committed. The security seat
+ * runs under its own role, with the review contract's grants cut to its own.
  */
 async function review(ctx: LineContext, task: Task): Promise<StationRefusal | undefined> {
   const { reviewer, vault } = ctx.components;
-  const contract = STATION_CONTRACTS.review;
+  const kind = isSecuritySeat(task) ? 'security' : 'review';
+  const contract = kind === 'security' ? securitySeatContract(STATION_CONTRACTS.review) : STATION_CONTRACTS.review;
+  const role = pinnedRole(ctx, kind === 'security' ? SECURITY_REVIEWER_ROLE : REVIEWER_ROLE);
+  const seatOf = (model: ModelIdentity): SeatIdentity => ({ role: { id: role.role, sha256: role.sha256 }, driver: reviewer.provenanceId(), model });
   const capability = capabilityRefusal(contract, reviewer.capabilities());
   if (capability !== undefined) return capability;
   const tampered = await tamperedPaths(ctx);
@@ -1514,7 +1542,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   const authored = await Promise.all(reviewed.map((t) => readResult(ctx, t)));
   const authors = await authorsOf(ctx, reviewed, authored);
   const level = ctx.run.requestedLevel;
-  const planned = seatReviewer(task.id, authors, reviewer.resolveModel(tierFor(scopeFor(ctx, task), 'review', attemptsOf(ctx.state, task))), level);
+  const planned = seatReviewer(task.id, kind, authors, seatOf(reviewer.resolveModel(tierFor(scopeFor(ctx, task), 'review', attemptsOf(ctx.state, task)))), level);
   if (!planned.ok) return planned;
 
   const spec = await readText(ctx, specArtifacts(ctx));
@@ -1537,18 +1565,19 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     'author-narrative': authored.map((r) => r.claim.narrative).join('\n'),
     plan: JSON.stringify(ctx.graph.tasks),
   };
-  // The seat's instructions are the `reviewer` role's; its grants stay its task's scope (D-A-RC-06).
-  const ran = await runTask(ctx, task, reviewer, pinnedRole(ctx, REVIEWER_ROLE), joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
+  // The seat's instructions are its seat's role's; its grants stay its task's scope (D-A-RC-06, R9).
+  const ran = await runTask(ctx, task, reviewer, role, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task, contract));
   if (!ran.ok) return spendRetry(ctx, task);
   // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
   const problems = taskResultProblems(ran.result);
   if (problems.length > 0) {
     throw new Error(`line: the reviewer's result for task ${task.id} does not match the TaskResult contract, so it was not recorded: ${problems.join('; ')}`);
   }
-  const seated = seatReviewer(task.id, authors, ran.result.model, level);
+  const seated = seatReviewer(task.id, kind, authors, seatOf(ran.result.model), level);
   if (!seated.ok) return seated;
-  // The stricter of the two seats: what the reviewer reports never widens what the runtime resolved (I2, I6; codex-1, gemini-1).
-  const seat = weakerGrade(planned.seat.independence, seated.seat.independence) === planned.seat.independence ? planned.seat : seated.seat;
+  // The seat the runtime resolved, at the weaker of the two grades: what the reviewer reports can lower the
+  // grade and never widen it, and never becomes the recorded identity, which stays the runtime's (I2, I6; P6 codex-1, gemini-1; R9 codex-1).
+  const seat = { ...planned.seat, independence: weakerGrade(planned.seat.independence, seated.seat.independence) };
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, {
     tasks: { [task.id]: 'passed' },
@@ -1559,22 +1588,32 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
 }
 
 /**
- * Every model that built the reviewed tasks (I6, D-A-BR-01): the model each
- * recorded result names, and the model of every call the runtime made for
- * them, failed and escalated iterations included. After an escalation the
- * last result names only the last tier's model, and a model whose iteration
- * failed still worked the task the reviewer judges.
+ * Every identity that built the reviewed tasks (I6, D-A-BR-01, R9): the role,
+ * driver, and model of every call the runtime made for them, failed and
+ * escalated iterations included, and the model each recorded result names,
+ * paired with every role and driver its task's calls recorded (D-R9-05).
+ * After an escalation the last result names only the last tier's model, and a
+ * model whose iteration failed still worked the task the reviewer judges. A
+ * result whose task recorded no call has no recorded role or driver, and the
+ * seat refuses it rather than reading it as different.
  */
-async function authorsOf(ctx: LineContext, reviewed: readonly Task[], authored: readonly TaskResult[]): Promise<ModelIdentity[]> {
+async function authorsOf(ctx: LineContext, reviewed: readonly Task[], authored: readonly TaskResult[]): Promise<SeatIdentity[]> {
   const ids = new Set(reviewed.map((t) => t.id));
   const calls = (await readUsage(ctx.components.vault, ctx.state)).filter((r) => ids.has(r.taskId));
-  // Each model once: a call replayed after a stop is the same model twice, and a seat taken on resume
+  const identities: SeatIdentity[] = calls.map((r) => ({ role: { id: r.role.id, sha256: r.role.sha256 }, driver: r.driver, model: r.model }));
+  for (const result of authored) {
+    const seats = calls.filter((r) => r.taskId === result.taskId);
+    if (seats.length === 0) identities.push({ role: null, driver: null, model: result.model });
+    for (const r of seats) identities.push({ role: { id: r.role.id, sha256: r.role.sha256 }, driver: r.driver, model: result.model });
+  }
+  // Each identity once: a call replayed after a stop is the same identity twice, and a seat taken on resume
   // lists the authors a run that never stopped would list (I2.resume-derives-state-from-the-vault).
-  const distinct = new Map<string, ModelIdentity>();
-  for (const model of [...authored.map((r) => r.model), ...calls.map((r) => r.model)]) {
+  const distinct = new Map<string, SeatIdentity>();
+  for (const seat of identities) {
+    const { model } = seat;
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- read back from the Vault: the type is the writer's claim, not the bytes'.
     if (typeof model?.family !== 'string') throw new Error(`line: a call recorded for ${reviewed.map((t) => t.id).join(', ')} names no model family, so a reviewer of it cannot be seated`);
-    distinct.set(JSON.stringify([model.provider, model.family, model.model, model.version]), model);
+    distinct.set(JSON.stringify([seat.role?.id ?? null, seat.role?.sha256 ?? null, seat.driver, model.provider, model.family, model.model, model.version]), seat);
   }
   return [...distinct.values()];
 }

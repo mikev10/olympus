@@ -79,6 +79,7 @@ beforeEach(async () => {
   await mkdir(roles);
   await writeFile(join(roles, 'builder.md'), 'Build the task.');
   await writeFile(join(roles, 'reviewer.md'), 'Review the change.');
+  await writeFile(join(roles, 'security-reviewer.md'), 'Review the change for security.');
   await writeFile(policyFile, JSON.stringify(POLICY));
   const sandbox = new StubSandboxProvider();
   const stub = new StubDriver();
@@ -153,19 +154,19 @@ describe('the CLI is a client of a remote API URL', () => {
   test('create shows the worst-case cost and starts nothing until that figure is approved; then create, events, status, approve', async () => {
     const shown = await cli(remote(...createArgs()));
     expect(shown.code).toBe(1);
-    expect(shown.err[0]).toBe('the worst-case cost of this run is $3, over at most 12 driver calls');
+    expect(shown.err[0]).toBe('the worst-case cost of this run is $3.75, over at most 15 driver calls');
     // No past run has priced a task here, so the likely figure declines rather than guess (R2).
     expect(shown.err[1]).toMatch(/^no likely cost: fewer than 5 past tasks at build on .+ \(0\), review on .+ \(0\)$/);
-    expect(shown.err[2]).toContain('--approve-cost 3');
+    expect(shown.err[2]).toContain('--approve-cost 3.75');
 
-    const wrong = await cli(remote(...createArgs('--approve-cost', '2.99')));
+    const wrong = await cli(remote(...createArgs('--approve-cost', '3.74')));
     expect(wrong).toMatchObject({ code: 1 });
     expect(wrong.err[2]).toContain('is not that figure');
 
-    const created = await cli(remote(...createArgs('--approve-cost', '3')));
+    const created = await cli(remote(...createArgs('--approve-cost', '3.75')));
     expect(created.code).toBe(0);
     const run = JSON.parse(created.out.join('\n')) as CreatedRun;
-    expect(run.worstCase).toMatchObject({ usd: 3, calls: 12 });
+    expect(run.worstCase).toMatchObject({ usd: 3.75, calls: 15 });
 
     const events = await cli(remote('events', run.runId));
     expect(events.code).toBe(0);
@@ -197,7 +198,7 @@ describe('the CLI is a client of a remote API URL', () => {
   });
 
   test('cancel stops a run; cancelling it again is refused with the runtime\'s reason', async () => {
-    const created = await cli(remote(...createArgs('--approve-cost', '3')));
+    const created = await cli(remote(...createArgs('--approve-cost', '3.75')));
     const run = JSON.parse(created.out.join('\n')) as CreatedRun;
     await settle(run.runId);
     const cancelled = await cli(remote('cancel', run.runId));
@@ -242,7 +243,7 @@ describe('the CLI refuses rather than guessing', () => {
 
 describe('telemetry (R12)', () => {
   test('a finished run prints what the library exports, an unfinished one is refused, and a collector is sent both bodies with its headers by the client', async () => {
-    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3')))).out.join('\n')) as CreatedRun;
+    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3.75')))).out.join('\n')) as CreatedRun;
     await settle(run.runId);
     // Waiting at the integrate exit is unfinished: refused, never exported (D-R12-04).
     const open = await cli(remote('telemetry', run.runId));
@@ -293,7 +294,7 @@ describe('a collector credential is never printed (codex-2)', () => {
       expect([...ran.out, ...ran.err].join('\n')).not.toContain('url-secret');
     }
     // A send that fails reports the run and the signal, never the error's own text, which a custom fetch could fill with the request.
-    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3')))).out.join('\n')) as CreatedRun;
+    const run = JSON.parse((await cli(remote(...createArgs('--approve-cost', '3.75')))).out.join('\n')) as CreatedRun;
     await settle(run.runId);
     await cli(remote('cancel', run.runId));
     const out: string[] = [];

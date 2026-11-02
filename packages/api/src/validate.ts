@@ -13,7 +13,7 @@
  * the graph `build` schedules are the ones validated here.
  */
 import { isAbsolute, posix, win32 } from 'node:path';
-import { isAutonomyLevel, SEAT_TASK_IDS } from '@olympus-ai/core';
+import { isAutonomyLevel, REVIEWING_ROLES, SEAT_TASK_IDS, SECURITY_SEAT_SUFFIX, securitySeatId } from '@olympus-ai/core';
 import type { RoleId, RunId, Task, TaskGraph, TaskId } from '@olympus-ai/core';
 import type { SecurityScanner } from '@olympus-ai/adapters';
 import type { CheckKind, CheckSpec, SecurityCheckKind, SecurityCheckSpec } from '@olympus-ai/integrity';
@@ -94,6 +94,8 @@ export type RequestProblemCode =
   | 'not-a-spec-part'
   /** A graph task named as a drafting seat is, which run state counts the seat under (R19). */
   | 'reserved'
+  /** A build task named a role a review seat runs under, so its author could be the identity that reviews it (R9). */
+  | 'reviewing-role'
   /** A path a draft would be written to already exists in the base (R19). */
   | 'exists'
   /** A test drafter or critic granted egress beyond the model relay, which would let it see the repository (R19, I3). */
@@ -519,6 +521,7 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
     const at = `graph.tasks[${String(i)}]`;
     if (!isNonEmptyString(t.id)) report(`${at}.id`, 'empty', `${at}.id must be a non-empty string`);
     else if (SEAT_TASK_IDS.includes(t.id as TaskId)) report(`${at}.id`, 'reserved', `${at}.id '${t.id}' is a drafting seat's id in run state; a graph task may not use it (R19)`);
+    else if (t.id.endsWith(SECURITY_SEAT_SUFFIX)) report(`${at}.id`, 'reserved', `${at}.id '${t.id}' ends '${SECURITY_SEAT_SUFFIX}', which names the security seat beside a review task; a graph task may not use it (R9)`);
     else if (ids.has(t.id)) report(`${at}.id`, 'duplicate', `${at}.id '${t.id}' is listed twice`);
     else {
       ids.add(t.id);
@@ -528,6 +531,10 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
       report(`${at}.station`, 'bad-station', `${at}.station must be 'build' or 'review'; M1 schedules tasks at no other station`);
     }
     if (!isNonEmptyString(t.role)) report(`${at}.role`, 'empty', `${at}.role must be a non-empty string`);
+    // An author running as a reviewer would be the identity that reviews its own change (R9, D-R9-04).
+    else if (t.station === 'build' && REVIEWING_ROLES.includes(t.role as RoleId)) {
+      report(`${at}.role`, 'reviewing-role', `${at}.role '${t.role}' is a role a review seat runs under; a build task may not author under it (R9)`);
+    }
     if (!Array.isArray(t.dependsOn) || !t.dependsOn.every(isNonEmptyString)) {
       report(`${at}.dependsOn`, 'empty', `${at}.dependsOn must be a list of task ids`);
     }
@@ -573,8 +580,11 @@ export function parseGraph(value: unknown, bind: GraphBinding): { ok: true; grap
     worktreePath: bind.workspace,
     attempt: 1,
   }));
-  const edges = bound.flatMap((task) => task.dependsOn.map((dep) => ({ from: dep, to: task.id })));
-  return { ok: true, graph: { tasks: bound, edges } };
+  // Beside every review task, the security seat: the same task's grants, dependencies, and role, so
+  // no graph can leave it out and every counter the line keeps counts it as a task (R9, D-R9-03).
+  const seated: Task[] = bound.flatMap((task) => (task.station === 'review' ? [task, { ...task, id: securitySeatId(task.id), dependsOn: [...task.dependsOn], dependencySet: [...task.dependencySet] }] : [task]));
+  const edges = seated.flatMap((task) => task.dependsOn.map((dep) => ({ from: dep, to: task.id })));
+  return { ok: true, graph: { tasks: seated, edges } };
 }
 
 function findCycle(tasks: ReadonlyArray<{ id: string; dependsOn: readonly string[] }>): string[] | undefined {

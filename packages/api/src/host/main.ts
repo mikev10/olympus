@@ -28,6 +28,9 @@
  *   declaring scheme `'none'`, for a local endpoint on the Docker host, comes
  *   without the key, and one given with it stops the host (R21, A-R21-04)
  *
+ * - `FACTORY_CODEX_SEATS` and `FACTORY_CODEX_KEY`, both or neither: the seats
+ *   the Codex driver fills, comma-separated, and the OpenAI key its relay is
+ *   given (R9). A seat the endpoint file also names stops the host.
  * - `FACTORY_WEBHOOK_*`: each subscription's secret, named by the policy and
  *   read here on the host, never by a sandbox (D-A-TF-05). A subscription
  *   whose variable is unset verifies no delivery (I5)
@@ -37,7 +40,7 @@
 
 import { createApiServer } from '../http/server.js';
 import { readFile } from 'node:fs/promises';
-import { composeHost, containerUser, parseEndpointFile, webhookSecrets } from './compose.js';
+import { composeHost, containerUser, parseCodexSeats, parseEndpointFile, webhookSecrets } from './compose.js';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -56,9 +59,11 @@ if (endpointFile === '' && endpointKey !== '') {
   throw new Error('factory-host: FACTORY_ENDPOINT_KEY is set without FACTORY_ENDPOINT_CONFIG');
 }
 const endpoint = endpointFile === '' ? null : parseEndpointFile(await readFile(endpointFile, 'utf8'), endpointKey);
+const codex = parseCodexSeats(process.env.FACTORY_CODEX_SEATS ?? '', process.env.FACTORY_CODEX_KEY ?? '');
 const components = await composeHost({
   ...(user === undefined ? {} : { containerUser: user }),
   endpoint,
+  codex,
   store: required('FACTORY_VAULT_STORE'),
   repository: required('FACTORY_REPOSITORY'),
   trees: required('FACTORY_TREES'),

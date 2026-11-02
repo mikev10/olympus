@@ -249,6 +249,7 @@ describe('the R12 fields, as the filesystem Vault takes them (codex-7)', () => {
     attempt: 1,
     model: { provider: 'p', family: 'f', model: 'm', version: '1' },
     role: { id: 'builder', sha256: 'a'.repeat(64) },
+    driver: 'stub@1',
     reading: { kind: 'unmetered' },
     collectedBy: 'runtime',
   };

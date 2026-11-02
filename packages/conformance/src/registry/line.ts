@@ -28,7 +28,6 @@ import type {
   RoleId,
   RunId,
   RunState,
-  TaskGraph,
   TaskId,
   TaskRequest,
   TaskResult,
@@ -212,9 +211,10 @@ export interface LineRig {
 /** The worst-case figure for the graph file as it stands, or null when the graph does not resolve under the policy. */
 async function approvedFigure(req: RunRequest): Promise<number | null> {
   try {
-    const { worstCaseCost } = await import('@olympus-ai/api');
-    const parsed = JSON.parse(await readFile(join(req.workspace, req.artifacts.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
-    return worstCaseCost({ tasks: parsed.tasks, edges: [] }, req.policy).usd;
+    const { parseGraph, worstCaseCost } = await import('@olympus-ai/api');
+    // Bound as admission binds it, so the security seats it derives are in the figure (R9).
+    const parsed = parseGraph(JSON.parse(await readFile(join(req.workspace, req.artifacts.taskGraph), 'utf8')), { runId: req.runId, baseCommit: req.baseCommit, workspace: req.workspace });
+    return parsed.ok ? worstCaseCost(parsed.graph, req.policy).usd : null;
   } catch {
     return null;
   }
