@@ -1,0 +1,89 @@
+The code under review is in the file
+`2026-11-02-R9-separation-of-duties-review-bundle.txt` (SHA-256 bbfa4cd5fc9da44506447b77bd627ad7dd1c92ea0d2d1374689d0cf815cd6ab5) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the separation-of-duties checks of a software factory runtime: the code that decides which model may review which change, and what a reviewer is shown, written in TypeScript. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime carries a change through fixed stations: build tasks are run by an AI model (the author) in a sandbox, checks run, and then review tasks are run by a model (the reviewer) that judges the change. This code records each seat's identity — the role it ran under, the driver (the vendor harness, named by its provenanceId()), and the model — and refuses to seat a reviewer that is the same identity as an author of the change. It also adds a second seat beside every review task, a security reviewer, derived from the task graph so no graph can name or omit it, run under its own role with a narrower set of context than the reviewer gets. Every driver call's usage record now names the driver the call went through, and records written before this change are read as "not recorded". The host can also place the Codex driver (a second model family) in seats an operator names.
+
+It must hold against a capable, motivated party trying to have a change reviewed by itself, or by a reviewer that saw what it must not see, while the run's records say the review was independent. Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls what a model returns (its result, including the model identity it reports, and its narrative), the files a build task writes in its workspace, the task graph and verification files a person supplies, and when the process stops. It does not control the components the runtime is wired with — the Vault (the record store), the sandbox provider, and the drivers are runtime-selected and trusted, even where a function takes one as an argument — and it does not control code running inside the runtime's own process, nor the host's environment variables.
+
+The invariants at stake:
+
+- Reviewers never share the author's model family. Where only one family is available, the system reports reduced independence rather than claiming the guarantee. A model's family is declared, never inferred.
+- The runtime derives status and records; the model never reports them. What a driver returns is a claim, never the record.
+- Default deny: a capability, context grant, or credential not granted is unavailable.
+- Fail closed: a missing check, a missing record, or an unsupported case is a refusal, never a silent degrade or a warning that lets the run continue.
+- No agent writes to the record store, and no credential the host holds (the merge token, the API's local token, a model key) reaches a sandbox.
+
+The mechanisms that matter most:
+
+- seatReviewer in packages/core/src/station/machine.ts, and authorsOf and review in packages/api/src/line.ts: who counts as an author, how identities are compared, and which seat is committed.
+- parseGraph in packages/api/src/validate.ts: the derived `.security` task beside each review task, the reserved suffix, and the refusal of a build task under a reviewing role.
+- securitySeatContract and grantedContext in packages/core: what the security seat is given.
+- The usage record's driver field, its write check in both Vaults, and the read of records written before it existed (packages/vault, packages/api/src/cost.ts).
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+A review verdict that gates the line, which is the M3 panel's; R13's nightly whole-tree job; R17's checks themselves; a third model family; and any change to what a driver returns.
+
+The ids in that list (M3, R13, R17) name other planned pieces of work you have not been shown. A review verdict is recorded and not acted on here, by design; its absence is not a defect.
+
+THE QUESTION
+
+How would I get a change reviewed by its own author's identity, by a reviewer of the author's family recorded as independent, or by a security seat that was given more than its grants or skipped entirely — while the run's records claim otherwise?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
