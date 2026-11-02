@@ -13,7 +13,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { RunOutcome } from '@olympus-ai/api';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
-import type { AutonomyLevel, ModelFamily, ModelIdentity, RunState, StationContractTable, TaskId } from '@olympus-ai/core';
+import type { AutonomyLevel, ModelFamily, ModelIdentity, RoleId, RunState, SeatIdentity, StationContractTable, TaskId } from '@olympus-ai/core';
 import type { MeterReading, SandboxHandle, SandboxProvider } from '@olympus-ai/sandbox';
 import type { LockManifest, UsageRecord, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
@@ -463,6 +463,11 @@ function identity(family: string): ModelIdentity {
   return { provider: 'conformance', family: family as ModelFamily, model: 'm', version: '1' };
 }
 
+/** A seat's identity: a model under a role and through a driver, as the line records it (A-R9-01). */
+function seatOf(family: string, role = 'reviewer', model = 'm'): SeatIdentity {
+  return { role: { id: role as RoleId, sha256: 'a'.repeat(64) }, driver: 'conformance@1', model: { ...identity(family), model } };
+}
+
 export const REVIEW_SEAT_FAMILY_CHECK: LocalAssertion = runtime({
   id: 'I6.review-seat-family-check',
   title:
@@ -470,16 +475,16 @@ export const REVIEW_SEAT_FAMILY_CHECK: LocalAssertion = runtime({
   run: async () => {
     const { seatReviewer } = await import('@olympus-ai/core');
     const review = 'review-1' as TaskId;
-    const authors = [identity('claude')];
+    const authors = [seatOf('claude', 'builder')];
     for (const level of [0, 1, 2] as AutonomyLevel[]) {
-      const seat = seatReviewer(review, authors, identity('claude'), level);
+      const seat = seatReviewer(review, 'review', authors, seatOf('claude'), level);
       if (!seat.ok || seat.seat.independence !== 'same-model') throw new Error(`I6: a same-family seat at L${String(level)} was ${JSON.stringify(seat)}`);
-      const sibling = seatReviewer(review, authors, { ...identity('claude'), model: 'another' }, level);
+      const sibling = seatReviewer(review, 'review', authors, seatOf('claude', 'reviewer', 'another'), level);
       if (!sibling.ok || sibling.seat.independence !== 'different-model') throw new Error(`I6: another model of the family at L${String(level)} was ${JSON.stringify(sibling)}`);
     }
-    const l3 = seatReviewer(review, authors, identity('claude'), 3);
+    const l3 = seatReviewer(review, 'review', authors, seatOf('claude'), 3);
     if (l3.ok || l3.reason !== 'same-family-reviewer') throw new Error(`I6: a same-family reviewer at L3 was ${JSON.stringify(l3)}`);
-    const l3Other = seatReviewer(review, authors, identity('gpt'), 3);
+    const l3Other = seatReviewer(review, 'review', authors, seatOf('gpt'), 3);
     if (!l3Other.ok || l3Other.seat.independence !== 'different-family') throw new Error('I6: a different-family reviewer at L3 was not seated as different-family');
 
     for (const [family, independence] of [['stub', 'same-model'], ['other-family', 'different-family']] as const) {
@@ -488,9 +493,9 @@ export const REVIEW_SEAT_FAMILY_CHECK: LocalAssertion = runtime({
         const author = await stubDriver();
         const reviewer = await stubDriver({ family });
         const state = stateOf(await startRun(await rig.request(await rig.components({ driver: author, reviewer }))), 'I6');
-        const [seat] = state.reviews;
-        if (state.reviews.length !== 1 || seat === undefined) throw new Error(`I6: ${String(state.reviews.length)} seats were recorded, expected one`);
-        if (seat.task !== HELLO_REVIEW || seat.independence !== independence || seat.reviewer.family !== family || seat.authors[0]?.family !== 'stub') {
+        const seat = state.reviews.find((s) => s.kind === 'review');
+        if (seat === undefined) throw new Error(`I6: no review seat was recorded among ${String(state.reviews.length)}`);
+        if (seat.task !== HELLO_REVIEW || seat.independence !== independence || seat.reviewer.model.family !== family || seat.authors[0]?.model.family !== 'stub') {
           throw new Error(`I6: a ${family} reviewer of a stub author was recorded as ${JSON.stringify(seat)}`);
         }
       });

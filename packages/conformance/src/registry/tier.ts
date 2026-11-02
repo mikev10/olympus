@@ -205,7 +205,7 @@ export const EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR: LocalAssertion = runtime({
       await startRun(await rig.request(components, { policy: await policyWith({ tier: 'fast', escalation: { afterFailedGates: 1, ceiling: 'standard' } }) }));
       const [seat] = (await rig.state()).reviews;
       if (seat === undefined) throw new Error(`I6: no review seat was recorded after ${String(builds)} builds`);
-      const families = [...new Set(seat.authors.map((a) => a.family))].sort();
+      const families = [...new Set(seat.authors.map((a) => a.model.family))].sort();
       if (JSON.stringify(families) !== '["first-family","second-family"]') {
         throw new Error(`I6: the seat's authors are of ${JSON.stringify(families)}; both models that built the task are authors`);
       }
@@ -230,7 +230,7 @@ export const EVERY_MODEL_THAT_BUILT_IS_AN_AUTHOR: LocalAssertion = runtime({
       const [seat] = (await rig.state()).reviews;
       if (seat === undefined) throw new Error('I6: no review seat was recorded');
       if (seat.independence !== 'different-model') {
-        throw new Error(`I6: a reviewer resolved to an author's family that reported '${seat.reviewer.family}' was seated as ${seat.independence}`);
+        throw new Error(`I6: a reviewer resolved to an author's family that reported '${seat.reviewer.model.family}' was seated as ${seat.independence}`);
       }
     });
   },
