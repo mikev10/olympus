@@ -1489,10 +1489,23 @@ async function evidenceFacts(ctx: LineContext, tasks: readonly TaskId[]): Promis
     const bundle = JSON.parse(decode(await ctx.components.vault.read(ref))) as EvidenceBundle;
     if (tasks.includes(bundle.taskId)) latest.set(bundle.taskId, bundle);
   }
+  return evidenceFactsOf([...latest.values()]);
+}
+
+/** The runtime's facts of each bundle, as a review seat is given them under its `evidence-bundle` grant. */
+export function evidenceFactsOf(bundles: readonly EvidenceBundle[]): string {
   return JSON.stringify(
-    [...latest.values()].map((b) => ({
+    bundles.map((b) => ({
       taskId: b.taskId,
-      checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation }) => ({ checkId, exitCode, suiteCount, expectationHeld: expectation === null ? null : expectation.held })),
+      checks: b.checks.map(({ checkId, exitCode, suiteCount, expectation, findings }) => ({
+        checkId,
+        exitCode,
+        suiteCount,
+        expectationHeld: expectation === null ? null : expectation.held,
+        // A security check's findings as the runtime parsed them, rule and location, where the security seat
+        // reads what the checks found (R9, codex-2); null for every other kind and for a report never read.
+        findings: findings === null ? null : findings.map((f) => ({ rule: f.rule, path: f.location.path, line: f.location.line })),
+      })),
       unstarted: b.unstarted.map((u) => u.checkId),
       // How many ways the claim and the diff disagree, and not the paths: a claimed path is a
       // string the author wrote, and the seat is given no author material (D-P6-03).
