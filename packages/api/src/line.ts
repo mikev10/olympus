@@ -1562,8 +1562,9 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
   }
   const seated = seatReviewer(task.id, kind, authors, seatOf(ran.result.model), level);
   if (!seated.ok) return seated;
-  // The stricter of the two seats: what the reviewer reports never widens what the runtime resolved (I2, I6; codex-1, gemini-1).
-  const seat = weakerGrade(planned.seat.independence, seated.seat.independence) === planned.seat.independence ? planned.seat : seated.seat;
+  // The seat the runtime resolved, at the weaker of the two grades: what the reviewer reports can lower the
+  // grade and never widen it, and never becomes the recorded identity, which stays the runtime's (I2, I6; P6 codex-1, gemini-1; R9 codex-1).
+  const seat = { ...planned.seat, independence: weakerGrade(planned.seat.independence, seated.seat.independence) };
   const ref = await vault.recordTaskResult(ctx.run.id, ran.result);
   await commit(ctx, {
     tasks: { [task.id]: 'passed' },

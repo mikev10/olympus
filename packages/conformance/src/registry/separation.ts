@@ -237,6 +237,24 @@ export const SEAT_IDENTITY_IN_RUN_STATE: LocalAssertion = runtime({
       }
     });
 
+    // A reviewer that resolves to another family and reports the author's model: the claim may lower
+    // the grade, never write the record. The seat's reviewer is the model the runtime resolved (codex-1).
+    await withLine('r9-i2-claimed-', async (rig) => {
+      const { startRun } = await api();
+      const author = await stubDriver();
+      const reviewer = await stubDriver({ family: 'other-family' });
+      const authorModel = author.resolveModel('standard');
+      const run = reviewer.runTask.bind(reviewer);
+      Object.assign(reviewer, { runTask: async (req: TaskRequest) => ({ ...(await run(req)), model: { ...authorModel } }) });
+      await startRun(await rig.request(await rig.components({ driver: author, reviewer })));
+      const state = await rig.state();
+      for (const s of state.reviews) {
+        if (s.reviewer.model.family !== 'other-family') throw new Error(`I2: the ${s.kind} seat records the model its reviewer reported, ${JSON.stringify(s.reviewer.model)}, not the one the runtime resolved`);
+        if (s.independence === 'different-family') throw new Error(`I6: a reviewer reporting the author's model was graded ${s.independence}; the claim must still lower the grade`);
+      }
+      if (state.reviews.length !== 2) throw new Error(`I2 control: ${String(state.reviews.length)} seats were recorded`);
+    });
+
     // A seat as a runtime before R9 committed it: model identities, no kind.
     await withLine('r9-i2-before-', async (rig) => {
       const { LocalVault } = await import('@olympus-ai/vault');
