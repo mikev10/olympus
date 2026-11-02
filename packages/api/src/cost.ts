@@ -133,8 +133,9 @@ export async function readUsage(vault: Vault, state: RunState): Promise<UsageRec
     if (record?.collectedBy !== 'runtime' || record.runId !== state.runId || typeof record.taskId !== 'string' || typeof record.reading !== 'object') {
       throw new Error(`cost: a usage record referenced by run ${state.runId} is not one the runtime collected for it`);
     }
-    // A record written before R12 carries no times: read as not recorded, never as a time (A-R12-01).
-    records.push(record.timing === undefined ? { ...(record as UsageRecord), timing: 'not-recorded' } : (record as UsageRecord));
+    // A record written before R12 carries no times, and one before R9 no driver: each read as not recorded (A-R12-01, A-R9-01).
+    const timed = record.timing === undefined ? { ...(record as UsageRecord), timing: 'not-recorded' as const } : (record as UsageRecord);
+    records.push(record.driver === undefined ? { ...timed, driver: null } : timed);
   }
   return records;
 }

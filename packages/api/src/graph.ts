@@ -36,9 +36,22 @@ import { SCANNERS, type SecurityScanners } from './security.js';
 export interface SandboxProfile {
   /** The image a driver task runs in: one that holds the driver's CLI. */
   readonly buildImage: string;
+  /**
+   * The image a driver whose CLI the build image does not hold runs in,
+   * keyed by its `provenanceId()` (R9, D-R9-06): the Codex driver's. A driver
+   * with no entry runs in `buildImage`.
+   */
+  readonly driverImages?: Readonly<Record<string, string>>;
   /** The image a verification check runs in: one that runs the stack's tools. */
   readonly checkImage: string;
   readonly limits: Readonly<Omit<SandboxSpec['limits'], 'wallClockMs'>>;
+}
+
+/** The image a task run through `driver` is provisioned from. */
+export function imageFor(profile: SandboxProfile, driver: { provenanceId(): string }): string {
+  const images = profile.driverImages ?? {};
+  const id = driver.provenanceId();
+  return Object.hasOwn(images, id) ? (images[id] ?? profile.buildImage) : profile.buildImage;
 }
 
 export interface GraphParts extends ComponentGraph {
