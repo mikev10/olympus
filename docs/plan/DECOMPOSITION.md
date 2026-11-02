@@ -894,6 +894,36 @@ panel's, not this unit's: until then a verdict is recorded and not interpreted
 scoped exception: a clean result from one is a necessary condition for `auto`
 at L2, never a sufficient one (D-A-DS-07).
 
+**Amendment:** A-R9-01, which this unit builds (D-A-SD-01). A seat's
+identity is `SeatIdentity`, its role, its driver's `provenanceId()`, and its
+model, recorded by the runtime. `ReviewSeat` carries it for its authors and
+its reviewer, with a `kind` of `review` or `security`, and `UsageRecord`
+gains the driver. A record committed before R9 reads as not recorded.
+
+**Already enforced, and kept:** a test drafter of the builder's family
+(`I6.test-drafter-of-builder-family`, R19), the review seat's grants
+(`I6.review-seat-reads-only-its-grants`, P6), and the merge credential
+(`I4.merge-credential-reaches-no-sandbox`). An approval is the token's
+principal, never a field (D-P9-06); this unit adds the assertion that the
+local token reaches no sandbox.
+
+**Gate paths:** `packages/core/src/station/types.ts` and
+`packages/vault/src/types.ts` for the amendment, `packages/api/package.json`
+so a Codex driver can fill a seat, and `packages/conformance/` for the
+registry entries. The pull request takes `gate-change`, and the squash merge
+carries `Gate-Change: acknowledged`.
+
+**Not in this unit:** a review verdict that gates the line, which is the M3
+panel's; R13's nightly whole-tree job; R17's checks themselves; a third model
+family; and any change to what a driver returns.
+
+**Conformance:** `pnpm typecheck`, `pnpm lint`, and `pnpm conformance` pass,
+and the report names an assertion for each new row: an author's identity
+never reviews its change, the security seat's family is checked against
+every author, the security seat is read-only and given its grants alone, each
+seat's identity is in run state, and the local token reaches no sandbox. Each
+fails when its check is deleted.
+
 ### R10 — Trust ratchet
 
 Within a run, capability only narrows. When a task takes in input that policy

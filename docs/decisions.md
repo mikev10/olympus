@@ -6614,3 +6614,73 @@ Responses stream. No model was called.
   started, so the boundary stays the runtime's.
 - **A call begun under budget can end over it by one call (codex, note).**
   That is P13's stated rule (D-P13-03), not this unit's to change.
+
+## Amendment: separation of duties (R9)
+
+R9 was started on `v2` at 4dee3f1 and stopped before any code. Its entry
+asks that each seat's identity, role, driver, and model, be recorded in run
+state, and that a security reviewer be seated beside the reviewer. Neither
+fits the contract, and a contract change is an amendment confirmed before it
+is built.
+
+### D-A-SD-01: a seat's identity is its role, its driver, and its model, recorded by the runtime
+
+- **Found**, on `v2` at 4dee3f1:
+  - A review seat records model identities only: `ReviewSeat` holds
+    `authors: ModelIdentity[]` and `reviewer: ModelIdentity`
+    (`packages/core/src/station/types.ts:75`). Role and driver are not in it.
+  - A call's `UsageRecord` holds the model and the pinned role, and no driver
+    (`packages/vault/src/types.ts:123-140`). A build seat's driver is
+    therefore in no record.
+  - Every driver already names itself: `Driver.provenanceId()`
+    (`packages/core/src/driver/contract.ts:138`), stamped onto evidence as
+    `driverProvenanceId` (`packages/api/src/line.ts:1406`, `:1428`). Each
+    driver returns `<id>@<version>` (`packages/drivers/*/src/driver.ts`).
+  - `RunState.reviews` is the only place a seat is recorded, and it has room
+    for one kind of seat at `review`.
+  - `@olympus-ai/api` depends on the Claude Code and OpenAI-compatible
+    drivers and not on Codex (`packages/api/package.json:22-23`), and the
+    host's seats are `ENDPOINT_SEATS` (`packages/api/src/host/compose.ts:52`).
+- **Chosen** by the maintainer, 2026-10-31, as A-R9-01 below: one identity
+  type, carried by the review seat and the usage record, and a seat kind on
+  the review seat. R9 builds it, so the external review of both families
+  covers the types with the checks that read them, as A-R26-01 was built by
+  R26.
+- **Rejected:**
+  - *Derive a seat's driver from the host's composition when it is needed.*
+    The runtime would infer a value rather than record it, and an auditor
+    holding only the Vault could not recompute the seat.
+  - *A separate run-state list for security seats.* One rule, that no
+    reviewer shares an author's identity, would be checked over two records,
+    and a reader of one would miss the other.
+  - *Building the types in this amendment's pull request.* The seat checks
+    are what the types exist for; reviewed apart, either could be wrong
+    against the other.
+- **Must hold:** a seat's family is the declared one, never inferred (I6).
+  Identity is the runtime's, from admission and the driver it called, never a
+  field a driver returned (I2). A seat committed before R9 is read as not
+  recorded, never as recorded and empty.
+- **Reverse:** drop A-R9-01 and the R9 entry's amendment paragraph. R9 then
+  cannot record a seat's identity and stays blocked.
+
+### A-R9-01: `SeatIdentity`, and the seat kind on `ReviewSeat`
+
+`packages/core/src/station/types.ts` gains:
+
+- `SeatRole { id: RoleId; sha256: string }`, the role a seat ran under as
+  admission pinned it, the same shape as the Vault's `RoleVersion`, declared
+  in `core` because `core` cannot import the Vault's types;
+- `SeatIdentity { role: SeatRole | null; driver: string | null; model:
+  ModelIdentity }`, where `driver` is the driver's `provenanceId()`;
+- `ReviewSeatKind = 'review' | 'security'`.
+
+`ReviewSeat` gains `kind: ReviewSeatKind`, and its `authors` and `reviewer`
+become `SeatIdentity`. `UsageRecord` (`packages/vault/src/types.ts`) gains
+`driver: string | null`, the `provenanceId()` of the driver the call was made
+through.
+
+`null` means not recorded, and only a record committed before R9 holds it.
+The Vault reads a seat committed before R9 as `kind: 'review'` with `role`
+and `driver` null on every identity, and a usage record before R9 with
+`driver` null. The line never writes null, and a seat check that meets a null
+where it needs the value refuses rather than treating it as different (I5).
