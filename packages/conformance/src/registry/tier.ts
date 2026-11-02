@@ -121,11 +121,11 @@ export const TIER_PER_STATION_FOLLOWS_POLICY: LocalAssertion = runtime({
       await startRun(await rig.request(components, { policy }));
       const built = driver.requests.map((r) => r.tier);
       const reviewed = reviewer.requests.map((r) => r.tier);
-      if (JSON.stringify(built) !== '["deep"]' || JSON.stringify(reviewed) !== '["standard"]') {
+      if (JSON.stringify(built) !== '["deep"]' || JSON.stringify(reviewed) !== '["standard","standard"]') {
         throw new Error(`I4: the builder ran at ${JSON.stringify(built)} and the reviewer at ${JSON.stringify(reviewed)}; policy names deep and standard for those stations`);
       }
       const models = (await usageOf(rig, components.vault)).map((r) => `${r.station}:${r.model.model}`);
-      if (JSON.stringify(models) !== '["build:stub-deep","review:stub-standard"]') {
+      if (JSON.stringify(models) !== '["build:stub-deep","review:stub-standard","review:stub-standard"]') {
         throw new Error(`I4: the usage records name ${JSON.stringify(models)}, not the models the station tiers resolve to`);
       }
     });

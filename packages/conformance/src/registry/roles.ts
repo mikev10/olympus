@@ -239,7 +239,7 @@ export const ATTEMPT_RECORDS_ITS_ROLE_VERSION: LocalAssertion = runtime({
       const usage = await Promise.all(state.usage.map((ref) => readRecord<UsageRecord>(components.vault, ref)));
       if (usage.length === 0) throw new Error('R20: the run state references no usage record');
       for (const u of usage) {
-        const expected = u.taskId === HELLO_REVIEW ? 'reviewer' : u.taskId === HELLO_TASK ? 'builder' : undefined;
+        const expected = u.taskId === HELLO_REVIEW ? 'reviewer' : u.taskId === `${HELLO_REVIEW}.security` ? 'security-reviewer' : u.taskId === HELLO_TASK ? 'builder' : undefined;
         if (u.role.id !== expected || u.role.sha256 !== pinned.get(expected)) {
           throw new Error(`R20: the call for ${u.taskId} records role ${JSON.stringify(u.role)}, not ${String(expected)} at its admitted hash`);
         }

@@ -33,6 +33,7 @@ import type {
   TaskId,
   TaskRequest,
   TaskResult,
+  TaskGraph,
 } from '@olympus-ai/core';
 import type { SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import type { CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, Vault } from '@olympus-ai/vault';
@@ -203,6 +204,14 @@ interface DraftingRig {
   readonly request: (overrides?: Partial<RunRequest>) => Promise<RunRequest>;
 }
 
+/** The rig's graph bound as admission binds it, the security seats `parseGraph` derives included (R9). */
+async function boundGraph(rig: LineRig, path: string): Promise<TaskGraph> {
+  const { parseGraph } = await api();
+  const parsed = parseGraph(JSON.parse(await readFile(join(rig.dirs.artifacts, path), 'utf8')), { runId: rig.runId, baseCommit: '0', workspace: rig.dirs.artifacts });
+  if (!parsed.ok) throw new Error(`R19 control: the rig's graph does not parse: ${JSON.stringify(parsed.problems)}`);
+  return parsed.graph;
+}
+
 /**
  * The rig's components with a drafting seat in each slot: stub drivers whose
  * families and drafts the assertion sets, over one stub sandbox the builder
@@ -252,7 +261,8 @@ async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
     const policy = overrides.policy ?? (await draftingPolicy());
     const artifacts = overrides.artifacts ?? artifactsFor(true, false);
     const drafted = [...(artifacts.spec === 'draft' ? ['spec' as const] : []), ...(artifacts.acceptanceTests === 'draft' ? ['test-design' as const] : [])];
-    const graph = JSON.parse(await readFile(join(rig.dirs.artifacts, artifacts.taskGraph), 'utf8')) as { tasks: Parameters<typeof worstCaseCost>[0]['tasks'] };
+    // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+    const graph = await boundGraph(rig, artifacts.taskGraph);
     return rig.request(await components(), {
       intent: artifacts.spec === 'draft' ? INTENT : null,
       rubrics,
@@ -260,7 +270,7 @@ async function drafting(rig: LineRig, seats: Seats = {}): Promise<DraftingRig> {
       artifacts,
       policy,
       // The figure a person approved: every seat a drafting station may hold counted in (R19).
-      approvedCostUsd: overrides.approvedCostUsd ?? worstCaseCost({ tasks: graph.tasks, edges: [] }, policy, drafted).usd,
+      approvedCostUsd: overrides.approvedCostUsd ?? worstCaseCost(graph, policy, drafted).usd,
     });
   };
   return { drivers, components, request };
@@ -1026,8 +1036,7 @@ export const WORST_CASE_COVERS_DRAFTING: LocalAssertion = runtime({
       const { admitRun, worstCaseCost } = await api();
       const r = await drafting(rig);
       const req = await r.request({ artifacts: artifactsFor(true, true) });
-      const graph = JSON.parse(await readFile(join(rig.dirs.artifacts, 'graph.json'), 'utf8')) as { tasks: Parameters<typeof worstCaseCost>[0]['tasks'] };
-      const without = worstCaseCost({ tasks: graph.tasks, edges: [] }, req.policy);
+      const without = worstCaseCost(await boundGraph(rig, 'graph.json'), req.policy);
       const outcome = await admitRun({ ...req, approvedCostUsd: without.usd });
       if (outcome.ok || outcome.reason !== 'cost-unapproved') throw new Error(`R19: a drafting run approved without its seats' cost was ${outcome.ok ? 'admitted' : outcome.reason}`);
       const seats = outcome.worstCase.tasks.filter((t) => t.station === 'spec' || t.station === 'test-design');

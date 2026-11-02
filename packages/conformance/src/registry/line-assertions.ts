@@ -514,8 +514,9 @@ export const REVIEWER_RECEIVES_NO_AUTHOR_MATERIAL: LocalAssertion = runtime({
       const author = await stubDriver({ narrative: SENTINEL });
       const reviewer = await stubDriver({ family: 'other-family' });
       await startRun(await rig.request(await rig.components({ driver: author, reviewer })));
-      const [req] = reviewer.requests;
-      if (reviewer.requests.length !== 1 || req === undefined) throw new Error(`I6: the reviewer was called ${String(reviewer.requests.length)} times`);
+      // The review seat and the security seat beside it (R9); the review seat's request is the one judged here.
+      const req = reviewer.requests.find((r) => r.taskId === HELLO_REVIEW);
+      if (reviewer.requests.length !== 2 || req === undefined) throw new Error(`I6: the reviewer was called ${String(reviewer.requests.length)} times`);
       const context = `${req.stablePrefix}\n${req.variableSuffix}`;
       if (context.includes('AUTHOR-NARRATIVE-SENTINEL')) throw new Error("I6: the author's narrative reached the reviewer");
       if (context.includes('"dependencySet"') || context.includes('[plan]') || context.includes('[task-graph]')) {
@@ -604,7 +605,7 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
       const all = await readUsage(vault, state);
       // Each call is recorded pending before it is made, and its reading follows; run state references the readings, and the Vault lists the pending ones by run (D-I1a-12).
       const kinds = recorded.map((r) => (r.reading.kind === 'pending' ? 'pending' : 'read'));
-      if (JSON.stringify(kinds) !== JSON.stringify(['pending', 'read', 'pending', 'read', 'pending', 'read'])) {
+      if (JSON.stringify(kinds) !== JSON.stringify(['pending', 'read', 'pending', 'read', 'pending', 'read', 'pending', 'read'])) {
         throw new Error(`I2: the usage records were not a pending record before each call and its reading after: ${JSON.stringify(kinds)}`);
       }
       const isPending = (r: UsageRecord): boolean => r.reading.kind === 'pending';
@@ -615,7 +616,8 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
         throw new Error('I2: a usage record the run holds did not come through recordUsage');
       }
       const shape = records.map((r) => `${r.taskId}@${r.station}#${String(r.attempt)}`);
-      const expected = [`${HELLO_TASK}@build#1`, `${HELLO_TASK}@build#2`, `${HELLO_REVIEW}@review#1`];
+      // Two builds, the review seat, and the security seat beside it (R9).
+      const expected = [`${HELLO_TASK}@build#1`, `${HELLO_TASK}@build#2`, `${HELLO_REVIEW}@review#1`, `${HELLO_REVIEW}.security@review#1`];
       if (JSON.stringify(shape) !== JSON.stringify(expected)) throw new Error(`I2: the usage records were ${JSON.stringify(shape)}, expected ${JSON.stringify(expected)}`);
       // Each record carries what destroy returned for the sandbox that driver call ran in, and the check sandboxes between them record nothing.
       const sandboxes = [...handles, ...reviewer.requests.map((req) => req.sandbox)];
@@ -630,7 +632,7 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
       const cost = (rs: readonly UsageRecord[]): number => rs.reduce((s, r) => s + (r.reading.kind === 'metered' ? r.reading.costUsd : 0), 0);
       const builds = records.filter((r) => r.station === 'build');
       if (
-        totals.run.calls !== 3 || totals.run.unmetered !== 0 || totals.run.metered.costUsd !== cost(records) ||
+        totals.run.calls !== 4 || totals.run.unmetered !== 0 || totals.run.metered.costUsd !== cost(records) ||
         totals.byStation.build?.metered.costUsd !== cost(builds) || totals.byTask[HELLO_TASK]?.calls !== 2 || totals.byTask[HELLO_REVIEW]?.calls !== 1
       ) {
         throw new Error(`I2: the totals are not the sums of their records: ${JSON.stringify(totals)}`);
@@ -642,7 +644,7 @@ export const COST_IS_RUNTIME_METERED: LocalAssertion = runtime({
       const base = await rig.components({ reviewer: await stubDriver({ family: 'other-family' }) });
       const state = stateOf(await startRun(await rig.request(base)), 'I2 unmetered');
       const totals = costTotals(await readUsage(base.vault, state));
-      if (totals.run.calls !== 2 || totals.run.unmetered !== 2 || totals.run.metered.calls !== 0) {
+      if (totals.run.calls !== 3 || totals.run.unmetered !== 3 || totals.run.metered.calls !== 0) {
         throw new Error(`I2: an unmetered line reported ${JSON.stringify(totals.run)}`);
       }
     });
