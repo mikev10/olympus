@@ -154,7 +154,7 @@ export const SECURITY_SEAT_FAMILY_CHECKED: LocalAssertion = runtime({
 export const SECURITY_SEAT_READS_ONLY_ITS_GRANTS: LocalAssertion = runtime({
   id: 'I4.security-seat-reads-only-its-grants',
   title:
-    "the security seat runs under the security-reviewer role in a read-only sandbox holding what the review seat's holds, and is given the locked spec with its security part, the diff, and the evidence bundle, and nothing else: not the acceptance tests the review seat is given, the author's narrative, or the plan; and its contract is cut from the review contract, never added to (R9)",
+    "the security seat runs under the security-reviewer role in a read-only sandbox holding what the review seat's holds but the acceptance tests, and is given the locked spec with its security part, the diff, and the evidence bundle, and nothing else: not the acceptance tests the review seat is given, the author's narrative, or the plan; and its contract is cut from the review contract, never added to (R9)",
   run: async () => {
     const { securitySeatContract, SECURITY_SEAT_GRANTS, STATION_CONTRACTS } = await core();
     const widened = { ...STATION_CONTRACTS.review, allowedContext: [...STATION_CONTRACTS.review.allowedContext, 'acceptance-tests', 'author-narrative', 'plan', 'conversation'] as const };
@@ -167,7 +167,7 @@ export const SECURITY_SEAT_READS_ONLY_ITS_GRANTS: LocalAssertion = runtime({
     await withLine('r9-i4-security-view-', async (rig) => {
       const { startRun } = await api();
       const { sandbox, specs } = await recordingSandbox();
-      const probe = ['graph.json', 'verify.json', '.git/author-notes', 'spec.md', 'src/change.ts'];
+      const probe = ['graph.json', 'verify.json', '.git/author-notes', 'spec.md', 'src/change.ts', 'acceptance.md'];
       const look = `const fs = require('node:fs'); console.log(JSON.stringify(${JSON.stringify(probe)}.map((p) => fs.existsSync(p))));`;
       const seen = new Map<string, string>();
       const author = await stubDriver({
@@ -195,7 +195,8 @@ export const SECURITY_SEAT_READS_ONLY_ITS_GRANTS: LocalAssertion = runtime({
       if (context.includes('AUTHOR-NARRATIVE-SENTINEL') || context.includes('[plan]')) throw new Error("I4: the security seat was given the author's narrative or the plan");
       for (const grant of ['[locked-spec]', '[diff]', '[evidence-bundle]']) if (!context.includes(grant)) throw new Error(`I4: the security seat was not given ${grant}`);
       if (!context.includes((await readArtifact(rig.dirs, 'security.json')).trim())) throw new Error("I4: the security seat was not given the spec's security part");
-      if (seen.get(SECURITY) !== '[false,false,false,true,true]' || seen.get(SECURITY) !== seen.get(HELLO_REVIEW)) {
+      // The seats differ by one file: the acceptance tests, which the review seat is granted and the security seat is not (codex-3).
+      if (seen.get(SECURITY) !== '[false,false,false,true,true,false]' || seen.get(HELLO_REVIEW) !== '[false,false,false,true,true,true]') {
         throw new Error(`I4: the security seat's workspace held ${String(seen.get(SECURITY))}, the review seat's ${String(seen.get(HELLO_REVIEW))}`);
       }
       // Every writable sandbox is a build's: neither review seat was given one.

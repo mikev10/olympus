@@ -96,6 +96,7 @@ import type {
   RunState,
   SeatIdentity,
   StationId,
+  StationContract,
   StationRefusal,
   TamperedPath,
   Task,
@@ -1454,15 +1455,17 @@ async function verify(ctx: LineContext, task: Task): Promise<StationRefusal | un
 }
 
 /**
- * The review seat's tree: the files its grants cover and nothing else. The
- * contract grants the locked spec, the acceptance tests, and the diff, so the
- * view holds those files as the accepted tree has them; the task graph, the
- * manifest, and every file the diff does not carry are absent, so a reviewer
- * with a read tool cannot open what its contract denies it (I6).
+ * A review seat's tree: the files its contract's grants cover and nothing
+ * else. The review contract grants the locked spec, the acceptance tests, and
+ * the diff, so the view holds those files as the accepted tree has them; the
+ * security seat's contract does not grant the acceptance tests, so its view
+ * holds none (R9, codex-3). The task graph, the manifest, and every file the
+ * diff does not carry are absent, so a reviewer with a read tool cannot open
+ * what its contract denies it (I6).
  */
-async function reviewView(ctx: LineContext, task: Task): Promise<string> {
+async function reviewView(ctx: LineContext, task: Task, contract: StationContract): Promise<string> {
   const { workspaces } = ctx.components;
-  const grants: readonly ContextGrant[] = STATION_CONTRACTS.review.allowedContext;
+  const grants: readonly ContextGrant[] = contract.allowedContext;
   const keep = new Set<string>();
   if (grants.includes('locked-spec')) for (const a of specArtifacts(ctx)) keep.add(a.path);
   if (grants.includes('acceptance-tests')) for (const a of ctx.artifacts.acceptanceTests) keep.add(a.path);
@@ -1550,7 +1553,7 @@ async function review(ctx: LineContext, task: Task): Promise<StationRefusal | un
     plan: JSON.stringify(ctx.graph.tasks),
   };
   // The seat's instructions are its seat's role's; its grants stay its task's scope (D-A-RC-06, R9).
-  const ran = await runTask(ctx, task, reviewer, role, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task));
+  const ran = await runTask(ctx, task, reviewer, role, joinParts(grantedContext(contract, offered)), await reviewView(ctx, task, contract));
   if (!ran.ok) return spendRetry(ctx, task);
   // I2: the line receives a result here too, and holds it to the contract exactly as build does (codex-6).
   const problems = taskResultProblems(ran.result);

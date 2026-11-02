@@ -406,7 +406,8 @@ export const REVIEW_SEAT_READS_ONLY_ITS_GRANTS: LocalAssertion = runtime({
           if (req.taskId === HELLO_TASK) {
             await inTask(sandbox, req, writes({ 'src/change.ts': 'changed', '.git/author-notes': 'the plan, as the author sees it' }));
             seen.author = JSON.parse(await inTask(sandbox, req, look)) as boolean[];
-          } else {
+          } else if (req.taskId === HELLO_REVIEW) {
+            // The review seat's own tree; the security seat beside it is held to its grants by I4.security-seat-reads-only-its-grants (R9).
             seen.reviewer = JSON.parse(await inTask(sandbox, req, look)) as boolean[];
           }
         },
