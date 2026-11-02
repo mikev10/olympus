@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildGraph, containerUser, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type RunOutcome } from '@olympus-ai/api';
+import { buildGraph, containerUser, parseGraph, DEFAULT_LIMITS, localWorkspaceStore, startRun, worstCaseCost, type ContainerUser, type GraphBinding, type RunOutcome } from '@olympus-ai/api';
 import { DEFAULT_ROLES_DIRECTORY } from '@olympus-ai/compiler';
 import {
   StrictPolicyEngine,
@@ -37,6 +37,14 @@ import { repoDir, type Corpus, type Item, type RepoPolicy } from './corpus.js';
 import { ScriptedSeat } from './seats.js';
 
 const run = promisify(execFile);
+
+
+/** A corpus item's graph bound as admission binds it, so the security seats `parseGraph` derives are in the figure approved (R9). */
+export function boundGraph(value: unknown, bind: GraphBinding): TaskGraph {
+  const parsed = parseGraph(value, bind);
+  if (!parsed.ok) throw new Error(`benchmark: the corpus item's graph does not parse: ${JSON.stringify(parsed.problems)}`);
+  return parsed.graph;
+}
 
 export const BUILDER = 'builder' as RoleId;
 export const REVIEWER = 'reviewer' as RoleId;
@@ -214,8 +222,9 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item): 
     profile: { buildImage: BASE_IMAGE, checkImage: BASE_IMAGE, limits: DEFAULT_LIMITS },
   });
   const policy = benchPolicy(policyOf);
-  const graph = JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')) as { tasks: TaskGraph['tasks'] };
   const runId = name as RunId;
+  // Bound as admission binds it, so the security seat it derives is in the figure (R9).
+  const graph = boundGraph(JSON.parse(await readFile(join(repository, ARTIFACTS.taskGraph), 'utf8')), { runId, baseCommit: source.commit, workspace: repository });
   const outcome = await startRun({
     runId,
     baseCommit: source.commit,
@@ -225,7 +234,7 @@ export async function throughTheLine(bench: Bench, corpus: Corpus, item: Item): 
     policy,
     roles: DEFAULT_ROLES_DIRECTORY,
     components,
-    approvedCostUsd: worstCaseCost({ tasks: graph.tasks, edges: [] }, policy).usd,
+    approvedCostUsd: worstCaseCost(graph, policy).usd,
   });
   return classify(outcome, await recorded(vault, runId));
 }

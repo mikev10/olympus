@@ -5,6 +5,7 @@
 "@olympus-ai/compiler": minor
 "@olympus-ai/conformance": minor
 "@olympus-ai/cli": patch
+"@olympus-ai/benchmark": patch
 ---
 
 Separation of duties across every seat (R9, A-R9-01).
@@ -15,3 +16,4 @@ Separation of duties across every seat (R9, A-R9-01).
 - `compiler`: the `security-reviewer` role ships with the defaults.
 - `conformance`: five R9 assertions, one per new row of the matrix.
 - `cli`: tests follow the figure the extra seat adds. Test only.
+- `benchmark`: the approved figure is computed from the graph as admission binds it, so the security seat is counted; the deterministic result is unchanged.
