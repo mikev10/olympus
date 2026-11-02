@@ -620,6 +620,7 @@ order between them is settled before any of them is picked up.
 | R24 | Repository instructions as granted context | M2 | P1, P4, R20, R23; R10 above L2 | — |
 | R25 | Property checks | M3 | P6, P8, R7, R15, R19 | — |
 | R26 | Driver: Codex | M2 | P5, P10, P12, P13, R23 | — |
+| R27 | Harness integrity: the CLI by content, the image in evidence | M2 | P5, P6, P13, R26 | — |
 
 ### R1 — Readiness
 
@@ -2174,6 +2175,75 @@ entry for this driver.
 
 **Why M2:** it is the second family R9, and so R13, wait on. One driver
 proves the contract is neutral, and two prove reviewer independence.
+
+### R27 — Harness integrity: the CLI by content, the image in evidence
+
+The agent CLI is the one third-party program inside the sandbox, and nothing
+pins its bytes. P5's and R26's images pin the base by digest and the CLI by
+exact version (`packages/drivers/claude-code/image/Dockerfile`,
+`packages/drivers/codex/image/Dockerfile`). `npm install --global` then takes
+whatever tarballs the registry serves for that version and its platform
+packages (`@anthropic-ai/claude-code-linux-x64`, the `@openai/codex@…-linux-x64`
+alias). It checks them only against hashes that the same registry supplies.
+A version number names a release, not its contents. The Cursor marketplace
+incident of 29 October 2026 shipped a backdoor as Claude Code `2.1.312`, a
+number Anthropic's real release also uses. And `ensureImage` accepts any
+image that the daemon holds under the tag, so a retagged image runs unnoticed.
+The evidence names the harness as `driverProvenanceId`, `<driver>@<version>`,
+which is a claim about a version and not about the binary that ran. This
+unit closes both gaps. It changes code that P5 and R26 shipped. Their entries
+stay as written, as the record of what shipped, and this entry is the record
+of the change. Binding:
+
+- **The CLI by content.** Each driver's image directory holds a manifest and
+  a lockfile that pin the CLI, its platform packages, and their `sha512`
+  integrity, and the image installs from that lockfile only, never by name.
+  A tarball whose hash differs fails the build, and a failed build refuses the
+  task, naming the package (I5). The lockfile is part of the inputs
+  `imageTag()` hashes, so changing it builds a new image.
+- **The image by digest.** After `ensureImage` builds or finds the tag, it
+  reads the image's content ID. The ID it finds is compared with the ID it
+  recorded when it built the image. A mismatch, or a tag found with no
+  recorded build, refuses. It never rebuilds over the mismatch, because a
+  replaced image is a finding, not a cache miss.
+- **The image in evidence.** The run records the image ID that every driver
+  call ran in, beside `driverProvenanceId`. An auditor can then tie a verdict
+  to the bytes that produced it, not to a version label. The runtime collects
+  the ID, never the driver (I2).
+- **A bump is a reviewed diff.** Moving a CLI version changes the lockfile.
+  The hashes in that diff are what the two review families see, so a bump
+  cannot happen through the registry alone.
+
+**Contract amendment:** the ID needs somewhere to live. One option is a new
+field on `EvidenceBundle` and `UsageRecord`. The other folds the ID into
+`provenanceId()`, which changes no type but alters the meaning of a string
+that R9 compares. This entry recommends the field, because a value that R9
+compares should not also carry the image ID. The amendment is confirmed
+before the build.
+
+**Gate paths:** `packages/vault/src/types.ts` if the field is chosen,
+`packages/conformance/` for the registry entries. The paid driver jobs rerun
+because the images change, so the pull request takes `gate-change`, and the
+squash merge carries `Gate-Change: acknowledged`.
+
+**Not in this unit:**
+- bumping either CLI's version
+- the CLI's own settings, such as `permissions.blockWritesOutsideWorkingDirectories`
+  and `CLAUDE_CODE_SUBAGENT_EFFORT`. A setting in the agent's own
+  configuration is not a trust boundary, and the mount already confines writes.
+- signing or attesting the image
+- R6's endpoint driver, which runs no third-party harness
+- an image registry
+
+**Conformance:** entries that fail when a lockfile integrity hash is changed
+and the build still succeeds; when the image installs by package name instead
+of from the lockfile; when a retagged image runs without refusal; and when the
+evidence for a driver call has no image ID.
+
+**Why M2:** the claim is auditable evidence that the work is real, and the
+evidence cannot yet say which binary did the work. It costs little, it waits
+on nothing unbuilt, and it does not block R9. It goes after R9, before the
+next driver or CLI bump.
 
 ---
 
