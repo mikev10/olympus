@@ -325,7 +325,8 @@ export const LOCAL_TOKEN_REACHES_NO_SANDBOX: LocalAssertion = runtime({
       if (JSON.stringify([...driver.requests, ...reviewer.requests]).includes(LOCAL_TOKEN)) throw new Error('I4: a task request carries the local token');
       let stored = '';
       for (const entry of await readdir(rig.dirs.store, { recursive: true, withFileTypes: true })) {
-        if (entry.isFile()) stored += await readFile(join(entry.parentPath, entry.name), 'utf8').catch(() => '');
+        // A file that cannot be read fails the assertion: one skipped is one the token could hide in (codex-4).
+        if (entry.isFile()) stored += await readFile(join(entry.parentPath, entry.name), 'utf8');
       }
       if (stored.includes(LOCAL_TOKEN)) throw new Error('I4: the Vault holds the local token');
     });
