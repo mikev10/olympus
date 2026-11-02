@@ -6684,3 +6684,165 @@ The Vault reads a seat committed before R9 as `kind: 'review'` with `role`
 and `driver` null on every identity, and a usage record before R9 with
 `driver` null. The line never writes null, and a seat check that meets a null
 where it needs the value refuses rather than treating it as different (I5).
+
+## R9: Separation of duties across every seat
+
+Built against `v2` at 33b36e8, on branch `unit/r9`. The spec is R9's entry in
+`docs/plan/DECOMPOSITION.md` and A-R9-01 (D-A-SD-01). The session read the
+code the unit touches before writing this.
+
+### D-R9-01: the boundary R9 was started on
+
+- **Deliverables:**
+  - A-R9-01 built: `SeatRole`, `SeatIdentity`, `ReviewSeatKind` and
+    `ReviewSeat.kind` in `packages/core/src/station/types.ts`;
+    `UsageRecord.driver` in `packages/vault/src/types.ts`; the Vault reading a
+    seat and a usage record committed before R9 as not recorded;
+  - `seatReviewer` comparing identities, role, driver, and model, as well as
+    families: an author's identity never fills a seat that reviews its change;
+  - a security seat beside every review task, run under a new
+    `security-reviewer` role in R20's format, read-only, granted
+    `locked-spec`, `diff`, and `evidence-bundle` alone, its family checked
+    against every author as the reviewer's is;
+  - every call's driver recorded on its usage record, so each seat's identity,
+    build and drafting seats included, is in run state by reference;
+  - the host composing the Codex driver into the seats an operator names, so a
+    second family can fill a seat;
+  - registry assertions for each new row; a changeset for each package
+    changed.
+- **Out of scope, verbatim from the spec:** a review verdict that gates the
+  line, which is the M3 panel's; R13's nightly whole-tree job; R17's checks
+  themselves; a third model family; and any change to what a driver returns.
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, and
+  `pnpm conformance` pass, apart from the paid reports under the D-A-CI-05
+  rule; the report names an assertion for each new row: an author's identity
+  never reviews its change, the security seat's family is checked against
+  every author, the security seat is read-only and given its grants alone,
+  each seat's identity is in run state, and the local token reaches no
+  sandbox. Each fails when its check is deleted. `pnpm test` passes for every
+  package changed. `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:** I6 (identity and family at every review seat), I4
+  (the security seat's grants; the local token), I5 (a seat whose identity
+  was not recorded is refused, never read as different), I2 (identity is the
+  runtime's, never a driver's field), I10 (no Greek name in the new role, ids,
+  or keys).
+- **Pending registry entries owed:** none. `pending-baseline.json` holds no
+  I4 or I6 entries, and R9 adds none.
+- **Dependencies, verified:** P6, P9, R17, and R26 are merged into `v2` and
+  tagged `reviewed/P6`, `reviewed/P9`, `reviewed/R17`, `reviewed/R26`
+  (`git tag -l 'reviewed/*'`). A-R9-01 is merged (33b36e8).
+
+### D-R9-02: what the code holds, verified, and where it differs from the entry
+
+- `seatReviewer(task, authors: ModelIdentity[], reviewer, level)` compares
+  families alone (`packages/core/src/station/machine.ts:241`). The line seats
+  the reviewer twice, from the model it resolves and from the model its result
+  names, and commits the stricter (`packages/api/src/line.ts:1517`, `:1548`).
+- Authors are every model of the reviewed tasks' results and usage records
+  (`authorsOf`, `packages/api/src/line.ts:1572`). A result carries a model and
+  no role or driver; a usage record carries model and role, and no driver.
+- Every call goes through `runTask` (`packages/api/src/line.ts:790`), with the
+  driver in scope, from the build seat, the review seat, and both drafting
+  seats (`packages/api/src/drafting.ts:392`, `:688`); `usageRecord` is the one
+  writer (`:903`). So recording the driver at that one place covers every seat.
+- The graph is bound in one function, `parseGraph`
+  (`packages/api/src/validate.ts:507`), called at admission
+  (`packages/api/src/run.ts:462`) and on every load (`:1229`). It already
+  refuses a build task no review task covers, and reserves the drafting seats'
+  ids (`SEAT_TASK_IDS`).
+- A review seat's grants are its task's scope, and its instructions the
+  pinned `reviewer` role's whatever its task names (D-A-RC-06,
+  `packages/api/src/line.ts:1541`). Admission requires `reviewer` among the
+  compiled roles (`packages/api/src/run.ts:628`) and a resume requires it
+  pinned (`:1164`).
+- The line provisions every task sandbox from one image,
+  `profile.buildImage` (`packages/api/src/line.ts:757`). The Codex CLI is in
+  no image but its own (`packages/drivers/codex/src/image.ts:1-13`). **The
+  entry names only `packages/api/package.json` for the Codex seat; filling
+  one also needs the sandbox image chosen by the driver that runs the task.**
+  That is inside `packages/api` and changes no contract, so it is built here.
+- The host's credentials are keyed by name: `anthropic` (Claude Code),
+  `openai` (Codex), `openai-compatible-endpoint` (the endpoint)
+  (`packages/drivers/*/src/driver.ts`). They do not collide.
+- The local token lives in the API server's closure
+  (`packages/api/src/http/server.ts:283-288`) and is handed to nothing else.
+  No assertion says so; R9 adds it.
+- `StationRefusal` has `same-family-reviewer` and no arm for a reviewer that
+  is an author's identity (`packages/core/src/station/types.ts:218`). See
+  D-R9-04.
+
+### D-R9-03: the security seat is a task `parseGraph` derives beside every review task
+
+- **Options, each checked against the code:**
+  1. *Derive it in `parseGraph`:* for each review task `r`, a task
+     `r.security` at `review`, with `r`'s role, dependencies, and dependency
+     set. The station machine, retries, parks, starts, the worst-case cost,
+     usage, and telemetry all count it as a graph task, with no change to any
+     of them. The locked graph file is unchanged, so its hash holds (I3).
+  2. *A seat the line runs inside each review task.* `RunState.results` and
+     `attempts` are keyed by task id, so a second seat under one id would
+     overwrite the first's result and share its retry budget; every counter
+     would need a second key.
+  3. *Require the planner to name it.* A graph that left it out would have to
+     be refused, every graph in the repository rewritten, and a drafted plan
+     could still omit it until refused. Option 1 is the same check with
+     nothing to omit.
+- **Chosen:** 1. A graph that names a task id ending `.security` is refused
+  as `reserved`. The seat runs under the pinned `security-reviewer` role
+  whatever its task's role names, as the reviewer runs under `reviewer`, and
+  its grants are its task's scope, which is the review task's: read-only, the
+  same view. Its context is the review contract's grants cut to `locked-spec`,
+  `diff`, and `evidence-bundle`, by a core function, so it can only ever be
+  narrower than the review contract. It runs on the review seat's driver.
+- **Rejected:** a separate component for the security seat. Nothing in the
+  spec asks the security reviewer to differ from the reviewer, and a third
+  family is out of scope; the seat is graded against every author, which is
+  the rule the spec states.
+- **Consequence:** every run makes one more review call per review task, and
+  admission requires a `security-reviewer` role. A run admitted before R9 has
+  none pinned, so resuming one is refused with the reason named. The default
+  roles directory ships the role.
+- **Reverse:** drop the derivation in `parseGraph` and the role requirement;
+  the line's security branch then has no task to run.
+
+### D-R9-04: an author's identity never reviews its change: refused at admission, a fault at the seat
+
+- **Found:** identity is role, driver, and model. A review seat runs under
+  `reviewer` or `security-reviewer`, and a build task under its graph role, so
+  the two can be one identity only when a graph names a reviewing role for a
+  build task.
+- **Chosen:** admission refuses a graph whose build task names `reviewer` or
+  `security-reviewer`, as `invalid-request` with code `reviewing-role`. And
+  `seatReviewer` throws on a reviewer identity equal to an author's, and on an
+  identity whose role or driver is not recorded, so a seat it cannot judge is
+  never filled and the run halts (I5). A null is never read as different.
+- **Rejected:** a new `StationRefusal` arm for the seat. That is a contract
+  change A-R9-01 does not declare, and an amendment. Admission makes the case
+  unreachable through the line, so the seat's check is a fault, as
+  `authorsOf` already throws on a call with no family. A-R9-01 says a null
+  "refuses"; a halt is that refusal.
+- **Reverse:** remove the admission code and the throw; the family check
+  still stands.
+
+### D-R9-05: an author is each identity a reviewed task ran as
+
+- A usage record is one identity: its role, driver, and model. A result names
+  a model the driver reported and no role or driver, so it is paired with
+  every role and driver the same task's calls recorded, which can only add
+  authors, never remove one. A task with a result and no usage record has no
+  recorded identity, and its seat is refused.
+- **Reverse:** compare models alone, as before R9.
+
+### D-R9-06: the host composes Codex in the seats an operator names
+
+- **Chosen:** `FACTORY_CODEX_KEY` and `FACTORY_CODEX_SEATS`, both or neither,
+  the seat names the endpoint file uses. The key goes to the sandbox provider
+  as the `openai` credential and to no sandbox (A-P12-01). A seat named by both
+  the endpoint and Codex stops the host before it listens. The build profile
+  gains an image per driver, keyed by `provenanceId()`, and the line picks a
+  task's image by the driver that runs it; a driver with no entry runs in the
+  build image, which is what every driver but Codex runs in today.
+- **Rejected:** one image holding every CLI. It couples two pinned images and
+  rebuilds both whenever either moves.
+- **Reverse:** drop the two variables and the image map; every seat is then
+  Claude Code or the endpoint's.
