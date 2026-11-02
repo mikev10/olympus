@@ -88,6 +88,47 @@ export function seatTaskId(station: DraftStation, seat: DraftSeat): TaskId {
   return `${station}.${seat}` as TaskId;
 }
 
+/** The roles the two review seats run under, whatever role their task names (D-A-RC-06, R9). */
+export const REVIEWER_ROLE = 'reviewer' as RoleId;
+export const SECURITY_REVIEWER_ROLE = 'security-reviewer' as RoleId;
+
+/** The roles a build task may not name: an author running as a reviewer would be the identity that reviews it (R9). */
+export const REVIEWING_ROLES: readonly RoleId[] = Object.freeze([REVIEWER_ROLE, SECURITY_REVIEWER_ROLE]);
+
+/**
+ * The suffix of the security seat `parseGraph` derives beside every review
+ * task (R9). A graph may not name a task ending in it.
+ */
+export const SECURITY_SEAT_SUFFIX = '.security';
+
+/** The security seat beside review task `review`. */
+export function securitySeatId(review: TaskId): TaskId {
+  return `${review}${SECURITY_SEAT_SUFFIX}` as TaskId;
+}
+
+/** Whether `task` is a security seat `parseGraph` derived, rather than a review task the graph named. */
+export function isSecuritySeat(task: { readonly id: TaskId; readonly station: StationId }): boolean {
+  return task.station === 'review' && task.id.endsWith(SECURITY_SEAT_SUFFIX);
+}
+
+/**
+ * What the security seat may be given: the locked spec, with the spec's
+ * security part (R17), the diff, and the evidence bundle, where the security
+ * checks' findings arrive (R9). Never the acceptance tests, the narrative, or
+ * the plan.
+ */
+export const SECURITY_SEAT_GRANTS: readonly ContextGrant[] = Object.freeze(['locked-spec', 'diff', 'evidence-bundle']);
+
+/**
+ * The security seat's contract: the review contract with its grants cut to
+ * `SECURITY_SEAT_GRANTS`. Cut, never added to, so the seat is never given
+ * anything the review seat is not.
+ */
+export function securitySeatContract(review: StationContract): StationContract {
+  if (review.id !== 'review') throw new Error(`station contracts: a security seat sits at review, not ${review.id}`);
+  return { ...review, allowedContext: review.allowedContext.filter((grant) => SECURITY_SEAT_GRANTS.includes(grant)) };
+}
+
 /** Every seat task id, so a graph that names one is refused and a scan of run state finds them. */
 export const SEAT_TASK_IDS: readonly TaskId[] = Object.freeze(
   (['spec', 'test-design'] as const).flatMap((station) => (['drafter', 'critic'] as const).map((seat) => seatTaskId(station, seat))),

@@ -38,6 +38,8 @@ import type {
   ParkCause,
   RetryPart,
   ReviewSeat,
+  ReviewSeatKind,
+  SeatIdentity,
   StationContract,
   StationRefusal,
   StationTransition,
@@ -231,28 +233,49 @@ export function gradeAgainst(seat: ModelIdentity, others: readonly ModelIdentity
   return others.reduce<IndependenceGrade>((grade, other) => weakerGrade(grade, gradeOf(seat, other)), 'different-family');
 }
 
+/** One identity as a key: two identities are one when role, driver, and model all match (R9). */
+function identityKey(seat: SeatIdentity): string {
+  const { role, driver, model } = seat;
+  return JSON.stringify([role?.id ?? null, role?.sha256 ?? null, driver, model.provider, model.family, model.model, model.version]);
+}
+
+function copyIdentity(seat: SeatIdentity): SeatIdentity {
+  return { role: seat.role === null ? null : { ...seat.role }, driver: seat.driver, model: { ...seat.model } };
+}
+
 /**
- * Assembles one review seat (I6). The reviewer's family is compared with every
+ * Assembles one review seat (I6, R9). An identity whose role or driver was
+ * not recorded is never read as different from another, and an author's
+ * identity never fills a seat that reviews its change: both throw, since
+ * admission refuses a graph that could seat one (D-R9-04) and the line never
+ * writes a null (A-R9-01). The reviewer's family is then compared with every
  * author's. At L3 a match refuses the seat and the run does not advance. At
  * L0-L2 the seat is filled and records the weakest grade, so the run says it
  * lacks the guarantee rather than claiming it. A seat with no author is not a
  * review and throws.
  */
-export function seatReviewer(task: TaskId, authors: readonly ModelIdentity[], reviewer: ModelIdentity, level: AutonomyLevel): SeatResult {
+export function seatReviewer(task: TaskId, kind: ReviewSeatKind, authors: readonly SeatIdentity[], reviewer: SeatIdentity, level: AutonomyLevel): SeatResult {
   if (authors.length === 0) throw new Error(`station machine: review task ${task} has no author to be independent of`);
-  const shared = authors.find((author) => author.family === reviewer.family);
-  if (shared !== undefined && level === 3) {
+  const unrecorded = [reviewer, ...authors].find((seat) => seat.role === null || seat.driver === null);
+  if (unrecorded !== undefined) {
+    throw new Error(`station machine: ${kind} seat ${task}: an identity's role or driver was not recorded, so the seat cannot be told apart from its authors and is not filled`);
+  }
+  if (authors.some((author) => identityKey(author) === identityKey(reviewer))) {
+    throw new Error(`station machine: ${kind} seat ${task}: the reviewer is an author of the change, the same role, driver, and model, and an author never reviews its own change`);
+  }
+  const models = authors.map((a) => a.model);
+  if (models.some((model) => model.family === reviewer.model.family) && level === 3) {
     return {
       ok: false,
       reason: 'same-family-reviewer',
       task,
-      family: reviewer.family,
-      message: `review task ${task}: the reviewer shares the model family '${reviewer.family}' with an author, and L3 does not seat it`,
+      family: reviewer.model.family,
+      message: `${kind} seat ${task}: the reviewer shares the model family '${reviewer.model.family}' with an author, and L3 does not seat it`,
     };
   }
   return {
     ok: true,
-    seat: { task, authors: authors.map((a) => ({ ...a })), reviewer: { ...reviewer }, independence: gradeAgainst(reviewer, authors) },
+    seat: { task, kind, authors: authors.map(copyIdentity), reviewer: copyIdentity(reviewer), independence: gradeAgainst(reviewer.model, models) },
   };
 }
 

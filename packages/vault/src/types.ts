@@ -138,6 +138,13 @@ export interface UsageRecord {
    * admission record, never anything the driver returned.
    */
   role: RoleVersion;
+  /**
+   * The `provenanceId()` of the driver the call was made through, so a
+   * seat's identity, role, driver, and model, is in the record (A-R9-01). I2:
+   * the runtime's, from the driver it called. `null` is how a record written
+   * before R9 is read; the Vault refuses to write one.
+   */
+  driver: string | null;
   reading: UsageReading;
   /**
    * When the call ran, by the runtime's clock: `startedAt` before the driver

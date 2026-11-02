@@ -38,6 +38,7 @@ import {
   type RoleId,
   type RunId,
   type RunState,
+  type SeatIdentity,
   type StationContractTable,
   type Task,
   type TaskGraph,
@@ -252,21 +253,35 @@ describe('transition', () => {
 });
 
 describe('the review seat (I6)', () => {
-  const authors = [identity('claude'), identity('gpt')];
+  const as = (model: ReturnType<typeof identity>, role = 'builder', driver = 'stub@1'): SeatIdentity => ({ role: { id: role as RoleId, sha256: 'a'.repeat(64) }, driver, model });
+  const authors = [as(identity('claude')), as(identity('gpt'))];
+  const reviewer = (family: string): SeatIdentity => as(identity(family), 'reviewer');
 
   test('at L3 a reviewer sharing any author family is refused', () => {
-    expect(seatReviewer('r' as TaskId, authors, identity('gpt'), 3)).toMatchObject({ ok: false, reason: 'same-family-reviewer', task: 'r', family: 'gpt' });
+    expect(seatReviewer('r' as TaskId, 'review', authors, reviewer('gpt'), 3)).toMatchObject({ ok: false, reason: 'same-family-reviewer', task: 'r', family: 'gpt' });
   });
 
-  test.each([0, 1, 2] as const)('at L%i the same family is seated and recorded with its grade', (level) => {
-    expect(seatReviewer('r' as TaskId, authors, identity('claude'), level)).toMatchObject({ ok: true, seat: { independence: 'same-model' } });
+  test.each([0, 1, 2] as const)('at L%i the same family is seated and recorded with its grade and kind', (level) => {
+    expect(seatReviewer('r' as TaskId, 'security', authors, reviewer('claude'), level)).toMatchObject({ ok: true, seat: { kind: 'security', independence: 'same-model' } });
   });
 
   test('a reviewer of another family is independent at every level, and a seat with no author throws', () => {
     for (const level of [0, 1, 2, 3] as const) {
-      expect(seatReviewer('r' as TaskId, authors, identity('gemini'), level)).toMatchObject({ ok: true, seat: { independence: 'different-family' } });
+      expect(seatReviewer('r' as TaskId, 'review', authors, reviewer('gemini'), level)).toMatchObject({ ok: true, seat: { independence: 'different-family' } });
     }
-    expect(() => seatReviewer('r' as TaskId, [], identity('gemini'), 1)).toThrow(/no author/);
+    expect(() => seatReviewer('r' as TaskId, 'review', [], reviewer('gemini'), 1)).toThrow(/no author/);
+  });
+
+  test("an author's identity never fills the seat, and another role on the same driver and model is graded, not refused (R9)", () => {
+    for (const level of [0, 1, 2, 3] as const) {
+      expect(() => seatReviewer('r' as TaskId, 'review', authors, as(identity('claude')), level)).toThrow(/an author never reviews its own change/);
+    }
+    expect(seatReviewer('r' as TaskId, 'review', authors, as(identity('claude'), 'reviewer'), 1)).toMatchObject({ ok: true, seat: { independence: 'same-model' } });
+  });
+
+  test('an identity whose role or driver was not recorded is never read as different (A-R9-01)', () => {
+    expect(() => seatReviewer('r' as TaskId, 'review', [{ ...as(identity('claude')), driver: null }], reviewer('gemini'), 1)).toThrow(/not recorded/);
+    expect(() => seatReviewer('r' as TaskId, 'review', authors, { ...reviewer('gemini'), role: null }, 1)).toThrow(/not recorded/);
   });
 });
 
