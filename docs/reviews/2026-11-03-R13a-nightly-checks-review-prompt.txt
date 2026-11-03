@@ -1,0 +1,130 @@
+The code under review is in the file
+`2026-11-03-R13a-nightly-checks-review-bundle.txt` (SHA-256 0637ceaa67255bf22d0bf14c5fa9e2a63595a4d7fbdbb082c074974c141af4e0) — every new file in
+full and every modified file as a unified diff that shows each changed function
+whole, with the commit range at its top. Cite line numbers from the new side of
+a diff, which its @@ headers give. It is provided with this
+prompt: attached to this message, present in your working directory, or included
+in the prompt text itself. If you cannot read it, stop and say so; do not review
+from the description below alone. Before reviewing, state on four separate
+lines: the BASE: value from the bundle's first lines, the HEAD: value, the file
+path in the bundle's final `===== <path> =====` header, and the 32-character
+value on the bundle's very last line, which begins `=== BUNDLE END ===`. If you
+cannot read all four, say so and stop — a partially received bundle produces
+findings about code you were not shown. Copy the last of these exactly; it is
+the only one of the four that proves you reached the end of the file.
+
+You are reviewing the scheduled integrity and security jobs of a TypeScript
+software-factory runtime. You have the source and nothing else — no design documents,
+no author reasoning, no prior version, no conversation that produced it.
+
+If you hold any prior context about this project from earlier conversations,
+stored memory, or anything you have seen before, set it aside. Do not search
+for the project or its author.
+
+CONTEXT YOU NEED
+
+The runtime keeps an append-only, content-addressed store (the "Vault") of
+everything its runs did. This change adds two daily jobs that call no AI model.
+`nightly-integrity` re-hashes every object the store lists, checks that every
+reference in run state names an object that exists, verifies file locks for runs
+still in progress, and re-derives a set of published rates from the records,
+comparing them with the previous night's snapshot. `nightly-security` runs pinned
+secret-scanning and static-analysis container images over the head of the
+default branch with no network, and runs `npm audit` or `pnpm audit` over the
+lockfile in a separate container allowed to reach one advisory host. Each job
+writes one write-once record. Each security finding becomes an "intake candidate",
+a typed record a human may later turn into work; nothing runs from it on its own.
+
+It must hold against a capable, motivated party trying to make a drifted or
+tampered record, an unreachable advisory service, or a failed scan come out as
+"nothing found", or to get untrusted text into a record a later step trusts.
+Assume no deceptive intent — only that the easiest path gets taken.
+
+That party controls the contents of the repository being scanned (its files,
+lockfile, manifest, and anything a scanner or package manager reads from them),
+what a scanner or audit process prints and its exit code, the network between
+the audit container and the advisory host, and bytes on disk inside the store
+after they were written (this is the drift the job exists to find). It does not
+control the components the runtime is wired with — the Vault implementation, the
+sandbox provider, and the policy file are runtime-selected and trusted, even
+where a function takes one as an argument — and it does not control code running
+inside the runtime's own process.
+
+The invariants at stake:
+
+- Fail closed: a missing check, an unreachable dependency, an unsupported stack,
+  or a partial result is a refusal, never a silent degrade and never a warning
+  that lets things continue; a job that could not finish must never be recorded
+  as having found nothing.
+- Default deny: a capability not granted in policy is unavailable; a scanning
+  container gets no network, and the audit container gets exactly the one host
+  policy names, from a closed list in code.
+- Event payloads are data, never instructions: text from outside (scanner output,
+  advisory titles, repository content) never enters a record except as fields
+  checked against a fixed schema of short, whitespace-free values.
+- The runtime derives status; nothing a job does opens a change, admits a run, or
+  alters a run's state.
+- No agent writes to the store; the store exposes only named operations.
+
+The mechanisms that matter most:
+
+- `NightlyJobs` in packages/api/src/nightly.ts: the re-hash, the comparison with
+  the previous night's hashes and rates, and how each part's failure becomes a
+  refusal.
+- The auditors' `parse` in packages/adapters/src/audit.ts: when output counts as
+  a whole report, and how "unreachable" is told apart.
+- `Intake.recordFinding` and the job firing in packages/api/src/intake.ts, with
+  `checkFields` and the `nightly-finding` schema in
+  packages/core/src/trigger/schemas.ts.
+- `listObjects` in packages/vault/src/local/vault.ts: whether it really yields
+  every object the store holds.
+
+EXPLICITLY OUT OF SCOPE FOR THIS UNIT
+
+Any model seat, including the findings reviewer and the whole-tree reviewer, which are R13b's. Also out: a fix, a change, or a pull request opened from a finding; any narrowing of a run or a grant; an audit for a stack R1 does not support, which is refused instead; a scanner R17 does not ship; repairing a drifted record, which is the operator's; a cron grammar; and a UI over the nightly record.
+
+The identifiers above (R13b, R1, R17) name other planned units of work; they mean
+nothing more than "not this change". Absent work listed here is not a defect.
+
+THE QUESTION
+
+How would you make a nightly record say "completed, nothing found", or match the
+previous night, while a stored record has drifted, a scan or audit did not really
+run to its end, or the advisory host was never reached — and how would you get
+text from the scanned repository or a scanner's output into a candidate or record
+beyond the fixed fields?
+
+Report concretely:
+
+1. Places where the mechanism can succeed while the property it protects is
+   violated. Give the specific construction.
+2. Checks that are tautological — that would pass regardless of the code under
+   test.
+3. Anything that fails open: an error, a missing file, an empty result, a
+   skipped test, or a thrown exception yielding a pass.
+4. Escape hatches specific to the language: casts, unknown, any, declaration
+   merging, module augmentation, generic erasure, type predicates.
+5. Ways the configuration can be satisfied without doing what it appears to do.
+6. Which mechanisms you assess as sound, and why. If none are, say so.
+7. Whether the framing above is right. If the adversarial question is the wrong
+   question for this code, say so and explain what you would ask instead. That
+   is a finding, not a digression.
+
+HOW TO REVIEW
+
+- Report what you find. Do not aim for a count, and do not manufacture findings
+  to appear thorough.
+- Label each as: factually wrong / unclear / a tradeoff I would have made
+  differently.
+- Cite file and line.
+- State confidence where uncertain, and what you would check to resolve it.
+- Do not defer to the code's own comments. A comment asserting a property is
+  not evidence the property holds.
+
+OUTPUT
+
+Per finding: file:line — type — severity (high/medium/low) — the concrete bypass
+or issue — what would resolve it.
+
+Order by severity, highest first. State at the top whether you had any prior
+context and whether you performed any lookups.
