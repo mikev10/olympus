@@ -1,3 +1,20 @@
+# External review of R13a, gemini, 2026-11-03
+
+An external review of R13a's nightly checks: the integrity and security jobs, the dependency auditors, the nightly record, and finding candidates. It was triaged in `2026-11-03-R13a-nightly-checks-triage.md`.
+
+## Source
+
+- **Reviewer:** gemini-3.1-pro-preview. Family: gemini.
+  A direct `generateContent` API call to `gemini-3.1-pro-preview`, offering no tools. `cleanRoom` is `null` because an API call loads no local configuration.
+- **Cross-family agreement:** gemini-1 and gemini-4 pair with codex-3, and gemini-2 with codex-4. gemini-3 was raised by Gemini alone.
+- **Date:** 2026-11-03
+- **Bundle:** `2026-11-03-R13a-nightly-checks-review-bundle.txt`, SHA-256 `0637ceaa67255bf22d0bf14c5fa9e2a63595a4d7fbdbb082c074974c141af4e0`. Base `eb15d11` (`reviewed/R9`), head `b04c518` (the unit branch when it shipped as PR #95). The bundle holds every changed file: new files in full, modified files as function-context diffs. `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml` were left out. Prompt: `2026-11-03-R13a-nightly-checks-review-prompt.txt`.
+- **Prior context and lookups:** It disclosed nothing about prior context or lookups, although the prompt asked it to. This is the reviewer's own report and cannot be checked independently.
+- **Coverage, and any gap:** Items 1, 3, 5 and 6 are answered. Item 2 (tautological checks) and item 4 (language escape hatches) come back empty. Item 7 gets one sentence calling the framing accurate.
+- **Citations:** line numbers point into the bundle, not the repository, so they are hints. Every finding was checked against the code it cites.
+
+---
+
 BASE: eb15d11
 HEAD: b04c518
 packages/vault/src/types.ts

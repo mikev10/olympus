@@ -7182,3 +7182,23 @@ read the code the unit touches before writing this.
   did, in the nightly record. **Rejected:** dropping them, which would leave
   the audit's one network grant unaudited. **Reverse by:** a decision store
   for records with no run.
+
+### D-R13a-09: the external review's fixes, and what stays a limit
+
+- **Fixed:** the following, from both families' findings
+  (`docs/reviews/2026-11-03-R13a-nightly-checks-triage.md`):
+  - an audit report counts only from an exit that agrees with it, and only
+    where the proxy recorded contact with the advisory host;
+  - an advisory id is extracted, never the field around it;
+  - a finding's values reach a record only after the `nightly-finding`
+    schema, and one that fails is kept as `security-unrecordable` with none
+    of its values;
+  - the baseline is used only when its firing names it;
+  - a failure no part caught still writes a refused record;
+  - two root lockfiles are refused.
+- **Known limits:** issue #96 covers two. A store that can be rewritten end
+  to end cannot authenticate its own history without an anchor outside it,
+  and a process's report cannot prove its response was complete. Issue #97
+  covers static-analysis rules, which are not checked for effective content
+  (R17's scanner semantics). Neither issue has an owning unit yet.
+- **Reverse by:** reverting 2dfd2c4 and cfd5534.

@@ -1,3 +1,20 @@
+# External review of R13a, codex, 2026-11-03
+
+An external review of R13a's nightly checks: the integrity and security jobs, the dependency auditors, the nightly record, and finding candidates. It was triaged in `2026-11-03-R13a-nightly-checks-triage.md`.
+
+## Source
+
+- **Reviewer:** gpt-6-astra. Family: codex.
+  A headless `codex exec` run under a read-only sandbox, with recorded approval policy `never`, in an empty scratch working directory. Its scratch config home held only `auth.json`, and its environment held `CODEX_HOME` alone. The manifest's `cleanRoom` lists both directories as they were before the run.
+- **Cross-family agreement:** codex-3 pairs with gemini-4 and gemini-1, and codex-4 with gemini-2. codex-1, codex-2, codex-5 and codex-6 were raised by Codex alone.
+- **Date:** 2026-11-03
+- **Bundle:** `2026-11-03-R13a-nightly-checks-review-bundle.txt`, SHA-256 `0637ceaa67255bf22d0bf14c5fa9e2a63595a4d7fbdbb082c074974c141af4e0`. Base `eb15d11` (`reviewed/R9`), head `b04c518` (the unit branch when it shipped as PR #95). The bundle holds every changed file: new files in full, modified files as function-context diffs. `docs/decisions.md`, `docs/plan/`, `docs/reviews/`, and `pnpm-lock.yaml` were left out. Prompt: `2026-11-03-R13a-nightly-checks-review-prompt.txt`.
+- **Prior context and lookups:** It says it had no prior context and made no external lookups, and that local shell access was blocked. This is the reviewer's own report and cannot be checked independently.
+- **Coverage, and any gap:** Items 1 to 7 are all answered. Item 2: it reports that no test is literally tautological. Item 4: it reports no declaration-merging exploit and names the `as unknown as` read of `NightlyRecord` from disk. Item 7: it calls the framing appropriate but says that process output and a store that can be rewritten cannot prove completion or history.
+- **Citations:** line numbers point into the bundle, not the repository, so they are hints. Every finding was checked against the code it cites.
+
+---
+
 BASE: eb15d11  
 HEAD: b04c518  
 packages/vault/src/types.ts  
