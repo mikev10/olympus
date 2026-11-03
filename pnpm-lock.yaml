@@ -182,6 +182,9 @@ importers:
       '@olympus-ai/integrity':
         specifier: workspace:*
         version: link:../integrity
+      '@olympus-ai/readiness':
+        specifier: workspace:*
+        version: link:../readiness
       '@olympus-ai/sandbox':
         specifier: workspace:*
         version: link:../sandbox
