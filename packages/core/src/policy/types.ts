@@ -75,7 +75,29 @@ export interface TriggerPolicy {
   maxDeliveryAgeMs?: number;
   /** How long a recorded candidate may wait to be admitted, on the runtime's clock; at most thirty days (D-R22-04). */
   candidateExpiryMs?: number;
+  /**
+   * What the `nightly-security` job runs (A-R13a-06, D-A-NR-04). Required
+   * while a schedule names that template. Policy selects; code pins: no
+   * image is named here, so no edit to this block can run an unpinned one.
+   */
+  nightly?: NightlyPolicy;
 }
+
+/**
+ * The nightly sweep's selection (D-A-NR-08). `scanners` names R17's
+ * scanners, each kind at most once, with the rules each runs: the secret
+ * scan may defer to the image's own with `null`, and static analysis, which
+ * has none of its own, must pin some. `advisoryHost` is the one host the
+ * dependency audit's sandbox may reach, from a closed list in code.
+ */
+export interface NightlyPolicy {
+  scanners: NightlyScanner[];
+  advisoryHost: string;
+}
+
+export type NightlyScanner =
+  | { kind: 'secret-scan'; config: string | null }
+  | { kind: 'static-analysis'; config: string };
 
 /**
  * One subscription: a grant naming where deliveries come from and the

@@ -30,10 +30,10 @@ import {
 } from './constants.js';
 import type {
   ApprovalKey, ApprovalOutcome, CapabilityScope, EscalationGrant, PolicyDocument, TriggerPolicy,
-  TriggerSchedule, TriggerSubscription,
+  NightlyPolicy, NightlyScanner, TriggerSchedule, TriggerSubscription,
 } from './types.js';
 import {
-  CHAR_CLASSES, LABEL_CLASS, TEMPLATE_IDS, hasFieldSchema, isTemplateId, type TemplateId,
+  CHAR_CLASSES, LABEL_CLASS, TEMPLATE_IDS, hasFieldSchema, isJobTemplate, isTemplateId, type TemplateId,
 } from '../trigger/schemas.js';
 
 /** One thing wrong, at the path it is wrong at. */
@@ -82,8 +82,19 @@ const BUDGET_KEYS: Readonly<Record<keyof Budget, true>> = {
 const TRIGGER_KEYS: Readonly<Record<keyof TriggerPolicy, true>> = {
   enabled: true, entryStation: true, taskTemplate: true, maxAutonomy: true,
   minAuthorTrust: true, maxTriggerDepth: true, budgetPerWindow: true,
-  subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true,
+  subscriptions: true, schedules: true, maxDeliveryAgeMs: true, candidateExpiryMs: true, nightly: true,
 };
+
+const NIGHTLY_KEYS: Readonly<Record<keyof NightlyPolicy, true>> = { scanners: true, advisoryHost: true };
+const NIGHTLY_SCANNER_KEYS: Readonly<Record<'kind' | 'config', true>> = { kind: true, config: true };
+
+/**
+ * The hosts a dependency audit may be granted, closed in code (D-A-NR-08):
+ * the npm registry, which serves the advisories both `npm audit` and
+ * `pnpm audit` read. A policy edit cannot point the audit's egress anywhere
+ * else.
+ */
+export const ADVISORY_HOSTS: readonly string[] = Object.freeze(['registry.npmjs.org']);
 
 const SUBSCRIPTION_KEYS: Readonly<Record<keyof TriggerSubscription, true>> = {
   id: true, kind: true, source: true, transport: true, secret: true, trustCeiling: true, labels: true,
@@ -455,17 +466,19 @@ function validateTriggers(value: unknown, path: string, defects: PolicyDefect[])
     : [];
   const maxDeliveryAgeMs = optionalBounded(record, 'maxDeliveryAgeMs', path, MAX_DELIVERY_AGE_CAP_MS, '7 days', defects);
   const candidateExpiryMs = optionalBounded(record, 'candidateExpiryMs', path, CANDIDATE_EXPIRY_CAP_MS, '30 days', defects);
+  const nightly = Object.hasOwn(record, 'nightly') ? validateNightly(record.nightly, child(path, 'nightly'), defects) ?? null : undefined;
   if (
     enabled === undefined || entryStation === undefined || taskTemplate === undefined
     || maxAutonomy === undefined || minAuthorTrust === undefined || maxTriggerDepth === undefined
     || runs === undefined || windowMs === undefined || subscriptions === undefined || schedules === undefined
-    || maxDeliveryAgeMs === null || candidateExpiryMs === null
+    || maxDeliveryAgeMs === null || candidateExpiryMs === null || nightly === null
   ) return undefined;
   const triggers: TriggerPolicy = {
     enabled, entryStation, taskTemplate, maxAutonomy, minAuthorTrust,
     maxTriggerDepth, budgetPerWindow: { runs, windowMs }, subscriptions, schedules,
     ...(maxDeliveryAgeMs === undefined ? {} : { maxDeliveryAgeMs }),
     ...(candidateExpiryMs === undefined ? {} : { candidateExpiryMs }),
+    ...(nightly === undefined ? {} : { nightly }),
   };
   const before = defects.length;
   routeDefects(triggers, path, defects);
@@ -504,6 +517,44 @@ function readList<T>(
     else out.push(value);
   }
   return ok ? out : undefined;
+}
+
+/**
+ * The nightly sweep's selection (A-R13a-06): at least one scanner, each kind
+ * once; static analysis with rules of its own, since its scanner has none;
+ * and an advisory host from `ADVISORY_HOSTS` alone.
+ */
+function validateNightly(value: unknown, path: string, defects: PolicyDefect[]): NightlyPolicy | undefined {
+  const record = shape(value, path, keysOf(NIGHTLY_KEYS), defects);
+  if (record === undefined) return undefined;
+  const scanners = readList(record, 'scanners', path, validateNightlyScanner, defects);
+  const advisoryHost = read(
+    record, 'advisoryHost', path, `one of ${ADVISORY_HOSTS.join(', ')}`, (v): v is string => typeof v === 'string' && ADVISORY_HOSTS.includes(v), defects,
+  );
+  if (scanners === undefined || advisoryHost === undefined) return undefined;
+  if (scanners.length === 0) {
+    defects.push({ path: child(path, 'scanners'), problem: 'names no scanner; a sweep that runs none would record nothing found' });
+    return undefined;
+  }
+  const kinds = scanners.map((s) => s.kind);
+  if (new Set(kinds).size !== kinds.length) {
+    defects.push({ path: child(path, 'scanners'), problem: 'names a scanner kind more than once' });
+    return undefined;
+  }
+  return { scanners, advisoryHost };
+}
+
+function validateNightlyScanner(value: unknown, path: string, defects: PolicyDefect[]): NightlyScanner | undefined {
+  const record = shape(value, path, keysOf(NIGHTLY_SCANNER_KEYS), defects);
+  if (record === undefined) return undefined;
+  const kind = read(record, 'kind', path, `'secret-scan' or 'static-analysis'`, (v): v is 'secret-scan' | 'static-analysis' => v === 'secret-scan' || v === 'static-analysis', defects);
+  if (kind === undefined) return undefined;
+  if (kind === 'static-analysis') {
+    const config = read(record, 'config', path, 'the rules, as non-empty text; static analysis has none of its own', isNonEmptyString, defects);
+    return config === undefined ? undefined : { kind, config };
+  }
+  const config = read(record, 'config', path, `the rules as non-empty text, or null for the image's own`, (v): v is string | null => v === null || isNonEmptyString(v), defects);
+  return config === undefined ? undefined : { kind, config };
 }
 
 function isIdentifier(value: unknown): value is string {
@@ -595,6 +646,17 @@ function routeDefects(triggers: TriggerPolicy, path: string, defects: PolicyDefe
   if (schedules.length > 0 && !triggers.enabled.includes('scheduled')) {
     defects.push({ path: child(path, 'schedules'), problem: `'scheduled' is not enabled, so no schedule fires` });
   }
+  // A job template runs a job in place of recording an event, so only a schedule's firing can name one (A-R13a-01).
+  for (const [kind, template] of Object.entries(triggers.taskTemplate)) {
+    if (kind !== 'scheduled' && isJobTemplate(template)) {
+      defects.push({ path: child(child(path, 'taskTemplate'), kind), problem: `'${template}' is a job template, valid only on 'scheduled'` });
+    }
+  }
+  schedules.forEach((s, i) => {
+    if (s.template === 'nightly-security' && triggers.nightly === undefined) {
+      defects.push({ path: `${child(path, 'schedules')}[${String(i)}].template`, problem: `'nightly-security' needs a nightly block naming its scanners and advisory host` });
+    }
+  });
 }
 
 function validateRoles(

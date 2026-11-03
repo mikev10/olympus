@@ -18,13 +18,24 @@ import type { AuthorTrust, TriggerKind } from '../run/types.js';
 
 /**
  * What an admitted event does. `intake-candidate` records the event in the
- * Vault for a person to read; nothing runs. A job template a later unit adds
- * (R8, R13) takes extracted fields as its only input and never enters the
- * build. No template starts a build (D-A-TF-01).
+ * Vault for a person to read; nothing runs. A job template takes the
+ * schedule's id as its only input, seats no model, and never enters the
+ * build: `nightly-integrity` re-hashes the Vault and checks R2's rates,
+ * `nightly-security` scans the default branch and audits its lockfile
+ * (R13a, A-R13a-01). A job template is valid only on `scheduled`. No
+ * template starts a build (D-A-TF-01).
  */
-export type TemplateId = 'intake-candidate';
+export type TemplateId = 'intake-candidate' | JobTemplateId;
 
-const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true };
+/** The templates that run a job in place of recording a candidate (A-R13a-01). */
+export type JobTemplateId = 'nightly-integrity' | 'nightly-security';
+
+const TEMPLATE_SET: Readonly<Record<TemplateId, true>> = { 'intake-candidate': true, 'nightly-integrity': true, 'nightly-security': true };
+const JOB_TEMPLATE_SET: Readonly<Record<JobTemplateId, true>> = { 'nightly-integrity': true, 'nightly-security': true };
+
+export function isJobTemplate(value: unknown): value is JobTemplateId {
+  return typeof value === 'string' && Object.hasOwn(JOB_TEMPLATE_SET, value);
+}
 
 export const TEMPLATE_IDS: readonly TemplateId[] = Object.freeze(Object.keys(TEMPLATE_SET).filter(isTemplateId));
 
@@ -40,7 +51,8 @@ export function isTemplateId(value: unknown): value is TemplateId {
  */
 export type CharClass =
   | 'identifier' | 'repository' | 'branch-ref' | 'commit-sha'
-  | 'failure-conclusion' | 'decimal' | 'label-list' | 'author-trust';
+  | 'failure-conclusion' | 'decimal' | 'label-list' | 'author-trust'
+  | 'nightly-scanner' | 'finding-rule' | 'tree-path';
 
 export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   identifier: /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u,
@@ -53,6 +65,11 @@ export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   // Labels from the subscription's allowlist, comma-joined; empty when none matched.
   'label-list': /^(?:[A-Za-z0-9._:/-]+(?:,[A-Za-z0-9._:/-]+)*)?$/u,
   'author-trust': /^(?:owner|collaborator|outside|anonymous)$/u,
+  'nightly-scanner': /^(?:secret-scan|static-analysis|dependency-audit)$/u,
+  // A scanner's rule id or an advisory's GHSA id: dotted, dashed, coloned, never a sentence.
+  'finding-rule': /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/u,
+  // Relative to the tree, forward slashes, no `..` component, no leading slash or dot-slash, no whitespace.
+  'tree-path': /^(?!\/)(?!\.\/)(?!(?:.*\/)?\.\.(?:\/|$))[A-Za-z0-9._@+=,~\/-]+$/u,
 });
 
 /** A single label as the policy's allowlist names one: the elements of `label-list`. */
@@ -92,9 +109,37 @@ export const FIELD_SCHEMAS = Object.freeze({
 } as const satisfies Partial<Record<TriggerKind, Readonly<Record<string, FieldSpec>>>>);
 
 export type SchemaKind = keyof typeof FIELD_SCHEMAS;
-export type FieldName<K extends SchemaKind> = keyof (typeof FIELD_SCHEMAS)[K] & string;
-/** The typed record an extractor yields for a kind: exactly the schema's fields (A-R22-03). */
-export type ExtractedFields<K extends SchemaKind> = Readonly<Record<FieldName<K>, string>>;
+
+/**
+ * The schemas a job's output is checked against, apart from the per-kind
+ * event schemas: a job is not an event source, and its candidate's kind is
+ * the `scheduled` kind that fired it (A-R13a-03, A-R13a-07). A
+ * `nightly-finding` names where a scanner found something and which rule
+ * found it, and nothing the scanner said about it.
+ */
+export const JOB_FIELD_SCHEMAS = Object.freeze({
+  'nightly-finding': Object.freeze({
+    scanner: { maxBytes: 20, charClass: 'nightly-scanner' },
+    rule: { maxBytes: 200, charClass: 'finding-rule' },
+    path: { maxBytes: 1024, charClass: 'tree-path' },
+    line: { maxBytes: 10, charClass: 'decimal' },
+  }),
+} as const satisfies Readonly<Record<string, Readonly<Record<string, FieldSpec>>>>);
+
+export type JobSchema = keyof typeof JOB_FIELD_SCHEMAS;
+/** Every schema a candidate's fields can have been checked against: a kind's, or a job's output schema. */
+export type CandidateSchema = SchemaKind | JobSchema;
+
+const ALL_SCHEMAS: Readonly<Record<CandidateSchema, Readonly<Record<string, FieldSpec>>>> = { ...FIELD_SCHEMAS, ...JOB_FIELD_SCHEMAS };
+
+export function isCandidateSchema(value: unknown): value is CandidateSchema {
+  return typeof value === 'string' && Object.hasOwn(ALL_SCHEMAS, value);
+}
+
+type AllSchemas = typeof FIELD_SCHEMAS & typeof JOB_FIELD_SCHEMAS;
+export type FieldName<K extends CandidateSchema> = keyof AllSchemas[K] & string;
+/** The typed record an extractor yields for a schema: exactly the schema's fields (A-R22-03). */
+export type ExtractedFields<K extends CandidateSchema> = Readonly<Record<FieldName<K>, string>>;
 
 export function hasFieldSchema(kind: TriggerKind): kind is SchemaKind {
   return Object.hasOwn(FIELD_SCHEMAS, kind);
@@ -114,14 +159,14 @@ export interface FieldDefect {
 const encoder = new TextEncoder();
 
 /**
- * Checks a candidate record against the kind's schema: every field present,
+ * Checks a candidate record against a kind's or a job's schema: every field present,
  * no other field, each a string within its cap and wholly in its class. The
  * value is returned as given or not at all (I5).
  */
-export function checkFields<K extends SchemaKind>(
+export function checkFields<K extends CandidateSchema>(
   kind: K, fields: Readonly<Record<string, unknown>>,
 ): { readonly ok: true; readonly fields: ExtractedFields<K> } | { readonly ok: false; readonly defects: readonly FieldDefect[] } {
-  const schema: Readonly<Record<string, FieldSpec>> = FIELD_SCHEMAS[kind];
+  const schema: Readonly<Record<string, FieldSpec>> = ALL_SCHEMAS[kind];
   const defects: FieldDefect[] = [];
   for (const field of Object.keys(fields)) {
     if (!Object.hasOwn(schema, field)) defects.push({ field, problem: 'unknown' });

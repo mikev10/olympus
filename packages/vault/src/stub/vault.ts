@@ -14,7 +14,7 @@ import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef } fr
 import { intakeId, intakeProblem } from '../intake.js';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
-  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, RefusedDeliveryCount, TriggerDecision,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
   LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
@@ -62,6 +62,7 @@ export class StubVault implements Vault {
   /** Trigger decisions by id, kept beside the runs (D-R22-03). */
   private readonly intake = new Map<CandidateId, IntakeEntry>();
   private readonly refusedCounts = new Map<string, Partial<Record<CountedRefusalCause, number>>>();
+  private readonly nightly = new Map<string, Uint8Array>();
 
   /** `root` is what locked paths resolve against (S1 finding 4d; P1 decides where the base belongs). */
   constructor(root: string) {
@@ -285,6 +286,31 @@ export class StubVault implements Vault {
     const counts = this.refusedCounts.get(key) ?? {};
     this.refusedCounts.set(key, { ...counts, [cause]: (counts[cause] ?? 0) + 1 });
     return Promise.resolve();
+  }
+
+  recordNightly(r: NightlyRecord): Promise<string> {
+    if ((r.collectedBy as string) !== 'runtime') return Promise.reject(new Error('StubVault: a nightly record is collected by the runtime'));
+    const bytes = new TextEncoder().encode(JSON.stringify(r));
+    const hash = sha256(bytes);
+    if (!this.nightly.has(hash)) this.nightly.set(hash, bytes);
+    return Promise.resolve(hash);
+  }
+
+  readNightly(): Promise<readonly NightlyEntry[]> {
+    const out = [...this.nightly.entries()].map(([hash, bytes]) => ({ record: JSON.parse(new TextDecoder().decode(bytes)) as NightlyRecord, sha256: hash }));
+    return Promise.resolve(out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256)));
+  }
+
+  /** The content-addressed objects and the nightly records. The stub keeps run state, locks, and intake as values, not bytes, so it yields none of them: it is `unsafe`. */
+  async *listObjects(): AsyncIterable<StoredObject> {
+    await Promise.resolve();
+    for (const [key, bytes] of [...this.blobs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const [runId = '', kind = '', hash = ''] = key.split('/');
+      yield { path: `runs/${runId}/objects/${kind}/${hash}.json`, runId: runId as RunId, named: 'content', bytes };
+    }
+    for (const [hash, bytes] of [...this.nightly.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      yield { path: `nightly/${hash}.json`, runId: null, named: 'content', bytes };
+    }
   }
 
   readRefusedDeliveryCounts(): Promise<readonly RefusedDeliveryCount[]> {

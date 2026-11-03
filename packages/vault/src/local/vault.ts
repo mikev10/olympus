@@ -34,7 +34,7 @@ import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import type { CandidateId, RunId, RunState, StationId, TaskResult, VaultRef, VaultRefKind } from '@olympus-ai/core';
 import type { IntegrityViolation } from '@olympus-ai/integrity';
 import type {
-  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, RefusedDeliveryCount, TriggerDecision,
+  AdmissionRecord, BaseRunRecord, CandidateRecord, CountedRefusalCause, CriticRecord, DecisionCause, DraftLockRecord, DraftRecord, EnforcementDecision, EvidenceBundle, IntakeEntry, IntegrationRecord, IntentRecord, NightlyEntry, NightlyRecord, RefusedDeliveryCount, StoredObject, TriggerDecision,
   LockEntry, LockManifest, LockVerdict, NoRunState, RubricRecord, UsageRecord, Vault,
 } from '../types.js';
 
@@ -102,6 +102,23 @@ function draftLockFile(station: string): string {
 }
 
 const DRAFT_STATIONS = new Set(['spec', 'test-design']);
+
+/** Where nightly records are kept: beside the runs, under none (A-R13a-02). */
+const NIGHTLY_DIR = 'nightly';
+
+const CONTENT_NAME = /^([0-9a-f]{64})\.json$/;
+
+/** `runs/<id>/objects/<kind>/<sha256>.json` and `nightly/<sha256>.json` are named by their hash. */
+function contentNamed(parts: readonly string[]): boolean {
+  const name = parts.at(-1) ?? '';
+  if (!CONTENT_NAME.test(name)) return false;
+  if (parts.length === 2 && parts[0] === NIGHTLY_DIR) return true;
+  return parts.length === 5 && parts[0] === 'runs' && parts[2] === 'objects' && KINDS.includes(parts[3] as VaultRefKind);
+}
+
+function runOf(parts: readonly string[]): RunId | null {
+  return parts[0] === 'runs' && parts.length > 2 && parts[1] !== undefined ? (parts[1] as RunId) : null;
+}
 
 export interface VaultRoots {
   /** What the Vault owns. Never inside `artifacts`, and never the same directory. */
@@ -382,6 +399,7 @@ const DECIDERS: Readonly<Record<DecisionCause['cause'], readonly string[]>> = {
   'approval-rejected': ['approval'],
   'draft-sent-back': ['line'],
   'draft-floor-applied': ['line'],
+  'record-drift': ['nightly'],
 };
 
 function isNullableString(r: Record<string, unknown>, key: string): boolean {
@@ -653,6 +671,8 @@ function intakeRecordProblem(d: TriggerDecision, candidate: CandidateRecord | nu
     if (candidate === null) return 'a candidate outcome is written with its candidate';
     if (d.outcome.candidate !== id || candidate.id !== id) return 'a candidate is named by its source and key';
     if ((candidate.collectedBy as string) !== 'runtime') return 'a candidate is collected by the runtime';
+    // A kind's candidate is checked against its kind's schema; only a schedule's job writes one under a job's output schema (A-R13a-07).
+    if ((candidate.schema as string) !== candidate.kind && !(candidate.kind === 'scheduled' && candidate.schema === 'nightly-finding')) return "a candidate's schema is its kind's, or a job's on a scheduled candidate";
     if (candidate.body !== null && sha256(Buffer.from(candidate.body.base64, 'base64')) !== candidate.body.sha256) return "a candidate's body hash is the hash of its body";
     return undefined;
   }
@@ -1063,6 +1083,69 @@ export class LocalVault implements Vault {
     return out;
   }
 
+  /** Under `nightly/<sha256>.json`, beside `runs/` and `intake/`, so `listRuns` never names one (A-R13a-02). */
+  async recordNightly(r: NightlyRecord): Promise<string> {
+    if (!isRecord(r) || (r.collectedBy as string) !== 'runtime') throw new Error("LocalVault: a nightly record is collected by the runtime");
+    const bytes = encode(r);
+    const hash = sha256(bytes);
+    await createExclusive(join(this.#store, NIGHTLY_DIR, `${hash}.json`), bytes);
+    return hash;
+  }
+
+  async readNightly(): Promise<readonly NightlyEntry[]> {
+    const dir = join(this.#store, NIGHTLY_DIR);
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const out: NightlyEntry[] = [];
+    for (const name of names) {
+      const hash = CONTENT_NAME.exec(name)?.[1];
+      if (hash === undefined) continue;
+      const bytes = await readFile(join(dir, name));
+      const record = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      if (!isRecord(record) || record.collectedBy !== 'runtime') throw new Error(`LocalVault: ${join(dir, name)} is not a nightly record`);
+      // The hash is the name's, not recomputed: a drifted record is the re-hash's to find, not this reader's to hide.
+      out.push({ record: record as unknown as NightlyRecord, sha256: hash });
+    }
+    return out.sort((a, b) => a.record.date.localeCompare(b.record.date) || a.record.schedule.localeCompare(b.record.schedule) || a.sha256.localeCompare(b.sha256));
+  }
+
+  /**
+   * Walks the whole store, sorted, and yields every file in it. A file under
+   * `runs/<id>/objects/<kind>/` or `nightly/` is named by its hash; every
+   * other is named by a run, a number, or an id. An entry that is neither a
+   * file nor a directory is not a record this store writes, and stops the
+   * walk rather than being skipped (I5).
+   */
+  async *listObjects(): AsyncIterable<StoredObject> {
+    const store = this.#store;
+    async function* walk(dir: string, rel: readonly string[]): AsyncGenerator<StoredObject> {
+      let entries: Dirent[];
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch (error) {
+        if (isAbsent(error) && rel.length === 0) return;
+        throw error;
+      }
+      entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      for (const entry of entries) {
+        const parts = [...rel, entry.name];
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          yield* walk(full, parts);
+          continue;
+        }
+        if (!entry.isFile()) throw new Error(`LocalVault: ${parts.join('/')} in the store is neither a file nor a directory`);
+        yield { path: parts.join('/'), runId: runOf(parts), named: contentNamed(parts) ? 'content' : 'name', bytes: await readFile(full) };
+      }
+    }
+    yield* walk(store, []);
+  }
+
   async #intakeEntry(id: CandidateId): Promise<IntakeEntry | null> {
     const file = join(this.#store, 'intake', 'decisions', `${id}.json`);
     let bytes: Uint8Array;
@@ -1078,9 +1161,11 @@ export class LocalVault implements Vault {
     }
     const admitted = await readJsonOrNull(join(this.#store, 'intake', 'admitted', `${id}.json`));
     const expired = await readJsonOrNull(join(this.#store, 'intake', 'expired', `${id}.json`));
+    const stored = (parsed.candidate ?? null) as (Omit<CandidateRecord, 'schema'> & { schema?: CandidateRecord['schema'] }) | null;
     return {
       decision: parsed.decision as unknown as TriggerDecision,
-      candidate: (parsed.candidate ?? null) as CandidateRecord | null,
+      // A candidate stored before R13a names no schema: its fields were checked against its kind's (A-R13a-07).
+      candidate: stored === null ? null : { ...stored, schema: stored.schema ?? stored.kind },
       sha256: sha256(bytes),
       admittedAs: isRecord(admitted) && typeof admitted.runId === 'string' ? (admitted.runId as RunId) : null,
       expiredAt: isRecord(expired) && typeof expired.at === 'string' ? expired.at : null,
