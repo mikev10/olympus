@@ -82,6 +82,8 @@ const server = createApiServer({
   rolesDirectory: required('FACTORY_ROLES_DIR'),
   // Only a name with the webhook prefix is ever read here, so a policy cannot name another host secret as one.
   secrets: webhookSecrets(process.env),
+  // The nightly sweep scans the branch runs merge into, as the working copy holds it (D-R13a-04).
+  nightlyTarget: { checkout: required('FACTORY_REPOSITORY'), branch: required('FACTORY_GIT_BASE_BRANCH') },
   rubricsDirectory: process.env.FACTORY_RUBRICS_DIR === undefined || process.env.FACTORY_RUBRICS_DIR === '' ? null : process.env.FACTORY_RUBRICS_DIR,
 });
 await server.listen(port, process.env.FACTORY_LISTEN_HOST ?? '127.0.0.1');

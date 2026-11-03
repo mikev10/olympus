@@ -25,3 +25,4 @@ export {
   type ScanOptions,
 } from './scan.js';
 export { renderReport } from './report.js';
+export { materialize, resolveCommit, type Materialized } from './tree.js';

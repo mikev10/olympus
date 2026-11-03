@@ -755,8 +755,12 @@ export interface RateSnapshot {
 export interface IntegrityCoverage {
   /** How many objects the store yielded, each re-hashed. */
   readonly objects: number;
-  /** The SHA-256 of every record not named by its hash, by store-relative path: what tomorrow compares against. */
-  readonly named: Readonly<Record<string, string>>;
+  /**
+   * The SHA-256 of every object's bytes, by store-relative path: what
+   * tomorrow compares against, so a record named by run, number, or id that
+   * changed, and any object that went missing, is found (D-A-NR-07).
+   */
+  readonly hashes: Readonly<Record<string, string>>;
   /** The snapshot compared against, by its nightly record's SHA-256, or `none` on the first night: never a match (D-A-NR-03). */
   readonly comparedWith: { readonly record: string } | 'none';
   /** Tonight's snapshot; null where the rates could not be derived, which is a refusal. */
