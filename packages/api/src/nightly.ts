@@ -368,7 +368,7 @@ export class NightlyJobs {
     let egress: EgressLog;
     try {
       const exec = await this.#options.sandbox.exec(handle, [...auditor.invocation], { env: { HOME: '/tmp', COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' } });
-      const parsed = auditor.parse(exec.stdout, lockfileText);
+      const parsed = auditor.parse(exec.stdout, exec.exitCode, lockfileText);
       if (parsed.ok) outcome = { ok: true, auditor, findings: parsed.findings };
       else {
         outcome = parsed.unreachable

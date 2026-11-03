@@ -114,8 +114,10 @@ export interface DependencyAuditor {
   readonly invocation: readonly [string, ...string[]];
   /**
    * The findings a whole report names, located in `lockfileText`, or a
-   * reason the output is not one. Never an empty list for a report it could
-   * not read (I5).
+   * reason the output is not one. A report is whole only from an exit the
+   * auditor declares, and only where that exit agrees with what it found:
+   * a clean report from an abnormal exit, or findings from a clean exit, is
+   * not one. Never an empty list for a report it could not read (I5).
    */
-  parse(stdout: string, lockfileText: string): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: boolean };
+  parse(stdout: string, exitCode: number, lockfileText: string): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: boolean };
 }

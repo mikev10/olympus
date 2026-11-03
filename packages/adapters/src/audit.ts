@@ -36,11 +36,14 @@ function fingerprint(stack: AuditStack, rule: string, name: string): string {
 
 const GHSA = /GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}/u;
 
-/** An advisory's id as a rule: its GHSA id, else its numeric id under a fixed prefix. */
+/**
+ * An advisory's id as a rule: the GHSA id it carries, extracted and never the
+ * field around it, else its numeric id under a fixed prefix. A field holding
+ * text beside the id yields the id alone (codex-3, gemini-4).
+ */
 function ruleOf(url: unknown, ghsa: unknown, id: unknown): string | undefined {
-  if (typeof ghsa === 'string' && GHSA.test(ghsa)) return ghsa;
-  if (typeof url === 'string') {
-    const match = GHSA.exec(url)?.[0];
+  for (const field of [ghsa, url]) {
+    const match = typeof field === 'string' ? GHSA.exec(field)?.[0] : undefined;
     if (match !== undefined) return match;
   }
   return typeof id === 'number' && Number.isInteger(id) && id > 0 ? `advisory-${String(id)}` : undefined;
@@ -77,16 +80,21 @@ export const NPM_AUDITOR: DependencyAuditor = Object.freeze({
   files: Object.freeze(['package.json', 'package-lock.json']),
   image: DEPENDENCY_AUDIT_IMAGE,
   invocation: Object.freeze(['npm', 'audit', '--json', '--package-lock-only', '--fetch-retries=0'] as const),
-  parse(stdout: string, lockfileText: string) {
+  parse(stdout: string, exitCode: number, lockfileText: string) {
     const parsed = parseJson(stdout);
     if (!isRecord(parsed) || Object.hasOwn(parsed, 'error') || parsed.auditReportVersion !== 2 || !isRecord(parsed.vulnerabilities) || !isRecord(parsed.metadata)) {
       return { ok: false, unreachable: unreachable(stdout, parsed) } as const;
     }
+    const vulnerable = parsed.vulnerabilities;
     const findings = new Map<string, AuditFinding>();
-    for (const entry of Object.values(parsed.vulnerabilities)) {
+    for (const entry of Object.values(vulnerable)) {
       if (!isRecord(entry) || !Array.isArray(entry.via)) return { ok: false, unreachable: false } as const;
       for (const via of entry.via as unknown[]) {
-        if (typeof via === 'string') continue;
+        // A string names another vulnerable package, which carries the advisory; one the report does not hold leaves it partial (codex-1).
+        if (typeof via === 'string') {
+          if (!Object.hasOwn(vulnerable, via)) return { ok: false, unreachable: false } as const;
+          continue;
+        }
         if (!isRecord(via) || typeof via.name !== 'string') return { ok: false, unreachable: false } as const;
         const rule = ruleOf(via.url, undefined, via.source);
         if (rule === undefined) return { ok: false, unreachable: false } as const;
@@ -97,9 +105,18 @@ export const NPM_AUDITOR: DependencyAuditor = Object.freeze({
         findings.set(print, { rule, packageName: name, line, fingerprint: print });
       }
     }
-    return { ok: true, findings: [...findings.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)) } as const;
+    return judged(exitCode, [...findings.values()]);
   },
 });
+
+/**
+ * npm and pnpm exit 0 with nothing found and 1 with findings. Any other exit,
+ * or one that disagrees with the report, is not a whole report (codex-1).
+ */
+function judged(exitCode: number, findings: AuditFinding[]): { readonly ok: true; readonly findings: AuditFinding[] } | { readonly ok: false; readonly unreachable: false } {
+  if (exitCode !== (findings.length === 0 ? 0 : 1)) return { ok: false, unreachable: false };
+  return { ok: true, findings: findings.sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)) };
+}
 
 /** `pnpm audit --json`: `advisories` by id, each naming its module and the versions found. */
 export const PNPM_AUDITOR: DependencyAuditor = Object.freeze({
@@ -108,7 +125,7 @@ export const PNPM_AUDITOR: DependencyAuditor = Object.freeze({
   files: Object.freeze(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']),
   image: DEPENDENCY_AUDIT_IMAGE,
   invocation: Object.freeze(['corepack', `pnpm@${PNPM_AUDIT_VERSION}`, 'audit', '--json'] as const),
-  parse(stdout: string, lockfileText: string) {
+  parse(stdout: string, exitCode: number, lockfileText: string) {
     const parsed = parseJson(stdout);
     if (!isRecord(parsed) || Object.hasOwn(parsed, 'error') || !isRecord(parsed.advisories) || !isRecord(parsed.metadata)) {
       return { ok: false, unreachable: unreachable(stdout, parsed) } as const;
@@ -126,7 +143,7 @@ export const PNPM_AUDITOR: DependencyAuditor = Object.freeze({
       const line = version === null ? null : lineOf(lockfileText, new RegExp(`^\\s+['"]?/?${escape(name)}@${escape(version)}(?:\\(.*\\))?['"]?:\\s*$`, 'u'));
       findings.set(print, { rule, packageName: name, line, fingerprint: print });
     }
-    return { ok: true, findings: [...findings.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)) } as const;
+    return judged(exitCode, [...findings.values()]);
   },
 });
 
