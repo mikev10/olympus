@@ -4,6 +4,7 @@ import { castsFrom, packageProgram } from '../kit/scan.js';
 import { INVARIANTS, type InvariantEntry } from '../kit/types.js';
 import { walkFiles, workspacePackages, workspaceRelative } from '../kit/workspace.js';
 import { R20_I7 } from './roles.js';
+import { R13A_I7 } from './nightly.js';
 import { R22_I7 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 import { TELEMETRY_EXPORTS_NO_TEXT } from './telemetry.js';
@@ -37,6 +38,8 @@ export const I7: InvariantEntry = {
   assertions: [
     // R22: the trigger framework, which registers the three entries M2 owed.
     ...R22_I7,
+    // R13a: the nightly checks that call no model.
+    ...R13A_I7,
     // R20: the role compiler.
     // R19: drafting at spec and test-design.
     ...R19_ASSERTIONS.I7,

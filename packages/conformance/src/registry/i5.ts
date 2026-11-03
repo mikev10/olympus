@@ -35,6 +35,7 @@ import { BUILD_CAP, GRANTED_ROLE, ROLE_CEILING, grantingDocument } from './polic
 import { ADAPTER_REFUSAL_ENFORCED_AT_ADMISSION, CHECK_COMMAND_HAS_A_GRAMMAR, MISSING_CHECK_OR_SHRUNKEN_SUITE_REFUSES, WORKSPACE_IS_WRITABLE_BY_THE_TASK } from './verification.js';
 import { INDETERMINATE_PROBE_LOWERS, UNSUPPORTED_STACK_REFUSES, REFUSAL_NAMES_THE_BOUNDING_TERM } from './readiness.js';
 import { R20_I5 } from './roles.js';
+import { R13A_I5 } from './nightly.js';
 import { R22_I5 } from './triggers.js';
 import { R19_ASSERTIONS } from './drafting.js';
 
@@ -54,6 +55,8 @@ export const I5: InvariantEntry = {
     ...R20_I5,
     // R22: the trigger framework.
     ...R22_I5,
+    // R13a: the nightly checks that call no model.
+    ...R13A_I5,
     // R17: security at the gate.
     ...R17_I5,
     // R4: parallel task execution.

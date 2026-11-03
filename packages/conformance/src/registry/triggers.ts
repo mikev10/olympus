@@ -120,7 +120,7 @@ async function plantCandidate(vault: Vault, key: string, change: Partial<Candida
   const id = intakeId('planted', key);
   const now = new Date().toISOString();
   const candidate: CandidateRecord = {
-    id, kind: 'issue', template: 'intake-candidate', extracted: { repository: 'octo/hello', number: '1', labels: '', authorTrust: 'owner' },
+    id, kind: 'issue', template: 'intake-candidate', schema: 'issue', extracted: { repository: 'octo/hello', number: '1', labels: '', authorTrust: 'owner' },
     authorTrust: 'owner', lineage: { depth: 0, chain: [], windowStart: now }, signedAt: now, body: null, recordedAt: now, collectedBy: 'runtime', ...change,
   };
   const decision: TriggerDecision = { source: 'planted', key, decidedAt: now, outcome: { kind: 'candidate', candidate: id }, collectedBy: 'runtime' };

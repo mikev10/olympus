@@ -9,6 +9,7 @@
  * through `readDecisions` and checks the component named, the run, the task,
  * and the station. Deleting the write for any one cause fails its row (I8).
  */
+import { REHASH_FINDS_DRIFT } from './nightly.js';
 import { createHash } from 'node:crypto';
 import { cp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -58,7 +59,8 @@ export type CauseKey =
   | 'task-conflict'
   | 'approval-rejected'
   | 'draft-sent-back'
-  | 'draft-floor-applied';
+  | 'draft-floor-applied'
+  | 'record-drift';
 
 export function keyOf(d: DecisionCause): CauseKey {
   switch (d.cause) {
@@ -88,6 +90,8 @@ export function keyOf(d: DecisionCause): CauseKey {
       return 'draft-sent-back';
     case 'draft-floor-applied':
       return 'draft-floor-applied';
+    case 'record-drift':
+      return 'record-drift';
   }
 }
 
@@ -602,6 +606,8 @@ export const DECISION_TABLE: Readonly<Record<CauseKey, Row>> = {
   'approval-rejected': { kind: 'scenario', run: () => draftingDecision('approval-rejected') },
   'draft-sent-back': { kind: 'scenario', run: () => draftingDecision('draft-sent-back') },
   'draft-floor-applied': { kind: 'scenario', run: () => draftingDecision('draft-floor-applied') },
+  // R13a: the nightly re-hash records drift that names a run in that run's record, decided by `nightly`.
+  'record-drift': { kind: 'scenario', run: async () => { await REHASH_FINDS_DRIFT.run(); } },
   'approval-refused:draft-mismatch': { kind: 'scenario', run: () => draftingDecision('draft-mismatch') },
   'approval-refused:draft-invalid': { kind: 'scenario', run: () => draftingDecision('draft-invalid') },
   'station:parked:iterations-exhausted': { kind: 'scenario', run: () => parkScenario('iterations-exhausted') },
