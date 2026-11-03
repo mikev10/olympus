@@ -729,15 +729,23 @@ export type NightlyFinding =
       readonly line: number | null;
       readonly fingerprint: string;
       readonly candidate: { readonly id: CandidateId } | { readonly none: UncandidatedCause };
-    };
+    }
+  /**
+   * A finding whose rule, path, line, or fingerprint did not pass the
+   * `nightly-finding` schema. It keeps its place, naming each field and the
+   * rule it broke, and none of its values: a value no schema admitted never
+   * enters a record (I7; codex-3, gemini-1).
+   */
+  | { readonly kind: 'security-unrecordable'; readonly scanner: NightlyScannerKind; readonly defects: readonly FieldDefect[] };
 
 /** A part of a job that could not finish, and why (I5). */
 export interface NightlyRefusal {
-  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit';
+  /** `job` is a failure no part caught: the record is still written, refused, with what was found before it (codex-5). */
+  readonly part: 'policy' | 'store' | 'rates' | 'locks' | 'target' | 'secret-scan' | 'static-analysis' | 'dependency-audit' | 'job';
   readonly cause:
     | 'no-policy' | 'not-enabled' | 'store-unreadable' | 'rates-unreadable' | 'locks-unreadable'
     | 'no-target' | 'target-unreadable' | 'scan-failed' | 'no-lockfile' | 'unsupported-stack'
-    | 'advisory-unreachable' | 'audit-failed';
+    | 'advisory-unreachable' | 'audit-failed' | 'baseline-unrecorded' | 'job-failed';
   readonly detail: string;
 }
 

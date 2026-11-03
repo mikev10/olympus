@@ -21,12 +21,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AUDITORS, UNSUPPORTED_LOCKFILES, type AuditFinding, type DependencyAuditor } from '@olympus-ai/adapters';
-import type { JobTemplateId, NightlyScanner, Policy, RunId, RunState, TriggerSchedule, VaultRef } from '@olympus-ai/core';
+import { checkFields, type JobTemplateId, type NightlyScanner, type Policy, type RunId, type RunState, type TriggerSchedule, type VaultRef } from '@olympus-ai/core';
 import type { Finding, SecurityCheckSpec } from '@olympus-ai/integrity';
 import { materialize, resolveCommit } from '@olympus-ai/readiness';
 import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import {
-  isNoRunState, type IntegrityCoverage, type NightlyFinding, type NightlyRecord, type NightlyRefusal,
+  isNoRunState, type IntegrityCoverage, type NightlyEntry, type NightlyFinding, type NightlyRecord, type NightlyRefusal,
   type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
 } from '@olympus-ai/vault';
 import type { Intake } from './intake.js';
@@ -56,6 +56,9 @@ export interface NightlyOptions {
 
 /** Endings no later step changes: a snapshot covers these runs alone (D-R13a-03). */
 export const SETTLED: ReadonlySet<RunEnding> = new Set<RunEnding>(['refused', 'merged', 'cancelled']);
+
+/** A finding's fingerprint is the runtime's SHA-256, hex; nothing else is a key (codex-3). */
+const FINGERPRINT = /^[0-9a-f]{64}$/u;
 
 /** How long one scan or the audit may run. */
 export const NIGHTLY_STEP_TIMEOUT_MS = 15 * 60_000;
@@ -129,9 +132,15 @@ export class NightlyJobs {
   /** Runs the schedule's job for `date` and writes its record; returns the record and its hash. */
   async run(policy: Policy, schedule: TriggerSchedule & { readonly template: JobTemplateId }, date: string, intake: Intake): Promise<{ record: NightlyRecord; sha256: string }> {
     const startedAt = new Date(this.#now()).toISOString();
-    const part = schedule.template === 'nightly-integrity'
-      ? await this.#integrity(schedule, date)
-      : await this.#security(policy, schedule, date, intake);
+    let part: Part;
+    try {
+      part = schedule.template === 'nightly-integrity'
+        ? await this.#integrity(schedule, date)
+        : await this.#security(policy, schedule, date, intake);
+    } catch (error) {
+      // A failure no part caught still writes the record, refused, so the firing is never left without one (codex-5).
+      part = { findings: [], refusals: [{ part: 'job', cause: 'job-failed', detail: describe(error) }], integrity: null, security: null };
+    }
     const record: NightlyRecord = {
       schedule: schedule.id, template: schedule.template, date, startedAt, endedAt: new Date(this.#now()).toISOString(),
       outcome: refusedWith(part.refusals), findings: part.findings,
@@ -144,9 +153,25 @@ export class NightlyJobs {
     const { vault } = this.#options;
     const findings: NightlyFinding[] = [];
     const refusals: NightlyRefusal[] = [];
-    const prior = [...(await vault.readNightly())]
-      .filter((e) => e.record.schedule === schedule.id && e.record.integrity !== null && e.record.date < date)
-      .at(-1);
+    let prior: NightlyEntry | undefined;
+    try {
+      prior = [...(await vault.readNightly())]
+        .filter((e) => e.record.schedule === schedule.id && e.record.integrity !== null && e.record.date < date)
+        .at(-1);
+    } catch (error) {
+      refusals.push({ part: 'store', cause: 'store-unreadable', detail: `the nightly records could not be read: ${describe(error)}` });
+    }
+    // Each earlier firing names the record its job wrote. A baseline no firing names was not written by this job (codex-4, gemini-2).
+    const named = new Map<string, string>();
+    for (const entry of await vault.readTriggerDecisions()) {
+      const { source, key, outcome } = entry.decision;
+      if (source === `schedule:${schedule.id}` && outcome.kind === 'job') named.set(key, outcome.nightly);
+    }
+    if (prior !== undefined && named.get(prior.record.date) !== prior.sha256) {
+      findings.push(drift(null, `nightly/${prior.sha256}.json`, 'changed-since-snapshot', named.get(prior.record.date) ?? 'unnamed', prior.sha256));
+      refusals.push({ part: 'store', cause: 'baseline-unrecorded', detail: `the record for ${prior.record.date} is not the one that night's firing names, so nothing is compared against it` });
+      prior = undefined;
+    }
 
     // Re-hash: the store names every object, and each content-addressed one is checked against its name.
     const hashes: Record<string, string> = {};
@@ -165,6 +190,13 @@ export class NightlyJobs {
     } catch (error) {
       storeRead = false;
       refusals.push({ part: 'store', cause: 'store-unreadable', detail: describe(error) });
+    }
+
+    // Every record a firing names is still held.
+    if (storeRead) {
+      for (const [day, hash] of named) {
+        if (hashes[`nightly/${hash}.json`] === undefined) findings.push(drift(null, `nightly/${hash}.json`, 'missing', hash, `missing (named by the firing of ${day})`));
+      }
     }
 
     // Against the last night: a record that changed or went missing since it was hashed.
@@ -341,7 +373,11 @@ export class NightlyJobs {
     tree: string, files: readonly string[], scratch: string, advisoryHost: string,
   ): Promise<({ ok: true; auditor: DependencyAuditor; findings: readonly AuditFinding[] } | { ok: false; cause: NightlyRefusal['cause']; detail: string }) & { egress: EgressLog | null }> {
     const root = new Set(files.filter((f) => !f.includes('/')));
-    const auditor = (this.#options.auditors ?? AUDITORS).find((a) => root.has(a.lockfile));
+    const auditors = this.#options.auditors ?? AUDITORS;
+    const lockfiles = [...auditors.map((a) => a.lockfile), ...UNSUPPORTED_LOCKFILES].filter((name) => root.has(name));
+    // Lockfiles of two stacks: auditing whichever is listed first would leave the other unaudited (gemini-3).
+    if (lockfiles.length > 1) return { ok: false, cause: 'unsupported-stack', detail: `the default branch holds ${lockfiles.join(' and ')}; which stack it uses is not decided`, egress: null };
+    const auditor = auditors.find((a) => root.has(a.lockfile));
     if (auditor === undefined) {
       const other = UNSUPPORTED_LOCKFILES.find((name) => root.has(name));
       return other === undefined
@@ -381,6 +417,11 @@ export class NightlyJobs {
       // Read after the audit whatever it did, so the record holds what the proxy decided (D-P14-04).
       ({ egress } = await this.#options.sandbox.destroy(handle));
     }
+    // A report counts only where the proxy saw the advisory host reached; a grant is permission, not contact (codex-2).
+    const reached = egress.kind === 'proxied' && egress.connections.some((c) => c.verdict !== 'refused' && c.host === advisoryHost);
+    if (outcome.ok && !reached) {
+      return { ok: false, cause: 'advisory-unreachable', detail: `the audit's proxy recorded no connection to ${advisoryHost}`, egress };
+    }
     return { ...outcome, egress };
   }
 
@@ -389,6 +430,10 @@ export class NightlyJobs {
     intake: Intake, policy: Policy, schedule: TriggerSchedule, date: string,
     scanner: SecurityCoverage['ran'][number], rule: string, path: string, line: number | null, fingerprint: string,
   ): Promise<NightlyFinding> {
+    // Checked before any record holds them: an unlocated finding is checked with a stand-in line, which is not kept.
+    const checked = checkFields('nightly-finding', { scanner, rule, path, line: String(line ?? 1) });
+    if (!checked.ok) return { kind: 'security-unrecordable', scanner, defects: checked.defects };
+    if (!FINGERPRINT.test(fingerprint)) return { kind: 'security-unrecordable', scanner, defects: [{ field: 'fingerprint', problem: 'out-of-class' }] };
     const candidate = line === null
       ? { none: 'unlocated' as const }
       : await intake.recordFinding(policy, schedule, `${date}:${scanner}:${fingerprint}`, { scanner, rule, path, line: String(line) });

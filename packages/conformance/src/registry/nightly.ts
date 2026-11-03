@@ -10,7 +10,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Intake, NightlyJobs } from '@olympus-ai/api';
 import type { Policy, RunId, TriggerSchedule } from '@olympus-ai/core';
-import type { ExecResult, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
+import type { EgressLog, ExecResult, SandboxHandle, SandboxProvider, SandboxSpec, Teardown } from '@olympus-ai/sandbox';
 import type { NightlyRecord, Vault } from '@olympus-ai/vault';
 import { runtime } from '../kit/assert.js';
 import type { LocalAssertion } from '../kit/types.js';
@@ -87,7 +87,12 @@ class ScriptedProvider implements SandboxProvider {
   readonly provisioned: Provisioned[] = [];
   readonly execs: string[][] = [];
   readonly #images = new Map<string, string>();
-  constructor(private readonly audit: { stdout: string; exitCode: number }, private readonly auditImage: string) {}
+  constructor(
+    private readonly audit: { stdout: string; exitCode: number },
+    private readonly auditImage: string,
+    private readonly auditEgress: EgressLog = { kind: 'proxied', connections: [{ verdict: 'tunnelled', host: 'registry.npmjs.org', at: '2026-11-02T03:00:01.000Z' }] },
+    private readonly scanReport = '[]',
+  ) {}
   async provision(spec: SandboxSpec): Promise<SandboxHandle> {
     this.provisioned.push({ spec, listed: (await readdir(spec.mounts.workspace.source)).sort() });
     const handle = `h${String(this.provisioned.length)}`;
@@ -97,10 +102,10 @@ class ScriptedProvider implements SandboxProvider {
   exec(h: SandboxHandle, cmd: string[]): Promise<ExecResult> {
     this.execs.push([...cmd]);
     const audit = this.#images.get(h) === this.auditImage;
-    return Promise.resolve(audit ? { ...this.audit, stderr: '', durationMs: 1 } : { exitCode: 0, stdout: '[]', stderr: '', durationMs: 1 });
+    return Promise.resolve(audit ? { ...this.audit, stderr: '', durationMs: 1 } : { exitCode: 0, stdout: this.scanReport, stderr: '', durationMs: 1 });
   }
-  destroy(): Promise<Teardown> {
-    return Promise.resolve({ meter: { kind: 'unmetered' }, egress: { kind: 'none' } });
+  destroy(h: SandboxHandle): Promise<Teardown> {
+    return Promise.resolve({ meter: { kind: 'unmetered' }, egress: this.#images.get(h) === this.auditImage ? this.auditEgress : { kind: 'none' } });
   }
   capabilities() {
     return { computerUse: false, gpu: false, os: 'linux' as const, persistent: false, remote: false };
@@ -108,13 +113,14 @@ class ScriptedProvider implements SandboxProvider {
 }
 
 /** A git checkout whose `main` holds a manifest and an npm lockfile. */
-async function checkout(dir: string): Promise<void> {
+async function checkout(dir: string, extra: Readonly<Record<string, string>> = {}): Promise<void> {
   await mkdir(dir, { recursive: true });
   const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=r13a@example.invalid', '-c', 'user.name=r13a', '-c', 'core.autocrlf=false', ...args], { stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   await writeFile(join(dir, 'package.json'), '{ "name": "target", "dependencies": { "minimist": "1.2.5" } }\n');
   await writeFile(join(dir, 'package-lock.json'), LOCKFILE);
   await writeFile(join(dir, 'index.js'), 'module.exports = 1;\n');
+  for (const [name, text] of Object.entries(extra)) await writeFile(join(dir, name), text);
   git('add', '.');
   git('commit', '-q', '-m', 'target');
 }
@@ -128,15 +134,22 @@ interface Rig {
   readonly policy: Policy;
 }
 
-async function withNightly<T>(prefix: string, audit: { stdout: string; exitCode: number }, body: (rig: Rig) => Promise<T>): Promise<T> {
+interface RigOptions {
+  readonly files?: Readonly<Record<string, string>>;
+  readonly auditEgress?: EgressLog;
+  /** What the secret scan prints; an empty report by default. */
+  readonly scanReport?: string;
+}
+
+async function withNightly<T>(prefix: string, audit: { stdout: string; exitCode: number }, body: (rig: Rig) => Promise<T>, options: RigOptions = {}): Promise<T> {
   const { Intake: IntakeClass, NightlyJobs: Jobs, SCANNERS } = await api();
   const { DEPENDENCY_AUDIT_IMAGE } = await adapters();
   const { LocalVault } = await import('@olympus-ai/vault');
   return withVaultDirs(prefix, async (dirs, base) => {
     const vault = new LocalVault(dirs);
     const target = join(base, 'target');
-    await checkout(target);
-    const sandbox = new ScriptedProvider(audit, DEPENDENCY_AUDIT_IMAGE);
+    await checkout(target, options.files);
+    const sandbox = new ScriptedProvider(audit, DEPENDENCY_AUDIT_IMAGE, options.auditEgress, options.scanReport);
     const jobs = new Jobs({
       vault, sandbox, workspaces: { root: join(base, 'trees'), user: { uid: 1000, gid: 1000 } }, limits: null, scanners: SCANNERS,
       target: { checkout: target, branch: 'main' },
@@ -332,7 +345,112 @@ const JOB_OPENS_NO_CHANGE = runtime({
   },
 });
 
+
+/** An advisory whose id carries text beside its GHSA id, and a scanner rule no schema admits. */
+const HOSTILE_REPORT = JSON.stringify({
+  auditReportVersion: 2,
+  vulnerabilities: {
+    minimist: {
+      name: 'minimist', severity: 'critical',
+      via: [{ source: 1097678, name: 'minimist', title: 't', url: `https://github.com/advisories/GHSA-xvch-5gv4-984h ${MARKER}`, severity: 'critical' }],
+      effects: [], nodes: ['node_modules/minimist'],
+    },
+  },
+  metadata: { vulnerabilities: { critical: 1, total: 1 } },
+});
+
+const AMBIGUOUS_LOCKFILES_REFUSED = runtime({
+  id: 'I5.nightly-audit-ambiguous-lockfiles-refused',
+  title: 'a default branch holding lockfiles of two stacks is refused, never audited as whichever stack is listed first (gemini-3)',
+  run: async () => {
+    await withNightly('r13a-ambiguous-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ vault, intake, policy }) => {
+      await intake.fire(policy, SECURITY, '2026-11-02');
+      const record = await recordOn(vault, 'security', '2026-11-02');
+      if (record.outcome.kind !== 'refused' || !record.outcome.refusals.some((r) => r.part === 'dependency-audit' && r.cause === 'unsupported-stack')) {
+        throw new Error(`I5: two lockfiles were audited as one stack: ${JSON.stringify(record.outcome)}`);
+      }
+      if (record.security?.ran.includes('dependency-audit') === true) throw new Error('I5: the ambiguous audit is recorded as having run');
+    }, { files: { 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" } });
+  },
+});
+
+const RECORD_HOLDS_CHECKED_FIELDS = runtime({
+  id: 'I7.nightly-record-holds-checked-fields-only',
+  title: "a finding's rule and path reach the nightly record only once they pass the nightly-finding schema; text beside an advisory id never does (codex-3, gemini-1, gemini-4)",
+  run: async () => {
+    const scanReport = JSON.stringify([{ RuleID: `generic-api-key ${MARKER}`, File: `src/a ${MARKER}.js`, StartLine: 3, Secret: 's3cr3t-value' }]);
+    await withNightly('r13a-recordfields-', { stdout: HOSTILE_REPORT, exitCode: 1 }, async ({ vault, intake, policy }) => {
+      await intake.fire(policy, SECURITY, '2026-11-02');
+      const everything = JSON.stringify([await vault.readTriggerDecisions(), await vault.readNightly()]);
+      if (everything.includes(MARKER)) throw new Error("I7: text beside the advisory's id reached a record");
+      const record = await recordOn(vault, 'security', '2026-11-02');
+      const audit = record.findings.find((f) => f.kind === 'security' && f.scanner === 'dependency-audit');
+      if (audit?.kind !== 'security' || audit.rule !== 'GHSA-xvch-5gv4-984h') throw new Error(`I7: the audit finding is ${JSON.stringify(audit)}`);
+      // The scanner's finding failed the schema: it is kept, as unrecordable, with none of its values.
+      if (!record.findings.some((f) => f.kind === 'security-unrecordable' && f.scanner === 'secret-scan')) throw new Error(`I7: the refused finding was not kept: ${JSON.stringify(record.findings)}`);
+    }, { scanReport });
+  },
+});
+
+const AUDIT_WITHOUT_CONTACT_REFUSED = runtime({
+  id: 'I5.nightly-audit-without-contact-is-refused',
+  title: "a whole audit report from a sandbox whose proxy recorded no connection to the advisory host is a refusal, never a completed audit (codex-2)",
+  run: async () => {
+    await withNightly('r13a-nocontact-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ vault, intake, policy }) => {
+      await intake.fire(policy, SECURITY, '2026-11-02');
+      const record = await recordOn(vault, 'security', '2026-11-02');
+      if (!(record.outcome.kind === 'refused' && record.outcome.refusals.some((r) => r.part === 'dependency-audit' && r.cause === 'advisory-unreachable'))) {
+        throw new Error(`I5: an audit with no recorded contact completed: ${JSON.stringify(record.outcome)}`);
+      }
+    }, { auditEgress: { kind: 'proxied', connections: [] } });
+  },
+});
+
+const JOB_FAILURE_IS_RECORDED = runtime({
+  id: 'I5.nightly-job-failure-is-recorded',
+  title: 'a nightly job that throws part-way still writes its record, refused with the cause, so the firing is never left without one (codex-5)',
+  run: async () => {
+    await withNightly('r13a-throws-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ store, intake, policy }) => {
+      await intake.fire(policy, INTEGRITY, '2026-11-02');
+      const [name] = await readdir(join(store, 'nightly'));
+      if (name === undefined) throw new Error('I5: the first night wrote no record');
+      await writeFile(join(store, 'nightly', name), '{ not json');
+      await intake.fire(policy, INTEGRITY, '2026-11-03').catch(() => undefined);
+      const entries = await readdir(join(store, 'nightly'));
+      const texts = await Promise.all(entries.filter((e) => e !== name).map((e) => readFile(join(store, 'nightly', e), 'utf8')));
+      const second = texts.map((t) => JSON.parse(t) as NightlyRecord).find((r) => r.date === '2026-11-03');
+      if (second === undefined) throw new Error('I5: a job that threw wrote no record');
+      if (second.outcome.kind !== 'refused') throw new Error('I5: a job that could not read its baseline completed');
+    });
+  },
+});
+
+const BASELINE_MUST_BE_RECORDED = runtime({
+  id: 'I5.nightly-baseline-must-be-the-recorded-one',
+  title: "the last night's snapshot is compared against only when it is the record that night's firing names; a substituted record is drift and a refusal, never a match (codex-4, gemini-2)",
+  run: async () => {
+    await withNightly('r13a-baseline-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ vault, store, intake, policy }) => {
+      await refusedRun(vault);
+      await intake.fire(policy, INTEGRITY, '2026-11-02');
+      const [original] = await vault.readNightly();
+      if (original === undefined) throw new Error('I5: the first night wrote no record');
+      // A substitute: the same night, its hashes rewritten, stored under its own new hash and the original removed.
+      const forged: NightlyRecord = { ...original.record, startedAt: '2026-11-02T02:00:00.001Z' };
+      await vault.recordNightly(forged);
+      await rm(join(store, 'nightly', `${original.sha256}.json`));
+      await intake.fire(policy, INTEGRITY, '2026-11-03');
+      const record = await recordOn(vault, 'integrity', '2026-11-03');
+      if (record.outcome.kind !== 'refused') throw new Error('I5: a substituted baseline was compared against as though it were the recorded one');
+      if (!record.findings.some((f) => f.kind === 'record-drift' && f.record.startsWith('nightly/'))) throw new Error(`I5: the substitution is not drift: ${JSON.stringify(record.findings)}`);
+    });
+  },
+});
+
 export const R13A_I2: readonly LocalAssertion[] = [JOB_OPENS_NO_CHANGE];
 export const R13A_I4: readonly LocalAssertion[] = [AUDIT_EGRESS_ONE_HOST, SCAN_DENY_ALL];
-export const R13A_I5: readonly LocalAssertion[] = [REHASH_FINDS_DRIFT, RATE_DRIFT_FOUND, FIRST_SNAPSHOT_NOT_A_MATCH, AUDIT_UNREACHABLE_REFUSED];
-export const R13A_I7: readonly LocalAssertion[] = [FINDING_TYPED_FIELDS];
+export const R13A_I5: readonly LocalAssertion[] = [
+  REHASH_FINDS_DRIFT, RATE_DRIFT_FOUND, FIRST_SNAPSHOT_NOT_A_MATCH, AUDIT_UNREACHABLE_REFUSED,
+  // The external review of R13a.
+  AMBIGUOUS_LOCKFILES_REFUSED, AUDIT_WITHOUT_CONTACT_REFUSED, JOB_FAILURE_IS_RECORDED, BASELINE_MUST_BE_RECORDED,
+];
+export const R13A_I7: readonly LocalAssertion[] = [FINDING_TYPED_FIELDS, RECORD_HOLDS_CHECKED_FIELDS];
