@@ -181,5 +181,14 @@ is deleted:
 - **A-R13a-03:** `FIELD_SCHEMAS` gains `nightly-finding`, which takes scanner,
   rule, path, and line.
 - **A-R13a-04:** `DecisionCause` gains `record-drift`, decided by `nightly`.
+- **A-R13a-05:** the Vault gains `listObjects`, read-only, yielding every
+  object the store holds (D-A-NR-07).
+- **A-R13a-06:** `TriggerPolicy` gains an optional `nightly` block naming the
+  sweep's scanners with their rules and the audit's one advisory host, from a
+  closed list in code (D-A-NR-08). `packages/core/src/policy/types.ts` joins
+  R13a's gate paths.
+- **A-R13a-07:** `CandidateRecord` gains `schema`, the schema its fields were
+  checked against; a finding's candidate is kind `scheduled` with schema
+  `nightly-finding` (D-A-NR-09). `TriggerDecision` gains the outcome `job`.
 - **A-R13b-01:** `TemplateId` gains `nightly-findings-review` and
   `nightly-tree-review`. `nightly-finding` gains category and record fields.

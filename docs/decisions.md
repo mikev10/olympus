@@ -6928,3 +6928,244 @@ and what proves it done. The maintainer confirmed the recommended answers on
   so each unit's external review covers the types together with the checks
   that read them, as A-R9-01 was built by R9.
 - **Reverse by:** landing the types as a separate amendment ahead of the units.
+
+## Amendment: R13a's three undeclared contract changes (A-R13a-05 to A-R13a-07)
+
+R13a was started on `v2` at 4db5668. Reading the code it touches turned up
+three changes its spec needs but does not declare. Each one is a contract or
+gate-path change, so the session stopped before writing any code and asked.
+On 2026-11-03 the maintainer confirmed the recommended answer to each.
+R13a builds them, since D-A-NR-06 has a unit build its own amendments.
+
+### D-A-NR-07: the Vault names every object it holds (A-R13a-05)
+
+- **Found:** the Vault contract has no method that lists what it stores
+  (`packages/vault/src/types.ts`, `interface Vault`), and `read` does not
+  check a content-addressed object against its name
+  (`packages/vault/src/local/vault.ts:690`). Through the existing methods a
+  job can reach what a run's current state names, a run's decision, usage,
+  and integration lists, its newest lock manifest, and the intake records. It
+  cannot reach a replaced task result, an older run-state version, or an
+  older lock generation, so the claim that it "re-hashes every object in the
+  Vault" would be false.
+- **Chosen:** the Vault gains `listObjects`, which is read-only and yields
+  every object the store holds: its path relative to the store, its run where
+  it has one, whether its name is its hash, and its bytes. The store names the
+  set, as `listRuns` does (A-R2-02). A caller never does.
+- **Rejected:** *Walk what the existing methods reach.* That leaves replaced
+  results and older state unchecked while the record says "every object".
+- **Reverse by:** removing the method and walking refs. The nightly record
+  would then have to name what it did not check.
+
+### D-A-NR-08: policy selects the sweep's scanners and the audit's host (A-R13a-06)
+
+- **Found:** D-A-NR-04 has policy name the scanners and the advisory host.
+  `TriggerPolicy` has no field for either
+  (`packages/core/src/policy/types.ts:62`). That file and
+  `packages/api/src/validate.ts` are both gate paths
+  (`.github/protected-paths.txt`), and R13a's spec did not list them.
+- **Chosen:** `TriggerPolicy` gains an optional `nightly` block, which names
+  the R17 scanners the sweep runs, each with its rules, and one advisory
+  host. Images stay pinned in code. The validator accepts a host only from a
+  closed list in code, and refuses a `nightly-security` schedule that has no
+  block. Both paths join R13a's gate paths.
+- **Rejected:** *Scanners and host fixed in code.* That is tighter, but it
+  departs from D-A-NR-04 as the maintainer confirmed it.
+- **Reverse by:** removing the block and fixing both in code.
+
+### D-A-NR-09: a finding candidate is `scheduled`, and names the schema its fields were checked against (A-R13a-07)
+
+- **Found:** admission reads a candidate's `kind` as the run's trigger kind
+  (`packages/api/src/run.ts:902`), so `kind` must be a `TriggerKind`. And
+  `CandidateRecord.extracted` is "the kind's schema record"
+  (`packages/vault/src/types.ts`, `CandidateRecord`). `nightly-finding` is
+  not a kind.
+- **Chosen:** a finding's candidate has kind `scheduled`, so it is admitted
+  under the schedule's route. `CandidateRecord` gains `schema`, which names
+  the schema its fields were checked against: either a kind's schema or a
+  job's output schema. Job output schemas are kept separate from the per-kind
+  event schemas. A candidate stored before R13a has no `schema` field and is
+  read as its kind's.
+- **Rejected:** *A new trigger kind.* It is not an event source, and it
+  would show up in `enabled`, `entryStation`, and every other per-kind map,
+  where it means nothing.
+- **Reverse by:** removing the field and the job schemas.
+
+## R13a: Nightly checks without a model
+
+Built against `v2` at 4db5668, on branch `unit/r13a`. The spec is
+`docs/plan/R13-nightly.md`, R13a, with A-R13a-01 to A-R13a-07. The session
+read the code the unit touches before writing this.
+
+### D-R13a-01: the boundary R13a was started on
+
+- **Deliverables:**
+  - the job templates `nightly-integrity` and `nightly-security`, valid only
+    on a `scheduled` schedule. The scheduler runs the job instead of
+    recording a candidate, and records the firing so that a missed day is
+    still found (A-R13a-01);
+  - `NightlyRecord`, `recordNightly`, and `readNightly`, write-once and
+    content-addressed, kept beside the runs (A-R13a-02), and `listObjects`
+    (A-R13a-05);
+  - a re-hash of every stored object, a check of every ref for a missing
+    object, and lock verification for any run that still holds its locks;
+  - a snapshot of R2's rates, compared with the last snapshot;
+  - the security sweep over the head of the target's default branch under
+    `deny-all`, and a dependency audit in a sandbox granted the advisory host
+    alone;
+  - each security or audit finding recorded as an `intake` candidate under
+    the `nightly-finding` schema (A-R13a-03, A-R13a-07);
+  - `GET /nightly`; drift that names a run, written to P14's record as
+    `record-drift` decided by `nightly` (A-R13a-04); and the policy `nightly`
+    block (A-R13a-06);
+  - a registry assertion for each conformance row, and a changeset for each
+    package changed.
+- **Out of scope, verbatim from the spec:** any model seat, including the
+  findings reviewer and the whole-tree reviewer, which are R13b's. Also out: a
+  fix, a change, or a pull request opened from a finding; any narrowing of a
+  run or a grant; an audit for a stack R1 does not support, which is refused
+  instead; a scanner R17 does not ship; repairing a drifted record, which is
+  the operator's; a cron grammar; and a UI over the nightly record.
+- **Acceptance, as commands:** `pnpm typecheck`, `pnpm lint`, and
+  `pnpm conformance` pass, and the report names
+  `I5.nightly-rehash-finds-a-drifted-record`,
+  `I5.nightly-rate-drift-is-found`, `I5.nightly-first-snapshot-is-not-a-match`,
+  `I5.nightly-audit-unreachable-is-refused`,
+  `I4.nightly-audit-egress-is-the-advisory-host-alone`,
+  `I4.nightly-scan-runs-deny-all`, `I7.nightly-finding-is-typed-fields`, and
+  `I2.nightly-job-opens-no-change`, each of which fails when its check is
+  deleted. `pnpm test` passes for every package changed, and
+  `git ls-files -- .plan/` prints nothing.
+- **Invariants touched:**
+  - Fail closed (I5): a job that cannot finish is recorded as refused, never
+    as "no findings", and a first night is never recorded as a match.
+  - Default deny (I4): the scan runs under `deny-all`, the audit reaches one
+    host, and policy selects what code pins.
+  - Payloads are data (I7): a finding enters only as typed fields.
+  - The runtime derives status (I2): every record field is the runtime's,
+    and no job opens a change.
+  - No agent writes to the Vault (I1): nothing here is reachable from a
+    sandbox, and the Vault is mounted nowhere.
+  - No Greek names in code (I10).
+- **Pending registry entries owed:** none. `pending-baseline.json` holds none
+  for R13.
+- **Dependencies, verified:** P14, R2, R17, and R22 are merged into `v2` and
+  tagged `reviewed/P14`, `reviewed/R2`, `reviewed/R17`, and `reviewed/R22`
+  (`git tag -l 'reviewed/*'`).
+- **Gate paths:** the spec's, plus `packages/core/src/policy/types.ts`
+  (D-A-NR-08), and `packages/api/package.json` with `readiness`'s exports
+  (D-R13a-04). The pull request takes `gate-change`, and the squash merge
+  carries `Gate-Change: acknowledged`.
+
+### D-R13a-02: what the code holds, verified, and where it differs from the spec
+
+- The spec's input table holds line for line on `v2` at 4db5668, with one
+  correction. `TriggerDecision` carries no `sha256`; `IntakeEntry.sha256` is
+  computed by the store on read
+  (`packages/vault/src/local/vault.ts:1085`). So a trigger decision's bytes
+  can only be compared with the hash a previous night recorded.
+- Some records are named by run, number, or id rather than by hash: the
+  admission record, base records, draft locks, lock manifests, run-state
+  versions, and every intake file (`vault.ts:625`, `:724`, `:1106`, `:981`).
+  Refused-delivery counts are rewritten while their hour is open (`:1029`).
+- `read` checks the hash only of an admission record or a base record
+  (`vault.ts:705`).
+- R2's `deriveOutcomes` is pure over records already read
+  (`packages/api/src/outcomes.ts:332`). `readRunRecords` reads one run
+  (`:175`), and gives it one of these endings: `refused`, `merged`, `passed`,
+  `cancelled`, `halted`, `parked`, `unfinished` (`:24`).
+- `scanTree` (`packages/api/src/scan.ts:86`) runs one R17 scanner over a copy
+  of a tree under `deny-all`, with its rules on a second read-only mount. The
+  static-analysis scanner has no rules of its own
+  (`packages/adapters/src/security.ts:175`), so the sweep's policy must pin
+  them.
+- Nothing in the code defines "the target's default branch". The host has the
+  working copy runs are admitted from (`FACTORY_REPOSITORY`) and the branch
+  runs merge into (`FACTORY_GIT_BASE_BRANCH`,
+  `packages/api/src/host/main.ts:68`, `:73`). R1 already reads a commit's
+  tree from a checkout without running anything the repository configures
+  (`packages/readiness/src/tree.ts:56`), but does not export it.
+- `npm audit --json --package-lock-only` was run here, in Docker 29.8.0, in
+  the pinned Node image (`node@sha256:83f487e0…`, Node 22.23.2, npm 10.9.8).
+  It prints a report with `auditReportVersion: 2` and exits 1 when it has
+  findings. With no network it exits 1 and prints `{ "message", "error" }`
+  with no `vulnerabilities`. `corepack pnpm@10.18.3 audit --json` prints
+  `advisories` and `metadata`; against an unreachable registry it exits 1
+  and prints `{ "error" }`.
+- Admission reads a candidate's kind as its trigger kind (`run.ts:902`). The
+  scheduler finds the last date a schedule covered from decisions under
+  `schedule:<id>` whose key is a date (`packages/api/src/schedule.ts:31`).
+
+### D-R13a-03: rates are snapshotted over settled runs only
+
+- **Ambiguous:** "the window the last snapshot covered". A run still in
+  flight changes its ending legitimately, so a snapshot over every run would
+  report drift on any night a run moved.
+- **Chosen:** a snapshot names the runs whose ending was `refused`,
+  `merged`, or `cancelled`, which no later step changes, and the rates
+  derived over exactly those runs. The next night derives the rates over the
+  same run ids from the records as they stand then. Any difference in any
+  figure is `rate-drift`, and so is a named run that is no longer settled.
+- **Rejected:** *A time window over admission times.* It includes runs that
+  are still moving. *Rates over every run.* Same failure.
+- **Reverse by:** widening `SETTLED` in `packages/api/src/nightly.ts`.
+
+### D-R13a-04: the sweep scans the host's checkout at `refs/heads/<base branch>`, through R1's reader
+
+- **Chosen:** the target is the host's working copy at the branch runs merge
+  into. R1's `resolveCommit` and `materialize` resolve that branch to a
+  commit and write the commit's tree out; both read git objects and run
+  nothing the repository configures. The commit is recorded. A host with no
+  target refuses the job with cause `no-target`. `readiness` exports the two
+  functions, and `api` depends on `readiness`.
+- **Rejected:** *The working tree as it stands.* Untracked and uncommitted
+  files are not the default branch. *A tarball from the GitHub API.* That is
+  a second network path, carrying the merge token, for bytes the checkout
+  already holds.
+- **Reverse by:** pointing `NightlyTarget` elsewhere.
+
+### D-R13a-05: locks are verified only for a run that is not settled
+
+- **Ambiguous:** "a lock that no longer verifies". `verifyLocks` hashes the
+  artifact root, which is the working copy. Once a run is merged, its spec
+  may be edited for the next run, and that is not drift in any record.
+- **Chosen:** every lock manifest is re-hashed as a record every night. The
+  artifacts are verified against it only for a run whose ending is not
+  settled (D-R13a-03), where the lock still governs.
+- **Reverse by:** verifying every run's locks.
+
+### D-R13a-06: the dependency audit, its stacks, and its causes
+
+- **Chosen:**
+  - **Stacks.** `npm` (a root `package-lock.json`) runs
+    `npm audit --json --package-lock-only`. `pnpm` (a root `pnpm-lock.yaml`)
+    runs `corepack pnpm@10.18.3 audit --json`, with the version pinned,
+    since corepack would otherwise fetch the newest.
+  - **Sandbox.** Both run in the pinned Node image over a read-only copy of
+    the manifest and the lockfile alone, with egress to the policy's
+    advisory host.
+  - **Refusals.** A tree with no lockfile is refused as `no-lockfile`. A
+    `yarn.lock`, or any other lockfile, is refused as `unsupported-stack`,
+    since R1 does not install with yarn. An output that is not a whole
+    report is refused as `advisory-unreachable` where it names a failed
+    request, and as `audit-failed` otherwise. It is never recorded as zero
+    findings (I5).
+  - **Findings.** A finding's rule is its advisory's GHSA id, its path is
+    the lockfile, and its line is the lockfile line that names the package.
+    A finding whose line cannot be found keeps its place in the record and
+    gets no candidate, rather than an invented line.
+- **Reverse by:** changing the auditor table in
+  `packages/adapters/src/audit.ts`.
+
+### D-R13a-07: a finding's candidate is written under its own source
+
+- **Found:** the scheduler reads a schedule's last date from keys under
+  `schedule:<id>`, and those keys must be dates (`schedule.ts:31`).
+- **Chosen:** the firing is recorded under `schedule:<id>` and the date,
+  with a new outcome, `job`, that names the nightly record. Each finding's
+  candidate is written under `nightly:<schedule id>` with the key
+  `<date>:<scanner>:<fingerprint>`, and goes through the same budget as
+  every other candidate. A finding over budget, or one whose fields do not
+  pass the schema, keeps its place in the nightly record along with the
+  reason it has no candidate (I5).
+- **Reverse by:** a separate candidate store for jobs.
