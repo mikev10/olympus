@@ -352,3 +352,47 @@ describe('a tier per station and escalation (A-R14-01)', () => {
     expect(lines(refuse(withScope({ escalation: 'always' })))).toContainEqual(expect.stringContaining('roles.builder.escalation'));
   });
 });
+
+describe('the nightly block (R13a, A-R13a-06)', () => {
+  function nightly(extra: Record<string, unknown>, schedule: Record<string, unknown> = { id: 'sweep', template: 'nightly-security', at: '03:00' }): Record<string, unknown> {
+    const document = authored();
+    const triggers = document.triggers as Record<string, unknown>;
+    document.triggers = {
+      ...triggers,
+      enabled: ['human', 'scheduled'],
+      entryStation: { human: 'intake', scheduled: 'intake' },
+      taskTemplate: { scheduled: 'intake-candidate' },
+      maxAutonomy: { human: 2, scheduled: 0 },
+      minAuthorTrust: { human: 'owner', scheduled: 'owner' },
+      schedules: [schedule],
+      maxDeliveryAgeMs: 3_600_000,
+      candidateExpiryMs: 86_400_000,
+      ...extra,
+    };
+    return document;
+  }
+  const block = { scanners: [{ kind: 'secret-scan', config: null }, { kind: 'static-analysis', config: 'rules: []' }], advisoryHost: 'registry.npmjs.org' };
+
+  test('accepts a block naming scanners and a listed advisory host, and carries it', () => {
+    expect(accept(nightly({ nightly: block })).triggers.nightly).toEqual(block);
+  });
+
+  test('refuses a nightly-security schedule with no block', () => {
+    expect(lines(refuse(nightly({})))).toEqual(expect.arrayContaining([expect.stringContaining('needs a nightly block')]));
+  });
+
+  test('refuses an advisory host outside the closed list', () => {
+    expect(lines(refuse(nightly({ nightly: { ...block, advisoryHost: 'example.com' } }))).join('\n')).toContain('advisoryHost');
+  });
+
+  test('refuses static analysis with no rules, a repeated kind, and no scanner', () => {
+    refuse(nightly({ nightly: { ...block, scanners: [{ kind: 'static-analysis', config: null }] } }));
+    refuse(nightly({ nightly: { ...block, scanners: [{ kind: 'secret-scan', config: null }, { kind: 'secret-scan', config: null }] } }));
+    refuse(nightly({ nightly: { ...block, scanners: [] } }));
+  });
+
+  test('refuses a job template on a kind other than scheduled', () => {
+    const document = nightly({ nightly: block, taskTemplate: { scheduled: 'intake-candidate', issue: 'nightly-integrity' } });
+    expect(lines(refuse(document)).join('\n')).toContain('job template');
+  });
+});

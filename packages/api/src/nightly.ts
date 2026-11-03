@@ -77,7 +77,7 @@ export function flattenFigures(value: unknown, prefix = '', out: Record<string, 
     for (const [key, child] of entries) flattenFigures(child, prefix === '' ? key : `${prefix}.${key}`, out);
     return out;
   }
-  out[prefix] = JSON.stringify(value) ?? 'undefined';
+  out[prefix] = value === undefined ? 'undefined' : JSON.stringify(value);
   return out;
 }
 
@@ -277,7 +277,7 @@ export class NightlyJobs {
     }
     const dir = join(this.#options.workspaces.root, 'nightly', `${schedule.id}-${date}-${randomUUID()}`);
     const tree = join(dir, 'tree');
-    const ran: SecurityCoverage['ran'][number][] = [];
+    const ran: Array<SecurityCoverage['ran'][number]> = [];
     let commit: string;
     let files: readonly string[];
     try {

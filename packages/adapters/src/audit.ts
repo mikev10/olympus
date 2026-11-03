@@ -76,7 +76,7 @@ export const NPM_AUDITOR: DependencyAuditor = Object.freeze({
   lockfile: 'package-lock.json',
   files: Object.freeze(['package.json', 'package-lock.json']),
   image: DEPENDENCY_AUDIT_IMAGE,
-  invocation: Object.freeze(['npm', 'audit', '--json', '--package-lock-only', '--fetch-retries=0']) as readonly [string, ...string[]],
+  invocation: Object.freeze(['npm', 'audit', '--json', '--package-lock-only', '--fetch-retries=0'] as const),
   parse(stdout: string, lockfileText: string) {
     const parsed = parseJson(stdout);
     if (!isRecord(parsed) || Object.hasOwn(parsed, 'error') || parsed.auditReportVersion !== 2 || !isRecord(parsed.vulnerabilities) || !isRecord(parsed.metadata)) {
@@ -107,7 +107,7 @@ export const PNPM_AUDITOR: DependencyAuditor = Object.freeze({
   lockfile: 'pnpm-lock.yaml',
   files: Object.freeze(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']),
   image: DEPENDENCY_AUDIT_IMAGE,
-  invocation: Object.freeze(['corepack', `pnpm@${PNPM_AUDIT_VERSION}`, 'audit', '--json']) as readonly [string, ...string[]],
+  invocation: Object.freeze(['corepack', `pnpm@${PNPM_AUDIT_VERSION}`, 'audit', '--json'] as const),
   parse(stdout: string, lockfileText: string) {
     const parsed = parseJson(stdout);
     if (!isRecord(parsed) || Object.hasOwn(parsed, 'error') || !isRecord(parsed.advisories) || !isRecord(parsed.metadata)) {

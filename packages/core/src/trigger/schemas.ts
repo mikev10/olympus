@@ -69,7 +69,7 @@ export const CHAR_CLASSES: Readonly<Record<CharClass, RegExp>> = Object.freeze({
   // A scanner's rule id or an advisory's GHSA id: dotted, dashed, coloned, never a sentence.
   'finding-rule': /^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$/u,
   // Relative to the tree, forward slashes, no `..` component, no leading slash or dot-slash, no whitespace.
-  'tree-path': /^(?!\/)(?!\.\/)(?!(?:.*\/)?\.\.(?:\/|$))[A-Za-z0-9._@+=,~\/-]+$/u,
+  'tree-path': /^(?!\/)(?!\.\/)(?!(?:.*\/)?\.\.(?:\/|$))[A-Za-z0-9._@+=,~/-]+$/u,
 });
 
 /** A single label as the policy's allowlist names one: the elements of `label-list`. */

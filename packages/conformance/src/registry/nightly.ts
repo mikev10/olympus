@@ -205,9 +205,9 @@ const RATE_DRIFT_FOUND = runtime({
       const record = await recordOn(vault, 'integrity', '2026-11-03');
       const rates = record.findings.filter((f) => f.kind === 'rate-drift');
       if (rates.length === 0) throw new Error(`I5: a record removed under the snapshot changed no rate: ${JSON.stringify(record.findings)}`);
-      if (!rates.some((f) => f.kind === 'rate-drift' && f.snapshot !== f.observed)) throw new Error('I5: a rate-drift finding names equal values');
+      if (!rates.some((f) => f.snapshot !== f.observed)) throw new Error('I5: a rate-drift finding names equal values');
       // A figure of R2's, not only the run's settledness: the rates themselves were derived again and compared.
-      if (!rates.some((f) => f.kind === 'rate-drift' && !f.rate.startsWith('runs.'))) throw new Error(`I5: no figure drifted: ${JSON.stringify(rates)}`);
+      if (!rates.some((f) => !f.rate.startsWith('runs.'))) throw new Error(`I5: no figure drifted: ${JSON.stringify(rates)}`);
     });
   },
 });
