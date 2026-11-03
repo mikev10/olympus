@@ -249,10 +249,10 @@ const AUDIT_UNREACHABLE_REFUSED = runtime({
 
 const AUDIT_EGRESS_ONE_HOST = runtime({
   id: 'I4.nightly-audit-egress-is-the-advisory-host-alone',
-  title: "the dependency audit's sandbox is granted the policy's advisory host and nothing else, over a read-only copy of the manifest and lockfile alone, in the pinned image",
+  title: "the dependency audit's sandbox is granted the policy's advisory host and nothing else, over a read-only copy of the manifest and lockfile alone, in the pinned image, and what each nightly sandbox's proxy decided is in the record",
   run: async () => {
     const { DEPENDENCY_AUDIT_IMAGE } = await adapters();
-    await withNightly('r13a-egress-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ intake, policy, sandbox }) => {
+    await withNightly('r13a-egress-', { stdout: NPM_REPORT, exitCode: 1 }, async ({ vault, intake, policy, sandbox }) => {
       await intake.fire(policy, SECURITY, '2026-11-02');
       const audits = sandbox.provisioned.filter((p) => p.spec.image === DEPENDENCY_AUDIT_IMAGE);
       const [audit] = audits;
@@ -261,6 +261,9 @@ const AUDIT_EGRESS_ONE_HOST = runtime({
       if (egress.mode !== 'allowlist' || JSON.stringify(egress.allow) !== JSON.stringify(['registry.npmjs.org'])) throw new Error(`I4: the audit's egress is ${JSON.stringify(egress)}`);
       if (mounts.workspace.mode !== 'ro' || mounts.others.length !== 0) throw new Error('I4: the audit has a writable or a second mount');
       if (JSON.stringify(audit.listed) !== JSON.stringify(['package-lock.json', 'package.json'])) throw new Error(`I4: the audit was given ${JSON.stringify(audit.listed)}`);
+      // What the audit's proxy decided is kept in the record, there being no run to hold it (D-P14-04, D-R13a-08).
+      const parts = (await recordOn(vault, 'security', '2026-11-02')).security?.egress.map((e) => e.part) ?? [];
+      if (!parts.includes('dependency-audit') || !parts.includes('secret-scan')) throw new Error(`I4: the record keeps egress for ${JSON.stringify(parts)}`);
     });
   },
 });

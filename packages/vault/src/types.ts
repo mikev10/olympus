@@ -13,7 +13,7 @@ import type {
   AuthorTrust, CandidateId, CandidateSchema, FieldDefect, JobTemplateId, SchemaKind, TemplateId, TriggerAdmissionCause, TriggerLineage,
 } from '@olympus-ai/core';
 import type { CheckResult, IntegrityViolation, TamperReport } from '@olympus-ai/integrity';
-import type { EgressConnection, MeterReading } from '@olympus-ai/sandbox';
+import type { EgressConnection, EgressLog, MeterReading } from '@olympus-ai/sandbox';
 
 /**
  * I3: an agent may not be judged by an artifact it can write. Specs and
@@ -775,6 +775,12 @@ export interface SecurityCoverage {
   readonly ran: readonly NightlyScannerKind[];
   /** The lockfile audited and its stack, or null where none was. */
   readonly audited: { readonly lockfile: string; readonly stack: 'npm' | 'pnpm' } | null;
+  /**
+   * What each sandbox's proxy decided, read at its teardown whatever the part
+   * did. A nightly job has no run whose P14 record could hold them, so they
+   * are kept here (D-P14-04, D-R13a-08).
+   */
+  readonly egress: ReadonlyArray<{ readonly part: NightlyScannerKind; readonly log: EgressLog }>;
 }
 
 /**

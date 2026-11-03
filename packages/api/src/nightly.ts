@@ -24,7 +24,7 @@ import { AUDITORS, UNSUPPORTED_LOCKFILES, type AuditFinding, type DependencyAudi
 import type { JobTemplateId, NightlyScanner, Policy, RunId, RunState, TriggerSchedule, VaultRef } from '@olympus-ai/core';
 import type { Finding, SecurityCheckSpec } from '@olympus-ai/integrity';
 import { materialize, resolveCommit } from '@olympus-ai/readiness';
-import type { SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
+import type { EgressLog, SandboxHandle, SandboxProvider, SandboxSpec } from '@olympus-ai/sandbox';
 import {
   isNoRunState, type IntegrityCoverage, type NightlyFinding, type NightlyRecord, type NightlyRefusal,
   type RateSnapshot, type RecordDriftProblem, type SecurityCoverage, type Vault,
@@ -266,7 +266,8 @@ export class NightlyJobs {
     const findings: NightlyFinding[] = [];
     const refusals: NightlyRefusal[] = [];
     const nightly = policy.triggers.nightly;
-    const coverage = (commit: { branch: string; commit: string } | null, ran: SecurityCoverage['ran'], audited: SecurityCoverage['audited']): SecurityCoverage => ({ target: commit, ran, audited });
+    const egress: Array<SecurityCoverage['egress'][number]> = [];
+    const coverage = (commit: { branch: string; commit: string } | null, ran: SecurityCoverage['ran'], audited: SecurityCoverage['audited']): SecurityCoverage => ({ target: commit, ran, audited, egress });
     if (nightly === undefined) {
       refusals.push({ part: 'policy', cause: 'no-policy', detail: 'the policy names no nightly block, so no scanner or advisory host is granted' });
       return { findings, refusals, integrity: null, security: coverage(null, [], null) };
@@ -294,6 +295,7 @@ export class NightlyJobs {
     try {
       for (const [index, selected] of nightly.scanners.entries()) {
         const outcome = await this.#scan(tree, join(dir, `scan-${String(index)}`), selected);
+        if (outcome.egress !== null) egress.push({ part: selected.kind, log: outcome.egress });
         if (!outcome.ok) {
           refusals.push({ part: selected.kind, cause: 'scan-failed', detail: outcome.reason });
           continue;
@@ -304,6 +306,7 @@ export class NightlyJobs {
         }
       }
       const audit = await this.#audit(tree, files, join(dir, 'audit'), nightly.advisoryHost);
+      if (audit.egress !== null) egress.push({ part: 'dependency-audit', log: audit.egress });
       if (!audit.ok) refusals.push({ part: 'dependency-audit', cause: audit.cause, detail: audit.detail });
       else {
         ran.push('dependency-audit');
@@ -319,29 +322,31 @@ export class NightlyJobs {
   }
 
   /** One R17 scanner over the tree, as `verify` runs it: a copy, `deny-all`, the pinned image, the tree the only data mount. */
-  async #scan(tree: string, scratch: string, selected: NightlyScanner): Promise<{ ok: true; findings: readonly Finding[] } | { ok: false; reason: string }> {
+  async #scan(
+    tree: string, scratch: string, selected: NightlyScanner,
+  ): Promise<({ ok: true; findings: readonly Finding[] } | { ok: false; reason: string }) & { egress: EgressLog | null }> {
     const scanner = scannerFor(selected.kind, this.#options.scanners);
     const check: SecurityCheckSpec = { id: `nightly-${selected.kind}`, kind: selected.kind, required: true, timeoutMs: NIGHTLY_STEP_TIMEOUT_MS, image: scanner.image, config: selected.config };
     const scanned = await scanTree({
       sandbox: this.#options.sandbox, tree, scratch: { dir: scratch, tree: join(scratch, 'tree'), config: join(scratch, 'config') },
       check, scanner, limits: this.#options.limits, user: this.#options.workspaces.user,
     });
-    if (!scanned.ok) return { ok: false, reason: scanned.reason };
-    if (scanned.result.findings === null) return { ok: false, reason: `the scanner exited ${String(scanned.result.exitCode)} without a whole report` };
-    return { ok: true, findings: scanned.result.findings };
+    if (!scanned.ok) return { ok: false, reason: scanned.reason, egress: scanned.at === 'exec' ? scanned.egress : null };
+    if (scanned.result.findings === null) return { ok: false, reason: `the scanner exited ${String(scanned.result.exitCode)} without a whole report`, egress: scanned.egress };
+    return { ok: true, findings: scanned.result.findings, egress: scanned.egress };
   }
 
   /** The lockfile's audit in its own sandbox: the manifest and lockfile alone, read-only, egress to the advisory host alone (D-R13a-06). */
   async #audit(
     tree: string, files: readonly string[], scratch: string, advisoryHost: string,
-  ): Promise<{ ok: true; auditor: DependencyAuditor; findings: readonly AuditFinding[] } | { ok: false; cause: NightlyRefusal['cause']; detail: string }> {
+  ): Promise<({ ok: true; auditor: DependencyAuditor; findings: readonly AuditFinding[] } | { ok: false; cause: NightlyRefusal['cause']; detail: string }) & { egress: EgressLog | null }> {
     const root = new Set(files.filter((f) => !f.includes('/')));
     const auditor = (this.#options.auditors ?? AUDITORS).find((a) => root.has(a.lockfile));
     if (auditor === undefined) {
       const other = UNSUPPORTED_LOCKFILES.find((name) => root.has(name));
       return other === undefined
-        ? { ok: false, cause: 'no-lockfile', detail: 'the default branch holds no lockfile at its root' }
-        : { ok: false, cause: 'unsupported-stack', detail: `${other} is a lockfile no audit covers` };
+        ? { ok: false, cause: 'no-lockfile', detail: 'the default branch holds no lockfile at its root', egress: null }
+        : { ok: false, cause: 'unsupported-stack', detail: `${other} is a lockfile no audit covers`, egress: null };
     }
     await mkdir(scratch, { recursive: true });
     for (const name of auditor.files) if (root.has(name)) await copyFile(join(tree, name), join(scratch, name));
@@ -357,20 +362,26 @@ export class NightlyJobs {
     try {
       handle = await this.#options.sandbox.provision(spec);
     } catch (error) {
-      return { ok: false, cause: 'audit-failed', detail: `its sandbox could not be provisioned: ${describe(error)}` };
+      return { ok: false, cause: 'audit-failed', detail: `its sandbox could not be provisioned: ${describe(error)}`, egress: null };
     }
+    let outcome: { ok: true; auditor: DependencyAuditor; findings: readonly AuditFinding[] } | { ok: false; cause: NightlyRefusal['cause']; detail: string };
+    let egress: EgressLog;
     try {
       const exec = await this.#options.sandbox.exec(handle, [...auditor.invocation], { env: { HOME: '/tmp', COREPACK_ENABLE_DOWNLOAD_PROMPT: '0' } });
       const parsed = auditor.parse(exec.stdout, lockfileText);
-      if (parsed.ok) return { ok: true, auditor, findings: parsed.findings };
-      return parsed.unreachable
-        ? { ok: false, cause: 'advisory-unreachable', detail: `the audit could not reach ${advisoryHost} (exit ${String(exec.exitCode)})` }
-        : { ok: false, cause: 'audit-failed', detail: `the audit exited ${String(exec.exitCode)} without a whole report` };
+      if (parsed.ok) outcome = { ok: true, auditor, findings: parsed.findings };
+      else {
+        outcome = parsed.unreachable
+          ? { ok: false, cause: 'advisory-unreachable', detail: `the audit could not reach ${advisoryHost} (exit ${String(exec.exitCode)})` }
+          : { ok: false, cause: 'audit-failed', detail: `the audit exited ${String(exec.exitCode)} without a whole report` };
+      }
     } catch (error) {
-      return { ok: false, cause: 'audit-failed', detail: describe(error) };
+      outcome = { ok: false, cause: 'audit-failed', detail: describe(error) };
     } finally {
-      await this.#options.sandbox.destroy(handle);
+      // Read after the audit whatever it did, so the record holds what the proxy decided (D-P14-04).
+      ({ egress } = await this.#options.sandbox.destroy(handle));
     }
+    return { ...outcome, egress };
   }
 
   /** A finding, with the candidate it became or why it became none (D-R13a-07). */

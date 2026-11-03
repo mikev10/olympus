@@ -7169,3 +7169,16 @@ read the code the unit touches before writing this.
   pass the schema, keeps its place in the nightly record along with the
   reason it has no candidate (I5).
 - **Reverse by:** a separate candidate store for jobs.
+
+### D-R13a-08: found while building — the resolved policy dropped the block, and egress had nowhere to go
+
+- **Found:** `cloneTriggers` (`packages/core/src/policy/engine.ts:109`) copies
+  named keys, so a resolved policy silently lost the `nightly` block and the
+  sweep refused `no-policy` for a block the document held. The conformance
+  rows found it. It now carries the block whole.
+- **Found:** D-P14-04 records every proxy decision in the run's P14 record,
+  but a nightly job has no run. **Chosen:** `SecurityCoverage.egress` keeps
+  each scan's and the audit's egress log, read at teardown whatever the part
+  did, in the nightly record. **Rejected:** dropping them, which would leave
+  the audit's one network grant unaudited. **Reverse by:** a decision store
+  for records with no run.
