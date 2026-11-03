@@ -6846,3 +6846,85 @@ code the unit touches before writing this.
   rebuilds both whenever either moves.
 - **Reverse:** drop the two variables and the image map; every seat is then
   Claude Code or the endpoint's.
+
+## Amendment: nightly review (R13), split into R13a and R13b
+
+R13 was started on `v2` at eb15d11 and stopped before any code. Its entry was
+prose only: it had no dependency line, no deliverables, no acceptance
+criteria, and no out-of-scope list, and those are what decide a unit's scope
+and what proves it done. The maintainer confirmed the recommended answers on
+2026-11-03. The spec is `docs/plan/R13-nightly.md`.
+
+### D-A-NR-01: R13 is two units, split by whether a model is seated
+
+- **Found:** the entry holds four jobs. Two call no model: the re-hash with the
+  rate check, and the security sweep with the dependency audit. Two seat a
+  reviewer. No job template exists yet (`core/src/trigger/schemas.ts:25`), and
+  no dependency audit exists (R17, "Not in this unit").
+- **Chosen:** R13a builds the two jobs with no model, plus the job-template
+  mechanism they need. R13b builds the two reviewer seats on top of R13a. R11
+  now depends on R13b.
+- **Rejected:** *One unit with all four jobs.* That bundle would mix
+  fail-closed scanning, record drift, seat independence, and untrusted text in
+  one review, and it would be the largest unit since I1.
+- **Reverse by:** merging the two entries in the table and the spec. Nothing
+  else depends on the split.
+
+### D-A-NR-02: drift is a finding in a nightly record, not an IntegrityViolation
+
+- **Found:** `IntegrityViolation` requires a run, a role, and a driver
+  (`integrity/src/types.ts:217`). A drifted record found at night has no role
+  or driver behind it.
+- **Chosen:** a `NightlyRecord`, kept beside the runs like R22's refused
+  deliveries (D-R22-03). Drift that names a run is also written to P14's
+  record under `record-drift`, decided by `nightly`.
+- **Rejected:** *Record drift as a violation with a placeholder role.* It would
+  attribute an act to a seat that did not perform it, so the record would
+  claim something the runtime did not observe.
+- **Reverse by:** widening `IntegrityViolation`, which is a contract
+  amendment.
+
+### D-A-NR-03: R2's rates are snapshotted nightly and checked against the last snapshot
+
+- **Found:** R2 derives its rates on read and stores none
+  (`api/src/outcomes.ts:322`, `:332`). The entry says "recomputes R2's
+  published rates", but nothing is published, so there is nothing to compare.
+- **Chosen:** each night records a snapshot of the rates. The next night
+  recomputes the same window from the re-hashed records, and any difference
+  is `rate-drift`. The first night records that no snapshot existed, never a
+  match.
+- **Rejected:** *Recompute and compare against the same computation.* It would
+  always match, so the check would assert nothing.
+- **Reverse by:** pointing the comparison at a published rate store, once one
+  exists.
+
+### D-A-NR-04: the nightly sweep uses the pinned scanner images, and policy only selects them
+
+- **Found:** R17's scanners pin `name@sha256:<digest>`
+  (`adapters/src/security.ts:19`). The entry says to pin "in policy". Egress
+  can be limited to named hosts (`core/src/policy/types.ts:20`).
+- **Chosen:** policy names which scanners and which advisory host the job
+  uses. Images stay pinned in the adapter, so policy cannot name an unpinned
+  image. An unreachable advisory host is a refusal (I5).
+- **Rejected:** *Images named in policy.* An operator could name a floating
+  tag, and the scan would run code no review pinned.
+- **Reverse by:** adding an image field to the nightly policy, validated as a
+  digest.
+
+### D-A-NR-05: a reviewer's finding becomes an intake candidate only, until R11
+
+- **Found:** the entry says a review "becomes R11 proposals or `intake`
+  candidates". R11 has no spec and depends on R13, so no R11 proposal shape
+  exists.
+- **Chosen:** R13b's findings become `intake` candidates. The review itself
+  is recorded in the nightly record, where R11 reads it when R11 is built.
+- **Rejected:** *Define an R11 proposal type now.* It would fix R11's contract
+  before R11 is designed, from one consumer.
+- **Reverse by:** R11 adding a proposal path that reads the nightly record.
+
+### D-A-NR-06: contract amendments are built by the units that need them
+
+- **Chosen:** A-R13a-01 to A-R13a-04 are built by R13a, and A-R13b-01 by R13b,
+  so each unit's external review covers the types together with the checks
+  that read them, as A-R9-01 was built by R9.
+- **Reverse by:** landing the types as a separate amendment ahead of the units.

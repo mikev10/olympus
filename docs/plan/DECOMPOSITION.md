@@ -604,9 +604,10 @@ order between them is settled before any of them is picked up.
 | R8 | Observe: post-merge outcomes | M2 | I1, R2, R22 | — |
 | R9 | Separation of duties across every seat | M2 | P6, P9, R17, R26 | — |
 | R10 | Trust ratchet | M2 | P12, P14, R22 | — |
-| R11 | Learning loop | M3 | R2, R7, R8, P14, R13, R20 | — |
+| R11 | Learning loop | M3 | R2, R7, R8, P14, R13b, R20 | — |
 | R12 | Telemetry export (OpenTelemetry) | M2 | P9, P13, P14, R2 | `docs/plan/R12-telemetry.md` |
-| R13 | Nightly review | M2 | P14, R2, R9, R17, R22 | — |
+| R13a | Nightly checks without a model | M2 | P14, R2, R17, R22 | `docs/plan/R13-nightly.md` |
+| R13b | Nightly reviewers | M2 | R13a, R9 | `docs/plan/R13-nightly.md` |
 | R14 | Model tier per station and escalation | M2 | P3, P4, P13, P14 | — |
 | R15 | Acceptance checks run on the base before build | M2 | P4, P6, P8, P14 | — |
 | R16 | Bug-fix intake | M2 | R15, R19, P14, R22 | — |
@@ -1015,6 +1016,14 @@ The first job's re-hash and the second job's day of refusals include R22's
 trigger decisions and its per-hour counts of deliveries refused before their
 signature verified, which are kept beside the runs and not under them
 (D-R22-03).
+
+**Split, by amendment (D-A-NR-01):** this entry is built as two units.
+**R13a**, nightly checks without a model, covers the first and third jobs and
+depends on P14, R2, R17, and R22. **R13b**, nightly reviewers, covers the second
+and fourth jobs and depends on R13a and R9. What each delivers, what each leaves
+out, its gate paths, and its conformance are in `docs/plan/R13-nightly.md`.
+Until R11 exists, a reviewer's finding becomes an `intake` candidate and
+nothing else (D-A-NR-05).
 
 ### R14 — Model tier per station and escalation
 
